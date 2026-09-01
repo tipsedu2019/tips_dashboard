@@ -3430,7 +3430,6 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /import\("\.\/registration-track-fixtures"\)/)
   assert.match(source, /fixtureModule\.createRegistrationSubjectTrackFixtureState\(\)/)
   assert.match(source, /installRegistrationSubjectTrackFixtureRuntime/)
-  assert.match(source, /const initialWorkspaceData =[\s\S]*?: registrationFixtureRequested\s*\? null/)
   assert.match(source, /registrationFixtureModule\.createRegistrationSubjectTrackFixtureAdapter/)
   assert.match(source, /searchParams\.get\("fixtureActionType"\)/)
   assert.match(source, /searchParams\.get\("fixtureActionDelayMs"\)/)

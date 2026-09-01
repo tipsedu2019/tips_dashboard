@@ -1430,6 +1430,7 @@ export function buildTimetableWorkspaceModel({
 export function buildCurriculumWorkspaceModel({
   classes = [],
   precomputedRows,
+  numbered = false,
   classTerms = [],
   classGroups = [],
   classGroupMembers = [],
@@ -1442,7 +1443,7 @@ export function buildCurriculumWorkspaceModel({
   const eligibleClasses = toArray(classes);
   const groupContext = buildClassGroupContext(eligibleClasses, classTerms, classGroups, classGroupMembers);
   const progressSummaryByClass = buildProgressLogSummary(progressLogs);
-  const allRows = sortCurriculumRows(
+  const inputRows = (
     Array.isArray(precomputedRows)
       ? precomputedRows
       : eligibleClasses.map((classItem) =>
@@ -1453,12 +1454,13 @@ export function buildCurriculumWorkspaceModel({
             progressSummaryByClass,
             groupContext.groupsByClassId.get(text(classItem?.id)) || [],
           ),
-        ),
+        )
   );
+  const allRows = numbered ? inputRows : sortCurriculumRows(inputRows);
 
   const selectedGroup = text(filters.classGroupId || filters.classGroup || filters.group);
   const selectedGroupValues = getClassGroupFilterValues(groupContext.classGroupOptions, selectedGroup);
-  const rows = allRows.filter((row) => {
+  const rows = numbered ? allRows : allRows.filter((row) => {
     const selectedStatus = text(filters.status);
     return (
       matchesSearch(row.searchText, filters.search) &&

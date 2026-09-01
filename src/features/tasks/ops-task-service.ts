@@ -755,7 +755,7 @@ async function sha256Hex(value: string) {
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("")
 }
 
-function assertOpsTaskPageFilters(filters: OpsTaskPageFilters) {
+export function assertOpsTaskPageFilters(filters: OpsTaskPageFilters) {
   if (!filters || typeof filters !== "object" || !Array.isArray(filters.statuses) || typeof filters.search !== "string") {
     throw new Error("ops_task_filters_invalid")
   }
@@ -1532,7 +1532,7 @@ function mapTask(
   }
 }
 
-function mapOpsTaskPageRow(row: Row): OpsTask {
+export function mapOpsTaskPageRow(row: Row): OpsTask {
   const payload = (row.row_data && typeof row.row_data === "object" ? row.row_data : row) as Row
   const base: OpsTask = {
     id: text(payload.id),

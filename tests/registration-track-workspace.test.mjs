@@ -1113,7 +1113,6 @@ test("case list renders one keyed application row in each responsive surface", a
   assert.match(source, /key=\{item\.taskId\}/);
   assert.doesNotMatch(source, /RegistrationCaseTracks|item\.tracks\.map/);
   assert.match(source, /item\.matchingTracks\.map/);
-  assert.match(source, /REGISTRATION_CASE_INITIAL_RENDER_LIMIT = 40/);
 });
 
 test("case list makes the whole visible row a keyboard-accessible entry point", async () => {
@@ -1336,11 +1335,6 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /item\.matchingTracks\.map/);
   assert.match(source, /min-w-0/);
   assert.match(source, /overflow-hidden/);
-  assert.match(source, /REGISTRATION_CASE_INITIAL_RENDER_LIMIT/);
-  assert.match(source, /visibleItems/);
-  assert.match(source, /windowState\.key === itemSetKey/);
-  assert.match(source, /setWindowState/);
-  assert.match(source, /더 보기/);
   assert.match(source, /role="status"/);
   assert.match(source, /aria-live="polite"/);
   assert.match(source, /visitScheduledAt/);
@@ -1412,7 +1406,7 @@ test("waiting list shows the manual workflow entry time instead of the legacy pi
 
 test("desktop application rows provide one table cell for each column while mobile cards stay shared", async () => {
   const source = await readListSource();
-  const desktopSource = sourceBetween(source, 'data-testid="registration-case-desktop-list"', "{hasMore ? (");
+  const desktopSource = source.slice(source.indexOf('data-testid="registration-case-desktop-list"'));
 
   assert.match(desktopSource, /<RegistrationCaseListRow item=\{item\}[\s\S]*?cellRole="cell"/);
   assert.match(source, /role=\{cellRole\}/);
@@ -1505,7 +1499,7 @@ test("workspace derives tab counts from application cases before filtering the s
     /filterRegistrationCaseListItems\(\s*registrationCaseItems,\s*registrationView,\s*deferredQuery,\s*\{ consultationOwnerId \},\s*\)/,
   );
   assert.match(source, /<RegistrationCaseList/);
-  assert.match(source, /items=\{visibleRegistrationCaseItems\}/);
+  assert.match(source, /items=\{displayedRegistrationCaseItems\}/);
   assert.match(source, /viewerId=\{registrationViewerId\}/);
   assert.match(source, /viewerRole=\{registrationViewerRole\}/);
   assert.doesNotMatch(source, /\bregistrationPipeline\b/);

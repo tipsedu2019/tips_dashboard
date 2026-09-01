@@ -1,0 +1,674 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { registerHooks } from 'node:module';
+
+const serviceUrl = new URL('../src/features/textbooks/textbook-read-service.ts', import.meta.url);
+const closingFilters = { month: 'all', subject: 'all', status: 'all' };
+const movementFilters = { closingMonth: '2026-08', subject: 'all', search: '' };
+const closingRow = () => ({ id: id(700), closing_month: '2026-08', subject: 'all', opening_quantity: 1, opening_amount: 0, purchase_quantity: 0, purchase_amount: 0,
+  sale_quantity: 0, sale_amount: 0, adjustment_quantity: 0, adjustment_amount: 0, ending_quantity: 1, ending_amount: 0, received_amount: 0, supplier_payment_amount: 0,
+  settlement_difference: 0, status: 'draft', memo: '', created_by: null, created_at: null, updated_at: null });
+const movementRow = () => ({ id: id(701), at: '2026-08-01T00:00:00+00:00', typeLabel: '출고', textbookTitle: '교재', locationName: '본관', quantity: -2, amount: -20000, marginAmount: 2000 });
+const closingDomains = [
+  ['listTextbookClosingPage', 'list_textbook_closing_page_v1', closingFilters, 'month-desc', closingRow],
+  ['listTextbookClosingMovementPage', 'list_textbook_closing_movement_page_v1', movementFilters, 'event-desc', movementRow],
+];
+const zeroCalculation = (openingQuantity = 1, openingAmount = 0) => ({ openingQuantity, openingAmount, purchaseQuantity: 0, purchaseAmount: 0, saleQuantity: 0, saleAmount: 0,
+  adjustmentQuantity: 0, adjustmentAmount: 0, endingQuantity: openingQuantity, endingAmount: openingAmount, receivedAmount: 0, supplierPaymentAmount: 0, paymentDifference: 0,
+  textbookMarginAmount: 0, settlementDifference: 0, needsReview: openingQuantity < 0,
+  teamMargins: ['english', 'math', 'science', 'other'].map((team) => ({ team, saleQuantity: 0, saleAmount: 0, purchaseCostAmount: 0, marginAmount: 0 })) });
+const closingPreview = () => ({ closingMonth: '2026-08', subject: 'all', sourceLineCount: 0, closing: zeroCalculation() });
+test('fractional preview opening follows the actual ledger without weakening stored integer fields', async () => {
+  const api = await service();
+  const { buildTextbookMonthlyClosing } = await import('../src/features/textbooks/textbook-ledger.js');
+  for (const openingQuantity of [2.5, 0.5]) {
+    const input = { closingMonth: '2026-08', subject: 'all', openingQuantity, openingAmount: 0 };
+    const closing = buildTextbookMonthlyClosing({ openingQuantity, stockMoves: [{ move_type: 'sale_issue', quantity: -2 }] });
+    assert.equal(closing.endingQuantity, openingQuantity === 2.5 ? 0.5 : -1.5);
+    assert.equal(closing.needsReview, openingQuantity === 0.5);
+    const data = { ...closingPreview(), sourceLineCount: 1, closing };
+    assert.deepEqual(await api.getTextbookClosingPreview(input, { client: wire(data).client }), data);
+  }
+  for (const openingQuantity of [NaN, Infinity, -Infinity]) {
+    const t = wire(null);
+    await assert.rejects(() => api.getTextbookClosingPreview({ closingMonth: '', subject: 'all', openingQuantity, openingAmount: 0 }, { client: t.client }), /input_invalid/);
+    assert.equal(t.calls.length, 0);
+  }
+  for (const key of ['opening_quantity', 'ending_quantity']) {
+    const data = { rows: [{ ...closingRow(), [key]: 2.5 }], totalCount: 1, page: 1, pageSize: 10 };
+    await assert.rejects(() => api.listTextbookClosingPage({ filters: closingFilters, sort: 'month-desc', page: 1, pageSize: 10 }, { client: wire(data).client }), /response_invalid/);
+  }
+});
+test('closing preview/detail preserve full totals, zero-default cash and original rounded mismatch', async () => {
+  const api = await service(); assert.equal(typeof api.getTextbookClosingPreview, 'function'); assert.equal(typeof api.getTextbookClosingDetail, 'function');
+  const input = { closingMonth: '2026-08', subject: 'all', openingQuantity: 1, openingAmount: 0 };
+  const t = wire(closingPreview()); assert.deepEqual(await api.getTextbookClosingPreview(input, { client: t.client }), closingPreview());
+  assert.deepEqual(t.calls[0].args, { p_input: input }); assert.equal(t.calls[0].name, 'get_textbook_closing_preview_v1');
+  for (const stored of [0.49, 0.5]) {
+    const row = { ...closingRow(), settlement_difference: stored, received_amount: 9900, supplier_payment_amount: 123 };
+    const result = await api.getTextbookClosingDetail(row.id, { client: wire({ row, preview: closingPreview() }).client });
+    assert.equal(result.preview.closing.paymentDifference, 0); assert.equal(result.metricMismatchCount, stored === 0.49 ? 0 : 1);
+    assert.equal(result.metricMismatches.margin, stored === 0.5);
+  }
+  assert.deepEqual(await api.getTextbookClosingDetail(id(700), { client: wire({ row: null, preview: null }).client }), { row: null, preview: null, storedMetrics: null, metricMismatches: null, metricMismatchCount: 0 });
+  for (const data of [null, { row: null, preview: closingPreview() }, { row: closingRow(), preview: null }, { row: { ...closingRow(), id: id(1) }, preview: closingPreview() }]) {
+    await assert.rejects(() => api.getTextbookClosingDetail(id(700), { client: wire(data).client }), /response_invalid/);
+  }
+  for (const patch of [{ sourceLineCount: -1 }, { closing: { ...zeroCalculation(), receivedAmount: 5 } }, { closing: { ...zeroCalculation(), endingQuantity: 0 } }, { closing: { ...zeroCalculation(), teamMargins: [] } }]) {
+    await assert.rejects(() => api.getTextbookClosingPreview(input, { client: wire({ ...closingPreview(), ...patch }).client }), /response_invalid/);
+  }
+  for (const closing of [
+    { ...zeroCalculation(), textbookMarginAmount: 5, settlementDifference: 5 },
+    { ...zeroCalculation(), endingAmount: 5 },
+    { ...zeroCalculation(), teamMargins: zeroCalculation().teamMargins.map((team, i) => i ? team : { ...team, saleQuantity: 1, marginAmount: 1 }) },
+    { ...zeroCalculation(), purchaseQuantity: 1, endingQuantity: 2 },
+  ]) await assert.rejects(() => api.getTextbookClosingPreview(input, { client: wire({ ...closingPreview(), closing }).client }), /response_invalid/);
+});
+for (const domain of closingDomains) {
+  test(`${domain[0]} reads direct page 11 without preceding pages, strict count and complete original rows`, async () => {
+    const api = await service(); assert.equal(typeof api[domain[0]], 'function');
+    const t = wire(envelope(domain));
+    assert.deepEqual(await api[domain[0]](request(domain), { client: t.client }), envelope(domain));
+    assert.equal(t.calls.length, 1); assert.equal(t.calls[0].name, domain[1]); assert.equal(t.calls[0].retry, false);
+    assert.deepEqual(t.calls[0].args, { p_filters: domain[2], p_sort: domain[3], p_page: 11, p_page_size: 10 });
+    for (const pageSize of [10, 15, 20]) {
+      const input = request(domain, { page: 200, pageSize }); const data = { rows: [], page: 200, pageSize, totalCount: 101 };
+      assert.deepEqual(await api[domain[0]](input, { client: wire(data).client }), data);
+    }
+    for (const bad of [null, {}, { ...envelope(domain), totalCount: 100 }, { ...envelope(domain), rows: [{}] }, { ...envelope(domain), extra: 1 }]) {
+      await assert.rejects(() => api[domain[0]](request(domain), { client: wire(bad).client }), /response_invalid/);
+    }
+    for (const patch of [{ page: 0 }, { pageSize: 30 }, { sort: 'other' }, { filters: {} }, { filters: { ...domain[2], extra: '' } }]) {
+      const transport = wire(null);
+      await assert.rejects(() => api[domain[0]](request(domain, patch), { client: transport.client }), /invalid/);
+      assert.equal(transport.calls.length, 0);
+    }
+  });
+}
+test('closing pages reject rows outside their echoed saved or searched movement scope', async () => {
+  const api = await service();
+  for (const [key, value] of [['month', '2026-09'], ['subject', 'science'], ['status', 'locked']]) {
+    await assert.rejects(() => api.listTextbookClosingPage({ filters: { ...closingFilters, [key]: value }, sort: 'month-desc', page: 1, pageSize: 10 },
+      { client: wire({ rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 }).client }), /response_invalid/);
+  }
+  for (const filters of [{ ...movementFilters, closingMonth: '2026-09' }, { ...movementFilters, search: 'absent' }]) {
+    await assert.rejects(() => api.listTextbookClosingMovementPage({ filters, sort: 'event-desc', page: 1, pageSize: 10 },
+      { client: wire({ rows: [movementRow()], page: 1, pageSize: 10, totalCount: 1 }).client }), /response_invalid/);
+  }
+});
+registerHooks({ resolve(specifier, context, next) {
+  if (specifier.startsWith('./') && context.parentURL?.includes('/src/features/textbooks/')) {
+    const candidate = new URL(`${specifier}.ts`, context.parentURL);
+    if (existsSync(candidate)) return next(candidate.href, context);
+  }
+  if (context.parentURL === serviceUrl.href && specifier === '@/lib/supabase') {
+    return { url: 'data:text/javascript,export const supabase=null;export const supabaseConfigError="unconfigured";', shortCircuit: true };
+  }
+  return next(specifier, context);
+} });
+async function service() {
+  assert.ok(existsSync(serviceUrl), 'production textbook read service exists');
+  return import(serviceUrl.href);
+}
+const id = (n) => `a2000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+const filters = { search: '교재', subject: 'all', schoolLevel: 'all', gradeLevel: 'all', subSubject: 'all', quality: 'all', inventory: 'all' };
+const master = () => ({
+  id: id(101), title: '교재 101', name: '교재 101', subject: 'english', status: 'active',
+  publisher: '출판사', category: '독해', isbn13: '978101', barcode: null, price: 10000,
+  sale_price: 10000, list_price: 10000, salePrice: 10000, publisher_id: null, default_supplier_id: null,
+  school_level: 'middle', grade_level: 'm2', school_levels: ['middle'], grade_levels: ['m2'], sub_subject: '독해',
+  subject_area_key: null, is_returnable: false,
+  locationQuantities: { [id(900)]: 12, unassigned: -2 }, studentLocationQuantities: { [id(900)]: 10, unassigned: -2 },
+  teacherLocationQuantities: { [id(900)]: 2 }, totalQuantity: 10, studentQuantity: 8, teacherQuantity: 2, stockValue: 1000,
+  locationSummary: [{ id: id(900), code: 'qa', name: '본관', sortOrder: 10, quantity: 12 }],
+  qualityIssues: { duplicate: false, missingCode: false, missingPublisher: false, missingCategory: false, missingPrice: false, subjectMismatch: false, inactive: false }, qualityScore: 0,
+});
+const inventory = () => ({ source: master(), id: id(101), title: '교재 101', publisher: '출판사', locationId: id(900), locationName: '본관', currentQuantity: 12,
+  latestCountAt: '', daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: 'recommended', reason: '실사 이력 없음', dueLabel: '실사 이력 없음' });
+const history = () => ({ id: `count-${id(101)}`, kind: 'count', sourceId: id(101), linkedMoveId: id(102), at: '2026-08-31', textbookTitle: '교재 101', locationName: '본관', change: '-2권', action: '실사 12→10', actor: id(901), actorId: id(901), actorLabel: '', memo: '확인' });
+const saleHistoryFilters = { search: '', year: 'all', month: 'all', classId: 'all' };
+const saleHistoryRow = () => ({ id: `2026-08:${id(800)}:${id(101)}`, year: '2026', month: '2026-08', classId: id(800), className: '중2반', textbookId: id(101), textbookTitle: '교재 101', waitingQuantity: 2, issuedQuantity: 3, totalQuantity: 5, latestAt: '2026-08-31T00:00:00+00:00' });
+test('history DTO identities and source option scopes cannot invent physical keys', async () => {
+  const api = await service(); const domain = workflowDomains[0];
+  for (const patch of [{ textbookId: 'fake' }, { classId: 'fake' }, { waitingQuantity: 0, issuedQuantity: 0, totalQuantity: 0 }]) {
+    const row = { ...saleHistoryRow(), ...patch }; row.id = `${row.month}:${row.classId || '-'}:${row.textbookId}`;
+    await assert.rejects(() => api.listTextbookSaleHistoryPage(request(domain), { client: wire(envelope(domain, { rows: [row] })).client }), /response_invalid/);
+  }
+  for (const patch of [{ classOptions: [['fake', '반']] }, { sourceTotalCount: 0, totalCount: 0, totalWaitingQuantity: 0, totalIssuedQuantity: 0 }, { totalWaitingQuantity: 0, totalIssuedQuantity: 0 }]) {
+    await assert.rejects(() => api.getTextbookSaleHistorySummary(saleHistoryFilters, { client: wire({ ...saleHistorySummary(), ...patch }).client }), /response_invalid/);
+  }
+});
+const purchaseFilters = { mode: 'request', search: '', boardScope: 'all', requestFilter: 'all', orderFilter: 'all' };
+const saleFilters = { search: '', status: 'all' };
+const workflowBook = () => ({ id: id(101), title: '교재 101', name: '교재 101', status: 'active', subject: 'english', publisher: '출판사', publisher_id: null, default_supplier_id: null, price: 10000, sale_price: 10000, list_price: 0, isbn13: null, barcode: null, is_returnable: true });
+const purchaseOrder = () => ({ id: id(200), supplier_id: null, requested_by: '선생님', requested_date: '2026-08-01', order_date: '2026-08-01', expected_date: null, ordered_at: null, received_at: null, status: 'requested', statement_number: '', memo: '', created_by: id(901), created_at: '2026-08-01T00:00:00+00:00', updated_at: null });
+const purchaseMember = (n = 300, copy_scope = 'student') => ({ id: id(n), purchase_order_id: id(200), textbook_id: id(101), requested_textbook_title: '', class_id: id(800), location_id: id(900), requested_quantity: 2, ordered_quantity: 0, received_quantity: 0, teacher_ordered_quantity: 0, teacher_received_quantity: 0, unit_cost: 0, copy_scope, memo: '', created_at: '2026-08-01T00:00:00+00:00', updated_at: null, status: 'requested', order: purchaseOrder() });
+const purchaseQuantities = () => ({ requested: 4, ordered: 0, received: 0, student: { requested: 2, ordered: 0, received: 0 }, teacher: { requested: 2, ordered: 0, received: 0 } });
+const purchaseRow = () => {
+  const lines = [purchaseMember(), purchaseMember(301, 'teacher')];
+  return { id: `requested||${id(101)}||${id(800)}||${id(900)}||선생님||||2026-08-01||`, anchorLineId: id(300), memberLineIds: [id(300), id(301)], line: { ...lines[0], purchaseScopeLines: lines }, lines,
+    mode: 'request', status: 'requested', eventAt: '2026-08-01T00:00:00+00:00', quantities: purchaseQuantities(),
+    references: { textbook: workflowBook(), class: { id: id(800), name: '중2반', studentCount: 3 }, location: { id: id(900), code: 'main', name: '본관' }, publisher: null, supplier: null, configuredSupplierId: '', unitCost: 9000 } };
+};
+const saleLine = () => ({ id: id(400), sale_id: id(500), student_id: null, class_id: id(800), textbook_id: id(101), charge_month: '2026-08', quantity: 2, unit_price: 10000, location_id: id(900), status: 'charged', exclusion_reason: '', memo: '', created_at: '2026-08-01T00:00:00+00:00', updated_at: null, copy_scope: 'teacher', teacher_id: null, teacher_name: '김선생' });
+const saleRecord = () => ({ id: id(500), class_id: id(800), charge_month: '2026-08', sale_date: '2026-08-01', status: 'charged', memo: '', created_by: id(901), created_at: '2026-08-01T00:00:00+00:00', updated_at: null });
+const saleRow = () => ({ id: id(400), line: saleLine(), sale: saleRecord(), textbook: workflowBook(), class: { id: id(800), name: '중2반', studentCount: 3 }, student: null, location: { id: id(900), code: 'main', name: '본관' }, status: 'charged', groupStatus: 'charged', eventAt: '2026-08-01T00:00:00+00:00', quantity: 2, amount: 20000, recipientName: '김선생' });
+test('sale authoritative raw status rejects inadmissible database states', async () => {
+  const api = await service();
+  for (const raw of [' paid ', '\t', '', 'unknown', null]) {
+    const row = saleRow(); row.line.status = raw; row.sale.status = 'issued';
+    await assert.rejects(() => api.getTextbookSaleDetail(row.id, { client: wire({ row }).client }), /response_invalid/);
+  }
+  for (const raw of ['unknown', '', 'returned', null]) {
+    const row = saleRow(); row.sale.status = raw;
+    await assert.rejects(() => api.getTextbookSaleDetail(row.id, { client: wire({ row }).client }), /response_invalid/);
+  }
+  for (const raw of ['charged', 'paid', 'issued', 'excluded', 'cancelled', 'returned']) {
+    const row = saleRow(); row.line.status = raw; row.status = raw === 'paid' ? 'charged' : raw;
+    row.groupStatus = raw === 'excluded' ? 'charged' : row.status;
+    row.sale.status = 'issued'; row.eventAt = raw === 'issued' ? '' : row.eventAt;
+    assert.deepEqual(await api.getTextbookSaleDetail(row.id, { client: wire({ row }).client }), { row });
+  }
+});
+const domains = [
+  ['listTextbookMasterPage', 'list_textbook_master_page_v1', filters, 'quality-title', master],
+  ['listTextbookInventoryPage', 'list_textbook_inventory_page_v1', { ...filters, locationId: id(900), audit: 'all' }, 'audit-priority', inventory],
+  ['listTextbookInventoryHistoryPage', 'list_textbook_inventory_history_page_v1', { textbookId: null, locationId: null }, 'event-desc', history],
+];
+const workflowDomains = [
+  ['listTextbookSaleHistoryPage', 'list_textbook_sale_history_page_v1', saleHistoryFilters, 'month-class-title', saleHistoryRow],
+  ['listTextbookPurchasePage', 'list_textbook_purchase_page_v1', purchaseFilters, 'status-event', purchaseRow],
+  ['listTextbookSalePage', 'list_textbook_sale_page_v1', saleFilters, 'status-event', saleRow],
+];
+function wire(data, error = null, onCall) {
+  const calls = [];
+  return { calls, client: {
+    from() { throw new Error('forbidden full catalog hydration'); },
+    rpc(name, args) {
+      const call = { name, args }; calls.push(call);
+      return { abortSignal(signal) { call.signal = signal; return this; }, retry(retry) { call.retry = retry; onCall?.(call); return Promise.resolve({ data, error }); } };
+    },
+  } };
+}
+const request = (domain, patch = {}) => ({ page: 11, pageSize: 10, filters: domain[2], sort: domain[3], ...patch });
+const envelope = (domain, patch = {}) => ({ rows: [domain[4]()], page: 11, pageSize: 10, totalCount: 101, ...patch });
+for (const domain of [...domains, ...workflowDomains]) {
+  test(`${domain[0]} directly loads page 11 with exact transport and full count`, async () => {
+    const api = await service(); const transport = wire(envelope(domain)); const caller = new AbortController();
+    const result = await api[domain[0]](request(domain), { client: transport.client, signal: caller.signal });
+    assert.equal(result.totalCount, 101); assert.equal(result.page, 11); assert.equal(result.rows.length, 1);
+    assert.equal(transport.calls.length, 1); const [call] = transport.calls;
+    assert.equal(call.name, domain[1]); assert.deepEqual(call.args, { p_filters: domain[2], p_sort: domain[3], p_page: 11, p_page_size: 10 });
+    assert.equal(call.retry, false); assert.ok(call.signal instanceof AbortSignal);
+    caller.abort(); assert.equal(call.signal.aborted, true);
+  });
+  test(`${domain[0]} preserves empty/out-of-range and all strict sizes`, async () => {
+    const api = await service();
+    for (const pageSize of [10, 15, 20]) {
+      const data = envelope(domain, { page: 2147483647, pageSize, rows: [] });
+      assert.deepEqual(await api[domain[0]](request(domain, { page: 2147483647, pageSize }), { client: wire(data).client }), data);
+    }
+  });
+  for (const patch of [{ page: 0 }, { page: 1.5 }, { page: 2147483648 }, { pageSize: 25 }, { pageSize: '10' }, { sort: 'unknown' }, { filters: {} }, { filters: { ...domain[2], surprise: true } }]) {
+    test(`${domain[0]} rejects input ${JSON.stringify(patch)} before RPC`, async () => {
+      const api = await service(); const transport = wire(envelope(domain));
+      await assert.rejects(() => api[domain[0]](request(domain, patch), { client: transport.client }), /invalid/i);
+      assert.equal(transport.calls.length, 0);
+    });
+  }
+  for (const patch of [null, {}, { totalCount: '101' }, { totalCount: -1 }, { page: 10 }, { pageSize: 15 }, { rows: [] }, { rows: [{ id: id(1) }] }, { rows: Array.from({ length: 11 }, () => domain[4]()) }, { extra: true }]) {
+    test(`${domain[0]} rejects malformed or inconsistent envelope ${JSON.stringify(patch)?.slice(0, 70)}`, async () => {
+      const api = await service(); const data = patch === null ? null : patch.rows?.length === 11 ? envelope(domain, patch) : { ...envelope(domain), ...patch };
+      if (patch && Object.keys(patch).length === 0) delete data.totalCount;
+      await assert.rejects(() => api[domain[0]](request(domain), { client: wire(data).client }), /response_invalid/);
+    });
+  }
+  for (const code of ['PGRST202', '42883', '42501', '22023']) test(`${domain[0]} ${code} fails once without fallback`, async () => {
+    const api = await service(); const error = { code, message: 'failed' }; const transport = wire(null, error);
+    await assert.rejects(() => api[domain[0]](request(domain), { client: transport.client }), (actual) => ['PGRST202', '42883'].includes(code) ? actual.code === 'textbook_read_rpc_unavailable' : actual === error);
+    assert.equal(transport.calls.length, 1);
+  });
+}
+test('caller cancellation and eight-second deadline reject even a resolved transport response', async (t) => {
+  const api = await service(); const domain = domains[0];
+  for (const cause of ['caller', 'timeout']) {
+    const caller = new AbortController(); const timeout = new AbortController(); const reason = new Error(cause);
+    t.mock.method(AbortSignal, 'timeout', (ms) => { assert.equal(ms, 8000); return timeout.signal; });
+    const transport = wire(envelope(domain), null, () => (cause === 'caller' ? caller : timeout).abort(reason));
+    await assert.rejects(() => api.listTextbookMasterPage(request(domain), { client: transport.client, signal: caller.signal }), (error) => error === reason);
+    assert.equal(transport.calls.length, 1); t.mock.restoreAll();
+  }
+  const caller = new AbortController(); caller.abort(new Error('cancelled')); const transport = wire(envelope(domain));
+  await assert.rejects(() => api.listTextbookMasterPage(request(domain), { client: transport.client, signal: caller.signal }), /cancelled/);
+  assert.equal(transport.calls.length, 0);
+});
+test('inventory wire null roundtrips to Infinity, while date-only and finite signed elapsed days survive', async () => {
+  const api = await service();
+  for (const [latestCountAt, daysSinceLatestCount, want] of [['', null, Infinity], ['2026-08-31', 0, 0], ['2026-09-01', -1, -1]]) {
+    const row = { ...inventory(), latestCountAt, daysSinceLatestCount };
+    const result = await api.listTextbookInventoryPage(request(domains[1]), { client: wire(envelope(domains[1], { rows: [row] })).client });
+    assert.equal(result.rows[0].daysSinceLatestCount, want); assert.equal(result.rows[0].latestCountAt, latestCountAt);
+  }
+});
+test('strict stock quantities reject fractional/non-safe values and quality fields reject malformed flags', async () => {
+  const api = await service();
+  for (const patch of [{ totalQuantity: 1.5 }, { studentQuantity: Number.MAX_SAFE_INTEGER + 1 }, { locationQuantities: { [id(900)]: 1.5 } },
+    { qualityIssues: { ...master().qualityIssues, duplicate: 'false' } }, { qualityIssues: { ...master().qualityIssues, extra: false } }]) {
+    await assert.rejects(() => api.listTextbookMasterPage(request(domains[0]), { client: wire(envelope(domains[0], { rows: [{ ...master(), ...patch }] })).client }), /response_invalid/);
+  }
+});
+test('legacy invalid count date restores Infinity without changing its recommended status or invalid-date labels', async () => {
+  const api = await service(); const row = { ...inventory(), latestCountAt: 'infinity', reason: '실사일 확인 필요', dueLabel: '실사일 확인 필요' };
+  const result = await api.listTextbookInventoryPage(request(domains[1]), { client: wire(envelope(domains[1], { rows: [row] })).client });
+  assert.equal(result.rows[0].daysSinceLatestCount, Infinity); assert.equal(result.rows[0].isRecommended, true);
+  assert.equal(result.rows[0].status, 'recommended'); assert.equal(result.rows[0].reason, '실사일 확인 필요');
+});
+for (const field of ['locationQuantities', 'studentLocationQuantities', 'teacherLocationQuantities', 'totalQuantity', 'studentQuantity', 'teacherQuantity', 'stockValue', 'qualityIssues', 'qualityScore', 'locationSummary']) {
+  test(`strict master validates required ${field}, including nested inventory source`, async () => {
+    const api = await service();
+    for (const d of domains.slice(0, 2)) for (const value of [undefined, '12', null]) {
+      const row = d[4](); const target = d === domains[0] ? row : row.source;
+      if (value === undefined) delete target[field]; else target[field] = value;
+      await assert.rejects(() => api[d[0]](request(d), { client: wire(envelope(d, { rows: [row] })).client }), /response_invalid/);
+    }
+  });
+}
+for (const patch of [{ daysSinceLatestCount: 'Infinity' }, { daysSinceLatestCount: Infinity }, { daysSinceLatestCount: 1.5 }, { latestCountAt: '2026-02-30' }, { status: 'all' }, { isRecommended: 1 }]) test(`inventory rejects malformed fields ${JSON.stringify(patch)}`, async () => {
+  const api = await service(); await assert.rejects(() => api.listTextbookInventoryPage(request(domains[1]), { client: wire(envelope(domains[1], { rows: [{ ...inventory(), ...patch }] })).client }), /response_invalid/);
+});
+test('history retains count and adjustment identities plus raw actor presentation seam', async () => {
+  const api = await service(); const result = await api.listTextbookInventoryHistoryPage(request(domains[2]), { client: wire(envelope(domains[2])).client });
+  assert.deepEqual(result.rows[0], history());
+  for (const patch of [{ id: id(101) }, { kind: 'other' }, { actorId: 1 }, { actorLabel: null }, { linkedMoveId: 'not-uuid' }]) {
+    await assert.rejects(() => api.listTextbookInventoryHistoryPage(request(domains[2]), { client: wire(envelope(domains[2], { rows: [{ ...history(), ...patch }] })).client }), /response_invalid/);
+  }
+});
+
+const summary = () => ({ totalCount: 1, totalQuantity: 10, studentQuantity: 8, teacherQuantity: 2, stockValue: 1000,
+  salePriceTotal: 10000, locationQuantities: { [id(900)]: 12, unassigned: -2 },
+  subjectTotals: [{ subject: 'english', totalCount: 1, totalQuantity: 10, salePriceTotal: 10000, stockValue: 1000 }],
+  qualityCounts: { all: 118, attention: 1, duplicate: 1, missingCode: 0, missingPublisher: 0, missingCategory: 0, missingPrice: 0, subjectMismatch: 0, inactive: 1 },
+  inventoryCounts: { all: 7, shortage: 4, surplus: 1, unused: 1, negative: 1 },
+  subSubjectOptions: ['독해'], locations: [{ id: id(900), code: 'qa', name: '본관', sortOrder: 10 }] });
+const balance = () => ({ locationId: id(900), rows: [{ textbookId: id(101), currentQuantity: 12,
+  ...Object.fromEntries(['locationQuantities', 'studentLocationQuantities', 'teacherLocationQuantities', 'totalQuantity', 'studentQuantity', 'teacherQuantity', 'stockValue'].map((key) => [key, master()[key]])) }] });
+const contexts = [
+  ['getTextbookMasterSummary','get_textbook_master_summary_v1',filters,{ p_filters: filters },summary],
+  ['getTextbookInventorySummary','get_textbook_inventory_summary_v1',domains[1][2],{ p_filters: domains[1][2] },() => ({ ...summary(), auditCounts: { all: 7, recommended: 6, pending: 0, done: 1 } })],
+  ['getTextbookMasterDetail','get_textbook_master_detail_v1',id(101),{ p_id: id(101) },() => ({ row: master() })],
+  ['getTextbookInventoryBalance','get_textbook_inventory_balance_v1',{ textbookIds: [id(101)], locationId: id(900) },{ p_input: { textbookIds: [id(101)], locationId: id(900) } },balance],
+  ['checkTextbookMasterDuplicate','check_textbook_master_duplicate_v1',{ excludeId: null, title: '교재', subject: 'english', publisher: '', category: '' },{ p_input: { excludeId: null, title: '교재', subject: 'english', publisher: '', category: '' } },() => ({ totalCount: 1, previewRows: [master()] })],
+];
+const saleHistorySummary = () => ({ totalCount: 101, totalWaitingQuantity: 202, totalIssuedQuantity: 303, sourceTotalCount: 111,
+  yearOptions: ['2026', '2025'], monthOptions: ['2026-08', '2025-12'], classOptions: [[id(800), '중2반'], [id(801), '중10반']], effectiveMonth: 'all' });
+const purchaseSummary = () => ({ mode: 'request', totalCount: 101, rawLineCount: 202, quantities: { requested: 404, ordered: 0, received: 0, student: { requested: 202, ordered: 0, received: 0 }, teacher: { requested: 202, ordered: 0, received: 0 } },
+  groups: [{ status: 'requested', totalCount: 101, rawLineCount: 202, quantities: { requested: 404, ordered: 0, received: 0, student: { requested: 202, ordered: 0, received: 0 }, teacher: { requested: 202, ordered: 0, received: 0 } } }],
+  requestCounts: { all: 202, unregistered: 0, orderable: 202 }, orderCounts: { all: 202, waiting: 202, partial: 202, returnable: 202, returned: 202 }, boardScopeCounts: { all: 202, active: 202, recent: 202 } });
+const saleSummary = () => ({ totalCount: 101, totalQuantity: 202, studentCount: 0, classCount: 1, totalAmount: 2020000,
+  groups: [{ status: 'charged', totalCount: 101, totalQuantity: 202 }], statusCounts: { all: 111, waiting: 101, issued: 4, returned: 3, cancelled: 3 } });
+const operationsSummary = () => ({ requestCount: 5, unregisteredRequestCount: 2, orderNeededCount: 3, receivingBacklogCount: 11, partialReceiptCount: 7, issueWaitingCount: 20, stockRiskCount: 3 });
+const workflowContexts = [
+  ['getTextbookPurchaseSummary', 'get_textbook_purchase_summary_v1', purchaseFilters, { p_filters: purchaseFilters }, purchaseSummary],
+  ['getTextbookSaleSummary', 'get_textbook_sale_summary_v1', saleFilters, { p_filters: saleFilters }, saleSummary],
+  ['getTextbookSaleHistorySummary', 'get_textbook_sale_history_summary_v1', saleHistoryFilters, { p_filters: saleHistoryFilters }, saleHistorySummary],
+  ['getTextbookOperationsSummary', 'get_textbook_operations_summary_v1', null, {}, operationsSummary],
+  ['getTextbookPurchaseDetail', 'get_textbook_purchase_detail_v1', { anchorLineId: id(301), mode: 'request' }, { p_anchor_line_id: id(301), p_mode: 'request' }, () => ({ row: purchaseRow() })],
+  ['getTextbookSaleDetail', 'get_textbook_sale_detail_v1', id(400), { p_id: id(400) }, () => ({ row: saleRow() })],
+];
+for(const d of workflowDomains)test(`${d[0]} cancels before/after transport and applies the eight second deadline`,async(t)=>{
+ const api=await service();const caller=new AbortController();caller.abort(new Error('pre-aborted'));const unused=wire(envelope(d));
+ await assert.rejects(()=>api[d[0]](request(d),{client:unused.client,signal:caller.signal}),/pre-aborted/);assert.equal(unused.calls.length,0);
+ for(const reason of ['caller','deadline']){
+  const active=new AbortController();const timeout=new AbortController();t.mock.method(AbortSignal,'timeout',ms=>{assert.equal(ms,8000);return timeout.signal;});
+  const transport=wire(envelope(d),null,()=> (reason==='caller'?active:timeout).abort(new Error(reason)));
+  await assert.rejects(()=>api[d[0]](request(d),{client:transport.client,signal:active.signal}),new RegExp(reason));assert.equal(transport.calls.length,1);t.mock.restoreAll();
+ }
+});
+function invokeWorkflow(api, method, input, options) { return method === 'getTextbookOperationsSummary' ? api[method](options) : api[method](input, options); }
+for (const [method, rpc, input, args, fixture] of workflowContexts) {
+  test(`${method} validates its complete workflow DTO and exact transport`, async () => {
+    const api = await service(); const transport = wire(fixture());
+    assert.deepEqual(await invokeWorkflow(api, method, input, { client: transport.client }), fixture());
+    assert.deepEqual(transport.calls.map(({name,args,retry}) => ({name,args,retry})), [{name:rpc,args,retry:false}]);
+    assert.ok(transport.calls[0].signal instanceof AbortSignal);
+  });
+  test(`${method} rejects missing/extra fields and never falls back on unavailable or denied RPC`, async () => {
+    const api = await service();
+    for (const data of [null, {}, {...fixture(),extra:true}]) await assert.rejects(() => invokeWorkflow(api,method,input,{client:wire(data).client}), /response_invalid/);
+    for (const code of ['PGRST202','42883','42501','22023']) {
+      const transport = wire(null, {code});
+      await assert.rejects(() => invokeWorkflow(api,method,input,{client:transport.client}), (e) => e.code === (['PGRST202','42883'].includes(code) ? 'textbook_read_rpc_unavailable' : code));
+      assert.equal(transport.calls.length,1);
+    }
+  });
+  test(`${method} observes caller cancellation and eight second transport deadline`, async () => {
+    const api = await service(); const controller = new AbortController(); const transport = wire(fixture(),null,()=>controller.abort());
+    await assert.rejects(() => invokeWorkflow(api,method,input,{client:transport.client,signal:controller.signal}), {name:'AbortError'});
+    const original = AbortSignal.timeout; const timeouts=[]; const deadlines=[];
+    AbortSignal.timeout = (ms) => { timeouts.push(ms); const deadline=new AbortController(); deadlines.push(deadline); return deadline.signal; };
+    try {
+      await assert.rejects(() => invokeWorkflow(api,method,input,{client:wire(fixture(),null,()=>deadlines[0].abort(new DOMException('timeout','TimeoutError'))).client}),{name:'TimeoutError'});
+      assert.deepEqual(timeouts,[8000]);
+    } finally { AbortSignal.timeout=original; }
+  });
+}
+test('purchase detail uses any real member identity, validates nested source and isolates teacher request DTO', async () => {
+  const api=await service();
+  assert.deepEqual(await api.getTextbookPurchaseDetail({anchorLineId:id(301),mode:'request'},{client:wire({row:purchaseRow()}).client}),{row:purchaseRow()});
+  assert.deepEqual(await api.getTextbookPurchaseDetail({anchorLineId:id(999),mode:'request'},{client:wire({row:null}).client}),{row:null});
+  for(const mutate of [r=>{r.memberLineIds=[id(300)];},r=>{r.line.purchaseScopeLines=[];},r=>{r.lines[1].copy_scope='student';},r=>{r.mode='order';},r=>{r.references.supplier={id:id(777),name:'leak'};},r=>{r.quantities.requested=3;},r=>{r.lines[0].order.id=id(777);},r=>{r.line.memo='different';}]) {
+    const row=purchaseRow(); mutate(row);
+    await assert.rejects(()=>api.getTextbookPurchaseDetail({anchorLineId:id(301),mode:'request'},{client:wire({row}).client}),/response_invalid/);
+  }
+  for(const input of [{anchorLineId:'synthetic',mode:'request'},{anchorLineId:id(301),mode:'teacher'},{anchorLineId:id(301),mode:'order',extra:true}]) {
+    const transport=wire({row:null}); await assert.rejects(()=>api.getTextbookPurchaseDetail(input,{client:transport.client}),/input_invalid/); assert.equal(transport.calls.length,0);
+  }
+});
+test('workflow summaries reject inconsistent full totals and sale detail rejects wrong real identity',async()=>{
+ const api=await service();
+ for(const patch of [{totalCount:100},{rawLineCount:201},{mode:'order'},{groups:[]}]) await assert.rejects(()=>api.getTextbookPurchaseSummary(purchaseFilters,{client:wire({...purchaseSummary(),...patch}).client}),/response_invalid/);
+ for(const patch of [{totalCount:100},{classCount:102},{groups:[]}]) await assert.rejects(()=>api.getTextbookSaleSummary(saleFilters,{client:wire({...saleSummary(),...patch}).client}),/response_invalid/);
+ await assert.rejects(()=>api.getTextbookOperationsSummary({client:wire({...operationsSummary(),requestCount:4}).client}),/response_invalid/);
+ await assert.rejects(()=>api.getTextbookSaleDetail(id(401),{client:wire({row:saleRow()}).client}),/response_invalid/);
+});
+test('sale wire decimal amount is authoritative while real amount and event mismatches are rejected',async()=>{
+ const api=await service();const row=saleRow();row.line.unit_price=0.1;row.line.quantity=3;row.quantity=3;row.amount=0.3;
+ assert.equal((await api.getTextbookSaleDetail(id(400),{client:wire({row}).client})).row.amount,0.3);
+ for(const patch of [{amount:0.31},{eventAt:'2026-01-01'},{recipientName:'wrong'}])await assert.rejects(()=>api.getTextbookSaleDetail(id(400),{client:wire({row:{...row,...patch}}).client}),/response_invalid/);
+});
+test('purchase display key and event are reconciled to the complete student-primary member',async()=>{
+ const api=await service();
+ for(const patch of [{id:'synthetic'},{eventAt:'wrong'}])await assert.rejects(()=>api.getTextbookPurchaseDetail({anchorLineId:id(300),mode:'request'},{client:wire({row:{...purchaseRow(),...patch}}).client}),/response_invalid/);
+});
+test('workflow raw source temporal fields reject malformed DTO values before display use',async()=>{
+ const api=await service();
+ for(const [kind,key,value] of [['purchase','created_at','nonsense'],['purchase','requested_date','2026-02-31'],['sale','created_at','wrong']]){
+  if(kind==='purchase'){
+   const row=purchaseRow();row.lines[0].order[key]=value;row.line.order[key]=value;
+   await assert.rejects(()=>api.getTextbookPurchaseDetail({anchorLineId:id(300),mode:'request'},{client:wire({row}).client}),/response_invalid/);
+  }else{
+   const row=saleRow();row.line[key]=value;
+   await assert.rejects(()=>api.getTextbookSaleDetail(id(400),{client:wire({row}).client}),/response_invalid/);
+  }
+ }
+});
+test('sale history summary is authoritative and separate from requested page, preserving off-page options', async () => {
+  const api = await service(); const transport = wire(saleHistorySummary());
+  const result = await api.getTextbookSaleHistorySummary(saleHistoryFilters, { client: transport.client });
+  assert.deepEqual(result, saleHistorySummary());
+  assert.deepEqual(transport.calls.map(({ name, args, retry }) => ({ name, args, retry })), [{ name: 'get_textbook_sale_history_summary_v1', args: { p_filters: saleHistoryFilters }, retry: false }]);
+  assert.ok(transport.calls[0].signal instanceof AbortSignal);
+});
+test('sale history rejects operations search and inconsistent raw history totals before downstream use', async () => {
+  const api = await service();
+  for (const method of ['listTextbookSaleHistoryPage', 'getTextbookSaleHistorySummary']) {
+    const transport = wire(saleHistorySummary());
+    const input = { ...saleHistoryFilters, search: '교재' };
+    await assert.rejects(() => api[method](method.startsWith('list') ? { page: 1, pageSize: 10, sort: 'month-class-title', filters: input } : input, { client: transport.client }), /filters_invalid/);
+    assert.equal(transport.calls.length, 0);
+  }
+  for (const patch of [{ sourceTotalCount: 100 }, { totalWaitingQuantity: -1 }, { effectiveMonth: '2026-08' }, { classOptions: [[id(800), '중2반'], [id(800), '중2반']] }]) {
+    await assert.rejects(() => api.getTextbookSaleHistorySummary(saleHistoryFilters, { client: wire({ ...saleHistorySummary(), ...patch }).client }), /response_invalid/);
+  }
+  const d = workflowDomains[0];
+  for (const patch of [{ totalQuantity: 4 }, { waitingQuantity: -1 }, { id: 'synthetic-wrong' }]) {
+    await assert.rejects(() => api.listTextbookSaleHistoryPage(request(d), { client: wire(envelope(d, { rows: [{ ...saleHistoryRow(), ...patch }] })).client }), /response_invalid/);
+  }
+});
+test('sale history distinguishes empty source from empty filter and resolves stale month to all', async () => {
+  const api = await service();
+  const stale = { ...saleHistoryFilters, month: '2020-01' };
+  assert.deepEqual(await api.getTextbookSaleHistorySummary(stale, { client: wire(saleHistorySummary()).client }), saleHistorySummary());
+  for (const sourceTotalCount of [0, 111]) {
+    const empty = { totalCount: 0, totalWaitingQuantity: 0, totalIssuedQuantity: 0, sourceTotalCount, yearOptions: sourceTotalCount ? ['2026'] : [], monthOptions: [], classOptions: [], effectiveMonth: 'all' };
+    assert.deepEqual(await api.getTextbookSaleHistorySummary({ ...stale, year: 'unknown' }, { client: wire(empty).client }), empty);
+  }
+});
+for (const [method, rpc, input, args, fixture] of contexts) {
+  test(`${method} uses a separate purpose-specific complete contract`, async () => {
+    const api = await service(); const transport = wire(fixture());
+    assert.deepEqual(await api[method](input, { client: transport.client }), fixture());
+    assert.equal(transport.calls.length, 1); assert.equal(transport.calls[0].name, rpc); assert.deepEqual(transport.calls[0].args, args); assert.equal(transport.calls[0].retry, false);
+  });
+  test(`${method} rejects absent, partial and fake page envelopes`, async () => {
+    const api = await service();
+    for (const data of [null, {}, { rows: [], page: 1, pageSize: 10, totalCount: 0 }]) await assert.rejects(() => api[method](input, { client: wire(data).client }), /response_invalid/);
+  });
+}
+test('balance rejects partial, duplicate, unknown-ID and wrong-location coverage', async () => {
+  const api = await service(); const input = contexts[3][2];
+  for (const data of [{ ...balance(), rows: [] }, { ...balance(), rows: [...balance().rows, ...balance().rows] }, { ...balance(), rows: [{ ...balance().rows[0], textbookId: id(102) }] }, { ...balance(), locationId: null }]) {
+    await assert.rejects(() => api.getTextbookInventoryBalance(input, { client: wire(data).client }), /response_invalid/);
+  }
+  await assert.rejects(() => api.getTextbookInventoryBalance({ ...input, textbookIds: [id(101),id(101)] }, { client: wire(balance()).client }), /invalid/);
+  assert.deepEqual(await api.getTextbookInventoryBalance({ textbookIds: [], locationId: null }, { client: wire({ locationId: null, rows: [] }).client }), { locationId: null, rows: [] });
+});
+test('duplicate preview has max10 with full count, and null detail is explicit', async () => {
+  const api = await service();
+  assert.deepEqual(await api.getTextbookMasterDetail(id(101), { client: wire({ row: null }).client }), { row: null });
+  const previewRows = Array.from({ length: 10 }, (_, n) => ({ ...master(), id: id(n+1) }));
+  assert.equal((await api.checkTextbookMasterDuplicate(contexts[4][2], { client: wire({ totalCount: 111, previewRows }).client })).totalCount,111);
+  for (const data of [{ totalCount: 111, previewRows: [] }, { totalCount: 111, previewRows: [...previewRows,master()] }, { totalCount: 0, previewRows: [master()] }]) {
+    await assert.rejects(() => api.checkTextbookMasterDuplicate(contexts[4][2], { client: wire(data).client }), /response_invalid/);
+  }
+});
+test('UUID context coverage compares canonical identities without rejecting uppercase input or allowing case-duplicate IDs', async () => {
+  const api = await service();
+  assert.equal((await api.getTextbookMasterDetail(id(101).toUpperCase(), { client: wire({ row: master() }).client })).row.id,id(101));
+  const input={textbookIds:[id(101).toUpperCase()],locationId:id(900).toUpperCase()};
+  assert.equal((await api.getTextbookInventoryBalance(input,{client:wire(balance()).client})).rows[0].textbookId,id(101));
+  await assert.rejects(() => api.getTextbookInventoryBalance({...input,textbookIds:[id(101),id(101).toUpperCase()]},{client:wire(balance()).client}),/invalid/);
+});
+test('summary retains full-filter price/location/subject totals and rejects incomplete or conflicting aggregates', async () => {
+  const api = await service();
+  assert.deepEqual(await api.getTextbookMasterSummary(filters,{client:wire(summary()).client}),summary());
+  for (const patch of [{ salePriceTotal: undefined }, { salePriceTotal: '10000' }, { locationQuantities: {} }, { subjectTotals: [] },
+    { subjectTotals: [{ ...summary().subjectTotals[0], totalCount: 2 }] }, { subjectTotals: [{ ...summary().subjectTotals[0], subject: 'invalid' }] }]) {
+    await assert.rejects(() => api.getTextbookMasterSummary(filters,{client:wire({...summary(),...patch}).client}),/response_invalid/);
+  }
+});
+
+function signedAmountSummary(stockValues, stockValue, inventorySummary = false) {
+  return { ...summary(), totalCount: stockValues.length, stockValue, salePriceTotal: stockValues.length * 10000,
+    subjectTotals: stockValues.map((value, index) => ({ subject: ['english', 'math', 'science', 'other'][index],
+      totalCount: 1, totalQuantity: index === 0 ? 10 : 0, salePriceTotal: 10000, stockValue: value })),
+    ...(inventorySummary ? { auditCounts: { all: stockValues.length, recommended: stockValues.length, pending: 0, done: 0 } } : {}),
+  };
+}
+for (const [method, , input] of contexts.slice(0, 2)) {
+  test(`${method} reconciles signed decimal cancellation without changing authoritative amounts`, async () => {
+    const api = await service();
+    for (const [parts, total] of [
+      [[10000.01, -10000], 0.01], [[-10000.01, 10000], -0.01],
+      [[10000.01, -10000, 0.2, -0.1], 0.11], [[1e-20, -9e-21], 1e-21],
+      [[1e308, 1e308, -1e308, -1e308], 0],
+    ]) {
+      const data = signedAmountSummary(parts, total, method === 'getTextbookInventorySummary');
+      assert.deepEqual(await api[method](input, { client: wire(data).client }), data);
+    }
+  });
+  test(`${method} rejects genuine amount discrepancies despite cancellation or overflow`, async () => {
+    const api = await service();
+    for (const [parts, total] of [
+      [[10000.01, -10000], 0.02], [[1e-20, -9e-21], 2e-21],
+      [[Number.MAX_VALUE, Number.MAX_VALUE], Number.MAX_VALUE],
+      [[1e308, -1e308, 1e308, -1e308], 1e307], [[Infinity, -10000], 0.01],
+    ]) {
+      const data = signedAmountSummary(parts, total, method === 'getTextbookInventorySummary');
+      await assert.rejects(() => api[method](input, { client: wire(data).client }), /response_invalid/);
+    }
+    const data = signedAmountSummary([10000.01, -10000], 0.01, method === 'getTextbookInventorySummary');
+    await assert.rejects(() => api[method](input, { client: wire({ ...data, salePriceTotal: 20000.01 }).client }), /response_invalid/);
+  });
+}
+
+// Exact original bounded payloads from authenticated final-only SQL execution.
+// Request: textbook-task2-final; actor a2000000-0000-4000-8000-000000000901 / authenticated.
+// SQL f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5
+// pgTAP ce8d2b839927932a873b6cb510fcd60328260935f6e29dec09ef30a4f76dcb34
+// Manifest at capture 3e4cc286f08ba0860ab03c4575e1802b0635da31f37d1971ac7bc807c997f06a
+// Raw sanitized log 8466e6e14e8dd971f714a59e5697633cad317f2c895e21aa61cdb047133d0ff1
+// Only '# TB2_WIRE ' was removed; original JSON bytes are retained below.
+const finalSqlWirePayloads = [
+  String.raw`{"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000203", "name": "Parity 203", "price": 10000, "title": "Parity 203", "isbn13": "tb2-203", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 0, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 0, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": false, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 0, "locationSummary": [], "studentQuantity": 0, "teacherQuantity": 0, "subject_area_key": null, "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "quality-title", "filters": {"search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookMasterPage"}`,
+  String.raw`{"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000203", "title": "Parity 203", "reason": "재고 부족", "source": {"id": "a2000000-0000-4000-8000-000000000203", "name": "Parity 203", "price": 10000, "title": "Parity 203", "isbn13": "tb2-203", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 0, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 0, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": false, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 0, "locationSummary": [], "studentQuantity": 0, "teacherQuantity": 0, "subject_area_key": null, "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}, "status": "recommended", "dueLabel": "실사 이력 없음", "publisher": "출판사", "locationId": "a2000000-0000-4000-8000-000000000900", "locationName": "본관", "isRecommended": true, "latestCountAt": "", "currentQuantity": 0, "isCountedThisCycle": false, "daysSinceLatestCount": null}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "audit-priority", "filters": {"audit": "all", "search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookInventoryPage"}`,
+  String.raw`{"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000201", "title": "Parity 201", "reason": "29일 남음", "source": {"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}, "status": "done", "dueLabel": "29일 남음", "publisher": "출판사", "locationId": "a2000000-0000-4000-8000-000000000900", "locationName": "본관", "isRecommended": false, "latestCountAt": "2026-08-30", "currentQuantity": 12, "isCountedThisCycle": true, "daysSinceLatestCount": 1}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "audit-priority", "filters": {"audit": "all", "search": "Parity 201", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookInventoryPage"}`,
+  String.raw`{"data": {"page": 1, "rows": [{"at": "2026-08-31", "id": "count-a2000000-0000-4000-8000-000000002003", "kind": "count", "memo": "", "actor": "-", "action": "실사 0→-2", "change": "-2권", "actorId": "", "sourceId": "a2000000-0000-4000-8000-000000002003", "actorLabel": "", "linkedMoveId": "a2000000-0000-4000-8000-000000001006", "locationName": "본관", "textbookTitle": "Parity 202"}, {"at": "2026-08-31T09:00:00+09:00", "id": "move-a2000000-0000-4000-8000-000000001006", "kind": "move", "memo": "", "actor": "-", "action": "실사 조정", "change": "-2권", "actorId": "", "sourceId": "a2000000-0000-4000-8000-000000001006", "actorLabel": "", "linkedMoveId": "", "locationName": "본관", "textbookTitle": "Parity 202"}], "pageSize": 10, "totalCount": 2}, "input": {"page": 1, "sort": "event-desc", "filters": {"locationId": null, "textbookId": "a2000000-0000-4000-8000-000000000202"}, "pageSize": 10}, "method": "listTextbookInventoryHistoryPage"}`,
+  String.raw`{"data": {"locations": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "sortOrder": 10}, {"id": "a2000000-0000-4000-8000-000000000910", "code": "__tb2_annex__", "name": "별관", "sortOrder": 20}], "stockValue": 0, "totalCount": 1, "qualityCounts": {"all": 118, "inactive": 1, "attention": 1, "duplicate": 1, "missingCode": 0, "missingPrice": 0, "missingCategory": 0, "subjectMismatch": 0, "missingPublisher": 0}, "subjectTotals": [{"subject": "english", "stockValue": 0, "totalCount": 1, "totalQuantity": 0, "salePriceTotal": 10000}], "totalQuantity": 0, "salePriceTotal": 10000, "inventoryCounts": {"all": 1, "unused": 1, "surplus": 0, "negative": 0, "shortage": 0}, "studentQuantity": 0, "teacherQuantity": 0, "subSubjectOptions": ["내신", "단어", "독해", "듣기", "모고", "문법"], "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}, "input": {"search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "subSubject": "all", "schoolLevel": "all"}, "method": "getTextbookMasterSummary"}`,
+  String.raw`{"data": {"locations": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "sortOrder": 10}, {"id": "a2000000-0000-4000-8000-000000000910", "code": "__tb2_annex__", "name": "별관", "sortOrder": 20}], "stockValue": 0, "totalCount": 1, "auditCounts": {"all": 1, "done": 0, "pending": 0, "recommended": 1}, "qualityCounts": {"all": 118, "inactive": 1, "attention": 1, "duplicate": 1, "missingCode": 0, "missingPrice": 0, "missingCategory": 0, "subjectMismatch": 0, "missingPublisher": 0}, "subjectTotals": [{"subject": "english", "stockValue": 0, "totalCount": 1, "totalQuantity": 0, "salePriceTotal": 10000}], "totalQuantity": 0, "salePriceTotal": 10000, "inventoryCounts": {"all": 1, "unused": 1, "surplus": 0, "negative": 0, "shortage": 0}, "studentQuantity": 0, "teacherQuantity": 0, "subSubjectOptions": ["내신", "단어", "독해", "듣기", "모고", "문법"], "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}, "input": {"audit": "all", "search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "method": "getTextbookInventorySummary"}`,
+  String.raw`{"data": {"row": {"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}}, "input": "a2000000-0000-4000-8000-000000000201", "method": "getTextbookMasterDetail"}`,
+  String.raw`{"data": {"rows": [{"stockValue": 977, "textbookId": "a2000000-0000-4000-8000-000000000201", "totalQuantity": 10, "currentQuantity": 12, "studentQuantity": 9, "teacherQuantity": 1, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}, {"stockValue": 0, "textbookId": "a2000000-0000-4000-8000-000000000204", "totalQuantity": 2, "currentQuantity": 2, "studentQuantity": 0, "teacherQuantity": 2, "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 2, "a2000000-0000-4000-8000-000000000910": 0}, "studentLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 2, "a2000000-0000-4000-8000-000000000910": 0}}], "locationId": "a2000000-0000-4000-8000-000000000900"}, "input": {"locationId": "a2000000-0000-4000-8000-000000000900", "textbookIds": ["a2000000-0000-4000-8000-000000000201", "a2000000-0000-4000-8000-000000000204"]}, "method": "getTextbookInventoryBalance"}`,
+  String.raw`{"data": {"totalCount": 1, "previewRows": [{"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}]}, "input": {"title": "Parity 201", "subject": "english", "category": "", "excludeId": null, "publisher": ""}, "method": "checkTextbookMasterDuplicate"}`,
+  String.raw`{"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000201", "title": "Parity 201", "reason": "실사일 확인 필요", "source": {"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}, "status": "recommended", "dueLabel": "실사일 확인 필요", "publisher": "출판사", "locationId": "a2000000-0000-4000-8000-000000000900", "locationName": "본관", "isRecommended": true, "latestCountAt": "infinity", "currentQuantity": 12, "isCountedThisCycle": false, "daysSinceLatestCount": null}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "audit-priority", "filters": {"audit": "all", "search": "Parity 201", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookInventoryPage"}`,
+];
+test('final SQL wire provenance binds immutable migration, pgTAP and all eight methods', () => {
+  const digest = (value) => createHash('sha256').update(value).digest('hex');
+  const migration = '20260831123610_textbook_inventory_numbered_reads.sql';
+  assert.equal(digest(readFileSync(new URL('../supabase/migrations/' + migration, import.meta.url))), 'f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5');
+  assert.equal(digest(readFileSync(new URL('../supabase/tests/textbook_inventory_numbered_reads_test.sql', import.meta.url))), 'ce8d2b839927932a873b6cb510fcd60328260935f6e29dec09ef30a4f76dcb34');
+  const manifest = JSON.parse(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.orderedNewMigrations.find((entry) => entry.fileName === migration), {
+    fileName: migration, status: 'final', sha256: 'f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5',
+  });
+  assert.equal(finalSqlWirePayloads.length, 10);
+  assert.equal(digest(finalSqlWirePayloads.join('\n')), '471bd0872879ec431b7253003bb74370ed43c761ad8eeec05c0673e866d193c2');
+  assert.deepEqual([...new Set(finalSqlWirePayloads.map((payload) => JSON.parse(payload).method))].sort(), [...domains, ...contexts].map((entry) => entry[0]).sort());
+});
+for (const [index, payload] of finalSqlWirePayloads.entries()) {
+  const capture = JSON.parse(payload);
+  test('final authenticated SQL DTO ' + (index + 1) + ' replays verbatim through ' + capture.method, async () => {
+    const api = await service();
+    const original = structuredClone(capture.data);
+    const transport = wire(capture.data);
+    const result = await api[capture.method](capture.input, { client: transport.client });
+    assert.deepEqual(capture.data, original, 'production parser must not mutate the captured wire DTO');
+    // Expected model-only conversion occurs AFTER the untouched wire reached the actual parser.
+    if (capture.method === 'listTextbookInventoryPage') {
+      for (const row of original.rows) if (row.daysSinceLatestCount === null) row.daysSinceLatestCount = Infinity;
+    }
+    assert.deepEqual(result, original);
+    assert.equal(transport.calls.length, 1);
+    assert.equal(transport.calls[0].retry, false);
+  });
+}
+
+// Original anchored JSON from the root-owned --require-final run on 2026-09-01
+// (UTC fixture dates remain 2026-08-31). No redaction/reconstruction or DTO repair.
+// Final log SHA256: 26baea68c1a2e8d6798540c197446c4728b98f4afbce15f8aadda824096d3668.
+const finalWorkflowSqlWirePayloads = [
+  "{\"data\": {\"page\": 1, \"rows\": [{\"id\": \"requested||3b000000-0000-4000-8000-000000000111||3b000000-0000-4000-8000-000000000600||3b000000-0000-4000-8000-000000000900||합성 교사||||2026-08-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"order\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-08-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"references\": {\"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"unitCost\": 9000, \"publisher\": null, \"configuredSupplierId\": \"\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000002111\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000002111\", \"3b000000-0000-4000-8000-000000001111\"]}], \"pageSize\": 10, \"totalCount\": 1}, \"input\": {\"page\": 1, \"sort\": \"status-event\", \"filters\": {\"mode\": \"order\", \"search\": \"__t3b__ 교재 111\", \"boardScope\": \"all\", \"orderFilter\": \"all\", \"requestFilter\": \"all\"}, \"pageSize\": 10}, \"method\": \"listTextbookPurchasePage\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"mode\": \"order\", \"groups\": [{\"status\": \"requested\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"totalCount\": 1, \"rawLineCount\": 2}], \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"totalCount\": 1, \"orderCounts\": {\"all\": 2, \"partial\": 0, \"waiting\": 2, \"returned\": 0, \"returnable\": 0}, \"rawLineCount\": 2, \"requestCounts\": {\"all\": 2, \"orderable\": 2, \"unregistered\": 0}, \"boardScopeCounts\": {\"all\": 2, \"active\": 2, \"recent\": 2}}, \"input\": {\"mode\": \"order\", \"search\": \"__t3b__ 교재 111\", \"boardScope\": \"all\", \"orderFilter\": \"all\", \"requestFilter\": \"all\"}, \"method\": \"getTextbookPurchaseSummary\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"row\": {\"id\": \"requested||3b000000-0000-4000-8000-000000000111||3b000000-0000-4000-8000-000000000600||3b000000-0000-4000-8000-000000000900||합성 교사||||2026-08-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"order\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-08-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"references\": {\"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"unitCost\": 9000, \"publisher\": null, \"configuredSupplierId\": \"\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000002111\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000002111\", \"3b000000-0000-4000-8000-000000001111\"]}}, \"input\": {\"mode\": \"order\", \"anchorLineId\": \"3b000000-0000-4000-8000-000000001111\"}, \"method\": \"getTextbookPurchaseDetail\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"page\": 1, \"rows\": [{\"id\": \"3b000000-0000-4000-8000-000000008111\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000008111\", \"memo\": \"\", \"status\": \"charged\", \"sale_id\": \"3b000000-0000-4000-8000-000000007000\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"quantity\": 2, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"student_id\": null, \"teacher_id\": null, \"unit_price\": 10000, \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"charge_month\": \"2026-08\", \"teacher_name\": \"\", \"exclusion_reason\": \"\"}, \"sale\": {\"id\": \"3b000000-0000-4000-8000-000000007000\", \"memo\": \"\", \"status\": \"charged\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"sale_date\": \"2026-08-31\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": null, \"updated_at\": null, \"charge_month\": \"2026-08\"}, \"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"amount\": 20000, \"status\": \"charged\", \"eventAt\": \"2026-08-01T00:00:00+00:00\", \"student\": null, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"quantity\": 2, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"groupStatus\": \"charged\", \"recipientName\": \"-\"}, {\"id\": \"3b000000-0000-4000-8000-000000009111\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000009111\", \"memo\": \"\", \"status\": \"issued\", \"sale_id\": \"3b000000-0000-4000-8000-000000007000\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"quantity\": 3, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"student_id\": null, \"teacher_id\": null, \"unit_price\": 10000, \"updated_at\": \"2026-08-31T00:00:00+00:00\", \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"charge_month\": \"2026-08\", \"teacher_name\": \"합성 교사\", \"exclusion_reason\": \"\"}, \"sale\": {\"id\": \"3b000000-0000-4000-8000-000000007000\", \"memo\": \"\", \"status\": \"charged\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"sale_date\": \"2026-08-31\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": null, \"updated_at\": null, \"charge_month\": \"2026-08\"}, \"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"amount\": 30000, \"status\": \"issued\", \"eventAt\": \"2026-08-31T00:00:00+00:00\", \"student\": null, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"quantity\": 3, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"groupStatus\": \"issued\", \"recipientName\": \"합성 교사\"}], \"pageSize\": 10, \"totalCount\": 2}, \"input\": {\"page\": 1, \"sort\": \"status-event\", \"filters\": {\"search\": \"__t3b__ 교재 111\", \"status\": \"all\"}, \"pageSize\": 10}, \"method\": \"listTextbookSalePage\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"groups\": [{\"status\": \"charged\", \"totalCount\": 1, \"totalQuantity\": 2}, {\"status\": \"issued\", \"totalCount\": 1, \"totalQuantity\": 3}], \"classCount\": 1, \"totalCount\": 2, \"totalAmount\": 50000, \"statusCounts\": {\"all\": 2, \"issued\": 1, \"waiting\": 1, \"returned\": 0, \"cancelled\": 0}, \"studentCount\": 0, \"totalQuantity\": 5}, \"input\": {\"search\": \"__t3b__ 교재 111\", \"status\": \"all\"}, \"method\": \"getTextbookSaleSummary\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"row\": {\"id\": \"3b000000-0000-4000-8000-000000009111\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000009111\", \"memo\": \"\", \"status\": \"issued\", \"sale_id\": \"3b000000-0000-4000-8000-000000007000\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"quantity\": 3, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"student_id\": null, \"teacher_id\": null, \"unit_price\": 10000, \"updated_at\": \"2026-08-31T00:00:00+00:00\", \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"charge_month\": \"2026-08\", \"teacher_name\": \"합성 교사\", \"exclusion_reason\": \"\"}, \"sale\": {\"id\": \"3b000000-0000-4000-8000-000000007000\", \"memo\": \"\", \"status\": \"charged\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"sale_date\": \"2026-08-31\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": null, \"updated_at\": null, \"charge_month\": \"2026-08\"}, \"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"amount\": 30000, \"status\": \"issued\", \"eventAt\": \"2026-08-31T00:00:00+00:00\", \"student\": null, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"quantity\": 3, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"groupStatus\": \"issued\", \"recipientName\": \"합성 교사\"}}, \"input\": \"3b000000-0000-4000-8000-000000009111\", \"method\": \"getTextbookSaleDetail\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"page\": 1, \"rows\": [{\"id\": \"2025-12:3b000000-0000-4000-8000-000000000601:3b000000-0000-4000-8000-000000000001\", \"year\": \"2025\", \"month\": \"2025-12\", \"classId\": \"3b000000-0000-4000-8000-000000000601\", \"latestAt\": \"2025-12-01T00:00:00+00:00\", \"className\": \"중10반\", \"textbookId\": \"3b000000-0000-4000-8000-000000000001\", \"textbookTitle\": \"__t3b__ 교재 1\", \"totalQuantity\": 7, \"issuedQuantity\": 0, \"waitingQuantity\": 7}], \"pageSize\": 10, \"totalCount\": 1}, \"input\": {\"page\": 1, \"sort\": \"month-class-title\", \"filters\": {\"year\": \"all\", \"month\": \"all\", \"search\": \"\", \"classId\": \"3b000000-0000-4000-8000-000000000601\"}, \"pageSize\": 10}, \"method\": \"listTextbookSaleHistoryPage\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"totalCount\": 112, \"yearOptions\": [\"2026\", \"2025\"], \"classOptions\": [[\"3b000000-0000-4000-8000-000000000600\", \"중2반\"], [\"3b000000-0000-4000-8000-000000000601\", \"중10반\"]], \"monthOptions\": [\"2026-08\", \"2025-12\"], \"effectiveMonth\": \"all\", \"sourceTotalCount\": 112, \"totalIssuedQuantity\": 333, \"totalWaitingQuantity\": 229}, \"input\": {\"year\": \"all\", \"month\": \"all\", \"search\": \"\", \"classId\": \"all\"}, \"method\": \"getTextbookSaleHistorySummary\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"requestCount\": 224, \"stockRiskCount\": 0, \"orderNeededCount\": 224, \"issueWaitingCount\": 112, \"partialReceiptCount\": 0, \"receivingBacklogCount\": 0, \"unregisteredRequestCount\": 0}, \"input\": null, \"method\": \"getTextbookOperationsSummary\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"page\": 1, \"rows\": [{\"id\": \"requested||3b000000-0000-4000-8000-000000000111||3b000000-0000-4000-8000-000000000600||3b000000-0000-4000-8000-000000000900||합성 교사||||2026-08-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"request\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-08-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"references\": {\"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"unitCost\": 9000, \"publisher\": null, \"configuredSupplierId\": \"\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000002111\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000002111\", \"3b000000-0000-4000-8000-000000001111\"]}], \"pageSize\": 10, \"totalCount\": 1}, \"input\": {\"page\": 1, \"sort\": \"status-event\", \"filters\": {\"mode\": \"request\", \"search\": \"__t3b__ 교재 111\", \"boardScope\": \"all\", \"orderFilter\": \"all\", \"requestFilter\": \"all\"}, \"pageSize\": 10}, \"method\": \"listTextbookPurchasePage\", \"actorId\": \"3b000000-0000-4000-8000-000000000903\"}",
+  "{\"data\": {\"mode\": \"request\", \"groups\": [{\"status\": \"requested\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"totalCount\": 1, \"rawLineCount\": 2}], \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"totalCount\": 1, \"orderCounts\": {\"all\": 2, \"partial\": 2, \"waiting\": 2, \"returned\": 2, \"returnable\": 2}, \"rawLineCount\": 2, \"requestCounts\": {\"all\": 2, \"orderable\": 2, \"unregistered\": 0}, \"boardScopeCounts\": {\"all\": 2, \"active\": 2, \"recent\": 2}}, \"input\": {\"mode\": \"request\", \"search\": \"__t3b__ 교재 111\", \"boardScope\": \"all\", \"orderFilter\": \"all\", \"requestFilter\": \"all\"}, \"method\": \"getTextbookPurchaseSummary\", \"actorId\": \"3b000000-0000-4000-8000-000000000903\"}",
+  "{\"data\": {\"row\": {\"id\": \"requested||3b000000-0000-4000-8000-000000000111||3b000000-0000-4000-8000-000000000600||3b000000-0000-4000-8000-000000000900||합성 교사||||2026-08-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"request\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000002111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000006111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"teacher\", \"created_at\": \"2026-08-01T00:00:00.000001+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000006111\", \"received_quantity\": 0, \"requested_quantity\": 3, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, {\"id\": \"3b000000-0000-4000-8000-000000001111\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005111\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-08-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000904\", \"order_date\": \"2026-08-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": \"3b000000-0000-4000-8000-000000000600\", \"unit_cost\": 0, \"copy_scope\": \"student\", \"created_at\": \"2026-08-01T00:00:00.000002+00:00\", \"updated_at\": null, \"location_id\": \"3b000000-0000-4000-8000-000000000900\", \"textbook_id\": \"3b000000-0000-4000-8000-000000000111\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005111\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-08-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 3}, \"received\": 0, \"requested\": 5}, \"references\": {\"class\": {\"id\": \"3b000000-0000-4000-8000-000000000600\", \"name\": \"중2반\", \"studentCount\": 0}, \"location\": {\"id\": \"3b000000-0000-4000-8000-000000000900\", \"code\": \"__t3b_main__\", \"name\": \"본관\"}, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000111\", \"name\": \"__t3b__ 교재 111\", \"price\": 10000, \"title\": \"__t3b__ 교재 111\", \"isbn13\": \"t3b-111\", \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"unitCost\": 9000, \"publisher\": null, \"configuredSupplierId\": \"\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000002111\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000002111\", \"3b000000-0000-4000-8000-000000001111\"]}}, \"input\": {\"mode\": \"request\", \"anchorLineId\": \"3b000000-0000-4000-8000-000000001111\"}, \"method\": \"getTextbookPurchaseDetail\", \"actorId\": \"3b000000-0000-4000-8000-000000000903\"}",
+  "{\"data\": {\"row\": null}, \"input\": {\"mode\": \"request\", \"anchorLineId\": \"3b000000-0000-4000-8000-000000999999\"}, \"method\": \"getTextbookPurchaseDetail\", \"actorId\": \"3b000000-0000-4000-8000-000000000903\"}",
+];
+test('final workflow SQL wire provenance binds immutable migration, pgTAP, actors and all nine methods', () => {
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  const migration = '20260831152429_textbook_workflow_numbered_reads.sql';
+  assert.equal(digest(readFileSync(new URL('../supabase/migrations/' + migration, import.meta.url))), '50106bd78e9ac61d1bc45b78f82309bf10abbd545187d47736823a707796e27e');
+  assert.equal(digest(readFileSync(new URL('../supabase/tests/textbook_workflow_numbered_reads_test.sql', import.meta.url))), '13412e12d3f382f81c74599e7bd35d8088d4fb88d531777de89ba77780cb3e4a');
+  const manifest = JSON.parse(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.orderedNewMigrations.find(entry => entry.fileName === migration), {
+    fileName: migration, status: 'final', sha256: '50106bd78e9ac61d1bc45b78f82309bf10abbd545187d47736823a707796e27e',
+  });
+  assert.equal(finalWorkflowSqlWirePayloads.length, 13);
+  assert.equal(digest(finalWorkflowSqlWirePayloads.join('\n')), '08036707db09c00d26440a3228b1506219a122cf4f893f0b388a5ddeaa2bfeaa');
+  const captures = finalWorkflowSqlWirePayloads.map(payload => {
+    assert.ok(payload.length + '# TASK3B_WIRE '.length <= 8000);
+    assert.doesNotMatch(payload, /\[REDACTED/);
+    const capture = JSON.parse(payload);
+    assert.deepEqual(Object.keys(capture).sort(), ['actorId', 'data', 'input', 'method']);
+    return capture;
+  });
+  assert.deepEqual([...new Set(captures.map(capture => capture.method))].sort(), [...workflowDomains, ...workflowContexts].map(entry => entry[0]).sort());
+  assert.deepEqual([...new Set(captures.map(capture => capture.actorId))].sort(), ['3b000000-0000-4000-8000-000000000901', '3b000000-0000-4000-8000-000000000903']);
+  assert.equal(captures.find(capture => capture.method === 'getTextbookOperationsSummary').input, null);
+});
+for (const [index, payload] of finalWorkflowSqlWirePayloads.entries()) {
+  const capture = JSON.parse(payload);
+  test('final authenticated workflow SQL DTO ' + (index + 1) + ' replays verbatim through ' + capture.method, async () => {
+    const api = await service(); const original = structuredClone(capture.data); const transport = wire(capture.data);
+    const result = await invokeWorkflow(api, capture.method, capture.input, { client: transport.client });
+    assert.deepEqual(capture.data, original, 'parser cannot repair/mutate original final SQL data');
+    assert.deepEqual(result, original);
+    assert.equal(transport.calls.length, 1);
+    const definition = [...workflowDomains, ...workflowContexts].find(entry => entry[0] === capture.method);
+    assert.equal(transport.calls[0].name, definition[1]);
+    const expectedArgs = capture.method.startsWith('list')
+      ? { p_filters: capture.input.filters, p_sort: capture.input.sort, p_page: capture.input.page, p_page_size: capture.input.pageSize }
+      : capture.method === 'getTextbookOperationsSummary' ? {}
+      : capture.method === 'getTextbookPurchaseDetail' ? { p_anchor_line_id: capture.input.anchorLineId, p_mode: capture.input.mode }
+      : capture.method === 'getTextbookSaleDetail' ? { p_id: capture.input }
+      : { p_filters: capture.input };
+    assert.deepEqual(transport.calls[0].args, expectedArgs);
+    assert.equal(transport.calls[0].retry, false);
+    assert.ok(transport.calls[0].signal instanceof AbortSignal);
+  });
+}
+
+// Untouched four new anchored JSON payloads from the root-owned R1 --require-final
+// combined original160+regression35 run. Earlier Task2/Task3b captures stay intact.
+// Final log SHA256: 5b3e079698473d0b33e018206dc741cd9cbe5fc5f7011ed2d5c3a48348330d93.
+const finalPurchaseCostSqlWirePayloads = [
+  "{\"data\": {\"page\": 1, \"rows\": [{\"id\": \"requested||3b000000-0000-4000-8000-000000000301||||||합성 교사||||2026-09-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000010301\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005301\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000301\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005301\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000010301\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005301\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000301\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005301\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"order\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000010301\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005301\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000301\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005301\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-09-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 0}, \"received\": 0, \"requested\": 2}, \"references\": {\"class\": null, \"location\": null, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000301\", \"name\": \"__t3b_cost__ 1\", \"price\": 10000, \"title\": \"__t3b_cost__ 1\", \"isbn13\": null, \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"팁스﻿서점\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"unitCost\": 0, \"publisher\": null, \"configuredSupplierId\": \"\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000010301\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000010301\"]}], \"pageSize\": 10, \"totalCount\": 1}, \"input\": {\"page\": 1, \"sort\": \"status-event\", \"filters\": {\"mode\": \"order\", \"search\": \"__t3b_cost__ 1\", \"boardScope\": \"all\", \"orderFilter\": \"all\", \"requestFilter\": \"all\"}, \"pageSize\": 10}, \"method\": \"listTextbookPurchasePage\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"row\": {\"id\": \"requested||3b000000-0000-4000-8000-000000000302||||||합성 교사||||2026-09-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000010302\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005302\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000302\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005302\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000010302\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005302\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000302\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005302\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"order\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000010302\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005302\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000302\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005302\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-09-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 0}, \"received\": 0, \"requested\": 2}, \"references\": {\"class\": null, \"location\": null, \"supplier\": {\"id\": \"3b000000-0000-4000-8000-000000000352\", \"name\": \"팁스﻿서점\"}, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000302\", \"name\": \"__t3b_cost__ 2\", \"price\": 10000, \"title\": \"__t3b_cost__ 2\", \"isbn13\": null, \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": \"3b000000-0000-4000-8000-000000000352\"}, \"unitCost\": 0, \"publisher\": null, \"configuredSupplierId\": \"3b000000-0000-4000-8000-000000000352\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000010302\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000010302\"]}}, \"input\": {\"mode\": \"order\", \"anchorLineId\": \"3b000000-0000-4000-8000-000000010302\"}, \"method\": \"getTextbookPurchaseDetail\", \"actorId\": \"3b000000-0000-4000-8000-000000000901\"}",
+  "{\"data\": {\"page\": 1, \"rows\": [{\"id\": \"requested||3b000000-0000-4000-8000-000000000301||||||합성 교사||||2026-09-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000010301\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005301\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000301\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005301\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000010301\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005301\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000301\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005301\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"request\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000010301\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005301\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000301\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005301\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-09-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 0}, \"received\": 0, \"requested\": 2}, \"references\": {\"class\": null, \"location\": null, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000301\", \"name\": \"__t3b_cost__ 1\", \"price\": 10000, \"title\": \"__t3b_cost__ 1\", \"isbn13\": null, \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"팁스﻿서점\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"unitCost\": 0, \"publisher\": null, \"configuredSupplierId\": \"\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000010301\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000010301\"]}], \"pageSize\": 10, \"totalCount\": 1}, \"input\": {\"page\": 1, \"sort\": \"status-event\", \"filters\": {\"mode\": \"request\", \"search\": \"__t3b_cost__ 1\", \"boardScope\": \"all\", \"orderFilter\": \"all\", \"requestFilter\": \"all\"}, \"pageSize\": 10}, \"method\": \"listTextbookPurchasePage\", \"actorId\": \"3b000000-0000-4000-8000-000000000903\"}",
+  "{\"data\": {\"row\": {\"id\": \"requested||3b000000-0000-4000-8000-000000000302||||||합성 교사||||2026-09-01||\", \"line\": {\"id\": \"3b000000-0000-4000-8000-000000010302\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005302\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000302\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005302\", \"received_quantity\": 0, \"purchaseScopeLines\": [{\"id\": \"3b000000-0000-4000-8000-000000010302\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005302\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000302\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005302\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}, \"mode\": \"request\", \"lines\": [{\"id\": \"3b000000-0000-4000-8000-000000010302\", \"memo\": \"\", \"order\": {\"id\": \"3b000000-0000-4000-8000-000000005302\", \"memo\": \"\", \"status\": \"requested\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"created_by\": \"3b000000-0000-4000-8000-000000000901\", \"order_date\": \"2026-09-01\", \"ordered_at\": null, \"updated_at\": null, \"received_at\": null, \"supplier_id\": null, \"requested_by\": \"합성 교사\", \"expected_date\": null, \"requested_date\": \"2026-08-31\", \"statement_number\": \"\"}, \"status\": \"requested\", \"class_id\": null, \"unit_cost\": 123, \"copy_scope\": \"student\", \"created_at\": \"2026-09-01T00:00:00+00:00\", \"updated_at\": null, \"location_id\": null, \"textbook_id\": \"3b000000-0000-4000-8000-000000000302\", \"ordered_quantity\": 0, \"purchase_order_id\": \"3b000000-0000-4000-8000-000000005302\", \"received_quantity\": 0, \"requested_quantity\": 2, \"requested_textbook_title\": \"\", \"teacher_ordered_quantity\": 0, \"teacher_received_quantity\": 0}], \"status\": \"requested\", \"eventAt\": \"2026-09-01T00:00:00+00:00\", \"quantities\": {\"ordered\": 0, \"student\": {\"ordered\": 0, \"received\": 0, \"requested\": 2}, \"teacher\": {\"ordered\": 0, \"received\": 0, \"requested\": 0}, \"received\": 0, \"requested\": 2}, \"references\": {\"class\": null, \"location\": null, \"supplier\": null, \"textbook\": {\"id\": \"3b000000-0000-4000-8000-000000000302\", \"name\": \"__t3b_cost__ 2\", \"price\": 10000, \"title\": \"__t3b_cost__ 2\", \"isbn13\": null, \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"출판사\", \"list_price\": 0, \"sale_price\": 10000, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": \"3b000000-0000-4000-8000-000000000352\"}, \"unitCost\": 9000, \"publisher\": null, \"configuredSupplierId\": \"3b000000-0000-4000-8000-000000000352\"}, \"anchorLineId\": \"3b000000-0000-4000-8000-000000010302\", \"memberLineIds\": [\"3b000000-0000-4000-8000-000000010302\"]}}, \"input\": {\"mode\": \"request\", \"anchorLineId\": \"3b000000-0000-4000-8000-000000010302\"}, \"method\": \"getTextbookPurchaseDetail\", \"actorId\": \"3b000000-0000-4000-8000-000000000903\"}",
+];
+test('final purchase-cost SQL wire provenance binds additive final migration and regression TAP', () => {
+  const digest = value => createHash('sha256').update(value).digest('hex');
+  const migration = '20260831164103_textbook_workflow_purchase_cost_whitespace.sql';
+  const sqlHash = 'a264ec78c4944fa8af5cfd42772ea2a40b64e1b473395421a61b91463489f947';
+  assert.equal(digest(readFileSync(new URL('../supabase/migrations/' + migration, import.meta.url))), sqlHash);
+  assert.equal(digest(readFileSync(new URL('../supabase/tests/textbook_workflow_purchase_cost_whitespace_test.sql', import.meta.url))), 'bae09376def7c5053b35ca1085432d9b81050eaa8eeb0b6f2681ae8c0e737b66');
+  const manifest = JSON.parse(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url), 'utf8'));
+  assert.deepEqual(manifest.orderedNewMigrations.find(entry => entry.fileName === migration), { fileName: migration, status: 'final', sha256: sqlHash });
+  assert.equal(finalPurchaseCostSqlWirePayloads.length, 4);
+  assert.equal(digest(finalPurchaseCostSqlWirePayloads.join('\n')), 'd9a028c1496ea8004dcbf6f16fedf3ec4f7cc644ce56bda28522e9ce5366b900');
+  for (const [index, payload] of finalPurchaseCostSqlWirePayloads.entries()) {
+    assert.ok(payload.length + '# TASK3B_WIRE '.length <= 8000);
+    assert.doesNotMatch(payload, /\[REDACTED/);
+    const capture = JSON.parse(payload);
+    assert.deepEqual(Object.keys(capture).sort(), ['actorId', 'data', 'input', 'method']);
+    assert.equal(capture.actorId, index < 2 ? '3b000000-0000-4000-8000-000000000901' : '3b000000-0000-4000-8000-000000000903');
+    assert.equal(capture.method, index % 2 === 0 ? 'listTextbookPurchasePage' : 'getTextbookPurchaseDetail');
+  }
+});
+for (const [index, payload] of finalPurchaseCostSqlWirePayloads.entries()) {
+  test('final purchase-cost SQL DTO ' + (index + 1) + ' preserves literal pricing and raw business label', async () => {
+    const capture = JSON.parse(payload);
+    const api = await service(); const original = structuredClone(capture.data); const transport = wire(capture.data);
+    const result = await api[capture.method](capture.input, { client: transport.client });
+    assert.deepEqual(capture.data, original, 'no repair or mutation before/inside the actual service parser');
+    assert.deepEqual(result, original);
+    const row = capture.method === 'listTextbookPurchasePage' ? result.rows[0] : result.row;
+    assert.equal(row.references.unitCost, [0, 0, 0, 9000][index]);
+    assert.equal(row.mode, index < 2 ? 'order' : 'request');
+    if (index % 2 === 0) {
+      assert.equal(result.totalCount, 1);
+      assert.equal(row.references.textbook.publisher, '팁스\ufeff서점');
+      assert.deepEqual(row.memberLineIds, ['3b000000-0000-4000-8000-000000010301']);
+    } else {
+      assert.equal(row.references.configuredSupplierId, '3b000000-0000-4000-8000-000000000352');
+      assert.deepEqual(row.references.supplier, index === 1 ? { id: '3b000000-0000-4000-8000-000000000352', name: '팁스\ufeff서점' } : null);
+      assert.deepEqual(row.memberLineIds, ['3b000000-0000-4000-8000-000000010302']);
+    }
+    assert.equal(transport.calls.length, 1);
+    assert.equal(transport.calls[0].name, index % 2 === 0 ? 'list_textbook_purchase_page_v1' : 'get_textbook_purchase_detail_v1');
+    assert.deepEqual(transport.calls[0].args, index % 2 === 0
+      ? { p_filters: capture.input.filters, p_sort: capture.input.sort, p_page: capture.input.page, p_page_size: capture.input.pageSize }
+      : { p_anchor_line_id: capture.input.anchorLineId, p_mode: capture.input.mode });
+    assert.equal(transport.calls[0].retry, false);
+    assert.ok(transport.calls[0].signal instanceof AbortSignal);
+  });
+}

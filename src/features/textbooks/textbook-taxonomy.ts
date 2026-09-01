@@ -1,5 +1,12 @@
 type Row = Record<string, unknown>;
 
+import type {
+  SubSubjectDraft,
+  SubSubjectDraftOperation,
+  TextbookSettingsSubject,
+  TextbookSubSubjectSettingRow,
+} from "./textbook-settings-types";
+
 function text(value: unknown) {
   return String(value || "").trim();
 }
@@ -427,6 +434,159 @@ export function createDefaultSubSubjectSettings() {
       isNew: true,
     })),
   );
+}
+
+const subSubjectUuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const subSubjectRevisionPattern = /^[0-9a-f]{64}$/;
+const subSubjectCollator = new Intl.Collator("ko", { numeric: true, sensitivity: "variant" });
+const subSubjectOwn = (value: object, key: string) => Object.prototype.hasOwnProperty.call(value, key);
+const subSubjectObject = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === "object" && !Array.isArray(value);
+const subSubjectExact = (value: unknown, keys: string[]) => subSubjectObject(value)
+  && Object.keys(value).length === keys.length
+  && keys.every((key) => subSubjectOwn(value, key));
+const failSubSubjectDraft = (): never => { throw new TypeError("textbook_settings_draft_invalid"); };
+const subSubjectKeys = TEXTBOOK_SUBJECT_OPTIONS.map((option) => option.value) as TextbookSettingsSubject[];
+const subSubjectIndex = (subject: string) => subSubjectKeys.indexOf(subject as TextbookSettingsSubject);
+const subSubjectRowCompare = (left: Pick<TextbookSubSubjectSettingRow, "subject" | "sortOrder" | "name" | "id">, right: Pick<TextbookSubSubjectSettingRow, "subject" | "sortOrder" | "name" | "id">) => {
+  const subjectDifference = subSubjectIndex(left.subject) - subSubjectIndex(right.subject);
+  if (subjectDifference !== 0) return subjectDifference;
+  if (left.sortOrder !== right.sortOrder) return left.sortOrder - right.sortOrder;
+  return subSubjectCollator.compare(left.name, right.name) || left.id.localeCompare(right.id);
+};
+const stableDefaultSubSubjectIds = new Set(createDefaultSubSubjectSettings().map((row) => row.id));
+
+export function isDefaultTextbookSubSubjectId(value: unknown): value is string {
+  return typeof value === "string" && stableDefaultSubSubjectIds.has(value);
+}
+
+function assertSubSubjectOperation(value: unknown): asserts value is SubSubjectDraftOperation {
+  if (!subSubjectObject(value) || typeof value.type !== "string" || typeof value.id !== "string" || !value.id) failSubSubjectDraft();
+  const row = value as Record<string, unknown>;
+  if (row.type === "add") {
+    if (!subSubjectExact(value, ["type", "id", "subject", "name", "isVisible"])
+      || !subSubjectUuidPattern.test(row.id as string)
+      || !subSubjectKeys.includes(row.subject as TextbookSettingsSubject)
+      || typeof row.name !== "string"
+      || typeof row.isVisible !== "boolean") failSubSubjectDraft();
+    return;
+  }
+  if (row.type === "patch") {
+    if (!subSubjectExact(value, ["type", "id", "patch"])) failSubSubjectDraft();
+    if (!subSubjectObject(row.patch)) failSubSubjectDraft();
+    const patch = row.patch as Record<string, unknown>;
+    if (Object.keys(patch).length === 0
+      || Object.keys(patch).some((key) => !["name", "isVisible"].includes(key))
+      || (subSubjectOwn(patch, "name") && typeof patch.name !== "string")
+      || (subSubjectOwn(patch, "isVisible") && typeof patch.isVisible !== "boolean")) failSubSubjectDraft();
+    return;
+  }
+  if (row.type === "delete") {
+    if (!subSubjectExact(value, ["type", "id"])) failSubSubjectDraft();
+    return;
+  }
+  if (row.type === "move") {
+    if (!subSubjectExact(value, ["type", "id", "direction"]) || !["up", "down"].includes(row.direction as string)) failSubSubjectDraft();
+    return;
+  }
+  failSubSubjectDraft();
+}
+
+export function assertSubSubjectDraft(value: unknown): asserts value is SubSubjectDraft {
+  if (!subSubjectExact(value, ["version", "baseRevision", "operations"]) || !subSubjectObject(value)) failSubSubjectDraft();
+  const draft = value as Record<string, unknown>;
+  const operations = draft.operations;
+  if (draft.version !== 1
+    || typeof draft.baseRevision !== "string"
+    || !subSubjectRevisionPattern.test(draft.baseRevision)
+    || !Array.isArray(operations)) failSubSubjectDraft();
+  (operations as unknown[]).forEach(assertSubSubjectOperation);
+}
+
+/** Pure mirror of the server's effective taxonomy and chronological draft journal. */
+export function projectTextbookSubSubjectDraft(rows: Row[] = [], draft: SubSubjectDraft | null): TextbookSubSubjectSettingRow[] {
+  const projected: TextbookSubSubjectSettingRow[] = rows
+    .map((row) => ({
+      id: text(row.id),
+      subject: normalizeTextbookSubject(row.subject) as TextbookSettingsSubject,
+      name: text(row.name),
+      sortOrder: Number(row.sort_order || row.sortOrder || 0),
+      isVisible: row.is_visible === false || row.isVisible === false ? false : true,
+      kind: "persisted" as const,
+      canMoveUp: false,
+      canMoveDown: false,
+    }))
+    .filter((row) => row.id && row.name);
+  const persistedKeys = new Set(projected.map((row) => `${row.subject}:${row.name}`));
+  for (const row of createDefaultSubSubjectSettings()) {
+    if (!persistedKeys.has(`${row.subject}:${row.name}`)) projected.push({
+      id: row.id,
+      subject: row.subject as TextbookSettingsSubject,
+      name: row.name,
+      sortOrder: row.sortOrder,
+      isVisible: true,
+      kind: "default",
+      canMoveUp: false,
+      canMoveDown: false,
+    });
+  }
+
+  const knownIds = new Set(projected.map((row) => row.id.toLowerCase()));
+  if (draft !== null) {
+    assertSubSubjectDraft(draft);
+    for (const operation of draft.operations) {
+      const identity = operation.id.toLowerCase();
+      const index = projected.findIndex((row) => row.id.toLowerCase() === identity);
+      if (operation.type === "add") {
+        if (knownIds.has(identity)) failSubSubjectDraft();
+        knownIds.add(identity);
+        const maximum = projected
+          .filter((row) => row.subject === operation.subject)
+          .reduce((value, row) => Math.max(value, row.sortOrder), 0);
+        projected.push({
+          id: operation.id,
+          subject: operation.subject,
+          name: text(operation.name),
+          sortOrder: maximum + 10,
+          isVisible: operation.isVisible,
+          kind: "added",
+          canMoveUp: false,
+          canMoveDown: false,
+        });
+      } else if (index < 0) {
+        failSubSubjectDraft();
+      } else if (operation.type === "patch") {
+        if (subSubjectOwn(operation.patch, "name")) projected[index].name = text(operation.patch.name);
+        if (subSubjectOwn(operation.patch, "isVisible")) projected[index].isVisible = operation.patch.isVisible!;
+      } else if (operation.type === "delete") {
+        projected.splice(index, 1);
+      } else {
+        const subjectRows = projected.filter((row) => row.subject === projected[index].subject).sort(subSubjectRowCompare);
+        const sourceIndex = subjectRows.findIndex((row) => row.id.toLowerCase() === identity);
+        const targetIndex = operation.direction === "up" ? sourceIndex - 1 : sourceIndex + 1;
+        if (targetIndex >= 0 && targetIndex < subjectRows.length) {
+          const target = subjectRows[targetIndex];
+          const sourceRank = projected[index].sortOrder;
+          if (sourceRank === target.sortOrder) {
+            [subjectRows[sourceIndex], subjectRows[targetIndex]] = [subjectRows[targetIndex], subjectRows[sourceIndex]];
+            subjectRows.forEach((row, subjectIndex) => { row.sortOrder = (subjectIndex + 1) * 10; });
+          } else {
+            projected[index].sortOrder = target.sortOrder;
+            target.sortOrder = sourceRank;
+          }
+        }
+      }
+    }
+  }
+
+  projected.sort(subSubjectRowCompare);
+  for (const subject of subSubjectKeys) {
+    const subjectRows = projected.filter((row) => row.subject === subject);
+    subjectRows.forEach((row, index) => {
+      row.canMoveUp = index > 0;
+      row.canMoveDown = index < subjectRows.length - 1;
+    });
+  }
+  return projected;
 }
 
 export function toTextbookSubSubjectSettingRecord(row: Row): TextbookSubSubjectSettingRecord {

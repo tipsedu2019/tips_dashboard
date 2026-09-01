@@ -145,28 +145,9 @@ test("approval trigger functions pin search_path for Supabase advisors", async (
   assert.match(migrationSource, /create or replace function public\.write_approval_status_event\(\)[\s\S]*set search_path = ''/)
 })
 
-test("approval views separate authored documents from documents waiting for my approval", () => {
-  assert.match(workspaceSource, /type ApprovalView = "mine" \| "review" \| "open" \| "done" \| "returned"/)
-  assert.match(workspaceSource, /{ key: "review", label: "결재함" }/)
-  assert.match(workspaceSource, /{ key: "open", label: "진행" }/)
-  assert.match(workspaceSource, /mine: requests\.filter\(\(request\) => request\.requesterId === userId\)\.length/)
-  assert.match(workspaceSource, /review: requests\.filter\(\(request\) => request\.approverId === userId && !isClosedApproval\(request\.status\)\)\.length/)
-  assert.match(workspaceSource, /view === "review"[\s\S]*requests\.filter\(\(request\) => request\.approverId === userId && !isClosedApproval\(request\.status\)\)/)
-})
-
-test("approval notification deep link selects, reveals, and scrolls to the requested document", () => {
-  assert.match(workspaceSource, /import \{ useSearchParams \} from "next\/navigation"/)
-  assert.match(workspaceSource, /const approvalId = searchParams\.get\("approvalId"\) \|\| ""/)
-  assert.match(workspaceSource, /const request = data\.requests\.find\(\(item\) => item\.id === approvalId\)/)
-  assert.match(workspaceSource, /setDeepLinkedApprovalId\(approvalId\)/)
-  assert.match(workspaceSource, /nextSearchParams\.delete\("approvalId"\)/)
-  assert.match(workspaceSource, /document\.getElementById\(`approval-\$\{deepLinkedApprovalId\}`\)\?\.scrollIntoView/)
-  assert.match(workspaceSource, /const deepLinkedRequest = requests\.find\(\(request\) => request\.id === deepLinkedApprovalId\)/)
-  assert.match(workspaceSource, /return \[deepLinkedRequest, \.\.\.filtered\]/)
-  assert.match(workspaceSource, /id=\{`approval-\$\{request\.id\}`\}/)
-  assert.match(workspaceSource, /highlighted=\{request\.id === deepLinkedApprovalId\}/)
-  assert.match(workspaceSource, /open=\{highlighted \|\| undefined\}/)
-})
+// Tab predicates and off-page deep links are exercised against the real
+// adapter/controller/workspace in approval-numbered-pagination.test.mjs and
+// final authorized SQL in approval_numbered_pages_test.sql.
 
 test("approval workspace loads independent datasets in parallel", () => {
   assert.match(serviceSource, /const \[profilesResult, templatesResult, requestResult\] = await Promise\.all\(\[/)

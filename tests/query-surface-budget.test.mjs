@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { execFileSync, spawnSync } from "node:child_process"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
@@ -1026,6 +1026,27 @@ test("list contracts accept caller cancellation only when every path retains the
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+test("list contracts fail closed for opaque abort helper calls without crashing", async () => {
+  const result = await verifyFixture({
+    source: `async function load(client, callerSignal) {
+  return client.from("ops_tasks")
+    .select("id")
+    .limit(30)
+    .order("id")
+    .abortSignal(managementRequestSignal(callerSignal))
+    .retry(false)
+}
+`,
+  })
+
+  assert.deepEqual(result.violations, [{
+    file: "src/features/tasks/list-tasks.ts",
+    symbol: "load",
+    surface: "tasks",
+    reason: "list_abort_signal_missing",
+  }])
+})
+
 test("list contracts reject combined cancellation when the exact timeout bound is not provable", async () => {
   const result = await verifyFixture({
     source: `async function load(client, callerSignal, signals) {
@@ -1053,6 +1074,412 @@ test("list contracts reject combined cancellation when the exact timeout bound i
     surface: "tasks",
     reason: "list_abort_signal_missing",
   })))
+})
+
+function inspectManagementFixture(source) {
+  return inspectQuerySurfaceSource({ surface: "management", file: "src/features/management/numbered-fixture.ts", source })
+    .map((violation) => violation.reason)
+}
+
+test("immutable abort aliases retain bounded deadlines through lexical chains and every conditional branch", () => {
+  const cases = [
+    `const deadline = AbortSignal.timeout(8000); const signal = deadline;`,
+    `const deadline = AbortSignal.timeout(8000); const next = deadline; const signal = request.signal ? AbortSignal.any([request.signal, next]) : deadline;`,
+    `const deadline = AbortSignal.timeout(8000); const signal = request.signal ? deadline : (request.other ? deadline : deadline);`,
+    `const deadline = AbortSignal.timeout(8000); const signal = AbortSignal.any([deadline, request.signal]);`,
+    `const deadline = AbortSignal.timeout(8000); const signal = deadline; { let deadline = request.signal; deadline = request.other; }`,
+    `const deadline = AbortSignal.timeout(8000); const signal = deadline; function unrelated(deadline) { deadline = request.signal; }`,
+  ]
+  for (const declarations of cases) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      ${declarations}
+      return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false)
+    }`), [], declarations)
+  }
+})
+
+test("immutable abort aliases resolve outer numeric timeout constants by declaration identity", () => {
+  assert.deepEqual(inspectManagementFixture(`const timeout = 8000;
+    function create(client) {
+      const duration = timeout;
+      return { async load(request) {
+        const deadline = AbortSignal.timeout(duration);
+        const signal = AbortSignal.any([request.signal, deadline]);
+        return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false)
+      } }
+    }`), [])
+})
+
+test("immutable abort numeric aliases cannot borrow outer constants or evaluate unsupported expressions", () => {
+  const cases = [
+    `const duration = 12000; QUERY`,
+    `let duration = 8000; QUERY`,
+    `const { duration } = request; QUERY`,
+    `QUERY const duration = 8000;`,
+    `const duration = next; const next = duration; QUERY`,
+    `const duration = 4000 + 4000; QUERY`,
+    `const box = { duration: 8000 }; const duration = box.duration; QUERY`,
+    `const duration = 8000; QUERY duration = 12000;`,
+    `const duration = 8000; function mutate() { duration += 4000; } QUERY`,
+    `return ((duration) => { QUERY })(request.duration);`,
+    `try { throw request; } catch ({ duration }) { QUERY }`,
+  ]
+  for (const body of cases) {
+    assert.deepEqual(inspectManagementFixture(`const duration = 8000;
+      async function load(client, request) {
+        ${body.replace("QUERY", 'const signal = AbortSignal.timeout(duration); client.rpc("get_management_stats_v1").abortSignal(signal).retry(false);')}
+      }`), ["list_abort_signal_missing"], body)
+  }
+})
+
+test("immutable abort alias dependency-only edits still recheck the unchanged query function", async () => {
+  const baselineSource = `const duration = 8000;
+async function load(client, request) {
+  const signal = AbortSignal.any([request.signal, AbortSignal.timeout(duration)]);
+  return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false);
+}
+`
+  for (const declaration of ["const duration = 12000;", "let duration = 8000;", "const duration = callerDuration;", ""]) {
+    const result = await verifyFixture({
+      surface: "management",
+      file: "src/features/management/numbered-fixture.ts",
+      baselineSource,
+      source: baselineSource.replace("const duration = 8000;", declaration),
+    })
+    assert.deepEqual(result.violations.map((violation) => violation.reason), ["list_abort_signal_missing"], declaration)
+  }
+  const safe = await verifyFixture({
+    surface: "management",
+    file: "src/features/management/numbered-fixture.ts",
+    baselineSource,
+    source: baselineSource.replace("const duration = 8000;", "const deadlineMs = 8000; const duration = deadlineMs;"),
+  })
+  assert.deepEqual(safe, { ok: true, violations: [] })
+})
+
+test("immutable abort dependency checks preserve unchanged raw legacy debt on unrelated module edits", async () => {
+  const file = "src/features/management/numbered-fixture.ts"
+  const baselineSource = `const unrelated = 1;
+async function load(client, signal) {
+  return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false);
+}
+`
+  const debt = inspectQuerySurfaceSource({ surface: "management", file, source: baselineSource })[0]
+  for (const manifest of [false, true]) {
+    const result = await verifyFixture({
+      surface: "management", file, baselineSource,
+      source: baselineSource.replace("unrelated = 1", "unrelated = 2"),
+      ...(manifest ? { debtManifest: (baselineSha) => [{
+        surface: "management", file, symbol: "load", violation: debt.reason,
+        baselineSha, fingerprint: debt.fingerprint, occurrenceFingerprint: debt.occurrenceFingerprint,
+      }] } : {}),
+    })
+    assert.deepEqual(result, { ok: true, violations: [] })
+  }
+})
+
+test("immutable abort aliases fail closed for unsafe bindings, writes, cycles and partial timeout paths", () => {
+  const cases = [
+    `const signal = request.signal;`,
+    `let signal = AbortSignal.timeout(8000);`,
+    `const signal = AbortSignal.timeout(8000); signal = request.signal;`,
+    `const signal = AbortSignal.timeout(8000); signal ||= request.signal;`,
+    `const signal = AbortSignal.timeout(8000); [signal] = [request.signal];`,
+    `const signal = AbortSignal.timeout(8000); ({ signal } = request);`,
+    `const signal = AbortSignal.timeout(8000); function mutate() { signal = request.signal; }`,
+    `const { signal } = { signal: AbortSignal.timeout(8000) };`,
+    `const box = { signal: AbortSignal.timeout(8000) }; const signal = box.signal;`,
+    `const signal = next; const next = signal;`,
+    `const signal = signal;`,
+    `const signal = deadline; const deadline = AbortSignal.timeout(8000);`,
+    `const signal = request.signal ? AbortSignal.timeout(8000) : request.signal;`,
+    `const signal = AbortSignal.any([request.signal]);`,
+    `const deadline = AbortSignal.timeout(8000); const signal = AbortSignal.any([request.signal, deadline, deadline]);`,
+    `const deadline = AbortSignal.timeout(8000); const signal = AbortSignal.any([...request.signals, deadline]);`,
+    `const deadline = AbortSignal.timeout(8000); const signal = AbortSignal.any([request.signal, request.other ? deadline : request.signal]);`,
+    `const deadline = AbortSignal.timeout(12000); const signal = deadline;`,
+    `let duration = 8000; const signal = AbortSignal.timeout(duration);`,
+    `const duration = 8000; duration = 12000; const signal = AbortSignal.timeout(duration);`,
+    `const AbortSignal = request.AbortSignal; const signal = AbortSignal.timeout(8000);`,
+  ]
+  for (const declarations of cases) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      ${declarations}
+      return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false)
+    }`), ["list_abort_signal_missing"], declarations)
+  }
+})
+
+test("immutable abort aliases never borrow a timeout from a shadowed or out-of-scope binding", () => {
+  const cases = [
+    `const signal = AbortSignal.timeout(8000); { const signal = request.signal; QUERY }`,
+    `const signal = AbortSignal.timeout(8000); { let signal = request.signal; QUERY }`,
+    `const signal = AbortSignal.timeout(8000); { const { signal } = request; QUERY }`,
+    `const signal = AbortSignal.timeout(8000); { QUERY const signal = request.signal; }`,
+    `{ const signal = AbortSignal.timeout(8000); } QUERY`,
+    `const signal = AbortSignal.timeout(8000); return ((signal) => { QUERY })(request.signal);`,
+    `const signal = AbortSignal.timeout(8000); try { throw request.signal; } catch (signal) { QUERY }`,
+    `const duration = 8000; { const duration = 12000; const signal = AbortSignal.timeout(duration); QUERY }`,
+    `const signal = AbortSignal.timeout(8000); for (const signal of request.signals) { QUERY }`,
+  ]
+  for (const body of cases) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      ${body.replace("QUERY", 'return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false);')}
+    }`), ["list_abort_signal_missing"], body)
+  }
+})
+
+test("immutable abort aliases reject unsupported bindings that shadow the native AbortSignal", () => {
+  const declarations = [
+    `namespace AbortSignal { export function timeout(ms) { return callerSignal; } }`,
+    `function AbortSignal() {}`,
+    `class AbortSignal {}`,
+    `import AbortSignal from "./untrusted";`,
+  ]
+  for (const declaration of declarations) {
+    assert.deepEqual(inspectManagementFixture(`${declaration}
+      async function load(client) {
+        const signal = AbortSignal.timeout(8000);
+        return client.rpc("get_management_stats_v1").abortSignal(signal).retry(false);
+      }`), ["list_abort_signal_missing"], declaration)
+  }
+})
+
+test("immutable abort aliases treat class static blocks as independent var scopes", () => {
+  const query = 'client.rpc("get_management_stats_v1").abortSignal(AbortSignal.timeout(duration)).retry(false);'
+  for (const body of [
+    `var duration = 12000; ${query}`,
+    `var duration = 8000; ${query}`,
+    `var duration; duration = 12000; ${query}`,
+    `var { duration } = request; ${query}`,
+    `{ var duration = 12000; } ${query}`,
+    `${query} var duration = 12000;`,
+    `var duration = 12000; const run = () => { ${query} }; run();`,
+  ]) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      const duration = 8000;
+      class DeadlineOwner { static { ${body} } }
+    }`), ["list_abort_signal_missing"], body)
+  }
+  assert.deepEqual(inspectManagementFixture(`async function load(client) {
+    const duration = 8000;
+    class DeadlineOwner {
+      static { var duration = 12000; }
+      static { ${query} }
+    }
+    ${query}
+  }`), [])
+})
+
+test("numbered RPC contract accepts only its strict server-validated page-size envelope", () => {
+  for (const size of ["10", "15", "20", "request.pageSize"]) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      return client.rpc("list_management_numbered_page_v1", { p_page: request.page, p_page_size: ${size} })
+        .abortSignal(AbortSignal.timeout(8000)).retry(false)
+    }`), [], size)
+  }
+})
+
+test("numbered RPC contract rejects known invalid sizes and unsafe parameter envelopes", () => {
+  const cases = [
+    ...["9", "11", "31", "0", "-1", "10.5", '"10"', "null", "undefined", "true"].map((size) => [`{ p_page_size: ${size} }`, "rpc_page_limit_invalid"]),
+    ["{}", "rpc_page_limit_missing"],
+    ["{ p_limit: 10 }", "rpc_page_limit_missing"],
+    ["{ p_page_size: 10, p_page_size: 20 }", "rpc_page_limit_unresolved"],
+    ['{ p_page_size: 10, "p_page_size": request.pageSize }', "rpc_page_limit_unresolved"],
+    ["{ ...request, p_page_size: 10 }", "rpc_page_limit_unresolved"],
+    ["{ p_page_size: 10, ...request }", "rpc_page_limit_unresolved"],
+    ['{ p_page_size: 10, [request.key]: 31 }', "rpc_page_limit_unresolved"],
+    ["{ p_page_size }", "rpc_page_limit_unresolved"],
+    ["request", "rpc_page_limit_unresolved"],
+  ]
+  for (const [parameters, reason] of cases) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request, p_page_size) {
+      return client.rpc("list_management_numbered_page_v1", ${parameters})
+        .abortSignal(AbortSignal.timeout(8000)).retry(false)
+    }`), [reason], parameters)
+  }
+  assert.deepEqual(inspectManagementFixture(`async function load(client) {
+    const pageSize = 11;
+    return client.rpc("list_management_numbered_page_v1", { p_page_size: pageSize })
+      .abortSignal(AbortSignal.timeout(8000)).retry(false)
+  }`), ["rpc_page_limit_invalid"])
+})
+
+test("numbered RPC contract is separate from scalar RPCs and cannot relax unrelated list RPCs", () => {
+  const cases = [
+    ['"list_management_numbered_page_v2", { p_page_size: request.pageSize }', "rpc_page_limit_missing"],
+    ['"list_ops_task_page_v1", { p_page_size: 10 }', "rpc_page_limit_missing"],
+    ['"list_ops_task_page_v1", { p_limit: request.pageSize }', "rpc_page_limit_unresolved"],
+    ['"list_management_numbered_page_v1"', "rpc_page_limit_missing"],
+  ]
+  for (const [argumentsText, reason] of cases) {
+    assert.deepEqual(inspectManagementFixture(`async function load(client, request) {
+      return client.rpc(${argumentsText}).abortSignal(AbortSignal.timeout(8000)).retry(false)
+    }`), [reason], argumentsText)
+  }
+  assert.deepEqual(inspectManagementFixture(`async function load(client) {
+    return client.rpc("get_management_stats_v1").abortSignal(AbortSignal.timeout(8000)).retry(false)
+  }`), [])
+})
+
+test("actual management services and hook retain verified timeout and pagination contracts", async () => {
+  for (const file of ["management-service.js", "management-numbered-service.ts", "use-management-records.ts"]) {
+    const source = await readFile(new URL(`../src/features/management/${file}`, import.meta.url), "utf8")
+    const violations = inspectQuerySurfaceSource({ surface: "management", file: `src/features/management/${file}`, source })
+    // The hook also owns unchanged legacy detail helpers. Inspect the actual
+    // numbered consumer; their separate debt remains the diff verifier's job.
+    const symbols = file === "management-service.js"
+      ? new Set(["createManagementReadService", "loadMetadata", "readListPage"])
+      : new Set([file === "use-management-records.ts" ? "useManagementRecords" : "createManagementNumberedReadService"])
+    assert.deepEqual(violations.filter((violation) => symbols.has(violation.symbol)), [], file)
+  }
+})
+
+test("task numbered RPC allows only its proven strict 10/15/20 contract", () => {
+  const inspect = (name, args, suffix = '.abortSignal(AbortSignal.timeout(8000)).retry(false)') => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/numbered-fixture.ts",
+    source: `async function load(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map((violation) => violation.reason)
+  for (const size of ["10", "15", "20", "request.pageSize"]) {
+    assert.deepEqual(inspect("list_ops_task_numbered_page_v1", `{ p_page: request.page, p_page_size: ${size} }`), [], size)
+  }
+  for (const size of ["5", "30", "11", "null", '"10"']) {
+    assert.deepEqual(inspect("list_ops_task_numbered_page_v1", `{ p_page_size: ${size} }`), ["rpc_page_limit_invalid"], size)
+  }
+  assert.deepEqual(inspect("list_ops_task_numbered_page_v1", "{}"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("list_ops_task_numbered_page_v1", "{ ...request, p_page_size: 10 }"), ["rpc_page_limit_unresolved"])
+  assert.deepEqual(inspect("list_ops_task_numbered_page_v2", "{ p_page_size: 10 }"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("list_ops_task_page_v2", "{ p_page_size: 10 }"), ["rpc_page_limit_missing"])
+  assert.ok(inspect("list_ops_task_numbered_page_v1", "{ p_page_size: 10 }", ".retry(false)").includes("list_abort_signal_missing"))
+  assert.ok(inspect("list_ops_task_numbered_page_v1", "{ p_page_size: 10 }", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+})
+
+test("actual task numbered service retains timeout, retry and bounded RPC contracts", async () => {
+  const file = "src/features/tasks/ops-task-numbered-service.ts"
+  const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8")
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source }), [])
+})
+
+test("secondary numbered RPCs allow only the two final-SQL-proven 10/15/20 contracts", () => {
+  for (const [surface, name] of [["academic", "get_academic_curriculum_numbered_page_v1"], ["operations", "get_operations_class_schedule_numbered_page_v1"]]) {
+    const inspect = (rpc, args, suffix = '.abortSignal(AbortSignal.timeout(8000)).retry(false)') => inspectQuerySurfaceSource({
+      surface, file: `src/features/${surface}/numbered-fixture.ts`,
+      source: `async function load(client, request) { return client.rpc(${JSON.stringify(rpc)}, ${args})${suffix} }`,
+    }).map((violation) => violation.reason)
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_page:request.page,p_page_size:${size}}`), [])
+    for (const size of ["5", "30", "11", "null", '"10"']) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+    assert.deepEqual(inspect(name.replace("v1", "v2"), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name.replace("_numbered", ""), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(9000)).retry(false)").includes("list_abort_signal_missing"))
+  }
+})
+
+test("secondary numbered production adapters retain bounded parameters and union cancellation", async () => {
+  for (const surface of ["academic", "operations"]) {
+    const file = `src/features/${surface}/${surface}-read-service.js`
+    const source = await readFile(new URL(`../${file}`, import.meta.url), "utf8")
+    assert.deepEqual(inspectQuerySurfaceSource({ surface, file, source }), [])
+  }
+})
+
+test("approval numbered RPC permits only its proven 10/15/20 contract and exact single-ID detail", () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/approvals/numbered-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map((item) => item.reason)
+  for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect("list_approval_numbered_page_v1", `{p_page:11,p_page_size:${size}}`), [])
+  for (const size of ["5", "30", "null"]) assert.deepEqual(inspect("list_approval_numbered_page_v1", `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+  assert.deepEqual(inspect("list_approval_numbered_page_v1", "{}"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("list_approval_numbered_page_v2", "{p_page_size:10}"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("get_approval_detail_v1", "{p_id:request.id}"), [])
+  assert.deepEqual(inspect("get_approval_detail_v2", "{p_id:request.id}"), ["rpc_page_limit_missing"])
+  assert.ok(inspect("list_approval_numbered_page_v1", "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+  assert.ok(inspect("list_approval_numbered_page_v1", "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+})
+
+test("actual approval numbered adapter keeps literal bounded RPCs and eight-second cancellation", async () => {
+  const file = "src/features/approvals/approval-numbered-service.ts"
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
+})
+
+test("makeup numbered RPC permits only final-proven sizes and exact detail/reservation contexts", () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/makeup-requests/numbered-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map((item) => item.reason)
+  for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect("list_makeup_numbered_page_v1", `{p_page:11,p_page_size:${size}}`), [])
+  for (const size of ["5", "30", "null"]) assert.deepEqual(inspect("list_makeup_numbered_page_v1", `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+  assert.deepEqual(inspect("list_makeup_numbered_page_v1", "{}"), ["rpc_page_limit_missing"])
+  assert.deepEqual(inspect("list_makeup_numbered_page_v1", "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+  assert.deepEqual(inspect("list_makeup_numbered_page_v2", "{p_page_size:10}"), ["rpc_page_limit_missing"])
+  for (const name of ["get_makeup_detail_v1", "get_makeup_reservation_context_v1"]) {
+    assert.deepEqual(inspect(name, "{p_id:request.id}"), [])
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_id:request.id}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{}", ".retry(false)").includes("list_abort_signal_missing"))
+  }
+  assert.ok(inspect("list_makeup_numbered_page_v1", "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+  assert.ok(inspect("list_makeup_numbered_page_v1", "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+})
+
+test("actual makeup numbered adapter keeps bounded literal RPCs and cancellation", async () => {
+  const file = "src/features/makeup-requests/makeup-numbered-service.ts"
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
+})
+
+test("textbook numbered RPCs permit only final-proven sizes and exact purpose-specific contexts", () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "management", file: "src/features/textbooks/numbered-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map((item) => item.reason)
+  for (const name of ["list_textbook_master_page_v1", "list_textbook_inventory_page_v1", "list_textbook_inventory_history_page_v1", "list_textbook_purchase_page_v1", "list_textbook_sale_page_v1", "list_textbook_sale_history_page_v1"]) {
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_page:11,p_page_size:${size}}`), [])
+    for (const size of ["5", "25", "null"]) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+  for (const name of ["get_textbook_master_summary_v1", "get_textbook_inventory_summary_v1", "get_textbook_master_detail_v1", "get_textbook_inventory_balance_v1", "check_textbook_master_duplicate_v1", "get_textbook_purchase_summary_v1", "get_textbook_sale_summary_v1", "get_textbook_sale_history_summary_v1", "get_textbook_operations_summary_v1", "get_textbook_purchase_detail_v1", "get_textbook_sale_detail_v1"]) {
+    assert.deepEqual(inspect(name, "{p_input:request.input}"), [])
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_input:request.input}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+})
+
+test("actual textbook numbered adapter keeps all seventeen literal contracts and cancellation", async () => {
+  const file = "src/features/textbooks/textbook-read-service.ts"
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "management", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
+})
+
+test("closing work reads have exactly two numbered and seven purpose-complete contracts", async () => {
+  const inspect = (name, args, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "management", file: "src/features/textbooks/closing-work-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${args})${suffix} }`,
+  }).map(item => item.reason)
+  const pages = ["list_textbook_closing_page_v1", "list_textbook_closing_movement_page_v1"]
+  const purposes = ["get_textbook_closing_detail_v1", "get_textbook_closing_preview_v1", "get_class_textbook_sale_context_v1", "get_textbook_purchase_handoff_context_v1", "get_textbook_billing_handoff_context_v1", "get_textbook_closing_save_context_v1", "get_textbook_closing_movement_export_v1"]
+  for (const name of pages) {
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_page:11,p_page_size:${size}}`), [])
+    for (const size of ["5", "25", "null"]) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+  }
+  for (const name of purposes) assert.deepEqual(inspect(name, "{p_input:request.input}"), [])
+  for (const name of [...pages, ...purposes]) {
+    assert.deepEqual(inspect(name.replace("_v1", "_v2"), "{p_input:request.input}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+  for (const file of ["src/features/textbooks/textbook-read-service.ts", "src/features/textbooks/textbook-work-context-service.ts"]) {
+    assert.deepEqual(inspectQuerySurfaceSource({ surface: "management", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])
+  }
 })
 
 test("ordered exact-key details and nested projections without wildcards remain allowed", async () => {

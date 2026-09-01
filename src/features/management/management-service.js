@@ -19,7 +19,10 @@ const CONTINUOUS_CLASS_SCHEDULE_RPC = {
 };
 const CLASS_CREATE_WITH_GROUPS_RPC = "create_class_with_group_memberships_v1";
 const CLASS_REPLACE_GROUPS_RPC = "replace_class_group_memberships_v1";
-const MANAGEMENT_PAGE_SIZE = 30;
+const MANAGEMENT_LIST_PAGE_SIZES = new Set([10, 15, 20]);
+const MANAGEMENT_LIST_DEFAULT_PAGE_SIZE = 20;
+const MANAGEMENT_RELATION_PAGE_SIZE = 30;
+const MANAGEMENT_READ_TIMEOUT_MS = 8_000;
 const MANAGEMENT_KINDS = new Set(["students", "classes", "textbooks"]);
 const MANAGEMENT_FILTER_KEYS = Object.freeze({
   students: ["kind", "search", "status", "schoolCategory", "school", "grade"],
@@ -59,6 +62,12 @@ function managementReadError(code) {
 
 function assertManagementKind(kind) {
   if (!MANAGEMENT_KINDS.has(kind)) throw managementReadError("management_kind_invalid");
+}
+
+function assertManagementListLimit(limit) {
+  if (!MANAGEMENT_LIST_PAGE_SIZES.has(limit)) {
+    throw managementReadError("management_page_limit_invalid");
+  }
 }
 
 function assertManagementFilters(kind, filters) {
@@ -220,12 +229,15 @@ export function createManagementReadService(options = {}) {
    *   kind: "students" | "classes" | "textbooks",
    *   filters: Record<string, unknown>,
    *   cursor?: null | { sortKey: string, id: string, scopeHash: string },
-   *   limit?: number
+   *   limit?: number,
+   *   signal?: AbortSignal
    * }} request
    */
-  const readListPage = async ({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) => {
+  const readListPage = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {
     assertManagementFilters(kind, filters);
-    if (limit !== MANAGEMENT_PAGE_SIZE) throw managementReadError("management_page_limit_invalid");
+    assertManagementListLimit(limit);
+    const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const scopeHash = await managementScopeHash(kind, filters);
     if (cursor !== null && (!cursor || typeof cursor !== "object" || cursor.scopeHash !== scopeHash
       || typeof cursor.sortKey !== "string" || typeof cursor.id !== "string")) {
@@ -236,9 +248,11 @@ export function createManagementReadService(options = {}) {
         p_filters: filters,
         p_cursor_sort_key: cursor?.sortKey || null,
         p_cursor_id: cursor?.id || null,
+        // This legacy cursor transport stays at its server-proven upper bound.
+        // Numbered 10/15/20-row UI reads use management-numbered-service.ts.
         p_limit: 30,
       })
-      .abortSignal(AbortSignal.timeout(8_000))
+      .abortSignal(requestSignal)
       .retry(false);
     if (error) throw error;
     const received = Array.isArray(data) ? data : [];
@@ -251,21 +265,35 @@ export function createManagementReadService(options = {}) {
     };
   };
 
-  const loadPageBundle = async ({ kind, filters, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) => {
-    assertManagementFilters(kind, filters);
-    const [page, statsResult, filterOptionsResult] = await Promise.all([
-      readListPage({ kind, filters, cursor, limit }),
+  const loadMetadata = ({ kind, filters, signal }) => {
+    const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    return Promise.all([
       client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
-        .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+        .abortSignal(requestSignal).retry(false),
       client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
-        .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-    ]);
-    if (statsResult.error) throw statsResult.error;
-    if (filterOptionsResult.error) throw filterOptionsResult.error;
+        .abortSignal(requestSignal).retry(false),
+    ])
+      .then(([statsResult, filterOptionsResult]) => {
+        if (statsResult.error) throw statsResult.error;
+        if (filterOptionsResult.error) throw filterOptionsResult.error;
+        return {
+          ok: true,
+          stats: unwrapRpcObject(statsResult.data) || {},
+          filterOptions: unwrapRpcObject(filterOptionsResult.data) || {},
+        };
+      })
+      .catch((error) => ({ ok: false, error }));
+  };
+
+  const loadPageBundle = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {
+    assertManagementFilters(kind, filters);
+    assertManagementListLimit(limit);
+    const metadata = loadMetadata({ kind, filters, signal });
+    const page = await readListPage({ kind, filters, cursor, limit, signal });
     return {
       page,
-      stats: unwrapRpcObject(statsResult.data) || {},
-      filterOptions: unwrapRpcObject(filterOptionsResult.data) || {},
+      metadata,
       effectiveFilters: filters,
     };
   };
@@ -280,11 +308,13 @@ export function createManagementReadService(options = {}) {
       kind,
       filters,
       cursor = null,
-      limit = MANAGEMENT_PAGE_SIZE,
+      limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE,
       canonicalReplayToken = "",
       coalesceInitialRequest = true,
+      signal,
     }) {
       assertManagementFilters(kind, filters);
+      assertManagementListLimit(limit);
       const requestedFingerprint = filterFingerprint(filters);
       const safeReplayToken = trimText(canonicalReplayToken);
       if (safeReplayToken && coalesceInitialRequest) {
@@ -293,9 +323,15 @@ export function createManagementReadService(options = {}) {
         if (replay
           && kind === "classes"
           && cursor === null
-          && limit === MANAGEMENT_PAGE_SIZE
+          && replay.limit === limit
           && replay.effectiveFingerprint === requestedFingerprint) {
-          return replay.result;
+          if (replay.signal === signal) return replay.result;
+          return {
+            page: replay.result.page,
+            effectiveFilters: replay.result.effectiveFilters,
+            metadata: loadMetadata({ kind, filters: replay.result.effectiveFilters, signal }),
+            canonicalReplayToken: null,
+          };
         }
       } else if (safeReplayToken) {
         canonicalReplayBundles.delete(safeReplayToken);
@@ -312,38 +348,49 @@ export function createManagementReadService(options = {}) {
             if (replay.initialFingerprint === initialFingerprint) canonicalReplayBundles.delete(token);
           }
         } else {
-          const inFlight = inFlightInitialClassBundles.get(initialFingerprint);
+          const inFlightBySignal = inFlightInitialClassBundles.get(initialFingerprint);
+          const inFlight = inFlightBySignal?.get(signal);
           if (inFlight) return inFlight;
         }
         const initialPromise = (async () => {
+          const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+          const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
           const { data, error } = await client.rpc("get_management_default_class_period_v1")
-            .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+            .abortSignal(requestSignal).retry(false);
           if (error) throw error;
           const periodId = trimText(unwrapRpcObject(data)?.periodId);
           if (!periodId) throw managementReadError("management_default_period_unavailable");
           const effectiveFilters = { ...filters, periodId };
-          const result = await loadPageBundle({ kind, filters: effectiveFilters, cursor, limit });
+          const result = await loadPageBundle({ kind, filters: effectiveFilters, cursor, limit, signal });
           if ((initialClassBundleRevisions.get(initialFingerprint) || 0) !== requestRevision) {
             return { ...result, canonicalReplayToken: null };
           }
           const replayToken = `management-canonical-${canonicalReplaySequence += 1}`;
           canonicalReplayBundles.set(replayToken, {
             initialFingerprint,
+            limit,
+            signal,
             effectiveFingerprint: filterFingerprint(effectiveFilters),
             result: { ...result, canonicalReplayToken: null },
           });
           return { ...result, canonicalReplayToken: replayToken };
         })();
-        if (coalesceInitialRequest) inFlightInitialClassBundles.set(initialFingerprint, initialPromise);
+        if (coalesceInitialRequest) {
+          const inFlightBySignal = inFlightInitialClassBundles.get(initialFingerprint) || new Map();
+          inFlightBySignal.set(signal, initialPromise);
+          inFlightInitialClassBundles.set(initialFingerprint, inFlightBySignal);
+        }
         try {
           return await initialPromise;
         } finally {
-          if (inFlightInitialClassBundles.get(initialFingerprint) === initialPromise) {
-            inFlightInitialClassBundles.delete(initialFingerprint);
+          const inFlightBySignal = inFlightInitialClassBundles.get(initialFingerprint);
+          if (inFlightBySignal?.get(signal) === initialPromise) {
+            inFlightBySignal.delete(signal);
+            if (inFlightBySignal.size === 0) inFlightInitialClassBundles.delete(initialFingerprint);
           }
         }
       }
-      const result = await loadPageBundle({ kind, filters, cursor, limit });
+      const result = await loadPageBundle({ kind, filters, cursor, limit, signal });
       return { ...result, canonicalReplayToken: null };
     },
     loadNextPage: readListPage,
@@ -364,9 +411,9 @@ export function createManagementReadService(options = {}) {
      *   limit?: number
      * }} request
      */
-    async loadRelationPage({ kind, id, relationKind, cursor = null, limit = MANAGEMENT_PAGE_SIZE }) {
+    async loadRelationPage({ kind, id, relationKind, cursor = null, limit = MANAGEMENT_RELATION_PAGE_SIZE }) {
       assertManagementKind(kind);
-      if (!MANAGEMENT_RELATIONS[kind].has(relationKind) || !trimText(id) || limit !== MANAGEMENT_PAGE_SIZE) {
+      if (!MANAGEMENT_RELATIONS[kind].has(relationKind) || !trimText(id) || limit !== MANAGEMENT_RELATION_PAGE_SIZE) {
         throw managementReadError("management_relation_invalid");
       }
       const decoded = cursor === null ? { sortValue: null, id: null } : decodeManagementRelationCursor(cursor, {
@@ -382,7 +429,7 @@ export function createManagementReadService(options = {}) {
           p_cursor_id: decoded.id,
           p_limit: 30,
         })
-        .abortSignal(AbortSignal.timeout(8_000))
+        .abortSignal(AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS))
         .retry(false);
       if (error) throw error;
       const response = unwrapRpcObject(data);
@@ -405,12 +452,12 @@ export function createManagementReadService(options = {}) {
       search = "",
       filters = { subject: "", schoolLevel: "", gradeLevel: "", subSubject: "" },
       cursor = null,
-      limit = MANAGEMENT_PAGE_SIZE,
+      limit = MANAGEMENT_RELATION_PAGE_SIZE,
     }) {
       const safeClassId = trimText(classId);
       const safeSearch = trimText(search);
       const expectedFilterKeys = ["gradeLevel", "schoolLevel", "subSubject", "subject"];
-      if (!safeClassId || limit !== MANAGEMENT_PAGE_SIZE || !filters || typeof filters !== "object" || Array.isArray(filters)
+      if (!safeClassId || limit !== MANAGEMENT_RELATION_PAGE_SIZE || !filters || typeof filters !== "object" || Array.isArray(filters)
         || JSON.stringify(Object.keys(filters).sort()) !== JSON.stringify(expectedFilterKeys)
         || Object.values(filters).some((value) => typeof value !== "string")) {
         throw managementReadError("management_textbook_picker_invalid");

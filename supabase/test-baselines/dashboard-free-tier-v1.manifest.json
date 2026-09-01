@@ -1,8 +1,8 @@
 {
   "baselineVersion": "dashboard-free-tier-v1",
   "originMainSha": "cd6756987963b1102b077fe6d4ccf199787b66c8",
-  "baselineSha256": "75fdc621929dbacf4ba049667feef65977f5996ac8f1cd39675585ecb1136fb7",
-  "catalogSha256": "4d925b43c13bcf4b24cdf69db16d6d648b68fe8661999416118f49357d99ed6d",
+  "baselineSha256": "2d8144a9f73559bfee7f3e417e7cf6b3a9d5d6a5d059890b1db7e0c1e674942a",
+  "catalogSha256": "2e4c512dc82ce947cd643f4ce850e5077005a5eb2faaccd53e2aebdcd4308f7f",
   "requiredObjectSignatures": [],
   "orderedNewMigrations": [
     {
@@ -144,6 +144,91 @@
       "fileName": "20260826101200_registration_legacy_first_consultation.sql",
       "status": "final",
       "sha256": "3637d62a4a52914e4c0e82f2ee38454f11dd0169ed8d1ec9c3b7dab8aabb7ccc"
+    },
+    {
+      "fileName": "20260831013310_management_numbered_pages.sql",
+      "status": "final",
+      "sha256": "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667"
+    },
+    {
+      "fileName": "20260831031913_ops_task_numbered_pages.sql",
+      "status": "final",
+      "sha256": "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"
+    },
+    {
+      "fileName": "20260831052546_academic_operations_numbered_pages.sql",
+      "status": "final",
+      "sha256": "32b51bd8ac1fc14d32bf01a260d1fa22a9324b658960de265f5b89bc0c61b0df"
+    },
+    {
+      "fileName": "20260831061736_approval_numbered_pages.sql",
+      "status": "final",
+      "sha256": "f371ec311759886788112090fc0aeaeb9242ffb7f86d98348216eb553cbc799d"
+    },
+    {
+      "fileName": "20260831063537_approval_detail_trim_parity.sql",
+      "status": "final",
+      "sha256": "6fb6efd7e5ba2441aa1ce91d23f2903d975c79567e42bea9d061aa5d6bf74c9b"
+    },
+    {
+      "fileName": "20260831065351_makeup_numbered_pages.sql",
+      "status": "final",
+      "sha256": "9c5bd203b41adee3cdceb4723c6a1f440b4abd67a6adfea0bfb06e3d5f0465bf"
+    },
+    {
+      "fileName": "20260831101449_makeup_system_note_whitespace_parity.sql",
+      "status": "final",
+      "sha256": "940613f164be35b25661750e8be5c0f15409409890308a5e046ef0fed31369ff"
+    },
+    {
+      "fileName": "20260831103631_makeup_source_precision_parity.sql",
+      "status": "final",
+      "sha256": "47413b333331c9abfe4e771f52e9078b4edc8d88e8cf2b0125dc437a246328ba"
+    },
+    {
+      "fileName": "20260831123610_textbook_inventory_numbered_reads.sql",
+      "status": "final",
+      "sha256": "f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5"
+    },
+    {
+      "fileName": "20260831152429_textbook_workflow_numbered_reads.sql",
+      "status": "final",
+      "sha256": "50106bd78e9ac61d1bc45b78f82309bf10abbd545187d47736823a707796e27e"
+    },
+    {
+      "fileName": "20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
+      "status": "final",
+      "sha256": "a264ec78c4944fa8af5cfd42772ea2a40b64e1b473395421a61b91463489f947"
+    },
+    {
+      "fileName": "20260831170552_textbook_closing_work_context_reads.sql",
+      "status": "final",
+      "sha256": "85d36756ec325de86fd8edea2bd2b5b693a4cb9b9fda8b07e9bafb0ce56facdd"
+    },
+    {
+      "fileName": "20260831184952_textbook_reference_numbered_reads.sql",
+      "status": "final",
+      "sha256": "d963654d5a55bb10102f52b91dcc8402f1f89c8797688139a8393a4670b445e7"
+    },
+    {
+      "fileName": "20260831234634_textbook_class_sale_roster_school.sql",
+      "status": "final",
+      "sha256": "458b951d33356be1f8544c1d1b7c80e4023031dedb78ce7029bef9ea10aa301b"
+    },
+    {
+      "fileName": "20260901045629_textbook_supplier_numbered_reads.sql",
+      "status": "final",
+      "sha256": "f2df2c48c4959cf3c03e763d16002677a8359bb9f705f5b6c7f6d830b7c6e637"
+    },
+    {
+      "fileName": "20260901065056_textbook_owner_settings_contract_fix.sql",
+      "status": "final",
+      "sha256": "cff2df0b819ba4bc5d9e64b3223899ba4a5e304fe25ded166b4b0b70b3faf965"
+    },
+    {
+      "fileName": "20260901072345_textbook_taxonomy_numbered_drafts.sql",
+      "status": "final",
+      "sha256": "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26"
     }
   ]
 }

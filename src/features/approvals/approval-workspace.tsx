@@ -1,11 +1,16 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState, type FormEvent } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type FormEvent } from "react"
 import { Check, ClipboardCheck, FileCheck2, Paperclip, Pencil, RefreshCw, RotateCcw, Save, Send, Trash2, X } from "lucide-react"
 import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Alert, AlertDescription } from "@/components/ui/alert"
+import { DataTablePagination } from "@/components/data-table/data-table-pagination"
+import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
+import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller"
+import { normalizePage } from "@/lib/numbered-pagination"
 import {
   Empty,
   EmptyHeader,
@@ -29,7 +34,9 @@ import {
   addApprovalComment,
   createMonthlyReportApproval,
   deleteApprovalRequest,
-  loadApprovalWorkspaceData,
+  loadApprovalCatalogs,
+  invalidateApprovalMutationSession,
+  discardLegacyApprovalMutationAttempt,
   saveApprovalTemplate,
   updateApprovalStatus,
   updateMonthlyReportApproval,
@@ -41,7 +48,9 @@ import {
   type ApprovalStatus,
   type ApprovalSubject,
   type ApprovalWorkspaceData,
+  type ApprovalMutationAttemptKind,
 } from "./approval-service"
+import { readApprovalNumberedPage, readApprovalDetail, type ApprovalNumberedPage } from "./approval-numbered-service"
 
 type ApprovalView = "mine" | "review" | "open" | "done" | "returned"
 type ApprovalTemplateKey = "english_monthly" | "math_monthly" | "free"
@@ -453,13 +462,31 @@ function approvalLineOptions(
 }
 
 export function ApprovalWorkspace() {
+  const { user, role, loading } = useAuth()
+  const actorScope = !loading && user?.id && role ? `${user.id}:${role}` : null
+  // A keyed session drops all UI drafts, catalogs and selections synchronously.
+  return <ApprovalWorkspaceSession key={actorScope || "unresolved"} actorScope={actorScope} />
+}
+
+function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null }) {
   const { user, canManageAll, isStaff, isAdmin } = useAuth()
   const searchParams = useSearchParams()
-  const [data, setData] = useState<ApprovalWorkspaceData>({ schemaReady: true, requests: [], profiles: [], templates: [] })
-  const [loading, setLoading] = useState(true)
+  const query = searchParams.toString()
+  const navigationFromQuery = (value: string) => {
+    const params = new URLSearchParams(value)
+    const candidate = params.get("view")
+    return { view: APPROVAL_VIEWS.some((item) => item.key === candidate) ? candidate as ApprovalView : "mine" as ApprovalView, page: normalizePage(Number(params.get("page"))) }
+  }
+  const [navigation, setNavigation] = useState(() => navigationFromQuery(query))
+  const [catalogs, setCatalogs] = useState<Pick<ApprovalWorkspaceData, "profiles" | "templates">>({ profiles: [], templates: [] })
+  const [catalogError, setCatalogError] = useState("")
+  const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ApprovalRequest> & Partial<Pick<ApprovalNumberedPage, "tabCounts">>) | null>(null)
   const [saving, setSaving] = useState(false)
-  const [view, setView] = useState<ApprovalView>("mine")
+  const [legacyRecovery, setLegacyRecovery] = useState<ApprovalMutationAttemptKind | null>(null)
+  const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({})
   const [input, setInput] = useState<ApprovalInput>(() => buildTemplateInput("english_monthly", monthInputValue()))
+  const inputRef = useRef(input)
+  inputRef.current = input
   const [message, setMessage] = useState("")
   const [composerOpen, setComposerOpen] = useState(false)
   const [checklistOpen, setChecklistOpen] = useState(false)
@@ -471,7 +498,23 @@ export function ApprovalWorkspace() {
   const [manualApproverTouched, setManualApproverTouched] = useState(false)
   const [editingRequestId, setEditingRequestId] = useState("")
   const [editingRequestStatus, setEditingRequestStatus] = useState<ApprovalStatus>("draft")
+  const draftRef = useRef({ checklistTextDraft, templateName, editingRequestId })
+  draftRef.current = { checklistTextDraft, templateName, editingRequestId }
   const [deepLinkedApprovalId, setDeepLinkedApprovalId] = useState("")
+  const [detail, setDetail] = useState<ApprovalRequest | null>(null)
+  const [detailError, setDetailError] = useState("")
+  const [detailRevision, setDetailRevision] = useState(0)
+  const alive = useRef(true)
+  useLayoutEffect(() => {
+    alive.current = true
+    return () => { alive.current = false; invalidateApprovalMutationSession() }
+  }, [])
+  const size = useDataTablePageSize("approvals:requests")
+  const loading = Boolean(actorScope) && (!size.ready || !snapshot || snapshot.loading)
+  const view = (snapshot?.scope || navigation.view) as ApprovalView
+  const visibleRequests = snapshot?.rows || []
+  const approvalCounts = snapshot?.tabCounts
+  const data: ApprovalWorkspaceData = { schemaReady: Boolean(actorScope), requests: visibleRequests, ...catalogs }
   const canApprove = canManageAll || isStaff
   const canDeleteClosedApprovals = isAdmin
   const userId = user?.id || ""
@@ -482,34 +525,97 @@ export function ApprovalWorkspace() {
   const submitDisabledReason = submitMissingLabels.length > 0 ? `${submitMissingLabels.join(", ")} 필요` : "상신"
   const composerExpanded = composerOpen || Boolean(editingRequestId)
 
-  const reload = useCallback(async () => {
-    setLoading(true)
-    const nextData = await loadApprovalWorkspaceData()
-    setData(nextData)
-    setLoading(false)
+  const controller = useRef<ReturnType<typeof createNumberedPageController<ApprovalRequest>> | null>(null)
+  const lastRequest = useRef("")
+  const previousSize = useRef<number | null>(null)
+  const writeLocation = useCallback((next: { view: ApprovalView; page: number }, replace = false) => {
+    const params = new URLSearchParams(window.location.search)
+    params.set("view", next.view); params.set("page", String(next.page))
+    const url = `${window.location.pathname}?${params}${window.location.hash}`
+    if (replace) window.history.replaceState(null, "", url)
+    else window.history.pushState(null, "", url)
   }, [])
-
+  const navigate = useCallback((nextView: ApprovalView, page: number, replace = false) => {
+    if (!alive.current || !actorScope) return
+    const next = { view: nextView, page: normalizePage(page) }
+    writeLocation(next, replace)
+    setNavigation((current) => current.view === next.view && current.page === next.page ? current : next)
+  }, [actorScope, writeLocation])
   useEffect(() => {
-    void reload()
-  }, [reload])
-
+    const next = navigationFromQuery(query)
+    setNavigation((current) => current.view === next.view && current.page === next.page ? current : next)
+  }, [query])
   useEffect(() => {
-    if (loading) return
-    const approvalId = searchParams.get("approvalId") || ""
-    if (!approvalId || deepLinkedApprovalId === approvalId) return
-    const request = data.requests.find((item) => item.id === approvalId)
-    if (!request) return
-    if (request.requesterId === userId) setView("mine")
-    else if (request.approverId === userId && !isClosedApproval(request.status)) setView("review")
-    else if (request.status === "approved") setView("done")
-    else if (request.status === "returned") setView("returned")
-    else setView("open")
-    setDeepLinkedApprovalId(approvalId)
-    const nextSearchParams = new URLSearchParams(window.location.search)
-    nextSearchParams.delete("approvalId")
-    const queryString = nextSearchParams.toString()
-    window.history.replaceState(null, "", `${window.location.pathname}${queryString ? `?${queryString}` : ""}`)
-  }, [data.requests, deepLinkedApprovalId, loading, searchParams, userId])
+    const instance = createNumberedPageController<ApprovalRequest>({
+      loadPage: ({ scope, page, pageSize, signal }) => readApprovalNumberedPage({ view: scope as ApprovalView, page, pageSize, signal }),
+      onChange: (next) => {
+        if (!alive.current || !actorScope) return
+        setSnapshot(next)
+        if (next.scope && !next.loading && !next.error) {
+          const accepted = { view: next.scope as ApprovalView, page: next.page }
+          lastRequest.current = `${accepted.view}:${accepted.page}:${next.pageSize}`
+          writeLocation(accepted, true)
+          setNavigation((current) => current.view === accepted.view && current.page === accepted.page ? current : accepted)
+        }
+      },
+    })
+    controller.current = instance; lastRequest.current = ""
+    return () => { instance.dispose(); if (controller.current === instance) controller.current = null }
+  }, [actorScope, writeLocation])
+  useEffect(() => {
+    if (!actorScope || !size.ready) return
+    const page = previousSize.current !== null && previousSize.current !== size.pageSize ? 1 : navigation.page
+    previousSize.current = size.pageSize
+    const key = `${navigation.view}:${page}:${size.pageSize}`
+    if (lastRequest.current === key) return
+    lastRequest.current = key
+    void controller.current?.load({ scope: navigation.view, page, pageSize: size.pageSize })
+  }, [actorScope, navigation, size.pageSize, size.ready])
+  const catalogRequest = useRef<AbortController | null>(null)
+  const loadCatalogs = useCallback(async () => {
+    if (!alive.current || !actorScope) return
+    catalogRequest.current?.abort()
+    const request = new AbortController(); catalogRequest.current = request
+    setCatalogError("")
+    try {
+      const value = await loadApprovalCatalogs(request.signal)
+      if (alive.current && !request.signal.aborted) setCatalogs(value)
+    } catch (error) {
+      if (alive.current && !request.signal.aborted) setCatalogError(error instanceof Error ? error.message : "선택 목록을 불러오지 못했습니다.")
+    }
+  }, [actorScope])
+  useEffect(() => { void loadCatalogs(); return () => catalogRequest.current?.abort() }, [loadCatalogs])
+  const reload = useCallback(async () => {
+    if (!alive.current || !actorScope) return
+    if (catalogError) void loadCatalogs()
+    setDetailRevision((value) => value + 1)
+    await controller.current?.retry()
+  }, [actorScope, catalogError, loadCatalogs])
+  const approvalId = searchParams.get("approvalId") || ""
+  const openedDetailId = useRef("")
+  useEffect(() => {
+    if (!actorScope || !approvalId) { setDetail(null); setDeepLinkedApprovalId(""); openedDetailId.current = ""; return }
+    const request = new AbortController()
+    setDetailError("")
+    void readApprovalDetail({ id: approvalId, signal: request.signal }).then((value) => {
+      if (!alive.current || request.signal.aborted) return
+      setDetail(value)
+      if (!value) { setDetailError("문서를 찾을 수 없거나 조회 권한이 없습니다."); return }
+      setDeepLinkedApprovalId(approvalId)
+      // Only opening the link chooses its owning tab; refresh never redirects a user's later tab selection.
+      if (openedDetailId.current !== approvalId) {
+        openedDetailId.current = approvalId
+        const ownerView = value.requesterId === userId ? "mine"
+          : value.approverId === userId && !isClosedApproval(value.status) ? "review"
+            : value.status === "approved" ? "done" : value.status === "returned" ? "returned" : "open"
+        const currentView = new URLSearchParams(window.location.search).get("view") || "mine"
+        if (ownerView !== currentView) navigate(ownerView, 1, true)
+      }
+    }).catch((error) => {
+      if (alive.current && !request.signal.aborted) setDetailError(error instanceof Error ? error.message : "문서를 불러오지 못했습니다.")
+    })
+    return () => request.abort()
+  }, [actorScope, approvalId, detailRevision, navigate, userId])
 
   useEffect(() => {
     if (!deepLinkedApprovalId) return
@@ -521,35 +627,6 @@ export function ApprovalWorkspace() {
     })
     return () => window.cancelAnimationFrame(frame)
   }, [deepLinkedApprovalId, view])
-
-  const approvalCounts = useMemo(() => {
-    const requests = data.requests
-    return {
-      mine: requests.filter((request) => request.requesterId === userId).length,
-      review: requests.filter((request) => request.approverId === userId && !isClosedApproval(request.status)).length,
-      open: requests.filter((request) => !isClosedApproval(request.status)).length,
-      done: requests.filter((request) => request.status === "approved").length,
-      returned: requests.filter((request) => request.status === "returned").length,
-    }
-  }, [data.requests, userId])
-
-  const visibleRequests = useMemo(() => {
-    const requests = data.requests
-    const filtered = view === "mine"
-      ? requests.filter((request) => request.requesterId === userId)
-      : view === "review"
-        ? requests.filter((request) => request.approverId === userId && !isClosedApproval(request.status))
-        : view === "open"
-          ? requests.filter((request) => !isClosedApproval(request.status))
-          : view === "done"
-            ? requests.filter((request) => request.status === "approved")
-            : requests.filter((request) => request.status === "returned")
-    const deepLinkedRequest = requests.find((request) => request.id === deepLinkedApprovalId)
-    if (!deepLinkedRequest || filtered.some((request) => request.id === deepLinkedRequest.id)) {
-      return filtered
-    }
-    return [deepLinkedRequest, ...filtered]
-  }, [data.requests, deepLinkedApprovalId, userId, view])
 
   const approverOptions = useMemo(
     () => data.profiles.filter((profile) => ["admin", "staff", "super_admin", "manager"].includes(profile.role) && profile.id !== userId),
@@ -686,6 +763,14 @@ export function ApprovalWorkspace() {
     setChecklistEditOpen(false)
   }
 
+  const mutationError = (error: unknown, fallback: string) => {
+    if (!alive.current) return
+    if (error && typeof error === "object" && "code" in error && error.code === "approval_legacy_attempt_recovery_required" && "kind" in error) {
+      setLegacyRecovery(error.kind as ApprovalMutationAttemptKind)
+    }
+    setMessage(error instanceof Error ? error.message : fallback)
+  }
+
   const createApproval = async (status: ApprovalStatus) => {
     if (!userId || saving) return
     const nextStatus = status === "draft" && editingRequestId ? editingRequestStatus : status
@@ -701,16 +786,21 @@ export function ApprovalWorkspace() {
       } else {
         await createMonthlyReportApproval(input, userId, status)
       }
-      setInput(buildTemplateInput(input.templateKey as ApprovalTemplateKey, monthInputValue()))
-      setComposerOpen(false)
-      setEditingRequestId("")
-      setEditingRequestStatus("draft")
+      if (!alive.current) return
+      if (inputRef.current === input && draftRef.current.checklistTextDraft === checklistTextDraft
+        && draftRef.current.templateName === templateName && draftRef.current.editingRequestId === editingRequestId) {
+        setInput(buildTemplateInput(input.templateKey as ApprovalTemplateKey, monthInputValue()))
+        setComposerOpen(false)
+        setEditingRequestId("")
+        setEditingRequestStatus("draft")
+      }
       await reload()
+      if (!alive.current) return
       setMessage(editingRequestId ? "수정했습니다." : status === "draft" ? "임시 저장했습니다." : "상신했습니다.")
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "저장하지 못했습니다.")
+      mutationError(error, "저장하지 못했습니다.")
     } finally {
-      setSaving(false)
+      if (alive.current) setSaving(false)
     }
   }
 
@@ -746,14 +836,17 @@ export function ApprovalWorkspace() {
     setSaving(true)
     try {
       await saveApprovalTemplate(input, userId, nextName)
-      setTemplateName("")
-      setTemplateSaveOpen(false)
+      if (!alive.current) return
+      setTemplateName((current) => current === templateName ? "" : current)
+      if (inputRef.current === input && draftRef.current.templateName === templateName) setTemplateSaveOpen(false)
+      await loadCatalogs()
       await reload()
+      if (!alive.current) return
       setMessage(`${nextName} 서식을 저장했습니다.`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "서식을 저장하지 못했습니다.")
+      mutationError(error, "서식을 저장하지 못했습니다.")
     } finally {
-      setSaving(false)
+      if (alive.current) setSaving(false)
     }
   }
 
@@ -767,12 +860,14 @@ export function ApprovalWorkspace() {
     setSaving(true)
     try {
       await updateApprovalStatus(request.id, status)
+      if (!alive.current) return
       await reload()
+      if (!alive.current) return
       setMessage(`${request.title} · ${approvalStatusLabel(status)}`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "상태를 바꾸지 못했습니다.")
+      mutationError(error, "상태를 바꾸지 못했습니다.")
     } finally {
-      setSaving(false)
+      if (alive.current) setSaving(false)
     }
   }
 
@@ -781,12 +876,15 @@ export function ApprovalWorkspace() {
     setSaving(true)
     try {
       await addApprovalComment(request.id, userId, body)
+      if (!alive.current) return
+      setCommentDrafts((current) => current[request.id] === body ? { ...current, [request.id]: "" } : current)
       await reload()
+      if (!alive.current) return
       setMessage(`${request.title} · 댓글 추가`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "댓글을 저장하지 못했습니다.")
+      mutationError(error, "댓글을 저장하지 못했습니다.")
     } finally {
-      setSaving(false)
+      if (alive.current) setSaving(false)
     }
   }
 
@@ -801,14 +899,25 @@ export function ApprovalWorkspace() {
     setSaving(true)
     try {
       await deleteApprovalRequest(request.id)
+      if (!alive.current) return
       await reload()
+      if (!alive.current) return
       setMessage(`${request.title} 삭제 완료`)
     } catch (error) {
-      setMessage(error instanceof Error ? error.message : "문서를 삭제하지 못했습니다.")
+      mutationError(error, "문서를 삭제하지 못했습니다.")
     } finally {
-      setSaving(false)
+      if (alive.current) setSaving(false)
     }
   }
+
+  if (!actorScope) return <div className="p-6 text-sm text-muted-foreground">로그인 확인 중</div>
+
+  const renderRequest = (request: ApprovalRequest, highlighted = request.id === deepLinkedApprovalId) => (
+    <ApprovalRequestRow key={request.id} request={request} canApprove={canApprove} userId={userId} saving={saving}
+      canDelete={canDeleteApprovalRequest(request)} highlighted={highlighted} onEdit={editApproval} onStatusChange={changeStatus}
+      onAddComment={addComment} onDelete={deleteApproval} commentBody={commentDrafts[request.id] || ""}
+      onCommentChange={(body) => setCommentDrafts((current) => ({ ...current, [request.id]: body }))} />
+  )
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
@@ -1080,14 +1189,14 @@ export function ApprovalWorkspace() {
                   type="button"
                   role="tab"
                   aria-selected={view === tab.key}
-                  onClick={() => setView(tab.key)}
+                  onClick={() => navigate(tab.key, 1)}
                   className={[
                     "shrink-0 rounded-md px-3 py-2 text-sm font-medium",
                     view === tab.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
                   ].join(" ")}
                 >
                   {tab.label}
-                  {approvalCounts[tab.key] > 0 && <span className="ml-1 text-xs opacity-80">{approvalCounts[tab.key]}</span>}
+                  {approvalCounts && approvalCounts[tab.key] > 0 && <span className="ml-1 text-xs opacity-80">{approvalCounts[tab.key]}</span>}
                 </button>
               ))}
             </div>
@@ -1100,10 +1209,23 @@ export function ApprovalWorkspace() {
           </div>
 
           {message && <div role="status" className="border-b px-3 py-2 text-sm text-primary">{message}</div>}
-          {!data.schemaReady && <div role="alert" className="border-b px-3 py-2 text-sm text-destructive">{data.error}</div>}
+          {legacyRecovery && <Alert><AlertDescription>
+            저장된 문서를 먼저 확인하세요. 로컬 재시도 기록만 폐기하며 서버 문서는 변경하지 않습니다.
+            <Button type="button" variant="outline" onClick={() => {
+              try { discardLegacyApprovalMutationAttempt(legacyRecovery); setLegacyRecovery(null); setMessage("로컬 재시도 기록을 폐기했습니다. 필요하면 저장을 다시 누르세요.") }
+              catch { setMessage("로컬 재시도 기록을 폐기하지 못했습니다.") }
+            }}>로컬 재시도 기록 폐기</Button>
+          </AlertDescription></Alert>}
+          {Boolean(snapshot?.error || catalogError || detailError) && <Alert variant="destructive"><AlertDescription>
+            {snapshot?.error ? snapshot.error instanceof Error ? snapshot.error.message : "목록을 불러오지 못했습니다." : catalogError || detailError}
+            <Button type="button" variant="outline" onClick={() => void reload()}>다시 시도</Button>
+          </AlertDescription></Alert>}
+          {detail && !visibleRequests.some((request) => request.id === detail.id) && (
+            <section aria-label="연결된 문서 상세" className="border-b">{renderRequest(detail, true)}</section>
+          )}
 
-          <div className="divide-y">
-            {loading ? (
+          <div className="divide-y" aria-label="전자결재 목록">
+            {loading && snapshot?.totalCount == null ? (
               <div className="p-6 text-sm text-muted-foreground">불러오는 중</div>
             ) : visibleRequests.length === 0 ? (
               <Empty className="min-h-48 border-0 p-8">
@@ -1114,22 +1236,11 @@ export function ApprovalWorkspace() {
                   <EmptyTitle className="text-sm text-muted-foreground">표시할 문서 없음</EmptyTitle>
                 </EmptyHeader>
               </Empty>
-            ) : visibleRequests.map((request) => (
-              <ApprovalRequestRow
-                key={request.id}
-                request={request}
-                canApprove={canApprove}
-                userId={userId}
-                saving={saving}
-                canDelete={canDeleteApprovalRequest(request)}
-                highlighted={request.id === deepLinkedApprovalId}
-                onEdit={editApproval}
-                onStatusChange={changeStatus}
-                onAddComment={addComment}
-                onDelete={deleteApproval}
-              />
-            ))}
+            ) : visibleRequests.map((request) => renderRequest(request))}
           </div>
+          <div className="border-t p-3"><DataTablePagination page={snapshot?.page || 1} pageSize={snapshot?.scope ? snapshot.pageSize : size.pageSize}
+            totalCount={snapshot?.totalCount ?? null} loading={loading} onPageChange={(page) => navigate(view, page)}
+            pageSizeMode={size.mode} onPageSizeChange={size.setPreference} /></div>
         </section>
       </div>
     </div>
@@ -1187,6 +1298,8 @@ function ApprovalRequestRow({
   onStatusChange,
   onAddComment,
   onDelete,
+  commentBody,
+  onCommentChange,
 }: {
   request: ApprovalRequest
   canApprove: boolean
@@ -1198,19 +1311,18 @@ function ApprovalRequestRow({
   onStatusChange: (request: ApprovalRequest, status: ApprovalStatus) => void
   onAddComment: (request: ApprovalRequest, body: string) => void
   onDelete: (request: ApprovalRequest) => void
+  commentBody: string
+  onCommentChange: (body: string) => void
 }) {
   const nextAction = nextApprovalAction(request.status, canApprove, request.requesterId === userId)
-  const [commentBody, setCommentBody] = useState("")
   const progress = checklistProgress(request.checklistItems)
   const attachments = attachmentDisplayRows(request.attachmentLinks)
   const canEdit = (request.requesterId === userId || canApprove) && request.status !== "approved" && request.status !== "canceled"
 
   const submitComment = (event: FormEvent) => {
     event.preventDefault()
-    const body = commentBody.trim()
-    if (!body) return
-    setCommentBody("")
-    onAddComment(request, body)
+    if (!commentBody.trim()) return
+    onAddComment(request, commentBody)
   }
 
   return (
@@ -1318,7 +1430,7 @@ function ApprovalRequestRow({
       <div className="grid gap-3 border-t pt-3 lg:grid-cols-[minmax(0,1fr)_minmax(240px,320px)]">
         <ApprovalActivity comments={request.comments} events={request.events} />
         <form onSubmit={submitComment} className="flex gap-2">
-          <Input value={commentBody} onChange={(event) => setCommentBody(event.target.value)} placeholder="댓글" aria-label={`${request.title} 댓글`} />
+          <Input value={commentBody} onChange={(event) => onCommentChange(event.target.value)} placeholder="댓글" aria-label={`${request.title} 댓글`} />
           <Button type="submit" variant="outline" disabled={saving || !commentBody.trim()}>
             저장
           </Button>

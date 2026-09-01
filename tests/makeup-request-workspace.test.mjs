@@ -2,6 +2,8 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import vm from "node:vm";
+import { act } from "react";
+import { setup, button, tab, row, id, facets, modules, stamp } from "./helpers/makeup-numbered-harness.mjs";
 
 import ts from "typescript";
 
@@ -99,32 +101,17 @@ function loadMakeupActionErrorMessage() {
   return transpileAndLoad(source, ["getMakeupActionErrorMessage"]);
 }
 
-function loadMakeupRequestViewHelpers() {
-  const source = sourceBetween(
-    workspaceSource,
-    "function isMakeupRequestParticipant",
-    "type MakeupRequestTableColumnKey",
-  );
-  return transpileAndLoad(
-    source,
-    ["getMakeupRequestViewRequests"],
-    {
-      MAKEUP_REQUEST_REQUEST_STATUSES: ["revision_requested"],
-      MAKEUP_REQUEST_CLOSED_STATUSES: ["completed", "rejected", "canceled"],
-    },
-  );
-}
+
 
 function loadMakeupFilterHelpers() {
   const source = sourceBetween(
     workspaceSource,
-    "function buildMakeupSubjectFilterOptions",
+    "function normalizeMakeupTeacherSubjects",
     "function getSlotRoomAvailability",
   );
   return transpileAndLoad(
     source,
-    ["buildMakeupSubjectFilterOptions", "matchesMakeupTeacherSubject"],
-    { MAKEUP_FILTER_SUBJECTS: ["영어", "수학", "과학"] },
+    ["matchesMakeupTeacherSubject"],
   );
 }
 
@@ -514,7 +501,7 @@ test("선택 수업 일정 consumer는 내부 성공 뒤 refresh된 이전 gener
   const schedulePlanEffectSource = sourceBetween(
     workspaceSource,
     "useEffect(() => {\n    const schedulePlanLoadCache",
-    "useEffect(() => {\n    if (!authLoading)",
+    "useEffect(() => {\n    const requestedRequestId",
   );
   assert.match(schedulePlanEffectSource, /const loadGeneration = schedulePlanLoadCache\.captureGeneration\(\)/);
   assert.match(schedulePlanEffectSource, /consumeMakeupClassSchedulePlanLoad\(schedulePlanRequest/);
@@ -614,7 +601,7 @@ test("legacy 휴강일은 lazy plan ready 전 선택과 제출을 막고 stale �
   const schedulePlanEffectSource = sourceBetween(
     workspaceSource,
     "useEffect(() => {\n    const schedulePlanLoadCache",
-    "useEffect(() => {\n    if (!authLoading)",
+    "useEffect(() => {\n    const requestedRequestId",
   );
 
   assert.match(workspaceSource, /const selectedClassSchedulePlanReady = isMakeupClassSchedulePlanReady\(selectedClass\)/);
@@ -677,27 +664,14 @@ test("휴보강 상신 DB 검증 실패는 원시 코드 대신 운영자 안내
   );
 });
 
-test("휴보강 선택 필터는 지정 과목만 제공하고 과목 미지정 선생님을 제외한다", () => {
-  const { buildMakeupSubjectFilterOptions, matchesMakeupTeacherSubject } = loadMakeupFilterHelpers();
-
-  assert.match(workspaceSource, /const subjectFilterOptions = useMemo\(\(\) => buildMakeupSubjectFilterOptions\(requests\), \[requests\]\)/);
-  assert.deepEqual(
-    JSON.parse(JSON.stringify(buildMakeupSubjectFilterOptions([
-      { subject: "수학" },
-      { subject: "수학" },
-      { subject: "영어" },
-      { subject: "국어" },
-    ]))),
-    [
-      { value: "영어", label: "영어", count: 1 },
-      { value: "수학", label: "수학", count: 2 },
-      { value: "과학", label: "과학", count: 0 },
-    ],
-  );
-  assert.equal(matchesMakeupTeacherSubject({ subjects: "영어, 과학" }, "영어"), true);
-  assert.equal(matchesMakeupTeacherSubject({ subjects: "영어, 과학" }, "수학"), false);
-  assert.equal(matchesMakeupTeacherSubject({ subjects: "" }, "과학"), false);
-  assert.equal(matchesMakeupTeacherSubject({ subjects: "" }, ""), true);
+test("휴보강 선택 필터는 전체 범위 과목 facets를 표시하고 폼의 과목 미지정 선생님은 제외한다", async (t) => {
+  const { matchesMakeupTeacherSubject } = loadMakeupFilterHelpers();
+  const p = await setup(t, {search:'?view=approvalPending'});
+  await act(async()=>p.finish(p.numbered()[0],1,{rows:[row(1,{subject:'수학'})],subjectOptions:facets.subjectOptions}));
+  await act(async()=>document.querySelector('[aria-label="과목 필터"]').click());
+  assert.match(document.body.textContent,/영어 112/);
+  assert.equal(matchesMakeupTeacherSubject({subjects:'영어, 과학'},'영어'),true);
+  assert.equal(matchesMakeupTeacherSubject({subjects:''},'과학'),false);
 });
 
 test("신규 휴보강 상신은 서버가 허용하지 않는 반려·보완 필드를 전송하지 않는다", () => {
@@ -854,7 +828,8 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.doesNotMatch(workspaceSource, /type="date"/);
   assert.doesNotMatch(workspaceSource, /type="time"/);
   assert.match(workspaceSource, /buildRoomAvailability/);
-  assert.match(workspaceSource, /ignoreOrphanedMakeupEvents: canIgnoreOrphanedMakeupEvents/);
+  const availability=modules(null)('src/features/makeup-requests/makeup-request-model.js').buildRoomAvailability({classrooms:[{name:'A'}],requests:[],slots:[{startAt:stamp,endAt:'2026-08-31T01:00:00Z',classroom:'A'}],ignoreOrphanedMakeupEvents:true,activeEventRequestIds:[id(999)],academicEvents:[{id:'tagged',start_at:stamp,end_at:'2026-08-31T01:00:00Z',note:'[[TIPS_MAKEUP]] '+JSON.stringify({requestId:id(999),kind:'makeup',classroom:'A'})}]});
+  assert.equal(availability[0].available,false);
   assert.match(workspaceSource, /빈 강의실/);
   assert.match(workspaceSource, /충돌/);
   assert.doesNotMatch(workspaceSource, /최종 확인/);
@@ -1175,41 +1150,13 @@ test("makeup workspace separates request status tabs by workflow state", () => {
   assert.doesNotMatch(workspaceSource, /\{ id: "approvals", label: "결재함" \}/);
 });
 
-test("관리팀은 자신이 참여하지 않은 결재대기 휴보강을 확인한다", () => {
-  const { getMakeupRequestViewRequests } = loadMakeupRequestViewHelpers();
-  const request = {
-    id: "approval-pending-request",
-    status: "approval_pending",
-    requesterId: "requester-profile",
-    teacherProfileId: "teacher-profile",
-    approverProfileId: "approver-profile",
-  };
-
-  assert.equal(
-    getMakeupRequestViewRequests([request], "approvalPending", "management-profile", true)
-      .map((item) => item.id)
-      .join(","),
-    "approval-pending-request",
-  );
-});
-
-test("관리팀은 자신이 참여하지 않은 보강대기 휴보강을 확인한다", () => {
-  const { getMakeupRequestViewRequests } = loadMakeupRequestViewHelpers();
-  const request = {
-    id: "makeup-pending-request",
-    status: "makeup_pending",
-    requesterId: "requester-profile",
-    teacherProfileId: "teacher-profile",
-    approverProfileId: "approver-profile",
-  };
-
-  assert.equal(
-    getMakeupRequestViewRequests([request], "makeupPending", "management-profile", true)
-      .map((item) => item.id)
-      .join(","),
-    "makeup-pending-request",
-  );
-});
+for (const [view,status] of [['approvalPending','approval_pending'],['makeupPending','makeup_pending']]) {
+  test('관리팀 numbered '+view+' 목록은 비참여 신청을 로컬에서 제거하지 않는다',async(t)=>{
+    const p=await setup(t,{search:'?view='+view});
+    await act(async()=>p.finish(p.numbered()[0],1,{rows:[row(1,{status,requesterId:id(801),teacherProfileId:id(802),approverProfileId:id(803)})]}));
+    assert.match(document.body.textContent,/수업 1/);assert.equal(p.numbered()[0].args.p_filters.view,view);
+  });
+}
 
 test("makeup workspace avoids browser prompt and fills wide screens", () => {
   assert.doesNotMatch(workspaceSource, /window\.prompt/);
@@ -1344,71 +1291,31 @@ test("makeup notification compatibility writers stay behind the canonical servic
   assert.doesNotMatch(workspaceSource, /\/api\/google-chat/);
 });
 
-test("makeup workspace keeps terminal requests in the approval result tab", () => {
-  assert.match(workspaceSource, /const MAKEUP_REQUEST_REQUEST_STATUSES = \["revision_requested"\]/);
-  assert.match(workspaceSource, /const MAKEUP_REQUEST_CLOSED_STATUSES = \["completed", "rejected", "canceled"\]/);
-  assert.match(workspaceSource, /function getMakeupRequestViewRequests/);
-  assert.match(workspaceSource, /MAKEUP_REQUEST_REQUEST_STATUSES\.includes\(request\.status\)/);
-  assert.match(workspaceSource, /MAKEUP_REQUEST_CLOSED_STATUSES\.includes\(request\.status\)/);
-  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, view, currentUserId, isManager\)/);
-  assert.match(workspaceSource, /MAKEUP_REQUEST_VIEW_TABS\.reduce/);
-  assert.match(workspaceSource, /getMakeupRequestViewRequests\(data\.requests, tab\.id, currentUserId, isManager\)\.length/);
+test("makeup workspace keeps all terminal states and server view counts in approval result tab",async(t)=>{
+ const p=await setup(t,{search:'?view=closed'});
+ await act(async()=>p.finish(p.numbered()[0],3,{rows:['completed','rejected','canceled'].map((status,i)=>row(i+1,{status}))}));
+ assert.equal(tab('승인/반려').getAttribute('aria-selected'),'true');
+ for(const text of ['수업 1','수업 2','수업 3']) assert.ok(document.body.textContent.includes(text));
+ assert.match(tab('결재대기').textContent,/112/);
 });
 
-test("makeup workspace does not expose direct delete for closed request rows", () => {
-  assert.match(workspaceSource, /const \{ user, role, loading: authLoading \} = useAuth\(\)/);
-  assert.doesNotMatch(workspaceSource, /isAdmin/);
-  assert.doesNotMatch(workspaceSource, /deleteMakeupRequest/);
-  assert.doesNotMatch(workspaceSource, /handleForceDeleteRequest/);
-  assert.doesNotMatch(workspaceSource, /canForceDeleteClosedRequests/);
-  assert.doesNotMatch(workspaceSource, /canForceDeleteRequest/);
-  assert.doesNotMatch(workspaceSource, /onForceDelete/);
+test("makeup workspace does not expose direct delete for closed rows across authority change",async(t)=>{
+ const p=await setup(t,{search:'?view=closed'});
+ await act(async()=>p.finish(p.numbered()[0],1,{rows:[row(1,{status:'completed'})]}));
+ assert.equal(button('삭제'),undefined);
+ await p.auth({role:'assistant'}); assert.equal(button('삭제'),undefined);assert.doesNotMatch(document.body.textContent,/수업 1/);
+ assert.doesNotMatch(workspaceSource,/deleteMakeupRequest|handleForceDeleteRequest|onForceDelete/);
 });
 
-test("makeup workspace filters table rows by subject teacher period and collapsible search", () => {
-  assert.match(workspaceSource, /type MakeupRequestPeriodFilter = "all" \| "today" \| "week" \| "month" \| "custom"/);
-  assert.match(workspaceSource, /const MAKEUP_REQUEST_PERIOD_FILTERS/);
-  for (const label of ["전체 기간", "오늘", "이번주", "이번달", "직접입력"]) {
-    assert.match(workspaceSource, new RegExp(label));
-  }
-  assert.match(workspaceSource, /selectedSubjectFilter/);
-  assert.match(workspaceSource, /selectedTeacherFilter/);
-  assert.match(serviceSource, /isVisible: row\.is_visible !== false/);
-  assert.match(serviceSource, /sortOrder: Number\(row\.sort_order \|\| row\.sortOrder \|\| 0\)/);
-  assert.match(workspaceSource, /function matchesMakeupTeacherSubject/);
-  assert.match(workspaceSource, /function getClassTeacherSelectionKey/);
-  assert.match(workspaceSource, /function matchesClassTeacherSelection/);
-  assert.match(workspaceSource, /data\.teachers[\s\S]*matchesMakeupTeacherSubject\(teacher, selectedSubjectFilter === "all" \? "" : selectedSubjectFilter\)/);
-  assert.match(workspaceSource, /data\.teachers[\s\S]*matchesMakeupTeacherSubject\(teacher, selectedSubject\)/);
-  assert.match(workspaceSource, /matchesClassTeacherSelection\(classItem, selectedTeacherKey, data\.teachers\)/);
-  assert.doesNotMatch(workspaceSource, /selectedClassFilter/);
-  assert.doesNotMatch(workspaceSource, /ariaLabel="수업 필터"/);
-  assert.doesNotMatch(workspaceSource, /allLabel="수업 전체"/);
-  assert.match(workspaceSource, /makeupPeriodFilter/);
-  assert.match(workspaceSource, /makeupPeriodStartDate/);
-  assert.match(workspaceSource, /makeupPeriodEndDate/);
-  assert.match(workspaceSource, /function matchesMakeupRequestSelectionFilters/);
-  assert.match(workspaceSource, /function matchesMakeupRequestPeriodFilter/);
-  assert.match(workspaceSource, /function getMakeupRequestPeriodDateKeys/);
-  assert.match(workspaceSource, /request\.cancelDate/);
-  assert.match(workspaceSource, /slot\.startAt/);
-  assert.match(workspaceSource, /과목 전체/);
-  assert.match(workspaceSource, /선생님 전체/);
-  assert.match(workspaceSource, /className="flex flex-wrap items-center gap-2 border-b bg-muted\/20 px-3 py-2"/);
-  assert.match(workspaceSource, /aria-label="휴보강 전체 필터"/);
-  assert.match(workspaceSource, /className="flex min-w-0 flex-wrap items-center gap-2" aria-label="휴보강 선택 필터"/);
-  assert.match(workspaceSource, /aria-label="휴보강 선택 필터"/);
-  assert.match(workspaceSource, /aria-label="휴보강 기간 필터"/);
-  assert.match(workspaceSource, /filterInputOpen/);
-  assert.match(workspaceSource, /const isFilterInputExpanded = filterInputOpen \|\| Boolean\(filterValue\)/);
-  assert.match(workspaceSource, /aria-label=\{isFilterInputExpanded \? `\$\{filterColumn\.label\} 검색 접기` : `\$\{filterColumn\.label\} 검색 펼치기`\}/);
-  assert.match(workspaceSource, /\{isFilterInputExpanded \? \(/);
-  assert.match(workspaceSource, /aria-label=\{`\$\{filterColumn\.label\} 필터`\}/);
-  assert.doesNotMatch(workspaceSource, /\{filterColumn\.label\} 필터<\/span>/);
-  assert.doesNotMatch(workspaceSource, /오름차순/);
-  assert.doesNotMatch(workspaceSource, /내림차순/);
-  assert.match(workspaceSource, /ariaLabel="휴보강 기간 시작일"/);
-  assert.match(workspaceSource, /ariaLabel="휴보강 기간 종료일"/);
+test("makeup table sends combined full filters atomically and keeps accepted controls on error",async(t)=>{
+ const p=await setup(t,{search:'?view=approvalPending&page=11'});
+ await act(async()=>p.finish(p.numbered()[0]));
+ await act(async()=>p.observed.changeFilters({subject:'수학',teacher:'name:담당',period:'custom',dateFrom:'2026-08-01',dateTo:'',filterColumn:'finalNote',search:'메모',sortColumn:'className',sortDirection:'desc'}));
+ const requested=p.numbered().at(-1);
+ assert.equal(requested.args.p_page,1);assert.equal(requested.args.p_filters.subject,'수학');assert.equal(requested.args.p_filters.filterColumn,'finalNote');assert.equal(requested.args.p_filters.search,'메모');
+ await act(async()=>requested.reject(new Error('FILTER ERROR')));
+ assert.match(document.body.textContent,/수업 101/);assert.equal(tab('결재대기').getAttribute('aria-selected'),'true');
+ await act(async()=>button('다시 시도').click());assert.deepEqual(p.numbered().at(-1).args,requested.args);
 });
 
 test("makeup workspace opens row details and uses cards on narrow viewports", () => {
@@ -1557,16 +1464,14 @@ test("휴보강 서비스는 업무 저장과 서버 알림 브리지를 분리�
   assert.match(notificationMakeupAdapterMigrationSource, /to authenticated, service_role/);
   assert.doesNotMatch(serviceSource, /appendLocalMakeupRequestEvent|recordMakeupRequestEvent|notifyMakeupRequest/);
 });
-test("휴보강 알림 딥링크는 신청 ID 상세를 열고 닫을 때 URL 상태를 정리한다", () => {
-  assert.match(workspaceSource, /useSearchParams\(\)/);
-  assert.match(workspaceSource, /searchParams\.get\("requestId"\)/);
-  assert.match(workspaceSource, /data\.requests\.find\(\(request\) => request\.id === requestedRequestId\)/);
-  assert.match(workspaceSource, /setSelectedDetailRequest\(requestedRequest\)/);
-  assert.match(workspaceSource, /consumedDeepLinkRequestIdRef\.current = ""/);
-  assert.match(workspaceSource, /const closeDetailRequest = useCallback\(\(\) => \{[\s\S]*setSelectedDetailRequest\(null\)[\s\S]*clearRequestDeepLink\(\)/);
-  assert.match(workspaceSource, /nextSearchParams\.delete\("requestId"\)/);
-  assert.match(workspaceSource, /onOpenChange=\{\(open\) => \{[\s\S]*closeDetailRequest\(\)/);
-  assert.match(notificationMakeupAdapterMigrationSource, /\/admin\/makeup-requests\?requestId=/);
+test("휴보강 알림 딥링크는 오프페이지 ID를 직접 읽고 닫을 때 다른 URL 필터를 보존한다",async(t)=>{
+ const p=await setup(t,{search:'?view=approvalPending&page=11&other=keep&requestId='+id(999)});
+ await act(async()=>p.finish(p.numbered()[0]));
+ const detail=p.requests.find(r=>r.name==='get_makeup_detail_v1');assert.equal(detail.args.p_id,id(999));
+ await act(async()=>detail.resolve({data:row(999,{className:'직접 상세'}),error:null}));assert.match(document.body.textContent,/직접 상세/);
+ const close=[...document.querySelectorAll('[role="dialog"] button')].find(b=>b.getAttribute('aria-label')==='모달 닫기');
+ assert.ok(close);await act(async()=>close.click());
+ const params=new URLSearchParams(window.location.search);assert.equal(params.get('requestId'),null);assert.equal(params.get('other'),'keep');assert.equal(params.get('page'),'11');
 });
 test("휴보강 업무 저장은 고정 RPC를 사용하고 알림 후처리 실패와 분리된다", () => {
   assert.match(serviceSource, /create_makeup_request_v2/);

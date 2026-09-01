@@ -11,7 +11,6 @@ const contentPayloadMigrationUrl = new URL(
   import.meta.url,
 )
 const serviceUrl = new URL("../src/features/approvals/approval-service.ts", import.meta.url)
-const workspaceUrl = new URL("../src/features/approvals/approval-workspace.tsx", import.meta.url)
 const adapterUrl = new URL(
   "../src/features/notifications/server/adapters/approvals-notification-adapter.ts",
   import.meta.url,
@@ -319,11 +318,10 @@ test("브라우저 mutation은 salted fingerprint와 opaque ID만 저장하고 �
   assert.match(service, /createdAt: Date\.now\(\)/)
   assert.match(service, /storedAge >= 0 && storedAge <= APPROVAL_MUTATION_ATTEMPT_TTL_MS/)
   assert.match(service, /let persisted: ApprovalMutationAttempt \| null = null[\s\S]*try \{[\s\S]*storage\.getItem\(approvalMutationStorageKey\(kind\)\)[\s\S]*catch/)
-  assert.match(service, /function clearApprovalMutationAttempt[\s\S]*try \{[\s\S]*storage\.removeItem\(approvalMutationStorageKey\(kind\)\)[\s\S]*catch/)
   assert.match(service, /function isDefinitiveApprovalMutationError[\s\S]*code === "40001"[\s\S]*code === "42501"[\s\S]*code\.startsWith\("23"\)/)
-  assert.match(service, /if \(isDefinitiveApprovalMutationError\(error\)\) \{[\s\S]*clearApprovalMutationAttempt\("transition", attempt\)/)
   assert.match(service, /p_request_id: attempt\.(?:requestId|createRequestId|transitionRequestId)/)
-  assert.match(service, /storage\.setItem\(approvalMutationStorageKey\(kind\), JSON\.stringify\(attempt\)\)/)
+  // Actor-keyed persistence/clearing and uncertain replay are now executed
+  // through the real service in approval-numbered-pagination.test.mjs.
   assert.doesNotMatch(service, /p_request_id:\s*crypto\.randomUUID\(\)/)
   assert.doesNotMatch(attemptType, /title|body|memo|attachment|comment|payload/i)
   assert.doesNotMatch(service, /sessionStorage\.setItem\([^\n]*(?:title|body|memo|attachment|comment)/i)
@@ -343,7 +341,6 @@ test("브라우저 mutation은 salted fingerprint와 opaque ID만 저장하고 �
   )
   assert.match(updateMutation, /p_request_id: attempt\.requestId/)
   assert.match(updateMutation, /attempt\.transitionRequestId/)
-  assert.match(updateMutation, /catch \(error\) \{[\s\S]*isDefinitiveApprovalMutationError\(error\)[\s\S]*clearApprovalMutationAttempt\("update", attempt\)/)
 
   for (const [start, end] of [
     ["export async function updateApprovalStatus", "export async function deleteApprovalRequest"],
@@ -404,16 +401,8 @@ test("전자결재 구버전 writer는 closure 전 안전한 최초 상태와 tr
   assert.doesNotMatch(triggerBody, /tg_op in \('UPDATE', 'DELETE'\) and v_request_id is null/)
 })
 
-test("전자결재 알림 deep link는 요청 문서를 찾아 열고 소비한 query를 제거한다", async () => {
-  const workspace = await source(workspaceUrl)
-
-  assert.match(workspace, /searchParams\.get\("approvalId"\)/)
-  assert.match(workspace, /data\.requests\.find\(\(item\) => item\.id === approvalId\)/)
-  assert.match(workspace, /setDeepLinkedApprovalId\(approvalId\)/)
-  assert.match(workspace, /nextSearchParams\.delete\("approvalId"\)/)
-  assert.match(workspace, /scrollIntoView\(/)
-  assert.match(workspace, /open=\{highlighted \|\| undefined\}/)
-})
+// Deep links now resolve directly and retain approvalId for Back/return.
+// Actual separate-detail rendering is covered by approval-numbered-pagination.test.mjs.
 
 test("전자결재 adapter는 권위 재검증 의존성을 주입해 provider 0 통합 회귀를 실행할 수 있다", async () => {
   const adapter = await source(adapterUrl)

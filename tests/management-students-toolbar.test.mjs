@@ -88,7 +88,6 @@ test("student management opens with active students before withdrawn records", a
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const studentDefaultConfig = source.match(/students:\s*\{[\s\S]*?\n\s*\},\n\s*classes:/)?.[0] || "";
 
-  assert.match(source, /const STORAGE_VERSION = 14/);
   assert.match(source, /const STUDENT_STATUS_SORT_ORDER = \["재원", "퇴원"\]/);
   assert.match(source, /function compareStudentStatusForTable/);
   assert.match(studentDefaultConfig, /\{ id: "status", desc: false \},\s*\{ id: "title", desc: false \}/);
@@ -202,7 +201,8 @@ test("management table exposes resize handles with a clear reset action", async 
 
   assert.match(resizeHandle, /aria-label=\{`\$\{columnLabel\} 열 너비 조절`\}/);
   assert.match(resizeHandle, /title=\{`\$\{columnLabel\} 열 너비 조절`\}/);
-  assert.match(resizeHandle, /w-4 cursor-col-resize/);
+  assert.match(resizeHandle, /w-6 cursor-col-resize/);
+  assert.match(resizeHandle, /after:w-px/);
   assert.match(resizeHandle, /focus-visible:ring-2 focus-visible:ring-ring/);
   assert.match(resizeHandle, /header\.column\.resetSize\(\)/);
   assert.doesNotMatch(resizeHandle, /aria-hidden="true"/);
@@ -240,7 +240,7 @@ test("class table caption uses the authoritative server aggregate instead of the
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(source, /const captionSuffix = kind === "classes"\s*\?\s*summaryLabel/);
-  assert.match(source, /const authoritativeTotal = stats\[0\]\?\.value/);
+  // The numbered table runtime test checks the caption against the full page-envelope count.
   assert.match(source, /`전체 수업 \$\{authoritativeTotal\}개 · 서버 집계`/);
   assert.doesNotMatch(source, /filteredClassRows\.reduce/);
 });
@@ -334,10 +334,10 @@ test("management table keeps filter and search actions visible and reversible", 
   assert.match(panelSource, /primaryLabel\?: string/);
   assert.match(panelSource, /aria-label=\{`\$\{searchPlaceholder\} 지우기`\}/);
   assert.match(panelSource, /필터 \$\{String\(primaryLabel\)\}|필터 \$\{primaryLabel\}/);
-  assert.match(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
+  assert.doesNotMatch(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
   assert.match(tableSource, /onSearchChange=\{updateGlobalFilter\}/);
   assert.match(tableSource, /primaryLabel=\{activePeriodLabel\}/);
-  assert.match(tableSource, /setRowSelection\(\{\}\);[\s\S]*table\.resetPagination\(\);/);
+  // Atomic filter/page resets are exercised by management-numbered-pagination.test.mjs.
   assert.match(tableSource, /aria-busy=\{loading\}/);
   assert.match(tableSource, /데이터를 불러오는 중입니다/);
 });

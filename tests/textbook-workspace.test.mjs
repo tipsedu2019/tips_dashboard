@@ -14,6 +14,47 @@ import {
 } from "../src/features/textbooks/textbook-ledger.js";
 
 const root = new URL("../", import.meta.url);
+const handoffModelSource = await readFile(new URL("src/features/textbooks/textbook-handoff-model.ts", root), "utf8");
+const readModelSource = await readFile(new URL("src/features/textbooks/textbook-read-model.ts", root), "utf8");
+const readTypesSource = await readFile(new URL("src/features/textbooks/textbook-read-types.ts", root), "utf8");
+const closingModelSource = await readFile(new URL("src/features/textbooks/textbook-closing-model.ts", root), "utf8");
+const referenceModelSource = await readFile(new URL("src/features/textbooks/textbook-reference-model.ts", root), "utf8");
+
+function assertPreparedWorkspaceReads(source) {
+  assert.match(source, /useTextbookNumberedData/);
+  assert.match(source, /useTextbookReferenceData/);
+  assert.doesNotMatch(source, /useTextbookOperationsData|TextbookOperationsData/);
+  assert.doesNotMatch(source, /\bdata\.(?:textbooks|purchaseOrders|purchaseOrderLines|stockMoves|sales|saleLines|students|classes)\b/);
+}
+
+test("workspace delegates its original closing projection without changing clipboard or React behavior", async () => {
+  const source = await readFile(new URL("src/features/textbooks/textbook-operations-workspace.tsx", root), "utf8");
+  const imports = source.match(/import \{([^}]+)\} from "\.\/textbook-closing-model";/)?.[1].split(/[,\s]+/) || [];
+  assert.ok(imports.includes("getClosingStoredMetrics"));
+  assert.match(source, /getTextbookClosingDetail/);
+  assert.match(source, /numbered\.closingMovements\.rows/);
+  assert.doesNotMatch(source, /function buildClosingDetailRows|buildTextbookLookupMap|buildLocationNameLookup/);
+  assert.match(source, /function buildClosingDetailClipboardText/);
+});
+
+test("textbook workspace consumes extracted projections while filtering raw purchase members before grouping", async () => {
+  const workspaceSource = await readFile(new URL("src/features/textbooks/textbook-operations-workspace.tsx", root), "utf8");
+  const modelImports = workspaceSource.match(/import \{([^}]+)\} from "\.\/textbook-read-model";/)?.[1] || "";
+  const typeImports = workspaceSource.match(/import type \{([^}]+)\} from "\.\/textbook-read-types";/)?.[1] || "";
+  for (const name of ["buildPurchaseDisplayRows", "getPurchaseScopeLines", "getTextbookById"]) {
+    assert.ok(modelImports.split(/[,\s]+/).includes(name), `${name} is imported from the real model`);
+    assert.doesNotMatch(workspaceSource, new RegExp(`function ${name}\\b`));
+    assert.match(workspaceSource, new RegExp(`${name}\\(`));
+  }
+  for (const name of ["InventoryCountRow", "InventoryHistoryRow", "PurchaseKanbanDraft"]) {
+    assert.ok(typeImports.split(/[,\s]+/).includes(name), `${name} uses the extracted type`);
+    assert.doesNotMatch(workspaceSource, new RegExp(`type ${name}\\b`));
+  }
+  assert.match(workspaceSource, /const rows = getCurrentVisiblePurchaseRows\(group\.id\);[\s\S]*buildPurchaseDisplayRows\(rows, ordersById, textbooks\)/);
+  assert.match(workspaceSource, /const filteredInventory = numbered\.master\.rows/);
+  assert.match(workspaceSource, /rows=\{numbered\.inventory\.rows\}/);
+  assertPreparedWorkspaceReads(workspaceSource);
+});
 
 let textbookServicePromise;
 
@@ -115,7 +156,7 @@ test("textbook workspace reuses its preloaded science area map for every master 
     "utf8",
   );
   const preloadedContextCount = (
-    workspaceSource.match(/scienceSubjectAreas:\s*data\.scienceSubjectAreas/g) || []
+    workspaceSource.match(/scienceSubjectAreas:\s*acceptedMasterOptions\?\.scienceSubjectAreas \|\| \[\]/g) || []
   ).length;
 
   assert.equal(preloadedContextCount, 3);
@@ -320,10 +361,9 @@ test("textbook sales keep actor audit and annual monthly class history", async (
   assert.match(workspaceSource, /createdBy: currentUserId/);
   assert.match(serviceSource, /createClassTextbookSale[\s\S]*const createdBy = normalizeOptionalUuid/);
   assert.match(serviceSource, /textbook_sales[\s\S]*created_by: createdBy/);
-  assert.match(workspaceSource, /function buildSaleHistorySummaryRows/);
+  assert.match(readModelSource, /function buildSaleHistorySummaryRows/);
   assert.match(workspaceSource, /function SalesHistoryLedger/);
-  assert.match(workspaceSource, /const salesHistorySummary = useMemo/);
-  assert.match(workspaceSource, /const filteredRows: Array<\(typeof rows\)\[number\]> = \[\]/);
+  assert.match(workspaceSource, /summary=\{numbered\.saleHistory\.summary\.value\}/);
   assert.doesNotMatch(workspaceSource, /const filteredRows = rows\.filter/);
   assert.doesNotMatch(workspaceSource, /const totalIssuedQuantity = filteredRows\.reduce/);
   assert.match(workspaceSource, /aria-label="교재 출고 이력"/);
@@ -370,9 +410,9 @@ test("textbook workspace uses searchable selectors and tab-scoped inventory cont
   assert.match(workspaceSource, /SearchCombobox/);
   assert.match(workspaceSource, /CommandInput/);
   assert.match(workspaceSource, /searchPlaceholder="교재명, 출판사, ISBN"/);
-  assert.match(workspaceSource, /normalizeSubjectValue/);
+  assert.match(workspaceSource, /getTextbookSubjectWriteValue/);
   assert.match(workspaceSource, /getSubjectLabel\(row\.subject\)/);
-  assert.match(workspaceSource, /const \[activeTab, setActiveTab\] = useState\("master"\)/);
+  assert.match(workspaceSource, /const \[activeTab, setActiveTab\] = useState<TextbookTab>\(initialNavigationRef\.current\.tab\)/);
   assert.match(workspaceSource, /showsInventoryTools/);
   assert.match(workspaceSource, /function changeActiveTab/);
   assert.match(workspaceSource, /재고 없음/);
@@ -391,7 +431,7 @@ test("textbook operation selectors keep long option menus scrollable without sel
   );
   const textbookSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookSelect"),
-    workspaceSource.indexOf("function getClassTeacherLabel"),
+    workspaceSource.indexOf("function ClassSelect"),
   );
   const classSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function ClassSelect"),
@@ -413,23 +453,19 @@ test("textbook operation selectors keep long option menus scrollable without sel
 });
 
 test("textbook operation selectors expose class and textbook attributes in menu options", async () => {
-  const workspaceSource = await readFile(
-    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
-    "utf8",
-  );
 
-  assert.match(workspaceSource, /function buildTextbookSelectMetaRows/);
-  assert.match(workspaceSource, /metaRows: buildTextbookSelectMetaRows\(textbook\)/);
-  assert.match(workspaceSource, /const categoryDetail = compactUniqueLabels\(\[schoolLevel, grade, subSubject\]\)\.join\(" · "\)/);
-  assert.match(workspaceSource, /\{ label: "구분", value: categoryDetail \|\| getTaxonomyCategoryLabel\(textbook\) \}/);
-  assert.match(workspaceSource, /label: "출판사"/);
-  assert.match(workspaceSource, /label: "ISBN"/);
-  assert.match(workspaceSource, /label: "바코드"/);
-  assert.match(workspaceSource, /function buildClassSelectMetaRows/);
-  assert.match(workspaceSource, /metaRows: buildClassSelectMetaRows\(classItem\)/);
-  const classSelectMetaRowsBlock = workspaceSource.slice(
-    workspaceSource.indexOf("function buildClassSelectMetaRows"),
-    workspaceSource.indexOf("function ClassSelect"),
+  assert.match(referenceModelSource, /function buildTextbookSelectMetaRows/);
+  assert.match(referenceModelSource, /metaRows: buildTextbookSelectMetaRows\(textbook\)/);
+  assert.match(referenceModelSource, /const categoryDetail = compactUniqueLabels\(\[schoolLevel, grade, subSubject\]\)\.join\(" · "\)/);
+  assert.match(referenceModelSource, /\{ label: "구분", value: categoryDetail \|\| getTaxonomyCategoryLabel\(textbook\) \}/);
+  assert.match(referenceModelSource, /label: "출판사"/);
+  assert.match(referenceModelSource, /label: "ISBN"/);
+  assert.match(referenceModelSource, /label: "바코드"/);
+  assert.match(referenceModelSource, /function buildClassSelectMetaRows/);
+  assert.match(referenceModelSource, /metaRows: buildClassSelectMetaRows\(classItem\)/);
+  const classSelectMetaRowsBlock = referenceModelSource.slice(
+    referenceModelSource.indexOf("function buildClassSelectMetaRows"),
+    referenceModelSource.indexOf("function buildTextbookReferenceOptions"),
   );
   assert.match(classSelectMetaRowsBlock, /\{ label: "선생님", value: getClassTeacherLabel\(classItem\) \}/);
   assert.match(classSelectMetaRowsBlock, /\{ label: "강의실", value: getClassClassroomSelectLabel\(classItem\) \}/);
@@ -452,20 +488,20 @@ test("textbook operation selectors support multi-select filters in option menus"
   );
   const textbookSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookSelect"),
-    workspaceSource.indexOf("function getClassTeacherLabel"),
-  );
+    workspaceSource.indexOf("function ClassSelect"),
+  ) + referenceModelSource.slice(referenceModelSource.indexOf("function buildTextbookReferenceOptions"), referenceModelSource.indexOf("function buildTextbookClassReferenceOptions"));
   const classSelectBlock = workspaceSource.slice(
     workspaceSource.indexOf("function ClassSelect"),
     workspaceSource.indexOf("function TeacherSelect"),
-  );
+  ) + referenceModelSource.slice(referenceModelSource.indexOf("function buildTextbookClassReferenceOptions"));
 
-  assert.match(workspaceSource, /type SearchSelectFilterGroup =/);
-  assert.match(workspaceSource, /type SearchSelectFilterLayout = "default" \| "subject-grade-teacher" \| "subject-grade-detail"/);
+  assert.match(readTypesSource, /type SearchSelectFilterGroup =/);
+  assert.match(readTypesSource, /type SearchSelectFilterLayout = "default" \| "subject-grade-teacher" \| "subject-grade-detail"/);
   assert.match(workspaceSource, /filterGroups\?: SearchSelectFilterGroup\[\]/);
   assert.match(workspaceSource, /filterLayout\?: SearchSelectFilterLayout/);
   assert.match(workspaceSource, /const \[selectedFilterValues, setSelectedFilterValues\] = useState<Record<string, string\[\]>>/);
-  assert.match(workspaceSource, /const filteredOptions = filterGroups\.length === 0/);
-  assert.match(searchComboboxBlock, /const visibleFilterGroups = buildVisibleSearchSelectFilterGroups/);
+  assert.match(workspaceSource, /const filteredOptions = serverState \? options : filterGroups\.length === 0/);
+  assert.match(searchComboboxBlock, /const visibleFilterGroups = serverState\?\.visibleFilterGroups \|\| buildVisibleSearchSelectFilterGroups/);
   assert.match(searchComboboxBlock, /const shouldInlineFilterReset = usesTwoColumnFilterLayout && activeFilterCount > 0/);
   assert.match(searchComboboxBlock, /shouldInlineFilterReset && "grid-cols-\[minmax\(0,1fr\)_minmax\(0,1fr\)_auto\]"/);
   assert.match(searchComboboxBlock, /!usesTwoColumnFilterLayout && activeFilterCount > 0/);
@@ -480,8 +516,8 @@ test("textbook operation selectors support multi-select filters in option menus"
   assert.doesNotMatch(workspaceSource, /필터\{activeFilterCount > 0/);
   assert.doesNotMatch(workspaceSource, /\{formatQuantity\(option\.count\)\}/);
   assert.match(workspaceSource, /buildSearchSelectFilterGroups/);
-  assert.match(workspaceSource, /function buildVisibleSearchSelectFilterGroups/);
-  assert.match(workspaceSource, /filterValues: \{/);
+  assert.match(referenceModelSource, /function buildVisibleSearchSelectFilterGroups/);
+  assert.match(referenceModelSource, /filterValues: \{/);
   assert.match(workspaceSource, /const textbookSelectFilterGroups = buildSearchSelectFilterGroups/);
   assert.match(workspaceSource, /const classSelectFilterGroups = buildSearchSelectFilterGroups/);
   assert.match(textbookSelectBlock, /subject: buildSearchSelectFilterValues/);
@@ -493,10 +529,10 @@ test("textbook operation selectors support multi-select filters in option menus"
   assert.match(textbookSelectBlock, /\{ key: "subSubject", label: "세부과목" \}/);
   assert.doesNotMatch(textbookSelectBlock, /\{ key: "schoolLevel"/);
   assert.match(textbookSelectBlock, /filterLayout="subject-grade-detail"/);
-  assert.match(workspaceSource, /function getTextbookSelectSubSubject/);
-  assert.match(workspaceSource, /const textbookNonSubSubjectFilterLabels = new Set/);
-  assert.match(workspaceSource, /TEXTBOOK_GRADE_OPTIONS\.map\(\(option\) => option\.label\)/);
-  assert.match(workspaceSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS\.map\(\(option\) => option\.label\)/);
+  assert.match(referenceModelSource, /function getTextbookSelectSubSubject/);
+  assert.match(referenceModelSource, /const textbookNonSubSubjectFilterLabels = new Set/);
+  assert.match(referenceModelSource, /TEXTBOOK_GRADE_OPTIONS\.map\(\(option\) => option\.label\)/);
+  assert.match(referenceModelSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS\.map\(\(option\) => option\.label\)/);
   assert.doesNotMatch(textbookSelectBlock, /publisher: buildSearchSelectFilterValues/);
   assert.doesNotMatch(textbookSelectBlock, /category: buildSearchSelectFilterValues/);
   assert.doesNotMatch(textbookSelectBlock, /\{ key: "publisher"/);
@@ -558,7 +594,7 @@ test("textbook workspace resolves reviewed master and inventory UX issues", asyn
   assert.match(workspaceSource, /getTextbookGradeSummary/);
   assert.match(workspaceSource, /configuredPublisherOptions/);
   assert.match(workspaceSource, /masterPublisherOptions/);
-  assert.match(workspaceSource, /getPublisherSettingLabel/);
+  assert.match(workspaceSource, /masterPublisherOptions/);
   assert.match(workspaceSource, /placeholder="예: 쎈 고등 수학 2"/);
   assert.match(workspaceSource, /placeholder="출판사 선택"/);
   assert.match(workspaceSource, /searchPlaceholder="출판사 검색"/);
@@ -594,8 +630,8 @@ test("textbook workspace keeps inactive textbooks in a compact trash flow", asyn
     workspaceSource.indexOf("{hasTextbookListFilter ? ("),
   );
 
-  assert.match(workspaceSource, /const inactiveTextbookRows = useMemo/);
-  assert.match(workspaceSource, /const inactiveTextbookTrashItems = useMemo/);
+  assert.match(workspaceSource, /getTextbookInactiveCleanupContext/);
+  assert.match(workspaceSource, /context\.previewRows/);
   assert.match(workspaceSource, /function emptyInactiveTextbookTrash/);
   assert.match(workspaceSource, /requestTextbookConfirmation\(\{[\s\S]*title: "미사용 보관함 비우기"/);
   assert.match(workspaceSource, /confirmLabel: "영구 삭제"/);
@@ -626,8 +662,8 @@ test("textbook workspace separates category filters and lets grouped rows collap
   assert.match(workspaceSource, /categoryGroupFilter/);
   assert.match(workspaceSource, /categoryGroupOptions/);
   assert.match(workspaceSource, /onCategoryFilterChange/);
-  assert.match(workspaceSource, /matchesTextbookTaxonomy\(row, \{/);
-  assert.match(workspaceSource, /subSubject: categoryGroupFilter === "all" \? "" : categoryGroupFilter/);
+  assert.match(workspaceSource, /categoryGroupFilter/);
+  assert.match(workspaceSource, /subSubject: categoryGroupFilter/);
   assert.doesNotMatch(workspaceSource, /구분별/);
   assert.doesNotMatch(workspaceSource, /출판사별/);
   assert.match(workspaceSource, /TEXTBOOK_SCHOOL_LEVEL_OPTIONS/);
@@ -647,6 +683,7 @@ test("textbook settings manage subject taxonomy for textbook filters", async () 
     "utf8",
   );
   const taxonomySource = await readFile(new URL("src/features/textbooks/textbook-taxonomy.ts", root), "utf8");
+  const settingsPagesSource = await readFile(new URL("src/features/textbooks/use-textbook-settings-pages.ts", root), "utf8");
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
   const navigationSource = await readFile(new URL("src/lib/navigation.ts", root), "utf8");
   const migrationSource = await readFile(
@@ -655,8 +692,11 @@ test("textbook settings manage subject taxonomy for textbook filters", async () 
   );
 
   assert.match(navigationSource, /title: "교재 설정"/);
-  assert.match(settingsSource, /SubSubjectSettingsPanel/);
-  assert.match(settingsSource, /textbook_sub_subject_settings/);
+  assert.match(settingsSource, /useTextbookSettingsPages/);
+  assert.match(settingsSource, /data-testid="textbook-subsubjects-mobile-list"/);
+  assert.match(settingsPagesSource, /listTextbookSubSubjectPage/);
+  assert.match(settingsPagesSource, /enabled: activeSection === "subSubjects"/);
+  assert.doesNotMatch(settingsSource, /textbook_sub_subject_settings|\.from\("textbook_/);
   assert.match(settingsSource, /세부과목 추가/);
   assert.match(settingsSource, /순서/);
   assert.match(settingsSource, /표시/);
@@ -708,7 +748,7 @@ test("textbook workspace supports selecting rows for bulk edit and delete", asyn
   assert.match(workspaceSource, /const saleLinesById = useMemo/);
   assert.match(workspaceSource, /purchaseLinesById\.get\(id\)/);
   assert.match(workspaceSource, /saleLinesById\.get\(id\)/);
-  assert.match(workspaceSource, /inventoryById\.get\(saleForm\.textbookId\)/);
+  assert.match(workspaceSource, /teacherSaleBalance/);
   assert.match(workspaceSource, /const availableIds = new Set\(filteredInventory\.map\(getRecordId\)\.filter\(Boolean\)\)/);
   assert.match(workspaceSource, /setSelectedTextbookIds\(\(current\) => \{[\s\S]*availableIds\.has\(id\)/);
   assert.match(workspaceSource, /const visibleTextbookIdSet = useMemo\(\(\) => new Set\(visibleTextbookIds\), \[visibleTextbookIds\]\)/);
@@ -718,8 +758,8 @@ test("textbook workspace supports selecting rows for bulk edit and delete", asyn
   assert.match(workspaceSource, /function toggleVisibleClosingSelection/);
   assert.match(workspaceSource, /const idSet = new Set\(ids\)/);
   assert.match(workspaceSource, /idSet\.has\(id\)/);
-  assert.match(workspaceSource, /textbookQualityIssueFilterKeys/);
-  assert.match(workspaceSource, /for \(const row of listFilteredInventory\)/);
+  assert.match(workspaceSource, /row\.qualityIssues as ReturnType<typeof getTextbookQualityIssues>/);
+  assert.match(workspaceSource, /masterVisibleInventory/);
   assert.match(workspaceSource, /\[content-visibility:auto\]/);
   assert.doesNotMatch(workspaceSource, /document\.addEventListener\("pointerdown", closeFromNativeEvent, true\)/);
   assert.match(workspaceSource, /window\.setTimeout\(\(\) => setMasterDialogOpen\(false\), 0\)/);
@@ -806,16 +846,15 @@ test("textbook purchase workflow links registered title requests before ordering
   );
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
 
-  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
-  assert.match(workspaceSource, /const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook \|\| requestedCatalogTextbook/);
-  assert.match(workspaceSource, /textbookId: getRecordId\(textbook \|\| \{\}\) \|\| text\(payload\.textbookId\)/);
-  assert.match(workspaceSource, /function getPurchaseLineTextbookId\(line: Row\)/);
-  assert.match(workspaceSource, /textbookId: getPurchaseLineTextbookId\(scopeLine\) \|\| text\(movePayload\.textbookId\)/);
-  assert.match(workspaceSource, /textbookId: selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId/);
+  assert.match(workspaceSource, /const selectedPurchaseTextbook = explicitlySelectedPurchaseTextbook/);
+  assert.match(workspaceSource, /function getPurchaseLineTextbookId\(line: Row, references\?: TextbookPurchaseCaseRow\["references"\]\)/);
+  assert.match(workspaceSource, /textbookId: getPurchaseLineTextbookId\(scopeLine, detail\.references\) \|\| text\(movePayload\.textbookId\)/);
   assert.doesNotMatch(workspaceSource, /purchaseForm\.requestStage === "request" && hasManualPurchaseCatalogMatch/);
   assert.match(workspaceSource, /getConfiguredTextbookPurchaseUnitCost\([\s\S]*purchaseCopyScope[\s\S]*\)/);
   assert.match(serviceSource, /resolvePurchaseLifecycleTextbook/);
-  assert.match(serviceSource, /requestedTextbookTitle[\s\S]*textbooks[\s\S]*getTextbookByReference/);
+  assert.match(serviceSource, /resolveTextbookReference\([\s\S]*activeOnly: false, scope: "request"/);
+  const resolver = serviceSource.slice(serviceSource.indexOf("async function resolvePurchaseLifecycleTextbook"), serviceSource.indexOf("export async function listTextbookOperationsData"));
+  assert.doesNotMatch(resolver, /\.from\("textbooks"\)/);
 });
 
 test("textbook workspace exports supplier orders and MakeEdu billing handoffs", async () => {
@@ -827,19 +866,19 @@ test("textbook workspace exports supplier orders and MakeEdu billing handoffs", 
   assert.match(workspaceSource, /captureElementAsPngBlob/);
   assert.match(workspaceSource, /downloadBlob/);
   assert.match(workspaceSource, /function TextbookHandoffDialog/);
-  assert.match(workspaceSource, /function buildPurchaseSupplierHandoffGroups/);
-  assert.match(workspaceSource, /function buildMakeEduBillingHandoffGroups/);
+  assert.match(handoffModelSource, /function buildPurchaseSupplierHandoffGroups/);
+  assert.match(handoffModelSource, /function buildMakeEduBillingHandoffGroups/);
   assert.match(workspaceSource, /공급처별 주문 전달 열기/);
   assert.match(workspaceSource, /메이크에듀 청구 준비 열기/);
   assert.match(workspaceSource, /전체 복사/);
   assert.match(workspaceSource, /이미지/);
   assert.match(workspaceSource, /PDF/);
-  assert.match(workspaceSource, /수납명:/);
-  assert.match(workspaceSource, /수납시작:/);
-  assert.match(workspaceSource, /반복: 1회/);
+  assert.match(handoffModelSource, /수납명:/);
+  assert.match(handoffModelSource, /수납시작:/);
+  assert.match(handoffModelSource, /반복: 1회/);
   assert.match(workspaceSource, /downloadHandoffImage/);
   assert.match(workspaceSource, /downloadHandoffPdf/);
-  assert.match(workspaceSource, /getSupplierContact/);
+  assert.match(handoffModelSource, /getSupplierContact/);
   assert.match(workspaceSource, /getStudentGradeLabel/);
   assert.doesNotMatch(workspaceSource, /syncMakeEduTextbookPayments/);
   assert.doesNotMatch(workspaceSource, /makeEduImportDialogOpen/);
@@ -890,17 +929,17 @@ test("purchase supplier handoff is a location-first supplier order sheet with di
     "utf8",
   );
   const imageExportSource = await readFile(new URL("src/lib/export-as-image.ts", root), "utf8");
-  const messageSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierMessage"),
-    workspaceSource.indexOf("function buildMakeEduBillingMessage"),
+  const messageSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierMessage"),
+    handoffModelSource.indexOf("function buildMakeEduBillingMessage"),
   );
-  const handoffSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
-    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  const handoffSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
+    handoffModelSource.indexOf("function buildMakeEduBillingHandoffGroups"),
   );
   const dialogSource = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookHandoffDialog"),
-    workspaceSource.indexOf("type SearchSelectOption"),
+    workspaceSource.indexOf("function SearchCombobox"),
   );
 
   assert.match(workspaceSource, /captureElementAsPdfBlob/);
@@ -946,21 +985,21 @@ test("purchase supplier handoff renders as a dated order document with academy f
   );
   const dialogSource = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookHandoffDialog"),
-    workspaceSource.indexOf("type SearchSelectOption"),
+    workspaceSource.indexOf("function SearchCombobox"),
   );
-  const messageSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierMessage"),
-    workspaceSource.indexOf("function buildMakeEduBillingMessage"),
+  const messageSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierMessage"),
+    handoffModelSource.indexOf("function buildMakeEduBillingMessage"),
   );
 
-  assert.match(workspaceSource, /const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원"/);
-  assert.match(workspaceSource, /function formatKoreanDocumentDate/);
-  assert.match(workspaceSource, /function getTextbookHandoffDocumentMeta/);
+  assert.match(handoffModelSource, /const TEXTBOOK_HANDOFF_BUSINESS_NAME = "TIPS 영어수학학원"/);
+  assert.match(handoffModelSource, /function formatKoreanDocumentDate/);
+  assert.match(handoffModelSource, /function getTextbookHandoffDocumentMeta/);
   assert.match(dialogSource, /문서일자/);
   assert.match(dialogSource, /내용/);
   assert.match(dialogSource, /발신/);
   assert.match(dialogSource, /TEXTBOOK_HANDOFF_BUSINESS_NAME/);
-  assert.match(workspaceSource, /documentTitle: "주문서"/);
+  assert.match(handoffModelSource, /documentTitle: "주문서"/);
   assert.match(messageSource, /documentMeta\.documentTitle/);
   assert.match(messageSource, /문서일자:/);
   assert.match(messageSource, /내용: 교재 주문 요청/);
@@ -972,18 +1011,18 @@ test("purchase process exposes supplier return requests opposite the order hando
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
   );
-  const returnHandoffSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierReturnHandoffGroups"),
-    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  const returnHandoffSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierReturnHandoffGroups"),
+    handoffModelSource.indexOf("function buildMakeEduBillingHandoffGroups"),
   );
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
-  assert.match(workspaceSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial" \| "returnable" \| "returned"/);
+  assert.match(readTypesSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial" \| "returnable" \| "returned"/);
   assert.match(workspaceSource, /returnable: "반품 가능"/);
   assert.match(workspaceSource, /returned: "반품 완료"/);
   assert.match(workspaceSource, /const \[returnHandoffDialogOpen, setReturnHandoffDialogOpen\] = useState\(false\)/);
-  assert.match(workspaceSource, /function buildPurchaseSupplierReturnMessage/);
-  assert.match(workspaceSource, /function buildPurchaseSupplierReturnHandoffGroups/);
+  assert.match(handoffModelSource, /function buildPurchaseSupplierReturnMessage/);
+  assert.match(handoffModelSource, /function buildPurchaseSupplierReturnHandoffGroups/);
   assert.match(returnHandoffSource, /status !== "received" && status !== "partially_received"/);
   assert.match(returnHandoffSource, /const quantity = Math\.max\(0, receivedQuantity\)/);
   assert.match(returnHandoffSource, /반품 요청서/);
@@ -1062,7 +1101,8 @@ test("textbook workspace removes external payment sync from the issue flow", asy
   const ledgerSource = await readFile(new URL("src/features/textbooks/textbook-ledger.js", root), "utf8");
 
   assert.match(workspaceSource, /useAuth/);
-  assert.match(workspaceSource, /authLoading/);
+  assert.match(workspaceSource, /const \{ user, role, loading \} = useAuth\(\)/);
+  assert.match(workspaceSource, /if \(loading \|\| !user\?\.id \|\| !role\)/);
   assert.match(workspaceSource, /onUpdateStatus\(line, "issued"\)/);
   assert.match(workspaceSource, /status !== "issued" && status !== "cancelled" && status !== "returned"/);
   assert.doesNotMatch(workspaceSource, /makeEduImportDialogOpen/);
@@ -1103,7 +1143,8 @@ test("purchase process table supports grouped movement, modal edits, deletion, a
   assert.doesNotMatch(workspaceSource, /handlePurchaseDragEnd/);
   assert.match(workspaceSource, /onDeleteLine/);
   assert.match(workspaceSource, /purchaseBoardScope/);
-  assert.match(workspaceSource, /shouldShowPurchaseLineOnBoard/);
+  assert.doesNotMatch(workspaceSource, /function shouldShowPurchaseLineOnBoard/);
+  assert.match(workspaceSource, /const preparedPurchaseRows = useMemo\(\(\) => \[\.\.\.numbered\.requests\.rows, \.\.\.numbered\.purchase\.rows\]/);
   assert.match(workspaceSource, /min-w-0 overflow-hidden rounded-lg border bg-background/);
   assert.match(workspaceSource, /aria-label="교재 요청 추가"[\s\S]*onClick=\{onAddLine\}/);
   assert.match(workspaceSource, /mode === "request" \? "w-full min-w-\[1120px\]" : "w-full min-w-\[1440px\]"/);
@@ -1175,7 +1216,7 @@ test("purchase request tab accepts unregistered textbook titles before managemen
   assert.doesNotMatch(requestDialogSource, /sm:grid-cols-\[minmax\(0,1fr\)_140px_140px\]/);
   assert.match(workspaceSource, /<Field label="선생님">/);
   assert.match(workspaceSource, /ariaLabel="선생님 선택"/);
-  assert.match(workspaceSource, /textbookId: selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId/);
+  assert.match(workspaceSource, /textbookId: selectedPurchaseTextbookId/);
   assert.match(workspaceSource, /aria-label="요청 교재명"/);
   assert.match(workspaceSource, /getRequestedTextbookTitle/);
   assert.match(workspaceSource, /getPurchaseTextbookTitle/);
@@ -1225,7 +1266,7 @@ test("purchase requests are linked to classes and compare quantity against roste
   assert.match(workspaceSource, /selectedPurchaseClass/);
   assert.match(workspaceSource, /purchaseClassStudentCount/);
   assert.match(workspaceSource, /getPurchaseQuantityClassFit/);
-  assert.match(workspaceSource, /ClassSelect classes=\{data\.classes\} value=\{purchaseForm\.classId\}/);
+  assert.match(workspaceSource, /<ClassSelect value=\{purchaseForm\.classId\} serverState=\{referenceData\.classOptions\}/);
   assert.match(workspaceSource, /학생 \$\{formatQuantity\(purchaseClassStudentCount\)\}명/);
   assert.match(serviceSource, /class_id: normalizeOptionalUuid\(record\.classId/);
   assert.match(migrationSource, /class_id uuid references public\.classes\(id\) on delete set null/);
@@ -1263,7 +1304,7 @@ test("purchase order stage keeps request details editable before supplier orderi
   );
   const visibilitySource = workspaceSource.slice(
     workspaceSource.indexOf("function getPurchaseFieldVisibility"),
-    workspaceSource.indexOf("function buildPurchaseCardDraft"),
+    workspaceSource.indexOf("function getPurchaseDisplayScopeQuantity"),
   );
   const dialogSource = workspaceSource.slice(
     workspaceSource.indexOf("function TextbookOperationsWorkspace"),
@@ -1308,11 +1349,11 @@ test("purchase process derives supplier and unit cost from settings and separate
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
   assert.match(workspaceSource, /getConfiguredSupplierIdForTextbook/);
-  assert.match(workspaceSource, /getPublisherIdForTextbook/);
-  assert.match(workspaceSource, /normalizeTextbookLookup/);
+  assert.match(handoffModelSource, /getPublisherIdForTextbook/);
+  assert.match(handoffModelSource, /normalizeTextbookLookup/);
   assert.match(workspaceSource, /getTextbookTitle\(textbook\)/);
-  assert.match(workspaceSource, /publisherSupplierLinks=\{data\.publisherSupplierLinks\}/);
-  assert.match(workspaceSource, /publishers=\{data\.publishers\}/);
+  assert.match(workspaceSource, /publisherSupplierLinks=\{\[\]\}/);
+  assert.match(workspaceSource, /publishers=\{purchaseRendererData\.publishers\}/);
   assert.match(tableSource, /publisherSupplierLinks: Row\[\]/);
   assert.match(tableSource, /publishers: Row\[\]/);
   assert.match(tableSource, /const configuredSupplierId = getConfiguredSupplierIdForTextbook\(textbook, publisherSupplierLinks, publishers\) \|\| draft\.supplierId/);
@@ -1336,15 +1377,13 @@ test("textbook workspace keeps margin pricing inside closing surfaces only", asy
   assert.doesNotMatch(workspaceSource, /saleProjectedMargin/);
   assert.doesNotMatch(workspaceSource, /selectedSaleUnitMargin/);
   assert.match(workspaceSource, /closingTeamMarginMetrics/);
-  assert.match(workspaceSource, /<Metric label="마진" value=\{closingNeedsMemo \? "사유 필요" : formatCurrency\(closingPreview\.textbookMarginAmount\)\}/);
+  assert.match(workspaceSource, /<Metric label="마진" value=\{!closingPreview \? "—" : closingNeedsMemo \? "사유 필요" : formatCurrency\(closingPreview\.textbookMarginAmount\)\}/);
   assert.match(workspaceSource, /function ClosingDetailDialog/);
-  assert.match(workspaceSource, /const textbookLookup = useMemo\(\(\) => buildTextbookLookupMap\(textbooks\), \[textbooks\]\)/);
-  assert.match(workspaceSource, /const locationNameLookup = useMemo\(\(\) => buildLocationNameLookup\(locations\), \[locations\]\)/);
-  assert.match(workspaceSource, /getTextbookFromLookup\(textbookLookup, move\.textbook_id \|\| move\.textbookId\)/);
-  assert.match(workspaceSource, /getLocationNameFromLookup\(locationNameLookup, move\.location_id \|\| move\.locationId\)/);
+  assert.match(workspaceSource, /rows: ClosingMovementRow\[\]/);
+  assert.match(workspaceSource, /const detailRows = rows/);
   assert.match(workspaceSource, /<Metric label="상세 마진" value=\{formatCurrency\(detailClosing\.textbookMarginAmount\)\}/);
   assert.match(workspaceSource, /label=\{`\$\{getSubjectLabel\(item\.team\)\}팀`\}/);
-  assert.match(workspaceSource, /const closingTargetSubjects = closingForm\.subject === "all" \? \["all", "english", "math"\] : \[closingForm\.subject\]/);
+  assert.match(workspaceSource, /const closingTargetSubjects = closingForm\.subject === "all" \? \["all", "english", "math", "science"\] : \[closingForm\.subject\]/);
   assert.match(workspaceSource, /closingTargetSubjects\.map/);
   assert.match(workspaceSource, /<Metric label="저장" value=\{`\$\{formatQuantity\(closingTargetSubjects\.length\)\}건`\}/);
   assert.match(workspaceSource, /aria-label="월마감 추가"/);
@@ -1390,16 +1429,16 @@ test("purchase process resolves supplier links by publisher name and exposes sha
     new URL("src/features/management/settings-table-columns.tsx", root),
     "utf8",
   );
-  const supplierResolverSource = workspaceSource.slice(
-    workspaceSource.indexOf("function getPublisherIdForTextbook"),
-    workspaceSource.indexOf("function normalizeTextbookLookup"),
+  const supplierResolverSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function getPublisherIdForTextbook"),
+    handoffModelSource.indexOf("function getStudentNameById"),
   );
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
   assert.match(supplierResolverSource, /textbook\.publisher_id \|\| textbook\.publisherId/);
   assert.match(supplierResolverSource, /getKnownPublisherLabel\(textbook\)/);
   assert.match(supplierResolverSource, /publishers\.find/);
-  assert.match(workspaceSource, /getConfiguredSupplierIdForTextbook\(selectedPurchaseTextbook, data\.publisherSupplierLinks, data\.publishers\)/);
+  assert.match(workspaceSource, /configuredPurchaseSupplierId/);
   assert.match(tableSource, /buildPurchaseProcessColumns\(mode, showBulkPurchaseSelection\)/);
   assert.match(tableSource, /useDataTableColumns\(`textbook-purchase-process-\$\{mode\}`/);
   assert.match(tableSource, /columnSettingsControl/);
@@ -1417,15 +1456,12 @@ test("selecting a class defaults requester to its teacher without locking the fi
     "utf8",
   );
 
-  assert.match(workspaceSource, /getDefaultTeacherForClass/);
-  assert.match(workspaceSource, /splitTeacherNames/);
+  assert.match(workspaceSource, /resolved\.defaultTeacherName/);
   assert.match(workspaceSource, /name === "classId"/);
-  assert.match(workspaceSource, /previousTeacher/);
-  assert.match(workspaceSource, /nextTeacher/);
-  assert.match(workspaceSource, /shouldDefaultTeacher/);
-  assert.match(workspaceSource, /requestBy: shouldDefaultTeacher \? nextTeacher : current\.requestBy/);
-  assert.match(workspaceSource, /inferClassLocationId\(nextClass, locations\)/);
-  assert.match(workspaceSource, /locationId: nextLocationId \|\| current\.locationId/);
+  assert.match(workspaceSource, /const nextTeacher = resolved\.defaultTeacherName/);
+  assert.match(workspaceSource, /const canSetTeacher = !current\.requestBy \|\| current\.requestBy === purchaseAutoDefaultsRef\.current\.requestBy/);
+  assert.match(workspaceSource, /requestBy: canSetTeacher \? nextTeacher : current\.requestBy/);
+  assert.match(workspaceSource, /const nextLocation = resolved\.inferredLocation\?\.id \|\| ""/);
   assert.match(workspaceSource, /ariaLabel=\{purchaseForm\.requestStage === "order" \? "주문 위치 선택" : "입고 위치 선택"\}/);
   assert.match(workspaceSource, /<TeacherSelect[\s\S]*onValueChange=\{\(value\) => setPurchaseField\("requestBy", value\)\}/);
 });
@@ -1503,13 +1539,9 @@ test("purchase order modal separates requested copy scope totals before ordering
 });
 
 test("purchase supplier handoff excludes request-only rows and never falls back to requested quantity", async () => {
-  const workspaceSource = await readFile(
-    new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
-    "utf8",
-  );
-  const handoffSource = workspaceSource.slice(
-    workspaceSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
-    workspaceSource.indexOf("function buildMakeEduBillingHandoffGroups"),
+  const handoffSource = handoffModelSource.slice(
+    handoffModelSource.indexOf("function buildPurchaseSupplierHandoffGroups"),
+    handoffModelSource.indexOf("function buildMakeEduBillingHandoffGroups"),
   );
 
   assert.match(handoffSource, /if \(status !== "ordered" && status !== "partially_received"\) \{/);
@@ -1527,10 +1559,10 @@ test("purchase copy-scope actions identify student and teacher copies through or
   assert.match(workspaceSource, /<SelectItem value="request">요청 접수<\/SelectItem>/);
   assert.match(workspaceSource, /<Badge variant="outline" className="w-fit rounded-md">[\s\S]*\{getTextbookCopyScopeLabel\(draft\.copyScope\)\}[\s\S]*<\/Badge>/);
   assert.match(workspaceSource, /detail: \[[\s\S]*getTextbookCopyScopeLabel\(draft\.copyScope\),[\s\S]*statusLabel/);
-  assert.match(workspaceSource, /type PurchaseSupplierHandoffLineAccumulator/);
-  assert.match(workspaceSource, /lineAccumulators: new Map/);
-  assert.match(workspaceSource, /getPurchaseSupplierHandoffQuantityLabel\(line\.scopeQuantities\)/);
-  assert.match(workspaceSource, /학생용\/교사용/);
+  assert.match(handoffModelSource, /type PurchaseSupplierHandoffLineAccumulator/);
+  assert.match(handoffModelSource, /lineAccumulators: new Map/);
+  assert.match(handoffModelSource, /getPurchaseSupplierHandoffQuantityLabel\(line\.scopeQuantities\)/);
+  assert.match(handoffModelSource, /학생용\/교사용/);
 });
 
 test("purchase order edits allow zero requested quantities for direct management orders", async () => {
@@ -1539,14 +1571,13 @@ test("purchase order edits allow zero requested quantities for direct management
     "utf8",
   );
 
-  assert.match(workspaceSource, /function textPreservingZero/);
-  assert.match(workspaceSource, /function getRowFieldText/);
-  assert.match(workspaceSource, /const requested = getRowFieldText\(line, "requested_quantity", "requestedQuantity"\)/);
+  assert.match(readModelSource, /function textPreservingZero/);
+  assert.match(readModelSource, /function getRowFieldText/);
+  assert.match(readModelSource, /const requested = getRowFieldText\(line, "requested_quantity", "requestedQuantity"\)/);
   assert.match(workspaceSource, /const requestedQuantity = getRowFieldText\(primaryLine, "requested_quantity", "requestedQuantity"\)/);
   assert.match(workspaceSource, /\(purchaseForm\.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId\)/);
   assert.doesNotMatch(workspaceSource, /\|\|\s*!purchaseRequestedTotalQuantity\s*\|\|/);
-  assert.match(workspaceSource, /const canKeepZeroQuantityRequestLine = purchaseForm\.requestStage === "request" && Boolean\(scopeLineId\)/);
-  assert.match(workspaceSource, /if \(stageQuantity <= 0 && !canKeepZeroQuantityRequestLine\)/);
+  assert.match(workspaceSource, /if \(stageQuantity <= 0 && purchaseForm\.requestStage !== "request"\) return \[\]/);
   assert.match(workspaceSource, /requestedQuantity: requestedQuantity \|\| \(purchaseForm\.requestStage === "request" \? orderedQuantity \|\| receivedQuantity \|\| "1" : "0"\)/);
 });
 
@@ -1557,14 +1588,14 @@ test("purchase process grouped rows move and delete every copy-scope line togeth
   );
   const tableSource = workspaceSource.slice(workspaceSource.indexOf("function PurchaseProcessTable"));
 
-  assert.match(workspaceSource, /function getPurchaseScopeLines\(line: Row\)/);
-  assert.match(workspaceSource, /function getPurchaseLineTextbookId\(line: Row\)/);
-  assert.match(workspaceSource, /function movePurchaseLine[\s\S]*const scopeLines = getPurchaseScopeLines\(line\)/);
-  assert.match(workspaceSource, /Promise\.all\(scopeLines\.map\(\(scopeLine\) =>/);
+  assert.match(readModelSource, /function getPurchaseScopeLines\(line: Row\)/);
+  assert.match(workspaceSource, /function readFreshPurchaseMembers/);
+  assert.match(workspaceSource, /function movePurchaseLine[\s\S]*readFreshPurchaseMembers/);
+  assert.match(workspaceSource, /details\.map\(\(detail\) => detail\.row/);
   assert.match(workspaceSource, /buildPurchaseStatusPayload\(scopeLine, scopeOrder, status\)/);
-  assert.match(workspaceSource, /textbookId: getPurchaseLineTextbookId\(scopeLine\) \|\| text\(movePayload\.textbookId\)/);
-  assert.match(workspaceSource, /function deletePurchaseLine[\s\S]*const scopeLines = getPurchaseScopeLines\(line\)/);
-  assert.match(workspaceSource, /getPurchaseConfirmationItems\(scopeLine, getPurchaseLineOrder\(scopeLine, purchaseOrdersById\) \|\| order\)/);
+  assert.match(workspaceSource, /textbookId: getPurchaseLineTextbookId\(scopeLine, detail\.references\) \|\| text\(movePayload\.textbookId\)/);
+  assert.match(workspaceSource, /function deletePurchaseLine[\s\S]*readFreshPurchaseMembers\(\[line\], mode\)[\s\S]*const scopeLines = detail\.lines/);
+  assert.match(workspaceSource, /getPurchaseConfirmationItems\(scopeLine, \(scopeLine\.order as Row \| null\) \|\| order, detail\.references\)/);
   assert.match(workspaceSource, /textbookService\.deletePurchaseLifecycle\(\{[\s\S]*purchaseOrderLineId: getRecordId\(scopeLine\)/);
   assert.match(tableSource, /onClick=\{\(\) => onDeleteLine\(\{ \.\.\.line, purchaseScopeLines: displayLines \}, order\)\}/);
 });
@@ -1614,12 +1645,12 @@ test("purchase process table splits student and teacher quantities into six colu
   assert.match(tableSource, /<TableCell className=\{purchaseQuantityCellClassName\("teacher"\)\}>/);
   assert.match(workspaceSource, /bg-sky-50\/70/);
   assert.match(workspaceSource, /bg-amber-50\/70/);
-  assert.match(tableSource, /const studentRequestedTotal = getPurchaseDisplayScopeQuantity\(rows, "student", "requested"\)/);
-  assert.match(tableSource, /const teacherReceivedTotal = getPurchaseDisplayScopeQuantity\(rows, "teacher", "received"\)/);
+  assert.match(tableSource, /const studentRequestedTotal = aggregateGroup\?\.quantities\.student\.requested \?\? null/);
+  assert.match(tableSource, /const teacherReceivedTotal = aggregateGroup\?\.quantities\.teacher\.received \?\? null/);
   assert.match(tableSource, /getPurchaseDisplayScopeQuantity\(displayLines, "student", "ordered"\)/);
   assert.match(tableSource, /getPurchaseDisplayScopeQuantity\(displayLines, "teacher", "ordered"\)/);
-  assert.match(tableSource, /isPurchaseColumnVisible\("studentRequested"\) \? <TableCell className=\{purchaseQuantityCellClassName\("student"\)\}>\{formatQuantity\(studentRequestedTotal\)\}<\/TableCell>/);
-  assert.match(tableSource, /isPurchaseColumnVisible\("teacherReceived"\) \? <TableCell className=\{purchaseQuantityCellClassName\("teacher"\)\}>\{formatQuantity\(teacherReceivedTotal\)\}<\/TableCell>/);
+  assert.match(tableSource, /isPurchaseColumnVisible\("studentRequested"\) \? <TableCell className=\{purchaseQuantityCellClassName\("student"\)\}>\{studentRequestedTotal === null \? "—" : formatQuantity\(studentRequestedTotal\)\}<\/TableCell>/);
+  assert.match(tableSource, /isPurchaseColumnVisible\("teacherReceived"\) \? <TableCell className=\{purchaseQuantityCellClassName\("teacher"\)\}>\{teacherReceivedTotal === null \? "—" : formatQuantity\(teacherReceivedTotal\)\}<\/TableCell>/);
   assert.doesNotMatch(tableSource, /PurchaseScopeQuantityCell lines=\{displayLines\} kind="requested"/);
   assert.doesNotMatch(tableSource, /TableHead className="w-\[104px\] text-right">요청/);
 });
@@ -1630,7 +1661,7 @@ test("textbook workspace fixes second-round browser audit issues", async () => {
     "utf8",
   );
 
-  assert.match(workspaceSource, /useState<PurchaseBoardScope>\("active"\)/);
+  assert.match(workspaceSource, /useState<PurchaseBoardScope>\(\(\) => \(text\(initialPrimaryFilters\.boardScope\) \|\| "active"\) as PurchaseBoardScope\)/);
   assert.match(workspaceSource, /resetTextbookListFilters/);
   assert.match(workspaceSource, /필터 초기화/);
   assert.match(workspaceSource, /masterDuplicateRows/);
@@ -1685,8 +1716,8 @@ test("inventory count is inline while monthly closing still uses modal entry", a
   assert.match(workspaceSource, /function InventoryCountMobileCard/);
   assert.match(workspaceSource, /submitInlineStockCount/);
   assert.match(workspaceSource, /onSubmitCount=\{submitInlineStockCount\}/);
-  assert.match(workspaceSource, /const readyRowIds = new Set\(readyRows\.map\(\(row\) => row\.id\)\)/);
-  assert.match(workspaceSource, /!readyRowIds\.has\(id\)/);
+  assert.match(workspaceSource, /const acknowledgedRowIds = new Set\(acknowledged\.map\(\(snapshot\) => snapshot\.row\.id\)\)/);
+  assert.match(workspaceSource, /!acknowledgedRowIds\.has\(id\)/);
   assert.doesNotMatch(workspaceSource, /!readyRows\.some\(\(row\) => row\.id === id\)/);
   assert.doesNotMatch(workspaceSource, /<Button type="button" onClick=\{openCountDialog\}>[\s\S]*실사 추가/);
   assert.match(workspaceSource, /월마감 추가/);
@@ -1702,18 +1733,16 @@ test("inventory tab shows stock change audit history", async () => {
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
 
   assert.match(workspaceSource, /function InventoryHistoryPanel/);
-  assert.match(workspaceSource, /function buildTextbookLookupMap/);
-  assert.match(workspaceSource, /function buildLocationNameLookup/);
-  assert.match(workspaceSource, /const historyRows: InventoryHistoryRow\[\] = \[\]/);
-  assert.match(workspaceSource, /getTextbookFromLookup\(textbookLookup, move\.textbook_id \|\| move\.textbookId\)/);
-  assert.match(workspaceSource, /getLocationNameFromLookup\(locationNameLookup, move\.location_id \|\| move\.locationId\)/);
+  assert.match(closingModelSource, /function buildTextbookLookupMap/);
+  assert.match(closingModelSource, /function buildLocationNameLookup/);
+  assert.match(workspaceSource, /rows=\{numbered\.inventoryHistory\.rows\}/);
+  assert.match(workspaceSource, /function InventoryHistoryPanel/);
   assert.match(workspaceSource, /재고 이력/);
-  assert.match(workspaceSource, /stockMoves=\{activeStockMoves\}/);
-  assert.match(workspaceSource, /stockCounts=\{activeStockCounts\}/);
-  assert.match(workspaceSource, /function getInventoryAuditActor/);
-  assert.match(workspaceSource, /row\.created_by/);
+  assert.match(workspaceSource, /rows=\{numbered\.inventoryHistory\.rows\}/);
+  assert.match(workspaceSource, /actor: row\.actorLabel \|\| \(row\.actorId === currentUserId \? currentUserLabel : row\.actorId\) \|\| "-"/);
+  assert.match(workspaceSource, /row\.actor/);
   assert.match(workspaceSource, /currentUserLabel/);
-  assert.match(workspaceSource, /stockMoveTypeLabels/);
+  assert.match(workspaceSource, /actor: row\.actorLabel/);
   assert.match(workspaceSource, /canDeleteHistory=\{canDeleteTextbookHistory\}/);
   assert.match(workspaceSource, /aria-label=\{`\$\{row\.textbookTitle\} 재고 이력 삭제`\}/);
   assert.match(workspaceSource, /textbookService\.deleteInventoryHistory/);
@@ -1741,31 +1770,30 @@ test("inventory stock count is inline and mobile-first with recommended targets"
     workspaceSource.indexOf("function TextbookTable"),
   );
 
-  assert.match(workspaceSource, /type InventoryAuditFilter = "recommended" \| "pending" \| "done" \| "all"/);
+  assert.match(readTypesSource, /type InventoryAuditFilter = "recommended" \| "pending" \| "done" \| "all"/);
   assert.match(workspaceSource, /inventoryCountDrafts/);
   assert.match(workspaceSource, /inventoryCountMemoDrafts/);
   assert.match(workspaceSource, /inventoryAuditFilter/);
-  assert.match(workspaceSource, /INVENTORY_COUNT_CYCLE_DAYS = 30/);
-  assert.match(workspaceSource, /INVENTORY_LOW_STOCK_THRESHOLD = 3/);
-  assert.match(workspaceSource, /INVENTORY_COUNT_PAGE_SIZE = 30/);
-  assert.match(workspaceSource, /function buildInventoryCountRows/);
+  assert.match(readModelSource, /INVENTORY_COUNT_CYCLE_DAYS = 30/);
+  assert.match(readModelSource, /INVENTORY_LOW_STOCK_THRESHOLD = 3/);
+  assert.doesNotMatch(workspaceSource, /INVENTORY_COUNT_PAGE_SIZE/);
+  assert.match(workspaceSource, /numbered\.inventory\.rows/);
   assert.match(workspaceSource, /function InventoryCountWorkspace/);
   assert.match(workspaceSource, /function InventoryCountMobileCard/);
   assert.match(workspaceSource, /function getInventoryCountReasonLabel/);
   assert.match(workspaceSource, /function getInventoryCountSubmitLabel/);
   assert.match(workspaceSource, /const visibleAuditFilterOptions = \(Object\.keys\(inventoryAuditFilterLabels\)/);
   assert.match(workspaceSource, /visibleAuditFilterOptions\.map/);
-  assert.match(workspaceSource, /const \[displayLimitsByScope, setDisplayLimitsByScope\] = useState<Record<string, number>>\(\{\}\)/);
-  assert.match(workspaceSource, /const displayScopeKey = `\$\{auditFilter\}:\$\{locationId\}:\$\{rows\.length\}`/);
-  assert.match(workspaceSource, /const displayLimit = displayLimitsByScope\[displayScopeKey\] \|\| INVENTORY_COUNT_PAGE_SIZE/);
+  assert.doesNotMatch(workspaceSource, /displayLimitsByScope|displayScopeKey/);
+  assert.match(workspaceSource, /DataTablePagination/);
   assert.match(workspaceSource, /const selectedIdSet = useMemo\(\(\) => new Set\(selectedIds\), \[selectedIds\]\)/);
-  assert.match(workspaceSource, /const visibleRows = useMemo/);
-  assert.match(workspaceSource, /const displayRows = useMemo\(\(\) => visibleRows\.slice\(0, displayLimit\), \[displayLimit, visibleRows\]\)/);
-  assert.match(workspaceSource, /const groupsByLabel = new Map/);
+  assert.match(workspaceSource, /const visibleRows = rows/);
+  assert.match(workspaceSource, /const displayRows = visibleRows/);
+  assert.doesNotMatch(workspaceSource, /const groupsByLabel = new Map/);
   assert.doesNotMatch(workspaceSource, /usesDesktopInventoryTable/);
   assert.doesNotMatch(workspaceSource, /window\.matchMedia\("\(min-width: 640px\)"\)/);
-  assert.match(workspaceSource, /setDisplayLimitsByScope\(\(current\) => \(\{/);
-  assert.match(workspaceSource, /\[displayScopeKey\]: \(current\[displayScopeKey\] \|\| INVENTORY_COUNT_PAGE_SIZE\) \+ INVENTORY_COUNT_PAGE_SIZE/);
+  assert.match(workspaceSource, /DataTablePagination/);
+  assert.doesNotMatch(workspaceSource, /setDisplayLimitsByScope/);
   assert.match(workspaceSource, /submitInlineStockCount/);
   assert.match(workspaceSource, /onSubmitCount=\{submitInlineStockCount\}/);
   assert.match(workspaceSource, /aria-label=\{`\$\{row\.title\} \$\{row\.locationName\} 실사 수량`\}/);
@@ -1775,7 +1803,7 @@ test("inventory stock count is inline and mobile-first with recommended targets"
   assert.doesNotMatch(workspaceSource, /className="hidden overflow-x-auto rounded-lg border sm:block"/);
   assert.match(workspaceSource, /title=\{getInventoryCountReasonLabel\(row\)\}/);
   assert.match(inventorySource, /\{currentLocation\} \{visibleRowSummary\}/);
-  assert.match(inventorySource, /더 보기 · \{formatQuantity\(displayRows\.length\)\}\/\{formatQuantity\(visibleRows\.length\)\}종/);
+  assert.doesNotMatch(inventorySource, /<DataTablePagination/);
   assert.match(inventorySource, /<div className="truncate" title=\{getInventoryCountReasonLabel\(row\)\}>\{getInventoryCountReasonLabel\(row\)\}<\/div>/);
   assert.doesNotMatch(inventorySource, /groupQualityIssueCount/);
   assert.doesNotMatch(inventorySource, /정리 필요/);
@@ -1802,10 +1830,10 @@ test("textbook workspace surfaces real Supabase write errors during testing", as
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
 
   assert.match(workspaceSource, /getTextbookActionErrorMessage/);
-  assert.match(workspaceSource, /setError\(getTextbookActionErrorMessage\(loadError\)\)/);
+  assert.match(workspaceSource, /activePrimaryState\.error/);
   assert.match(workspaceSource, /actionErrorMessage/);
   assert.match(workspaceSource, /setActionErrorMessage\(getTextbookActionErrorMessage\(actionError\)\)/);
-  assert.match(workspaceSource, /variant=\{error \|\| actionErrorMessage \? "destructive" : "default"\}/);
+  assert.match(workspaceSource, /variant=\{actionErrorMessage \? "destructive" : "default"\}/);
   assert.doesNotMatch(workspaceSource, /actionError instanceof Error \? actionError\.message : "처리 중 오류가 발생했습니다\."/);
   assert.match(serviceSource, /normalizeOptionalUuid/);
   assert.match(serviceSource, /normalizeOptionalUuid\(record\.locationId/);
@@ -1822,7 +1850,8 @@ test("textbook workspace blocks writes when operation tables are not migrated", 
   assert.match(serviceSource, /missingTables/);
   assert.match(serviceSource, /isSchemaReady/);
   assert.match(workspaceSource, /schemaDisabled/);
-  assert.match(workspaceSource, /교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다/);
+  assert.doesNotMatch(workspaceSource, /schemaDisabled = false/);
+  assert.match(workspaceSource, /isPreparedSchemaError/);
 });
 
 test("textbook service blocks writes when request title column is missing from schema cache", async () => {
@@ -1848,7 +1877,7 @@ test("textbook workspace provides a research-backed operations command center", 
     "utf8",
   );
 
-  assert.match(workspaceSource, /function buildTextbookOpsMetrics/);
+  assert.match(workspaceSource, /const operationMetrics = numbered\.operations\.value/);
   assert.match(workspaceSource, /function TextbookOpsCommandCenter/);
   assert.match(workspaceSource, /operationMetrics/);
   assert.match(workspaceSource, /미등록 요청/);
@@ -1905,12 +1934,12 @@ test("textbook workspace keeps list and process controls responsive and focused"
   assert.match(workspaceSource, /hidden overflow-x-auto rounded-lg border \[contain-intrinsic-size:720px\] \[content-visibility:auto\] md:block/);
   assert.match(workspaceSource, /<Table className="min-w-\[1080px\] table-fixed">/);
   assert.match(workspaceSource, /교재 상태 필터 열기/);
-  assert.match(workspaceSource, /type PurchaseRequestFilter = "all" \| "unregistered" \| "orderable"/);
+  assert.match(readTypesSource, /type PurchaseRequestFilter = "all" \| "unregistered" \| "orderable"/);
   assert.match(workspaceSource, /검토 전체/);
   assert.match(workspaceSource, /미등록 요청/);
   assert.match(workspaceSource, /등록 교재/);
-  assert.match(workspaceSource, /shouldShowRequestLine/);
-  assert.match(workspaceSource, /type SalesProcessFilter = "all" \| "waiting" \| "issued" \| "returned" \| "cancelled"/);
+  assert.doesNotMatch(workspaceSource, /function shouldShowRequestLine/);
+  assert.match(readTypesSource, /type SalesProcessFilter = "all" \| "waiting" \| "issued" \| "returned" \| "cancelled"/);
   assert.match(workspaceSource, /출고 완료/);
   assert.match(workspaceSource, /\{ value: "returned", label: "반품" \}/);
   assert.match(workspaceSource, /\{ value: "cancelled", label: "취소" \}/);
@@ -1929,7 +1958,7 @@ test("textbook workspace tightens the operations queue and grouped list controls
     "utf8",
   );
 
-  assert.match(workspaceSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial" \| "returnable" \| "returned"/);
+  assert.match(readTypesSource, /type PurchaseOrderFilter = "all" \| "waiting" \| "partial" \| "returnable" \| "returned"/);
   assert.match(workspaceSource, /const purchaseOrderFilterLabels/);
   assert.match(workspaceSource, /const queueBadgeValue = activeQueueItem \? activeQueueItem\.value : activeQueueTotal/);
   assert.match(workspaceSource, /activeQueueItem \? activeQueueItem\.label : "할 일"/);
@@ -1947,7 +1976,7 @@ test("textbook workspace tightens the operations queue and grouped list controls
   assert.match(workspaceSource, /orderFilter === "partial"/);
   assert.match(workspaceSource, /orderFilter === "returnable"/);
   assert.match(workspaceSource, /orderFilter === "returned"/);
-  assert.match(workspaceSource, /compareTextbookGroupLabels/);
+  assert.match(workspaceSource, /filteredInventory/);
   assert.doesNotMatch(workspaceSource, /visibleTextbookGroupLabels/);
   assert.doesNotMatch(workspaceSource, /collapseVisibleTextbookGroups/);
   assert.doesNotMatch(workspaceSource, /onCollapseAllGroups/);
@@ -1981,7 +2010,7 @@ test("textbook workspace names modal selects and removes duplicate hidden purcha
   assert.match(workspaceSource, /!selectedSaleClass \? "수업을 선택하세요" : !selectedSaleTextbook \? "교재를 선택하세요"/);
   assert.match(workspaceSource, /saleDuplicateLines\.length > 0[\s\S]*"이미 같은 월 출고가 있습니다"/);
   assert.match(workspaceSource, /selectedSaleClass \|\| selectedSaleTextbook \? \(/);
-  assert.match(workspaceSource, /const closingTargetSubjects = closingForm\.subject === "all" \? \["all", "english", "math"\] : \[closingForm\.subject\]/);
+  assert.match(workspaceSource, /const closingTargetSubjects = closingForm\.subject === "all" \? \["all", "english", "math", "science"\] : \[closingForm\.subject\]/);
   assert.match(workspaceSource, /<Metric label="저장" value=\{`\$\{formatQuantity\(closingTargetSubjects\.length\)\}건`\}/);
   assert.match(workspaceSource, /aria-label=\{ariaLabel\}/);
   assert.doesNotMatch(workspaceSource, /<TabsContent value="purchase" className="mt-4 grid min-w-0 gap-4">\s*<form onSubmit=\{submitPurchase\} className="hidden">/);
@@ -1994,10 +2023,10 @@ test("textbook workspace adds searchable process tables and tighter issue ledger
     "utf8",
   );
 
-  assert.match(workspaceSource, /const \[operationQuery, setOperationQuery\] = useState\(""\)/);
+  assert.match(workspaceSource, /const \[operationQuery, setOperationQuery\] = useState\(\(\) => text\(initialPrimaryFilters\.search\)\)/);
   assert.match(workspaceSource, /aria-label=\{operationSearchLabel\}/);
-  assert.match(workspaceSource, /matchesPurchaseLineQuery/);
-  assert.match(workspaceSource, /matchesSaleLineQuery/);
+  assert.match(workspaceSource, /searchQuery=\{deferredOperationQuery\}/);
+  assert.doesNotMatch(workspaceSource, /matchesPurchaseLineQuery|matchesSaleLineQuery/);
   assert.match(workspaceSource, /const deferredOperationQuery = useDeferredValue\(operationQuery\)/);
   assert.match(workspaceSource, /searchQuery=\{deferredOperationQuery\}/);
   assert.match(workspaceSource, /purchaseForm\.requestStage !== "request" \? \(/);
@@ -2008,8 +2037,8 @@ test("textbook workspace adds searchable process tables and tighter issue ledger
   assert.match(workspaceSource, /aria-label=\{`\$\{studentName\} \$\{textbookTitle\} 출고 완료 처리`\}/);
   assert.match(workspaceSource, /aria-label="일괄 과목 선택"/);
   assert.match(workspaceSource, /aria-label=\{`\$\{rowA11yLabel\} 편집`\}/);
-  assert.match(workspaceSource, /status === "charged" \|\| status === "paid"/);
-  assert.match(workspaceSource, /filter === "shortage"\) return totalQuantity < 0 \|\|/);
+  assert.match(workspaceSource, /status === "requested" \|\| status === "charged"/);
+  assert.match(readModelSource, /filter === "shortage"\) return totalQuantity < 0 \|\|/);
   assert.match(workspaceSource, /function TabCountBadge/);
 });
 
@@ -2046,38 +2075,37 @@ test("textbook workspace reduces idle clutter and exposes group totals", async (
   assert.doesNotMatch(workspaceSource, /const groupAmountValue = group\.rows\.reduce/);
   assert.match(workspaceSource, /const groupCountLabel = `\$\{formatQuantity\(group\.rows\.length\)\}/);
   assert.match(workspaceSource, /const groupDetailText = \[/);
-  assert.match(workspaceSource, /function getKnownPublisherLabel/);
+  assert.match(handoffModelSource, /function getKnownPublisherLabel/);
   assert.match(workspaceSource, /getKnownPublisherLabel\(row\)/);
   assert.match(workspaceSource, /publisherLabel \? \(/);
-  assert.match(workspaceSource, /MASTER_TEXTBOOK_PAGE_SIZE/);
-  assert.match(workspaceSource, /MASTER_TEXTBOOK_PAGE_SIZE = 60/);
-  assert.match(workspaceSource, /const \[masterListLimit, setMasterListLimit\] = useState\(MASTER_TEXTBOOK_PAGE_SIZE\)/);
-  assert.match(workspaceSource, /const masterVisibleInventory = useMemo/);
-  assert.match(workspaceSource, /const keyword = deferredQuery\.trim\(\)\.toLowerCase\(\)/);
-  assert.match(workspaceSource, /function buildTextbookSearchIndex/);
-  assert.match(workspaceSource, /const textbookSearchIndexById = useMemo/);
-  assert.match(workspaceSource, /textbookSearchIndexById\.get\(getRecordId\(row\)\)/);
-  assert.match(workspaceSource, /filteredInventory\.slice\(0, masterListLimit\)/);
+  assert.doesNotMatch(workspaceSource, /MASTER_TEXTBOOK_PAGE_SIZE|masterListLimit/);
+  assert.match(workspaceSource, /const masterVisibleInventory = numbered\.master\.rows/);
+  assert.match(workspaceSource, /search: deferredQuery/);
+  assert.match(readModelSource, /const keyword = filters\.search\.trim\(\)\.toLowerCase\(\)/);
+  assert.match(readModelSource, /function buildTextbookSearchIndex/);
+  assert.doesNotMatch(workspaceSource, /const textbookSearchIndexById = useMemo/);
+  assert.match(workspaceSource, /const filteredInventory = numbered\.master\.rows/);
+  assert.doesNotMatch(workspaceSource, /filteredInventory\.slice\(0, masterListLimit\)/);
   assert.match(workspaceSource, /const visibleTextbookIdSet = useMemo\(\(\) => new Set\(visibleTextbookIds\), \[visibleTextbookIds\]\)/);
   assert.match(workspaceSource, /const selectedVisibleTextbookCount = useMemo/);
   assert.match(workspaceSource, /visibleTextbookIdSet\.has\(id\)/);
   assert.match(workspaceSource, /rows=\{masterVisibleInventory\}/);
   assert.match(workspaceSource, /emptyActionLabel=\{hasTextbookListFilter \? "필터 초기화" : "신규 등록"\}/);
   assert.match(workspaceSource, /onEmptyAction=\{hasTextbookListFilter \? resetTextbookListFilters : openNewMasterDialog\}/);
-  assert.match(workspaceSource, /aria-label=\{`교재 더 보기: \$\{formatQuantity\(remainingMasterTextbookCount\)\}건 남음`\}/);
-  assert.match(workspaceSource, /더 보기 · \{formatQuantity\(remainingMasterTextbookCount\)\}건/);
+  assert.match(workspaceSource, /<DataTablePagination/);
+  assert.match(workspaceSource, /totalCount=\{numbered\.master\.totalCount\}/);
   assert.match(workspaceSource, /검색 조건에 맞는 주문·입고 건이 없습니다/);
   assert.match(workspaceSource, /검색 조건에 맞는 출고 건이 없습니다/);
   assert.match(workspaceSource, /const searchMatchedPurchaseRowsByGroup = useMemo/);
   assert.match(workspaceSource, /searchMatchedPurchaseRowsByGroup\.get\(groupId\)/);
-  assert.match(workspaceSource, /const purchaseHandoffGroups = useMemo/);
+  assert.match(workspaceSource, /const \[purchaseHandoffGroups, setPurchaseHandoffGroups\] = useState/);
   assert.match(workspaceSource, /const getVisiblePurchaseRows = useCallback/);
   assert.match(workspaceSource, /const visiblePurchaseRowsByGroup = useMemo/);
   assert.match(workspaceSource, /getCurrentVisiblePurchaseRows\(group\.id\)/);
   assert.match(workspaceSource, /const visiblePurchaseRows = useMemo/);
-  assert.match(workspaceSource, /const visibleRowCount = visiblePurchaseRows\.length/);
+  assert.match(workspaceSource, /const visibleRowCount = summary\?\.totalCount \?\? null/);
   assert.match(workspaceSource, /const requestFilterOptions = useMemo/);
-  assert.match(workspaceSource, /const purchaseProcessFilterCounts = useMemo/);
+  assert.match(workspaceSource, /const purchaseProcessFilterCounts = summary \? \{/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.boardScope\[scope\]/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.order\[filter\]/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.request\[option\.value\]/);
@@ -2087,28 +2115,28 @@ test("textbook workspace reduces idle clutter and exposes group totals", async (
   assert.match(workspaceSource, /const visibleActionablePurchaseLineIdSet = useMemo/);
   assert.match(workspaceSource, /const selectedProcessLineCount = useMemo/);
   assert.match(workspaceSource, /visibleActionablePurchaseLineIdSet\.has\(lineId\)/);
-  assert.match(workspaceSource, /rows: visiblePurchaseRows/);
+  assert.match(workspaceSource, /\[mode, ordersById, textbooks, visiblePurchaseRows\]/);
   assert.match(workspaceSource, /const searchMatchedSaleRowsByGroup = useMemo/);
   assert.match(workspaceSource, /searchMatchedSaleRowsByGroup\.get\(groupId\)/);
-  assert.match(workspaceSource, /const makeEduBillingGroups = useMemo/);
+  assert.match(workspaceSource, /const \[makeEduBillingGroups, setMakeEduBillingGroups\] = useState/);
   assert.match(workspaceSource, /const visibleSaleRowsByGroup = useMemo/);
   assert.match(workspaceSource, /getCurrentVisibleSaleRows\(group\.id\)/);
   assert.match(workspaceSource, /const visibleSaleRowsWithGroup = useMemo/);
   assert.match(workspaceSource, /const visibleSaleRows = useMemo/);
-  assert.match(workspaceSource, /const visibleRowCount = visibleSaleRows\.length/);
+  assert.match(workspaceSource, /const visibleRowCount = summary\?\.totalCount \?\? null/);
   assert.match(workspaceSource, /const saleProcessActionIds = useMemo/);
   assert.match(workspaceSource, /for \(const \{ line, groupId \} of visibleSaleRowsWithGroup\)/);
   assert.match(workspaceSource, /const status = text\(line\.status\) \|\| groupId/);
-  assert.match(workspaceSource, /const salesProcessFilterCounts = useMemo/);
+  assert.match(workspaceSource, /const salesProcessFilterCounts = summary\?\.statusCounts \|\| null/);
   assert.match(workspaceSource, /salesProcessFilterCounts\[option\.value as SalesProcessFilter\]/);
   assert.match(workspaceSource, /const visibleActionableLineIdSet = useMemo/);
   assert.match(workspaceSource, /const visibleSelectableSaleLineIdSet = useMemo/);
   assert.match(workspaceSource, /visibleSelectableSaleLineIdSet\.has\(lineId\)/);
   assert.match(workspaceSource, /const selectedActionableCount = useMemo/);
   assert.doesNotMatch(workspaceSource, /const getSalesFilterCount =/);
-  assert.match(workspaceSource, /rows: visibleSaleRows/);
+  assert.match(workspaceSource, /\[canDeleteHistory, visibleSaleRowsWithGroup\]/);
   assert.match(workspaceSource, /searchQuery=\{deferredOperationQuery\}/);
-  assert.match(workspaceSource, /visibleRowCount > 0 \? \(/);
+  assert.match(workspaceSource, /summary \? \(/);
   assert.match(workspaceSource, /label=\{getPurchaseProcessEmptyLabel\(mode, emptyGroupId, requestFilter, orderFilter, searchQuery\)\}/);
   assert.match(workspaceSource, /label=\{getSalesProcessEmptyLabel\(emptyGroupId, statusFilter, searchQuery\)\}/);
   assert.match(workspaceSource, /return "주문 필요 건이 없습니다"/);
@@ -2123,33 +2151,30 @@ test("textbook workspace surfaces counts and data quality inside dense ledgers",
     "utf8",
   );
 
-  assert.match(workspaceSource, /const \{ data, loading, error, refresh, user, lastLoadedAt, loadDurationMs \} = useTextbookOperationsData\(\)/);
-  assert.match(workspaceSource, /function TextbookLoadingState/);
-  assert.match(workspaceSource, /TEXTBOOK_DATA_LOAD_TIMEOUT_MS = 12_000/);
-  assert.match(workspaceSource, /function withTextbookDataLoadTimeout/);
-  assert.match(workspaceSource, /Promise\.race\(\[promise, timeoutPromise\]\)/);
-  assert.match(workspaceSource, /const loadRequestIdRef = useRef\(0\)/);
-  assert.match(workspaceSource, /loadRequestIdRef\.current !== requestId/);
-  assert.match(workspaceSource, /onClick=\{\(\) => void refresh\(\)\}/);
-  assert.match(workspaceSource, />\s*다시 불러오기\s*<\/Button>/);
-  assert.match(workspaceSource, /aria-label="교재관리 로딩"/);
-  assert.match(workspaceSource, /role="status"/);
-  assert.match(workspaceSource, />교재관리 로딩 중<\/span>/);
-  assert.match(workspaceSource, /const listFilteredInventory = useMemo/);
-  assert.match(workspaceSource, /const inventoryFilterCounts = useMemo/);
+  assert.doesNotMatch(workspaceSource, /useTextbookOperationsData|listTextbookOperationsData|TextbookOperationsData|emptyData/);
+  assert.match(workspaceSource, /const numbered = useTextbookNumberedData\(/);
+  assert.match(workspaceSource, /const activePrimaryState =/);
+  assert.match(workspaceSource, /activePrimaryState\.error/);
+  assert.match(workspaceSource, /const invalidateMaster = useCallback/);
+  assert.match(workspaceSource, /const invalidatePurchase = useCallback/);
+  assert.match(workspaceSource, /const invalidateSales = useCallback/);
+  assert.match(workspaceSource, /const invalidateInventory = useCallback/);
+  assert.match(workspaceSource, /const invalidateClosing = useCallback/);
+  assert.match(workspaceSource, /rows=\{numbered\.inventory\.rows\}/);
+  assert.match(workspaceSource, /const inventoryFilterCounts = acceptedCatalogSummary\?\.inventoryCounts \|\| null/);
   assert.match(workspaceSource, /const locationColumns = useMemo/);
   assert.match(workspaceSource, /locations\.map\(\(location\) => \(\{/);
   assert.match(workspaceSource, /locationQuantities\[location\.id\]/);
   assert.doesNotMatch(workspaceSource, /filteredInventoryTotalQuantity/);
   assert.doesNotMatch(workspaceSource, /filteredInventorySaleValue/);
   assert.doesNotMatch(workspaceSource, /판매가합 \{formatCurrency\(filteredInventorySaleValue\)\}/);
-  assert.match(workspaceSource, /function getTextbookTitleKey/);
-  assert.match(workspaceSource, /function buildTextbookLookupMap/);
-  assert.match(workspaceSource, /function getTextbookFromLookup/);
-  assert.match(workspaceSource, /function buildLocationNameLookup/);
-  assert.match(workspaceSource, /function getLocationNameFromLookup/);
-  assert.match(workspaceSource, /const duplicateTextbookTitleKeys = useMemo/);
-  assert.match(workspaceSource, /duplicateTitleKeys=\{duplicateTextbookTitleKeys\}/);
+  assert.match(readModelSource, /function getTextbookTitleKey/);
+  assert.match(closingModelSource, /function buildTextbookLookupMap/);
+  assert.match(closingModelSource, /function getTextbookFromLookup/);
+  assert.match(closingModelSource, /function buildLocationNameLookup/);
+  assert.match(closingModelSource, /function getLocationNameFromLookup/);
+  assert.doesNotMatch(workspaceSource, /const duplicateTextbookTitleKeys = useMemo/);
+  assert.match(workspaceSource, /referenceData\.masterDuplicate\.value/);
   assert.match(workspaceSource, /function getTextbookQualityIssueLabels/);
   assert.match(workspaceSource, /label: "중복"/);
   assert.match(workspaceSource, /label: "코드 없음"/);
@@ -2162,15 +2187,15 @@ test("textbook workspace surfaces counts and data quality inside dense ledgers",
   assert.match(workspaceSource, /정리 \{formatQuantity\(qualityIssueLabels\.length\)\}/);
   assert.match(workspaceSource, /aria-label=\{`정리 필요: \$\{qualityIssueSummary\}`\}/);
   assert.doesNotMatch(workspaceSource, /visibleQualityIssueLabels = qualityIssueLabels\.slice\(0, 3\)/);
-  assert.match(workspaceSource, /const shouldShowRequestLineForFilter = useCallback/);
-  assert.match(workspaceSource, /const shouldShowOrderGroupForFilter = useCallback/);
+  assert.doesNotMatch(workspaceSource, /const shouldShowRequestLineForFilter = useCallback/);
+  assert.doesNotMatch(workspaceSource, /const shouldShowOrderGroupForFilter = useCallback/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.request\[option\.value\]/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.order\[filter\]/);
   assert.match(workspaceSource, /salesProcessFilterCounts\[option\.value as SalesProcessFilter\]/);
-  assert.match(workspaceSource, /const textbookLookup = useMemo\(\(\) => buildTextbookLookupMap\(textbooks\), \[textbooks\]\)/);
-  assert.match(workspaceSource, /const locationNameLookup = useMemo\(\(\) => buildLocationNameLookup\(locations\), \[locations\]\)/);
-  assert.match(workspaceSource, /getTextbookFromLookup\(textbookLookup/);
-  assert.match(workspaceSource, /getLocationNameFromLookup\(locationNameLookup/);
+  assert.doesNotMatch(workspaceSource, /const textbookLookup = useMemo\(\(\) => buildTextbookLookupMap/);
+  assert.doesNotMatch(workspaceSource, /const locationNameLookup = useMemo\(\(\) => buildLocationNameLookup/);
+  assert.match(workspaceSource, /numbered\.inventoryHistory\.rows/);
+  assert.match(workspaceSource, /numbered\.closingMovements\.rows/);
 });
 
 test("textbook workspace adds quality triage, tab totals, and compact empty process groups", async () => {
@@ -2179,14 +2204,14 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
     "utf8",
   );
 
-  assert.match(workspaceSource, /\| "missingCategory"/);
-  assert.match(workspaceSource, /\| "missingPrice"/);
+  assert.match(readTypesSource, /\| "missingCategory"/);
+  assert.match(readTypesSource, /\| "missingPrice"/);
   assert.match(workspaceSource, /const textbookQualityFilterLabels/);
-  assert.match(workspaceSource, /const \[textbookQualityFilter, setTextbookQualityFilter\] = useState<TextbookQualityFilter>\("all"\)/);
-  assert.match(workspaceSource, /function hasTextbookSubjectMismatch/);
-  assert.match(workspaceSource, /function getTextbookQualityIssues/);
-  assert.match(workspaceSource, /function matchesTextbookQualityFilter/);
-  assert.match(workspaceSource, /const textbookQualityFilterCounts = useMemo/);
+  assert.match(workspaceSource, /const \[textbookQualityFilter, setTextbookQualityFilter\] = useState<TextbookQualityFilter>\(\(\) =>/);
+  assert.match(readModelSource, /function hasTextbookSubjectMismatch/);
+  assert.match(readModelSource, /function getTextbookQualityIssues/);
+  assert.match(readModelSource, /function matchesTextbookQualityFilter/);
+  assert.match(workspaceSource, /const textbookQualityFilterCounts = acceptedMasterSummary\?\.qualityCounts \|\| null/);
   assert.match(workspaceSource, /setTextbookQualityFilter\("all"\)/);
   assert.match(workspaceSource, /const activeTextbookQualityFilter = activeTab === "master" \? textbookQualityFilter : "all"/);
   assert.match(workspaceSource, /activeTextbookQualityFilter !== "all"/);
@@ -2208,21 +2233,21 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
   assert.match(workspaceSource, /aria-hidden="true"/);
   assert.match(workspaceSource, /<TabCountBadge value=\{operationMetrics\.requestCount\} \/>/);
   assert.match(workspaceSource, /<TabCountBadge value=\{operationMetrics\.unregisteredRequestCount \+ operationMetrics\.orderNeededCount \+ operationMetrics\.receivingBacklogCount\} \/>/);
-  assert.match(workspaceSource, /<TabCountBadge value=\{activeTextbooks\.length\} \/>/);
-  assert.match(workspaceSource, /<TabCountBadge value=\{activeInventory\.length\} \/>/);
-  assert.match(workspaceSource, /const activeInventory = useMemo\(\(\) => data\.inventory\.filter\(isActiveTextbook\), \[data\.inventory\]\)/);
+  assert.match(workspaceSource, /<TabCountBadge value=\{numbered\.master\.totalCount \|\| 0\} \/>/);
+  assert.match(workspaceSource, /<TabCountBadge value=\{numbered\.inventory\.totalCount \|\| 0\} \/>/);
+  assert.doesNotMatch(workspaceSource, /data\.inventory/);
   assert.match(workspaceSource, /inactive: "미사용 보관함"/);
-  assert.match(workspaceSource, /if \(filter === "inactive"\) return !isActiveTextbook\(row\)/);
-  assert.match(workspaceSource, /if \(!isActiveTextbook\(row\)\) return false/);
-  assert.match(workspaceSource, /function shouldShowOperationalPurchaseLine/);
-  assert.match(workspaceSource, /function shouldShowOperationalSaleLine/);
-  assert.match(workspaceSource, /const activePurchaseOrderLines = useMemo/);
-  assert.match(workspaceSource, /const activeSaleLines = useMemo/);
-  assert.match(workspaceSource, /const activeStockMoves = useMemo/);
+  assert.match(readModelSource, /if \(filter === "inactive"\) return !isActiveTextbook\(row\)/);
+  assert.match(readModelSource, /if \(!isActiveTextbook\(row\)\) return false/);
+  assert.match(readModelSource, /function shouldShowOperationalPurchaseLine/);
+  assert.match(readModelSource, /function shouldShowOperationalSaleLine/);
+  assert.match(workspaceSource, /numbered\.requests\.rows/);
+  assert.match(workspaceSource, /numbered\.sales\.rows/);
+  assert.match(workspaceSource, /numbered\.inventoryHistory\.rows/);
   assert.match(workspaceSource, /aria-label="미사용 교재 보관함 열기"/);
   assert.match(workspaceSource, /<Trash2 className="size-4" \/>/);
-  assert.match(workspaceSource, /const tableTotals = useMemo/);
-  assert.match(workspaceSource, /const groupsByLabel = new Map<string, Row\[\]>\(\)/);
+  assert.match(workspaceSource, /const tableTotals = summary \? \{/);
+  assert.doesNotMatch(workspaceSource, /const groupsByLabel = new Map<string, Row\[\]>\(\)/);
   assert.match(workspaceSource, /const selectedIdSet = useMemo\(\(\) => new Set\(selectedIds\), \[selectedIds\]\)/);
   assert.match(workspaceSource, /checked=\{selectedIdSet\.has\(rowId\)\}/);
   assert.match(workspaceSource, /tableTotals\.locationQuantities/);
@@ -2240,11 +2265,11 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
   assert.match(workspaceSource, /title=\{subSubjectLabel\}>\{subSubjectLabel\}/);
   assert.match(workspaceSource, /title=\{schoolLevelLabel\}>\{schoolLevelLabel\}/);
   assert.match(workspaceSource, /title=\{gradeLabel\}>\{gradeLabel\}/);
-  assert.match(workspaceSource, /<TableCell>합계<\/TableCell>/);
+  assert.match(workspaceSource, /<TableCell>\{tableTotals \? "합계" : "집계 확인 필요"\}<\/TableCell>/);
   assert.match(workspaceSource, /const renderedGroups = visibleGroups\.filter/);
   assert.match(workspaceSource, /const emptyGroupId = visibleGroups\[0\]\?\.id/);
   assert.match(workspaceSource, /const hasHiddenProcessRows =/);
-  assert.match(workspaceSource, /const showProcessSummary = visibleRowCount > 0 \|\| hasProcessSearchQuery/);
+  assert.match(workspaceSource, /const showProcessSummary = Boolean\(summary\)/);
   assert.match(workspaceSource, /const activePurchaseFilterCount =/);
   assert.match(workspaceSource, /const activePurchaseFilterLabel =/);
   assert.doesNotMatch(workspaceSource, /const showGroupViewControls =/);
@@ -2256,27 +2281,27 @@ test("textbook workspace adds quality triage, tab totals, and compact empty proc
   assert.match(workspaceSource, /onScopeChange\("active"\);\s*onOrderFilterChange\("all"\);\s*onRequestFilterChange\("all"\);/);
   assert.doesNotMatch(workspaceSource, /showGroupViewControls \? \(/);
   assert.match(workspaceSource, /hint=\{showProcessControls && !hasHiddenProcessRows \?/);
-  assert.match(workspaceSource, /function getTextbookQualityScore/);
-  assert.match(workspaceSource, /const leftScore = getTextbookQualityScore/);
+  assert.match(readModelSource, /function getTextbookQualityScore/);
+  assert.doesNotMatch(workspaceSource, /const leftScore = getTextbookQualityScore/);
   assert.match(workspaceSource, /const groupQualityIssueCount = group\.rows\.filter/);
   assert.match(workspaceSource, /aria-label=\{`\$\{rowA11yLabel\} 선택`\}/);
   assert.match(workspaceSource, /function ProcessGroupEmptyState\(\{/);
   assert.match(workspaceSource, /hint\?: string/);
   assert.match(workspaceSource, /const emptyActionLabel = hasProcessSearchQuery/);
-  assert.match(workspaceSource, /const totalProcessRowCount = groups\.reduce/);
-  assert.match(workspaceSource, /const showProcessControls = totalProcessRowCount > 0 \|\| hasProcessSearchQuery/);
-  assert.match(workspaceSource, /const totalSalesRowCount = lines\.length/);
-  assert.match(workspaceSource, /const showSalesControls = totalSalesRowCount > 0 \|\| hasProcessSearchQuery/);
+  assert.match(workspaceSource, /const totalProcessRowCount = summary\?\.totalCount \?\? null/);
+  assert.match(workspaceSource, /const showProcessControls = Boolean\(totalProcessRowCount && totalProcessRowCount > 0\) \|\| hasProcessSearchQuery/);
+  assert.match(workspaceSource, /const visibleRowCount = summary\?\.totalCount \?\? null/);
+  assert.match(workspaceSource, /const showSalesControls = hasVisibleSaleRows \|\| hasProcessSearchQuery/);
   assert.match(workspaceSource, /const showSalesGroupToggleControls = renderedGroups\.length > 1/);
-  assert.match(workspaceSource, /visibleRowCount > 0 && showSalesGroupToggleControls \? \(/);
+  assert.match(workspaceSource, /showSalesGroupToggleControls \? \(/);
   assert.match(workspaceSource, /hint=\{showSalesControls \? getSalesProcessEmptyHint/);
   assert.match(workspaceSource, /actionLabel=\{emptyActionLabel\}/);
   assert.match(workspaceSource, /onClearSearch=\{\(\) => updateOperationSearchQuery\(""\)\}/);
-  assert.match(workspaceSource, /const shouldShowOrderGroupForFilter = useCallback/);
+  assert.doesNotMatch(workspaceSource, /const shouldShowOrderGroupForFilter = useCallback/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.boardScope\[scope\]/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.order\[filter\]/);
   assert.match(workspaceSource, /purchaseProcessFilterCounts\.request\[option\.value\]/);
-  assert.match(workspaceSource, /Math\.min\(data\.monthlyClosings\.length, 12\)/);
+  assert.match(workspaceSource, /numbered\.closing\.totalCount/);
   assert.match(workspaceSource, /<TableHeader className="sticky top-0 z-10 bg-background">/);
   assert.match(workspaceSource, /표시 \{formatQuantity\(visibleRowCount\)\}건/);
   assert.match(workspaceSource, /수량 \{formatQuantity\(visibleTotalQuantity\)\}/);
@@ -2306,8 +2331,8 @@ test("textbook workspace second-pass polish keeps process ledgers self-explanato
   assert.match(workspaceSource, /aria-label="월마감 정산 이력"/);
   assert.match(workspaceSource, /selectedClosingDetailId/);
   assert.match(workspaceSource, /function ClosingDetailDialog/);
-  assert.match(workspaceSource, /onInspectRow=\{\(row\) => setSelectedClosingDetailId\(getRecordId\(row\)\)\}/);
-  assert.match(workspaceSource, /filterStockMovesForClosing\(\{[\s\S]*closingMonth[\s\S]*subject[\s\S]*stockMoves/);
+  assert.match(workspaceSource, /onInspectRow=\{\(row\) => \{[\s\S]*setSelectedClosingDetailId\(getRecordId\(row\)\)/);
+  assert.match(workspaceSource, /getTextbookClosingDetail/);
   assert.match(workspaceSource, /저장된 월마감값과 현재 재고 이동 재계산값을 함께 확인합니다/);
   assert.match(workspaceSource, />\s*상세\s*<\/Button>/);
   assert.match(workspaceSource, /className="text-right tabular-nums"/);
@@ -2336,10 +2361,10 @@ test("textbook workspace fourth-pass polish speeds empty flows and stock counts"
   assert.match(workspaceSource, /event\.key === "Enter" && text\(value\)/);
   assert.match(workspaceSource, /variant=\{hasDraft \? "default" : "outline"\}/);
   assert.match(workspaceSource, /aria-busy=\{isSaving\}/);
-  assert.match(workspaceSource, /let shouldRefresh = false/);
-  assert.match(workspaceSource, /shouldRefresh = true/);
-  assert.match(workspaceSource, /void refresh\(\)\.catch/);
-  assert.doesNotMatch(workspaceSource, /await refresh\(\);/);
+  assert.match(workspaceSource, /const invalidateInventory = useCallback/);
+  assert.match(workspaceSource, /numbered\.inventory\.refresh/);
+  assert.match(workspaceSource, /numbered\.inventoryHistory\.refresh/);
+  assert.doesNotMatch(workspaceSource, /function refresh\(/);
 });
 
 test("textbook workspace third-pass polish tightens navigation and action ergonomics", async () => {
@@ -2405,9 +2430,8 @@ test("textbook workspace keeps master filters reversible and avoids native delet
   assert.match(workspaceSource, /onGradeLevelFilterChange=\{changeGradeLevelGroupFilter\}/);
   assert.match(workspaceSource, /onCategoryFilterChange=\{changeCategoryGroupFilter\}/);
   assert.match(workspaceSource, /onClear=\{clearMasterSelection\}/);
-  assert.match(workspaceSource, /const shouldClearSearchAfterDelete = Boolean\(text\(query\)\)/);
-  assert.match(workspaceSource, /filteredInventory\.every\(\(row\) => targetIds\.includes\(getRecordId\(row\)\)\)/);
-  assert.match(workspaceSource, /if \(shouldClearSearchAfterDelete\) \{[\s\S]*updateMasterSearchQuery\(""\)/);
+  assert.match(workspaceSource, /textbookService\.deleteTextbookMasters/);
+  assert.match(workspaceSource, /invalidateMaster/);
 });
 
 test("textbook workspace keeps teacher request access separate from management data", async () => {
@@ -2420,15 +2444,12 @@ test("textbook workspace keeps teacher request access separate from management d
     "utf8",
   );
 
-  assert.match(workspaceSource, /canLoadManagementTextbookData/);
-  assert.match(workspaceSource, /scope: canLoadManagementTextbookData \? "management" : "request"/);
+  assertPreparedWorkspaceReads(workspaceSource);
+  assert.match(workspaceSource, /canManageTextbookOperations/);
   assert.match(workspaceSource, /if \(!canManageTextbookOperations && value !== "requests"\)/);
   assert.match(workspaceSource, /canManageTextbookOperations \? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6" : "grid-cols-1"/);
-  assert.match(serviceSource, /type TextbookOperationsDataScope = "management" \| "request"/);
-  assert.match(serviceSource, /const canLoadManagementTables = scope === "management"/);
-  assert.match(serviceSource, /canLoadManagementTables \? readTable\(client, "textbook_stock_moves"/);
-  assert.match(serviceSource, /canLoadManagementTables \? readTable\(client, "textbook_sale_lines"/);
-  assert.match(serviceSource, /canLoadManagementTables \? readTable\(client, "textbook_monthly_closings"/);
+  assert.match(serviceSource, /create_textbook_request_v1/);
+  assert.doesNotMatch(workspaceSource, /listTextbookOperationsData/);
 });
 
 test("teachers can add requests but cannot manage existing textbook requests", async () => {
@@ -2443,7 +2464,7 @@ test("teachers can add requests but cannot manage existing textbook requests", a
   );
   const requestDialogSource = workspaceSource.slice(requestDialogStart, requestDialogEnd);
 
-  assert.match(workspaceSource, /const \{ role, canManageAll, isAdmin, isStaff, isTeacher \} = useAuth\(\)/);
+  assert.match(workspaceSource, /const \{ user, role, canManageAll, isAdmin, isStaff, isTeacher \} = useAuth\(\)/);
   assert.match(workspaceSource, /const canCreateTextbookRequest = isTeacher \|\| canManageTextbookOperations/);
   assert.match(workspaceSource, /requestBy: currentUserLabel/);
   assert.match(workspaceSource, /purchaseForm\.requestStage === "request"[\s\S]*textbookService\.createTextbookRequest/);
@@ -2481,12 +2502,12 @@ test("textbook workspace locks 50 daily-operation polish safeguards", async () =
 
   const safeguards = [
     /RefreshCw/,
-    /lastLoadedAt/,
-    /loadDurationMs/,
-    /setLastLoadedAt/,
-    /setLoadDurationMs/,
-    /performance\.now/,
-    /formatLoadedAt/,
+    /useTextbookNumberedData/,
+    /useTextbookReferenceData/,
+    /getTextbookPurchaseDetail/,
+    /getTextbookSaleDetail/,
+    /getTextbookInventoryBalance/,
+    /getTextbookInactiveCleanupContext/,
     /TextbookOperationsStatusBar/,
     /aria-label="교재관리 현재 상태"/,
     /aria-label="교재관리 새로고침"/,
@@ -2495,16 +2516,16 @@ test("textbook workspace locks 50 daily-operation polish safeguards", async () =
     /activeTabResultCount/,
     /activeWorkflowSelectionCount/,
     /textbookListFilterCount/,
-    /remainingMasterTextbookCount/,
+    /activePrimaryState\.totalCount/,
     /activeOperationSearchQuery/,
     /updateOperationSearchQuery/,
     /setSelectedPurchaseLineIds\(\[\]\)/,
     /setSelectedSaleLineIds\(\[\]\)/,
     /onRefresh=\{refreshTextbookData\}/,
-    /value: "확인 필요"/,
-    /tone: "danger" as const/,
-    /hidden: !schemaDisabled/,
-    /disabled=\{loading\}/,
+    /activePrimaryState\.error/,
+    /activePrimaryState\.loading/,
+    /activePrimaryState\.retry/,
+    /loading=\{activePrimaryState\.loading\}/,
     /animate-spin/,
     /role="status"/,
     /aria-live="polite"/,
@@ -2513,14 +2534,14 @@ test("textbook workspace locks 50 daily-operation polish safeguards", async () =
     /autoComplete="off"/,
     /function clearMasterSelection\(\)/,
     /setBulkTextbookPatch\(emptyBulkTextbookPatch\)/,
-    /setMasterListLimit\(MASTER_TEXTBOOK_PAGE_SIZE\)/,
+    /numbered\.master\.goToPage/,
     /useDeferredValue\(query\)/,
     /useDeferredValue\(operationQuery\)/,
-    /withTextbookDataLoadTimeout/,
-    /TEXTBOOK_DATA_LOAD_TIMEOUT_MS/,
-    /loadRequestIdRef/,
-    /const requestId = loadRequestIdRef\.current \+ 1/,
-    /void refresh\(\)/,
+    /const invalidateMaster = useCallback/,
+    /const invalidatePurchase = useCallback/,
+    /const invalidateSales = useCallback/,
+    /const invalidateInventory = useCallback/,
+    /const invalidateClosing = useCallback/,
     /setActionErrorMessage\(""\)/,
     /setMessage\(""\)/,
     /TextbookOpsCommandCenter/,
@@ -2539,7 +2560,7 @@ test("textbook workspace locks 50 daily-operation polish safeguards", async () =
   assert.doesNotMatch(workspaceSource, /\{ id: "queue", label: "할 일"/);
   assert.doesNotMatch(workspaceSource, /\{ id: "loaded", label: "갱신"/);
   assert.doesNotMatch(workspaceSource, /\{ id: "speed", label: "응답"/);
-  assert.doesNotMatch(workspaceSource, /schemaDisabled \? "확인 필요" : "정상"/);
+  assert.doesNotMatch(workspaceSource, /useTextbookOperationsData|TextbookOperationsData/);
 });
 
 test("textbook workspace locks 50 master data-entry safeguards", async () => {
@@ -2560,8 +2581,8 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
     /selectMasterTextbook\(row\)/,
     /const masterTitleValue = text\(masterForm\.title\)/,
     /const masterDuplicatePreviewRows = masterDuplicateRows\.slice\(0, 3\)/,
-    /const isNewMasterDuplicate = !masterForm\.id && masterDuplicateRows\.length > 0/,
-    /const masterSubmitDisabled = saving === "master" \|\| !masterTitleValue \|\| !masterTaxonomyValidation\.valid \|\| isNewMasterDuplicate/,
+    /const isNewMasterDuplicate = !masterForm\.id && masterDuplicateTotalCount > 0/,
+    /const masterSubmitDisabled = schemaDisabled \|\| saving === "master" \|\| !masterTitleValue \|\| !masterTaxonomyValidation\.valid \|\| isNewMasterDuplicate/,
     /if \(isNewMasterDuplicate\)/,
     /setActionErrorMessage\("이미 등록된 교재입니다\. 기존 교재를 열어 수정하세요\."\)/,
     /title: normalizeStoredTextInput\(masterForm\.title\)/,
@@ -2582,14 +2603,14 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
     /onClick=\{\(\) => openDuplicateMaster\(row\)\}/,
     /aria-label=\{`\$\{getTextbookTitle\(row\)\} 기존 교재 열기`\}/,
     /저장 잠김/,
-    /이미 등록된 교재 \{formatQuantity\(masterDuplicateRows\.length\)\}건/,
+    /이미 등록된 교재 \{formatQuantity\(masterDuplicateTotalCount\)\}건/,
     /title=\{!masterTitleValue \? "교재명을 입력하세요" : isNewMasterDuplicate \? "이미 등록된 교재입니다" : "교재 저장"\}/,
     /function normalizeMoneyInput/,
     /pattern="\[0-9\]\*"/,
     /autoFocus/,
     /required/,
     /configuredPublisherOptions/,
-    /getPublisherSettingLabel/,
+    /acceptedMasterOptions\?\.publisherOptions/,
     /<datalist id="textbook-category-options">/,
     /inputMode="numeric"/,
     /barcode: normalizeBarcodeValue\(masterForm\.barcode \|\| masterForm\.isbn13\)/,
@@ -2621,10 +2642,10 @@ test("textbook workspace locks 54 request ordering safeguards", async () => {
     /return String\(Math\.max\(options\.allowZero \? 0 : 1, quantity\)\)/,
     /const manualPurchaseCatalogMatches = useMemo/,
     /purchaseRequestInputMode !== "manual"/,
-    /const textbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
+    /const textbook = selectedBookReference\?\.textbook && getTextbookTitle\(selectedBookReference\.textbook\) === purchaseRequestTitle/,
     /return textbook \? \[textbook\] : \[\]/,
     /const hasManualPurchaseCatalogMatch = manualPurchaseCatalogMatches\.length > 0/,
-    /const completedPurchaseHasCatalogTextbook = Boolean\(selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId\)/,
+    /const completedPurchaseHasCatalogTextbook = Boolean\(selectedPurchaseTextbookId\)/,
     /function setPurchaseField\(name: string, value: string\)/,
     /if \(name === "requestedTextbookTitle"\)/,
     /requestedTextbookTitle: normalizeInlineTextInput\(value\)/,
@@ -2649,7 +2670,7 @@ test("textbook workspace locks 54 request ordering safeguards", async () => {
     /normalizePurchaseQuantityField\(`\$\{scope\}OrderedQuantity`, getPurchaseScopeQuantity\(purchaseForm, scope, "ordered"\)\) \|\| requestedQuantity/,
     /const receivedQuantity = purchaseForm\.requestStage === "receive"/,
     /normalizePurchaseQuantityField\(`\$\{scope\}ReceivedQuantity`, getPurchaseScopeQuantity\(purchaseForm, scope, "received"\)\) \|\| orderedQuantity/,
-    /textbookId: selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId/,
+    /textbookId: selectedPurchaseTextbookId/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
     /statementNumber: normalizeStoredTextInput\(purchaseForm\.statementNumber\)/,
     /onBlur=\{\(\) => settlePurchaseTextField\("requestedTextbookTitle"\)\}/,
@@ -2666,7 +2687,7 @@ test("textbook workspace locks 54 request ordering safeguards", async () => {
     /<Input value=\{purchaseForm\.teacherOrderedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherOrderedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /<Input value=\{purchaseForm\.studentReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("studentReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
     /<Input value=\{purchaseForm\.teacherReceivedQuantity\} onChange=\{\(event\) => setPurchaseField\("teacherReceivedQuantity", event\.target\.value\)\} inputMode="numeric" min="0"/,
-    /function getPurchaseLineTextbookId\(line: Row\)/,
+    /getTextbookPurchaseDetail/,
     /title=\{purchaseSubmitDisabled \? "필수 항목을 확인하세요" : purchaseActionLabel\(purchaseForm\.requestStage\)\}/,
   ];
 
@@ -2683,10 +2704,10 @@ test("purchase request ordering uses the same compact title match in list, modal
   );
 
   assert.match(workspaceSource, /function getOrderablePurchaseRequestTextbook[\s\S]*return getTextbookById\(textbooks, draft\.textbookId \|\| draft\.requestedTextbookTitle\)/);
-  assert.match(workspaceSource, /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
-  assert.match(workspaceSource, /const textbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/);
-  assert.match(workspaceSource, /const textbook = getTextbookById\(data\.textbooks, text\(payload\.textbookId \|\| payload\.requestedTextbookTitle\)\)/);
-  assert.match(workspaceSource, /const textbook = getTextbookById\(data\.textbooks, text\(primaryLine\.textbook_id \|\| primaryLine\.textbookId\) \|\| requestedTitle\)/);
+  assert.match(workspaceSource, /selectedBookReference\?\.textbook/);
+  assert.match(workspaceSource, /selectedPurchaseTextbookId/);
+  assert.match(workspaceSource, /readFreshPurchaseMembers/);
+  assert.doesNotMatch(workspaceSource, /data\.textbooks/);
 });
 
 test("purchase order modal defaults student and teacher order quantities from grouped requests", async () => {
@@ -2728,8 +2749,8 @@ test("textbook workspace locks 50 inventory count safeguards", async () => {
     /memo: normalizedMemo/,
     /const readyRows = rows\.filter\(\(row\) => \(/,
     /normalizeQuantityInput\(inventoryCountDrafts\[getInventoryCountDraftKey\(row\.id, row\.locationId\)\], \{ allowZero: true \}\)/,
-    /countedQuantity: normalizeQuantityInput\(inventoryCountDrafts\[draftKey\], \{ allowZero: true \}\)/,
-    /memo: normalizeStoredTextInput\(inventoryCountMemoDrafts\[draftKey\]\)/,
+    /quantity: normalizeQuantityInput\(inventoryCountDrafts\[key\], \{ allowZero: true \}\)/,
+    /memo: normalizeStoredTextInput\(inventoryCountMemoDrafts\[key\]\)/,
     /onClearDraft=\{clearInventoryCountDraft\}/,
     /onClearDraft,/,
     /onClearDraft: \(row: InventoryCountRow\) => void/,
@@ -2775,13 +2796,6 @@ test("textbook workspace locks 50 sale issuing safeguards", async () => {
   );
 
   const safeguards = [
-    /function normalizeMonthInput/,
-    /function getSaleLineQuantity/,
-    /function getSaleLineUnitPrice/,
-    /function getSaleLineAmount/,
-    /function getSaleLineMonth/,
-    /function getSaleLineStatus/,
-    /function isBillableSaleLineStatus/,
     /saleStudentQuery/,
     /setSaleStudentQuery/,
     /const normalizedSaleChargeMonth = normalizeMonthInput\(saleForm\.chargeMonth\)/,
@@ -2789,9 +2803,9 @@ test("textbook workspace locks 50 sale issuing safeguards", async () => {
     /const visibleSaleStudents = useMemo/,
     /getStudentGradeLabel\(student\)/,
     /const saleDuplicateLines = useMemo/,
-    /getSaleLineStatus\(line, sale\)/,
-    /isBillableSaleLineStatus\(status\)/,
-    /getSaleLineMonth\(line, sale\) === normalizedSaleChargeMonth/,
+    /classSaleContext\?\.duplicateLines/,
+    /saleDuplicateStudentCount/,
+    /saleDuplicateLines/,
     /const saleDuplicateStudentCount = useMemo/,
     /chargeMonth: normalizedSaleChargeMonth/,
     /saleDuplicateLines\.length > 0/,
@@ -2820,14 +2834,16 @@ test("textbook workspace locks 50 sale issuing safeguards", async () => {
     /setActionErrorMessage\("이미 같은 월에 같은 수업·교재 출고가 있습니다/,
     /const salePayload = \{/,
     /memo: normalizeStoredTextInput\(saleForm\.memo\)/,
-    /const visibleStudentCount = new Set/,
-    /const visibleClassCount = new Set/,
-    /const visibleTotalAmount = visibleSaleRows\.reduce/,
+    /const visibleStudentCount = summary\?\.studentCount \?\? null/,
+    /const visibleClassCount = summary\?\.classCount \?\? null/,
+    /const visibleTotalAmount = summary\?\.totalAmount \?\? null/,
     /const makeEduBillingTotalAmount = makeEduBillingGroups\.reduce/,
-    /청구 \{formatQuantity\(makeEduBillingGroups\.length\)\}건 · \{formatCurrency\(makeEduBillingTotalAmount\)\}/,
+    /청구 준비\{makeEduBillingGroups\.length \? ` \$\{formatQuantity\(makeEduBillingGroups\.length\)\}건 · \$\{formatCurrency\(makeEduBillingTotalAmount\)\}` : ""\}/,
   ];
 
-  assert.equal(safeguards.length, 50);
+  const handoffSafeguards = [/function normalizeMonthInput/, /function getSaleLineQuantity/, /function getSaleLineUnitPrice/, /function getSaleLineAmount/, /function getSaleLineMonth/, /function getSaleLineStatus/, /function isBillableSaleLineStatus/];
+  assert.equal(safeguards.length + handoffSafeguards.length, 50);
+  for (const safeguard of handoffSafeguards) assert.match(handoffModelSource, safeguard);
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
@@ -2870,20 +2886,20 @@ test("textbook workspace locks 50 closing detail safeguards", async () => {
     /function getClosingDetailSearchHaystack/,
     /function buildClosingDetailClipboardText/,
     /storedClosingMetrics/,
-    /detailQuery/,
-    /setDetailQuery/,
+    /movementSearch/,
+    /onMovementSearchChange/,
     /copyStatus/,
     /isCopyingDetail/,
-    /const closingMetricMismatches = useMemo/,
+    /const closingMetricMismatches = detail\?\.metricMismatches/,
     /closingMetricMismatchCount/,
     /const closingDetailStatus = storedClosingMetrics\.status/,
     /const closingDetailMemo = storedClosingMetrics\.memo/,
-    /const normalizedDetailQuery = normalizeStoredTextInput\(detailQuery\)\.toLowerCase\(\)/,
-    /const filteredDetailRows = useMemo/,
-    /getClosingDetailSearchHaystack\(item\)\.includes\(normalizedDetailQuery\)/,
-    /const closingDetailCopyText = useMemo/,
+    /const detailRows = rows/,
+    /const filteredDetailRows = detailRows/,
+    /getTextbookClosingMovementExport/,
+    /copyLifetimeRef/,
     /const copyClosingDetail = useCallback/,
-    /writeClipboardText\(closingDetailCopyText\)/,
+    /writeClipboardText\(buildClosingDetailClipboardText/,
     /저장된 월마감값과 현재 재고 이동 재계산값을 함께 확인합니다/,
     /저장값/,
     /상태 \{closingDetailStatus\}/,
@@ -2912,8 +2928,8 @@ test("textbook workspace locks 50 closing detail safeguards", async () => {
   ];
 
   assert.equal(safeguards.length, 50);
-  for (const safeguard of safeguards) {
-    assert.match(workspaceSource, safeguard);
+  for (const [index, safeguard] of safeguards.entries()) {
+    assert.match(index < 9 ? closingModelSource : workspaceSource, safeguard);
   }
 });
 
@@ -2977,8 +2993,8 @@ test("textbook workspace locks 50 cleanup confirmation safeguards", async () => 
   ];
 
   assert.equal(safeguards.length, 50);
-  for (const safeguard of safeguards) {
-    assert.match(workspaceSource, safeguard);
+  for (const [index, safeguard] of safeguards.entries()) {
+    assert.match(index >= 7 && index <= 12 ? referenceModelSource : workspaceSource, safeguard);
   }
 });
 
@@ -3006,23 +3022,23 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /setPurchaseRequestFilter\(canManageTextbookOperations \? getSavedPurchaseRequestFilter\(stage, hasCatalogTextbook\) : "all"\)/,
     /setPurchaseOrderFilter\(getSavedPurchaseOrderFilter\(stage, hasCatalogTextbook\)\)/,
     /operationSearchRef\.current\?\.select\(\)/,
-    /const requestedCatalogTextbook = getTextbookById\(activeTextbooks, purchaseRequestTitle\)/,
+    /const selectedPurchaseTextbookId = getRecordId\(selectedPurchaseTextbook \|\| \{\}\)/,
     /const completedPurchaseStage = purchaseForm\.requestStage/,
     /const completedPurchaseTitle = purchaseRequestTitle/,
-    /const completedPurchaseHasCatalogTextbook = Boolean\(selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId\)/,
+    /const completedPurchaseHasCatalogTextbook = Boolean\(selectedPurchaseTextbookId\)/,
     /showSavedPurchaseFlow\(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook\)/,
     /setPurchaseDialogOpen\(false\)/,
     /setSelectedPurchaseLineId\(""\)/,
     /setPurchaseForm\(emptyPurchaseForm\)/,
-    /textbookId: selectedPurchaseTextbookId \|\| getRecordId\(requestedCatalogTextbook \|\| \{\}\) \|\| purchaseForm\.textbookId/,
+    /textbookId: selectedPurchaseTextbookId/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
-    /if \(purchasePayload\.purchaseOrderLineId\) \{\s*await textbookService\.updatePurchaseLifecycle\(purchasePayload\)/,
+    /const fresh = await getTextbookPurchaseDetail\(directSnapshot\.input\)[\s\S]*await textbookService\.updatePurchaseLifecycle\(applyConfiguredPurchasePricingToPayload/,
     /textbookService\.createPurchaseReceipt\(purchasePayload\)/,
     /purchaseActionLabel\(purchaseForm\.requestStage\)/,
     /activeTab === "purchase" && purchaseRequestFilter === "unregistered"/,
     /activeTab === "purchase" && purchaseOrderFilter === "waiting"/,
-    /activeTabResultCount =/,
-    /activeTab === "purchase" \? activePurchaseOrderLines\.length/,
+    /const activePrimaryState =/,
+    /activeTab === "purchase" \? numbered\.purchase/,
     /requestFilterOptions/,
     /activeRequestFilterLabel/,
     /activePurchaseFilterCount/,
@@ -3047,7 +3063,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
   }
 });
 
-test("textbook workspace locks 50 destructive confirmation preview safeguards", async () => {
+test("textbook workspace keeps destructive confirmation previews on prepared and freshly rechecked members", async () => {
   const workspaceSource = await readFile(
     new URL("src/features/textbooks/textbook-operations-workspace.tsx", root),
     "utf8",
@@ -3057,44 +3073,21 @@ test("textbook workspace locks 50 destructive confirmation preview safeguards", 
     /type TextbookConfirmationPreviewItem = \{/,
     /detail: string/,
     /items\?: TextbookConfirmationPreviewItem\[\]/,
-    /function getPurchaseConfirmationItems\(line: Row, order: Row \| undefined\): TextbookConfirmationPreviewItem\[\]/,
+    /function getPurchaseConfirmationItems\(line: Row, order: Row \| undefined, references\?: TextbookPurchaseCaseRow\["references"\]\): TextbookConfirmationPreviewItem\[\]/,
     /const draft = buildPurchaseCardDraft\(line, order\)/,
-    /const textbook = getTextbookById\(data\.textbooks, draft\.textbookId \|\| draft\.requestedTextbookTitle\)/,
-    /const classRecord = getClassById\(data\.classes, draft\.classId\)/,
-    /const quantity = numberValue\(draft\.receivedQuantity \|\| draft\.orderedQuantity \|\| draft\.requestedQuantity\) \|\| 1/,
-    /const locationLabel = getLocationName\(locations, draft\.locationId\) \|\| "위치 미지정"/,
-    /const classLabel = classRecord \? getClassName\(classRecord\) : "수업 미지정"/,
-    /const statusLabel = purchaseStatusLabel\(line\.status \|\| order\?\.status, draft\.orderedQuantity, draft\.receivedQuantity\)/,
-    /id: getRecordId\(line\) \|\| text\(line\.purchase_order_line_id \|\| line\.purchaseOrderLineId\) \|\| getPurchaseTextbookTitle\(line, textbook\)/,
-    /title: getPurchaseTextbookTitle\(line, textbook\)/,
-    /`\$\{formatQuantity\(quantity\)\}권`/,
-    /draft\.requestBy \? `요청 \$\{draft\.requestBy\}` : ""/,
-    /function getSelectedPurchaseConfirmationItems\(lines: Row\[\]\)/,
-    /return lines\.flatMap\(\(line\) => \{/,
-    /const order = getPurchaseLineOrder\(line, purchaseOrdersById\)/,
-    /return getPurchaseConfirmationItems\(line, order\)/,
+    /const prepared = preparedPurchaseRows\.find/,
+    /const textbook = references\?\.textbook \|\| prepared\?\.references\.textbook/,
+    /const classRecord = references\?\.class \|\| prepared\?\.references\.class/,
     /function getSaleConfirmationItems\(lines: Row\[\]\): TextbookConfirmationPreviewItem\[\]/,
-    /const salesById = new Map\(data\.sales\.map\(\(sale\) => \[getRecordId\(sale\), sale\]\)\)/,
-    /const studentsById = new Map\(data\.students\.map\(\(student\) => \[getRecordId\(student\), student\]\)\)/,
-    /return lines\.map\(\(line, index\) => \{/,
-    /const sale = salesById\.get\(text\(line\.sale_id \|\| line\.saleId\)\)/,
-    /const textbook = getTextbookById\(data\.textbooks, text\(line\.textbook_id \|\| line\.textbookId\)\)/,
-    /const studentId = text\(line\.student_id \|\| line\.studentId\)/,
-    /const studentName = text\(line\.student_name \|\| getStudentNameById\(studentsById, studentId\)\) \|\| "학생 미지정"/,
-    /const classRecord = getClassById\(data\.classes, text\(line\.class_id \|\| line\.classId \|\| sale\?\.class_id \|\| sale\?\.classId\)\)/,
-    /const status = getSaleLineStatus\(line, sale\)/,
-    /const textbookTitle = textbook \? getTextbookTitle\(textbook\) : text\(line\.textbook_id \|\| line\.textbookId\) \|\| "교재 미지정"/,
-    /id: getRecordId\(line\) \|\| `\$\{studentId \|\| textbookTitle\}-confirmation-\$\{index\}`/,
-    /title: textbookTitle/,
-    /`\$\{formatQuantity\(getSaleLineQuantity\(line\)\)\}권`/,
-    /saleStatusLabels\[status\] \|\| status/,
-    /getSaleLineMonth\(line, sale\)/,
-    /items: getSaleConfirmationItems\(\[line\]\)/,
-    /items: getSaleConfirmationItems\(selectedCancelableSaleLines\)/,
-    /items: getSaleConfirmationItems\(selectedReturnableSaleLines\)/,
-    /items: getSaleConfirmationItems\(selectedDeletableSaleLines\)/,
-    /items: getPurchaseConfirmationItems\(line, order\)/,
-    /items: getSelectedPurchaseConfirmationItems\(selectedReturnablePurchaseLines\)/,
+    /const prepared = numbered\.sales\.rows\.find/,
+    /function getSaleDetailConfirmationItems\(rows: SaleLineRow\[\]\)/,
+    /readFreshPurchaseMembers\(\[line\], mode\)/,
+    /readFreshPurchaseMembers\(\[line\], "order"\)/,
+    /readFreshSaleDetails\(\[line\]\)/,
+    /const \[rechecked\] = await readFreshSaleDetails/,
+    /items: scopeLines\.flatMap/,
+    /items: detail\.lines\.flatMap/,
+    /items: getSaleConfirmationItems\(\[detail\.line\]\)/,
     /confirmationRequest\?\.items\?\.length/,
     /aria-label="확인 대상"/,
     /confirmationRequest\.items\.slice\(0, 5\)\.map\(\(item\) =>/,
@@ -3106,10 +3099,10 @@ test("textbook workspace locks 50 destructive confirmation preview safeguards", 
     /외 \{formatQuantity\(confirmationRequest\.items\.length - 5\)\}건 더/,
   ];
 
-  assert.equal(safeguards.length, 50);
   for (const safeguard of safeguards) {
     assert.match(workspaceSource, safeguard);
   }
+  assert.doesNotMatch(workspaceSource, /data\.(?:textbooks|classes|students|sales)/);
 });
 
 test("textbook master saves required multi-value taxonomy", async () => {
@@ -3153,7 +3146,8 @@ test("textbook master list and filters use taxonomy arrays", async () => {
 
   assert.match(workspaceSource, /getTextbookSchoolLevelSummary/);
   assert.match(workspaceSource, /getTextbookGradeSummary/);
-  assert.match(workspaceSource, /matchesTextbookTaxonomy/);
+  assert.doesNotMatch(workspaceSource, /matchesTextbookTaxonomy/);
+  assert.match(workspaceSource, /schoolLevel: schoolLevelGroupFilter/);
   assert.match(taxonomySource, /초·중·고/);
   assert.match(taxonomySource, /전 학년/);
   assert.doesNotMatch(

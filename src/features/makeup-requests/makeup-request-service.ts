@@ -172,6 +172,8 @@ export type MakeupRequestWorkspaceData = {
   classrooms: Row[]
   academicEvents: Row[]
   error?: string
+  reservationContext?: import("./makeup-numbered-service").MakeupReservationContext
+  collisionContextReady?: boolean
 }
 
 export type GoogleChatChannel = "executive" | "admin" | "math" | "english"
@@ -509,7 +511,7 @@ function isMakeupManagerRole(role: string) {
 function getLatestMakeupRequestEvent(request: MakeupRequest, eventTypes: string[]) {
   return [...(request.events || [])]
     .filter((event) => eventTypes.includes(event.eventType))
-    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0] || null
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt) || right.id.localeCompare(left.id))[0] || null
 }
 
 function isRefundApprovalRequest(request: MakeupRequest) {
@@ -571,6 +573,48 @@ async function runMakeupMutationRpc(
   const request = mapRequest(requestRow, profilesById, teachersById)
   await dispatchLegacyMakeupNotification(sourceEventId)
   return { request, sourceEventId }
+}
+
+function mapMakeupFormCatalogs(profilesRows: Row[], teacherRows: Row[], classRows: Row[], lessonSessionRows: Row[]) {
+  const sessions = new Map<string, MakeupClassOption["lessonSessions"]>()
+  for (const row of lessonSessionRows) {
+    const classId = text(row.class_id), id = text(row.id), date = text(row.session_date), state = text(row.schedule_state)
+    if (!classId || !id || !date || !["active", "makeup"].includes(state)) continue
+    sessions.set(classId, [...(sessions.get(classId) || []), { id, date, state }])
+  }
+  return { profiles: profilesRows.map(mapProfile), teachers: teacherRows.map(mapTeacher), classes: classRows.map((row) => mapClass({ ...row, lessonSessions: sessions.get(text(row.id)) || [] })) }
+}
+
+async function readMakeupCatalog(table: string, select: string, signal?: AbortSignal): Promise<Row[]> {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const deadline = AbortSignal.timeout(8_000), combined = signal ? AbortSignal.any([signal, deadline]) : deadline
+  combined.throwIfAborted()
+  const { data, error } = await supabase.from(table).select(select).abortSignal(combined).retry(false)
+  combined.throwIfAborted()
+  if (error) throw error
+  if (!Array.isArray(data)) throw new Error("휴보강 기준정보 응답이 올바르지 않습니다.")
+  return data as unknown as Row[]
+}
+
+/** Form catalogs stay independent of table filters and numbered request rows. */
+export async function loadMakeupFormCatalogs({ signal }: { signal?: AbortSignal } = {}) {
+  const rows = await Promise.all([
+    readMakeupCatalog("profiles", "id,email,name,role,login_id,teacher_catalog_id", signal),
+    readMakeupCatalog("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email,dashboard_role", signal),
+    readMakeupCatalog("classes", MAKEUP_CLASS_LIST_SELECT, signal),
+    readMakeupCatalog("class_lesson_sessions", "id,class_id,session_date,schedule_state", signal),
+  ])
+  return mapMakeupFormCatalogs(...rows as [Row[], Row[], Row[], Row[]])
+}
+
+/** Required collision catalogs must fail explicitly, not become empty optional reads. */
+export async function loadMakeupCollisionCatalogs({ signal }: { signal?: AbortSignal } = {}) {
+  const [classRows, classrooms, academicEvents] = await Promise.all([
+    readMakeupCatalog("classes", MAKEUP_CLASS_LIST_SELECT, signal),
+    readMakeupCatalog("classroom_catalogs", "*", signal),
+    readMakeupCatalog("academic_events", "*", signal),
+  ])
+  return { classes: classRows.map(mapClass), classrooms, academicEvents }
 }
 
 export async function loadMakeupRequestWorkspaceData(): Promise<MakeupRequestWorkspaceData> {
@@ -724,9 +768,26 @@ function buildCreatePayload(
   }
 }
 
-export async function createMakeupRequest(input: MakeupRequestInput, requesterId: string) {
+/** Fresh create-only context; never substitute this for completion collision guards. */
+async function loadMakeupCreateContext(): Promise<MakeupRequestWorkspaceData> {
+  try {
+    const rows = await Promise.all([
+      readTable("profiles", "id,email,name,role,login_id,teacher_catalog_id", true),
+      readTable("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email,dashboard_role", true),
+      readTable("classes", MAKEUP_CLASS_LIST_SELECT, true),
+      readTable("class_lesson_sessions", "id,class_id,session_date,schedule_state", true),
+    ])
+    return { ...EMPTY_WORKSPACE_DATA, ...mapMakeupFormCatalogs(...rows as [Row[], Row[], Row[], Row[]]) }
+  } catch (error) {
+    return { ...EMPTY_WORKSPACE_DATA, schemaReady: false, error: isMissingRelationError(error) ? "휴보강 신청서 DB 마이그레이션을 적용하세요." : getMakeupWorkspaceLoadErrorMessage(error) }
+  }
+}
+
+export async function createMakeupRequest(input: MakeupRequestInput, requesterId: string, { signal }: { signal?: AbortSignal } = {}) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const data = await loadMakeupRequestWorkspaceData()
+  signal?.throwIfAborted()
+  const data = await loadMakeupCreateContext()
+  signal?.throwIfAborted()
   if (!data.schemaReady) throw new Error(data.error || "휴보강 신청서 DB를 사용할 수 없습니다.")
 
   const requester = data.profiles.find((profile) => profile.id === requesterId)
@@ -741,10 +802,15 @@ export async function createMakeupRequest(input: MakeupRequestInput, requesterId
   const result = await runIdempotentMakeupCreate({
     actorId: requesterId,
     payload: createInput,
-    invoke: (requestId: string) => runMakeupMutationRpc("create_makeup_request_v2", {
-      p_input: createInput,
-      p_request_id: requestId,
-    }, data),
+    invoke: (requestId: string) => {
+      // The idempotency fingerprint awaits Web Crypto; recheck immediately
+      // before sending an as-yet-unsent write under a possibly changed actor.
+      signal?.throwIfAborted()
+      return runMakeupMutationRpc("create_makeup_request_v2", {
+        p_input: createInput,
+        p_request_id: requestId,
+      }, data)
+    },
   })
   return result.request
 }

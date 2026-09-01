@@ -43,6 +43,9 @@ import {
 import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
+import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
+import type { DataTablePageSize, DataTablePageSizePreference } from "@/lib/numbered-pagination";
+import { managementTableStorageKey, readManagementNumberedQuery, replaceManagementNumberedQuery, type ManagementNumberedQuery } from "./management-numbered-state";
 import { ClassTextbookPicker } from "./class-textbook-picker";
 import { ManagementRelationCombobox } from "./management-relation-combobox";
 import {
@@ -58,6 +61,7 @@ import {
 } from "./management-service.js";
 import { pickDefaultPeriodValue } from "./period-preferences";
 import { serializeManagementListFilters } from "./management-filter-transition.js";
+import { getManagementListErrorRecoveryState } from "./management-list-load-state";
 import {
   filterClassStudentCandidates,
   filterStudentClassCandidates,
@@ -1435,16 +1439,55 @@ function FieldClearButton({
 }
 
 export function ManagementPage({ kind }: { kind: ManagementKind }) {
+  const { user, role } = useAuth();
+  return <ManagementPageContent key={JSON.stringify([kind, user?.id || null, role])} kind={kind} />;
+}
+
+function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const { canManageAll } = useAuth();
+  const { canManageAll, user, role, loading: authLoading } = useAuth();
   const config = PAGE_CONFIG[kind];
   const managementListFilterScope = serializeManagementListFilters(kind, searchParams.toString());
   const managementListFilters = useMemo(
     () => JSON.parse(managementListFilterScope) as ManagementListFilters,
     [managementListFilterScope],
   );
+  const pageSizeState = useDataTablePageSize(`management:${kind}`);
+  const { ready: pageSizeReady, mode: pageSizeMode, pageSize: requestedPageSize, setAutoPageSize, setPreference } = pageSizeState;
+  const [autoMeasurementKind, setAutoMeasurementKind] = useState<ManagementKind | null>(null);
+  const [savedSort, setSavedSort] = useState<{ kind: ManagementKind; value: unknown } | null>(null);
+  useEffect(() => {
+    let active = true;
+    queueMicrotask(() => {
+      if (!active) return;
+      let value: unknown;
+      try { value = JSON.parse(window.localStorage.getItem(managementTableStorageKey(kind)) || "null")?.sorting; } catch { /* defaults */ }
+      setSavedSort({ kind, value });
+    });
+    return () => { active = false; };
+  }, [kind]);
+  const numberedQuery = readManagementNumberedQuery(kind, searchParams.toString(), savedSort?.kind === kind ? savedSort.value : undefined);
+  const changeNumberedQuery = useCallback((query: ManagementNumberedQuery) => {
+    // Read the live URL so a simultaneous detail/filter update is never overwritten.
+    replaceManagementNumberedQuery(window, pathname, query);
+  }, [pathname]);
+  const handleAutoPageSizeChange = useCallback((size: DataTablePageSize) => {
+    if (!pageSizeReady || pageSizeMode !== "auto") return;
+    if (autoMeasurementKind !== kind) {
+      setAutoPageSize(size);
+      setAutoMeasurementKind(kind);
+      return;
+    }
+    if (requestedPageSize === size) return;
+    setAutoPageSize(size);
+    changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
+  }, [autoMeasurementKind, changeNumberedQuery, kind, pageSizeMode, pageSizeReady, requestedPageSize, savedSort, setAutoPageSize]);
+  const handlePageSizePreferenceChange = useCallback((value: DataTablePageSizePreference) => {
+    setPreference(value);
+    changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
+  }, [changeNumberedQuery, kind, savedSort, setPreference]);
   const {
     rows,
     stats,
@@ -1453,16 +1496,26 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     classFormReferences,
     filterOptions,
     effectiveClassPeriodId,
-    hasMore,
-    loadingMore,
-    loadMore,
+    page,
+    pageSize: displayedPageSize,
+    totalCount,
+    sort: displayedSort,
+    scope: displayedScope,
+    goToPage,
+    setSort,
     loadDetail,
     loadRelationPage,
     loadClassRosterPreview,
     loadClassTextbookCandidatePage,
-    removeRows,
     refresh,
-  } = useManagementRecords(kind, managementListFilters);
+  } = useManagementRecords(kind, managementListFilters, {
+    enabled: pageSizeReady && (pageSizeMode !== "auto" || autoMeasurementKind === kind) && savedSort?.kind === kind && !authLoading && Boolean(user?.id),
+    pageSize: pageSizeState.pageSize,
+    authorizationScope: JSON.stringify([user?.id || null, role]),
+    page: numberedQuery.page,
+    sort: numberedQuery.sort,
+    onQueryChange: changeNumberedQuery,
+  });
   const canMutateRows = canManageAll;
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
@@ -2822,14 +2875,13 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
     try {
       const results = await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
       reportPublicClassesCacheRefresh(results);
-      removeRows(rows.map((row) => row.id));
       await reconcileManagementPage();
     } catch (bulkError) {
       setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
     } finally {
       setSaving(false);
     }
-  }, [canMutateRows, kind, reconcileManagementPage, removeRows]);
+  }, [canMutateRows, kind, reconcileManagementPage]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -3623,13 +3675,37 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
       ? relatedTitle(pendingClassStudentDetailRecord, "학생")
       : resolveRelatedTitle(pendingClassStudentDetailId)
     : "학생";
+  const errorRecovery = getManagementListErrorRecoveryState({
+    error,
+    loading,
+    rowCount: rows.length,
+  });
 
   return (
     <div className="flex flex-col gap-6">
-      {error && !loading ? (
+      {errorRecovery.visible ? (
         <div className="px-4 lg:px-6">
           <Alert variant="destructive">
-            <AlertDescription>{error}</AlertDescription>
+            <AlertDescription>
+              <div className="flex w-full flex-wrap items-center justify-between gap-3">
+                <div className="grid gap-1">
+                  <span>{error}</span>
+                  {errorRecovery.hasRetainedRows ? (
+                    <span className="text-xs">기존 목록은 유지됩니다.</span>
+                  ) : null}
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  aria-label={`${config.emptyLabel} 목록 다시 시도`}
+                  onClick={() => void refresh()}
+                  disabled={errorRecovery.retryDisabled}
+                >
+                  {loading ? "다시 시도 중" : "다시 시도"}
+                </Button>
+              </div>
+            </AlertDescription>
           </Alert>
         </div>
       ) : null}
@@ -3640,22 +3716,22 @@ export function ManagementPage({ kind }: { kind: ManagementKind }) {
           rows={rows}
           stats={stats}
           loading={loading}
+          page={page}
+          totalCount={totalCount}
+          sort={displayedSort}
+          displayedScope={displayedScope}
+          onPageChange={goToPage}
+          onSortChange={setSort}
           filterOptions={filterOptions}
-          onRefresh={refresh}
           badgeLabel={config.badgeLabel}
           statusLabel={config.statusLabel}
           emptyLabel={config.emptyLabel}
           actions={actions}
+          pageSize={displayedPageSize}
+          pageSizeMode={pageSizeState.mode}
+          onAutoPageSizeChange={handleAutoPageSizeChange}
+          onPageSizePreferenceChange={handlePageSizePreferenceChange}
         />
-        <div className="flex justify-center py-4" data-testid="management-list-continuation">
-          {hasMore ? (
-            <Button type="button" variant="outline" onClick={() => void loadMore()} disabled={loadingMore}>
-              {loadingMore ? "불러오는 중" : "다음 30건"}
-            </Button>
-          ) : rows.length > 0 && !loading ? (
-            <span className="text-xs text-muted-foreground">목록의 끝입니다.</span>
-          ) : null}
-        </div>
       </div>
 
       <Dialog open={dialogMode !== null} onOpenChange={handleDialogOpenChange}>

@@ -95,6 +95,8 @@ export function buildAcademicCalendarWorkspaceModel(input?: {
 }): AcademicCalendarWorkspaceModel;
 
 export function buildClassScheduleRouteModel(input?: {
+  numbered?: boolean;
+  syncGroupCounts?: { groupId: string; memberCount: number; representativeClassId: string }[];
   classes?: OperationsSourceRow[];
   textbooks?: OperationsSourceRow[];
   progressLogs?: OperationsSourceRow[];

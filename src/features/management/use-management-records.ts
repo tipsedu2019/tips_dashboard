@@ -13,6 +13,10 @@ import {
 } from "./records.js";
 import { buildCurriculumWorkspaceModel } from "../academic/records.js";
 import { createManagementReadService, getAssignedClassTextbookIds } from "./management-service.js";
+import type { ManagementListPageSize } from "./management-page-size";
+import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller";
+import { createManagementNumberedReadService, type ManagementNumberedSort } from "./management-numbered-service";
+import { sanitizeManagementNumberedSort, type ManagementNumberedQuery } from "./management-numbered-state";
 
 export type ManagementKind = "students" | "classes" | "textbooks";
 
@@ -502,11 +506,11 @@ function attachClassAuditSummary(
 function normalizeManagementRows(
   kind: ManagementKind,
   sourceRows: Record<string, unknown>[],
+  preserveOrder = false,
 ) {
   const config = CONFIG[kind];
-  return sourceRows
-    .map((row) => config.normalize(row))
-    .sort((left, right) => left.title.localeCompare(right.title, "ko"));
+  const rows = sourceRows.map((row) => config.normalize(row));
+  return preserveOrder ? rows : rows.sort((left, right) => left.title.localeCompare(right.title, "ko"));
 }
 
 // Kept for the legacy enrichment compatibility helpers exercised by older callers.
@@ -636,6 +640,15 @@ export type ManagementListFilters =
   | { kind: "textbooks"; search: string; status: string | null; subject: string | null; publisher: string | null };
 
 type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
+
+export type UseManagementRecordsOptions = {
+  pageSize: ManagementListPageSize;
+  enabled: boolean;
+  authorizationScope?: string;
+  page?: number;
+  sort?: ManagementNumberedSort;
+  onQueryChange?: (query: ManagementNumberedQuery) => void;
+};
 
 function defaultManagementFilters(kind: ManagementKind): ManagementListFilters {
   if (kind === "students") return { kind, search: "", status: null, schoolCategory: null, school: null, grade: null };
@@ -769,120 +782,154 @@ function listRowToSource(kind: ManagementKind, row: Record<string, unknown>) {
   return { ...row, name: row.title, active_class_count: row.activeClassCount, updated_at: row.updatedAt };
 }
 
-export function useManagementRecords(kind: ManagementKind, requestedFilters?: ManagementListFilters) {
-  const [rows, setRows] = useState<ManagementRow[]>([]);
+export function useManagementRecords(
+  kind: ManagementKind,
+  requestedFilters?: ManagementListFilters,
+  { pageSize, enabled, authorizationScope = "", page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
+) {
+  // Native history updates are transitions, while size preferences/measurements
+  // are urgent. Reconcile the request pair before effects can issue a query.
+  const [requestPagination, setRequestPagination] = useState({
+    urlPage: page, page, pageSize, initialized: enabled,
+  });
+  if (requestPagination.urlPage !== page || requestPagination.pageSize !== pageSize || (!requestPagination.initialized && enabled)) {
+    setRequestPagination({
+      urlPage: page,
+      page: requestPagination.initialized && requestPagination.pageSize !== pageSize
+        ? 1 : requestPagination.urlPage !== page ? page : requestPagination.page,
+      pageSize,
+      initialized: requestPagination.initialized || enabled,
+    });
+  }
   const [stats, setStats] = useState<ManagementStat[]>([]);
-  const [classFormReferences, setClassFormReferences] = useState<ClassFormReferences>(EMPTY_CLASS_FORM_REFERENCES);
-  const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [nextCursor, setNextCursor] = useState<ManagementPageCursor | null>(null);
-  const [hasMore, setHasMore] = useState(false);
+  const [classFormReferences, setClassFormReferences] = useState<{ owner: string; references: ClassFormReferences } | null>(null);
+  const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
-  const [effectiveClassPeriodId, setEffectiveClassPeriodId] = useState("");
-  const loadGenerationRef = useRef(0);
-  const canonicalReplayTokenRef = useRef("");
+  const [resolvedClassPeriod, setResolvedClassPeriod] = useState<{
+    requestScope: string; canonicalScope: string; periodId: string;
+  } | null>(null);
+  const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
+  const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ManagementRow> & { authorizationScope: string; kind: ManagementKind }) | null>(null);
+  const [metadataOwner, setMetadataOwner] = useState("");
+  const controllerRef = useRef<ReturnType<typeof createNumberedPageController<ManagementRow>> | null>(null);
+  const lastRequestKeyRef = useRef("");
+  const onQueryChangeRef = useRef(onQueryChange);
+  useEffect(() => { onQueryChangeRef.current = onQueryChange; }, [onQueryChange]);
   const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
-  const effectiveFiltersRef = useRef<ManagementListFilters>(filters);
   const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
-
-  const load = useCallback(async ({ allowCanonicalReplay = false }: { allowCanonicalReplay?: boolean } = {}) => {
-    const loadGeneration = loadGenerationRef.current + 1;
-    loadGenerationRef.current = loadGeneration;
-    const isCurrent = () => loadGenerationRef.current === loadGeneration;
-
-    if (!readService) {
-      setRows([]);
-      setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
-      setError("Supabase 연결 설정을 확인해 주세요.");
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-    try {
-      const canonicalReplayToken = allowCanonicalReplay ? canonicalReplayTokenRef.current : "";
-      if (!allowCanonicalReplay && canonicalReplayTokenRef.current) {
-        readService.discardCanonicalReplay(canonicalReplayTokenRef.current);
-      }
-      canonicalReplayTokenRef.current = "";
-      const result = await readService.loadInitialPage({
-        kind,
-        filters,
-        cursor: null,
-        limit: 30,
-        canonicalReplayToken,
-        coalesceInitialRequest: allowCanonicalReplay,
-      });
-      if (!isCurrent()) return;
-      canonicalReplayTokenRef.current = textValue(result.canonicalReplayToken);
-      effectiveFiltersRef.current = result.effectiveFilters as ManagementListFilters;
-      setEffectiveClassPeriodId(kind === "classes" ? textValue(result.effectiveFilters.periodId) : "");
-      const sourceRows = result.page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row));
-      setRows(normalizeManagementRows(kind, sourceRows));
-      setStats(aggregateToStats(kind, result.stats));
-      setFilterOptions(result.filterOptions);
-      setNextCursor(result.page.nextCursor);
-      setHasMore(result.page.hasMore);
-      setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
-      setError(null);
-      setLoading(false);
-    } catch (fetchError) {
-      if (isCurrent()) {
-        setRows([]);
-        if (kind === "classes") {
-          setClassFormReferences(EMPTY_CLASS_FORM_REFERENCES);
+  const numberedService = useMemo(() => supabase ? createManagementNumberedReadService({ supabase }) : null, []);
+  const requestedSort = sanitizeManagementNumberedSort(kind, sort);
+  const scope = JSON.stringify({ authorizationScope, kind, filters, sort: requestedSort });
+  const owner = JSON.stringify([authorizationScope, kind]);
+  const periodScopeMatches = enabled && resolvedClassPeriod !== null
+    && (resolvedClassPeriod.requestScope === scope || resolvedClassPeriod.canonicalScope === scope);
+  if (resolvedClassPeriod && !periodScopeMatches) {
+    setResolvedClassPeriod(null);
+  }
+  if (classFormReferences && classFormReferences.owner !== owner) {
+    setClassFormReferences(null);
+  }
+  useEffect(() => {
+    const authorization = { owner };
+    detailAuthorizationRef.current = authorization;
+    return () => {
+      if (detailAuthorizationRef.current === authorization) detailAuthorizationRef.current = null;
+    };
+  }, [owner]);
+  useEffect(() => {
+    let active = true;
+    lastRequestKeyRef.current = "";
+    const controller = createNumberedPageController<ManagementRow>({
+      loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal, canonicalizeScope }) => {
+        if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
+        const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
+        let effectiveFilters = request.filters;
+        const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
+        if (effectiveFilters.kind === "classes" && !effectiveFilters.periodId) {
+          const { data, error } = await supabase.rpc("get_management_default_class_period_v1").abortSignal(requestSignal).retry(false);
+          requestSignal.throwIfAborted();
+          if (error) throw error;
+          const period = textValue((Array.isArray(data) ? data[0] : data)?.periodId);
+          if (!period) throw new Error("management_default_period_unavailable");
+          effectiveFilters = { ...effectiveFilters, periodId: period };
+          const canonicalScope = JSON.stringify({ authorizationScope, kind, filters: effectiveFilters, sort: request.sort });
+          if (!canonicalizeScope(canonicalScope)) throw new Error("management_request_superseded");
+          // The subsequent canonical URL rewrite describes this same request.
+          lastRequestKeyRef.current = JSON.stringify([canonicalScope, requestedPage, requestedSize]);
+          setResolvedClassPeriod({ requestScope, canonicalScope, periodId: period });
         }
-        setError(
-          fetchError instanceof Error ? fetchError.message : "알 수 없는 연결 오류가 발생했습니다.",
-        );
-        setLoading(false);
-      }
-    }
-  }, [filters, kind, readService]);
+        setMetadataFailure(null);
+        const metadata = Promise.all([
+          supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
+          supabase.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
+        ]);
+        void metadata.then(([statsResult, optionsResult]) => {
+          if (!active || signal.aborted) return;
+          if (statsResult.error || optionsResult.error) throw statsResult.error || optionsResult.error;
+          setMetadataOwner(owner);
+          setStats(aggregateToStats(kind, (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) || {}));
+          setFilterOptions((Array.isArray(optionsResult.data) ? optionsResult.data[0] : optionsResult.data) || {});
+        }).catch((error) => {
+          if (active && !signal.aborted) setMetadataFailure({ owner, error: error instanceof Error ? error.message : "목록 부가 정보를 불러오지 못했습니다." });
+        });
+        const result = await numberedService.readPage({ kind, filters: effectiveFilters, page: requestedPage, pageSize: requestedSize, sort: request.sort, signal });
+        return { ...result, rows: normalizeManagementRows(kind, result.rows.map((row) => listRowToSource(kind, row)), true) };
+      },
+      onChange: (next) => {
+        if (!active) return;
+        setSnapshot({ ...next, authorizationScope, kind });
+        if (!next.loading && !next.error && next.scope && lastRequestKeyRef.current) {
+          const [requestScope, requestedPage, requestedSize] = JSON.parse(lastRequestKeyRef.current);
+          if (requestedPage !== next.page) {
+            lastRequestKeyRef.current = JSON.stringify([requestScope, next.page, requestedSize]);
+            onQueryChangeRef.current?.({ page: next.page, sort: JSON.parse(next.scope).sort });
+          }
+        }
+      },
+    });
+    controllerRef.current = controller;
+    return () => {
+      active = false;
+      controller.dispose();
+      if (controllerRef.current === controller) controllerRef.current = null;
+    };
+  }, [authorizationScope, enabled, kind, numberedService, owner]);
 
   useEffect(() => {
-    void load({ allowCanonicalReplay: true });
-    return () => {
-      loadGenerationRef.current += 1;
-    };
-  }, [load]);
+    let active = true;
+    queueMicrotask(() => {
+      const { page: requestedPage, pageSize: requestedSize } = requestPagination;
+      const key = JSON.stringify([scope, requestedPage, requestedSize]);
+      if (!active || !enabled || lastRequestKeyRef.current === key) return;
+      lastRequestKeyRef.current = key;
+      void controllerRef.current?.load({ scope, page: requestedPage, pageSize: requestedSize });
+    });
+    return () => { active = false; };
+  }, [enabled, scope, requestPagination]);
 
-  const loadMore = useCallback(async () => {
-    if (!readService || !nextCursor || !hasMore || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const page = await readService.loadNextPage({ kind, filters: effectiveFiltersRef.current, cursor: nextCursor, limit: 30 });
-      const incoming = normalizeManagementRows(kind, page.rows.map((row: Record<string, unknown>) => listRowToSource(kind, row)));
-      setRows((current) => {
-        const byId = new Map(current.map((row) => [row.id, row]));
-        for (const row of incoming) byId.set(row.id, row);
-        return [...byId.values()];
-      });
-      setNextCursor(page.nextCursor);
-      setHasMore(page.hasMore);
-    } catch (fetchError) {
-      setError(fetchError instanceof Error ? fetchError.message : "다음 목록을 불러오지 못했습니다.");
-    } finally {
-      setLoadingMore(false);
-    }
-  }, [hasMore, kind, loadingMore, nextCursor, readService]);
+  const goToPage = useCallback((nextPage: number) => onQueryChangeRef.current?.({ page: nextPage, sort: JSON.parse(scope).sort }), [onQueryChangeRef, scope]);
+  const setSort = useCallback((nextSort: ManagementNumberedSort) => onQueryChangeRef.current?.({ page: 1, sort: sanitizeManagementNumberedSort(kind, nextSort) }), [kind, onQueryChangeRef]);
 
   const loadDetail = useCallback(async (id: string) => {
     if (!readService) return null;
+    const authorization = detailAuthorizationRef.current;
+    if (!authorization || authorization.owner !== owner) return null;
     const detail = await readService.loadDetail({ kind, id });
+    if (detailAuthorizationRef.current !== authorization) return null;
     const sourceRow = detailToSourceRow(kind, detail);
     if (!sourceRow) return null;
     if (kind === "classes") {
       setClassFormReferences({
-        teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
-        classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
-        scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
+        owner,
+        references: {
+          teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
+          classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
+          scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
+        },
       });
     }
     return normalizeManagementRows(kind, [sourceRow])[0] || null;
-  }, [kind, readService]);
+  }, [kind, owner, readService, setClassFormReferences]);
 
   const loadRelationPage = useCallback(async ({
     id,
@@ -932,31 +979,39 @@ export function useManagementRecords(kind: ManagementKind, requestedFilters?: Ma
 
   const reloadRow = useCallback(async (id: string) => {
     const detailRow = await loadDetail(id);
-    if (!detailRow) return null;
-    setRows((current) => current.some((row) => row.id === id)
-      ? current.map((row) => row.id === id ? detailRow : row)
-      : [detailRow, ...current]);
+    if (detailRow) await controllerRef.current?.retry();
     return detailRow;
   }, [loadDetail]);
 
   const removeRows = useCallback((ids: string[]) => {
-    const removed = new Set(ids);
-    setRows((current) => current.filter((row) => !removed.has(row.id)));
+    // Keep the displayed count and rows from one server snapshot until reconciliation.
+    if (ids.length) void controllerRef.current?.retry();
   }, []);
 
-  const refresh = useCallback(() => load({ allowCanonicalReplay: false }), [load]);
+  const refresh = useCallback(async () => { if (enabled) await controllerRef.current?.retry(); }, [enabled]);
+  const displayed = snapshot?.authorizationScope === authorizationScope && snapshot.kind === kind ? snapshot : null;
+  const displayedQueryScope = displayed?.scope || scope;
+  const displayedSort = useMemo(() => JSON.parse(displayedQueryScope).sort as ManagementNumberedSort, [displayedQueryScope]);
+  const rows = displayed?.rows || [];
+  const loading = !displayed || (enabled && displayed.loading);
+  const fetchError = displayed?.error;
+  const error = fetchError ? fetchError instanceof Error ? fetchError.message : "목록을 불러오지 못했습니다." : metadataFailure?.owner === owner ? metadataFailure.error : null;
 
   return {
     rows,
-    stats,
+    stats: metadataOwner === owner ? stats : [],
     loading,
     error,
-    classFormReferences,
-    filterOptions,
-    effectiveClassPeriodId,
-    hasMore,
-    loadingMore,
-    loadMore,
+    classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
+    filterOptions: metadataOwner === owner ? filterOptions : {},
+    effectiveClassPeriodId: periodScopeMatches ? resolvedClassPeriod.periodId : "",
+    page: displayed?.page || 1,
+    pageSize: displayed?.totalCount !== null && displayed ? displayed.pageSize : pageSize,
+    totalCount: displayed?.totalCount ?? null,
+    sort: displayedSort,
+    scope: displayed?.scope || owner,
+    goToPage,
+    setSort,
     loadDetail,
     loadRelationPage,
     loadClassRosterPreview,

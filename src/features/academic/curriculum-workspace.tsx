@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { type KeyboardEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ClipboardList, SlidersHorizontal } from "lucide-react";
 
@@ -12,6 +12,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Progress } from "@/components/ui/progress";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { DataTablePagination } from "@/components/data-table/data-table-pagination";
+import { normalizePage } from "@/lib/numbered-pagination";
 import {
   Table,
   TableBody,
@@ -31,7 +33,6 @@ import { buildCurriculumWorkspaceModel, type CurriculumRow } from "./records.js"
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
 const DEFAULT_CURRICULUM_STATUS_FILTER = "수강";
-const CURRICULUM_CLASS_PAGE_SIZE = 30;
 const CURRICULUM_VIEW_MODES = [
   { value: "all", label: "전체" },
   { value: "unlinked", label: "교재 미연결" },
@@ -92,6 +93,7 @@ function applyCurriculumQueryState(
     teacher: string;
     classroom: string;
     viewMode: string;
+    page: number;
   },
 ) {
   const values = [
@@ -103,6 +105,7 @@ function applyCurriculumQueryState(
     ["teacher", state.teacher, ""],
     ["classroom", state.classroom, ""],
     ["view", normalizeCurriculumViewMode(state.viewMode), "all"],
+    ["page", String(state.page), "1"],
   ] as const;
 
   for (const [key, value, defaultValue] of values) {
@@ -227,19 +230,35 @@ export function AcademicCurriculumWorkspace() {
   const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
   const [classroom, setClassroom] = useState(() => text(searchParams.get("classroom")));
   const [viewMode, setViewMode] = useState(() => normalizeCurriculumViewMode(searchParams.get("view")));
-  const deferredSearch = useDeferredValue(search);
+  const [observedQuery, setObservedQuery] = useState(searchParamString);
+  const [writtenQuery, setWrittenQuery] = useState<string | null>(null);
+  const [navigation, setNavigation] = useState(() => ({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) }));
+  // Adopt the complete restored location in one render, before reads or URL effects commit.
+  if (observedQuery !== searchParamString) {
+    setObservedQuery(searchParamString);
+    // A self-write is acknowledged once; any other location invalidates it too.
+    setWrittenQuery(null);
+    if (writtenQuery !== searchParamString) {
+      setSearch(text(searchParams.get("q"))); setPeriod(text(searchParams.get("period")));
+      setStatus(text(searchParams.get("status")) || DEFAULT_CURRICULUM_STATUS_FILTER);
+      setSubject(text(searchParams.get("subject"))); setGrade(text(searchParams.get("grade")));
+      setTeacher(text(searchParams.get("teacher"))); setClassroom(text(searchParams.get("classroom")));
+      setViewMode(normalizeCurriculumViewMode(searchParams.get("view")));
+      setNavigation({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) });
+    }
+  }
   const {
     data: curriculumData,
     loading,
-    loadingMore,
+    page: displayedPage, pageSize, totalCount, goToPage, pageSizeMode, setPageSizePreference,
+    displayRequest,
     dataMatchesCurrentScope,
     error,
-    loadMore,
     refresh,
   } = useAcademicWorkspaceData({
     mode: "curriculum",
     periodId: period || null,
-    search: deferredSearch,
+    search,
     status,
     subject: subject || null,
     grade: grade || null,
@@ -247,8 +266,19 @@ export function AcademicCurriculumWorkspace() {
     classroom: classroom || null,
     viewMode,
     cursor: null,
+    page: navigation.page,
+    navigationKey: navigation.key,
   });
-  const renderData = dataMatchesCurrentScope ? curriculumData : null;
+  const renderData = curriculumData;
+  const handlePageChange = (page: number) => {
+    if (totalCount === null || displayRequest.mode !== "curriculum") return;
+    setSearch(displayRequest.search); setPeriod(displayRequest.periodId || "");
+    setStatus(displayRequest.status || DEFAULT_CURRICULUM_STATUS_FILTER);
+    setSubject(displayRequest.subject || ""); setGrade(displayRequest.grade || "");
+    setTeacher(displayRequest.teacher || ""); setClassroom(displayRequest.classroom || "");
+    setViewMode(displayRequest.viewMode);
+    return goToPage(page);
+  };
   const page = (renderData?.page || {}) as {
     rows?: CurriculumRow[];
     hasMore?: boolean;
@@ -264,6 +294,7 @@ export function AcademicCurriculumWorkspace() {
   const model = useMemo(() => {
     const derived = buildCurriculumWorkspaceModel({
       precomputedRows: Array.isArray(page.rows) ? page.rows : [],
+      numbered: true,
     });
     const optionValues = (key: string) => Array.isArray(filterOptions[key])
       ? (filterOptions[key] as unknown[]).map((value) => text(value)).filter(Boolean)
@@ -302,9 +333,10 @@ export function AcademicCurriculumWorkspace() {
     };
   }, [filterOptions, page.rows, stats]);
   const defaultPeriod = useMemo(() => pickDefaultPeriodValue(model.classGroupOptions), [model.classGroupOptions]);
-  const normalizedPeriod = period && model.classGroupOptions.some((option) => option.value === period)
-    ? period
-    : defaultPeriod;
+  const normalizedPeriod = period || (displayRequest.mode === "curriculum" ? displayRequest.periodId : "") || defaultPeriod;
+  const periodOptions = normalizedPeriod && !model.classGroupOptions.some((option) => option.value === normalizedPeriod)
+    ? [{ value: normalizedPeriod, label: normalizedPeriod }, ...model.classGroupOptions]
+    : model.classGroupOptions;
   const hasNonDefaultPeriodFilter = Boolean(normalizedPeriod && normalizedPeriod !== defaultPeriod);
   const hasNonDefaultStatusFilter = status !== DEFAULT_CURRICULUM_STATUS_FILTER;
   const hasActiveFilters = Boolean(
@@ -319,10 +351,10 @@ export function AcademicCurriculumWorkspace() {
   );
   const viewRows = model.rows;
   const visibleViewRows = model.rows;
-  const hasMoreViewRows = Boolean(page?.hasMore);
   const viewRowSessionCount = Number(model.summary.totalSessions || 0);
   const viewRowTextbookCount = Number(model.summary.linkedTextbooks || 0);
-  const viewModeLabel = CURRICULUM_VIEW_MODES.find((mode) => mode.value === viewMode)?.label || "전체";
+  const displayedViewMode = displayRequest.mode === "curriculum" ? displayRequest.viewMode : viewMode;
+  const viewModeLabel = CURRICULUM_VIEW_MODES.find((mode) => mode.value === displayedViewMode)?.label || "전체";
   const curriculumViewModeCounts = model.summary.viewModeCounts;
   const curriculumWorkQueueItems = useMemo(
     () =>
@@ -334,16 +366,17 @@ export function AcademicCurriculumWorkspace() {
   );
   const curriculumQueryState = useMemo(
     () => ({
-      search,
-      period,
-      status,
-      subject,
-      grade,
-      teacher,
-      classroom,
-      viewMode,
+      search: displayRequest.mode === "curriculum" ? displayRequest.search : search,
+      period: displayRequest.mode === "curriculum" ? displayRequest.periodId || "" : period,
+      status: displayRequest.mode === "curriculum" ? displayRequest.status || "" : status,
+      subject: displayRequest.mode === "curriculum" ? displayRequest.subject || "" : subject,
+      grade: displayRequest.mode === "curriculum" ? displayRequest.grade || "" : grade,
+      teacher: displayRequest.mode === "curriculum" ? displayRequest.teacher || "" : teacher,
+      classroom: displayRequest.mode === "curriculum" ? displayRequest.classroom || "" : classroom,
+      viewMode: displayedViewMode,
+      page: displayedPage,
     }),
-    [classroom, grade, period, search, status, subject, teacher, viewMode],
+    [classroom, displayRequest, displayedPage, displayedViewMode, grade, period, search, status, subject, teacher],
   );
   const curriculumReturnPath = useMemo(
     () => buildCurriculumListHref(pathname, searchParamString, curriculumQueryState),
@@ -351,12 +384,19 @@ export function AcademicCurriculumWorkspace() {
   );
 
   useEffect(() => {
+    if (loading || !dataMatchesCurrentScope) return;
     const nextHref = buildCurriculumListHref(pathname, searchParamString, curriculumQueryState);
     const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
     if (nextHref !== currentHref) {
-      router.replace(nextHref, { scroll: false });
+      let current = true;
+      queueMicrotask(() => {
+        if (!current) return;
+        setWrittenQuery(nextHref.split("?")[1] || "");
+        router.replace(nextHref, { scroll: false });
+      });
+      return () => { current = false; };
     }
-  }, [curriculumQueryState, pathname, router, searchParamString]);
+  }, [curriculumQueryState, dataMatchesCurrentScope, loading, pathname, router, searchParamString]);
 
   const rememberCurriculumScrollPosition = useCallback(() => {
     if (typeof window === "undefined") return;
@@ -439,13 +479,13 @@ export function AcademicCurriculumWorkspace() {
       id: "period",
       label: "기간",
       value: normalizedPeriod || "none",
-      options: model.classGroupOptions.map((option) => ({
+      options: periodOptions.map((option) => ({
         value: option.value,
         label: option.label,
       })),
       emptyValue: "none",
       emptyLabel: "기간 없음",
-      disabled: model.classGroupOptions.length === 0,
+      disabled: periodOptions.length === 0,
       onChange: (value) => {
         setPeriod(value === "none" ? "" : value);
       },
@@ -532,7 +572,7 @@ export function AcademicCurriculumWorkspace() {
     classroom ? { id: "classroom", label: <>강의실 {classroom}</> } : null,
   ].filter(Boolean) as ClassFilterPanelChip[];
 
-  if (loading && !dataMatchesCurrentScope) {
+  if (loading && !renderData) {
     return <CurriculumWorkspaceSkeleton />;
   }
 
@@ -557,7 +597,7 @@ export function AcademicCurriculumWorkspace() {
           searchValue={search}
           searchPlaceholder="수업 검색"
           onSearchChange={setSearch}
-          summaryLabel={`수업 ${viewRows.length}개 · 교재 미연결 ${model.summary.unlinkedClassCount}개 · 진도 필요 ${model.summary.updateNeededClassCount}개`}
+          summaryLabel={`수업 ${totalCount ?? "확인 중"}개 · 교재 미연결 ${model.summary.unlinkedClassCount}개 · 진도 필요 ${model.summary.updateNeededClassCount}개`}
           chips={filterChips}
           showReset={hasActiveFilters}
           onReset={resetFilters}
@@ -632,7 +672,6 @@ export function AcademicCurriculumWorkspace() {
                 <ClipboardList className="size-4 text-muted-foreground" />
                 <p className="text-sm font-semibold text-foreground">반별 수업계획</p>
                 <Badge variant="secondary">{model.summary.classCount}개</Badge>
-                {hasMoreViewRows ? <Badge variant="outline">{visibleViewRows.length}/{model.summary.classCount}</Badge> : null}
               </div>
               <div className="text-xs text-muted-foreground">
                 {viewRowSessionCount}회차 · {viewRowTextbookCount}권
@@ -855,22 +894,12 @@ export function AcademicCurriculumWorkspace() {
                   </Table>
                 </ScrollArea>
                 </div>
-                {hasMoreViewRows ? (
-                  <div className="flex justify-center border-t bg-background px-4 py-3">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="min-w-44"
-                      disabled={loadingMore}
-                      onClick={() => void loadMore()}
-                    >
-                      {loadingMore ? "불러오는 중" : `다음 ${CURRICULUM_CLASS_PAGE_SIZE}건`} · {visibleViewRows.length}/{model.summary.classCount}개
-                    </Button>
-                  </div>
-                ) : null}
               </>
             )}
+            <div className="border-t px-4 py-3">
+              <DataTablePagination page={displayedPage} pageSize={pageSize} totalCount={totalCount} loading={loading}
+                onPageChange={handlePageChange} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
+            </div>
         </section>
       </div>
     </div>

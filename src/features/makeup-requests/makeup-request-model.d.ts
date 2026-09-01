@@ -79,6 +79,7 @@ export function buildRoomAvailability(options?: {
   currentRequestId?: string;
   subject?: string;
   ignoreOrphanedMakeupEvents?: boolean;
+  activeEventRequestIds?: string[];
 }): MakeupRoomAvailability[];
 export function getDefaultMakeupEndAt(startAt: string, classItem?: unknown): string;
 export function applyMakeupRequestToSchedulePlan(

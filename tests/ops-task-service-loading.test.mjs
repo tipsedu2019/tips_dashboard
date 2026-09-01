@@ -1408,18 +1408,11 @@ test("workspace task caches are isolated by viewer identity", async () => {
 });
 
 test("registration core data uses a viewer-scoped session cache for instant reloads", async () => {
-  const workspaceSource = await readFile(
-    new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url),
-    "utf8",
-  );
-
   assert.match(serviceSource, /OPS_REGISTRATION_SESSION_CACHE_TTL_MS = 60_000/);
   assert.match(serviceSource, /getPersistedOpsTaskWorkspaceData/);
   assert.match(serviceSource, /options\.viewerId/);
   assert.match(serviceSource, /window\.sessionStorage\.getItem/);
   assert.match(serviceSource, /window\.sessionStorage\.setItem/);
-  assert.match(workspaceSource, /getPersistedOpsTaskWorkspaceData\(loadOptions\)/);
-  assert.match(workspaceSource, /setData\(\(current\) => current \|\| cachedData\)/);
 });
 
 test("persisted registration data renders immediately but still revalidates and invalidates after mutations", async () => {

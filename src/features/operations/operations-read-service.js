@@ -1,9 +1,25 @@
+import { validatePageSize } from '../../lib/numbered-pagination.ts';
+
+/**
+ * @typedef {{termId:string|null,search:string,subject:string|null,grade:string|null,teacher:string|null,syncGroupId:string|null}} ClassScheduleNumberedFilters
+ * @typedef {{id:string,name:string,subject:string,grade:string,schedule:string,termId:string|null,teacherName:string|null,termName:string|null,syncGroupId:string|null,syncGroupName:string|null,status:string,updatedAt:string|null}} ClassScheduleNumberedRow
+ * @typedef {{total:number,active:number,draft:number}} ClassScheduleNumberedStats
+ * @typedef {{terms:Array<{value:string,label:string}>,subjects:string[],grades:string[],teachers:string[],syncGroups:Array<{value:string,label:string}>}} ClassScheduleNumberedFilterOptions
+ * @typedef {{groupId:string,memberCount:number,representativeClassId:string}} ClassScheduleSyncGroupCount
+ * @typedef {import('../../lib/numbered-pagination').NumberedPage<ClassScheduleNumberedRow> & {stats:ClassScheduleNumberedStats,filterOptions:ClassScheduleNumberedFilterOptions,syncGroupCounts:ClassScheduleSyncGroupCount[]}} ClassScheduleNumberedPage
+ */
 const PAGE_SIZE = 30;
 const CATALOG_TTL_MS = 30 * 60 * 1_000;
 const DATE_KEY = /^\d{4}-\d{2}-\d{2}$/u;
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 const CLASS_FILTER_KEYS = ["grade", "search", "subject", "syncGroupId", "teacher", "termId"];
 const catalogCacheByActorScope = new Map();
+const catalogGenerationByActorScope = new Map();
+
+export function invalidateOperationsCatalogCache(actorScope) {
+  catalogCacheByActorScope.delete(actorScope);
+  catalogGenerationByActorScope.set(actorScope, (catalogGenerationByActorScope.get(actorScope) || 0) + 1);
+}
 
 function text(value) {
   return typeof value === "string" ? value.trim() : String(value || "").trim();
@@ -414,6 +430,61 @@ function assertAnnualResponse(value, academicYear) {
   throw operationsError("operations_annual_response_invalid");
 }
 
+const NUMBERED_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
+function exactOperationsKeys(value, keys) {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+    && Object.keys(value).length === keys.length && keys.every((key) => Object.hasOwn(value, key));
+}
+function operationsCount(value) { return Number.isSafeInteger(value) && value >= 0; }
+function operationsStrings(value) { return Array.isArray(value) && value.every((item) => typeof item === 'string'); }
+
+function assertClassScheduleNumberedFilters(filters) {
+  if (!exactOperationsKeys(filters, CLASS_FILTER_KEYS) || typeof filters.search !== 'string'
+    || CLASS_FILTER_KEYS.some((key) => key !== 'search' && filters[key] !== null && typeof filters[key] !== 'string')) throw operationsError('operations_numbered_filters_invalid');
+  const normalized = normalizeClassFilters(filters);
+  if (['termId','syncGroupId'].some((key) => normalized[key] !== null && !NUMBERED_UUID.test(normalized[key]))) throw operationsError('operations_numbered_filters_invalid');
+  return normalized;
+}
+
+function assertClassScheduleNumberedResponse(response, { page, pageSize }) {
+  const fail = () => { throw operationsError('operations_numbered_response_invalid'); };
+  if (!exactOperationsKeys(response, ['rows','page','pageSize','totalCount','stats','filterOptions','syncGroupCounts'])
+    || response.page !== page || response.pageSize !== pageSize || !operationsCount(response.totalCount)
+    || !Array.isArray(response.rows) || response.rows.length > pageSize
+    || response.rows.length > Math.max(0, response.totalCount - (page - 1) * pageSize)) fail();
+  const rows = response.rows.map((entry) => {
+    if (exactOperationsKeys(entry, ['id','sort_key','row_data'])) {
+      if (typeof entry.sort_key !== 'string' || entry.id !== entry.row_data?.id) fail();
+      return entry.row_data;
+    }
+    return entry;
+  });
+  const strings = ['id','name','subject','grade','schedule','status'];
+  const nullable = ['termId','teacherName','termName','syncGroupId','syncGroupName','updatedAt'];
+  if (!rows.every((row) => exactOperationsKeys(row, [...strings,...nullable]) && strings.every((key) => typeof row[key] === 'string')
+    && nullable.every((key) => row[key] === null || typeof row[key] === 'string') && NUMBERED_UUID.test(row.id)
+    && ['termId','syncGroupId'].every((key) => row[key] === null || NUMBERED_UUID.test(row[key]))
+    && (row.updatedAt === null || (row.updatedAt.trim() !== '' && Number.isFinite(Date.parse(row.updatedAt)))))
+    || new Set(rows.map((row) => row.id)).size !== rows.length) fail();
+  const stats = response.stats;
+  const options = response.filterOptions;
+  if (!exactOperationsKeys(stats, ['total','active','draft']) || !Object.values(stats).every(operationsCount)
+    || stats.total !== response.totalCount || stats.active + stats.draft > stats.total
+    || !exactOperationsKeys(options, ['terms','subjects','grades','teachers','syncGroups'])
+    || !['subjects','grades','teachers'].every((key) => operationsStrings(options[key]) && options[key].length <= 200)
+    || !['terms','syncGroups'].every((key) => Array.isArray(options[key]) && options[key].length <= 200
+      && options[key].every((item) => exactOperationsKeys(item, ['value','label']) && typeof item.value === 'string' && NUMBERED_UUID.test(item.value) && typeof item.label === 'string'))) fail();
+  const groups = response.syncGroupCounts;
+  if (!Array.isArray(groups) || groups.length > 200
+    || !groups.every((group) => exactOperationsKeys(group, ['groupId','memberCount','representativeClassId'])
+      && typeof group.groupId === 'string' && NUMBERED_UUID.test(group.groupId)
+      && typeof group.representativeClassId === 'string' && NUMBERED_UUID.test(group.representativeClassId)
+      && operationsCount(group.memberCount) && group.memberCount > 0 && group.memberCount <= response.totalCount
+      && options.syncGroups.some((option) => option.value === group.groupId))
+    || new Set(groups.map((group) => group.groupId)).size !== groups.length) fail();
+  return { ...response, rows };
+}
+
 export function createOperationsReadService(options = {}) {
   const client = options.supabase;
   if (!client || typeof client.rpc !== "function") throw operationsError("operations_client_missing");
@@ -465,6 +536,20 @@ export function createOperationsReadService(options = {}) {
   }
 
   return {
+    /**
+     * @param {{filters:ClassScheduleNumberedFilters,page:number,pageSize:import('../../lib/numbered-pagination').DataTablePageSize,signal?:AbortSignal}} request
+     * @returns {Promise<ClassScheduleNumberedPage>}
+     */
+    async readClassScheduleNumberedPage({ filters: rawFilters, page, pageSize, signal }) {
+      validatePageSize(pageSize);
+      if (!Number.isInteger(page) || page < 1 || page > 2147483647) throw operationsError('operations_numbered_request_invalid');
+      const filters = assertClassScheduleNumberedFilters(rawFilters);
+      const { data, error } = await client.rpc('get_operations_class_schedule_numbered_page_v1', {
+        p_filters: filters, p_page: page, p_page_size: pageSize,
+      }).abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000)).retry(false);
+      if (error) throw error;
+      return assertClassScheduleNumberedResponse(data, { page, pageSize });
+    },
     async load(request) {
       if (request?.mode === "calendar") {
         const range = assertRange(request.dateFrom, request.dateTo, 42);
@@ -562,6 +647,7 @@ export function createOperationsReadService(options = {}) {
       };
     },
     async loadCatalogs() {
+      const generation = catalogGenerationByActorScope.get(actorScope) || 0;
       const timestamp = Number(now());
       const catalogCache = catalogCacheByActorScope.get(actorScope);
       if (catalogCache && catalogCache.actorScope === actorScope && timestamp < catalogCache.expiresAt) {
@@ -572,7 +658,9 @@ export function createOperationsReadService(options = {}) {
           .abortSignal(AbortSignal.timeout(8_000))
           .retry(false),
       );
-      catalogCacheByActorScope.set(actorScope, { actorScope, expiresAt: timestamp + CATALOG_TTL_MS, value });
+      if (generation === (catalogGenerationByActorScope.get(actorScope) || 0)) {
+        catalogCacheByActorScope.set(actorScope, { actorScope, expiresAt: timestamp + CATALOG_TTL_MS, value });
+      }
       return value;
     },
   };
