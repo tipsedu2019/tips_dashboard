@@ -1903,7 +1903,7 @@ test("SQL review workflow는 migration rename destination을 Squawk에 전달한
   })
   assert.equal(result.status, 0, result.stderr)
   const args = (await readFile(squawkArgs, "utf8")).split("\0").filter(Boolean)
-  assert.deepEqual(args, ["--pg-version", "17", renamed])
+  assert.deepEqual(args, ["--no-error-on-unmatched-pattern", "--pg-version", "17", renamed])
 })
 
 test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {
