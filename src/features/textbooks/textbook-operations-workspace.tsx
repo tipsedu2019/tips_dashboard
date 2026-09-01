@@ -5358,7 +5358,6 @@ function TextbookOperationsWorkspaceContent() {
         movementTotalCount={numbered.closingMovements.totalCount}
         movementLoading={numbered.closingMovements.loading}
         onMovementPageChange={(page) => { void numbered.closingMovements.goToPage(page); }}
-        movementPageSizeMode={numbered.closingMovements.pageSizeMode}
         onMovementPageSizeChange={numbered.closingMovements.setPageSizePreference}
         onOpenChange={(open) => {
           if (!open) {
@@ -5728,7 +5727,6 @@ function TextbookOperationsWorkspaceContent() {
             totalCount={numbered.master.totalCount}
             loading={numbered.master.loading}
             onPageChange={(page) => { void numbered.master.goToPage(page); }}
-            pageSizeMode={numbered.master.pageSizeMode}
             onPageSizeChange={numbered.master.setPageSizePreference}
             ariaLabel="교재 목록 페이지 탐색"
           />
@@ -5767,7 +5765,7 @@ function TextbookOperationsWorkspaceContent() {
             onClearSearch={() => updateOperationSearchQuery("")}
           />
           <DataTablePagination page={numbered.requests.page} pageSize={numbered.requests.pageSize} totalCount={numbered.requests.totalCount} loading={numbered.requests.loading}
-            onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.requests.goToPage(page); }} pageSizeMode={numbered.requests.pageSizeMode}
+            onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.requests.goToPage(page); }}
             onPageSizeChange={numbered.requests.setPageSizePreference} ariaLabel="교재 요청 페이지 탐색" />
         </TabsContent>
 
@@ -5810,7 +5808,7 @@ function TextbookOperationsWorkspaceContent() {
             onClearSearch={() => updateOperationSearchQuery("")}
           />
           <DataTablePagination page={numbered.purchase.page} pageSize={numbered.purchase.pageSize} totalCount={numbered.purchase.totalCount} loading={numbered.purchase.loading}
-            onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.purchase.goToPage(page); }} pageSizeMode={numbered.purchase.pageSizeMode}
+            onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.purchase.goToPage(page); }}
             onPageSizeChange={numbered.purchase.setPageSizePreference} ariaLabel="주문 입고 페이지 탐색" />
         </TabsContent>
 
@@ -5822,7 +5820,7 @@ function TextbookOperationsWorkspaceContent() {
             onFiltersChange={setSaleHistoryFilters}
           />
           <DataTablePagination page={numbered.saleHistory.page} pageSize={numbered.saleHistory.pageSize} totalCount={numbered.saleHistory.totalCount} loading={numbered.saleHistory.loading}
-            onPageChange={(page) => { void numbered.saleHistory.goToPage(page); }} pageSizeMode={numbered.saleHistory.pageSizeMode}
+            onPageChange={(page) => { void numbered.saleHistory.goToPage(page); }}
             onPageSizeChange={numbered.saleHistory.setPageSizePreference} ariaLabel="출고 이력 페이지 탐색" />
           <SalesProcessTable
             summary={numbered.sales.summary.value}
@@ -5854,7 +5852,7 @@ function TextbookOperationsWorkspaceContent() {
             onClearSearch={() => updateOperationSearchQuery("")}
           />
           <DataTablePagination page={numbered.sales.page} pageSize={numbered.sales.pageSize} totalCount={numbered.sales.totalCount} loading={numbered.sales.loading}
-            onPageChange={(page) => { setSelectedSaleLineIds([]); void numbered.sales.goToPage(page); }} pageSizeMode={numbered.sales.pageSizeMode}
+            onPageChange={(page) => { setSelectedSaleLineIds([]); void numbered.sales.goToPage(page); }}
             onPageSizeChange={numbered.sales.setPageSizePreference} ariaLabel="교재 출고 페이지 탐색" />
         </TabsContent>
 
@@ -5889,7 +5887,6 @@ function TextbookOperationsWorkspaceContent() {
             totalCount={numbered.inventory.totalCount}
             loading={numbered.inventory.loading}
             onPageChange={(page) => { setSelectedTextbookIds([]); void numbered.inventory.goToPage(page); }}
-            pageSizeMode={numbered.inventory.pageSizeMode}
             onPageSizeChange={numbered.inventory.setPageSizePreference}
             ariaLabel="재고 실사 페이지 탐색"
           />
@@ -5907,7 +5904,6 @@ function TextbookOperationsWorkspaceContent() {
             totalCount={numbered.inventoryHistory.totalCount}
             loading={numbered.inventoryHistory.loading}
             onPageChange={(page) => { void numbered.inventoryHistory.goToPage(page); }}
-            pageSizeMode={numbered.inventoryHistory.pageSizeMode}
             onPageSizeChange={numbered.inventoryHistory.setPageSizePreference}
             ariaLabel="재고 이력 페이지 탐색"
           />
@@ -5939,7 +5935,7 @@ function TextbookOperationsWorkspaceContent() {
                 }}
               />
               <DataTablePagination page={numbered.closing.page} pageSize={numbered.closing.pageSize} totalCount={numbered.closing.totalCount} loading={numbered.closing.loading}
-                onPageChange={(page) => { setSelectedClosingIds([]); void numbered.closing.goToPage(page); }} pageSizeMode={numbered.closing.pageSizeMode}
+                onPageChange={(page) => { setSelectedClosingIds([]); void numbered.closing.goToPage(page); }}
                 onPageSizeChange={numbered.closing.setPageSizePreference} ariaLabel="월마감 페이지 탐색" />
             </TabsContent>
           </>
@@ -8299,7 +8295,6 @@ function ClosingDetailDialog({
   movementTotalCount,
   movementLoading,
   onMovementPageChange,
-  movementPageSizeMode,
   onMovementPageSizeChange,
   onOpenChange,
 }: {
@@ -8316,8 +8311,7 @@ function ClosingDetailDialog({
   movementTotalCount: number | null;
   movementLoading: boolean;
   onMovementPageChange: (page: number) => void;
-  movementPageSizeMode: "auto" | "manual";
-  onMovementPageSizeChange: (value: "auto" | 10 | 15 | 20) => void;
+  onMovementPageSizeChange: (value: 10 | 15 | 20) => void;
   onOpenChange: (open: boolean) => void;
 }) {
   const [copyStatus, setCopyStatus] = useState("");
@@ -8471,7 +8465,7 @@ function ClosingDetailDialog({
           </div>
         </div>
         <DataTablePagination page={movementPage} pageSize={movementPageSize} totalCount={movementTotalCount} loading={movementLoading}
-          onPageChange={onMovementPageChange} pageSizeMode={movementPageSizeMode} onPageSizeChange={onMovementPageSizeChange}
+          onPageChange={onMovementPageChange} onPageSizeChange={onMovementPageSizeChange}
           ariaLabel="월마감 상세 이동 페이지 탐색" />
         <div className={dialogFooterClassName}>
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>

@@ -2,7 +2,7 @@ export const DATA_TABLE_PAGE_SIZES = [10, 15, 20] as const
 
 export type DataTablePageSize = (typeof DATA_TABLE_PAGE_SIZES)[number]
 
-export type DataTablePageSizePreference = "auto" | DataTablePageSize
+export type DataTablePageSizePreference = DataTablePageSize
 
 export type NumberedPage<T> = {
   rows: T[]

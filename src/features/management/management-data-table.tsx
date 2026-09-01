@@ -74,9 +74,7 @@ import { MANAGEMENT_TABLE_STORAGE_VERSION, managementTableStorageKey, resetManag
 import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
 import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
-  getManagementListRowCapacity,
   getManagementListViewportHeight,
-  pickManagementListPageSize,
   type ManagementListPageSize,
 } from "./management-page-size";
 import {
@@ -1252,8 +1250,6 @@ export function ManagementDataTable({
   emptyLabel,
   actions = {},
   pageSize,
-  pageSizeMode,
-  onAutoPageSizeChange,
   onPageSizePreferenceChange,
 }: {
   kind: ManagementKind;
@@ -1272,9 +1268,7 @@ export function ManagementDataTable({
   emptyLabel: string;
   actions?: ManagementTableActions;
   pageSize: ManagementListPageSize;
-  pageSizeMode: "auto" | "manual";
-  onAutoPageSizeChange: (size: ManagementListPageSize) => void;
-  onPageSizePreferenceChange: (value: "auto" | ManagementListPageSize) => void;
+  onPageSizePreferenceChange: (value: ManagementListPageSize) => void;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -1282,7 +1276,6 @@ export function ManagementDataTable({
   const searchParamString = searchParams.toString();
   const tableLayoutRef = useRef<HTMLDivElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
-  const tableBodyRef = useRef<HTMLTableSectionElement | null>(null);
   const tablePagerRef = useRef<HTMLDivElement | null>(null);
   const managementScrollStorageKey = useMemo(
     () => getManagementListScrollStorageKey(kind, pathname, searchParamString),
@@ -1790,26 +1783,15 @@ export function ManagementDataTable({
 
   useLayoutEffect(() => {
     const tableLayout = tableLayoutRef.current;
-    const tableBody = tableBodyRef.current;
     const tablePager = tablePagerRef.current;
     const tableViewport = tableViewportRef.current;
-    if (!tableLayout || !tableBody || !tablePager || !tableViewport) {
+    if (!tableLayout || !tablePager || !tableViewport) {
       return undefined;
     }
 
-    const measurePageSize = () => {
-      if (tableBody.getClientRects().length === 0) {
-        // Mobile cards hide the desktop table; the hydrated estimate is usable.
-        if (pageSizeMode === "auto") onAutoPageSizeChange(pageSize);
-        return;
-      }
-
-      const firstRealRow = tableBody.querySelector<HTMLElement>('tr[data-management-row="true"]');
-      const measuredRowHeight = firstRealRow?.getBoundingClientRect().height || 34;
-      const bodyRect = tableBody.getBoundingClientRect();
+    const measureViewportHeight = () => {
       const pagerRect = tablePager.getBoundingClientRect();
       const viewportRect = tableViewport.getBoundingClientRect();
-      const viewportBottomBorder = Number.parseFloat(window.getComputedStyle(tableViewport).borderBottomWidth) || 0;
       const footerGap = Math.max(0, pagerRect.top - viewportRect.bottom);
       let bottomReserve = 0;
       for (let ancestor: HTMLElement | null = tableLayout; ancestor; ancestor = ancestor.parentElement) {
@@ -1819,16 +1801,6 @@ export function ManagementDataTable({
           + (Number.parseFloat(style.marginBottom) || 0);
         if (ancestor.dataset.slot === "sidebar-inset") break;
       }
-      const fitRows = getManagementListRowCapacity({
-        viewportHeight: window.innerHeight,
-        // Internal scrolling must not increase the apparent space for rows.
-        bodyViewportTop: bodyRect.top + tableViewport.scrollTop,
-        documentScrollTop: window.scrollY,
-        rowHeight: measuredRowHeight,
-        footerHeight: pagerRect.height || 44,
-        bodyToFooterGap: footerGap + viewportBottomBorder,
-        bottomReserve,
-      });
       const nextViewportHeight = getManagementListViewportHeight({
         viewportHeight: window.innerHeight,
         viewportDocumentTop: viewportRect.top + window.scrollY,
@@ -1837,25 +1809,19 @@ export function ManagementDataTable({
         bottomReserve,
       });
       setTableViewportHeight((current) => current === nextViewportHeight ? current : nextViewportHeight);
-      const nextPageSize = pickManagementListPageSize(fitRows);
-
-      if (pageSizeMode === "auto") {
-        onAutoPageSizeChange(nextPageSize);
-      }
     };
 
-    const resizeObserver = new ResizeObserver(measurePageSize);
+    const resizeObserver = new ResizeObserver(measureViewportHeight);
     resizeObserver.observe(tableLayout);
-    resizeObserver.observe(tableBody);
     resizeObserver.observe(tablePager);
-    window.addEventListener("resize", measurePageSize, { passive: true });
-    measurePageSize();
+    window.addEventListener("resize", measureViewportHeight, { passive: true });
+    measureViewportHeight();
 
     return () => {
       resizeObserver.disconnect();
-      window.removeEventListener("resize", measurePageSize);
+      window.removeEventListener("resize", measureViewportHeight);
     };
-  }, [kind, onAutoPageSizeChange, pageSize, pageSizeMode]);
+  }, [kind]);
 
   useEffect(() => {
     if (tableViewportRef.current) tableViewportRef.current.scrollTop = 0;
@@ -1951,11 +1917,9 @@ export function ManagementDataTable({
   );
   const filteredRowCount = table.getFilteredRowModel().rows.length;
   const authoritativeTotal = totalCount?.toLocaleString("ko-KR");
-  const summaryLabel = loading
-    ? `${emptyLabel} 불러오는 중`
-    : kind === "classes"
-      ? authoritativeTotal === undefined ? "수업 건수 확인 중" : `전체 수업 ${authoritativeTotal}개 · 서버 집계`
-      : `표시 ${filteredRowCount}건`;
+  const summaryLabel = kind === "classes"
+    ? authoritativeTotal === undefined ? "수업 건수 확인 중" : `전체 수업 ${authoritativeTotal}개 · 서버 집계`
+    : `표시 ${filteredRowCount}건`;
   const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);
   const bulkEditFields = BULK_EDIT_FIELDS[kind];
@@ -1993,7 +1957,7 @@ export function ManagementDataTable({
   const emptyStateTitle = rows.length === 0 ? `${emptyLabel} 없음` : `${emptyLabel} 결과 없음`;
   const createLabel = kind === "students" ? "학생 등록" : kind === "classes" ? "수업 등록" : "교재 등록";
   const hasCreateAction = typeof actions.onCreate === "function";
-  const showSummaryBadge = loading || hasActiveFilters || rows.length !== filteredRowCount;
+  const showSummaryBadge = hasActiveFilters || rows.length !== filteredRowCount;
   const showInitialLoading = shouldRenderManagementInitialLoading(loading, rows.length);
   useEffect(() => {
     if (typeof window === "undefined" || loading) {
@@ -3404,7 +3368,7 @@ export function ManagementDataTable({
               </TableRow>
             ))}
           </TableHeader>
-          <TableBody ref={tableBodyRef}>
+          <TableBody>
             {showInitialLoading ? (
               <>
                 <TableRow>
@@ -3518,7 +3482,6 @@ export function ManagementDataTable({
             totalCount={totalCount}
             loading={loading}
             onPageChange={onPageChange}
-            pageSizeMode={pageSizeMode}
             onPageSizeChange={onPageSizePreferenceChange}
             ariaLabel={`${emptyLabel} 목록 페이지 탐색`}
           />

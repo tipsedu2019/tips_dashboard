@@ -183,8 +183,8 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
   const goToPage = useCallback((page: number) => {
     const target = desired.current;
     if (!service || serviceRef.current !== service || !target || target.service !== service || !snapshot?.scope) return Promise.resolve();
-    // Keep the preference input (including Auto) intact; ordinary paging belongs
-    // to the accepted dataset and size, while retry belongs to the last load.
+    // Ordinary paging belongs to the accepted dataset and fixed size, while
+    // retry belongs to the last load.
     pageScopeAdoption.current = true;
     desired.current = { ...target, fingerprint: snapshot.scope, scope: snapshot.scope };
     return controller.current?.load({ scope: snapshot.scope, page, pageSize: snapshot.pageSize });
@@ -233,7 +233,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     error: (isNumbered ? snapshot?.error ? getErrorMessage(snapshot.error, "목록을 불러오지 못했습니다.") : null : rangeError)
       || (catalogError?.service === service ? catalogError?.message : null),
     page: snapshot?.page || 1, pageSize: snapshot?.scope ? snapshot.pageSize : size.pageSize,
-    totalCount: snapshot?.totalCount ?? null, pageSizeMode: size.mode,
+    totalCount: snapshot?.totalCount ?? null,
     setPageSizePreference, goToPage, refresh,
     loadEventDetail, loadClassScheduleDetail, loadClassLessonDesignDetail, loadLessonTextbookCandidates,
   };

@@ -44,7 +44,7 @@ import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
-import type { DataTablePageSize, DataTablePageSizePreference } from "@/lib/numbered-pagination";
+import type { DataTablePageSizePreference } from "@/lib/numbered-pagination";
 import { managementTableStorageKey, readManagementNumberedQuery, replaceManagementNumberedQuery, type ManagementNumberedQuery } from "./management-numbered-state";
 import { ClassTextbookPicker } from "./class-textbook-picker";
 import { ManagementRelationCombobox } from "./management-relation-combobox";
@@ -1455,8 +1455,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     [managementListFilterScope],
   );
   const pageSizeState = useDataTablePageSize(`management:${kind}`);
-  const { ready: pageSizeReady, mode: pageSizeMode, pageSize: requestedPageSize, setAutoPageSize, setPreference } = pageSizeState;
-  const [autoMeasurementKind, setAutoMeasurementKind] = useState<ManagementKind | null>(null);
+  const { ready: pageSizeReady, setPreference } = pageSizeState;
   const [savedSort, setSavedSort] = useState<{ kind: ManagementKind; value: unknown } | null>(null);
   useEffect(() => {
     let active = true;
@@ -1473,17 +1472,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     // Read the live URL so a simultaneous detail/filter update is never overwritten.
     replaceManagementNumberedQuery(window, pathname, query);
   }, [pathname]);
-  const handleAutoPageSizeChange = useCallback((size: DataTablePageSize) => {
-    if (!pageSizeReady || pageSizeMode !== "auto") return;
-    if (autoMeasurementKind !== kind) {
-      setAutoPageSize(size);
-      setAutoMeasurementKind(kind);
-      return;
-    }
-    if (requestedPageSize === size) return;
-    setAutoPageSize(size);
-    changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
-  }, [autoMeasurementKind, changeNumberedQuery, kind, pageSizeMode, pageSizeReady, requestedPageSize, savedSort, setAutoPageSize]);
   const handlePageSizePreferenceChange = useCallback((value: DataTablePageSizePreference) => {
     setPreference(value);
     changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
@@ -1509,7 +1497,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     loadClassTextbookCandidatePage,
     refresh,
   } = useManagementRecords(kind, managementListFilters, {
-    enabled: pageSizeReady && (pageSizeMode !== "auto" || autoMeasurementKind === kind) && savedSort?.kind === kind && !authLoading && Boolean(user?.id),
+    enabled: pageSizeReady && savedSort?.kind === kind && !authLoading && Boolean(user?.id),
     pageSize: pageSizeState.pageSize,
     authorizationScope: JSON.stringify([user?.id || null, role]),
     page: numberedQuery.page,
@@ -3728,8 +3716,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           emptyLabel={config.emptyLabel}
           actions={actions}
           pageSize={displayedPageSize}
-          pageSizeMode={pageSizeState.mode}
-          onAutoPageSizeChange={handleAutoPageSizeChange}
           onPageSizePreferenceChange={handlePageSizePreferenceChange}
         />
       </div>

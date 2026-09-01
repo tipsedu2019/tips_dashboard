@@ -250,7 +250,7 @@ export function AcademicCurriculumWorkspace() {
   const {
     data: curriculumData,
     loading,
-    page: displayedPage, pageSize, totalCount, goToPage, pageSizeMode, setPageSizePreference,
+    page: displayedPage, pageSize, totalCount, goToPage, setPageSizePreference,
     displayRequest,
     dataMatchesCurrentScope,
     error,
@@ -898,7 +898,7 @@ export function AcademicCurriculumWorkspace() {
             )}
             <div className="border-t px-4 py-3">
               <DataTablePagination page={displayedPage} pageSize={pageSize} totalCount={totalCount} loading={loading}
-                onPageChange={handlePageChange} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
+                onPageChange={handlePageChange} onPageSizeChange={setPageSizePreference} />
             </div>
         </section>
       </div>

@@ -309,14 +309,13 @@ type FooterResource = {
   totalCount: number | null;
   loading: boolean;
   goToPage: (page: number) => void;
-  pageSizeMode: "auto" | "manual";
-  setPageSizePreference?: (value: "auto" | 10 | 15 | 20) => void;
+  setPageSizePreference?: (value: 10 | 15 | 20) => void;
 };
 
 function PageFooter({ resource, label }: { resource: FooterResource; label: string }) {
   return (
     <div className="border-t px-3 py-3">
-      <DataTablePagination page={resource.page} pageSize={resource.pageSize} totalCount={resource.totalCount} loading={resource.loading} onPageChange={resource.goToPage} pageSizeMode={resource.pageSizeMode} onPageSizeChange={resource.setPageSizePreference} ariaLabel={label} />
+      <DataTablePagination page={resource.page} pageSize={resource.pageSize} totalCount={resource.totalCount} loading={resource.loading} onPageChange={resource.goToPage} onPageSizeChange={resource.setPageSizePreference} ariaLabel={label} />
     </div>
   );
 }

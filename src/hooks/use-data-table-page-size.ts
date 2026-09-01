@@ -20,15 +20,7 @@ type StoredPreferences = Record<string, StoredPreference>
 export type UseDataTablePageSizeResult = {
   ready: boolean
   pageSize: DataTablePageSize
-  mode: "auto" | "manual"
   setPreference: (preference: DataTablePageSizePreference) => void
-  setAutoPageSize: (measuredPageSize: DataTablePageSize) => void
-}
-
-function estimateAutoPageSize(viewportHeight = typeof window === "undefined" ? 0 : window.innerHeight): DataTablePageSize {
-  if (viewportHeight >= 1_120) return 20
-  if (viewportHeight >= 800) return 15
-  return 10
 }
 
 function readPreferences(): StoredPreferences {
@@ -66,7 +58,7 @@ function writePreferences(preferences: StoredPreferences) {
 }
 
 export function useDataTablePageSize(tableId: string): UseDataTablePageSizeResult {
-  const [state, setState] = useState<{ tableId: string | null; mode: "auto" | "manual"; pageSize: DataTablePageSize }>({ tableId: null, mode: "auto", pageSize: 10 })
+  const [state, setState] = useState<{ tableId: string | null; pageSize: DataTablePageSize }>({ tableId: null, pageSize: 10 })
 
   useEffect(() => {
     let active = true
@@ -87,10 +79,10 @@ export function useDataTablePageSize(tableId: string): UseDataTablePageSizeResul
           }
           if (persisted) window.localStorage.removeItem(legacyKey)
         } catch {
-          // Invalid legacy values or unavailable storage leave auto sizing intact.
+          // Invalid legacy values or unavailable storage keep the fixed default.
         }
       }
-      setState({ tableId, mode: preference ? "manual" : "auto", pageSize: preference?.pageSize ?? estimateAutoPageSize() })
+      setState({ tableId, pageSize: preference?.pageSize ?? 10 })
     })
 
     return () => {
@@ -99,29 +91,12 @@ export function useDataTablePageSize(tableId: string): UseDataTablePageSizeResul
   }, [tableId])
 
   const setPreference = useCallback((preference: DataTablePageSizePreference) => {
-    if (preference === "auto") {
-      setState({ tableId, mode: "auto", pageSize: estimateAutoPageSize() })
-      const preferences = readPreferences()
-      delete preferences[tableId]
-      writePreferences(preferences)
-      if (/^management:(students|classes|textbooks)$/.test(tableId)) {
-        try { window.localStorage.removeItem(`tips:management-page-size:${tableId.slice("management:".length)}:v1`) } catch { /* storage may be unavailable */ }
-      }
-      return
-    }
-
     const validPageSize = validatePageSize(preference)
-    setState({ tableId, mode: "manual", pageSize: validPageSize })
+    setState({ tableId, pageSize: validPageSize })
     const preferences = readPreferences()
     preferences[tableId] = { mode: "manual", pageSize: validPageSize }
     writePreferences(preferences)
   }, [tableId])
 
-  const setAutoPageSize = useCallback((measuredPageSize: DataTablePageSize) => {
-    const pageSize = validatePageSize(measuredPageSize)
-    setState((current) => current.tableId === tableId && current.mode === "auto" && current.pageSize !== pageSize
-      ? { ...current, pageSize } : current)
-  }, [tableId])
-
-  return { ready: state.tableId === tableId, pageSize: state.pageSize, mode: state.mode, setPreference, setAutoPageSize }
+  return { ready: state.tableId === tableId, pageSize: state.pageSize, setPreference }
 }

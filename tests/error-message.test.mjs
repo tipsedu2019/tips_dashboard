@@ -28,7 +28,7 @@ test("ignores blank or non-string fields and does not stringify arbitrary object
   assert.equal(getErrorMessage(null, "안전한 오류"), "안전한 오류");
 });
 
-test("workspace hooks use the structured error helper instead of Unknown error", async () => {
+test("workspace hooks preserve structured range and numbered-page errors", async () => {
   const sources = await Promise.all([
     readFile(new URL("../src/features/academic/use-academic-workspace-data.ts", import.meta.url), "utf8"),
     readFile(new URL("../src/features/operations/use-operations-workspace-data.ts", import.meta.url), "utf8"),
@@ -36,7 +36,8 @@ test("workspace hooks use the structured error helper instead of Unknown error",
 
   for (const source of sources) {
     assert.match(source, /import \{ getErrorMessage \} from "@\/lib\/error-message"/);
-    assert.match(source, /setError\(getErrorMessage\(fetchError,/);
+    assert.match(source, /setRangeError\(getErrorMessage\(error,/);
+    assert.match(source, /snapshot\?\.error \? getErrorMessage\(snapshot\.error,/);
     assert.doesNotMatch(source, /Unknown error/);
   }
 });

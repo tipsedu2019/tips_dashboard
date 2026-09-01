@@ -79,12 +79,14 @@ test('URL-restored size owns the first request and Back-size restoration reuses 
   assert.equal(summaries(h).length, 1);
 });
 
-test('URL-restored sizes are ephemeral Auto state and only explicit UI size changes persist', async t => {
+test('URL-restored sizes are ephemeral route state and only explicit UI size changes persist', async t => {
   const input = onlyMaster({ restoredPage: 3, restoredPageSize: 15, restorationKey: 'direct-15' });
   const h = await setupHook(t, input, { preferences: {} });
   assert.deepEqual(pages(h).map(request => [request.args.p_page, request.args.p_page_size]), [[3, 15]]);
-  assert.equal(h.current.master.pageSizeMode, 'auto');
+  assert.equal('pageSizeMode' in h.current.master, false);
   assert.deepEqual(JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1')), {});
+
+  await h.resolve(pages(h)[0], pageData(pages(h)[0], 40, [masterRow()]));
 
   // Every disabled secondary entry also receives the parser's default size 10.
   // Merely mounting them must not create manual preferences.
@@ -95,7 +97,6 @@ test('URL-restored sizes are ephemeral Auto state and only explicit UI size chan
   await h.act(() => h.current.master.setPageSizePreference(20));
   assert.equal(pages(h).at(-1).args.p_page_size, 20);
   assert.deepEqual(JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1'))['textbooks:master'], { mode: 'manual', pageSize: 20 });
-  assert.equal(h.current.master.pageSizeMode, 'manual');
 });
 
 for (const [key, rpc, sort, filters, summary] of cases) test(`${key} owns exact RPC/filter/sort/mode and all three persisted sizes`, async t => {
@@ -125,7 +126,7 @@ for (const [key, rpc, sort, filters, summary] of cases) test(`${key} owns exact 
   const scopeNames = { saleHistory: 'sales-history', inventoryHistory: 'inventory-history', closingMovements: 'closing-movements' };
   const stored = JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1'));
   assert.deepEqual(stored[`textbooks:${scopeNames[key] || key}`], { mode: 'manual', pageSize: 20 });
-  assert.equal(h.current[key].pageSizeMode, 'manual');
+  assert.equal('pageSizeMode' in h.current[key], false);
   assert.deepEqual(h.requests.filter(r => r.table), []);
 });
 
@@ -282,7 +283,7 @@ test('same-ID role change and logout/relogin clear all resources and reject stal
   assert.equal(h.current.operations.value, null); assert.ok(oldRequests.every(r => r.signal.aborted));
   const length = h.requests.length;
   await h.act(() => { old.master.goToPage(9); old.master.retry(); old.master.refresh(); old.master.summary.retry(); old.operations.retry(); old.refreshVisible(); old.master.setPageSizePreference(20); });
-  assert.equal(h.requests.length, length); assert.equal(h.current.master.pageSizeMode, 'manual');
+  assert.equal(h.requests.length, length); assert.equal('pageSizeMode' in h.current.master, false);
   const staffRequests = h.requests.slice(oldRequests.length);
   input = { ...input, viewerId: '', viewerRole: '', authReady: false }; await h.rerender(input);
   for (const request of staffRequests) await h.resolve(request, request.name.startsWith('list_') ? pageData(request) : request.name === 'get_textbook_operations_summary_v1' ? operationsSummary() : null);

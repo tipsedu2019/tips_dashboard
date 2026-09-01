@@ -35,7 +35,6 @@ export type DataTablePaginationProps = {
   totalCount: number | null
   loading?: boolean
   onPageChange: (page: number) => void
-  pageSizeMode?: "auto" | "manual"
   onPageSizeChange?: (preference: DataTablePageSizePreference) => void
   ariaLabel?: string
 }
@@ -46,7 +45,6 @@ export function DataTablePagination({
   totalCount,
   loading = false,
   onPageChange,
-  pageSizeMode = "auto",
   onPageSizeChange,
   ariaLabel = "페이지 탐색",
 }: DataTablePaginationProps) {
@@ -66,8 +64,8 @@ export function DataTablePagination({
       <div className="flex flex-wrap items-center justify-center gap-3">
         {onPageSizeChange ? (
           <Select
-            value={pageSizeMode === "auto" ? "auto" : String(pageSize)}
-            onValueChange={(value) => onPageSizeChange(value === "auto" ? "auto" : validatePageSize(Number(value)))}
+            value={String(pageSize)}
+            onValueChange={(value) => onPageSizeChange(validatePageSize(Number(value)))}
             disabled={loading}
           >
             <SelectTrigger size="sm" aria-label="페이지당 행 수">
@@ -75,7 +73,6 @@ export function DataTablePagination({
             </SelectTrigger>
             <SelectContent>
               <SelectGroup>
-                <SelectItem value="auto">자동</SelectItem>
                 {DATA_TABLE_PAGE_SIZES.map((size) => (
                   <SelectItem key={size} value={String(size)}>{size}개씩 보기</SelectItem>
                 ))}

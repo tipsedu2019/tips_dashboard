@@ -141,27 +141,27 @@ for (const domain of ['academic', 'operations']) {
     assert.equal(page.state.displayRequest.search, '');
     assert.equal(page.state.dataMatchesCurrentScope, false, 'unadopted FAILED_FILTER inputs must not be claimed current');
   });
-  for (const [acceptedSize, failedPreference, failedSize] of [[10, 15, 15], [10, 20, 20], [20, 10, 10], [20, 'auto', 10]]) {
+  for (const [acceptedSize, failedPreference] of [[10, 15], [10, 20], [20, 10]]) {
     test(`${domain}: accepted ${acceptedSize} size owns paging after failed ${failedPreference} preference`, async (t) => {
       const page = await setup(t, domain, { pageSize: acceptedSize, request: { page: 2 } });
       await act(async () => page.finish(page.numbered()[0]));
       await act(async () => page.state.setPageSizePreference(failedPreference));
-      assert.equal(page.numbered().at(-1).args.p_page_size, failedSize);
+      assert.equal(page.numbered().at(-1).args.p_page_size, failedPreference);
       await act(async () => page.numbered().at(-1).reject(new Error('size failure')));
       await page.render();
       await act(async () => { void page.state.refresh(); });
-      assert.equal(page.numbered().at(-1).args.p_page_size, failedSize);
+      assert.equal(page.numbered().at(-1).args.p_page_size, failedPreference);
       await act(async () => page.numbered().at(-1).reject(new Error('size retry failure')));
       await act(async () => { void page.state.goToPage(3); });
       assert.equal(page.numbered().at(-1).args.p_page_size, acceptedSize);
       assert.equal(page.numbered().at(-1).args.p_page, 3);
       await act(async () => page.finish(page.numbered().at(-1)));
       assert.equal(page.state.pageSize, acceptedSize);
-      assert.equal(page.state.pageSizeMode, failedPreference === 'auto' ? 'auto' : 'manual');
+      assert.equal('pageSizeMode' in page.state, false);
       assert.equal(page.numbered().length, 4);
       await act(async () => page.state.setPageSizePreference(failedPreference));
       assert.equal(page.numbered().length, 5, 'selecting the still-stored preference again is a new request intent');
-      assert.equal(page.numbered().at(-1).args.p_page_size, failedSize);
+      assert.equal(page.numbered().at(-1).args.p_page_size, failedPreference);
       assert.equal(page.numbered().at(-1).args.p_page, 1);
     });
   }
