@@ -39,7 +39,13 @@ The projected-stock test initially stopped at a strict fixture/parser boundary b
 
 A final hook self-review found that the new synchronous watermark initially keyed only input identity. A direct-hook mounted counterexample accepted `{row:null}` for an admin and synchronously rerendered the identical request input as staff before passive effects; it produced genuine RED because the admin value was still published (`expected null`, actual `{row:null}`). The watermark now keys actor ID/role and input identity together. The same counterexample proves synchronous clearing for role change, user change, and auth disable, while the existing late-completion/retry/unmount cases remain in the suite.
 
-The final mounted suite is `24/24 PASS` (the original 13 plus 11 review/self-review counterexamples). It now additionally covers same-kind A-to-B and A-to-none form closure, stale render/submit exclusion before passive effects, actor-boundary publication exclusion, canonical detail kind/tab and replace-history close, controlled purchase selection and exact location/book/balance readiness, authoritative master/bulk options, canonical duplicate identity and total count, and the static Radix teacher selector.
+### Fix round 2 RED/GREEN
+
+The fresh re-review found one Minor stage-scoping defect: an open catalog request with an accepted real UUID book and location still started the order/receive-only inventory balance read and could surface its irrelevant error. The new mounted real-workspace counterexample produced ordinary RED with the exact observation `{ balanceRequestCount: 1, irrelevantRetryVisible: true, submitDisabled: false }` instead of `{ 0, false, false }`. The dialog-scoped retry selector was mutation-checked by temporarily restoring the original product condition; it caught both the RPC and visible dialog error.
+
+The minimal production fix adds `purchaseForm.requestStage !== "request"` to `purchaseBalanceInput` and permits the balance resource into `purchaseReferenceError` only while that input is enabled. The counterexample is GREEN with zero balance RPC, no purchase-dialog balance retry, and request submit still enabled. The positive order/receive counterexample remains GREEN and proves the exact `{ textbookIds: [bookId], locationId }` RPC, accepted balance projection, and no legacy stock fallback; the existing submit-readiness guard remains unchanged.
+
+The final mounted suite is `25/25 PASS` (the original 13 plus 12 review/self-review counterexamples). It additionally covers same-kind A-to-B and A-to-none form closure, stale render/submit exclusion before passive effects, actor-boundary publication exclusion, canonical detail kind/tab and replace-history close, controlled purchase selection and exact location/book/balance readiness, request-stage balance suppression, authoritative master/bulk options, canonical duplicate identity and total count, and the static Radix teacher selector.
 
 ## Implementation
 
@@ -70,13 +76,16 @@ The final source count confirms there are no remaining loader reads of `location
 
 ```text
 node --test tests/textbook-reference-ui.test.mjs
-24/24 PASS
+25/25 PASS
 
 node --test --test-name-pattern='master and inventory controls use summary counts' tests/textbook-numbered-renderers.test.mjs
 1/1 PASS
 
+node --test tests/textbook-reference-read-service.test.mjs tests/textbook-numbered-renderers.test.mjs
+60/60 PASS
+
 node --test tests/textbook-reference-ui.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-data.test.mjs tests/textbook-reference-read-service.test.mjs tests/textbook-numbered-read-service.test.mjs tests/textbook-work-context.test.mjs tests/textbook-reference-model.test.mjs tests/search-combobox.test.mjs tests/class-textbook-picker-model.test.mjs
-409/410 PASS
+409/410 PASS (round-1 aggregate; round 2 changed only request-stage gating and used the 25/25 plus 60/60 focused gates above)
 ```
 
 The sole aggregate failure is the known pre-existing out-of-scope source-text assertion `workspace imports and invokes the single extracted implementations of all three builders` / `buildPurchaseSupplierHandoffGroups is imported`. All 409 other aggregate tests and all exact Task5c review-fix gates pass. The authoritative-options renderer guard now positively checks the service-provided category and negatively checks the stale numbered-summary category; it is not an expectation relaxation. A separate exploratory workspace source-text selection included stale pre-Task5c string guards and was not used as a completion gate or rewritten to broaden this fix.
@@ -91,9 +100,9 @@ Owned source/test hashes at the final gate:
 
 ```text
 75b4c1cc7ada219423ce022bd136b88e68c174fb1ed06875d3763014eba9d419  src/features/textbooks/use-textbook-reference-data.ts
-b1cd2ed4b8ce72111a07a2fd35cc1ddd604bdd55a469e044b55a3aaa703b3111  src/features/textbooks/textbook-operations-workspace.tsx
+6913fcf67292b794258bf89d56f0ae1e1806fe7a2639e8cf7dd17af2f28037c1  src/features/textbooks/textbook-operations-workspace.tsx
 a7e7beee29e87e0d76356b2e21b1fe5818f22b89a6ce16c7b8ab0e39219c0174  tests/helpers/textbook-numbered-harness.mjs
-f1f4c867c476129c7ee8f7e5a802947ed6a14e34a7319b1b99433797f0438f80  tests/textbook-reference-ui.test.mjs
+bd5a0f598f90ac621e2d38a73809b08ecd0b3e10112b5adb77c13ff67af82128  tests/textbook-reference-ui.test.mjs
 c0f1ef2841858d28bdff8f7f88207d5eb536a7f2c20865f6bd4f2b40a329962d  tests/textbook-numbered-renderers.test.mjs
 ```
 

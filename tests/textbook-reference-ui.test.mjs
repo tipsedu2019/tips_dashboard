@@ -524,6 +524,42 @@ test("purchase catalog B owns its picker and stays blocked until exact book and 
   assert.ok(button("다시 시도"))
 })
 
+test("accepted catalog request skips inventory balance transport and its irrelevant error UI", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=requests&textbookPage=1&textbookPageSize=10" })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_purchase_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
+  await h.settleLegacy()
+  await h.act(() => button("요청 바로 추가").click())
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_reference_page_v1"), {
+    rows: [bookOption(101)], page: 1, pageSize: 20, totalCount: 1,
+    baseFilterGroups: facetGroups(1), visibleFilterGroups: facetGroups(1), activeFilterCount: 0,
+  })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [requestLocationOption], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: id(900), code: "main", name: "본관" },
+  })
+  await h.act(() => document.querySelector('[aria-label="교재 선택"]').click())
+  await h.act(() => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes("서버 교재 101")).click())
+  await h.resolve(h.requests.find((request) => request.name === "resolve_textbook_reference_v1"), selectedBookResult(h, 101, "서버 교재 101"))
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_location_reference_v1"), {
+    row: { id: id(900), code: "main", name: "본관", option: requestLocationOption },
+  })
+
+  const balanceRequests = h.requests.filter((request) => request.name === "get_textbook_inventory_balance_v1")
+  if (balanceRequests[0]) await h.reject(balanceRequests[0], { code: "PGRST202", message: "request-stage balance must stay disabled" })
+  const submit = [...document.querySelectorAll('form button[type="submit"]')].at(-1)
+  const purchaseDialog = submit.closest('[role="dialog"]')
+  assert.deepEqual({
+    balanceRequestCount: balanceRequests.length,
+    irrelevantRetryVisible: [...purchaseDialog.querySelectorAll('button')].some((node) => node.textContent.trim() === "다시 시도"),
+    submitDisabled: submit.disabled,
+  }, {
+    balanceRequestCount: 0,
+    irrelevantRetryVisible: false,
+    submitDisabled: false,
+  })
+})
+
 test("purchase projected stock comes from exact accepted purchase balance and direct null detail ignores legacy books", async (t) => {
   const direct = purchaseRow("order")
   const h = await setup(t, { search: `?textbookTab=purchase&textbookPage=1&textbookPageSize=10&textbookDetailKind=purchase&textbookDetail=${direct.anchorLineId}` })

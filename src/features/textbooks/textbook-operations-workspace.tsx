@@ -1406,7 +1406,8 @@ function TextbookOperationsWorkspaceContent() {
     && isTextbookUuid(saleForm.textbookId) && isTextbookUuid(saleForm.locationId)
     ? { textbookIds: [saleForm.textbookId], locationId: saleForm.locationId }
     : null;
-  const purchaseBalanceInput = purchaseDialogOpen && isTextbookUuid(purchaseForm.textbookId) && isTextbookUuid(purchaseForm.locationId)
+  const purchaseBalanceInput = purchaseDialogOpen && purchaseForm.requestStage !== "request"
+    && isTextbookUuid(purchaseForm.textbookId) && isTextbookUuid(purchaseForm.locationId)
     ? { textbookIds: [purchaseForm.textbookId], locationId: purchaseForm.locationId }
     : null;
   const normalizedClosingMonth = normalizeMonthInput(closingForm.closingMonth);
@@ -1460,7 +1461,7 @@ function TextbookOperationsWorkspaceContent() {
   const purchaseReferenceError = referenceData.selectedBook.error
     ? referenceData.selectedBook : referenceData.selectedClass.error
       ? referenceData.selectedClass : referenceData.selectedLocation.error
-        ? referenceData.selectedLocation : referenceData.purchaseBalance.error ? referenceData.purchaseBalance : null;
+        ? referenceData.selectedLocation : purchaseBalanceInput && referenceData.purchaseBalance.error ? referenceData.purchaseBalance : null;
   const saleReferenceError = referenceData.classSalePreview.error
     ? referenceData.classSalePreview : referenceData.teacherSaleBalance.error
       ? referenceData.teacherSaleBalance : referenceData.selectedBook.error
