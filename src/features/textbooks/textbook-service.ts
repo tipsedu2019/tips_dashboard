@@ -27,6 +27,7 @@ import {
   parseTextbookSubjectForWrite,
   validateTextbookTaxonomy,
 } from "./textbook-taxonomy";
+import { resolveTextbookReference } from "./textbook-reference-service";
 
 type SupabaseClientLike = NonNullable<typeof sharedSupabase>;
 type Row = Record<string, unknown>;
@@ -281,9 +282,11 @@ async function resolvePurchaseLifecycleTextbook(
     return null;
   }
 
-  const textbooks = await readTable(client, "textbooks");
-  const textbook = getTextbookByReference(textbooks, reference);
-  return normalizeOptionalUuid(getRecordId(textbook || {}));
+  const result = await resolveTextbookReference(
+    { reference, activeOnly: false, scope: "request", fallbackSupplier: "" },
+    { client },
+  );
+  return normalizeOptionalUuid(result.row?.textbook.id);
 }
 
 export async function listTextbookOperationsData(clientInput?: SupabaseClientLike | TextbookOperationsDataOptions | null) {

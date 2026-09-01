@@ -79,7 +79,7 @@ test("mounted request form starts bounded independent reference pickers without 
     rows: [], page: 1, pageSize: 10, totalCount: 0,
   })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
 
   const addRequest = button("요청 바로 추가")
   assert.ok(addRequest, document.body.textContent)
@@ -100,7 +100,7 @@ test("mounted request form starts bounded independent reference pickers without 
   assert.deepEqual(location.args, {
     p_filters: { search: "" }, p_sort: "match-order", p_page: 1, p_page_size: 20,
   })
-  assert.equal(h.requests.filter((request) => request.table).length > 0, true, "legacy action bundle still loads during Task5c")
+  assert.deepEqual(h.requests.filter((request) => request.table), [], "bounded reference startup must not start legacy tables")
 })
 
 test("reference hook addresses every named service and aborts the old same-user role lifetime", async (t) => {
@@ -252,7 +252,7 @@ test("mounted class sale uses the complete off-page school roster, duplicates, a
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_summary_v1"), saleSummary(0))
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), saleHistorySummary(0))
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   await h.act(() => button("출고 바로 추가").click())
   const monthInput = document.querySelector('[aria-label="출고월"]')
   await h.act(() => {
@@ -294,13 +294,70 @@ test("mounted class sale uses the complete off-page school roster, duplicates, a
   })
   assert.equal(document.body.textContent.includes("1/1명 표시"), true)
   assert.equal([...document.querySelectorAll('[aria-label$="출고 대상 선택"]')].some((node) => node.getAttribute("aria-label").includes("__t5b2_same_name")), true)
+
+  await h.act(() => {
+    const props = monthInput[Object.keys(monthInput).find((key) => key.startsWith("__reactProps$"))]
+    props.onChange({ target: { value: "2099-09" } })
+  })
+  const positiveInput = { ...classSaleWire.input, chargeMonth: "2099-09" }
+  const positiveContext = {
+    ...classSaleWire, input: positiveInput, duplicateCount: 0, duplicateLineCount: 0,
+    duplicateLines: [], duplicateSales: [], duplicateLineIds: [], duplicateStudentIds: [],
+  }
+  const positivePreview = h.requests.findLast((request) => request.name === "get_class_textbook_sale_context_v1")
+  assert.deepEqual(positivePreview.args.p_input, positiveInput)
+  await h.resolve(positivePreview, positiveContext)
+  await h.act(() => button("출고 대기 저장").click())
+  const saveContext = h.requests.findLast((request) => request.name === "get_class_textbook_sale_context_v1")
+  assert.notEqual(saveContext, positivePreview, "save re-reads the full off-page roster instead of using its preview")
+  assert.deepEqual(saveContext.args.p_input, positiveInput)
+  assert.equal(h.requests.some((request) => request.table), false, "class writer waits for the complete fresh roster context")
+  await h.resolve(saveContext, positiveContext)
+  const firstWriter = h.requests.find((request) => request.table)
+  assert.equal(firstWriter.table, "textbook_sales")
+  assert.equal(firstWriter.steps.find((step) => step.method === "insert").args[0].charge_month, "2099-09")
+})
+
+test("mounted teacher sale preserves a manual name and re-reads its exact accepted balance before writing", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=sales&textbookPage=1&textbookPageSize=10" })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_summary_v1"), saleSummary(0))
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), saleHistorySummary(0))
+  await h.act(() => button("출고 바로 추가").click())
+  await h.act(() => button("교사용").click())
+  const option = bookOption(101)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_reference_page_v1"), { rows: [option], page: 1, pageSize: 20, totalCount: 1, baseFilterGroups: facetGroups(1), visibleFilterGroups: facetGroups(1), activeFilterCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_teacher_reference_page_v1"), { rows: [{ value: "수동 선생님", label: "수동 선생님" }], page: 1, pageSize: 20, totalCount: 1 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), { rows: [requestLocationOption], page: 1, pageSize: 20, totalCount: 1, defaultLocation: { id: id(900), code: "main", name: "본관" } })
+  await h.act(async () => { document.querySelector('[aria-label="교사용 수령 선생님 선택"]').click(); await new Promise((resolve) => window.requestAnimationFrame(resolve)) })
+  await h.act(() => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes("수동 선생님")).click())
+  await h.act(async () => { document.querySelector('[aria-label="교재 선택"]').click(); await new Promise((resolve) => window.requestAnimationFrame(resolve)) })
+  await h.act(() => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes("서버 교재 101")).click())
+  await h.resolve(h.requests.find((request) => request.name === "resolve_textbook_reference_v1"), selectedBookResult(h, 101, "서버 교재 101"))
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_location_reference_v1"), { row: { id: id(900), code: "main", name: "본관", option: requestLocationOption } })
+  const balancePayload = { locationId: id(900), rows: [{ textbookId: id(101), currentQuantity: 7, locationQuantities: { [id(900)]: 7 }, studentLocationQuantities: {}, teacherLocationQuantities: { [id(900)]: 7 }, totalQuantity: 7, studentQuantity: 0, teacherQuantity: 7, stockValue: 70000 }] }
+  const previewBalance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
+  await h.resolve(previewBalance, balancePayload)
+  await h.act(() => button("출고 대기 저장").click())
+  const saveBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
+  assert.notEqual(saveBalance, previewBalance)
+  assert.deepEqual(saveBalance.args.p_input, { textbookIds: [id(101)], locationId: id(900) })
+  assert.equal(h.requests.some((request) => request.table), false)
+  await h.resolve(saveBalance, balancePayload)
+  const saleWrite = h.requests.find((request) => request.table === "textbook_sales")
+  await h.resolve(saleWrite, { id: id(500) })
+  const lineWrite = h.requests.find((request) => request.table === "textbook_sale_lines")
+  const linePayload = lineWrite.steps.find((step) => step.method === "insert").args[0][0]
+  assert.equal(linePayload.teacher_name, "수동 선생님")
+  assert.equal(linePayload.teacher_id, null, "manual teacher identity is not fabricated")
 })
 
 test("master duplicate read blocks pending/error/stale submit and opens an off-page duplicate by direct ID", async (t) => {
   const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_master_summary_v1"), masterSummary(0))
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   await h.act(() => button("신규 등록").click())
   const title = document.querySelector('[aria-label="교재명"]')
   await h.act(() => {
@@ -466,7 +523,7 @@ test("explicit direct detail close replaces its history entry", async (t) => {
 test("former accepted closing and sale values never render or enable under changed input", async (t) => {
   const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   await h.act(() => button("월마감 추가").click())
   const first = h.requests.find((request) => request.name === "get_textbook_closing_preview_v1")
   await h.resolve(first, closingResult(0))
@@ -495,7 +552,7 @@ test("purchase catalog B owns its picker and stays blocked until exact book and 
   const h = await setup(t, { search: "?textbookTab=requests&textbookPage=1&textbookPageSize=10" })
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_purchase_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   await h.act(() => button("요청 바로 추가").click())
   const page = h.requests.find((request) => request.name === "list_textbook_reference_page_v1")
   const locationPage = h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1")
@@ -528,7 +585,7 @@ test("accepted catalog request skips inventory balance transport and its irrelev
   const h = await setup(t, { search: "?textbookTab=requests&textbookPage=1&textbookPageSize=10" })
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_purchase_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   await h.act(() => button("요청 바로 추가").click())
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_reference_page_v1"), {
     rows: [bookOption(101)], page: 1, pageSize: 20, totalCount: 1,
@@ -580,11 +637,8 @@ test("purchase projected stock comes from exact accepted purchase balance and di
   await h.unmount()
 
   const unregistered = unregisteredPurchaseRow()
-  const legacy = masterRow(101, { title: "Legacy title", name: "Legacy title" })
   const h2 = await setup(t, { search: `?textbookTab=requests&textbookPage=1&textbookPageSize=10&textbookDetailKind=purchase&textbookDetail=${unregistered.anchorLineId}` })
-  const legacyRequest = h2.requests.find((request) => request.table === "textbooks")
-  await h2.resolve(legacyRequest, [legacy])
-  await h2.settleLegacy()
+  assert.deepEqual(h2.requests.filter((request) => request.table), [], "direct detail hydration has no legacy catalog scan")
   await h2.resolve(h2.requests.find((request) => request.name === "get_textbook_purchase_detail_v1"), { row: unregistered })
   const selectedRequest = h2.requests.find((request) => request.name === "resolve_textbook_reference_v1")
   assert.equal(selectedRequest.args.p_reference, "Legacy title", "authoritative null detail never substitutes legacy textbook UUID")
@@ -594,7 +648,7 @@ test("master option consumers use exact accepted category and bulk metadata and 
   const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), { rows: [masterRow(101)], page: 1, pageSize: 10, totalCount: 1 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_master_summary_v1"), masterSummary(1, { subSubjectOptions: ["요약 전용 분류"] }))
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   const optionsRequest = h.requests.find((request) => request.name === "get_textbook_master_options_v1")
   await h.resolve(optionsRequest, masterOptions())
   await h.act(() => document.querySelector('[aria-label="교재 세부과목 필터"]').click())
@@ -645,7 +699,7 @@ test("static TeacherSelect retains Radix combobox and explicit unassigned option
 test("mounted closing preview rejects a late manual-input result and displays only the accepted service calculation", async (t) => {
   const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
-  await h.settleLegacy()
+  await h.assertNoLegacyReads()
   await h.act(() => button("월마감 추가").click())
   const first = h.requests.find((request) => request.name === "get_textbook_closing_preview_v1")
   assert.ok(first)

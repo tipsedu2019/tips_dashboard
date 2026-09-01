@@ -62,14 +62,14 @@ export function transport() {
   const requests = [];
   function pending(metadata) {
     const deferred = Promise.withResolvers();
-    const request = { ...metadata, ...deferred, steps: [] };
+    const request = { ...metadata, ...deferred, sequence: requests.length, steps: [] };
     requests.push(request);
     const chain = {
       then: deferred.promise.then.bind(deferred.promise),
       abortSignal(signal) { request.signal = signal; return chain; },
       retry(value) { request.retry = value; return chain; },
     };
-    for (const method of ['select', 'order', 'eq', 'in', 'range', 'limit', 'single', 'maybeSingle', 'insert', 'update', 'delete']) {
+    for (const method of ['select', 'order', 'eq', 'in', 'range', 'limit', 'single', 'maybeSingle', 'insert', 'upsert', 'update', 'delete']) {
       chain[method] = (...args) => { request.steps.push({ method, args }); return chain; };
     }
     return chain;
@@ -169,9 +169,9 @@ export async function setup(t, initial = {}) {
     act: callback => act(async () => { await callback(); }),
     resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),
     reject: (request, error) => act(async () => { request.resolve({ data: null, error }); }),
-    settleLegacy: () => act(async () => {
-      for (const request of io.requests.filter(request => request.table)) request.resolve({ data: [], error: null });
-      for (const request of io.requests.filter(request => request.name === 'list_active_science_subject_areas_v1')) request.resolve({ data: [], error: null });
+    assertNoLegacyReads: () => act(async () => {
+      assert.deepEqual(io.requests.filter(request => request.table).map(request => request.table), [], 'mounted workspace must never start a legacy table read');
+      assert.equal(io.requests.some(request => request.name === 'list_active_science_subject_areas_v1'), false, 'mounted workspace must use accepted master options instead of the old taxonomy read');
     }),
     auth: async patch => { auth = { ...auth, ...patch }; await render(); },
     navigate: async query => { window.history.replaceState(null, '', `/admin/textbooks${query}`); await render(); },

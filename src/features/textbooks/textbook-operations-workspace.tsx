@@ -1,9 +1,9 @@
 "use client";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
-import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineMonth, getSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getStudentNameById, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
+import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineMonth, getSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
-import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import {
   Barcode,
@@ -92,8 +92,9 @@ import {
   normalizeBarcodeValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
-import { getTextbookClosingDetail } from "./textbook-read-service";
-import { getTextbookBillingHandoff, getTextbookClosingMovementExport, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
+import { getTextbookClosingDetail, getTextbookInventoryBalance, getTextbookPurchaseDetail, getTextbookSaleDetail } from "./textbook-read-service";
+import { getTextbookInactiveCleanupContext } from "./textbook-reference-service";
+import { getClassTextbookSaleContext, getTextbookBillingHandoff, getTextbookClosingMovementExport, getTextbookClosingSaveContext, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
 import { getClosingStoredMetrics, type ClosingStoredMetrics } from "./textbook-closing-model";
 import {
   subjectOptions,
@@ -115,7 +116,6 @@ import {
   getPurchaseTextbookTitle,
   getPurchaseLineOrder,
   getClassById,
-  isActiveTextbook,
   getSaleEventAt,
   buildPurchaseCardDraft,
   getPurchaseScopeLines,
@@ -314,7 +314,6 @@ const inventoryFilterLabels: Record<InventoryFilter, string> = {
   negative: "마이너스",
 };
 
-const TEXTBOOK_DATA_LOAD_TIMEOUT_MS = 12_000;
 const textbookHistoryDeleteAdminEmails = new Set(["yeoyuasset@naver.com"]);
 
 const inventoryAuditFilterLabels: Record<InventoryAuditFilter, string> = {
@@ -363,20 +362,6 @@ function purchaseQuantityCellClassName(scope: TextbookCopyScope) {
   );
 }
 
-function withTextbookDataLoadTimeout<T>(promise: Promise<T>) {
-  let timeoutId: ReturnType<typeof globalThis.setTimeout> | undefined;
-  const timeoutPromise = new Promise<never>((_, reject) => {
-    timeoutId = globalThis.setTimeout(() => {
-      reject(new Error("교재관리 데이터를 불러오는 데 시간이 오래 걸립니다. 다시 시도하세요."));
-    }, TEXTBOOK_DATA_LOAD_TIMEOUT_MS);
-  });
-
-  return Promise.race([promise, timeoutPromise]).finally(() => {
-    if (timeoutId) {
-      globalThis.clearTimeout(timeoutId);
-    }
-  });
-}
 
 function buildPurchaseProcessColumns(mode: "request" | "order", showSelection: boolean) {
   return [
@@ -415,56 +400,6 @@ const purchaseOrderFilterLabels: Record<PurchaseOrderFilter, string> = {
   partial: "부분입고",
   returnable: "반품 가능",
   returned: "반품 완료",
-};
-
-type TextbookOperationsData = {
-  textbooks: Row[];
-  publishers: Row[];
-  suppliers: Row[];
-  publisherSupplierLinks: Row[];
-  textbookSubSubjectSettings: Row[];
-  scienceSubjectAreas: Row[];
-  locations: Row[];
-  purchaseOrders: Row[];
-  purchaseOrderLines: Row[];
-  stockMoves: Row[];
-  sales: Row[];
-  saleLines: Row[];
-  stockCounts: Row[];
-  monthlyClosings: Row[];
-  students: Row[];
-  classes: Row[];
-  teacherCatalogs: Row[];
-  inventory: Row[];
-  defaultLocationId: string;
-  currentMonth: string;
-  missingTables: string[];
-  isSchemaReady: boolean;
-};
-
-const emptyData: TextbookOperationsData = {
-  textbooks: [],
-  publishers: [],
-  suppliers: [],
-  publisherSupplierLinks: [],
-  textbookSubSubjectSettings: [],
-  scienceSubjectAreas: [],
-  locations: [],
-  purchaseOrders: [],
-  purchaseOrderLines: [],
-  stockMoves: [],
-  sales: [],
-  saleLines: [],
-  stockCounts: [],
-  monthlyClosings: [],
-  students: [],
-  classes: [],
-  teacherCatalogs: [],
-  inventory: [],
-  defaultLocationId: "",
-  currentMonth: "",
-  missingTables: [],
-  isSchemaReady: true,
 };
 
 function firstNonBlankText(...values: unknown[]) {
@@ -657,13 +592,6 @@ function getSavedPurchaseOrderFilter(stage: string, hasCatalogTextbook: boolean)
 
 function getSavedPurchaseBoardScope(stage: string): PurchaseBoardScope {
   return stage === "receive" ? "recent" : "active";
-}
-
-function formatLoadedAt(value: string) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "-";
-  return date.toLocaleTimeString("ko-KR", { hour: "2-digit", minute: "2-digit" });
 }
 
 function getStudentName(row: Row) {
@@ -1024,66 +952,6 @@ function buildPurchaseStatusPayload(line: Row, order: Row | undefined, targetSta
   );
 }
 
-function useTextbookOperationsData() {
-  const { user, loading: authLoading, role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
-  const [data, setData] = useState<TextbookOperationsData>(emptyData);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState("");
-  const [lastLoadedAt, setLastLoadedAt] = useState("");
-  const [loadDurationMs, setLoadDurationMs] = useState(0);
-  const loadRequestIdRef = useRef(0);
-  const canLoadManagementTextbookData = !isTeacher && (canManageAll || isAdmin || isStaff || role === "admin" || role === "staff");
-
-  const load = useCallback(async () => {
-    if (authLoading) {
-      return;
-    }
-
-    const requestId = loadRequestIdRef.current + 1;
-    loadRequestIdRef.current = requestId;
-
-    if (!user) {
-      setData(emptyData);
-      setError("관리자 세션을 확인할 수 없습니다. 다시 로그인해 주세요.");
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError("");
-    const startedAt = performance.now();
-    try {
-      const next = await withTextbookDataLoadTimeout(
-        textbookService.listTextbookOperationsData({
-          scope: canLoadManagementTextbookData ? "management" : "request",
-        }),
-      );
-      if (loadRequestIdRef.current !== requestId) {
-        return;
-      }
-      setData(next as TextbookOperationsData);
-      setLastLoadedAt(new Date().toISOString());
-      setLoadDurationMs(Math.max(0, Math.round(performance.now() - startedAt)));
-    } catch (loadError) {
-      if (loadRequestIdRef.current !== requestId) {
-        return;
-      }
-      setData(emptyData);
-      setError(getTextbookActionErrorMessage(loadError));
-    } finally {
-      if (loadRequestIdRef.current === requestId) {
-        setLoading(false);
-      }
-    }
-  }, [authLoading, canLoadManagementTextbookData, user]);
-
-  useEffect(() => {
-    void load();
-  }, [load]);
-
-  return { data, loading, error, refresh: load, user, lastLoadedAt, loadDurationMs };
-}
-
 function TextbookOpsCommandCenter({
   metrics,
   activeQueueKey,
@@ -1194,8 +1062,7 @@ export function TextbookOperationsWorkspace() {
 }
 
 function TextbookOperationsWorkspaceContent() {
-  const { data, loading, error, refresh, user, lastLoadedAt, loadDurationMs } = useTextbookOperationsData();
-  const { role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
+  const { user, role, canManageAll, isAdmin, isStaff, isTeacher } = useAuth();
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
   const initialNavigationRef = useRef(parseTextbookNavigation(new URLSearchParams(searchParamString)));
@@ -1239,6 +1106,7 @@ function TextbookOperationsWorkspaceContent() {
   const [inventoryCountLocationId, setInventoryCountLocationId] = useState("");
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
+  const inventoryCountDraftRevisionsRef = useRef<Record<string, number>>({});
   const [saleForm, setSaleForm] = useState(emptySaleForm);
   const saleAutoDefaultsRef = useRef({ locationId: "" });
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
@@ -1580,6 +1448,41 @@ function TextbookOperationsWorkspaceContent() {
     closing: { enabled: activeTab === "closing", filters: closingFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
     closingMovements: { enabled: Boolean(selectedClosingDetailId && selectedClosingScope), filters: { closingMonth: selectedClosingScope?.closingMonth || "", subject: selectedClosingScope?.subject || "all", search: closingMovementSearch }, restoredPage: initialNavigationRef.current.movements.page, restoredPageSize: initialNavigationRef.current.movements.pageSize, restorationKey: navigationKey },
   });
+  const actorKey = `${user?.id || ""}:${role || ""}`;
+  const actionLifetimeRef = useRef({ actorKey, mounted: false });
+  const actionSequenceRef = useRef(0);
+  const liveActionInputsRef = useRef({
+    master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
+    purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
+    inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
+  });
+  liveActionInputsRef.current = {
+    master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
+    purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
+    inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
+  };
+  useLayoutEffect(() => {
+    actionLifetimeRef.current = { actorKey, mounted: true };
+    return () => { actionLifetimeRef.current = { actorKey, mounted: false }; };
+  }, [actorKey]);
+  const isCurrentActionActor = useCallback((expectedActorKey: string) => (
+    actionLifetimeRef.current.mounted && actionLifetimeRef.current.actorKey === expectedActorKey
+  ), []);
+  const invalidateMaster = useCallback(async () => {
+    await Promise.all([numbered.master.refresh(), numbered.master.summary.retry(), numbered.operations.retry(), referenceData.masterOptions.retry()]);
+  }, [numbered.master, numbered.operations, referenceData.masterOptions]);
+  const invalidatePurchase = useCallback(async () => {
+    await Promise.all([numbered.requests.refresh(), numbered.requests.summary.retry(), numbered.purchase.refresh(), numbered.purchase.summary.retry(), numbered.operations.retry(), referenceData.purchaseDetail.retry()]);
+  }, [numbered.operations, numbered.purchase, numbered.requests, referenceData.purchaseDetail]);
+  const invalidateSales = useCallback(async () => {
+    await Promise.all([numbered.sales.refresh(), numbered.sales.summary.retry(), numbered.saleHistory.refresh(), numbered.saleHistory.summary.retry(), numbered.operations.retry(), referenceData.saleDetail.retry()]);
+  }, [numbered.operations, numbered.saleHistory, numbered.sales, referenceData.saleDetail]);
+  const invalidateInventory = useCallback(async () => {
+    await Promise.all([numbered.inventory.refresh(), numbered.inventory.summary.retry(), numbered.inventoryHistory.refresh(), numbered.operations.retry()]);
+  }, [numbered.inventory, numbered.inventoryHistory, numbered.operations]);
+  const invalidateClosing = useCallback(async () => {
+    await Promise.all([numbered.closing.refresh(), numbered.operations.retry(), referenceData.closingPreview.retry()]);
+  }, [numbered.closing, numbered.operations, referenceData.closingPreview]);
   const requestRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.requests.rows), [numbered.requests.rows]);
   const purchaseRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.purchase.rows), [numbered.purchase.rows]);
   const saleRendererData = useMemo(() => buildPreparedSaleRendererData(numbered.sales.rows), [numbered.sales.rows]);
@@ -1642,10 +1545,7 @@ function TextbookOperationsWorkspaceContent() {
   const selectedLocationId = purchaseForm.locationId;
   const saleLocationId = saleForm.locationId;
   const selectedInventoryCountLocationId = preparedInventoryLocationId;
-  const schemaDisabled = !data.isSchemaReady;
-  const schemaMessage = schemaDisabled
-    ? `교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. 누락: ${data.missingTables.join(", ")}`
-    : "";
+  const schemaDisabled = false;
   const currentUserId = text(user?.id);
   const currentUserLabel = text(user?.email || user?.id);
   const currentUserEmail = normalizeEmailValue(user?.email);
@@ -1656,11 +1556,6 @@ function TextbookOperationsWorkspaceContent() {
     isAdmin ||
     role === "admin" ||
     textbookHistoryDeleteAdminEmails.has(currentUserEmail);
-  const inactiveTextbookRows = useMemo(() => data.inventory.filter((row) => !isActiveTextbook(row)), [data.inventory]);
-  const inactiveTextbookTrashItems = useMemo(
-    () => buildTextbookCleanupPreviewRows(inactiveTextbookRows),
-    [inactiveTextbookRows],
-  );
   const configuredPublisherOptions = useMemo(() => acceptedMasterOptions?.publisherOptions.map((option) => option.label) || [], [acceptedMasterOptions]);
   const publisherGroupOptions = configuredPublisherOptions;
   const masterPublisherOptions = useMemo(() => {
@@ -1821,18 +1716,10 @@ function TextbookOperationsWorkspaceContent() {
     setCategoryGroupFilter("all");
   }, [acceptedMasterOptions, categoryGroupFilter, categoryGroupOptions]);
 
-  const purchaseOrdersById = useMemo(
-    () => new Map(data.purchaseOrders.map((order) => [getRecordId(order), order])),
-    [data.purchaseOrders],
-  );
-  const purchaseLinesById = useMemo(
-    () => new Map(data.purchaseOrderLines.map((line) => [getRecordId(line), line])),
-    [data.purchaseOrderLines],
-  );
-  const saleLinesById = useMemo(
-    () => new Map(data.saleLines.map((line) => [getRecordId(line), line])),
-    [data.saleLines],
-  );
+  const preparedPurchaseRows = useMemo(() => [...numbered.requests.rows, ...numbered.purchase.rows], [numbered.purchase.rows, numbered.requests.rows]);
+  const purchaseOrdersById = useMemo(() => new Map<string, Row>(preparedPurchaseRows.flatMap((row) => row.lines.map((line) => line.order).filter(Boolean) as Row[]).map((order) => [getRecordId(order), order])), [preparedPurchaseRows]);
+  const purchaseLinesById = useMemo(() => new Map<string, Row>(preparedPurchaseRows.flatMap((row) => row.lines as Row[]).map((line) => [getRecordId(line), line])), [preparedPurchaseRows]);
+  const saleLinesById = useMemo(() => new Map<string, Row>(numbered.sales.rows.map((row) => [row.id, row.line as Row])), [numbered.sales.rows]);
   const selectedBulkOrderLines = useMemo(
     () => selectedPurchaseLineIds
       .map((id) => purchaseLinesById.get(id))
@@ -1840,9 +1727,9 @@ function TextbookOperationsWorkspaceContent() {
         if (!line) return false;
         const order = getPurchaseLineOrder(line, purchaseOrdersById);
         if (text(line.status || order?.status) !== "requested") return false;
-        return isOrderablePurchaseRequestLine(line, order, data.textbooks);
+        return Boolean(preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)))?.references.textbook);
       }),
-    [data.textbooks, purchaseLinesById, purchaseOrdersById, selectedPurchaseLineIds],
+    [preparedPurchaseRows, purchaseLinesById, purchaseOrdersById, selectedPurchaseLineIds],
   );
   const selectedReceivablePurchaseLines = useMemo(
     () => selectedPurchaseLineIds
@@ -2311,7 +2198,7 @@ function TextbookOperationsWorkspaceContent() {
   function refreshTextbookData() {
     setMessage("");
     setActionErrorMessage("");
-    void refresh();
+    void Promise.all([activePrimaryState.retry(), activeSummaryResource?.retry()]);
   }
 
   function setMasterTextField(name: "title" | "publisher", value: string) {
@@ -2391,7 +2278,8 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openMasterFromPurchaseRequest(line: Row) {
-    const title = getPurchaseTextbookTitle(line, getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || getRequestedTextbookTitle(line)));
+    const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)));
+    const title = getPurchaseTextbookTitle(line, prepared?.references.textbook || undefined);
     const taxonomy = getTextbookTaxonomySelection(line);
     setMasterForm({
       ...emptyMasterForm,
@@ -2783,6 +2671,20 @@ function TextbookOperationsWorkspaceContent() {
     setMessage("");
   }
 
+  async function readFreshPurchaseMembers(lines: Row[], mode: "request" | "order", expectedSelection?: string) {
+    const expectedActorKey = actorKey;
+    const anchors = [...new Set(lines.map((line) => {
+      const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)));
+      return prepared?.anchorLineId || getRecordId(line);
+    }).filter(Boolean))];
+    const details = await Promise.all(anchors.map((anchorLineId) => getTextbookPurchaseDetail({ anchorLineId, mode })));
+    if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.purchaseSelection !== expectedSelection)) {
+      throw new Error("작업 대상이 변경되었습니다. 다시 시도하세요.");
+    }
+    if (details.some((detail) => !detail.row)) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
+    return details.map((detail) => detail.row as TextbookPurchaseCaseRow);
+  }
+
   function closeBulkOrderDialog() {
     setBulkOrderDialogOpen(false);
     setBulkOrderQuantities({});
@@ -2794,23 +2696,23 @@ function TextbookOperationsWorkspaceContent() {
     setBulkOrderQuantities((current) => ({ ...current, [lineId]: value }));
   }
 
-  function applyConfiguredPurchasePricingToPayload(payload: Row) {
-    const textbook = getTextbookById(data.textbooks, text(payload.textbookId || payload.requestedTextbookTitle));
-    const supplierId =
-      getConfiguredSupplierIdForTextbook(textbook, data.publisherSupplierLinks, data.publishers) ||
-      text(payload.supplierId);
+  function applyConfiguredPurchasePricingToPayload(payload: Row, references?: TextbookPurchaseCaseRow["references"]) {
+    const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(text(payload.purchaseOrderLineId))
+      || getRecordId(row.references.textbook || {}) === text(payload.textbookId));
+    const textbook = references?.textbook || prepared?.references.textbook || (acceptedSelectedBook?.textbook as Row | undefined);
+    const supplierId = references?.configuredSupplierId || prepared?.references.configuredSupplierId || acceptedSelectedBook?.configuredSupplierId || text(payload.supplierId);
+    const supplierRows = [references?.supplier, prepared?.references.supplier, acceptedSelectedBook?.supplier].filter(Boolean) as Row[];
 
     return {
       ...payload,
       textbookId: getRecordId(textbook || {}) || text(payload.textbookId),
       supplierId,
-      unitCost: String(getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, data.suppliers, payload.unitCost, getTextbookCopyScope(payload))),
+      unitCost: String(getConfiguredTextbookPurchaseUnitCost(textbook, supplierId, supplierRows, payload.unitCost, getTextbookCopyScope(payload))),
     };
   }
 
-  function getPurchaseLineTextbookId(line: Row) {
-    const draft = buildPurchaseCardDraft(line, getPurchaseLineOrder(line, purchaseOrdersById));
-    const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId) || draft.requestedTextbookTitle);
+  function getPurchaseLineTextbookId(line: Row, references?: TextbookPurchaseCaseRow["references"]) {
+    const textbook = references?.textbook || preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)))?.references.textbook;
     return getRecordId(textbook || {}) || text(line.textbook_id || line.textbookId);
   }
 
@@ -2820,15 +2722,19 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
+    const expectedSelection = JSON.stringify(selectedPurchaseLineIds);
     void runAction(
       "purchase-bulk-order",
       async () => {
-        await Promise.all(selectedBulkOrderLines.map((line) => {
-          const order = getPurchaseLineOrder(line, purchaseOrdersById);
+        const details = await readFreshPurchaseMembers(selectedBulkOrderLines, "request", expectedSelection);
+        const actualLines = details.flatMap((detail) => detail.lines.map((line) => ({ line, references: detail.references }))).filter(({ line }) => selectedPurchaseLineIds.includes(getRecordId(line)));
+        if (actualLines.length !== selectedPurchaseLineIds.length) throw new Error("선택한 모든 구매 작업 대상을 찾을 수 없습니다.");
+        for (const { line, references } of actualLines) {
+          const order = (line.order as Row | null) || undefined;
           const draft = buildPurchaseCardDraft(line, order);
           const lineId = getRecordId(line);
           const orderedQuantity = normalizeQuantityInput(bulkOrderQuantities[lineId]) || getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1";
-          return textbookService.updatePurchaseLifecycle({
+          await textbookService.updatePurchaseLifecycle({
             ...applyConfiguredPurchasePricingToPayload(buildPurchasePayloadFromDraft(
               line,
               order,
@@ -2837,16 +2743,17 @@ function TextbookOperationsWorkspaceContent() {
                 orderedQuantity,
               },
               "ordered",
-            )),
+            ), references),
             createdBy: currentUserId,
           });
-        }));
-        setSelectedPurchaseLineIds([]);
-        setBulkOrderQuantities({});
+        }
       },
       `${formatQuantity(selectedBulkOrderLines.length)}건을 주문으로 전환했습니다.`,
+      invalidatePurchase,
     ).then((ok) => {
       if (ok) {
+        setSelectedPurchaseLineIds([]);
+        setBulkOrderQuantities({});
         setBulkOrderDialogOpen(false);
       }
     });
@@ -2857,14 +2764,18 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
+    const expectedSelection = JSON.stringify(selectedPurchaseLineIds);
     void runAction(
       "purchase-bulk-receive",
       async () => {
-        await Promise.all(selectedReceivablePurchaseLines.map((line) => {
-          const order = getPurchaseLineOrder(line, purchaseOrdersById);
+        const details = await readFreshPurchaseMembers(selectedReceivablePurchaseLines, "order", expectedSelection);
+        const actualLines = details.flatMap((detail) => detail.lines.map((line) => ({ line, references: detail.references }))).filter(({ line }) => selectedPurchaseLineIds.includes(getRecordId(line)));
+        if (actualLines.length !== selectedPurchaseLineIds.length) throw new Error("선택한 모든 구매 작업 대상을 찾을 수 없습니다.");
+        for (const { line, references } of actualLines) {
+          const order = (line.order as Row | null) || undefined;
           const draft = buildPurchaseCardDraft(line, order);
           const orderedQuantity = draft.orderedQuantity || draft.requestedQuantity || "1";
-          return textbookService.updatePurchaseLifecycle({
+          await textbookService.updatePurchaseLifecycle({
             ...applyConfiguredPurchasePricingToPayload(buildPurchasePayloadFromDraft(
               line,
               order,
@@ -2875,14 +2786,14 @@ function TextbookOperationsWorkspaceContent() {
                 statementNumber: draft.statementNumber || "bulk-receive",
               },
               "received",
-            )),
+            ), references),
             createdBy: currentUserId,
           });
-        }));
-        setSelectedPurchaseLineIds([]);
+        }
       },
       `${formatQuantity(selectedReceivablePurchaseLines.length)}건을 입고 완료했습니다.`,
-    );
+      invalidatePurchase,
+    ).then((ok) => { if (ok) setSelectedPurchaseLineIds([]); });
   }
 
   function setBulkTextbookPatchField(name: keyof typeof emptyBulkTextbookPatch, value: string) {
@@ -3013,14 +2924,13 @@ function TextbookOperationsWorkspaceContent() {
               price: text(row.sale_price || row.salePrice || row.price),
               status: normalizeStatusValue(row.status),
               ...getBulkTextbookPatchValues(row),
-            }, { scienceSubjectAreas: data.scienceSubjectAreas }),
+            }, { scienceSubjectAreas: acceptedMasterOptions?.scienceSubjectAreas || [] }),
           ),
         );
-        setSelectedTextbookIds([]);
-        setBulkTextbookPatch(emptyBulkTextbookPatch);
       },
       `${formatQuantity(selectedTextbookRows.length)}개 교재를 수정했습니다.`,
-    );
+      invalidateMaster,
+    ).then((ok) => { if (ok) { setSelectedTextbookIds([]); setBulkTextbookPatch(emptyBulkTextbookPatch); } });
   }
 
   function applyBulkTextbookStatus(status: string) {
@@ -3040,14 +2950,13 @@ function TextbookOperationsWorkspaceContent() {
               title: getTextbookTitle(row),
               price: text(row.sale_price || row.salePrice || row.price),
               status,
-            }, { scienceSubjectAreas: data.scienceSubjectAreas }),
+            }, { scienceSubjectAreas: acceptedMasterOptions?.scienceSubjectAreas || [] }),
           ),
         );
-        setSelectedTextbookIds([]);
-        setBulkTextbookPatch(emptyBulkTextbookPatch);
       },
       `${formatQuantity(selectedTextbookRows.length)}개 교재를 ${statusLabel}으로 변경했습니다.`,
-    );
+      invalidateMaster,
+    ).then((ok) => { if (ok) { setSelectedTextbookIds([]); setBulkTextbookPatch(emptyBulkTextbookPatch); } });
   }
 
   function deleteSelectedTextbooks() {
@@ -3076,42 +2985,48 @@ function TextbookOperationsWorkspaceContent() {
       "textbook-bulk-delete",
       async () => {
         deleteResult = await textbookService.deleteTextbookMasters(targetIds);
-        if (shouldClearSearchAfterDelete) {
-          updateMasterSearchQuery("");
-        } else {
-          clearMasterSelection();
-        }
       },
       () => getTextbookDeleteResultMessage(deleteResult, targetCount),
-    );
+      invalidateMaster,
+    ).then((ok) => {
+      if (!ok) return;
+      if (shouldClearSearchAfterDelete) updateMasterSearchQuery(""); else clearMasterSelection();
+    });
   }
 
-  function emptyInactiveTextbookTrash() {
-    const targetIds = inactiveTextbookRows.map(getRecordId).filter(Boolean);
-    if (targetIds.length === 0) {
-      setMessage("비울 미사용 교재가 없습니다.");
-      return;
+  async function emptyInactiveTextbookTrash() {
+    const expectedActorKey = actorKey;
+    setSaving("textbook-trash-context");
+    setActionErrorMessage("");
+    try {
+      const context = await getTextbookInactiveCleanupContext();
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      if (context.targetIds.length === 0) { setMessage("비울 미사용 교재가 없습니다."); return; }
+      const targetIds = [...context.targetIds];
+      let deleteResult: Awaited<ReturnType<typeof textbookService.purgeInactiveTextbooks>> | undefined;
+      requestTextbookConfirmation({
+        title: "미사용 보관함 비우기",
+        description: `${formatQuantity(context.totalCount)}개 미사용 교재를 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.`,
+        confirmLabel: "영구 삭제",
+        items: context.previewRows.slice(0, 5),
+        onConfirm: () => {
+          void runAction(
+            "textbook-trash-empty",
+            async () => {
+              const recheck = await getTextbookInactiveCleanupContext();
+              if (!isCurrentActionActor(expectedActorKey) || JSON.stringify(recheck.targetIds) !== JSON.stringify(targetIds)) throw new Error("정리 대상이 변경되었습니다. 다시 확인하세요.");
+              deleteResult = await textbookService.purgeInactiveTextbooks(targetIds);
+            },
+            () => `${formatQuantity(deleteResult?.deletedIds.length || targetIds.length)}개 미사용 교재를 영구 삭제했습니다.`,
+            invalidateMaster,
+          ).then((ok) => { if (ok) { clearMasterSelection(); setBulkTextbookPatch(emptyBulkTextbookPatch); setTextbookQualityFilter("all"); } });
+        },
+      });
+    } catch (contextError) {
+      if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError));
+    } finally {
+      if (isCurrentActionActor(expectedActorKey)) setSaving("");
     }
-
-    let deleteResult: Awaited<ReturnType<typeof textbookService.purgeInactiveTextbooks>> | undefined;
-    requestTextbookConfirmation({
-      title: "미사용 보관함 비우기",
-      description: `${formatQuantity(targetIds.length)}개 미사용 교재를 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.`,
-      confirmLabel: "영구 삭제",
-      items: inactiveTextbookTrashItems,
-      onConfirm: () => {
-        void runAction(
-          "textbook-trash-empty",
-          async () => {
-            deleteResult = await textbookService.purgeInactiveTextbooks(targetIds);
-            clearMasterSelection();
-            setBulkTextbookPatch(emptyBulkTextbookPatch);
-            setTextbookQualityFilter("all");
-          },
-          () => `${formatQuantity(deleteResult?.deletedIds.length || targetIds.length)}개 미사용 교재를 영구 삭제했습니다.`,
-        );
-      },
-    });
   }
 
   function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string, fromDirectDetail = false, directDetail?: TextbookPurchaseCaseRow) {
@@ -3191,31 +3106,52 @@ function TextbookOperationsWorkspaceContent() {
     setMessage("");
   }
 
-  async function runAction(name: string, action: () => Promise<unknown>, success: string | (() => string)) {
-    let shouldRefresh = false;
+  async function runAction(
+    name: string,
+    action: () => Promise<unknown>,
+    success: string | (() => string),
+    invalidate: () => Promise<void>,
+    isCurrentInput: () => boolean = () => true,
+  ) {
+    const expectedActorKey = actorKey;
+    const actionSequence = actionSequenceRef.current + 1;
+    actionSequenceRef.current = actionSequence;
+    const canPublish = () => isCurrentActionActor(expectedActorKey) && isCurrentInput();
+    const clearOwnSaving = () => {
+      if (isCurrentActionActor(expectedActorKey) && actionSequenceRef.current === actionSequence) setSaving("");
+    };
     setSaving(name);
     setMessage("");
     setActionErrorMessage("");
+    let result: unknown;
     try {
-      const result = await action();
-      const publicClassesCacheRefresh = (result as { publicClassesCacheRefresh?: { status?: string } } | null)?.publicClassesCacheRefresh;
-      const savedMessage = typeof success === "function" ? success() : success;
-      setMessage(publicClassesCacheRefresh?.status === "pending"
-        ? `${savedMessage} · 공개 수업 캐시 갱신 대기 중`
-        : savedMessage);
-      shouldRefresh = true;
-      return true;
+      result = await action();
     } catch (actionError) {
-      setActionErrorMessage(getTextbookActionErrorMessage(actionError));
-      return false;
-    } finally {
-      setSaving("");
-      if (shouldRefresh) {
-        void refresh().catch((refreshError) => {
-          setActionErrorMessage(getTextbookActionErrorMessage(refreshError));
-        });
+      if (canPublish()) {
+        setActionErrorMessage(getTextbookActionErrorMessage(actionError));
       }
+      clearOwnSaving();
+      return false;
     }
+    if (!canPublish()) {
+      clearOwnSaving();
+      return false;
+    }
+    try {
+      await invalidate();
+    } catch (invalidationError) {
+      if (canPublish()) setActionErrorMessage(`저장은 완료됐지만 화면을 갱신하지 못했습니다. ${getTextbookActionErrorMessage(invalidationError)}`);
+      return canPublish();
+    } finally {
+      clearOwnSaving();
+    }
+    if (!canPublish()) return false;
+    const publicClassesCacheRefresh = (result as { publicClassesCacheRefresh?: { status?: string } } | null)?.publicClassesCacheRefresh;
+    const savedMessage = typeof success === "function" ? success() : success;
+    setMessage(publicClassesCacheRefresh?.status === "pending"
+      ? `${savedMessage} · 공개 수업 캐시 갱신 대기 중`
+      : savedMessage);
+    return true;
   }
 
   function submitMaster(event: FormEvent<HTMLFormElement>) {
@@ -3242,13 +3178,16 @@ function TextbookOperationsWorkspaceContent() {
       ].filter(Boolean).join(" ") || masterForm.category,
     };
     const completedMasterTitle = getTextbookTitle(masterPayload);
+    const expectedMasterForm = JSON.stringify(masterForm);
     void runAction(
       "master",
       () => textbookService.upsertTextbookMaster(
         masterPayload,
-        { scienceSubjectAreas: data.scienceSubjectAreas },
+        { scienceSubjectAreas: acceptedMasterOptions?.scienceSubjectAreas || [] },
       ),
       "교재 마스터가 저장되었습니다.",
+      invalidateMaster,
+      () => liveActionInputsRef.current.master === expectedMasterForm,
     ).then((ok) => {
       if (ok) {
         if (completedMasterTitle) {
@@ -3266,6 +3205,7 @@ function TextbookOperationsWorkspaceContent() {
     const completedPurchaseStage = purchaseForm.requestStage;
     const completedPurchaseTitle = purchaseRequestTitle;
     const completedPurchaseHasCatalogTextbook = Boolean(selectedPurchaseTextbookId);
+    const expectedPurchaseForm = JSON.stringify(purchaseForm);
     if (purchaseForm.requestStage === "request" && !selectedPurchaseLineId) {
       if (!canCreateTextbookRequest) {
         setActionErrorMessage("교재 요청을 등록할 권한이 없습니다.");
@@ -3283,6 +3223,8 @@ function TextbookOperationsWorkspaceContent() {
           memo: normalizeStoredTextInput(purchaseForm.memo),
         }),
         purchaseSuccessMessage(purchaseForm.requestStage, false),
+        invalidatePurchase,
+        () => liveActionInputsRef.current.purchase === expectedPurchaseForm,
       ).then((ok) => {
         if (ok) {
           showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
@@ -3333,7 +3275,7 @@ function TextbookOperationsWorkspaceContent() {
         unitCost: String(getConfiguredTextbookPurchaseUnitCost(
           selectedPurchaseTextbook,
           configuredPurchaseSupplierId,
-          data.suppliers,
+          selectedPurchaseSupplierRows,
           purchaseForm.unitCost,
           scope,
         )),
@@ -3347,15 +3289,32 @@ function TextbookOperationsWorkspaceContent() {
     void runAction(
       "purchase",
       async () => {
+        let actualDetails: TextbookPurchaseCaseRow[] = [];
+        if (selectedPurchaseLineId) {
+          actualDetails = await readFreshPurchaseMembers(
+            [...new Set(Object.values(selectedPurchaseScopeLineIds).filter(Boolean))].map((id) => purchaseLinesById.get(id)).filter((line): line is Row => Boolean(line)),
+            purchaseForm.requestStage === "request" ? "request" : "order",
+          );
+          if (liveActionInputsRef.current.purchase !== expectedPurchaseForm) throw new Error("구매 입력이 변경되었습니다. 다시 시도하세요.");
+        }
         for (const purchasePayload of purchasePayloads) {
           if (purchasePayload.purchaseOrderLineId) {
-            await textbookService.updatePurchaseLifecycle(purchasePayload);
+            const actualDetail = actualDetails.find((detail) => detail.lines.some((line) => line.id === purchasePayload.purchaseOrderLineId));
+            const actualLine = actualDetail?.lines.find((line) => getTextbookCopyScope(line) === getTextbookCopyScope(purchasePayload));
+            if (!actualDetail || !actualLine) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
+            await textbookService.updatePurchaseLifecycle(applyConfiguredPurchasePricingToPayload({
+              ...purchasePayload,
+              purchaseOrderLineId: actualLine.id,
+              purchaseOrderId: (actualLine.order as { id?: string } | null)?.id || actualLine.purchase_order_id,
+            }, actualDetail.references));
           } else {
             await textbookService.createPurchaseReceipt(purchasePayload);
           }
         }
       },
       purchaseSuccessMessage(purchaseForm.requestStage, Boolean(selectedPurchaseLineId)),
+      invalidatePurchase,
+      () => liveActionInputsRef.current.purchase === expectedPurchaseForm,
     ).then((ok) => {
       if (ok) {
         showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
@@ -3383,10 +3342,17 @@ function TextbookOperationsWorkspaceContent() {
       excludedStudentIds,
       createdBy: currentUserId,
     };
+    const expectedSaleForm = JSON.stringify(saleForm);
+    const expectedActorKey = actorKey;
     void runAction(
       "sale",
-      () => isTeacherSale
-        ? textbookService.createTeacherTextbookIssue(
+      async () => {
+        if (isTeacherSale) {
+          const balance = await getTextbookInventoryBalance({ textbookIds: [saleForm.textbookId], locationId: saleLocationId });
+          if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.sale !== expectedSaleForm) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
+          const balanceRow = balance.rows.find((row) => row.textbookId === saleForm.textbookId);
+          if (!selectedSaleTextbook || acceptedSelectedLocation?.id !== saleLocationId || !balanceRow) throw new Error("출고 컨텍스트를 완성하지 못했습니다.");
+          return textbookService.createTeacherTextbookIssue(
             {
               ...salePayload,
               copyScope: "teacher",
@@ -3394,17 +3360,26 @@ function TextbookOperationsWorkspaceContent() {
               teacherName: saleTeacherName,
               quantity: saleTeacherQuantity,
             },
-            data as unknown as Row,
-          )
-        : textbookService.createClassTextbookSale(
+            { textbooks: [selectedSaleTextbook], inventory: [{ id: saleForm.textbookId, ...balanceRow }], teacherCatalogs: [], defaultLocationId: saleLocationId },
+          );
+        }
+        const input = { classId: saleForm.classId, textbookId: saleForm.textbookId, locationId: saleLocationId, chargeMonth: normalizedSaleChargeMonth };
+        const context = await getClassTextbookSaleContext(input);
+        if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.sale !== expectedSaleForm) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
+        if (!context.complete) throw new Error("출고 컨텍스트를 완성하지 못했습니다.");
+        if (context.duplicateCount > 0) throw new Error("이미 같은 월에 같은 수업·교재 출고가 있습니다.");
+        return textbookService.createClassTextbookSale(
             {
               ...salePayload,
               copyScope: "student",
               copy_scope: "student",
             },
-            data as unknown as Row,
-          ),
+            { classes: [context.class], students: context.students, textbooks: [context.textbook], inventory: [{ id: input.textbookId, ...context.inventory }], defaultLocationId: input.locationId },
+          );
+      },
       isTeacherSale ? "교사용 출고 대기 목록에 추가했습니다." : "출고 대기 목록에 추가했습니다.",
+      invalidateSales,
+      () => liveActionInputsRef.current.sale === expectedSaleForm,
     ).then((ok) => {
       if (ok) {
         setActiveTab("sales");
@@ -3417,7 +3392,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function getSaleLineTextbookTitle(line: Row) {
-    const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId));
+    const textbook = numbered.sales.rows.find((row) => row.id === getRecordId(line))?.textbook;
     return getTextbookTitle(textbook || {}) || text(line.textbook_title || line.textbookTitle || line.textbook_id || line.textbookId);
   }
 
@@ -3433,11 +3408,59 @@ function TextbookOperationsWorkspaceContent() {
     }
   }
 
+  async function readFreshSaleActionContexts(lines: Row[], expectedSelection?: string) {
+    const expectedActorKey = actorKey;
+    const ids = [...new Set(lines.map(getRecordId).filter(Boolean))];
+    const details = await Promise.all(ids.map((id) => getTextbookSaleDetail(id)));
+    if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.saleSelection !== expectedSelection)) throw new Error("출고 작업 대상이 변경되었습니다.");
+    const rows = details.map((detail) => detail.row).filter((row): row is NonNullable<typeof row> => Boolean(row));
+    if (rows.length !== ids.length) throw new Error("출고 작업 대상을 찾을 수 없습니다.");
+    const groups = new Map<string, string[]>();
+    for (const row of rows) {
+      const locationId = row.location?.id || text(row.line.location_id);
+      const textbookId = getRecordId(row.textbook);
+      if (!locationId || !textbookId) throw new Error("출고 위치와 교재를 확인할 수 없습니다.");
+      groups.set(locationId, [...new Set([...(groups.get(locationId) || []), textbookId])]);
+    }
+    const balances = await Promise.all([...groups].map(([locationId, textbookIds]) => getTextbookInventoryBalance({ textbookIds, locationId })));
+    if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.saleSelection !== expectedSelection)) throw new Error("출고 작업 대상이 변경되었습니다.");
+    return rows.map((row) => {
+      const locationId = row.location?.id || text(row.line.location_id);
+      const textbookId = getRecordId(row.textbook);
+      const balance = balances.find((item) => item.locationId === locationId)?.rows.find((item) => item.textbookId === textbookId);
+      if (!balance) throw new Error("출고 재고를 확인할 수 없습니다.");
+      return { row, locationId, textbookId, balance };
+    });
+  }
+
+  async function readFreshSaleDetails(lines: Row[], expectedSelection?: string) {
+    const expectedActorKey = actorKey;
+    const ids = [...new Set(lines.map(getRecordId).filter(Boolean))];
+    const details = await Promise.all(ids.map((id) => getTextbookSaleDetail(id)));
+    if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.saleSelection !== expectedSelection)) throw new Error("출고 작업 대상이 변경되었습니다.");
+    const rows = details.map((detail) => detail.row).filter((row): row is NonNullable<typeof row> => Boolean(row));
+    if (rows.length !== ids.length) throw new Error("출고 작업 대상을 찾을 수 없습니다.");
+    return rows;
+  }
+
   function updateSaleLineStatus(line: Row, status: "issued" | "returned") {
     void runAction(
       `sale-line-${getRecordId(line)}`,
-      () => textbookService.updateSaleLineStatus({ saleLineId: getRecordId(line), status, createdBy: currentUserId }, data as unknown as Row),
+      async () => {
+        const detail = await getTextbookSaleDetail(getRecordId(line));
+        if (!detail.row || !isCurrentActionActor(actorKey)) throw new Error("출고 작업 대상을 찾을 수 없습니다.");
+        const locationId = detail.row.location?.id || text(detail.row.line.location_id);
+        const textbookId = getRecordId(detail.row.textbook);
+        const balance = await getTextbookInventoryBalance({ textbookIds: [textbookId], locationId });
+        if (!isCurrentActionActor(actorKey)) throw new Error("출고 작업 대상이 변경되었습니다.");
+        const balanceRow = balance.rows.find((row) => row.textbookId === textbookId);
+        if (!balanceRow) throw new Error("출고 재고를 확인할 수 없습니다.");
+        return textbookService.updateSaleLineStatus({ saleLineId: detail.row.id, status, createdBy: currentUserId }, {
+          saleLines: [detail.row.line], inventory: [{ id: textbookId, ...balanceRow }], defaultLocationId: locationId,
+        });
+      },
       status === "returned" ? "고객 반품으로 처리했습니다." : "출고가 반영되었습니다.",
+      invalidateSales,
     ).then((ok) => {
       if (ok) {
         showUpdatedSaleLine(line, status);
@@ -3445,17 +3468,18 @@ function TextbookOperationsWorkspaceContent() {
     });
   }
 
-  function getPurchaseConfirmationItems(line: Row, order: Row | undefined): TextbookConfirmationPreviewItem[] {
+  function getPurchaseConfirmationItems(line: Row, order: Row | undefined, references?: TextbookPurchaseCaseRow["references"]): TextbookConfirmationPreviewItem[] {
     const draft = buildPurchaseCardDraft(line, order);
-    const textbook = getTextbookById(data.textbooks, draft.textbookId || draft.requestedTextbookTitle);
-    const classRecord = getClassById(data.classes, draft.classId);
+    const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)));
+    const textbook = references?.textbook || prepared?.references.textbook;
+    const classRecord = references?.class || prepared?.references.class;
     const quantity = numberValue(draft.receivedQuantity || draft.orderedQuantity || draft.requestedQuantity) || 1;
     const locationLabel = getLocationName(locations, draft.locationId) || "위치 미지정";
     const classLabel = classRecord ? getClassName(classRecord) : "수업 미지정";
     const statusLabel = purchaseStatusLabel(line.status || order?.status, draft.orderedQuantity, draft.receivedQuantity);
     return [{
-      id: getRecordId(line) || text(line.purchase_order_line_id || line.purchaseOrderLineId) || getPurchaseTextbookTitle(line, textbook),
-      title: getPurchaseTextbookTitle(line, textbook),
+      id: getRecordId(line) || text(line.purchase_order_line_id || line.purchaseOrderLineId) || getPurchaseTextbookTitle(line, textbook || undefined),
+      title: getPurchaseTextbookTitle(line, textbook || undefined),
       detail: [
         getTextbookCopyScopeLabel(draft.copyScope),
         statusLabel,
@@ -3467,23 +3491,15 @@ function TextbookOperationsWorkspaceContent() {
     }];
   }
 
-  function getSelectedPurchaseConfirmationItems(lines: Row[]) {
-    return lines.flatMap((line) => {
-      const order = getPurchaseLineOrder(line, purchaseOrdersById);
-      return getPurchaseConfirmationItems(line, order);
-    });
-  }
-
   function getSaleConfirmationItems(lines: Row[]): TextbookConfirmationPreviewItem[] {
-    const salesById = new Map(data.sales.map((sale) => [getRecordId(sale), sale]));
-    const studentsById = new Map(data.students.map((student) => [getRecordId(student), student]));
     return lines.map((line, index) => {
-      const sale = salesById.get(text(line.sale_id || line.saleId));
-      const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId));
+      const prepared = numbered.sales.rows.find((row) => row.id === getRecordId(line));
+      const sale = prepared?.sale;
+      const textbook = prepared?.textbook;
       const studentId = text(line.student_id || line.studentId);
-      const studentName = text(line.student_name || getStudentNameById(studentsById, studentId)) || "학생 미지정";
-      const classRecord = getClassById(data.classes, text(line.class_id || line.classId || sale?.class_id || sale?.classId));
-      const status = getSaleLineStatus(line, sale);
+      const studentName = text(line.student_name || prepared?.student?.name || studentId) || "학생 미지정";
+      const classRecord = prepared?.class;
+      const status = getSaleLineStatus(line, sale || undefined);
       const textbookTitle = textbook ? getTextbookTitle(textbook) : text(line.textbook_id || line.textbookId) || "교재 미지정";
       return {
         id: getRecordId(line) || `${studentId || textbookTitle}-confirmation-${index}`,
@@ -3493,10 +3509,24 @@ function TextbookOperationsWorkspaceContent() {
           classRecord ? getClassName(classRecord) : "수업 미지정",
           `${formatQuantity(getSaleLineQuantity(line))}권`,
           saleStatusLabels[status] || status,
-          getSaleLineMonth(line, sale),
+          getSaleLineMonth(line, sale || undefined),
         ].filter(Boolean).join(" · "),
       };
     });
+  }
+
+  function getSaleDetailConfirmationItems(rows: SaleLineRow[]): TextbookConfirmationPreviewItem[] {
+    return rows.map((row, index) => ({
+      id: row.id || `${row.recipientName}-${index}`,
+      title: getTextbookTitle(row.textbook),
+      detail: [
+        row.recipientName || "대상 미지정",
+        row.class ? getClassName(row.class) : "수업 미지정",
+        `${formatQuantity(row.quantity)}권`,
+        saleStatusLabels[row.status] || row.status,
+        row.sale?.charge_month || row.line.charge_month,
+      ].filter(Boolean).join(" · "),
+    }));
   }
 
   function deleteSaleLine(line: Row) {
@@ -3506,34 +3536,45 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
-    requestTextbookConfirmation({
-      title: isHistory ? "출고 이력 삭제" : "출고 대기 취소",
-      description: isHistory
-        ? "선택한 출고 이력과 연결된 재고 이동 기록을 삭제합니다."
-        : "출고 대기 건을 취소하고 삭제합니다.",
-      confirmLabel: isHistory ? "이력 삭제" : "취소 삭제",
-      items: getSaleConfirmationItems([line]),
-      onConfirm: () => {
-        void runAction(
-          `sale-delete-${getRecordId(line)}`,
-          () => textbookService.deleteSaleLineLifecycle({
-            saleLineId: getRecordId(line),
-            saleId: text(line.sale_id || line.saleId),
-          }),
-          isHistory ? "출고 이력을 삭제했습니다." : "출고 대기 건을 삭제했습니다.",
-        );
-      },
-    });
+    const expectedActorKey = actorKey;
+    setSaving(`sale-context-${getRecordId(line)}`);
+    void readFreshSaleDetails([line]).then(([detail]) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: isHistory ? "출고 이력 삭제" : "출고 대기 취소",
+        description: isHistory ? "선택한 출고 이력과 연결된 재고 이동 기록을 삭제합니다." : "출고 대기 건을 취소하고 삭제합니다.",
+        confirmLabel: isHistory ? "이력 삭제" : "취소 삭제",
+        items: getSaleConfirmationItems([detail.line]),
+        onConfirm: () => {
+          void runAction(
+            `sale-delete-${detail.id}`,
+            async () => {
+              const [rechecked] = await readFreshSaleDetails([detail.line]);
+              return textbookService.deleteSaleLineLifecycle({ saleLineId: rechecked.id, saleId: text(rechecked.line.sale_id) });
+            },
+            isHistory ? "출고 이력을 삭제했습니다." : "출고 대기 건을 삭제했습니다.",
+            invalidateSales,
+          );
+        },
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function returnSaleLine(line: Row) {
-    requestTextbookConfirmation({
-      title: "고객 반품 처리",
-      description: "출고 완료 건을 고객 반품으로 처리합니다.",
-      confirmLabel: "반품 처리",
-      items: getSaleConfirmationItems([line]),
-      onConfirm: () => updateSaleLineStatus(line, "returned"),
-    });
+    const expectedActorKey = actorKey;
+    setSaving(`sale-context-${getRecordId(line)}`);
+    void readFreshSaleActionContexts([line]).then(([context]) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: "고객 반품 처리",
+        description: "출고 완료 건을 고객 반품으로 처리합니다.",
+        confirmLabel: "반품 처리",
+        items: getSaleDetailConfirmationItems([context.row]),
+        onConfirm: () => updateSaleLineStatus(context.row.line, "returned"),
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function issueSelectedSaleLines() {
@@ -3542,52 +3583,63 @@ function TextbookOperationsWorkspaceContent() {
     }
     const issuedTextbookTitles = [...new Set(selectedIssuableSaleLines
       .map((line) => {
-        const textbook = getTextbookById(data.textbooks, text(line.textbook_id || line.textbookId));
+        const textbook = numbered.sales.rows.find((row) => row.id === getRecordId(line))?.textbook;
         return getTextbookTitle(textbook || {});
       })
       .filter(Boolean))];
 
+    const expectedSelection = JSON.stringify(selectedSaleLineIds);
     void runAction(
       "sale-bulk-issue",
       async () => {
-        await Promise.all(selectedIssuableSaleLines.map((line) =>
-          textbookService.updateSaleLineStatus({ saleLineId: getRecordId(line), status: "issued", createdBy: currentUserId }, data as unknown as Row),
-        ));
-        setSelectedSaleLineIds([]);
-        setSalesProcessFilter("issued");
-        if (issuedTextbookTitles.length === 1) {
-          updateOperationSearchQuery(issuedTextbookTitles[0]);
-        }
+        const contexts = await readFreshSaleActionContexts(selectedIssuableSaleLines, expectedSelection);
+        for (const context of contexts) await textbookService.updateSaleLineStatus({ saleLineId: context.row.id, status: "issued", createdBy: currentUserId }, {
+          saleLines: [context.row.line], inventory: [{ id: context.textbookId, ...context.balance }], defaultLocationId: context.locationId,
+        });
       },
       `${formatQuantity(selectedIssuableSaleLines.length)}건을 출고 완료했습니다.`,
-    );
+      invalidateSales,
+    ).then((ok) => {
+      if (!ok) return;
+      setSelectedSaleLineIds([]);
+      setSalesProcessFilter("issued");
+      if (issuedTextbookTitles.length === 1) updateOperationSearchQuery(issuedTextbookTitles[0]);
+    });
   }
 
   function cancelSelectedSaleLines() {
     if (selectedCancelableSaleLines.length === 0) {
       return;
     }
-    requestTextbookConfirmation({
-      title: "출고 전 취소",
-      description: `${formatQuantity(selectedCancelableSaleLines.length)}건을 출고 전 취소로 삭제합니다.`,
-      confirmLabel: "취소 삭제",
-      items: getSaleConfirmationItems(selectedCancelableSaleLines),
-      onConfirm: () => {
+    const expectedSelection = JSON.stringify(selectedSaleLineIds);
+    const expectedActorKey = actorKey;
+    setSaving("sale-bulk-context");
+    void readFreshSaleDetails(selectedCancelableSaleLines, expectedSelection).then((details) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: "출고 전 취소",
+        description: `${formatQuantity(details.length)}건을 출고 전 취소로 삭제합니다.`,
+        confirmLabel: "취소 삭제",
+        items: getSaleDetailConfirmationItems(details),
+        onConfirm: () => {
         void runAction(
           "sale-bulk-cancel",
           async () => {
-            await Promise.all(selectedCancelableSaleLines.map((line) =>
-              textbookService.deleteSaleLineLifecycle({
-                saleLineId: getRecordId(line),
-                saleId: text(line.sale_id || line.saleId),
-              }),
-            ));
-            setSelectedSaleLineIds([]);
+            const rechecked = await readFreshSaleDetails(details.map((detail) => detail.line), expectedSelection);
+            for (const detail of rechecked) {
+              await textbookService.deleteSaleLineLifecycle({
+                saleLineId: detail.id,
+                saleId: detail.line.sale_id,
+              });
+            }
           },
-          `${formatQuantity(selectedCancelableSaleLines.length)}건을 출고 전 취소했습니다.`,
-        );
-      },
-    });
+          `${formatQuantity(details.length)}건을 출고 전 취소했습니다.`,
+          invalidateSales,
+        ).then((ok) => { if (ok) setSelectedSaleLineIds([]); });
+        },
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function returnSelectedSaleLines() {
@@ -3597,55 +3649,67 @@ function TextbookOperationsWorkspaceContent() {
     const returnedTextbookTitles = [...new Set(selectedReturnableSaleLines
       .map((line) => getSaleLineTextbookTitle(line))
       .filter(Boolean))];
-    requestTextbookConfirmation({
-      title: "고객 반품 처리",
-      description: `${formatQuantity(selectedReturnableSaleLines.length)}건을 고객 반품으로 처리합니다.`,
-      confirmLabel: "반품 처리",
-      items: getSaleConfirmationItems(selectedReturnableSaleLines),
-      onConfirm: () => {
+    const expectedSelection = JSON.stringify(selectedSaleLineIds);
+    const expectedActorKey = actorKey;
+    setSaving("sale-bulk-context");
+    void readFreshSaleActionContexts(selectedReturnableSaleLines, expectedSelection).then((initialContexts) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: "고객 반품 처리",
+        description: `${formatQuantity(initialContexts.length)}건을 고객 반품으로 처리합니다.`,
+        confirmLabel: "반품 처리",
+        items: getSaleDetailConfirmationItems(initialContexts.map((context) => context.row)),
+        onConfirm: () => {
         void runAction(
           "sale-bulk-return",
           async () => {
-            await Promise.all(selectedReturnableSaleLines.map((line) =>
-              textbookService.updateSaleLineStatus({ saleLineId: getRecordId(line), status: "returned", createdBy: currentUserId }, data as unknown as Row),
-            ));
-            setSelectedSaleLineIds([]);
-            setSalesProcessFilter("returned");
-            if (returnedTextbookTitles.length === 1) {
-              updateOperationSearchQuery(returnedTextbookTitles[0]);
-            }
+            const contexts = await readFreshSaleActionContexts(initialContexts.map((context) => context.row.line), expectedSelection);
+            for (const context of contexts) await textbookService.updateSaleLineStatus({ saleLineId: context.row.id, status: "returned", createdBy: currentUserId }, {
+              saleLines: [context.row.line], inventory: [{ id: context.textbookId, ...context.balance }], defaultLocationId: context.locationId,
+            });
           },
-          `${formatQuantity(selectedReturnableSaleLines.length)}건을 고객 반품으로 처리했습니다.`,
-        );
-      },
-    });
+          `${formatQuantity(initialContexts.length)}건을 고객 반품으로 처리했습니다.`,
+          invalidateSales,
+        ).then((ok) => {
+          if (!ok) return;
+          setSelectedSaleLineIds([]);
+          setSalesProcessFilter("returned");
+          if (returnedTextbookTitles.length === 1) updateOperationSearchQuery(returnedTextbookTitles[0]);
+        });
+        },
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function deleteSelectedSaleHistoryLines() {
     if (!canDeleteTextbookHistory || selectedDeletableSaleLines.length === 0) {
       return;
     }
-    requestTextbookConfirmation({
-      title: "출고 이력 삭제",
-      description: `${formatQuantity(selectedDeletableSaleLines.length)}건의 출고/반품 이력과 연결된 재고 이동 기록을 삭제합니다.`,
-      confirmLabel: "이력 삭제",
-      items: getSaleConfirmationItems(selectedDeletableSaleLines),
-      onConfirm: () => {
+    const expectedSelection = JSON.stringify(selectedSaleLineIds);
+    const expectedActorKey = actorKey;
+    setSaving("sale-bulk-context");
+    void readFreshSaleDetails(selectedDeletableSaleLines, expectedSelection).then((details) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: "출고 이력 삭제",
+        description: `${formatQuantity(details.length)}건의 출고/반품 이력과 연결된 재고 이동 기록을 삭제합니다.`,
+        confirmLabel: "이력 삭제",
+        items: getSaleDetailConfirmationItems(details),
+        onConfirm: () => {
         void runAction(
           "sale-bulk-delete-history",
           async () => {
-            await Promise.all(selectedDeletableSaleLines.map((line) =>
-              textbookService.deleteSaleLineLifecycle({
-                saleLineId: getRecordId(line),
-                saleId: text(line.sale_id || line.saleId),
-              }),
-            ));
-            setSelectedSaleLineIds([]);
+            const rechecked = await readFreshSaleDetails(details.map((detail) => detail.line), expectedSelection);
+            for (const detail of rechecked) await textbookService.deleteSaleLineLifecycle({ saleLineId: detail.id, saleId: detail.line.sale_id });
           },
-          `${formatQuantity(selectedDeletableSaleLines.length)}건의 출고/반품 이력을 삭제했습니다.`,
-        );
-      },
-    });
+          `${formatQuantity(details.length)}건의 출고/반품 이력을 삭제했습니다.`,
+          invalidateSales,
+        ).then((ok) => { if (ok) setSelectedSaleLineIds([]); });
+        },
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function movePurchaseLine(line: Row, order: Row | undefined, status: PurchaseKanbanStatus, draft?: PurchaseKanbanDraft) {
@@ -3653,120 +3717,149 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
-    const scopeLines = getPurchaseScopeLines(line);
     void runAction(
       `purchase-move-${getRecordId(line)}`,
       async () => {
-        await Promise.all(scopeLines.map((scopeLine) => {
-          const scopeOrder = getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order;
+        const [detail] = await readFreshPurchaseMembers([line], status === "ordered" ? "request" : "order");
+        const scopeLines = detail.lines;
+        for (const scopeLine of scopeLines) {
+          const scopeOrder = (scopeLine.order as Row | null) || order;
           const movePayload = draft && scopeLines.length === 1
             ? buildPurchasePayloadFromDraft(scopeLine, scopeOrder, draft, status)
             : buildPurchaseStatusPayload(scopeLine, scopeOrder, status);
-          return textbookService.updatePurchaseLifecycle(
+          await textbookService.updatePurchaseLifecycle(
             applyConfiguredPurchasePricingToPayload(
               {
                 ...movePayload,
-                textbookId: getPurchaseLineTextbookId(scopeLine) || text(movePayload.textbookId),
+                textbookId: getPurchaseLineTextbookId(scopeLine, detail.references) || text(movePayload.textbookId),
                 requestedTextbookTitle: normalizeStoredTextInput(text(movePayload.requestedTextbookTitle || getRequestedTextbookTitle(scopeLine))),
               },
+              detail.references,
             ),
           );
-        }));
+        }
       },
       "상태가 변경되었습니다.",
+      invalidatePurchase,
     );
   }
 
   function deletePurchaseLine(line: Row, order: Row | undefined) {
-    const scopeLines = getPurchaseScopeLines(line);
-    requestTextbookConfirmation({
-      title: scopeLines.length > 1 ? "요청 묶음 삭제" : "요청 삭제",
-      description: scopeLines.length > 1
-        ? "학생용과 교사용 요청을 함께 삭제합니다."
-        : "이 요청 건을 삭제합니다.",
-      confirmLabel: "삭제",
-      items: scopeLines.flatMap((scopeLine) =>
-        getPurchaseConfirmationItems(scopeLine, getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order)),
-      onConfirm: () => {
-        void runAction(
-          `purchase-delete-${getRecordId(line)}`,
-          async () => {
-            await Promise.all(scopeLines.map((scopeLine) => {
-              const scopeOrder = getPurchaseLineOrder(scopeLine, purchaseOrdersById) || order;
-              return textbookService.deletePurchaseLifecycle({
-                purchaseOrderId: getRecordId(scopeOrder || {}) || text(scopeLine.purchase_order_id || scopeLine.purchaseOrderId),
-                purchaseOrderLineId: getRecordId(scopeLine),
-              });
-            }));
-          },
-          scopeLines.length > 1 ? "요청 묶음을 삭제했습니다." : "요청 건을 삭제했습니다.",
-        );
-      },
-    });
+    const expectedActorKey = actorKey;
+    const mode = text(line.status || order?.status) === "requested" ? "request" as const : "order" as const;
+    setSaving(`purchase-context-${getRecordId(line)}`);
+    void readFreshPurchaseMembers([line], mode).then(([detail]) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      const scopeLines = detail.lines;
+      requestTextbookConfirmation({
+        title: scopeLines.length > 1 ? "요청 묶음 삭제" : "요청 삭제",
+        description: scopeLines.length > 1 ? "학생용과 교사용 요청을 함께 삭제합니다." : "이 요청 건을 삭제합니다.",
+        confirmLabel: "삭제",
+        items: scopeLines.flatMap((scopeLine) => getPurchaseConfirmationItems(scopeLine, (scopeLine.order as Row | null) || order, detail.references)),
+        onConfirm: () => {
+          void runAction(
+            `purchase-delete-${getRecordId(line)}`,
+            async () => {
+              const [rechecked] = await readFreshPurchaseMembers([line], mode);
+              for (const scopeLine of rechecked.lines) {
+                const scopeOrder = scopeLine.order || order;
+                await textbookService.deletePurchaseLifecycle({
+                  purchaseOrderId: getRecordId(scopeOrder || {}) || text(scopeLine.purchase_order_id || scopeLine.purchaseOrderId),
+                  purchaseOrderLineId: getRecordId(scopeLine),
+                });
+              }
+            },
+            scopeLines.length > 1 ? "요청 묶음을 삭제했습니다." : "요청 건을 삭제했습니다.",
+            invalidatePurchase,
+          );
+        },
+      });
+    }, (contextError) => {
+      if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError));
+    }).finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function returnPurchaseLine(line: Row, order: Row | undefined) {
-    requestTextbookConfirmation({
-      title: "공급처 반품",
-      description: "입고 완료 건을 공급처 반품으로 처리합니다.",
-      confirmLabel: "반품 처리",
-      items: getPurchaseConfirmationItems(line, order),
-      onConfirm: () => {
+    const expectedActorKey = actorKey;
+    setSaving(`purchase-context-${getRecordId(line)}`);
+    void readFreshPurchaseMembers([line], "order").then(([detail]) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: "공급처 반품",
+        description: "입고 완료 건을 공급처 반품으로 처리합니다.",
+        confirmLabel: "반품 처리",
+        items: detail.lines.flatMap((member) => getPurchaseConfirmationItems(member, (member.order as Row | null) || order, detail.references)),
+        onConfirm: () => {
         void runAction(
           `purchase-return-${getRecordId(line)}`,
-          () => textbookService.returnPurchaseLifecycle({
-            purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
-            purchaseOrderLineId: getRecordId(line),
-            createdBy: currentUserId,
-            memo: "공급처 반품",
-          }),
+          async () => {
+            const [rechecked] = await readFreshPurchaseMembers([detail.line], "order");
+            for (const member of rechecked.lines) await textbookService.returnPurchaseLifecycle({
+              purchaseOrderId: getRecordId(member.order || {}) || member.purchase_order_id,
+              purchaseOrderLineId: member.id,
+              createdBy: currentUserId,
+              memo: "공급처 반품",
+            });
+          },
           "공급처 반품으로 처리했습니다.",
+          invalidatePurchase,
         );
-      },
-    });
+        },
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function returnSelectedPurchaseLines() {
     if (selectedReturnablePurchaseLines.length === 0) {
       return;
     }
-    requestTextbookConfirmation({
-      title: "공급처 반품",
-      description: `${formatQuantity(selectedReturnablePurchaseLines.length)}건을 공급처 반품으로 처리합니다.`,
-      confirmLabel: "반품 처리",
-      items: getSelectedPurchaseConfirmationItems(selectedReturnablePurchaseLines),
-      onConfirm: () => {
+    const expectedSelection = JSON.stringify(selectedPurchaseLineIds);
+    const expectedActorKey = actorKey;
+    setSaving("purchase-bulk-context");
+    void readFreshPurchaseMembers(selectedReturnablePurchaseLines, "order", expectedSelection).then((details) => {
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      requestTextbookConfirmation({
+        title: "공급처 반품",
+        description: `${formatQuantity(details.length)}건을 공급처 반품으로 처리합니다.`,
+        confirmLabel: "반품 처리",
+        items: details.flatMap((detail) => detail.lines.flatMap((member) => getPurchaseConfirmationItems(member, (member.order as Row | null) || undefined, detail.references))),
+        onConfirm: () => {
         void runAction(
           "purchase-bulk-return",
           async () => {
-            await Promise.all(selectedReturnablePurchaseLines.map((line) => {
-              const order = getPurchaseLineOrder(line, purchaseOrdersById);
-              return textbookService.returnPurchaseLifecycle({
-                purchaseOrderId: getRecordId(order || {}) || text(line.purchase_order_id || line.purchaseOrderId),
-                purchaseOrderLineId: getRecordId(line),
-                createdBy: currentUserId,
-                memo: "공급처 반품",
-              });
-            }));
-            setSelectedPurchaseLineIds([]);
+            const rechecked = await readFreshPurchaseMembers(details.map((detail) => detail.line), "order", expectedSelection);
+            for (const detail of rechecked) for (const member of detail.lines) await textbookService.returnPurchaseLifecycle({
+              purchaseOrderId: getRecordId(member.order || {}) || member.purchase_order_id,
+              purchaseOrderLineId: member.id,
+              createdBy: currentUserId,
+              memo: "공급처 반품",
+            });
           },
-          `${formatQuantity(selectedReturnablePurchaseLines.length)}건을 공급처 반품으로 처리했습니다.`,
-        );
-      },
-    });
+          `${formatQuantity(details.length)}건을 공급처 반품으로 처리했습니다.`,
+          invalidatePurchase,
+        ).then((ok) => { if (ok) setSelectedPurchaseLineIds([]); });
+        },
+      });
+    }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
+      .finally(() => { if (isCurrentActionActor(expectedActorKey)) setSaving(""); });
   }
 
   function setInventoryCountDraft(row: InventoryCountRow, value: string) {
+    const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
+    inventoryCountDraftRevisionsRef.current[draftKey] = (inventoryCountDraftRevisionsRef.current[draftKey] || 0) + 1;
     setInventoryCountDrafts((current) => ({
       ...current,
-      [getInventoryCountDraftKey(row.id, row.locationId)]: normalizeQuantityInput(value, { allowZero: true }),
+      [draftKey]: normalizeQuantityInput(value, { allowZero: true }),
     }));
   }
 
   function setInventoryCountMemoDraft(row: InventoryCountRow, value: string) {
+    const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
+    inventoryCountDraftRevisionsRef.current[draftKey] = (inventoryCountDraftRevisionsRef.current[draftKey] || 0) + 1;
     setInventoryCountMemoDrafts((current) => ({
       ...current,
-      [getInventoryCountDraftKey(row.id, row.locationId)]: normalizeInlineTextInput(value),
+      [draftKey]: normalizeInlineTextInput(value),
     }));
   }
 
@@ -3782,6 +3875,7 @@ function TextbookOperationsWorkspaceContent() {
       delete next[draftKey];
       return next;
     });
+    delete inventoryCountDraftRevisionsRef.current[draftKey];
   }
 
   function submitInlineStockCount(row: InventoryCountRow, countedQuantity: string, memo = "") {
@@ -3793,22 +3887,27 @@ function TextbookOperationsWorkspaceContent() {
     }
 
     const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
+    const expectedActorKey = actorKey;
+    const submittedRevision = inventoryCountDraftRevisionsRef.current[draftKey] || 0;
     void runAction(
       `count-inline-${draftKey}`,
-      () => textbookService.createStockCountAdjustment({
-        textbookId: row.id,
-        locationId: row.locationId,
-        countedQuantity: normalizedQuantity,
-        expectedQuantity: row.currentQuantity,
-        sale_price: getTextbookSalePrice(row.source),
-        memo: normalizedMemo,
-        createdBy: currentUserId,
-      }),
+      async () => {
+        const balance = await getTextbookInventoryBalance({ textbookIds: [row.id], locationId: row.locationId });
+        if (!isCurrentActionActor(expectedActorKey)) throw new Error("재고 작업 대상이 변경되었습니다.");
+        const authoritative = balance.rows.find((item) => item.textbookId === row.id);
+        if (!authoritative) throw new Error("재고 수량을 확인할 수 없습니다.");
+        return textbookService.createStockCountAdjustment({
+          textbookId: row.id, locationId: row.locationId, countedQuantity: normalizedQuantity,
+          expectedQuantity: authoritative.currentQuantity, sale_price: getTextbookSalePrice(row.source), memo: normalizedMemo, createdBy: currentUserId,
+        });
+      },
       "실사 수량이 반영되었습니다.",
+      invalidateInventory,
     ).then((ok) => {
       if (ok) {
         setInventoryAuditFilter("done");
         updateMasterSearchQuery(row.title);
+        if ((inventoryCountDraftRevisionsRef.current[draftKey] || 0) !== submittedRevision) return;
         setInventoryCountDrafts((current) => {
           const next = { ...current };
           delete next[draftKey];
@@ -3819,6 +3918,7 @@ function TextbookOperationsWorkspaceContent() {
           delete next[draftKey];
           return next;
         });
+        delete inventoryCountDraftRevisionsRef.current[draftKey];
       }
     });
   }
@@ -3832,40 +3932,47 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
+    const expectedActorKey = actorKey;
+    const snapshots = readyRows.map((row) => {
+      const key = getInventoryCountDraftKey(row.id, row.locationId);
+      return { row, key, quantity: normalizeQuantityInput(inventoryCountDrafts[key], { allowZero: true }), memo: normalizeStoredTextInput(inventoryCountMemoDrafts[key]), revision: inventoryCountDraftRevisionsRef.current[key] || 0 };
+    });
     void runAction(
       "count-inline-bulk",
       async () => {
-        await Promise.all(readyRows.map((row) => {
-          const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
-          return textbookService.createStockCountAdjustment({
-            textbookId: row.id,
-            locationId: row.locationId,
-            countedQuantity: normalizeQuantityInput(inventoryCountDrafts[draftKey], { allowZero: true }),
-            expectedQuantity: row.currentQuantity,
-            sale_price: getTextbookSalePrice(row.source),
-            memo: normalizeStoredTextInput(inventoryCountMemoDrafts[draftKey]),
-            createdBy: currentUserId,
-          });
-        }));
-        setInventoryCountDrafts((current) => {
-          const next = { ...current };
-          readyRows.forEach((row) => delete next[getInventoryCountDraftKey(row.id, row.locationId)]);
-          return next;
-        });
-        setInventoryCountMemoDrafts((current) => {
-          const next = { ...current };
-          readyRows.forEach((row) => delete next[getInventoryCountDraftKey(row.id, row.locationId)]);
-          return next;
-        });
-        const readyRowIds = new Set(readyRows.map((row) => row.id));
-        setSelectedTextbookIds((current) => current.filter((id) => !readyRowIds.has(id)));
-        setInventoryAuditFilter("done");
-        if (readyRows.length === 1) {
-          updateMasterSearchQuery(readyRows[0].title);
+        const groups = new Map<string, string[]>();
+        for (const snapshot of snapshots) groups.set(snapshot.row.locationId, [...new Set([...(groups.get(snapshot.row.locationId) || []), snapshot.row.id])]);
+        const balances = await Promise.all([...groups].map(([locationId, textbookIds]) => getTextbookInventoryBalance({ textbookIds, locationId })));
+        if (!isCurrentActionActor(expectedActorKey)) throw new Error("재고 작업 대상이 변경되었습니다.");
+        for (const snapshot of snapshots) {
+          const authoritative = balances.find((balance) => balance.locationId === snapshot.row.locationId)?.rows.find((item) => item.textbookId === snapshot.row.id);
+          if (!authoritative) throw new Error("선택한 모든 재고 수량을 확인할 수 없습니다.");
+        }
+        for (const snapshot of snapshots) {
+          const authoritative = balances.find((balance) => balance.locationId === snapshot.row.locationId)!.rows.find((item) => item.textbookId === snapshot.row.id)!;
+          await textbookService.createStockCountAdjustment({ textbookId: snapshot.row.id, locationId: snapshot.row.locationId, countedQuantity: snapshot.quantity,
+            expectedQuantity: authoritative.currentQuantity, sale_price: getTextbookSalePrice(snapshot.row.source), memo: snapshot.memo, createdBy: currentUserId });
         }
       },
       `${formatQuantity(readyRows.length)}건의 실사 수량을 반영했습니다.`,
-    );
+      invalidateInventory,
+    ).then((ok) => {
+      if (!ok) return;
+      setInventoryCountDrafts((current) => {
+        const next = { ...current };
+        snapshots.forEach((snapshot) => { if ((inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision) delete next[snapshot.key]; });
+        return next;
+      });
+      setInventoryCountMemoDrafts((current) => {
+        const next = { ...current };
+        snapshots.forEach((snapshot) => { if ((inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision) { delete next[snapshot.key]; delete inventoryCountDraftRevisionsRef.current[snapshot.key]; } });
+        return next;
+      });
+      const readyRowIds = new Set(readyRows.map((row) => row.id));
+      setSelectedTextbookIds((current) => current.filter((id) => !readyRowIds.has(id)));
+      setInventoryAuditFilter("done");
+      if (readyRows.length === 1) updateMasterSearchQuery(readyRows[0].title);
+    });
   }
 
   function deleteInventoryHistory(row: InventoryHistoryRow) {
@@ -3886,6 +3993,7 @@ function TextbookOperationsWorkspaceContent() {
             linkedMoveId: row.linkedMoveId,
           }),
           "재고 이력을 삭제했습니다.",
+          invalidateInventory,
         );
       },
     });
@@ -3896,10 +4004,13 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
+    const expectedSelection = JSON.stringify(selectedClosingIds);
     void runAction(
       "closing-bulk-lock",
       async () => textbookService.updateMonthlyClosingStatus({ ids: selectedClosingIds, status: "locked" }),
       `${formatQuantity(selectedClosingIds.length)}건을 확정했습니다.`,
+      invalidateClosing,
+      () => liveActionInputsRef.current.closingSelection === expectedSelection,
     ).then((ok) => {
       if (ok) {
         setSelectedClosingIds([]);
@@ -3913,14 +4024,20 @@ function TextbookOperationsWorkspaceContent() {
       setMessage("차이가 있으면 사유를 입력하세요.");
       return;
     }
+    const expectedClosingForm = JSON.stringify(closingForm);
+    const expectedActorKey = actorKey;
     void runAction(
       "closing",
       async () => {
-        await Promise.all(closingTargetSubjects.map((subject) =>
-          textbookService.upsertMonthlyClosing({ ...closingForm, subject }, data as unknown as Row),
-        ));
+        const contexts = await Promise.all(closingTargetSubjects.map((subject) => getTextbookClosingSaveContext(normalizedClosingMonth, subject)));
+        if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.closing !== expectedClosingForm) throw new Error("월마감 입력이 변경되었습니다. 다시 시도하세요.");
+        for (let index = 0; index < closingTargetSubjects.length; index += 1) {
+          await textbookService.upsertMonthlyClosing({ ...closingForm, subject: closingTargetSubjects[index] }, contexts[index] as unknown as Row);
+        }
       },
       "월마감 초안이 저장되었습니다.",
+      invalidateClosing,
+      () => liveActionInputsRef.current.closing === expectedClosingForm,
     ).then((ok) => {
       if (ok) {
         setClosingDialogOpen(false);
@@ -3930,28 +4047,11 @@ function TextbookOperationsWorkspaceContent() {
 
   return (
     <div className="flex min-h-[calc(100dvh-5rem)] flex-col gap-4 px-4 py-4 lg:px-6">
-      {error || actionErrorMessage || message ? (
-        <Alert variant={error || actionErrorMessage ? "destructive" : "default"}>
+      {actionErrorMessage || message ? (
+        <Alert variant={actionErrorMessage ? "destructive" : "default"}>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span>{error || actionErrorMessage || message}</span>
-            {error ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="h-8 self-start sm:self-auto"
-                onClick={() => void refresh()}
-                aria-label={lastLoadedAt ? `다시 불러오기 · ${formatLoadedAt(lastLoadedAt)} · ${loadDurationMs}ms` : "다시 불러오기"}
-              >
-                다시 불러오기
-              </Button>
-            ) : null}
+            <span>{actionErrorMessage || message}</span>
           </AlertDescription>
-        </Alert>
-      ) : null}
-      {schemaDisabled ? (
-        <Alert variant="destructive">
-          <AlertDescription>{schemaMessage}</AlertDescription>
         </Alert>
       ) : null}
       {masterOptionsInput && referenceData.masterOptions.error ? (
@@ -4675,13 +4775,13 @@ function TextbookOperationsWorkspaceContent() {
                     const lineId = getRecordId(line);
                     const order = getPurchaseLineOrder(line, purchaseOrdersById);
                     const draft = buildPurchaseCardDraft(line, order);
-                    const textbook = getOrderablePurchaseRequestTextbook(line, order, data.textbooks);
+                    const textbook = preparedPurchaseRows.find((row) => row.memberLineIds.includes(lineId))?.references.textbook;
                     const defaultOrderQuantity = getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1";
                     return (
                       <TableRow key={lineId}>
                         <TableCell className="min-w-0">
                           <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                            <div className="min-w-0 truncate font-medium">{getPurchaseTextbookTitle(line, textbook)}</div>
+                            <div className="min-w-0 truncate font-medium">{getPurchaseTextbookTitle(line, textbook || undefined)}</div>
                             <Badge variant="outline" className="w-fit rounded-md">
                               {getTextbookCopyScopeLabel(draft.copyScope)}
                             </Badge>
@@ -4695,7 +4795,7 @@ function TextbookOperationsWorkspaceContent() {
                             onChange={(event) => setBulkOrderQuantity(lineId, event.target.value)}
                             inputMode="numeric"
                             min="1"
-                            aria-label={`${getPurchaseTextbookTitle(line, textbook)} ${getTextbookCopyScopeLabel(draft.copyScope)} 주문 수량`}
+                            aria-label={`${getPurchaseTextbookTitle(line, textbook || undefined)} ${getTextbookCopyScopeLabel(draft.copyScope)} 주문 수량`}
                           />
                         </TableCell>
                       </TableRow>
@@ -5184,11 +5284,11 @@ function TextbookOperationsWorkspaceContent() {
 
         <TextbookOperationsStatusBar
           items={workspaceStatusItems}
-          loading={loading}
+          loading={activePrimaryState.loading}
           onRefresh={refreshTextbookData}
         />
 
-        {loading ? (
+        {activePrimaryState.loading && activePrimaryState.totalCount === null ? (
           <TextbookLoadingState />
         ) : (
           <>
@@ -5818,6 +5918,7 @@ function TextbookHandoffDialog({
   idPrefix,
   format = "default",
   loadState = "",
+  sourceLineCount = 0,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -5828,6 +5929,7 @@ function TextbookHandoffDialog({
   idPrefix: string;
   format?: "default" | "purchase-order" | "purchase-return";
   loadState?: string;
+  sourceLineCount?: number;
 }) {
   const [status, setStatus] = useState("");
   const [manualCopyText, setManualCopyText] = useState("");
@@ -5909,6 +6011,9 @@ function TextbookHandoffDialog({
           {loadState ? <Alert role="status"><AlertDescription>{loadState}</AlertDescription></Alert> : null}
           <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
             <div className="flex flex-wrap gap-2">
+              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
+                {formatQuantity(sourceLineCount)}건
+              </Badge>
               <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
                 {formatQuantity(groups.length)}묶음
               </Badge>
@@ -8443,6 +8548,8 @@ function PurchaseProcessTable({
   const [returnHandoffDialogOpen, setReturnHandoffDialogOpen] = useState(false);
   const [purchaseHandoffGroups, setPurchaseHandoffGroups] = useState<TextbookHandoffGroup[]>([]);
   const [returnHandoffGroups, setReturnHandoffGroups] = useState<TextbookHandoffGroup[]>([]);
+  const [purchaseHandoffSourceLineCount, setPurchaseHandoffSourceLineCount] = useState(0);
+  const [returnHandoffSourceLineCount, setReturnHandoffSourceLineCount] = useState(0);
   const [purchaseHandoffState, setPurchaseHandoffState] = useState("");
   const [returnHandoffState, setReturnHandoffState] = useState("");
   const handoffAbortRef = useRef<AbortController | null>(null);
@@ -8629,8 +8736,10 @@ function PurchaseProcessTable({
   const openPurchaseHandoff = useCallback((kind: "order" | "return") => {
     if (kind === "order") setHandoffDialogOpen(true); else setReturnHandoffDialogOpen(true);
     const setGroups = kind === "order" ? setPurchaseHandoffGroups : setReturnHandoffGroups;
+    const setSourceLineCount = kind === "order" ? setPurchaseHandoffSourceLineCount : setReturnHandoffSourceLineCount;
     const setState = kind === "order" ? setPurchaseHandoffState : setReturnHandoffState;
     setGroups([]);
+    setSourceLineCount(0);
     if (!acceptedFilters || mode !== "order") { setState("현재 필터가 아직 준비되지 않았습니다."); return; }
     const frozenFilters = { ...acceptedFilters };
     handoffAbortRef.current?.abort();
@@ -8640,6 +8749,7 @@ function PurchaseProcessTable({
     void getTextbookPurchaseHandoff(frozenFilters, kind, { signal: abort.signal }).then((result) => {
       if (abort.signal.aborted) return;
       setGroups(result.groups);
+      setSourceLineCount(result.sourceLineCount);
       setState(result.groups.length ? "전체 필터 범위 준비 완료" : "전체 필터 범위에 전달할 항목이 없습니다.");
     }, (error) => { if (!abort.signal.aborted) setState(getTextbookActionErrorMessage(error)); });
   }, [acceptedFilters, mode]);
@@ -8670,8 +8780,9 @@ function PurchaseProcessTable({
             open={handoffDialogOpen}
             onOpenChange={setHandoffDialogOpen}
             title="공급처 주문 전달"
-            description="보이는 주문 건을 공급처별 이미지, PDF로 정리합니다."
+            description="현재 필터의 전체 주문 건을 공급처별 이미지, PDF로 정리합니다."
             groups={purchaseHandoffGroups}
+            sourceLineCount={purchaseHandoffSourceLineCount}
             loadState={purchaseHandoffState}
             emptyLabel="전달할 주문 건이 없습니다"
             idPrefix="purchase-handoff"
@@ -8681,8 +8792,9 @@ function PurchaseProcessTable({
             open={returnHandoffDialogOpen}
             onOpenChange={setReturnHandoffDialogOpen}
             title="공급처 반품 요청서"
-            description="보이는 반품 가능 건을 공급처별 이미지, PDF로 정리합니다."
+            description="현재 필터의 전체 반품 가능 건을 공급처별 이미지, PDF로 정리합니다."
             groups={returnHandoffGroups}
+            sourceLineCount={returnHandoffSourceLineCount}
             loadState={returnHandoffState}
             emptyLabel="반품 요청할 입고 건이 없습니다"
             idPrefix="purchase-return-handoff"
@@ -9695,6 +9807,7 @@ function SalesProcessTable({
   const [collapsedGroups, setCollapsedGroups] = useState<Record<string, boolean>>({});
   const [billingDialogOpen, setBillingDialogOpen] = useState(false);
   const [makeEduBillingGroups, setMakeEduBillingGroups] = useState<TextbookHandoffGroup[]>([]);
+  const [billingHandoffSourceLineCount, setBillingHandoffSourceLineCount] = useState(0);
   const [billingHandoffState, setBillingHandoffState] = useState("");
   const billingAbortRef = useRef<AbortController | null>(null);
   useEffect(() => () => billingAbortRef.current?.abort(), []);
@@ -9852,6 +9965,7 @@ function SalesProcessTable({
   const openBillingHandoff = useCallback(() => {
     setBillingDialogOpen(true);
     setMakeEduBillingGroups([]);
+    setBillingHandoffSourceLineCount(0);
     if (!acceptedFilters) { setBillingHandoffState("현재 필터가 아직 준비되지 않았습니다."); return; }
     const frozenFilters = { ...acceptedFilters };
     billingAbortRef.current?.abort();
@@ -9861,6 +9975,7 @@ function SalesProcessTable({
     void getTextbookBillingHandoff(frozenFilters, { signal: abort.signal }).then((result) => {
       if (abort.signal.aborted) return;
       setMakeEduBillingGroups(result.groups);
+      setBillingHandoffSourceLineCount(result.sourceLineCount);
       setBillingHandoffState(result.groups.length ? "전체 필터 범위 준비 완료" : "전체 필터 범위에 청구할 항목이 없습니다.");
     }, (error) => { if (!abort.signal.aborted) setBillingHandoffState(getTextbookActionErrorMessage(error)); });
   }, [acceptedFilters]);
@@ -9873,8 +9988,9 @@ function SalesProcessTable({
         open={billingDialogOpen}
         onOpenChange={setBillingDialogOpen}
         title="메이크에듀 청구 준비"
-        description="보이는 출고 건을 메이크에듀 기타수납 생성용 수납명, 금액, 대상 원생으로 정리합니다."
+        description="현재 필터의 전체 출고 건을 메이크에듀 기타수납 생성용 수납명, 금액, 대상 원생으로 정리합니다."
         groups={makeEduBillingGroups}
+        sourceLineCount={billingHandoffSourceLineCount}
         loadState={billingHandoffState}
         emptyLabel="청구할 출고 건이 없습니다"
         idPrefix="makeedu-billing"
