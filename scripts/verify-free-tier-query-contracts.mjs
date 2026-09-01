@@ -602,8 +602,11 @@ export function inspectOperationalMigrationSource({ file, source }) {
 
     const cronDelete = /\b(?:delete\s+from|truncate(?:\s+table)?)\s+cron\s*\.\s*job\b/iu.test(executableWithBodies)
     const unscheduleCalls = [...executableWithBodies.matchAll(/\bcron\s*\.\s*unschedule\s*\(\s*([^)]*?)\s*\)/giu)]
-    const broadUnschedule = unscheduleCalls.some((match) => !/^(?:'[A-Za-z0-9_.:-]+'|[1-9][0-9]*)$/u.test(match[1].trim()))
-      || (unscheduleCalls.length > 0 && /\bfrom\s+cron\s*\.\s*job\b/iu.test(executableWithBodies))
+    // An exact literal remains bounded even when a preceding existence query
+    // reads cron.job. Variables and expressions can expand the deletion scope.
+    const broadUnschedule = unscheduleCalls.some((match) => (
+      !/^(?:'[A-Za-z0-9_.:-]+'|[1-9][0-9]*)$/u.test(match[1].trim())
+    ))
     if (cronDelete || broadUnschedule) record(statement, statementIndex, "broad_cron_removal")
   }
   return violations

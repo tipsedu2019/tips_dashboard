@@ -2606,7 +2606,7 @@ begin
       where job.jobname = 'tips-registration-customer-reminder-v1'
       order by job.jobid
     loop
-      perform cron.unschedule(v_job.jobid);
+      perform cron.unschedule('tips-registration-customer-reminder-v1');
     end loop;
   end if;
 end;
@@ -2752,7 +2752,7 @@ begin
       where job.jobname = 'tips-registration-customer-reminder-v1'
       order by job.jobid
     loop
-      perform cron.unschedule(v_job.jobid);
+      perform cron.unschedule('tips-registration-customer-reminder-v1');
     end loop;
   end if;
   return dashboard_private.inspect_registration_customer_reminder_schedule_v1();
@@ -2830,7 +2830,7 @@ begin
       where job.jobname = 'tips-lightweight-registration-reminder-v1'
       order by job.jobid
     loop
-      perform cron.unschedule(v_job.jobid);
+      perform cron.unschedule('tips-lightweight-registration-reminder-v1');
     end loop;
   end if;
 end;
@@ -2922,7 +2922,7 @@ begin
       where job.jobname = 'tips-lightweight-registration-reminder-v1'
       order by job.jobid
     loop
-      perform cron.unschedule(v_job.jobid);
+      perform cron.unschedule('tips-lightweight-registration-reminder-v1');
     end loop;
   end if;
   return pg_catalog.jsonb_build_object(
