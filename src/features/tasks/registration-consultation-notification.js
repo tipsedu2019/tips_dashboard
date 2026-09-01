@@ -168,6 +168,72 @@ export function isRegistrationManagementNotificationWorkflowStatus(status) {
   ].includes(text(status))
 }
 
+const REGISTRATION_MANAGEMENT_NOTIFICATION_EVENT_BY_STATUS = Object.freeze({
+  consultation_requested: "registration.case_created",
+  consultation_completed: "registration.consultation_completed",
+  waiting_current_class: "registration.waiting_transitioned",
+  waiting_new_class: "registration.waiting_transitioned",
+  waiting_next_opening: "registration.waiting_transitioned",
+  enrollment_requested: "registration.admission_started",
+})
+
+export function getRegistrationManagementNotificationReadiness(input = {}) {
+  const workflowStatus = text(input.workflowStatus)
+  const eventKey = REGISTRATION_MANAGEMENT_NOTIFICATION_EVENT_BY_STATUS[workflowStatus] || null
+  if (!eventKey) {
+    return {
+      ready: false,
+      eventKey: null,
+      missingFields: ["현재 진행상태에는 보낼 관리 알림이 없습니다"],
+    }
+  }
+
+  const missingFields = []
+  if (!text(input.studentName)) missingFields.push("학생 이름")
+  if (!text(input.subject)) missingFields.push("과목")
+  if (eventKey === "registration.case_created") {
+    if (!text(input.schoolGrade)) missingFields.push("학년")
+    if (!text(input.inquiryAt)) missingFields.push("문의 시각")
+  }
+  return {
+    ready: missingFields.length === 0,
+    eventKey,
+    missingFields,
+  }
+}
+
+const REGISTRATION_APPOINTMENT_NOTIFICATION_REQUIRED_FIELDS = Object.freeze([
+  "학생",
+  "일시",
+  "장소",
+  "과목",
+  "담당자",
+])
+
+export function getRegistrationAppointmentNotificationReadiness(input = {}) {
+  const participants = Array.isArray(input.participants) ? input.participants : []
+  const missingFields = []
+  if (!text(input.studentName)) missingFields.push("학생")
+  if (!text(input.scheduledAt)) missingFields.push("일시")
+  if (!text(input.place)) missingFields.push("장소")
+  if (participants.length === 0 || participants.some((participant) => !text(participant?.subject))) {
+    missingFields.push("과목")
+  }
+  if (
+    participants.length === 0
+    || participants.some((participant) => (
+      !text(participant?.directorProfileId) || !text(participant?.directorName)
+    ))
+  ) {
+    missingFields.push("담당자")
+  }
+  return {
+    ready: missingFields.length === 0,
+    requiredFields: [...REGISTRATION_APPOINTMENT_NOTIFICATION_REQUIRED_FIELDS],
+    missingFields,
+  }
+}
+
 export function getRegistrationVisitNotificationDedupeKey(input = {}) {
   return [
     "registration:visit",
@@ -240,7 +306,11 @@ export function buildRegistrationVisitCanonicalMessage(input = {}) {
 
 export async function sendRegistrationVisitNotificationTarget(target = {}, sessionToken = "") {
   const appointmentId = text(target.appointmentId)
+  const notificationRevision = Number(target.notificationRevision)
   if (!appointmentId) throw new Error("방문상담 예약 ID를 확인하세요.")
+  if (!Number.isInteger(notificationRevision) || notificationRevision < 1) {
+    throw new Error("방문상담 예약의 최신 버전을 확인하세요.")
+  }
   const fixtureModule = await import("./registration-track-fixture-runtime").catch(() => null)
   const fixture = fixtureModule?.executeRegistrationSubjectTrackFixtureAction(
     "sendRegistrationVisitNotificationTarget",
@@ -248,6 +318,7 @@ export async function sendRegistrationVisitNotificationTarget(target = {}, sessi
   ) || null
   if (fixture) return fixture
   if (!text(sessionToken)) throw new Error("로그인 세션을 확인하세요.")
+  const requestKey = crypto.randomUUID()
 
   const response = await fetch("/api/registration/consultation-notification", {
     method: "POST",
@@ -255,7 +326,7 @@ export async function sendRegistrationVisitNotificationTarget(target = {}, sessi
       Authorization: `Bearer ${text(sessionToken)}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ appointmentId }),
+    body: JSON.stringify({ appointmentId, notificationRevision, requestKey }),
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || payload?.ok !== true) {

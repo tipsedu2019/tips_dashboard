@@ -394,6 +394,12 @@ export type OpsRegistrationMigrationLegacySnapshot = {
   }
 }
 
+export type OpsRegistrationCollectionWindow = {
+  loadedCount: number
+  totalCount: number | null
+  overflow: boolean | null
+}
+
 type OpsRegistrationCaseDetailFields<
   TTrack extends OpsRegistrationTrackSummary | OpsRegistrationObservationTrackSummary,
 > = {
@@ -413,6 +419,10 @@ type OpsRegistrationCaseDetailFields<
   consultations: OpsRegistrationConsultation[]
   admissionBatches: OpsRegistrationAdmissionBatch[]
   enrollments: OpsRegistrationEnrollment[]
+  collectionWindows: {
+    scheduledAppointments: OpsRegistrationCollectionWindow
+    currentEnrollments: OpsRegistrationCollectionWindow
+  }
   events: OpsRegistrationTrackEvent[]
   migrationLegacy: OpsRegistrationMigrationLegacySnapshot | null
 }
@@ -829,18 +839,20 @@ export type RegistrationMeasure = {
   ok: boolean
 }
 
-type QueryResult = { data: unknown; error: unknown }
+type QueryResult = { data: unknown; error: unknown; count?: number | null }
 type QueryBuilder = PromiseLike<QueryResult> & {
-  abortSignal?: (signal: AbortSignal) => QueryBuilder
-  retry?: (enabled: boolean) => QueryBuilder
+  abortSignal: (signal: AbortSignal) => QueryBuilder
+  retry: (enabled: boolean) => QueryBuilder
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
+  is: (column: string, value: unknown) => QueryBuilder
   neq: (column: string, value: unknown) => QueryBuilder
   gte: (column: string, value: unknown) => QueryBuilder
   lt: (column: string, value: unknown) => QueryBuilder
   in: (column: string, values: unknown[]) => QueryBuilder
+  or: (filters: string) => QueryBuilder
   order: (column: string, options?: Record<string, unknown>) => QueryBuilder
-  limit: (count: number) => QueryBuilder
+  limit: (count: number, options?: Record<string, unknown>) => QueryBuilder
   single: () => QueryBuilder
 }
 
@@ -929,18 +941,6 @@ const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
   "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
 ].join(",")
 
-const TASK_SCOPED_CASE_READS = [
-  ["ops_registration_subject_tracks", [
-    "*",
-    "director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name)",
-    "level_tests:ops_registration_level_tests(*)",
-    "consultations:ops_registration_consultations(*)",
-    "enrollments:ops_registration_enrollments(*)",
-  ].join(",")],
-  ["ops_registration_appointments", "*"],
-  ["ops_registration_admission_batches", "*"],
-] as const
-
 const PARENT_DETAIL_COLUMNS = "*,ops_registration_details(*),ops_task_comments(*),ops_task_attachments(*)"
 const EVENT_COLUMNS = "id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at"
 const MESSAGE_COLUMNS = "id,status,claim_active,template_key,request_key,updated_at"
@@ -983,6 +983,16 @@ function text(input: unknown) {
 function nullableText(input: unknown) {
   const normalized = text(input)
   return normalized || null
+}
+
+function nullableRegistrationDateTime(input: unknown) {
+  const normalized = text(input)
+  if (!normalized) return null
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) {
+    const parsed = new Date(`${normalized}:00+09:00`)
+    return Number.isNaN(parsed.getTime()) ? normalized : parsed.toISOString()
+  }
+  return normalized
 }
 
 function bool(input: unknown) {
@@ -1037,6 +1047,18 @@ function normalizeRegistrationAppointmentCalendarInput(
 function rows(input: unknown): Row[] {
   if (!Array.isArray(input)) return []
   return input.filter((entry): entry is Row => Boolean(entry) && typeof entry === "object")
+}
+
+function mergeRowsById(...groups: Row[][]): Row[] {
+  const seen = new Set<string>()
+  const merged: Row[] = []
+  for (const row of groups.flat()) {
+    const id = text(value(row, "id"))
+    if (id && seen.has(id)) continue
+    if (id) seen.add(id)
+    merged.push(row)
+  }
+  return merged
 }
 
 function firstRow(input: unknown): Row | null {
@@ -2043,6 +2065,20 @@ export function createRegistrationTrackService(
     return rows(data)
   }
 
+  async function queryCountedRows(
+    builder: QueryBuilder,
+    metrics: { queryCount: number },
+  ) {
+    metrics.queryCount += 1
+    const { data, error, count } = await builder
+    if (error) throw error
+    const resultRows = rows(data)
+    const normalizedCount = Number.isInteger(count) && Number(count) >= resultRows.length
+      ? Number(count)
+      : null
+    return { rows: resultRows, count: normalizedCount }
+  }
+
   async function queryOne(
     builder: QueryBuilder,
     metrics: { queryCount: number },
@@ -2385,22 +2421,102 @@ export function createRegistrationTrackService(
       const controller = typeof AbortController === "function" ? new AbortController() : null
       const signal = controller?.signal
       const detailRequest = (async () => {
+      const loadScheduledAppointmentPage = () => queryCountedRows(
+        client.from("ops_registration_appointments")
+          .select("id,task_id,kind,scheduled_at,place,status,notification_revision,created_at,updated_at", { count: "exact" })
+          .eq("task_id", safeTaskId)
+          .neq("kind", "observation_class")
+          .in("status", ["scheduled"])
+          .order("scheduled_at", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(30)
+          .abortSignal(signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000))
+          .retry(false),
+        metrics,
+      )
+      const loadAppointmentHistoryRows = () => queryRows(
+        client.from("ops_registration_appointments")
+          .select("id,task_id,kind,scheduled_at,place,status,notification_revision,created_at,updated_at")
+          .eq("task_id", safeTaskId)
+          .neq("kind", "observation_class")
+          .in("status", ["completed", "canceled"])
+          .order("updated_at", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(30)
+          .abortSignal(signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000))
+          .retry(false),
+        metrics,
+      )
+      const loadOpenBatchRows = () => queryRows(
+        client.from("ops_registration_admission_batches")
+          .select("id,task_id,revision_number,status,invoice_sent_at,payment_confirmed_at,created_at,updated_at")
+          .eq("task_id", safeTaskId)
+          .in("status", ["draft", "invoiced", "paid"])
+          .order("revision_number", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(1)
+          .abortSignal(signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000))
+          .retry(false),
+        metrics,
+      )
+      const loadBatchHistoryRows = () => queryRows(
+        client.from("ops_registration_admission_batches")
+          .select("id,task_id,revision_number,status,invoice_sent_at,payment_confirmed_at,created_at,updated_at")
+          .eq("task_id", safeTaskId)
+          .in("status", ["completed", "canceled"])
+          .order("revision_number", { ascending: false })
+          .order("id", { ascending: false })
+          .limit(30)
+          .abortSignal(signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000))
+          .retry(false),
+        metrics,
+      )
+      const loadActiveTrackRows = () => queryRows(
+        client.from("ops_registration_subject_tracks")
+          .select("id,task_id,subject,pipeline_status,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,updated_at,workflow_status,workflow_revision,workflow_status_entered_at,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,enrollment_detail_rows,observation_return_workflow_status,observation_attempt_count,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name),active_level_tests:ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link),level_test_history:ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link),active_consultations:ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at),consultation_history:ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at)")
+          .eq("task_id", safeTaskId)
+          .is("archived_at", null)
+          .in("active_level_tests.status", ["scheduled", "in_progress"])
+          .in("level_test_history.status", ["completed", "absent", "canceled"])
+          .in("active_consultations.status", ["waiting", "scheduled"])
+          .in("consultation_history.status", ["completed", "canceled"])
+          .order("attempt_number", { ascending: false, referencedTable: "active_level_tests" })
+          .order("id", { ascending: false, referencedTable: "active_level_tests" })
+          .limit(1, { referencedTable: "active_level_tests" })
+          .order("attempt_number", { ascending: false, referencedTable: "level_test_history" })
+          .order("id", { ascending: false, referencedTable: "level_test_history" })
+          .limit(30, { referencedTable: "level_test_history" })
+          .order("created_at", { ascending: false, referencedTable: "active_consultations" })
+          .order("id", { ascending: false, referencedTable: "active_consultations" })
+          .limit(1, { referencedTable: "active_consultations" })
+          .order("updated_at", { ascending: false, referencedTable: "consultation_history" })
+          .order("id", { ascending: false, referencedTable: "consultation_history" })
+          .limit(30, { referencedTable: "consultation_history" })
+          .order("subject", { ascending: true })
+          .order("id", { ascending: true })
+          .limit(30)
+          .abortSignal(signal
+            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+            : AbortSignal.timeout(8_000))
+          .retry(false),
+        metrics,
+      )
       const phaseOneRequest = Promise.all([
         queryOne(
           client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
           metrics,
           signal,
         ),
-        ...TASK_SCOPED_CASE_READS.map(([table, columns]) => {
-          const taskQuery = client.from(table).select(columns).eq("task_id", safeTaskId)
-          return queryRows(
-            table === "ops_registration_appointments"
-              ? taskQuery.neq("kind", "observation_class")
-              : taskQuery,
-            metrics,
-            signal,
-          )
-        }),
+        loadScheduledAppointmentPage(),
+        loadAppointmentHistoryRows(),
         queryRows(
           client.from("ops_task_events")
             .select(EVENT_COLUMNS)
@@ -2420,6 +2536,9 @@ export function createRegistrationTrackService(
           signal,
         ),
         queryCustomerReminderSummaries(safeTaskId, metrics),
+        loadOpenBatchRows(),
+        loadBatchHistoryRows(),
+        loadActiveTrackRows(),
       ])
         .then(
           (phaseOne) => ({ ok: true as const, phaseOne }),
@@ -2430,18 +2549,92 @@ export function createRegistrationTrackService(
         const phaseOneResult = await phaseOneRequest
         if (!phaseOneResult.ok) throw phaseOneResult.error
         const phaseOne = phaseOneResult.phaseOne
-        const [parentRow, trackRows, appointmentRows, batchRows, eventRows, messageRows, reminderSummaries] = phaseOne as [
-          Row, Row[], Row[], Row[], Row[], Row[], Map<string, RegistrationCustomerReminderSummary>,
+        const [
+          parentRow,
+          scheduledAppointmentPage,
+          appointmentHistoryRows,
+          eventRows,
+          messageRows,
+          reminderSummaries,
+          openBatchRows,
+          batchHistoryRows,
+          trackRows,
+        ] = phaseOne as [
+          Row,
+          { rows: Row[]; count: number | null },
+          Row[],
+          Row[],
+          Row[],
+          Map<string, RegistrationCustomerReminderSummary>,
+          Row[],
+          Row[],
+          Row[],
         ]
+        const appointmentRows = mergeRowsById(
+          scheduledAppointmentPage.rows,
+          appointmentHistoryRows,
+        )
+        const batchRows = mergeRowsById(openBatchRows, batchHistoryRows)
         const sharedAppointmentRows = appointmentRows.filter(
           (row) => !isBookingOnlyRegistrationAppointmentRow(row),
         )
         const sharedEventRows = eventRows.filter(
           (row) => !isBookingOnlyRegistrationEventRow(row),
         )
-        const levelTestRows = trackRows.flatMap((row) => rows(value(row, "level_tests")))
-        const consultationRows = trackRows.flatMap((row) => rows(value(row, "consultations")))
-        const enrollmentRows = trackRows.flatMap((row) => rows(value(row, "enrollments")))
+        const splitChildRows = (
+          row: Row,
+          activeKey: string,
+          historyKey: string,
+          legacyKey: string,
+        ) => value(row, activeKey) !== undefined || value(row, historyKey) !== undefined
+          ? mergeRowsById(rows(value(row, activeKey)), rows(value(row, historyKey)))
+          : rows(value(row, legacyKey))
+        const levelTestRows = mergeRowsById(...trackRows.map((row) => (
+          splitChildRows(row, "active_level_tests", "level_test_history", "level_tests")
+        )))
+        const consultationRows = mergeRowsById(...trackRows.map((row) => (
+          splitChildRows(row, "active_consultations", "consultation_history", "consultations")
+        )))
+        const trackIds = trackRows.map((row) => text(value(row, "id"))).filter(Boolean)
+        let enrollmentRows: Row[] = []
+        let currentEnrollmentPage: { rows: Row[]; count: number | null } = {
+          rows: [],
+          count: 0,
+        }
+        if (trackIds.length > 0) {
+          const [loadedCurrentEnrollmentPage, enrollmentHistoryRows] = await Promise.all([
+            queryCountedRows(
+              client.from("ops_registration_enrollments")
+                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
+                .in("track_id", trackIds)
+                .or("status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)")
+                .order("created_at", { ascending: false })
+                .order("id", { ascending: false })
+                .limit(30)
+                .abortSignal(signal
+                  ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+                  : AbortSignal.timeout(8_000))
+                .retry(false),
+              metrics,
+            ),
+            queryRows(
+              client.from("ops_registration_enrollments")
+                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
+                .in("track_id", trackIds)
+                .or("status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)")
+                .order("updated_at", { ascending: false })
+                .order("id", { ascending: false })
+                .limit(30)
+                .abortSignal(signal
+                  ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+                  : AbortSignal.timeout(8_000))
+                .retry(false),
+              metrics,
+            ),
+          ])
+          currentEnrollmentPage = loadedCurrentEnrollmentPage
+          enrollmentRows = mergeRowsById(currentEnrollmentPage.rows, enrollmentHistoryRows)
+        }
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
         const comments = rows(value(parentRow, "ops_task_comments")).map(mapComment)
         const attachments = rows(value(parentRow, "ops_task_attachments")).map(mapAttachment)
@@ -2480,6 +2673,22 @@ export function createRegistrationTrackService(
             consultations: consultationRows.map(mapConsultation),
             admissionBatches: batchRows.map(mapBatch),
             enrollments: enrollmentRows.map(mapEnrollment),
+            collectionWindows: {
+              scheduledAppointments: {
+                loadedCount: scheduledAppointmentPage.rows.length,
+                totalCount: scheduledAppointmentPage.count,
+                overflow: scheduledAppointmentPage.count === null
+                  ? null
+                  : scheduledAppointmentPage.count > scheduledAppointmentPage.rows.length,
+              },
+              currentEnrollments: {
+                loadedCount: currentEnrollmentPage.rows.length,
+                totalCount: currentEnrollmentPage.count,
+                overflow: currentEnrollmentPage.count === null
+                  ? null
+                  : currentEnrollmentPage.count > currentEnrollmentPage.rows.length,
+              },
+            },
             events: sharedEventRows.map(mapTrackEvent),
             migrationLegacy: tracks.some((track) => track.migrationReviewRequired)
               ? buildRegistrationMigrationLegacySnapshot(parentRow, detailRow, sharedEventRows)
@@ -2812,19 +3021,23 @@ export function createRegistrationTrackService(
     priority: string
     requestKey: string
   }): Promise<RegistrationCaseCreateResponse> {
-    const result = await callRpc<RegistrationCaseCreateResponse>("create_registration_case", {
-      p_student_name: input.studentName,
-      p_school_grade: input.schoolGrade,
-      p_school_name: input.schoolName,
-      p_parent_phone: input.parentPhone,
-      p_student_phone: input.studentPhone,
-      p_campus: input.campus,
-      p_inquiry_at: input.inquiryAt,
-      p_subjects: input.subjects,
-      p_request_note: input.requestNote,
-      p_priority: input.priority,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const result = await callRpc<RegistrationCaseCreateResponse>(
+      "create_registration_case",
+      {
+        p_student_name: input.studentName,
+        p_school_grade: input.schoolGrade,
+        p_school_name: input.schoolName,
+        p_parent_phone: input.parentPhone,
+        p_student_phone: input.studentPhone,
+        p_campus: input.campus,
+        p_inquiry_at: nullableRegistrationDateTime(input.inquiryAt),
+        p_subjects: input.subjects,
+        p_request_note: input.requestNote,
+        p_priority: input.priority,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
     return {
       ...result,
       tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
@@ -2873,11 +3086,15 @@ export function createRegistrationTrackService(
     subjects: RegistrationSubject[]
     requestKey: string
   }): Promise<RegistrationSubjectSyncResponse> {
-    const result = await callRpc<RegistrationSubjectSyncResponse>("sync_registration_case_subjects", {
-      p_task_id: input.taskId,
-      p_subjects: input.subjects,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const result = await callRpc<RegistrationSubjectSyncResponse>(
+      "sync_registration_case_subjects",
+      {
+        p_task_id: input.taskId,
+        p_subjects: input.subjects,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
     return {
       ...result,
       tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
@@ -2933,20 +3150,24 @@ export function createRegistrationTrackService(
     expectedCommonRevision: number
     requestKey: string
   }): Promise<RegistrationCommonUpdateResponse> {
-    return callRpc<RegistrationCommonUpdateResponse>("update_registration_case_common", {
-      p_task_id: input.taskId,
-      p_student_name: input.studentName,
-      p_school_grade: input.schoolGrade,
-      p_school_name: nullableText(input.schoolName),
-      p_parent_phone: input.parentPhone,
-      p_student_phone: nullableText(input.studentPhone),
-      p_campus: input.campus,
-      p_inquiry_at: input.inquiryAt,
-      p_request_note: nullableText(input.requestNote),
-      p_priority: input.priority,
-      p_expected_common_revision: input.expectedCommonRevision,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    return callRpc<RegistrationCommonUpdateResponse>(
+      "update_registration_case_common",
+      {
+        p_task_id: input.taskId,
+        p_student_name: input.studentName,
+        p_school_grade: input.schoolGrade,
+        p_school_name: nullableText(input.schoolName),
+        p_parent_phone: input.parentPhone,
+        p_student_phone: nullableText(input.studentPhone),
+        p_campus: input.campus,
+        p_inquiry_at: nullableRegistrationDateTime(input.inquiryAt),
+        p_request_note: nullableText(input.requestNote),
+        p_priority: input.priority,
+        p_expected_common_revision: input.expectedCommonRevision,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
   }
 
   async function routeRegistrationInquiry(input: {
@@ -3245,12 +3466,16 @@ export function createRegistrationTrackService(
     expectedWorkflowRevision: number
     requestKey: string
   }): Promise<RegistrationWorkflowStatusMutationResponse> {
-    const result = await callRpc<Row>("set_registration_workflow_status_v1", {
-      p_track_id: input.trackId,
-      p_workflow_status: input.workflowStatus,
-      p_expected_workflow_revision: input.expectedWorkflowRevision,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const result = await callRpc<Row>(
+      "set_registration_workflow_status_v1",
+      {
+        p_track_id: input.trackId,
+        p_workflow_status: input.workflowStatus,
+        p_expected_workflow_revision: input.expectedWorkflowRevision,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
     const status = text(value(result, "workflow_status", "workflowStatus"))
     if (!isOpsRegistrationWorkflowStatus(status)) {
       throw new Error("registration_workflow_status_response_invalid")
@@ -3434,26 +3659,20 @@ export function createRegistrationTrackService(
     return stringList(value(row, "source_event_ids", "sourceEventIds"))
   }
 
-  async function ensureRegistrationCaseCreatedNotificationSourceIds(taskId: string): Promise<string[]> {
-    const normalizedTaskId = text(taskId)
-    if (!normalizedTaskId) throw new Error("registration_task_id_invalid")
-    const result = await callRpc<Row>("ensure_registration_case_created_notification_v1", {
-      p_task_id: normalizedTaskId,
-    })
-    return Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds"))))
-  }
-
   async function ensureRegistrationWorkflowNotificationSourceIds(input: {
     trackId: string
     workflowRevision: number
+    requestKey: string
   }): Promise<string[]> {
     const normalizedTrackId = text(input.trackId)
     if (!normalizedTrackId || !Number.isInteger(input.workflowRevision) || input.workflowRevision < 1) {
       throw new Error("registration_workflow_notification_source_invalid")
     }
-    const result = await callRpc<Row>("ensure_registration_workflow_notification_v1", {
+    const result = await callRpc<Row>("ensure_registration_workflow_notification_v2", {
       p_track_id: normalizedTrackId,
       p_workflow_revision: input.workflowRevision,
+      p_request_key: requireRequestKey(input.requestKey),
+      p_intent: "send_registration_management_notification",
     })
     return Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds"))))
   }
@@ -3701,7 +3920,6 @@ export function createRegistrationTrackService(
     saveRegistrationEnrollmentRows,
     saveRegistrationEnrollmentDetails,
     listRegistrationLegacySourceIds,
-    ensureRegistrationCaseCreatedNotificationSourceIds,
     ensureRegistrationWorkflowNotificationSourceIds,
     claimRegistrationAdmissionMessage,
     reconcileRegistrationAdmissionMessage,
@@ -4148,10 +4366,6 @@ export function claimRegistrationAdmissionMessage(
 
 export function loadRegistrationLegacyNotificationSourceIds(taskId: string): Promise<string[]> {
   return defaultRegistrationTrackService.listRegistrationLegacySourceIds(taskId)
-}
-
-export function ensureRegistrationCaseCreatedNotificationSourceIds(taskId: string): Promise<string[]> {
-  return defaultRegistrationTrackService.ensureRegistrationCaseCreatedNotificationSourceIds(taskId)
 }
 
 export function ensureRegistrationWorkflowNotificationSourceIds(

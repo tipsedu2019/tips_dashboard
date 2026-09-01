@@ -817,21 +817,11 @@ export function getRegistrationConsultationOutcomeSaveState(input = {}) {
   const savedNote = enrollmentText(input.savedNote)
   const draftNote = enrollmentText(input.draftNote)
   const editable = Boolean(input.canEdit ?? input.canCompleteConsultation)
-  const waitingKind = enrollmentText(input.waitingKind)
-  const classId = enrollmentText(input.classId)
-  const blockers = []
   const dirty = draftOutcome !== savedOutcome || draftNote !== savedNote
-  if (dirty && draftOutcome === "waiting" && savedOutcome !== "waiting") {
-    if (!waitingKind) blockers.push("대기 유형")
-    else if (waitingKind === "current_class" && !classId) blockers.push("대기 반")
-  } else if (dirty && draftOutcome !== "waiting" && (waitingKind || classId)) {
-    blockers.push("대기 정보")
-  }
   return {
     editable,
     dirty,
-    ...(blockers.length > 0 ? { blockers } : {}),
-    canSave: editable && dirty && Boolean(draftOutcome) && blockers.length === 0,
+    canSave: editable && dirty && Boolean(draftOutcome),
     label: dirty ? "상담 결과 저장" : savedOutcome ? "저장됨" : "상담 결과를 선택하세요",
   }
 }
@@ -842,11 +832,15 @@ export function shouldRenderRegistrationConsultationOutcome(input = {}) {
     && Boolean(input.canEdit)
 }
 
+export function canManageRegistrationCase(viewerRole) {
+  return ["admin", "staff"].includes(String(viewerRole || ""))
+}
+
 export function getRegistrationActionPermissions(input = {}) {
-  const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
+  const canManage = canManageRegistrationCase(input.viewerRole)
   const consultation = input.activeConsultation
   const ownsConsultation = Boolean(
-    ["admin", "staff", "teacher"].includes(String(input.viewerRole || ""))
+    canManage
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && consultation?.trackId === input.track?.id
@@ -866,9 +860,9 @@ export function getRegistrationActionPermissions(input = {}) {
 }
 
 export function getRegistrationSummaryActionPermissions(input = {}) {
-  const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
+  const canManage = canManageRegistrationCase(input.viewerRole)
   const canOpenOwnConsultationHint = Boolean(
-    (input.viewerRole === "admin" || (input.viewerRole === "teacher" && input.track?.subject === "과학"))
+    canManage
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && ["consultation_waiting", "visit_consultation_scheduled"].includes(input.track?.status),

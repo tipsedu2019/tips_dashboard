@@ -2,12 +2,12 @@
 
 import { useEffect, useRef, useState, type ReactNode } from "react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 
 import {
   RegistrationInquiryCommonFields,
+  toRegistrationInquiryDateTimeLocal,
   type RegistrationInquiryFieldName,
 } from "./registration-application-inquiry-fields"
 import {
@@ -16,22 +16,17 @@ import {
   settleRegistrationConflictComparison,
   type RegistrationConflictComparison,
 } from "./registration-application-model"
-import { getRegistrationSchoolChoices } from "./registration-school-options"
 import { RegistrationSubjectPicker } from "./registration-subject-picker"
 import { RegistrationSaveButton } from "./registration-save-button"
-import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
-import { getRegistrationSubjectPickerAvailability } from "./registration-intake-workflow"
-import type {
-  OpsSchoolOption,
-  RegistrationSchoolCatalogStatus,
-} from "./ops-task-service"
 import {
   createRegistrationMutationRequestKey,
   type OpsRegistrationCaseDetail,
   type RegistrationSubject,
 } from "./registration-track-service"
-import { isValidRegistrationMobilePhone } from "./registration-workflow"
-import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  sortAcademicSubjects,
+} from "../../lib/academic-subject-registry.ts"
 
 const COMMITTED_REFRESH_ERROR = "저장은 완료됐지만 최신 내용을 불러오지 못했습니다"
 
@@ -48,7 +43,7 @@ export type RegistrationInquiryDraft = {
   subjects: RegistrationSubject[]
 }
 
-export type RegistrationInquirySaveOutcome = "saved" | "conflict"
+export type RegistrationInquirySaveOutcome = "saved" | "partial" | "conflict"
 
 const REGISTRATION_INQUIRY_FIELD_LABELS: Record<keyof RegistrationInquiryDraft, string> = {
   studentName: "학생명",
@@ -69,31 +64,6 @@ function errorMessage(error: unknown, fallback: string) {
     return String((error as { message?: unknown }).message || fallback)
   }
   return fallback
-}
-
-function toLocalDateTime(value: string | undefined) {
-  const raw = String(value || "").trim()
-  if (!raw) return ""
-  const local = raw.match(/^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2})/)
-  if (local && !/(Z|[+-]\d{2}:?\d{2})$/i.test(raw)) return local[1]
-  const date = new Date(raw)
-  if (Number.isNaN(date.getTime())) return local?.[1] || ""
-  const year = date.getFullYear()
-  const month = String(date.getMonth() + 1).padStart(2, "0")
-  const day = String(date.getDate()).padStart(2, "0")
-  const hours = String(date.getHours()).padStart(2, "0")
-  const minutes = String(date.getMinutes()).padStart(2, "0")
-  return `${year}-${month}-${day}T${hours}:${minutes}`
-}
-
-function formatRegistrationInquiryAt(value: string) {
-  if (!value) return "기록된 문의 일시가 없습니다"
-  const date = new Date(value)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(date)
 }
 
 function useOwnedDirtyState(dirty: boolean, onDirtyChange?: (dirty: boolean) => void) {
@@ -141,21 +111,6 @@ function registrationInquiryConflictRows(
     }))
 }
 
-function registrationTrackCanBeRemoved(
-  detail: OpsRegistrationCaseDetail,
-  trackId: string,
-) {
-  const track = detail.tracks.find((candidate) => candidate.id === trackId)
-  if (!track || track.status !== "inquiry" || track.migrationReviewRequired) return false
-  if (["manual", "migration"].includes(track.directorAssignmentSource)) return false
-  if (detail.levelTests.some((item) => item.trackId === trackId)) return false
-  if (detail.consultations.some((item) => item.trackId === trackId)) return false
-  if (detail.enrollments.some((item) => item.trackId === trackId)) return false
-  return !detail.events.some((event) => (
-    event.trackId === trackId && event.eventType !== "director_default_resolved"
-  ))
-}
-
 function RegistrationRefreshRecovery({
   pending,
   retrying,
@@ -178,26 +133,14 @@ function RegistrationRefreshRecovery({
 
 export function RegistrationInquiryEditor({
   detail,
-  identityLocked,
   canEdit,
-  subjectCapabilities,
-  schools = [],
-  schoolCatalogStatus = "loading",
-  schoolCatalogError = "",
-  onRetrySchools,
   onSave,
   onReload,
   onWarning,
   onDirtyChange,
 }: {
   detail: OpsRegistrationCaseDetail
-  identityLocked: boolean
   canEdit: boolean
-  subjectCapabilities: readonly RegistrationSubjectCapability[]
-  schools?: OpsSchoolOption[]
-  schoolCatalogStatus?: "loading" | RegistrationSchoolCatalogStatus
-  schoolCatalogError?: string
-  onRetrySchools?: () => void
   onSave: (draft: RegistrationInquiryDraft, requestKey: string) => Promise<RegistrationInquirySaveOutcome>
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
@@ -212,7 +155,7 @@ export function RegistrationInquiryEditor({
     parentPhone: registration.parentPhone || "",
     studentPhone: registration.studentPhone || "",
     campus: detail.task.campus || "본관",
-    inquiryAt: toLocalDateTime(registration.inquiryAt || detail.task.createdAt),
+    inquiryAt: toRegistrationInquiryDateTimeLocal(registration.inquiryAt),
     requestNote: registration.requestNote || "",
     priority: detail.task.priority || "normal",
     subjects: canonicalSubjects,
@@ -243,37 +186,6 @@ export function RegistrationInquiryEditor({
     })
   }, [canonicalDraftKey, canonicalDraftValue])
 
-  const availability = getRegistrationSubjectPickerAvailability({
-    capabilities: subjectCapabilities,
-    grade: draft.schoolGrade,
-    selectedSubjects: draft.subjects,
-  })
-  const disabledReasonBySubject = Object.fromEntries(
-    Object.entries(availability.disabledReasonBySubject)
-      .filter(([subject]) => !draft.subjects.includes(subject as RegistrationSubject)),
-  ) as Partial<Record<RegistrationSubject, string>>
-  const removableSubjects = new Set(
-    detail.tracks
-      .filter((track) => registrationTrackCanBeRemoved(detail, track.id))
-      .map((track) => track.subject),
-  )
-  const disabledSubjects = new Set(availability.options.filter((subject) => (
-    draft.subjects.includes(subject)
-    && (draft.subjects.length === 1 || (
-      canonicalSubjects.includes(subject) && !removableSubjects.has(subject)
-    ))
-  )))
-  const scienceGradeInvalid = draft.subjects.includes("과학")
-    && !["고1", "고2", "고3"].includes(draft.schoolGrade.replace(/\s+/g, ""))
-  const valid = Boolean(
-    draft.subjects.length > 0
-    && draft.studentName.trim()
-    && draft.schoolGrade.trim()
-    && isValidRegistrationMobilePhone(draft.parentPhone)
-    && draft.campus.trim()
-    && draft.inquiryAt
-    && !scienceGradeInvalid,
-  )
   const conflictRows = conflictAttempt?.latestReady
     ? registrationInquiryConflictRows(conflictAttempt.attempted, canonicalDraft)
     : []
@@ -284,26 +196,7 @@ export function RegistrationInquiryEditor({
     setDraft((current) => ({ ...current, [field]: value }))
   }
 
-  function updateSchoolGrade(nextGrade: string) {
-    const catalogChoices = getRegistrationSchoolChoices({ schools, grade: nextGrade })
-    setValidationError("")
-    setConflictAttempt(null)
-    setDraft((current) => ({
-      ...current,
-      schoolGrade: nextGrade,
-      schoolName: identityLocked || schoolCatalogStatus !== "authoritative"
-        ? current.schoolName
-        : catalogChoices.some((choice) => choice.value === current.schoolName)
-          ? current.schoolName
-          : "",
-    }))
-  }
-
   function updateInquiryField(field: RegistrationInquiryFieldName, value: string) {
-    if (field === "schoolGrade") {
-      updateSchoolGrade(value)
-      return
-    }
     update(field, value)
   }
 
@@ -315,23 +208,6 @@ export function RegistrationInquiryEditor({
 
   async function submit() {
     if (!canEdit || saving || refreshPending || conflictAttempt) return
-    if (!valid) {
-      const message = scienceGradeInvalid
-        ? "과학은 고1~고3에서만 선택할 수 있습니다."
-        : "필수 문의 정보와 과목을 확인하고 올바르게 입력하세요."
-      setValidationError(message)
-      const invalidSelector = draft.subjects.length === 0 || scienceGradeInvalid
-        ? '[data-registration-focus="subject"] button'
-        : !draft.studentName.trim()
-          ? '[data-common-field="student-name"]'
-          : !draft.schoolGrade.trim()
-            ? '[data-common-field="school-grade"]'
-            : !isValidRegistrationMobilePhone(draft.parentPhone)
-              ? '[data-common-field="parent-phone"]'
-              : '[data-common-field="student-name"]'
-      focusFirstInvalid(sectionRef.current, invalidSelector)
-      return
-    }
     const attemptedDraft: RegistrationInquiryDraft = {
       ...draft,
       studentName: draft.studentName.trim(),
@@ -371,7 +247,7 @@ export function RegistrationInquiryEditor({
           setConflictAttempt(settleRegistrationConflictComparison(comparison, { succeeded: false, error: refreshMessage }))
           onWarning(refreshMessage)
         }
-      } else {
+      } else if (outcome === "saved") {
         setConflictAttempt(null)
         onDirtyChange?.(false)
         setRefreshPending(true)
@@ -383,10 +259,7 @@ export function RegistrationInquiryEditor({
         }
       }
     } catch (error) {
-      const rawMessage = errorMessage(error, "문의 정보를 저장하지 못했습니다.")
-      const message = rawMessage.includes("registration_subject_removal_blocked")
-        ? "이미 진행 이력이 있는 과목은 삭제할 수 없습니다. 해당 과목을 완료 처리하세요."
-        : rawMessage
+      const message = errorMessage(error, "문의 정보를 저장하지 못했습니다.")
       setValidationError(message)
       onWarning(message)
     } finally {
@@ -468,37 +341,17 @@ export function RegistrationInquiryEditor({
           </AlertDescription>
         </Alert>
       ) : null}
-      {identityLocked ? (
-        <div className="flex justify-end"><Badge variant="secondary">학생 연결 보정 필요</Badge></div>
-      ) : null}
       <RegistrationSubjectPicker
         value={draft.subjects}
-        options={availability.options}
+        options={ACADEMIC_SUBJECT_VALUES}
         grade={draft.schoolGrade}
-        disabledReasonBySubject={disabledReasonBySubject}
         disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)}
-        disabledSubjects={disabledSubjects}
         onToggle={toggleSubject}
       />
       <RegistrationInquiryCommonFields
         values={draft}
-        inquiryAtLabel={formatRegistrationInquiryAt(draft.inquiryAt)}
-        schoolChoices={getRegistrationSchoolChoices({
-          schools,
-          grade: draft.schoolGrade,
-          currentSchoolName: draft.schoolName,
-        })}
-        schoolCatalogStatus={schoolCatalogStatus}
-        schoolCatalogError={schoolCatalogError}
         disabled={!canEdit || saving || refreshPending || Boolean(conflictAttempt)}
-        disabledFields={{
-          studentName: identityLocked,
-          schoolName: identityLocked,
-          parentPhone: identityLocked,
-          studentPhone: identityLocked,
-        }}
         onChange={updateInquiryField}
-        onRetrySchools={onRetrySchools}
       />
       {canEdit ? (
         <div className="flex justify-end">

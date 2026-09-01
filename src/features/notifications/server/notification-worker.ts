@@ -2051,18 +2051,18 @@ async function createProductionWorkerRuntime(
         })
       })()
     : null
-  const { createRegistrationObservationNotificationSourceReader } = await import(
-    "./adapters/registration-observation-notification-source.ts"
-  )
-  const observationSourceReader = createRegistrationObservationNotificationSourceReader({
-    async getClient() {
-      return serviceClient as never
-    },
-  })
-
   return createNotificationWorkerRuntime({
-    getAdapter,
+    // Registration notifications now run only through their explicit preview
+    // and confirmation routes. Keep the generic worker fail-closed even when
+    // an application deploy reaches production before the matching DB migration.
+    getAdapter(workflowKey) {
+      return workflowKey === "registration" ? null : getAdapter(workflowKey)
+    },
     async rpc(name, parameters) {
+      if (name === "reap_registration_observation_chat_job_leases_v1") {
+        return { reaped_count: 0, failed_count: 0 }
+      }
+      if (name === "claim_registration_observation_chat_jobs_v1") return []
       const { data, error } = await serviceClient.rpc(name, parameters)
       if (error) {
         throw Object.assign(new Error("알림 worker RPC가 실패했습니다."), {
@@ -2083,7 +2083,6 @@ async function createProductionWorkerRuntime(
       return null
     },
     createRunId: randomUUID,
-    observationSourceReader,
   })
 }
 

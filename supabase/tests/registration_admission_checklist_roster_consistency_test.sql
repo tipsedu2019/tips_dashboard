@@ -1,6 +1,6 @@
 begin;
 
-select plan(32);
+select plan(36);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -686,6 +686,94 @@ select ok(
   'a planned capacity claim is not exposed as completed enrollment'
 );
 
+create or replace function pg_temp.registration_admission_status_side_effect_snapshot(
+  p_task_id uuid,
+  p_track_id uuid,
+  p_student_id uuid,
+  p_class_id uuid
+)
+returns jsonb
+language sql
+stable
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'task', (
+      select pg_catalog.to_jsonb(task)
+      from public.ops_tasks task
+      where task.id = p_task_id
+    ),
+    'detail', (
+      select pg_catalog.to_jsonb(detail)
+      from public.ops_registration_details detail
+      where detail.task_id = p_task_id
+    ),
+    'nonStatusTrack', (
+      select pg_catalog.to_jsonb(track)
+        - 'workflow_status'
+        - 'workflow_revision'
+        - 'workflow_status_entered_at'
+        - 'updated_at'
+      from public.ops_registration_subject_tracks track
+      where track.id = p_track_id
+    ),
+    'batches', (
+      select coalesce(
+        pg_catalog.jsonb_agg(pg_catalog.to_jsonb(batch) order by batch.id),
+        '[]'::jsonb
+      )
+      from public.ops_registration_admission_batches batch
+      where batch.task_id = p_task_id
+    ),
+    'enrollments', (
+      select coalesce(
+        pg_catalog.jsonb_agg(pg_catalog.to_jsonb(enrollment) order by enrollment.id),
+        '[]'::jsonb
+      )
+      from public.ops_registration_enrollments enrollment
+      where enrollment.track_id = p_track_id
+    ),
+    'studentClassIds', (
+      select coalesce(student.class_ids, '[]'::jsonb)
+      from public.students student
+      where student.id = p_student_id
+    ),
+    'studentWaitlistIds', (
+      select coalesce(student.waitlist_class_ids, '[]'::jsonb)
+      from public.students student
+      where student.id = p_student_id
+    ),
+    'classStudentIds', (
+      select coalesce(pg_catalog.to_jsonb(class.student_ids), '[]'::jsonb)
+      from public.classes class
+      where class.id = p_class_id
+    ),
+    'classWaitlistIds', (
+      select coalesce(pg_catalog.to_jsonb(class.waitlist_ids), '[]'::jsonb)
+      from public.classes class
+      where class.id = p_class_id
+    ),
+    'historyCount', (
+      select pg_catalog.count(*)
+      from public.student_class_enrollment_history history
+      where history.student_id = p_student_id
+        and history.class_id = p_class_id
+    ),
+    'messages', (select pg_catalog.count(*) from public.ops_registration_messages),
+    'canonical', (select pg_catalog.count(*) from dashboard_private.notification_events),
+    'fanout', (select pg_catalog.count(*) from dashboard_private.notification_event_fanout_jobs),
+    'deliveries', (select pg_catalog.count(*) from dashboard_private.notification_deliveries)
+  );
+$$;
+
+create temporary table registration_isolated_status_before on commit drop as
+select pg_temp.registration_admission_status_side_effect_snapshot(
+  '00000000-0000-4000-8000-00000000b411',
+  '00000000-0000-4000-8000-00000000b405',
+  '00000000-0000-4000-8000-00000000b202',
+  '00000000-0000-4000-8000-00000000b305'
+) as state;
+
 set local role authenticated;
 create temporary table registration_isolated_batch_result on commit drop as
 select public.set_registration_workflow_status_v1(
@@ -698,22 +786,46 @@ set local role postgres;
 
 select ok(
   (
-    select nullif(result.payload #>> '{enrollmentFinalization,batchId}', '') is not null
-      and result.payload #>> '{enrollmentFinalization,batchId}' <>
+    select result.payload ->> 'workflowStatus' = 'registered'
+      and (result.payload ->> 'workflowRevision')::integer = 2
+      and result.payload ? 'enrollmentFinalization'
+      and result.payload -> 'enrollmentFinalization' = 'null'::jsonb
+      and before.state = pg_temp.registration_admission_status_side_effect_snapshot(
+        '00000000-0000-4000-8000-00000000b411',
+        '00000000-0000-4000-8000-00000000b405',
+        '00000000-0000-4000-8000-00000000b202',
+        '00000000-0000-4000-8000-00000000b305'
+      )
+    from registration_isolated_batch_result result
+    cross join registration_isolated_status_before before
+  ),
+  'status changes only the manual status and revision without finalization side effects'
+);
+
+create temporary table registration_isolated_finalization_result on commit drop as
+select dashboard_private.finalize_registration_track_enrollments_v1(
+  '00000000-0000-4000-8000-00000000b405',
+  '00000000-0000-4000-8000-00000000b101'
+) as payload;
+
+select ok(
+  (
+    select nullif(result.payload ->> 'batchId', '') is not null
+      and result.payload ->> 'batchId' <>
         '00000000-0000-4000-8000-00000000b413'
       and exists (
         select 1
         from public.ops_registration_admission_batches batch
-        where batch.id = (result.payload #>> '{enrollmentFinalization,batchId}')::uuid
+        where batch.id = (result.payload ->> 'batchId')::uuid
           and batch.task_id = '00000000-0000-4000-8000-00000000b411'
           and batch.revision_number = 2
           and batch.status = 'completed'
           and batch.invoice_sent_at is null
           and batch.payment_confirmed_at is null
       )
-    from registration_isolated_batch_result result
+    from registration_isolated_finalization_result result
   ),
-  'an unbatched subject receives its own terminal compatibility batch'
+  'the explicit finalizer gives an unbatched subject its own terminal compatibility batch'
 );
 
 select ok(
@@ -931,41 +1043,41 @@ values (
   false,
   1
 );
-set local role authenticated;
 select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
+  $$select dashboard_private.finalize_registration_track_enrollments_v1(
     '00000000-0000-4000-8000-00000000b402',
-    'registered',
-    1,
-    'admission-register-mixed-batch-membership'
+    '00000000-0000-4000-8000-00000000b101'
   )$$,
   '23514',
   'registration_admission_batch_membership_invariant',
-  'mixed batched and unbatched rows fail atomically instead of borrowing a batch'
+  'the private finalizer rejects mixed batched and unbatched rows with exact SQLSTATE 23514'
 );
-set local role postgres;
 delete from public.ops_registration_enrollments
 where id = '00000000-0000-4000-8000-00000000b407';
 
 update public.ops_registration_subject_tracks
 set pipeline_status = 'inquiry'
 where id = '00000000-0000-4000-8000-00000000b402';
-set local role authenticated;
 select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
+  $$select dashboard_private.finalize_registration_track_enrollments_v1(
     '00000000-0000-4000-8000-00000000b402',
-    'registered',
-    1,
-    'admission-register-wrong-pipeline'
+    '00000000-0000-4000-8000-00000000b101'
   )$$,
   '23514',
   'registration_enrollment_pipeline_invalid',
-  'registered rejects a track outside the enrollment pipeline'
+  'the private finalizer rejects a track outside the enrollment pipeline with exact SQLSTATE 23514'
 );
-set local role postgres;
 update public.ops_registration_subject_tracks
 set pipeline_status = 'enrollment_processing'
 where id = '00000000-0000-4000-8000-00000000b402';
+
+create temporary table registration_admission_status_before on commit drop as
+select pg_temp.registration_admission_status_side_effect_snapshot(
+  '00000000-0000-4000-8000-00000000b401',
+  '00000000-0000-4000-8000-00000000b402',
+  '00000000-0000-4000-8000-00000000b201',
+  '00000000-0000-4000-8000-00000000b301'
+) as state;
 
 set local role authenticated;
 create temporary table registration_admission_registered_result on commit drop as
@@ -980,11 +1092,81 @@ set local role postgres;
 select ok(
   (
     select result.payload ->> 'workflowStatus' = 'registered'
-      and result.payload #>> '{enrollmentFinalization,studentId}' =
-        '00000000-0000-4000-8000-00000000b201'
+      and (result.payload ->> 'workflowRevision')::integer = 2
+      and result.payload ? 'enrollmentFinalization'
+      and result.payload -> 'enrollmentFinalization' = 'null'::jsonb
+      and before.state = pg_temp.registration_admission_status_side_effect_snapshot(
+        '00000000-0000-4000-8000-00000000b401',
+        '00000000-0000-4000-8000-00000000b402',
+        '00000000-0000-4000-8000-00000000b201',
+        '00000000-0000-4000-8000-00000000b301'
+      )
     from registration_admission_registered_result result
+    cross join registration_admission_status_before before
   ),
-  'registered status returns one canonical enrollment finalization receipt'
+  'registered status changes only status and revision and returns null enrollmentFinalization'
+);
+
+update dashboard_private.ops_registration_mutations mutation
+set response_payload = mutation.response_payload || pg_catalog.jsonb_build_object(
+  'enrollmentFinalization',
+  pg_catalog.jsonb_build_object(
+    'batchId', '00000000-0000-4000-8000-000000000bad'
+  )
+)
+where mutation.actor_id = '00000000-0000-4000-8000-00000000b101'
+  and mutation.request_key = 'admission-register-without-checklist-order'
+  and mutation.task_id = '00000000-0000-4000-8000-00000000b401'
+  and mutation.mutation_type = 'set_workflow_status';
+
+set local role authenticated;
+create temporary table registration_admission_legacy_status_replay on commit drop as
+select public.set_registration_workflow_status_v1(
+  '00000000-0000-4000-8000-00000000b402',
+  'registered',
+  1,
+  'admission-register-without-checklist-order'
+) as payload;
+set local role postgres;
+
+select is(
+  (
+    select result.payload -> 'enrollmentFinalization'
+    from registration_admission_legacy_status_replay result
+  ),
+  'null'::jsonb,
+  'status replay sanitizes a legacy enrollment finalization receipt'
+);
+
+select is(
+  (
+    select mutation.response_payload -> 'enrollmentFinalization'
+    from dashboard_private.ops_registration_mutations mutation
+    where mutation.actor_id = '00000000-0000-4000-8000-00000000b101'
+      and mutation.request_key = 'admission-register-without-checklist-order'
+      and mutation.task_id = '00000000-0000-4000-8000-00000000b401'
+      and mutation.mutation_type = 'set_workflow_status'
+  ),
+  'null'::jsonb,
+  'status replay permanently removes the legacy enrollment finalization payload'
+);
+
+create temporary table registration_admission_finalization_result on commit drop as
+select dashboard_private.finalize_registration_track_enrollments_v1(
+  '00000000-0000-4000-8000-00000000b402',
+  '00000000-0000-4000-8000-00000000b101'
+) as payload;
+
+select ok(
+  (
+    select result.payload ->> 'trackId' = '00000000-0000-4000-8000-00000000b402'
+      and result.payload ->> 'studentId' = '00000000-0000-4000-8000-00000000b201'
+      and result.payload ->> 'batchId' = '00000000-0000-4000-8000-00000000b403'
+      and result.payload -> 'enrollmentIds'
+        = '["00000000-0000-4000-8000-00000000b404"]'::jsonb
+    from registration_admission_finalization_result result
+  ),
+  'the explicit private finalizer returns the canonical enrollment receipt'
 );
 
 select ok(
@@ -995,7 +1177,7 @@ select ok(
     from public.ops_registration_subject_tracks track
     where track.id = '00000000-0000-4000-8000-00000000b402'
   ),
-  'manual and canonical track statuses commit together'
+  'the explicit finalizer commits the canonical pipeline without changing the manual status revision'
 );
 
 select ok(

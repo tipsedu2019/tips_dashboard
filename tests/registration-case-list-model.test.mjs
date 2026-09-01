@@ -114,7 +114,7 @@ test("observation list groups all three states and derives four labels from scal
   const cases = [
     ["observation_requested", null, "예약 필요"],
     ["observation_requested", "scheduled", "청강 예약"],
-    ["observation_feedback_pending", "attended_feedback_pending", "교사 피드백 대기"],
+    ["observation_feedback_pending", "attended_feedback_pending", "원장 확인 대기"],
     ["observation_completed", "completed", "청강 완료"],
   ]
   for (const [workflowStatus, observationCurrentStatus, label] of cases) {

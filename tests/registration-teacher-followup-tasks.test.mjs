@@ -4,34 +4,37 @@ import test from "node:test"
 
 const migrationUrl = new URL("../supabase/migrations/20260815121000_registration_teacher_followup_tasks.sql", import.meta.url)
 const legacyFinalizationMigrationUrl = new URL("../supabase/migrations/20260826101200_registration_legacy_first_consultation.sql", import.meta.url)
-const bookingMigrationUrl = new URL("../supabase/migrations/20260817111325_registration_observation_booking_followup_tasks.sql", import.meta.url)
+const retirementMigrationUrl = new URL("../supabase/migrations/20260901110100_registration_teacher_feedback_request_retirement.sql", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 
-test("feedback task contract keeps one link, a 24-hour due date, and completion guard", async () => {
-  const [originalSql, bookingSql] = await Promise.all([
-    readFile(migrationUrl, "utf8"),
-    readFile(bookingMigrationUrl, "utf8"),
-  ])
-  const sql = `${originalSql}\n${bookingSql}`
-  assert.match(sql, /create table dashboard_private\.registration_observation_feedback_tasks/i)
-  assert.match(sql, /observation_id uuid not null unique/i)
-  assert.match(sql, /'청강 피드백 작성 · '/i)
-  assert.match(sql, /new\.ends_at \+ interval '24 hours'/i)
-  assert.match(sql, /assignee_id[\s\S]*new\.teacher_profile_id/i)
-  assert.match(sql, /registration_observation_feedback_required/i)
-  assert.match(sql, /feedback_submitted_at[\s\S]*status = 'done'/i)
+async function readOptional(url) {
+  try {
+    return await readFile(url, "utf8")
+  } catch (error) {
+    if (error?.code === "ENOENT") return ""
+    throw error
+  }
+}
+
+test("feedback task retirement preserves rows while disabling both task triggers", async () => {
+  const sql = await readOptional(retirementMigrationUrl)
+  assert.match(sql, /drop trigger if exists sync_registration_observation_feedback_task_v1[\s\S]*on public\.ops_registration_observations/i)
+  assert.match(sql, /drop trigger if exists guard_registration_feedback_task_completion_v1[\s\S]*on public\.ops_tasks/i)
+  assert.match(sql, /create or replace function dashboard_private\.sync_registration_observation_feedback_task_v1\(\)[\s\S]*return new/i)
+  assert.match(sql, /registration_observation_feedback_request_retired/i)
+  assert.match(sql, /feature_retired/i)
+  assert.match(sql, /update public\.ops_tasks[\s\S]*status = 'canceled'/i)
+  assert.match(sql, /insert into public\.ops_task_events/i)
+  assert.doesNotMatch(sql, /delete from (?:dashboard_private\.registration_observation_feedback_tasks|public\.ops_tasks|public\.ops_task_events)/i)
 })
 
-test("booking immediately creates and maintains one teacher feedback task", async () => {
-  const sql = await readFile(bookingMigrationUrl, "utf8")
-  assert.match(sql, /after insert or update of status, ends_at, teacher_profile_id/i)
-  assert.match(sql, /new\.status = 'scheduled'/i)
-  assert.match(sql, /not exists[\s\S]*registration_observation_feedback_tasks/i)
-  assert.match(sql, /new\.ends_at \+ interval '24 hours'/i)
-  assert.match(sql, /assignee_id = new\.teacher_profile_id/i)
-  assert.match(sql, /set teacher_profile_id = observation\.teacher_profile_id/i)
-  assert.match(sql, /new\.status = 'canceled'[\s\S]*status = 'canceled'/i)
-  assert.match(sql, /v_feedback_was_missing := old\.feedback_submitted_at is null/i)
+test("feedback submit and correction RPCs are fail-closed while management decision stays callable", async () => {
+  const sql = await readOptional(retirementMigrationUrl)
+  assert.match(sql, /registration_observation_feedback_retired/i)
+  assert.match(sql, /revoke all on function public\.submit_registration_observation_feedback_v1\([\s\S]*from public, anon, authenticated, service_role/i)
+  assert.match(sql, /revoke all on function public\.correct_registration_observation_feedback_v1\([\s\S]*from public, anon, authenticated, service_role/i)
+  assert.match(sql, /grant execute on function public\.decide_registration_observation_v1\([\s\S]*to authenticated/i)
+  assert.match(sql, /if v_actor_role not in \('admin', 'staff'\) then[\s\S]*registration_observation_not_found/i)
 })
 
 test("enrollment creates an ordinary first-parent-consultation task for the first-session teacher", async () => {
@@ -81,17 +84,40 @@ test("first-parent-consultation task follows first-session schedule and teacher 
   assert.match(sql, /task\.status in \('requested', 'confirmed', 'in_progress', 'on_hold'\)/i)
 })
 
-test("scheduled observation Chat reminders are retired without deleting delivery history", async () => {
-  const sql = await readFile(migrationUrl, "utf8")
-  assert.match(sql, /registration\.observation_(?:reminder|feedback)_due/i)
-  assert.match(sql, /scheduled_google_chat_replaced_by_task/i)
-  assert.doesNotMatch(sql, /delete from dashboard_private\.notification_(?:events|deliveries)/i)
+test("feedback-due producer and rule are retired without deleting notification history", async () => {
+  const sql = await readOptional(retirementMigrationUrl)
+  assert.match(sql, /p_event_key = 'registration\.observation_feedback_due'[\s\S]*return null/i)
+  assert.match(sql, /update dashboard_private\.notification_rules[\s\S]*enabled = false[\s\S]*event_key = 'registration\.observation_feedback_due'/i)
+  assert.match(sql, /update dashboard_private\.registration_observation_chat_jobs[\s\S]*last_error_code = 'feature_retired'/i)
+  assert.match(sql, /update dashboard_private\.notification_event_fanout_jobs/i)
+  assert.match(sql, /update dashboard_private\.notification_deliveries/i)
+  assert.doesNotMatch(sql, /delete from dashboard_private\.(?:registration_observation_chat_jobs|notification_events|notification_event_fanout_jobs|notification_deliveries|notification_delivery_attempts|notification_audit_logs)/i)
 })
 
-test("feedback-linked general tasks open the exact feedback page and hide generic completion", async () => {
+test("feedback-linked general tasks expose no marker route or completion override", async () => {
   const source = await readFile(workspaceUrl, "utf8")
-  assert.match(source, /registration_observation_feedback:/)
-  assert.match(source, /\/admin\/registration\/observations\/\$\{observationId\}\/feedback/)
-  assert.match(source, /피드백 작성/)
-  assert.match(source, /getNextTaskStatusAction[\s\S]*isRegistrationObservationFeedbackTask[\s\S]*return null/)
+  assert.doesNotMatch(source, /registration_observation_feedback:/)
+  assert.doesNotMatch(source, /\/admin\/registration\/observations\/\$\{observationId\}\/feedback/)
+  assert.doesNotMatch(source, /isRegistrationObservationFeedbackTask/)
+})
+
+test("attendance and director decision preserve manual workflow status and revision", async () => {
+  const sql = await readOptional(retirementMigrationUrl)
+  assert.match(sql, /create or replace function dashboard_private\.record_registration_observation_attendance_v1_impl/i)
+  assert.match(sql, /'registration_observation_attendance_recorded'[\s\S]*v_track\.workflow_status[\s\S]*v_track\.workflow_status/i)
+  assert.match(sql, /create or replace function dashboard_private\.decide_registration_observation_v1_impl/i)
+  assert.match(sql, /when 'attended_feedback_pending' then 'observation_attendance_recorded'/i)
+  assert.match(sql, /v_observation\.status not in \('attended_feedback_pending', 'completed', 'no_show'\)/i)
+  assert.match(sql, /'workflowRevisionBefore', v_track\.workflow_revision[\s\S]*'workflowRevisionAfter', v_track\.workflow_revision/i)
+  assert.doesNotMatch(sql, /set workflow_status = v_target_workflow_status/i)
+  assert.doesNotMatch(sql, /set workflow_status = 'observation_feedback_pending'/i)
+})
+
+test("attended director-approved observation remains a valid enrollment source without feedback fields", async () => {
+  const sql = await readOptional(retirementMigrationUrl)
+  assert.match(sql, /create or replace function dashboard_private\.validate_registration_observation_class_start_source_v1/i)
+  assert.match(sql, /observation\.status in \('attended_feedback_pending', 'completed'\)/i)
+  assert.match(sql, /observation\.attendance = 'attended'/i)
+  assert.match(sql, /observation\.decision_kind = 'enrollment'/i)
+  assert.doesNotMatch(sql, /observation\.suitability_result = 'fit'/i)
 })

@@ -339,7 +339,7 @@ function RegistrationCaseProcessCells({
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     <RegistrationCaseCell label="상태" cellRole={cellRole}>{trackLines((track) => {
       const summary = getRegistrationObservationListSummary(track)
-      return <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone={summary.label === "교사 피드백 대기" ? "warning" : "primary"}>{summary.label}</RegistrationCasePill></RegistrationCaseTrackValue>
+      return <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone={summary.label === "원장 확인 대기" ? "warning" : "primary"}>{summary.label}</RegistrationCasePill></RegistrationCaseTrackValue>
     })}</RegistrationCaseCell>
     <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{trackLines((track) => {
       const summary = getRegistrationObservationListSummary(track)

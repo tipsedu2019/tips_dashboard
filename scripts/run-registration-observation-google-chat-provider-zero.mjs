@@ -1144,10 +1144,14 @@ select
   '95200000-0000-4000-8000-000000000103', 'provider-zero 301호', 'manual', 7
 from (
   select
-    date_trunc('minute', clock_timestamp() at time zone 'Asia/Seoul')
-      + interval '4 hours' as starts_at,
-    date_trunc('minute', clock_timestamp() at time zone 'Asia/Seoul')
-      + interval '5 hours' as ends_at
+    (
+      date_trunc('day', clock_timestamp() at time zone 'Asia/Seoul')
+      + interval '1 day 10 hours'
+    ) at time zone 'Asia/Seoul' as starts_at,
+    (
+      date_trunc('day', clock_timestamp() at time zone 'Asia/Seoul')
+      + interval '1 day 11 hours'
+    ) at time zone 'Asia/Seoul' as ends_at
 ) clock
 on conflict (id) do update set
   session_key = excluded.session_key,

@@ -32,14 +32,18 @@ const REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET = new Set<string>([
 export function resolveRegistrationWorkspaceWorkflowStatus(input: Pick<
   OpsRegistrationObservationTrackSummary,
   "workflowStatus" | "observationReturnWorkflowStatus"
->): OpsRegistrationWorkflowStatus | null {
+> & Partial<Pick<
+  OpsRegistrationObservationTrackSummary,
+  "status" | "waitingKind"
+>>): OpsRegistrationWorkflowStatus {
   if (REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET.has(input.workflowStatus)) {
     return input.workflowStatus as OpsRegistrationWorkflowStatus
   }
   const returnStatus = input.observationReturnWorkflowStatus || ""
-  return REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET.has(returnStatus)
-    ? returnStatus as OpsRegistrationWorkflowStatus
-    : null
+  if (REGISTRATION_WORKSPACE_WORKFLOW_STATUS_SET.has(returnStatus)) {
+    return returnStatus as OpsRegistrationWorkflowStatus
+  }
+  return getRegistrationWorkflowStatusFromLegacyTrack(input) as OpsRegistrationWorkflowStatus
 }
 
 export function canManageRegistrationObservationTrack(input: {
@@ -49,7 +53,6 @@ export function canManageRegistrationObservationTrack(input: {
 }) {
   return input.viewerRole === "admin"
     || input.viewerRole === "staff"
-    || Boolean(input.viewerId && input.viewerId === input.directorProfileId)
 }
 
 export function resolveRegistrationApplicationFocusPanelId(input: {

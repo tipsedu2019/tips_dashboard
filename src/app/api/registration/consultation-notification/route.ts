@@ -39,6 +39,12 @@ type VisitDispatchPlan = Readonly<{
   notifiedTrackIds: string[]
   items: LegacyVisitDispatchItem[]
 }>
+type VisitNotificationEnsureReceipt = Readonly<{
+  appointmentId: string
+  notificationRevision: number
+  requestKey: string
+  sourceEventId: string
+}>
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const TEMPLATE_CHECKSUM = /^(?:[a-f0-9]{32}|[a-f0-9]{64})$/
@@ -178,6 +184,29 @@ function parsePlan(value: unknown): VisitDispatchPlan {
     return item as LegacyVisitDispatchItem
   })
   return { appointmentId, notificationRevision, recipientRevision, notifiedTrackIds, items }
+}
+
+function parseEnsureReceipt(
+  value: unknown,
+  expected: { appointmentId: string; requestKey: string },
+): VisitNotificationEnsureReceipt {
+  if (!isRecord(value)) throw new Error("registration_visit_notification_ensure_invalid")
+  const receipt = {
+    appointmentId: text(value.appointmentId),
+    notificationRevision: numberValue(value.notificationRevision),
+    requestKey: text(value.requestKey),
+    sourceEventId: text(value.sourceEventId),
+  }
+  if (
+    receipt.appointmentId !== expected.appointmentId
+    || receipt.requestKey !== expected.requestKey
+    || !Number.isInteger(receipt.notificationRevision)
+    || receipt.notificationRevision < 1
+    || !UUID.test(receipt.sourceEventId)
+    || value.ready !== true
+    || text(value.intent) !== "send_registration_visit_notification"
+  ) throw new Error("registration_visit_notification_ensure_invalid")
+  return receipt
 }
 
 async function dispatchInApp(
@@ -413,16 +442,29 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null)
-  if (!isRecord(body) || Object.keys(body).length !== 1 || Object.keys(body)[0] !== "appointmentId") {
+  if (!isRecord(body) || Object.keys(body).sort().join(",") !== "appointmentId,notificationRevision,requestKey") {
     return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 })
   }
   const appointmentId = text(body.appointmentId)
-  if (!UUID.test(appointmentId)) {
+  const notificationRevision = numberValue(body.notificationRevision)
+  const requestKey = text(body.requestKey)
+  if (
+    !UUID.test(appointmentId)
+    || !Number.isInteger(notificationRevision)
+    || notificationRevision < 1
+    || !UUID.test(requestKey)
+  ) {
     return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 })
   }
 
   try {
-    const plan = parsePlan(await rpc(serverClient, "get_registration_visit_legacy_dispatch_plan_v1", {
+    parseEnsureReceipt(await rpc(client, "ensure_registration_visit_notification_v1", {
+      p_appointment_id: appointmentId,
+      p_expected_notification_revision: notificationRevision,
+      p_request_key: requestKey,
+      p_intent: "send_registration_visit_notification",
+    }), { appointmentId, requestKey })
+    const plan = parsePlan(await rpc(client, "get_registration_visit_legacy_dispatch_plan_v1", {
       p_appointment_id: appointmentId,
       p_actor_profile_id: userId,
     }))
@@ -458,7 +500,15 @@ export async function POST(request: Request) {
     return NextResponse.json(payload, { status })
   } catch (error) {
     const code = text((error as { code?: unknown })?.code)
-    const status = code === "42501" ? 403 : code === "P0002" ? 404 : 503
+    const status = code === "22023"
+      ? 400
+      : code === "23514"
+        ? 409
+        : code === "42501"
+          ? 403
+          : code === "P0002"
+            ? 404
+            : 503
     return NextResponse.json({ ok: false, error: "방문상담 알림 후처리를 완료하지 못했습니다." }, { status })
   }
 }

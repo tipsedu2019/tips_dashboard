@@ -30,6 +30,71 @@ const OBSERVATION_BOOKING_TARGET = Object.freeze({
   sourceId: IDS.observation,
 })
 
+test("waiting message task authorization excludes archived registration tracks", async () => {
+  for (const [active, expectedAuthorizedTaskIds] of [[true, [IDS.task]], [false, []]]) {
+    const filters = []
+    const queryControls = []
+    const authorizedTaskIds = []
+    const actorClient = {
+      from(table) {
+        assert.equal(table, "ops_registration_subject_tracks")
+        return {
+          select(columns) {
+            assert.equal(columns, "task_id")
+            return this
+          },
+          eq(column, value) {
+            filters.push([column, value])
+            return this
+          },
+          is(column, value) {
+            filters.push([column, value])
+            return this
+          },
+          maybeSingle() {
+            queryControls.push("maybeSingle")
+            return this
+          },
+          abortSignal(signal) {
+            assert.equal(signal instanceof AbortSignal, true)
+            queryControls.push("abortSignal")
+            return this
+          },
+          async retry(value) {
+            assert.equal(value, false)
+            queryControls.push("retry:false")
+            return { data: active ? { task_id: IDS.task } : null, error: null }
+          },
+        }
+      },
+    }
+    const handlers = createProductionRegistrationCustomerMessageRouteHandlers({
+      auth: {
+        async authenticate() {
+          return { actorProfileId: IDS.actor, role: "staff", actorClient, serviceClient: {} }
+        },
+        async authorizeTask(_context, taskId) {
+          authorizedTaskIds.push(taskId)
+          return false
+        },
+      },
+      environment: FIXED_ENV,
+      providerFetch: async () => {
+        throw new Error("authorization_must_not_call_provider")
+      },
+    })
+    const response = await handlers.messages(new Request(
+      `http://localhost/messages?messageKind=waiting_notice&sourceId=${IDS.track}`,
+      { headers: { authorization: "Bearer local-operator" } },
+    ))
+
+    assert.equal(response.status, 404)
+    assert.deepEqual(filters, [["id", IDS.track], ["archived_at", null]])
+    assert.deepEqual(queryControls, ["abortSignal", "maybeSingle", "retry:false"])
+    assert.deepEqual(authorizedTaskIds, expectedAuthorizedTaskIds)
+  }
+})
+
 const RAW_SOURCE = Object.freeze({
   messageKind: "observation_booking",
   sourceId: IDS.observation,
@@ -161,8 +226,16 @@ function createObservationProductionHarness({
           filters.push([column, value])
           return this
         },
-        async maybeSingle() {
+        maybeSingle() {
           assert.deepEqual(filters, [["id", IDS.observation]])
+          return this
+        },
+        abortSignal(signal) {
+          assert.equal(signal instanceof AbortSignal, true)
+          return this
+        },
+        async retry(value) {
+          assert.equal(value, false)
           return table === "ops_registration_observations"
             ? { data: { task_id: IDS.task }, error: null }
             : { data: null, error: { code: "wrong_source_table" } }

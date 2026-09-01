@@ -348,10 +348,19 @@ test("canonical visit state distinguishes cancellation and old replacement", () 
   assert.equal(state({ changeKind: "appointment_replaced", isOldAppointment: true }), "replaced")
 })
 
-test("notification route accepts appointmentId and reloads the canonical visit plan on the server", () => {
+test("notification route accepts only canonical identity fields and explicitly snapshots before reading the plan", () => {
   assert.match(routeSource, /body\.appointmentId/)
+  assert.match(routeSource, /body\.notificationRevision/)
+  assert.match(routeSource, /body\.requestKey/)
+  assert.match(routeSource, /ensure_registration_visit_notification_v1/)
   assert.match(routeSource, /get_registration_visit_legacy_dispatch_plan_v1/)
   assert.match(routeSource, /p_appointment_id: appointmentId/)
+  assert.match(routeSource, /p_expected_notification_revision: notificationRevision/)
+  assert.match(routeSource, /p_request_key: requestKey/)
+  assert.match(routeSource, /p_intent: "send_registration_visit_notification"/)
+  assert.doesNotMatch(routeSource, /body\.intent/)
+  const post = routeSource.slice(routeSource.indexOf("export async function POST"))
+  assert.ok(post.indexOf("ensure_registration_visit_notification_v1") < post.indexOf("get_registration_visit_legacy_dispatch_plan_v1"))
   assert.match(routeSource, /notificationRevision/)
   assert.match(routeSource, /recipientRevision/)
   assert.doesNotMatch(routeSource, /body\.message/)
@@ -373,17 +382,59 @@ test("route response carries the server-owned revision, changed tracks, and warn
   assert.match(routeSource, /warning/)
 })
 
-test("visit appointment save dispatches canonical targets and supports explicit cancellation", async () => {
+test("appointment save and cancellation are provider-zero while preview remains explicit", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /notificationTargets/)
+  const managementSend = sourceBlock(source, "async function sendVisitManagementNotification", "async function handoffCommittedAppointment")
+  const finishSave = sourceBlock(source, "async function finishAppointmentSave", "async function reloadAfterCommittedMutation")
+  const performSave = sourceBlock(source, "async function performSaveAppointment", "function dismissAppointmentConfirmation")
+  const cancelSave = sourceBlock(source, "async function confirmAppointmentCancellation", "async function completeAttempt")
   assert.match(source, /saveRegistrationSharedAppointment/)
   assert.match(source, /replaceRemaining: editMode === "replace_remaining"/)
-  assert.match(source, /sendRegistrationVisitNotificationTarget/)
   assert.match(source, /cancelRegistrationAppointment/)
   assert.match(source, /예약 취소/)
+  assert.match(source, /onOpenCustomerMessage/)
+  assert.match(source, /예약 안내 알림톡/)
+  assert.match(managementSend, /sendRegistrationVisitNotificationTarget/)
+  assert.match(managementSend, /catch \(error\) \{[\s\S]*?await onReload\?\.\(\)/)
+  assert.doesNotMatch(managementSend, /saveRegistrationSharedAppointment|cancelRegistrationAppointment/)
+  assert.match(source, /방문상담 관리 알림 보내기/)
+  assert.match(source, /const appointmentNotificationParticipants =[\s\S]*?directorProfileId/)
+  assert.match(source, /const visitManagementNotificationIdentity = JSON\.stringify\([\s\S]*?appointmentNotificationParticipants/)
+  assert.match(source, /useEffect\(\(\) => \{\s*setVisitManagementNotificationSent\(false\)\s*\}, \[visitManagementNotificationIdentity\]\)/)
+  for (const mutation of [finishSave, performSave, cancelSave]) {
+    assert.doesNotMatch(mutation, /sendRegistrationVisitNotificationTarget|dispatchNotificationTargets/)
+  }
 })
 
-test("visit notification helper sends only the authoritative appointment id", async () => {
+test("appointment notification readiness names every required fact", () => {
+  const readiness = notificationModel.getRegistrationAppointmentNotificationReadiness
+  assert.equal(typeof readiness, "function")
+  if (typeof readiness !== "function") return
+
+  assert.deepEqual(readiness({}), {
+    ready: false,
+    requiredFields: ["학생", "일시", "장소", "과목", "담당자"],
+    missingFields: ["학생", "일시", "장소", "과목", "담당자"],
+  })
+  assert.deepEqual(readiness({
+    studentName: "김학생",
+    scheduledAt: "2026-09-02T10:00:00+09:00",
+    place: "본관",
+    participants: [{ subject: "영어", directorProfileId: "director-1", directorName: "강원장" }],
+  }), {
+    ready: true,
+    requiredFields: ["학생", "일시", "장소", "과목", "담당자"],
+    missingFields: [],
+  })
+  assert.deepEqual(readiness({
+    studentName: "김학생",
+    scheduledAt: "2026-09-02T10:00:00+09:00",
+    place: "본관",
+    participants: [{ subject: "영어", directorProfileId: "director-1", directorName: "" }],
+  }).missingFields, ["담당자"])
+})
+
+test("a same-revision director correction gets a fresh explicit visit-notification UUID intent key", async () => {
   const send = notificationModel.sendRegistrationVisitNotificationTarget
   assert.equal(typeof send, "function")
   if (typeof send !== "function") return
@@ -397,9 +448,16 @@ test("visit notification helper sends only the authoritative appointment id", as
     })
   }
   try {
-    const result = await send({ appointmentId: "appointment-1", notificationRevision: 2 }, "session-token")
+    const result = await send({ appointmentId: "appointment-1", notificationRevision: 2, directorProfileId: "director-1" }, "session-token")
+    await send({ appointmentId: "appointment-1", notificationRevision: 2, directorProfileId: "director-2" }, "session-token")
     assert.equal(result.appointmentId, "appointment-1")
-    assert.deepEqual(JSON.parse(requests[0].init.body), { appointmentId: "appointment-1" })
+    const firstBody = JSON.parse(requests[0].init.body)
+    const secondBody = JSON.parse(requests[1].init.body)
+    assert.deepEqual(Object.keys(firstBody), ["appointmentId", "notificationRevision", "requestKey"])
+    assert.equal(firstBody.appointmentId, "appointment-1")
+    assert.equal(firstBody.notificationRevision, 2)
+    assert.match(firstBody.requestKey, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i)
+    assert.notEqual(firstBody.requestKey, secondBody.requestKey)
     assert.equal(requests[0].init.headers.Authorization, "Bearer session-token")
   } finally {
     globalThis.fetch = previousFetch
@@ -508,14 +566,17 @@ test("consultation notification route uses server-rendered delivery content for 
   assert.doesNotMatch(routeSource, /body\.(?:title|message|target|href|recipient)/);
 });
 
-test("consultation notification route accepts only appointmentId and does not forward arbitrary client text", () => {
+test("consultation notification route accepts only appointment identity and revision without client-controlled intent", () => {
   assert.match(routeSource, /const appointmentId = text\(body\.appointmentId\)/);
+  assert.match(routeSource, /const notificationRevision = numberValue\(body\.notificationRevision\)/);
+  assert.match(routeSource, /const requestKey = text\(body\.requestKey\)/);
 
   const clientBodyFields = [
     ...routeSource.matchAll(/\bbody(?:\?\.)?\.([A-Za-z_][A-Za-z0-9_]*)/g),
   ].map((match) => match[1]);
 
-  assert.deepEqual([...new Set(clientBodyFields)], ["appointmentId"]);
+  assert.deepEqual([...new Set(clientBodyFields)], ["appointmentId", "notificationRevision", "requestKey"]);
+  assert.doesNotMatch(routeSource, /body\.intent/);
   assert.doesNotMatch(routeSource, /JSON\.stringify\(body\)/);
 });
 
@@ -526,7 +587,7 @@ test("canonical task links come only from the server dispatch plan", () => {
   assert.doesNotMatch(routeSource, /new URL\([^)]*request\.url/);
 });
 
-test("canonical visit identity includes place while create dispatches only server targets", () => {
+test("canonical visit identity includes place while flat registration create stays provider-zero", () => {
 
   const message = notificationModel.buildRegistrationVisitCanonicalMessage?.({
     state: "updated",
@@ -537,14 +598,15 @@ test("canonical visit identity includes place while create dispatches only serve
   });
   assert.match(message || "", /상담실 A/);
   assert.match(message || "", /영어: 강부희/);
-  assert.match(workspaceSource, /sendRegistrationVisitNotificationTarget\(target/);
-  assert.match(workspaceSource, /dispatchRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(workspaceSource, /sendRegistrationVisitNotificationTarget\(target/);
+  assert.doesNotMatch(workspaceSource, /dispatchRegistrationVisitNotificationTargets/);
   assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /getConsultationNotificationWarning\(result\.value\)/);
   assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /result\.value\?\.ok === false/);
-  assert.match(workspaceSource, /savedWithNotificationDeliveryFailure/);
-  assert.match(workspaceSource, /savedWithNotificationAuditWarning/);
-  assert.match(workspaceSource, /방문상담 알림 전달은 접수됐습니다\. 감사 이력을 확인하세요\./);
-  assert.match(workspaceSource, /방문상담 알림은 전송하지 못했습니다\. 업무는 정상 저장되었습니다\./);
+  const submitStart = workspaceSource.indexOf("const submitForm = async");
+  const submitEnd = workspaceSource.indexOf("const handleFormKeyDown", submitStart);
+  const submitSource = workspaceSource.slice(submitStart, submitEnd);
+  assert.match(submitSource, /await createRegistrationCase\(\{/);
+  assert.doesNotMatch(submitSource, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/);
   assert.doesNotMatch(workspaceSource, /notifyRegistrationConsultationReservation/);
 });
 
@@ -662,34 +724,38 @@ test("successful route warnings are returned to the client at runtime", () => {
 
 test("registration no longer has a generic browser Google Chat sender", () => {
   assert.doesNotMatch(workspaceSource, /async function notifyRegistrationWorkflow/);
-  assert.match(workspaceSource, /loadRegistrationLegacyNotificationSourceIds/);
+  assert.doesNotMatch(workspaceSource, /loadRegistrationLegacyNotificationSourceIds/);
   assert.match(workspaceSource, /dispatchLegacyOpsTaskSources/);
+  assert.match(workspaceSource, /if \(payload\.type !== "registration"\) \{[\s\S]*?dispatchLegacyOpsTaskSources/);
 });
 
-test("registration saves state before dispatching a status notification and does not notify on case creation", async () => {
+test("registration status saves never dispatch; management Chat uses a separate explicit action", async () => {
   const editor = await readFile(new URL(
     "../src/features/tasks/registration-track-editor.tsx",
     import.meta.url,
   ), "utf8")
   const editorStatus = editor.slice(
     editor.indexOf("async function changeWorkflowStatus"),
-    editor.indexOf("const migrationReviewPanelId"),
+    editor.indexOf("async function sendRegistrationManagementNotification"),
   )
   assert.match(editorStatus, /await setRegistrationWorkflowStatus/)
-  assert.match(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
-  assert.match(editorStatus, /dispatchRegistrationManagementNotificationSources/)
-  assert.ok(
-    editorStatus.indexOf("await setRegistrationWorkflowStatus")
-      < editorStatus.indexOf("ensureRegistrationWorkflowNotificationSourceIds"),
+  assert.doesNotMatch(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.doesNotMatch(editorStatus, /dispatchRegistrationManagementNotificationSources/)
+
+  const explicitNotification = editor.slice(
+    editor.indexOf("async function sendRegistrationManagementNotification"),
+    editor.indexOf("const migrationReviewPanelId"),
   )
+  assert.match(explicitNotification, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.match(explicitNotification, /dispatchRegistrationManagementNotificationSources/)
 
   const workspaceStatus = workspaceSource.slice(
     workspaceSource.indexOf("const handleRegistrationWorkflowStatusChange"),
     workspaceSource.indexOf("const closeRegistrationApplicationHost"),
   )
   assert.match(workspaceStatus, /await setRegistrationWorkflowStatus/)
-  assert.match(workspaceStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
-  assert.match(workspaceStatus, /dispatchRegistrationManagementNotificationSources/)
+  assert.doesNotMatch(workspaceStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.doesNotMatch(workspaceStatus, /dispatchRegistrationManagementNotificationSources/)
 
   const atomicCreate = workspaceSource.slice(
     workspaceSource.indexOf('if (createAttempt.writer === "atomic")'),
@@ -963,22 +1029,16 @@ test("appointment editor preserves conflict drafts and keeps cancellation explic
   assert.doesNotMatch(source, /NotificationControlPanel/);
 });
 
-test("appointment processing UI is fail-closed and retry never replays save or cancel", async () => {
+test("appointment UI does not couple fact persistence to notification processing jobs", async () => {
   const source = await readFile(appointmentEditorUrl, "utf8");
-  const retryBlock = sourceBlock(source, "async function retryRegistrationNotificationJobStatus", "async function reloadAfterCommittedMutation");
+  const finish = sourceBlock(source, "async function finishAppointmentSave", "async function reloadAfterCommittedMutation");
 
-  assert.match(source, /isRegistrationNotificationProcessingReady/);
-  assert.match(source, /getRegistrationNotificationProcessingReadiness\(notificationToken\)/);
-  assert.match(source, /effectiveProcessingReadiness/);
-  assert.match(source, /예약 저장됨 · 알림 재계산 중/);
-  assert.match(source, /알림 재계산 완료/);
-  assert.match(source, /알림 재계산 실패 · 다시 시도/);
-  assert.match(retryBlock, /retryRegistrationNotificationJob/);
-  assert.doesNotMatch(retryBlock, /saveRegistrationSharedAppointment/);
-  assert.doesNotMatch(retryBlock, /cancelRegistrationAppointment/);
-  assert.doesNotMatch(source, /예약 저장과 알림 처리는 완료되었습니다/);
-  assert.match(source, /notificationProcessingCompleted[\s\S]*예약 저장과 알림 재계산은 완료되었습니다/);
-  assert.match(source, /notificationProcessingPhase === "succeeded"[\s\S]*알림 재계산 상태는 아직 확인되지 않았습니다/);
+  assert.match(finish, /setCommittedAppointment\(saved\)[\s\S]*await handoffCommittedAppointment\(saved\)/);
+  assert.doesNotMatch(source, /isRegistrationNotificationProcessingReady/);
+  assert.doesNotMatch(source, /getRegistrationNotificationProcessingReadiness/);
+  assert.doesNotMatch(source, /getRegistrationNotificationJobStatus/);
+  assert.doesNotMatch(source, /retryRegistrationNotificationJob/);
+  assert.doesNotMatch(source, /알림 재계산|알림 재시도/);
 });
 
 test("방문상담 legacy plan은 active template allowlist를 쓰고 관리팀 외 Chat 목적지를 만들지 않는다", async () => {

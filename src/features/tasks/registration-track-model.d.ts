@@ -495,6 +495,10 @@ export function shouldRenderRegistrationConsultationOutcome(input?: {
   canEdit?: boolean
 }): boolean
 
+export function canManageRegistrationCase(
+  viewerRole?: RegistrationPermissionInput["viewerRole"],
+): boolean
+
 export function getRegistrationActiveConsultation<T extends RegistrationConsultationSummary>(input?: {
   trackId?: string | null
   consultations?: readonly T[]

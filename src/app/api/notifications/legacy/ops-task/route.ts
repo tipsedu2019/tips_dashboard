@@ -225,6 +225,20 @@ async function loadLegacyDispatchPlan(
   }
 }
 
+async function authorizeRegistrationLegacyDispatch(
+  client: SupabaseClient,
+  sourceEventId: string,
+) {
+  const registrationScope = await rpc(
+    client,
+    "authorize_registration_legacy_dispatch_v1",
+    { p_source_event_id: sourceEventId },
+  )
+  if (typeof registrationScope !== "boolean") {
+    throw new Error("registration_legacy_dispatch_authorization_invalid")
+  }
+}
+
 async function finalizeLegacyDispatch(
   client: SupabaseClient,
   begun: JsonRecord,
@@ -380,6 +394,7 @@ export async function POST(request: Request) {
   if (!UUID.test(sourceEventId)) return response({ ok: false, error: "Invalid request" }, 400)
 
   try {
+    await authorizeRegistrationLegacyDispatch(actorClient, sourceEventId)
     const plan = await loadLegacyDispatchPlan(serverClient, sourceEventId, actor.user.id)
     const items = parsePlan(plan)
     const outcomes: string[] = []

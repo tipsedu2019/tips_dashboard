@@ -33,9 +33,6 @@ import {
   type RegistrationConflictComparison,
 } from "./registration-application-model"
 import {
-  advanceRegistrationAutomaticSavingGeneration,
-  resolveRegistrationTrackDirectorDefaults,
-  shouldSettleRegistrationAutomaticSavingGeneration,
   type RegistrationDirectorCatalogStatus,
 } from "./registration-director-default.js"
 import { RegistrationEnrollmentEditor, type RegistrationEnrollmentDirtyScope } from "./registration-enrollment-editor"
@@ -165,7 +162,6 @@ export type RegistrationTrackDirectorSectionHandle = {
 }
 
 export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDirectorSectionHandle, {
-  task: OpsTask
   detail: OpsRegistrationCaseDetail
   track: OpsRegistrationTrackSummary
   permissions: ActionPermissions
@@ -180,7 +176,6 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
   onDirtyChange?: (dirty: boolean) => void
   sharedSave: boolean
 }>(function RegistrationTrackDirectorSection({
-  task,
   detail,
   track,
   permissions,
@@ -223,224 +218,31 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
     : serverDirectorProfileId
   const [savingManual, setSavingManual] = useState(false)
   const [manualDirectorConflictAttempt, setManualDirectorConflictAttempt] = useState<RegistrationConflictComparison<{ profileId: string; label: string }> | null>(null)
-  const [automaticError, setAutomaticError] = useState("")
-  const [automaticRefreshError, setAutomaticRefreshError] = useState("")
-  const [automaticRefreshTrackId, setAutomaticRefreshTrackId] = useState("")
-  const [automaticRefreshRequest, setAutomaticRefreshRequest] = useState<{ id: number; preferredTrackId: string } | null>(null)
-  const [visitCorrectionRequest, setVisitCorrectionRequest] = useState<{ id: number; trackId: string } | null>(null)
-  const [automaticSaving, setAutomaticSaving] = useState(false)
-  const [automaticRefreshing, setAutomaticRefreshing] = useState(false)
+  const [refreshPending, setRefreshPending] = useState(false)
+  const [refreshRetrying, setRefreshRetrying] = useState(false)
   const [catalogRefreshRequired, setCatalogRefreshRequired] = useState(false)
   const [catalogRefreshing, setCatalogRefreshing] = useState(false)
-  const [retryVersion, setRetryVersion] = useState(0)
   const requestKeysRef = useRef(new Map<string, string>())
-  const attemptedRef = useRef(new Set<string>())
-  const automaticGenerationRef = useRef(0)
-  const refreshRequestIdRef = useRef(0)
-  const refreshAttemptedRef = useRef(new Set<number>())
-  const visitCorrectionRequestIdRef = useRef(0)
-  const visitCorrectionAttemptedRef = useRef(new Set<number>())
-  const activeRef = useRef(false)
-  useEffect(() => {
-    activeRef.current = true
-    return () => {
-      activeRef.current = false
-    }
-  }, [])
-  const resolutions = useMemo(() => resolveRegistrationTrackDirectorDefaults({
-    tracks: detail.tracks,
-    grade: task.registration?.schoolGrade || "",
-    inquiryAt: task.registration?.inquiryAt || "",
-    teachers: teacherOptions,
-    profiles: directorOptions,
-    ...{ capabilities: subjectCapabilities },
-    catalogStatus: directorCatalogStatus,
-  }), [detail.tracks, directorCatalogStatus, directorOptions, subjectCapabilities, task.registration?.inquiryAt, task.registration?.schoolGrade, teacherOptions])
-  const automaticActions = useMemo(
-    () => resolutions.filter((resolution) => (
-      resolution.trackId === track.id
-      && (resolution.shouldAssign || resolution.shouldClear)
-    )),
-    [resolutions, track.id],
-  )
 
-  useEffect(() => {
-    if (!automaticRefreshRequest || refreshAttemptedRef.current.has(automaticRefreshRequest.id)) return
-    refreshAttemptedRef.current.add(automaticRefreshRequest.id)
-    const request = automaticRefreshRequest
-    setAutomaticRefreshing(true)
-    void (async () => {
-      try {
-        await onReload(request.preferredTrackId || undefined)
-        if (!activeRef.current) return
-        setManualDirectorConflictAttempt((current) => current
-          ? settleRegistrationConflictComparison(current, { succeeded: true })
-          : current)
-        setAutomaticRefreshError("")
-        setAutomaticRefreshTrackId("")
-      } catch (refreshError) {
-        if (!activeRef.current) return
-        const refreshMessage = errorMessage(refreshError, "최신 등록 정보를 다시 불러오지 못했습니다.")
-        setManualDirectorConflictAttempt((current) => current
-          ? settleRegistrationConflictComparison(current, { succeeded: false, error: refreshMessage })
-          : current)
-        setAutomaticRefreshError(refreshMessage)
-        setAutomaticRefreshTrackId(request.preferredTrackId)
-        onWarning(refreshMessage)
-      } finally {
-        if (activeRef.current) setAutomaticRefreshing(false)
-      }
-    })()
-  }, [automaticRefreshRequest, onReload, onWarning])
-
-  useEffect(() => {
-    if (!visitCorrectionRequest || visitCorrectionAttemptedRef.current.has(visitCorrectionRequest.id)) return
-    visitCorrectionAttemptedRef.current.add(visitCorrectionRequest.id)
-    onOpenVisit(visitCorrectionRequest.trackId)
-  }, [onOpenVisit, visitCorrectionRequest])
-
-  useEffect(() => {
-    const hasAutomaticActions = permissions.canManage
-      && !detail.tracks.some((item) => item.migrationReviewRequired)
-      && automaticActions.length > 0
-    const generationState = advanceRegistrationAutomaticSavingGeneration(
-      automaticGenerationRef.current,
-      hasAutomaticActions,
-    )
-    automaticGenerationRef.current = generationState.generation
-    if (!generationState.saving) {
-      setAutomaticSaving(false)
-      return
-    }
-    let cancelled = false
-
-    async function applyAutomaticDefaults() {
-      let saved = false
-      let attemptedAny = false
-      let visitCorrectionTrackId = ""
-      setAutomaticSaving(true)
-      try {
-        for (const resolution of automaticActions) {
-          if (cancelled) break
-          const assignmentSource = resolution.shouldClear ? "clear_default" : "default"
-          const visitGuardSignature = detail.consultations
-            .filter((consultation) => (
-              consultation.trackId === resolution.trackId
-              && consultation.mode === "visit"
-              && consultation.status === "scheduled"
-            ))
-            .map((consultation) => {
-              const appointment = detail.appointments.find((item) => item.id === consultation.appointmentId)
-              return `${consultation.id}:${consultation.appointmentId || ""}:${appointment?.updatedAt || ""}:${appointment?.status || ""}`
-            })
-            .sort()
-            .join("|")
-          const logicalKey = [
-            detail.task.id,
-            resolution.trackId,
-            assignmentSource,
-            resolution.profileId,
-            resolution.ruleKey,
-            detail.commonRevision,
-            visitGuardSignature,
-          ].join(":")
-          const attemptKey = `${logicalKey}:retry:${retryVersion}`
-          if (attemptedRef.current.has(attemptKey)) continue
-          attemptedRef.current.add(attemptKey)
-          if (!attemptedAny) {
-            attemptedAny = true
-            setAutomaticError("")
-          }
-          let requestKey = requestKeysRef.current.get(logicalKey)
-          if (!requestKey) {
-            requestKey = createRegistrationMutationRequestKey("registration-director-default", resolution.trackId)
-            requestKeysRef.current.set(logicalKey, requestKey)
-          }
-          try {
-            await assignRegistrationTrackDirector({
-              trackId: resolution.trackId,
-              directorProfileId: resolution.shouldClear ? null : resolution.profileId,
-              assignmentSource,
-              ruleKey: resolution.shouldClear ? null : resolution.ruleKey,
-              expectedCommonRevision: detail.commonRevision,
-              requestKey,
-            })
-            saved = true
-          } catch (error) {
-            const message = errorMessage(error, "상담 책임자 자동 배정을 저장하지 못했습니다.")
-            if (message.includes("registration_common_revision_conflict")) {
-              if (!activeRef.current) return
-              const id = ++refreshRequestIdRef.current
-              setAutomaticRefreshRequest({ id, preferredTrackId: "" })
-              return
-            }
-            if (message.includes("registration_visit_reassign_requires_reschedule")) {
-              if (!activeRef.current) return
-              visitCorrectionTrackId = resolution.trackId
-              setAutomaticError("방문상담 예약에서 담당 원장을 다시 확인하세요.")
-              const id = ++visitCorrectionRequestIdRef.current
-              setVisitCorrectionRequest({ id, trackId: resolution.trackId })
-              onWarning("방문상담 예약에서 담당 원장을 다시 확인하세요.")
-              continue
-            }
-            if (isRegistrationDirectorCatalogRefreshError(message)) {
-              if (!activeRef.current) return
-              setCatalogRefreshRequired(true)
-              setAutomaticError("담당자 기준이 변경되었습니다. 최신 담당자 정보를 다시 불러오세요.")
-              onWarning("담당자 기준이 변경되었습니다. 담당자 정보를 다시 불러오세요.")
-              return
-            }
-            if (activeRef.current) {
-              setAutomaticError(message)
-              onWarning(message)
-            }
-          }
-        }
-        if (saved && activeRef.current) {
-          const id = ++refreshRequestIdRef.current
-          setAutomaticRefreshRequest({ id, preferredTrackId: visitCorrectionTrackId })
-        }
-      } finally {
-        if (
-          activeRef.current
-          && shouldSettleRegistrationAutomaticSavingGeneration(
-            generationState.generation,
-            automaticGenerationRef.current,
-          )
-        ) setAutomaticSaving(false)
-      }
-    }
-
-    void applyAutomaticDefaults()
-    return () => {
-      cancelled = true
-    }
-  }, [automaticActions, detail.appointments, detail.commonRevision, detail.consultations, detail.task.id, detail.tracks, onWarning, permissions.canManage, retryVersion])
-
-  const canEdit = permissions.canManage && !track.migrationReviewRequired
+  const canEdit = permissions.canManage
   const currentOptionMissing = Boolean(
     track.directorProfileId && !availableDirectors.some((profile) => profile.id === track.directorProfileId),
   )
-  const selectedDirectorIsAvailable = availableDirectors.some((profile) => profile.id === directorProfileId)
-  const directorSelectorLocked = catalogRefreshRequired
-    || directorCatalogStatus === "error"
-    || directorCatalogStatus === "partial"
-    || Boolean(automaticRefreshError)
+  const selectedDirectorIsAvailable = !directorProfileId
+    || availableDirectors.some((profile) => profile.id === directorProfileId)
+  const directorSelectorLocked = refreshPending
   useOwnedDirtyState(
     Boolean(manualDirectorConflictAttempt) || (!directorSelectorLocked && directorProfileId !== serverDirectorProfileId),
     onDirtyChange,
   )
 
   async function saveManualDirector(): Promise<boolean> {
-    if (directorProfileId === serverDirectorProfileId && Boolean(directorProfileId)) return true
-    if (!canEdit || !directorProfileId || !selectedDirectorIsAvailable || savingManual || automaticSaving || automaticRefreshError) {
-      if (canEdit && !directorProfileId) onWarning("상담 책임자를 선택하세요.")
-      return false
-    }
-    const logicalKey = `registration-director-manual:${track.id}:${directorProfileId}:${detail.commonRevision}`
+    if (directorProfileId === serverDirectorProfileId) return true
+    if (!canEdit || !selectedDirectorIsAvailable || savingManual || refreshPending) return false
+    const logicalKey = `registration-director-manual:${track.id}:${directorProfileId || "unassigned"}:${detail.commonRevision}`
     const attemptedDirector = {
       profileId: directorProfileId,
-      label: availableDirectors.find((profile) => profile.id === directorProfileId)?.label || directorProfileId,
+      label: availableDirectors.find((profile) => profile.id === directorProfileId)?.label || "미지정",
     }
     let requestKey = requestKeysRef.current.get(logicalKey)
     if (!requestKey) {
@@ -448,29 +250,21 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
       requestKeysRef.current.set(logicalKey, requestKey)
     }
     setSavingManual(true)
-    let committed = false
     try {
       await assignRegistrationTrackDirector({
         trackId: track.id,
-        directorProfileId,
+        directorProfileId: directorProfileId || null,
         assignmentSource: "manual",
         ruleKey: null,
         expectedCommonRevision: detail.commonRevision,
         requestKey,
       })
-      committed = true
       onDirtyChange?.(false)
-      await onReload(track.id)
       requestKeysRef.current.delete(logicalKey)
       setManualDirectorConflictAttempt(null)
-      return true
     } catch (error) {
       const message = errorMessage(error, "상담 책임자를 저장하지 못했습니다.")
-      if (committed) {
-        setAutomaticRefreshError(COMMITTED_REFRESH_ERROR)
-        setAutomaticRefreshTrackId(track.id)
-        onWarning(COMMITTED_REFRESH_ERROR)
-      } else if (message.includes("registration_common_revision_conflict")) {
+      if (message.includes("registration_common_revision_conflict")) {
         requestKeysRef.current.delete(logicalKey)
         const comparison = beginRegistrationConflictComparison(attemptedDirector)
         setManualDirectorConflictAttempt(comparison)
@@ -481,8 +275,7 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
         } catch {
           const refreshMessage = "다른 사용자의 변경을 감지했지만 최신 정보를 다시 불러오지 못했습니다."
           setManualDirectorConflictAttempt(settleRegistrationConflictComparison(comparison, { succeeded: false, error: refreshMessage }))
-          setAutomaticRefreshError(refreshMessage)
-          setAutomaticRefreshTrackId(track.id)
+          setRefreshPending(true)
           onWarning("최신 정보 다시 불러오기를 눌러 주세요.")
         }
       } else if (message.includes("registration_visit_reassign_requires_reschedule")) {
@@ -490,15 +283,23 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
         onWarning("방문상담 예약에서 담당 원장을 다시 확인하세요.")
       } else if (isRegistrationDirectorCatalogRefreshError(message)) {
         setCatalogRefreshRequired(true)
-        setAutomaticError("담당자 기준이 변경되었습니다. 최신 담당자 정보를 다시 불러오세요.")
         onWarning("담당자 기준이 변경되었습니다. 담당자 정보를 다시 불러오세요.")
       } else {
         onWarning(message)
       }
+      setSavingManual(false)
       return false
+    }
+    try {
+      await onReload(track.id)
+      setRefreshPending(false)
+    } catch {
+      setRefreshPending(true)
+      onWarning(COMMITTED_REFRESH_ERROR)
     } finally {
       setSavingManual(false)
     }
+    return true
   }
 
   const saveManualDirectorRef = useRef(saveManualDirector)
@@ -507,30 +308,34 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
     savePending: () => saveManualDirectorRef.current(),
   }), [])
 
-  async function retryAutomaticRefresh() {
-    if (!automaticRefreshError || automaticRefreshing) return
-    const id = ++refreshRequestIdRef.current
-    setAutomaticRefreshRequest({ id, preferredTrackId: automaticRefreshTrackId })
+  async function retryDirectorRefresh() {
+    if (!refreshPending || refreshRetrying) return
+    setRefreshRetrying(true)
+    try {
+      await onReload(track.id)
+      setRefreshPending(false)
+      setManualDirectorConflictAttempt((current) => current
+        ? settleRegistrationConflictComparison(current, { succeeded: true })
+        : current)
+    } catch {
+      onWarning(COMMITTED_REFRESH_ERROR)
+    } finally {
+      setRefreshRetrying(false)
+    }
   }
 
-  async function retryAutomaticDefaults() {
-    if (!catalogRefreshRequired) {
-      setRetryVersion((value) => value + 1)
-      return
-    }
+  async function retryDirectorCatalog() {
     if (!onRetryDirectorCatalog || catalogRefreshing) return
     setCatalogRefreshing(true)
     try {
       const refreshed = await onRetryDirectorCatalog()
       if (refreshed === false) {
-        setAutomaticError("최신 담당자 정보를 불러오지 못했습니다. 다시 시도하세요.")
+        onWarning("최신 담당자 정보를 불러오지 못했습니다. 다시 시도하세요.")
         return
       }
       setCatalogRefreshRequired(false)
-      setRetryVersion((value) => value + 1)
     } catch (error) {
       const message = errorMessage(error, "최신 담당자 정보를 불러오지 못했습니다. 다시 시도하세요.")
-      setAutomaticError(message)
       onWarning(message)
     } finally {
       setCatalogRefreshing(false)
@@ -538,7 +343,7 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
   }
 
   const catalogNeedsRetry = directorCatalogStatus !== "loading"
-    && (catalogRefreshRequired || resolutions.some((resolution) => resolution.status === "unavailable"))
+    && (catalogRefreshRequired || directorCatalogStatus === "error" || directorCatalogStatus === "partial")
 
   return (
     <section
@@ -546,7 +351,7 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
       className="grid min-w-0 gap-2"
       aria-label={`${track.subject} 상담 책임자`}
     >
-      <RegistrationRefreshRecovery pending={Boolean(automaticRefreshError)} retrying={automaticRefreshing} onRetry={() => void retryAutomaticRefresh()} ownerLabel={track.subject} />
+      <RegistrationRefreshRecovery pending={refreshPending} retrying={refreshRetrying} onRetry={() => void retryDirectorRefresh()} ownerLabel={track.subject} />
       {manualDirectorConflictAttempt ? (
         <Alert className="w-full border-amber-300 bg-amber-50 text-amber-950">
           <AlertTitle>상담 책임자 변경 충돌</AlertTitle>
@@ -576,9 +381,9 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
             className="h-10"
             aria-label={`${track.subject} 상담 책임자 선택`}
             value={directorProfileId}
-            placeholder="원장 선택"
+            placeholder="미지정"
             options={[
-              { value: "", label: "원장 선택" },
+              { value: "", label: "미지정" },
               ...(currentOptionMissing
                 ? [{ value: track.directorProfileId || "", label: track.directorName || "현재 담당 원장" }]
                 : []),
@@ -592,26 +397,17 @@ export const RegistrationTrackDirectorSection = forwardRef<RegistrationTrackDire
                 value,
               })
             }}
-            disabled={Boolean(manualDirectorConflictAttempt) || directorSelectorLocked || savingManual || automaticSaving}
+            disabled={Boolean(manualDirectorConflictAttempt) || directorSelectorLocked || savingManual}
           />
         ) : (
           <span className="flex h-10 items-center text-sm font-medium text-foreground">{track.directorName || "담당자 지정 필요"}</span>
         )}
       </Label>
-      {automaticSaving ? <span role="status" className="text-xs text-muted-foreground">규칙 확인 중</span> : null}
-      {!automaticSaving && directorCatalogStatus === "loading" ? (
+      {directorCatalogStatus === "loading" ? (
         <span role="status" className="text-xs text-muted-foreground">담당자 정보 확인 중</span>
       ) : null}
-      {automaticError ? (
-        <div className="flex flex-wrap items-center gap-2">
-          <span role="alert" className="text-xs text-destructive">{automaticError}</span>
-          <Button type="button" variant="ghost" size="sm" aria-label={`${track.subject} ${catalogRefreshRequired ? "담당자 정보 다시 불러오기" : "자동 배정 다시 시도"}`} onClick={() => void retryAutomaticDefaults()} disabled={catalogRefreshing || Boolean(automaticRefreshError)}>
-            {catalogRefreshRequired ? "담당자 정보 다시 불러오기" : "자동 배정 다시 시도"}
-          </Button>
-        </div>
-      ) : null}
-      {catalogNeedsRetry && !automaticError ? (
-        <Button type="button" variant="ghost" size="sm" aria-label={`${track.subject} 담당자 정보 다시 불러오기`} onClick={() => void onRetryDirectorCatalog?.()} disabled={!onRetryDirectorCatalog || Boolean(automaticRefreshError)}>
+      {catalogNeedsRetry ? (
+        <Button type="button" variant="ghost" size="sm" aria-label={`${track.subject} 담당자 정보 다시 불러오기`} onClick={() => void retryDirectorCatalog()} disabled={!onRetryDirectorCatalog || catalogRefreshing || refreshPending}>
           담당자 정보 다시 불러오기
         </Button>
       ) : null}
@@ -1296,7 +1092,6 @@ export type RegistrationConsultationOutcomeEditorProps = {
   subject: RegistrationSubject
   consultation: OpsRegistrationConsultation
   track: OpsRegistrationTrackSummary
-  classOptions: OpsClassOption[]
   editable: boolean
   onReload: () => void | Promise<void>
   onWarning: (message: string) => void
@@ -1307,7 +1102,6 @@ export function RegistrationConsultationOutcomeEditor({
   subject,
   consultation,
   track,
-  classOptions,
   editable,
   onReload,
   onWarning,
@@ -1315,8 +1109,6 @@ export function RegistrationConsultationOutcomeEditor({
 }: RegistrationConsultationOutcomeEditorProps): JSX.Element {
   const [outcome, setOutcome] = useState<"" | "undecided" | "waiting" | "observation" | "enrollment" | "not_registered">(consultation.outcome || "")
   const [note, setNote] = useState(consultation.note || "")
-  const [waitingKind, setWaitingKind] = useState<RegistrationWaitingKind>(track.waitingDetailKind || track.waitingKind || "")
-  const [classId, setClassId] = useState("")
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
   const submissionKeys = useSubmissionKeys()
@@ -1325,15 +1117,13 @@ export function RegistrationConsultationOutcomeEditor({
     draftOutcome: outcome,
     savedNote: consultation.note,
     draftNote: note,
-    waitingKind,
-    classId,
     canEdit: editable,
   })
   useOwnedDirtyState(!refreshPending && saveState.editable && saveState.dirty, onDirtyChange)
 
   async function submit() {
     if (!outcome || !saveState.canSave || saving || refreshPending) return
-    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome, note, waitingKind, classId, revision: track.workflowRevision })
+    const normalizedDraft = JSON.stringify({ consultationId: consultation.id, outcome, note, revision: track.workflowRevision })
     const kind = "consultation-result-v2"
     const requestKey = submissionKeys.getOrCreate(kind, normalizedDraft)
     setSaving(true)
@@ -1342,8 +1132,8 @@ export function RegistrationConsultationOutcomeEditor({
         consultationId: consultation.id,
         outcome,
         note,
-        waitingKind,
-        classId,
+        waitingKind: "",
+        classId: "",
         expectedWorkflowRevision: track.workflowRevision,
         requestKey,
       })
@@ -1403,19 +1193,10 @@ export function RegistrationConsultationOutcomeEditor({
             <legend className="text-sm font-medium">상담 결과</legend>
             <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
               {CONSULTATION_OUTCOME_OPTIONS.map((option) => (
-                <Button key={option.value} type="button" aria-label={`${subject} 상담 결과 ${option.label}`} variant={outcome === option.value ? "default" : "outline"} aria-pressed={outcome === option.value} disabled={saving || !saveState.editable} onClick={() => {
-                  setOutcome(option.value)
-                  if (option.value !== "waiting") { setWaitingKind(""); setClassId("") }
-                }}>{option.label}</Button>
+                <Button key={option.value} type="button" aria-label={`${subject} 상담 결과 ${option.label}`} variant={outcome === option.value ? "default" : "outline"} aria-pressed={outcome === option.value} disabled={saving || !saveState.editable} onClick={() => setOutcome(option.value)}>{option.label}</Button>
               ))}
             </div>
           </fieldset>
-          {outcome === "waiting" ? (
-            <div className="grid gap-3 sm:grid-cols-2">
-              <RegistrationSelect aria-label={`${subject} 대기 유형`} value={waitingKind} placeholder="대기 유형 선택" onValueChange={(value) => { setWaitingKind(value as RegistrationWaitingKind); if (value !== "current_class") setClassId("") }} options={WAITING_KIND_OPTIONS} disabled={saving || !saveState.editable} />
-              {waitingKind === "current_class" ? <SubjectClassSelect subject={subject} value={classId} onChange={setClassId} classOptions={classOptions} disabled={saving || !saveState.editable} /> : null}
-            </div>
-          ) : null}
           <div className="grid gap-2">
             <Label htmlFor={`${subject}-consultation-note`}>상담 내용</Label>
             <Textarea
@@ -1902,7 +1683,7 @@ export function RegistrationMigrationReviewEditor({
     <Alert role="region" className="border-amber-300 bg-amber-50/50 text-amber-950" aria-label="과목 분리 확인 필요">
       <AlertTitle className="text-amber-950">과목 분리 확인 필요</AlertTitle>
       <AlertDescription className="grid min-w-0 justify-items-stretch gap-4 text-amber-950">
-        <p className="text-xs text-amber-900/75">기존 공통 기록을 한 과목에만 귀속하거나 공통 이력으로 남겨야 다음 업무를 진행할 수 있습니다.</p>
+        <p className="text-xs text-amber-900/75">기존 공통 기록의 귀속만 확인합니다. 등록 정보와 진행상태는 계속 입력할 수 있습니다.</p>
       <RegistrationRefreshRecovery pending={directorRefreshPending} retrying={Boolean(savingDirectorId)} onRetry={() => void retryDirectorRefresh()} ownerLabel={reviewSubjectLabel} />
       <RegistrationRefreshRecovery pending={reviewRefreshPending} retrying={saving} onRetry={() => void retryResolutionRefresh()} ownerLabel={reviewSubjectLabel} />
 
@@ -2008,10 +1789,16 @@ export function RegistrationMigrationReviewEditor({
                     { value: "", label: "대기 종류 선택" },
                     ...WAITING_KIND_OPTIONS,
                   ]}
-                  onValueChange={(value) => setWaitingKinds((current) => ({ ...current, [track.id]: value as RegistrationWaitingKind }))}
-                  disabled={Boolean(conflictState) || reviewRefreshPending || saving}
+                  onValueChange={(value) => {
+                    if (!permissions.canManage) return
+                    setWaitingKinds((current) => ({ ...current, [track.id]: value as RegistrationWaitingKind }))
+                  }}
+                  disabled={Boolean(conflictState) || reviewRefreshPending || !permissions.canManage || saving}
                 />
-                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => setClassIds((current) => ({ ...current, [track.id]: value }))} classOptions={classOptions} disabled={Boolean(conflictState) || reviewRefreshPending || saving} /> : null}
+                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => {
+                  if (!permissions.canManage) return
+                  setClassIds((current) => ({ ...current, [track.id]: value }))
+                }} classOptions={classOptions} disabled={Boolean(conflictState) || reviewRefreshPending || !permissions.canManage || saving} /> : null}
               </div>
             ) : null}
           </div>

@@ -256,7 +256,7 @@ test("mounted historical observation uses its exact attempt status and exposes n
   )
   const expectedLabels = new Map([
     ["scheduled", "청강 예정"],
-    ["attended_feedback_pending", "교사 피드백 대기"],
+    ["attended_feedback_pending", "원장 확인 대기"],
     ["completed", "청강 완료"],
     ["no_show", "불참"],
     ["canceled", "취소"],
@@ -311,6 +311,18 @@ test("mounted historical observation uses its exact attempt status and exposes n
 test("a successful observation mutation clears stale appointment warnings", async () => {
   const source = await readSource("src/features/tasks/registration-track-editor.tsx")
   assert.match(source, /const handleObservationSaved = useCallback\(async \(\) => \{\s*onWarning\(""\)/)
+})
+
+test("observation fact save only exposes a later explicit single-source message action", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+  const saveStart = source.indexOf("async function saveBooking()")
+  const saveEnd = source.indexOf("async function cancelBooking()", saveStart)
+  assert.ok(saveStart >= 0 && saveEnd > saveStart)
+  const saveBooking = source.slice(saveStart, saveEnd)
+
+  assert.match(saveBooking, /messageKind: "observation_booking",\s*sourceId: savedObservation\.observationId/)
+  assert.doesNotMatch(saveBooking, /onOpenCustomerMessage|\.preview\(|\.send\(|fetch\(/)
+  assert.match(source, /disabled=\{saving \|\| !customerMessageTarget\}/)
 })
 
 test("mounted saved observation exposes one booking AlimTalk action with the canonical observation ID", async () => {
@@ -899,57 +911,46 @@ test("no valid dialog focus target leaves Radix default focus restoration untouc
   }
 })
 
-test("withdrawal dialog wires correction validation to the field, disabled submit, and RPC guard", async () => {
+test("booking editor exposes no status-changing withdrawal action", async () => {
   const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
 
-  assert.match(
-    source,
-    /const withdrawSubmitState = getRegistrationObservationWithdrawalSubmitState\(/,
-  )
-  assert.match(source, /executeRegistrationObservationWithdrawal\(\s*withdrawSubmitState,/)
-  assert.match(source, /aria-invalid=\{Boolean\(withdrawSubmitState\.fieldError\)\}/)
-  assert.match(source, /aria-describedby=\{withdrawSubmitState\.fieldError/)
-  assert.match(
-    source,
-    /withdrawSubmitState\.fieldError \? <p[^>]*role="alert"[^>]*>\{withdrawSubmitState\.fieldError\}<\/p>/,
-  )
-  assert.match(source, /disabled=\{withdrawSubmitState\.submitDisabled\}/)
+  assert.doesNotMatch(source, /actions\.withdrawRegistrationObservation/u)
+  assert.doesNotMatch(source, />청강 철회</u)
+  assert.doesNotMatch(source, /withdrawOpen/u)
 })
 
-test("save and withdrawal dialogs wire guarded close and explicit focus return on every exit", async () => {
+test("save dialog wires guarded close and explicit focus return on every exit", async () => {
   const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
 
   assert.match(source, /const saveDialogTriggerRef = useRef<HTMLButtonElement>\(null\)/)
-  assert.match(source, /const withdrawDialogTriggerRef = useRef<HTMLButtonElement>\(null\)/)
   assert.match(source, /ref=\{saveDialogTriggerRef\}/)
-  assert.match(source, /ref=\{withdrawDialogTriggerRef\}/)
   assert.match(source, /getRegistrationObservationDialogClosePlan\(\{\s*saving,/)
   assert.equal(
     (source.match(/onOpenChange=\{handle(?:SaveConfirm|Withdraw)OpenChange\}/g) || []).length,
-    2,
-    "both controlled Dialog roots must reject close requests while saving",
+    1,
+    "the controlled save Dialog must reject close requests while saving",
   )
-  assert.equal((source.match(/onEscapeKeyDown=/g) || []).length, 2)
-  assert.equal((source.match(/onCloseAutoFocus=/g) || []).length, 2)
+  assert.equal((source.match(/onEscapeKeyDown=/g) || []).length, 1)
+  assert.equal((source.match(/onCloseAutoFocus=/g) || []).length, 1)
   const hidesDefaultCloseWhileSaving = (
     source.match(/showCloseButton=\{!saving\}/g) || []
-  ).length === 2
+  ).length === 1
   const handlesDefaultCloseExplicitly = (
     source.match(/onCloseButtonClick=\{handle(?:SaveConfirm|Withdraw)CloseButton\}/g) || []
-  ).length === 2
+  ).length === 1
   assert.equal(
     hidesDefaultCloseWhileSaving || handlesDefaultCloseExplicitly,
     true,
-    "both default X controls must be unavailable or explicitly guarded during saving",
+    "the default X control must be unavailable or explicitly guarded during saving",
   )
   assert.equal(
-    (source.match(/restoreRegistrationObservationDialogTriggerFocus\(/g) || []).length >= 3,
+    (source.match(/restoreRegistrationObservationDialogTriggerFocus\(/g) || []).length >= 2,
     true,
-    "the helper definition and both dialog close paths must restore their own trigger",
+    "the helper definition and save dialog close path must restore its trigger",
   )
   assert.equal(
     (source.match(/<DialogClose asChild>[\s\S]{0,180}<Button[^>]*disabled=\{saving \|\| mutationCommitted\}/g) || []).length,
-    2,
+    1,
     "footer close controls must not close during a mutation",
   )
 })
@@ -958,7 +959,7 @@ test("nested observation confirmations render above the registration detail moda
   const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
   const dialogContents = [...source.matchAll(/<DialogContent([\s\S]*?)>/g)].map((match) => match[1])
 
-  assert.equal(dialogContents.length, 2, "예약 저장과 청강 철회 확인창을 모두 검사한다")
+  assert.equal(dialogContents.length, 1, "예약 저장 확인창을 검사한다")
   for (const content of dialogContents) {
     assert.match(content, /className="z-\[90\]"/)
     assert.match(content, /overlayClassName="z-\[90\]"/)
@@ -970,22 +971,15 @@ test("dialog close focus falls back to the active subject tab before suppressing
   const fallbackLookup = /document\.getElementById\(`registration-subject-tab-\$\{trackId\}`\)/g
   assert.equal(
     (source.match(fallbackLookup) || []).length,
-    2,
-    "save and withdrawal dialogs must both resolve the persistent active-subject tab",
+    1,
+    "the save dialog must resolve the persistent active-subject tab",
   )
 
-  for (const [handlerName, startMarker, endMarker] of [
-    [
-      "handleSaveDialogCloseAutoFocus",
-      "function handleSaveDialogCloseAutoFocus",
-      "function handleWithdrawDialogCloseAutoFocus",
-    ],
-    [
-      "handleWithdrawDialogCloseAutoFocus",
-      "function handleWithdrawDialogCloseAutoFocus",
-      "\n  useEffect(() => {",
-    ],
-  ]) {
+  for (const [handlerName, startMarker, endMarker] of [[
+    "handleSaveDialogCloseAutoFocus",
+    "function handleSaveDialogCloseAutoFocus",
+    "\n  const selectedSession",
+  ]]) {
     const start = source.indexOf(startMarker)
     const end = source.indexOf(endMarker, start + 1)
     assert.ok(start >= 0 && end > start, `${handlerName} must remain explicit`)
@@ -1111,7 +1105,7 @@ test("booking editor delegates feedback decisions to one dedicated slot and excl
 
   assert.match(source, /saveRegistrationObservationBooking/)
   assert.match(source, /cancelRegistrationObservation/)
-  assert.match(source, /withdrawRegistrationObservation/)
+  assert.doesNotMatch(source, /actions\.withdrawRegistrationObservation/)
   assert.doesNotMatch(source, /setRegistrationWorkflowStatus|set_registration_workflow_status_v1/)
   assert.doesNotMatch(source, /target as /)
   assert.match(source, /feedbackPanel/)
@@ -1130,11 +1124,7 @@ test("booking editor delegates feedback decisions to one dedicated slot and excl
   assert.doesNotMatch(source, /function requestKey\(/)
   assert.match(source, /committedCanonicalKey/)
   assert.match(source, /저장됐지만 최신 청강 정보를 불러오지 못했습니다\./)
-  assert.match(source, /setWithdrawValueTouched\(true\)/)
-  assert.match(
-    source,
-    /const withdrawAvailable = canWithdrawRegistrationObservation\(\{\s*workflowStatus,\s*currentObservation: current,\s*\}\)/,
-  )
+  assert.doesNotMatch(source, /setWithdrawValueTouched\(true\)/)
   assert.equal(
     (caseListSource.match(/const entryAvailable = !disabled && canOpenRegistrationCaseListItem\(item\)/g) || []).length,
     2,
@@ -1185,8 +1175,8 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   assert.match(source, /force: true/)
   assert.match(source, /<RegistrationObservationFeedbackPanel/)
   assert.match(source, /feedbackPanel=\{/)
-  assert.match(source, /canKeepRegistrationObservationFeedbackHistoryMounted\(\{/)
-  assert.match(source, /observationAttemptCount: activeTrack\.observationAttemptCount/)
+  assert.match(source, /observationSummaryVisible: true/)
+  assert.match(source, /canManageActiveObservation/)
   assert.match(
     source,
     /activeFeedbackHistoryOnly\s*\? activeObservationFeedbackPanel\s*:\s*\(/,

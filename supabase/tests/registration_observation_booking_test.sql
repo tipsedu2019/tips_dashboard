@@ -1,11 +1,9 @@
 begin;
-select plan(71);
+select plan(47);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
 set local lock_timeout = '5s';
-
-create extension if not exists dblink;
 
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password,
@@ -477,11 +475,116 @@ create temporary table registration_observation_booking_results(
 ) on commit drop;
 grant all on registration_observation_booking_results to authenticated;
 
-update dashboard_private.registration_observation_runtime_settings
-set activation_version = 1,
-    updated_at = now(),
-    updated_by = '99100000-0000-4000-8000-000000000001'
-where singleton = true;
+insert into dashboard_private.registration_observation_runtime_settings(
+  singleton, activation_version, updated_at, updated_by
+)
+values (
+  true, 1, now(), '99100000-0000-4000-8000-000000000001'
+)
+on conflict (singleton) do update
+set activation_version = excluded.activation_version,
+    updated_at = excluded.updated_at,
+    updated_by = excluded.updated_by;
+
+-- The reviewed isolated baseline keeps notification control-plane rows empty.
+-- Disabled rules let this booking test exercise domain-event atomicity without
+-- materializing a delivery or contacting a provider.
+set constraints all deferred;
+
+with seed(rule_id, template_id, event_key) as (
+  values
+    (
+      '99100000-0000-4000-8000-000000000301'::uuid,
+      '99100000-0000-4000-8000-000000000401'::uuid,
+      'registration.observation_scheduled'::text
+    ),
+    (
+      '99100000-0000-4000-8000-000000000302'::uuid,
+      '99100000-0000-4000-8000-000000000402'::uuid,
+      'registration.observation_rescheduled'::text
+    ),
+    (
+      '99100000-0000-4000-8000-000000000303'::uuid,
+      '99100000-0000-4000-8000-000000000403'::uuid,
+      'registration.observation_canceled'::text
+    ),
+    (
+      '99100000-0000-4000-8000-000000000304'::uuid,
+      '99100000-0000-4000-8000-000000000404'::uuid,
+      'registration.observation_reminder_due'::text
+    ),
+    (
+      '99100000-0000-4000-8000-000000000305'::uuid,
+      '99100000-0000-4000-8000-000000000405'::uuid,
+      'registration.observation_feedback_due'::text
+    )
+)
+insert into dashboard_private.notification_rules(
+  id, scope_key, workflow_key, event_key, channel_key, audience_key,
+  rule_variant_key, delivery_mode, schedule_key, schedule_config,
+  enabled, active_template_id, revision,
+  created_by, created_actor_kind, updated_by, updated_actor_kind
+)
+select
+  seed.rule_id, 'global', 'registration', seed.event_key,
+  'google_chat', 'subject_team', 'immediate', 'immediate', null, null,
+  false, seed.template_id, 1, null, 'system', null, 'system'
+from seed
+where not exists (
+  select 1
+  from dashboard_private.notification_rules rule
+  where rule.scope_key = 'global'
+    and rule.workflow_key = 'registration'
+    and rule.event_key = seed.event_key
+);
+
+with seed(rule_id, template_id) as (
+  values
+    (
+      '99100000-0000-4000-8000-000000000301'::uuid,
+      '99100000-0000-4000-8000-000000000401'::uuid
+    ),
+    (
+      '99100000-0000-4000-8000-000000000302'::uuid,
+      '99100000-0000-4000-8000-000000000402'::uuid
+    ),
+    (
+      '99100000-0000-4000-8000-000000000303'::uuid,
+      '99100000-0000-4000-8000-000000000403'::uuid
+    ),
+    (
+      '99100000-0000-4000-8000-000000000304'::uuid,
+      '99100000-0000-4000-8000-000000000404'::uuid
+    ),
+    (
+      '99100000-0000-4000-8000-000000000305'::uuid,
+      '99100000-0000-4000-8000-000000000405'::uuid
+    )
+)
+insert into dashboard_private.notification_templates(
+  id, rule_id, version, title_template, body_template, allowed_variables,
+  payload_schema_version, checksum, created_by, created_actor_kind
+)
+select
+  seed.template_id, seed.rule_id, 1,
+  '청강 예약 상태분리 테스트', '비활성 규칙 테스트', '[]'::jsonb, 3,
+  dashboard_private.notification_seed_template_checksum_v1(
+    '청강 예약 상태분리 테스트', '비활성 규칙 테스트', '[]'::jsonb, 3
+  ),
+  null, 'system'
+from seed
+where exists (
+  select 1
+  from dashboard_private.notification_rules rule
+  where rule.id = seed.rule_id
+)
+and not exists (
+  select 1
+  from dashboard_private.notification_templates template
+  where template.id = seed.template_id
+);
+
+set constraints all immediate;
 
 select function_returns('public', 'enter_registration_observation_v1', array['uuid','integer','text'], 'jsonb');
 select function_returns('public', 'save_registration_observation_booking_v1', array['uuid','uuid','uuid','text','uuid','text','integer','integer','bigint','text'], 'jsonb');
@@ -491,8 +594,12 @@ select ok(
   has_function_privilege('authenticated', 'public.enter_registration_observation_v1(uuid,integer,text)', 'EXECUTE')
   and has_function_privilege('authenticated', 'public.save_registration_observation_booking_v1(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)', 'EXECUTE')
   and has_function_privilege('authenticated', 'public.cancel_registration_observation_v1(uuid,integer,bigint,text)', 'EXECUTE')
-  and has_function_privilege('authenticated', 'public.withdraw_registration_observation_v1(uuid,text,text,uuid,integer,bigint,bigint,text,text)', 'EXECUTE'),
-  'authenticated can execute only the public booking lifecycle surface'
+  and has_function_privilege('authenticated', 'dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)', 'EXECUTE')
+  and has_function_privilege('authenticated', 'dashboard_private.save_registration_observation_booking_v1_impl(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)', 'EXECUTE')
+  and has_function_privilege('authenticated', 'dashboard_private.cancel_registration_observation_v1_impl(uuid,integer,bigint,text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'public.withdraw_registration_observation_v1(uuid,text,text,uuid,integer,bigint,bigint,text,text)', 'EXECUTE')
+  and not has_function_privilege('authenticated', 'dashboard_private.withdraw_registration_observation_v1_impl(uuid,text,text,uuid,integer,bigint,bigint,text,text)', 'EXECUTE'),
+  'authenticated can execute the public and delegated booking surface but not retired withdrawal'
 );
 select ok(
   not has_function_privilege('anon', 'public.enter_registration_observation_v1(uuid,integer,text)', 'EXECUTE')
@@ -502,12 +609,12 @@ select ok(
   'anon service and direct-write surfaces remain closed'
 );
 
-select pg_temp.registration_observation_booking_set_actor('99100000-0000-4000-8000-000000000004');
+select pg_temp.registration_observation_booking_set_actor('99100000-0000-4000-8000-000000000003');
 set local role authenticated;
 select throws_ok(
   $$select public.enter_registration_observation_v1('99100000-0000-4000-8000-000000000106', 1, 'unrelated-enter')$$,
   'P0002', 'registration_observation_not_found',
-  'unrelated actor cannot enter an existing observation track'
+  'a teacher cannot enter an observation track because registration writes are manager-only'
 );
 reset role;
 
@@ -538,8 +645,8 @@ select throws_ok(
   $$select pg_temp.registration_observation_save_revision_probe(
     null, null, null, null, 'invalid-new-missing-workflow'
   )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'new booking rejects a missing required workflow revision'
+  'P0001', 'registration_observation_save_unexpected_success',
+  'new booking accepts a missing workflow revision and the probe rolls back its successful write'
 );
 select throws_ok(
   $$select pg_temp.registration_observation_save_revision_probe(
@@ -616,8 +723,9 @@ set local role authenticated;
 
 insert into registration_observation_booking_results(result_key, response)
 select 'enter', public.enter_registration_observation_v1(
-  '99100000-0000-4000-8000-000000000106', 1, 'enter-once'
+  '99100000-0000-4000-8000-000000000106', 999, 'enter-once'
 );
+reset role;
 select is(
   (
     select pg_catalog.jsonb_build_object(
@@ -626,6 +734,15 @@ select is(
       'returnStatus', track.observation_return_workflow_status,
       'attempts', track.observation_attempt_count,
       'response', result.response,
+      'eventCount', (
+        select count(*) from public.ops_task_events event
+        where event.task_id = track.task_id
+      ),
+      'receiptCount', (
+        select count(*)
+        from dashboard_private.registration_observation_mutation_requests request
+        where request.request_key = 'enter-once'
+      ),
       'observationCount', (
         select count(*) from public.ops_registration_observations observation
         where observation.track_id = track.id
@@ -636,10 +753,9 @@ select is(
     where track.id = '99100000-0000-4000-8000-000000000106'
       and result.result_key = 'enter'
   ),
-  '{"status":"observation_requested","revision":2,"returnStatus":"consultation_completed","attempts":0,"response":{"operation":"enter","requestKey":"enter-once","trackId":"99100000-0000-4000-8000-000000000106","workflowStatus":"observation_requested","workflowRevision":2,"observation":null,"appointment":null,"changed":true},"observationCount":0}'::jsonb,
-  'enter changes only workflow revision and return status'
+  '{"status":"consultation_completed","revision":1,"returnStatus":null,"attempts":0,"response":{"operation":"enter","requestKey":"enter-once","trackId":"99100000-0000-4000-8000-000000000106","workflowStatus":"consultation_completed","workflowRevision":1,"observation":null,"appointment":null,"changed":false},"eventCount":0,"receiptCount":1,"observationCount":0}'::jsonb,
+  'enter is a no-op even when its compatibility workflow revision is stale'
 );
-reset role;
 
 update dashboard_private.registration_observation_runtime_settings
 set activation_version = 0
@@ -647,7 +763,7 @@ where singleton = true;
 set local role authenticated;
 select is(
   public.enter_registration_observation_v1(
-    '99100000-0000-4000-8000-000000000106', 1, 'enter-once'
+    '99100000-0000-4000-8000-000000000106', 999, 'enter-once'
   ),
   (select response from registration_observation_booking_results where result_key = 'enter'),
   'same fingerprint replays byte-identical JSON before runtime guard'
@@ -661,6 +777,38 @@ reset role;
 update dashboard_private.registration_observation_runtime_settings
 set activation_version = 1
 where singleton = true;
+
+set local role authenticated;
+select lives_ok(
+  $$select public.enter_registration_observation_v1(
+    '99100000-0000-4000-8000-000000000106', null, 'enter-stale-revision'
+  )$$,
+  'enter also accepts a null compatibility workflow revision'
+);
+reset role;
+select is(
+  (
+    select pg_catalog.jsonb_build_object(
+      'workflowStatus', track.workflow_status,
+      'workflowRevision', track.workflow_revision,
+      'returnStatus', track.observation_return_workflow_status,
+      'eventCount', (
+        select pg_catalog.count(*)
+        from public.ops_task_events event
+        where event.task_id = track.task_id
+      ),
+      'receiptCount', (
+        select pg_catalog.count(*)
+        from dashboard_private.registration_observation_mutation_requests request
+        where request.request_key = 'enter-stale-revision'
+      )
+    )
+    from public.ops_registration_subject_tracks track
+    where track.id = '99100000-0000-4000-8000-000000000106'
+  ),
+  '{"workflowStatus":"consultation_completed","workflowRevision":1,"returnStatus":null,"eventCount":0,"receiptCount":1}'::jsonb,
+  'enter leaves manual status and audit unchanged while storing its no-op receipt'
+);
 
 set local role authenticated;
 insert into registration_observation_booking_results(result_key, response)
@@ -895,24 +1043,24 @@ select throws_ok(
     '99100000-0000-4000-8000-000000000104', null,
     null, 1, 1, 'reschedule-stale'
   )$$,
-  '40001', null,
-  'stale reschedule revisions close with SQLSTATE 40001'
+  '23514', 'registration_observation_stale_revision',
+  'stale reschedule revisions are non-retryable domain conflicts'
 );
 select throws_ok(
   $$select pg_temp.registration_observation_reschedule_stale_probe(
     (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     2, 1, 'reschedule-observation-stale'
   )$$,
-  '40001', null,
-  'observation-only stale reschedule closes with SQLSTATE 40001'
+  '23514', 'registration_observation_stale_revision',
+  'observation-only stale reschedule uses the exact non-retryable domain SQLSTATE'
 );
 select throws_ok(
   $$select pg_temp.registration_observation_reschedule_stale_probe(
     (select (response -> 'observation' ->> 'observationId')::uuid from registration_observation_booking_results where result_key = 'book-1'),
     1, 2, 'reschedule-notification-stale'
   )$$,
-  '40001', null,
-  'notification-only stale reschedule closes independently with SQLSTATE 40001'
+  '23514', 'registration_observation_stale_revision',
+  'notification-only stale reschedule uses the exact non-retryable domain SQLSTATE'
 );
 select is(
   (
@@ -1019,204 +1167,63 @@ select public.cancel_registration_observation_v1(
   1, 1, 'cancel-second'
 );
 
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'return_to_previous', 'consultation_completed',
-    '99100000-0000-4000-8000-000000000148', null, null,
-    'withdraw-return-forbidden-decision-id'
-  )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'return withdrawal rejects forbidden decision inputs'
+select ok(
+  not has_function_privilege(
+    'authenticated',
+    'public.withdraw_registration_observation_v1(uuid,text,text,uuid,integer,bigint,bigint,text,text)',
+    'EXECUTE'
+  )
+  and not has_function_privilege(
+    'authenticated',
+    'dashboard_private.withdraw_registration_observation_v1_impl(uuid,text,text,uuid,integer,bigint,bigint,text,text)',
+    'EXECUTE'
+  )
+  and pg_catalog.pg_get_functiondef(
+    'public.withdraw_registration_observation_v1(uuid,text,text,uuid,integer,bigint,bigint,text,text)'::regprocedure
+  ) like '%dashboard_private.withdraw_registration_observation_v1_impl%',
+  'the retired public wrapper delegates to an owner-only implementation with no authenticated grant'
 );
+
+reset role;
 select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'director_decision', 'enrollment_requested',
-    '99100000-0000-4000-8000-000000000148', null, null,
-    'withdraw-partial-id-only'
+  $$select dashboard_private.withdraw_registration_observation_v1_impl(
+    '99100000-0000-4000-8000-000000000136',
+    'return_to_previous', 'consultation_completed', null,
+    1, null, null, null, 'withdraw-retired-owner'
   )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'director withdrawal rejects a decision ID without either revision'
+  '55000', 'registration_observation_withdraw_retired',
+  'the owner-only compatibility implementation fails closed with the exact retired contract'
 );
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'director_decision', 'enrollment_requested', null, 7, null,
-    'withdraw-partial-observation-only'
+set local role authenticated;
+
+select lives_ok(
+  $$select public.set_registration_workflow_status_v1(
+    '99100000-0000-4000-8000-000000000166',
+    'enrollment_requested', 1, 'manual-status-with-active-observation'
   )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'director withdrawal rejects an observation revision without ID or feedback revision'
+  'manual registration status remains editable despite an active observation'
 );
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'director_decision', 'enrollment_requested', null, null, 3,
-    'withdraw-partial-feedback-only'
-  )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'director withdrawal rejects a feedback revision without ID or observation revision'
-);
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'director_decision', 'enrollment_requested',
-    '99100000-0000-4000-8000-000000000148', 7, null,
-    'withdraw-partial-missing-feedback'
-  )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'director withdrawal rejects ID and observation revision without feedback revision'
-);
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'director_decision', 'enrollment_requested',
-    '99100000-0000-4000-8000-000000000148', null, 3,
-    'withdraw-partial-missing-observation'
-  )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'director withdrawal rejects ID and feedback revision without observation revision'
-);
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_revision_probe(
-    'director_decision', 'enrollment_requested', null, 7, 3,
-    'withdraw-partial-missing-id'
-  )$$,
-  '22023', 'registration_observation_revision_combination_invalid',
-  'director withdrawal rejects both revisions without a decision ID'
-);
+
 select is(
   (
     select pg_catalog.jsonb_build_object(
       'workflowStatus', track.workflow_status,
       'workflowRevision', track.workflow_revision,
-      'returnStatus', track.observation_return_workflow_status,
-      'decision', decision_observation.decision_kind,
-      'observationRevision', decision_observation.revision,
-      'feedbackRevision', decision_observation.feedback_revision,
-      'laterCanceledDecision', later_observation.decision_kind,
-      'auditCount', (
-        select count(*)
-        from public.ops_task_events event
-        where event.task_id = track.task_id
-      ),
-      'receiptCount', (
-        select count(*)
-        from dashboard_private.registration_observation_mutation_requests request
-        where request.request_key in (
-          'withdraw-return-forbidden-decision-id',
-          'withdraw-partial-id-only',
-          'withdraw-partial-observation-only',
-          'withdraw-partial-feedback-only',
-          'withdraw-partial-missing-feedback',
-          'withdraw-partial-missing-observation',
-          'withdraw-partial-missing-id'
-        )
-      )
-    )
-    from public.ops_registration_subject_tracks track
-    join public.ops_registration_observations decision_observation
-      on decision_observation.id = '99100000-0000-4000-8000-000000000148'
-    join public.ops_registration_observations later_observation
-      on later_observation.id = '99100000-0000-4000-8000-000000000158'
-    where track.id = '99100000-0000-4000-8000-000000000146'
-  ),
-  '{"workflowStatus":"observation_requested","workflowRevision":4,"returnStatus":"consultation_completed","decision":"re_observation","observationRevision":7,"feedbackRevision":3,"laterCanceledDecision":null,"auditCount":0,"receiptCount":0}'::jsonb,
-  'invalid withdraw revision combinations leave workflow observation audit and receipts unchanged'
-);
-
-create temporary table registration_observation_withdraw_side_effect_baseline
-on commit drop
-as
-select
-  track.id as track_id,
-  track.task_id,
-  (
-    select count(*)
-    from public.ops_registration_enrollments enrollment
-    where enrollment.track_id = track.id
-  ) as enrollment_rows,
-  (
-    select count(*)
-    from public.ops_registration_admission_batches admission
-    where admission.task_id = track.task_id
-  ) as admission_rows,
-  (
-    select count(*)
-    from public.ops_registration_admission_batches payment
-    where payment.task_id = track.task_id
-      and payment.payment_confirmed_at is not null
-  ) as payment_rows
-from public.ops_registration_subject_tracks track
-where track.id in (
-  '99100000-0000-4000-8000-000000000116',
-  '99100000-0000-4000-8000-000000000136',
-  '99100000-0000-4000-8000-000000000146',
-  '99100000-0000-4000-8000-000000000176'
-);
-
-insert into registration_observation_booking_results(result_key, response)
-select 'withdraw-return', public.withdraw_registration_observation_v1(
-  '99100000-0000-4000-8000-000000000116', 'return_to_previous',
-  'consultation_completed', null, 2, null, null, null, 'withdraw-return'
-);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'status', track.workflow_status,
-      'revision', track.workflow_revision,
-      'returnStatus', track.observation_return_workflow_status,
       'attempts', track.observation_attempt_count,
-      'observation', result.response -> 'observation',
-      'appointment', result.response -> 'appointment'
-    )
-    from public.ops_registration_subject_tracks track
-    join registration_observation_booking_results result on result.result_key = 'withdraw-return'
-    where track.id = '99100000-0000-4000-8000-000000000116'
-  ),
-  '{"status":"consultation_completed","revision":3,"returnStatus":null,"attempts":2,"observation":null,"appointment":null}'::jsonb,
-  'return withdrawal changes only track workflow and clears return status'
-);
-
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_exit_kind_probe(
-    null, 'withdraw-null-exit-kind'
-  )$$,
-  '22023', 'registration_observation_withdraw_invalid',
-  'withdraw rejects a NULL exit kind before mutating an otherwise valid enrollment transition'
-);
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_exit_kind_probe(
-    '', 'withdraw-empty-exit-kind'
-  )$$,
-  '22023', 'registration_observation_withdraw_invalid',
-  'withdraw rejects an empty exit kind before mutating an otherwise valid enrollment transition'
-);
-select throws_ok(
-  $$select pg_temp.registration_observation_withdraw_exit_kind_probe(
-    '   ', 'withdraw-whitespace-exit-kind'
-  )$$,
-  '22023', 'registration_observation_withdraw_invalid',
-  'withdraw rejects a whitespace exit kind before mutating an otherwise valid enrollment transition'
-);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'workflowStatus', track.workflow_status,
-      'workflowRevision', track.workflow_revision,
-      'returnStatus', track.observation_return_workflow_status,
+      'observationStatus', observation.status,
       'observationRevision', observation.revision,
+      'appointmentStatus', appointment.status,
       'notificationRevision', appointment.notification_revision,
-      'auditCount', (
+      'decision', observation.decision_kind,
+      'enrollments', (
         select count(*)
-        from public.ops_task_events event
-        where event.task_id = track.task_id
-          and event.event_type = 'registration_track_event'
-          and (event.after_value::jsonb ->> 'event_type')
-            = 'registration_observation_withdrawn'
+        from public.ops_registration_enrollments enrollment
+        where enrollment.track_id = track.id
       ),
-      'receiptCount', (
+      'admissionBatches', (
         select count(*)
-        from dashboard_private.registration_observation_mutation_requests request
-        where request.request_key in (
-          'withdraw-null-exit-kind',
-          'withdraw-empty-exit-kind',
-          'withdraw-whitespace-exit-kind'
-        )
+        from public.ops_registration_admission_batches batch
+        where batch.task_id = track.task_id
       )
     )
     from public.ops_registration_subject_tracks track
@@ -1224,444 +1231,70 @@ select is(
       on observation.track_id = track.id
     join public.ops_registration_appointments appointment
       on appointment.id = observation.appointment_id
-    where track.id = '99100000-0000-4000-8000-000000000136'
-  ),
-  '{"workflowStatus":"observation_requested","workflowRevision":1,"returnStatus":"waiting_new_class","observationRevision":2,"notificationRevision":2,"auditCount":0,"receiptCount":0}'::jsonb,
-  'invalid exit kinds leave workflow revisions observation appointment audit and receipts unchanged'
-);
-
-select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000126', 'observation_requested', 1,
-    'generic-target-observation'
-  )$$,
-  '55000', 'registration_observation_transition_requires_action',
-  'generic RPC rejects an observation target with the action error'
-);
-select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000136', 'enrollment_requested', 1,
-    'generic-source-observation'
-  )$$,
-  '55000', 'registration_observation_transition_requires_action',
-  'generic RPC rejects an observation source even with canceled-only history'
-);
-select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000166', 'enrollment_requested', 1,
-    'generic-active-scheduled'
-  )$$,
-  '55000', 'registration_observation_transition_requires_action',
-  'generic RPC rejects a normal source with an undecided scheduled observation'
-);
-update public.ops_registration_observations observation
-set status = 'attended_feedback_pending',
-    attendance = 'attended',
-    attendance_recorded_by = '99100000-0000-4000-8000-000000000001',
-    attendance_recorded_at = now(),
-    updated_at = now()
-where observation.id = '99100000-0000-4000-8000-000000000168';
-select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000166', 'enrollment_requested', 1,
-    'generic-active-feedback-pending'
-  )$$,
-  '55000', 'registration_observation_transition_requires_action',
-  'generic RPC rejects a normal source with undecided attended feedback pending'
-);
-update public.ops_registration_observations observation
-set status = 'completed',
-    suitability_result = 'unfit',
-    feedback_reason = '활성 청강 generic guard 검증',
-    feedback_submitted_by = '99100000-0000-4000-8000-000000000003',
-    feedback_submitted_at = now(),
-    feedback_revision = 1,
-    updated_at = now()
-where observation.id = '99100000-0000-4000-8000-000000000168';
-select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000166', 'enrollment_requested', 1,
-    'generic-active-completed'
-  )$$,
-  '55000', 'registration_observation_transition_requires_action',
-  'generic RPC rejects a normal source with an undecided completed observation'
-);
-update public.ops_registration_observations observation
-set status = 'no_show',
-    attendance = 'no_show',
-    suitability_result = null,
-    feedback_reason = null,
-    feedback_submitted_by = null,
-    feedback_submitted_at = null,
-    updated_at = now()
-where observation.id = '99100000-0000-4000-8000-000000000168';
-select throws_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000166', 'enrollment_requested', 1,
-    'generic-active-no-show'
-  )$$,
-  '55000', 'registration_observation_transition_requires_action',
-  'generic RPC rejects a normal source with an undecided no-show observation'
-);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'workflowStatus', track.workflow_status,
-      'workflowRevision', track.workflow_revision,
-      'auditCount', (
-        select count(*)
-        from public.ops_task_events event
-        where event.task_id = track.task_id
-      ),
-      'receiptCount', (
-        select count(*)
-        from dashboard_private.ops_registration_mutations mutation
-        where mutation.task_id = track.task_id
-      )
-    )
-    from public.ops_registration_subject_tracks track
     where track.id = '99100000-0000-4000-8000-000000000166'
   ),
-  '{"workflowStatus":"consultation_completed","workflowRevision":1,"auditCount":0,"receiptCount":0}'::jsonb,
-  'active undecided observation guards leave normal-source workflow audit and receipts unchanged'
-);
-select lives_ok(
-  $$select public.set_registration_workflow_status_v1(
-    '99100000-0000-4000-8000-000000000126', 'enrollment_requested', 1,
-    'generic-plain-enrollment'
-  )$$,
-  'generic consultation to enrollment remains compatible without observations'
+  '{"workflowStatus":"enrollment_requested","workflowRevision":2,"attempts":1,"observationStatus":"scheduled","observationRevision":1,"appointmentStatus":"scheduled","notificationRevision":1,"decision":null,"enrollments":0,"admissionBatches":0}'::jsonb,
+  'manual status editing leaves observation, notification, admission, and enrollment facts unchanged'
 );
 
-insert into registration_observation_booking_results(result_key, response)
-select 'withdraw-general', public.withdraw_registration_observation_v1(
-  '99100000-0000-4000-8000-000000000136', 'director_decision',
-  'enrollment_requested', null, 1, null, null, null, 'withdraw-general'
-);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'status', track.workflow_status,
-      'revision', track.workflow_revision,
-      'attempts', track.observation_attempt_count,
-      'decision', observation.decision_kind,
-      'observationRevision', observation.revision,
-      'notificationRevision', appointment.notification_revision
-    )
-    from public.ops_registration_subject_tracks track
-    join public.ops_registration_observations observation on observation.track_id = track.id
-    join public.ops_registration_appointments appointment on appointment.id = observation.appointment_id
-    where track.id = '99100000-0000-4000-8000-000000000136'
-  ),
-  '{"status":"enrollment_requested","revision":2,"attempts":1,"decision":null,"observationRevision":2,"notificationRevision":2}'::jsonb,
-  'general director withdrawal can choose enrollment after canceled-only history without an observation decision'
-);
-
-select lives_ok(
-  $$insert into registration_observation_booking_results(result_key, response)
-    select 'withdraw-general-unfit', public.withdraw_registration_observation_v1(
-      '99100000-0000-4000-8000-000000000176', 'director_decision',
-      'enrollment_requested', null, 3, null, null, null,
-      'withdraw-general-unfit'
-    )$$,
-  'general director decision does not reject enrollment for unfit suitability'
-);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'status', track.workflow_status,
-      'workflowRevision', track.workflow_revision,
-      'returnStatus', track.observation_return_workflow_status,
-      'attempts', track.observation_attempt_count,
-      'decision', decision_observation.decision_kind,
-      'suitability', decision_observation.suitability_result,
-      'observationRevision', decision_observation.revision,
-      'feedbackRevision', decision_observation.feedback_revision,
-      'notificationRevision', decision_appointment.notification_revision,
-      'laterCanceledDecision', later_observation.decision_kind,
-      'laterCanceledRevision', later_observation.revision,
-      'responseObservation', result.response -> 'observation'
-    )
-    from public.ops_registration_subject_tracks track
-    join public.ops_registration_observations decision_observation
-      on decision_observation.id = '99100000-0000-4000-8000-000000000178'
-    join public.ops_registration_appointments decision_appointment
-      on decision_appointment.id = decision_observation.appointment_id
-    join public.ops_registration_observations later_observation
-      on later_observation.id = '99100000-0000-4000-8000-000000000188'
-    join registration_observation_booking_results result
-      on result.result_key = 'withdraw-general-unfit'
-    where track.id = '99100000-0000-4000-8000-000000000176'
-  ),
-  '{"status":"enrollment_requested","workflowRevision":4,"returnStatus":null,"attempts":2,"decision":"not_registered","suitability":"unfit","observationRevision":5,"feedbackRevision":2,"notificationRevision":4,"laterCanceledDecision":null,"laterCanceledRevision":1,"responseObservation":null}'::jsonb,
-  'general director enrollment succeeds with an unfit latest decision-bearing observation and only later canceled history'
-);
-
-select throws_ok(
-  $$select public.withdraw_registration_observation_v1(
-    '99100000-0000-4000-8000-000000000146', 'director_decision',
-    'enrollment_requested', '99100000-0000-4000-8000-000000000148',
-    4, 7, 2, '사유', 'withdraw-correction-stale'
-  )$$,
-  '40001', null,
-  'stale correction feedback revision closes with SQLSTATE 40001'
-);
-select throws_ok(
-  $$select public.withdraw_registration_observation_v1(
-    '99100000-0000-4000-8000-000000000146', 'director_decision',
-    'enrollment_requested', '99100000-0000-4000-8000-000000000148',
-    4, 7, 3, null, 'withdraw-correction-no-reason'
-  )$$,
-  '22023', 'registration_observation_correction_reason_required',
-  're-observation correction requires a nonblank reason'
-);
-insert into registration_observation_booking_results(result_key, response)
-select 'withdraw-correction', public.withdraw_registration_observation_v1(
-  '99100000-0000-4000-8000-000000000146', 'director_decision',
-  'enrollment_requested', '99100000-0000-4000-8000-000000000148',
-  4, 7, 3, '원장 재검토로 등록 결정', 'withdraw-correction'
-);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'status', track.workflow_status,
-      'workflowRevision', track.workflow_revision,
-      'attempts', track.observation_attempt_count,
-      'decision', observation.decision_kind,
-      'suitability', observation.suitability_result,
-      'observationRevision', observation.revision,
-      'feedbackRevision', observation.feedback_revision,
-      'notificationRevision', appointment.notification_revision,
-      'laterCanceledDecision', later_observation.decision_kind
-    )
-    from public.ops_registration_subject_tracks track
-    join public.ops_registration_observations observation
-      on observation.id = '99100000-0000-4000-8000-000000000148'
-    join public.ops_registration_appointments appointment on appointment.id = observation.appointment_id
-    join public.ops_registration_observations later_observation
-      on later_observation.id = '99100000-0000-4000-8000-000000000158'
-    where track.id = observation.track_id
-  ),
-  '{"status":"enrollment_requested","workflowRevision":5,"attempts":2,"decision":"enrollment","suitability":"unfit","observationRevision":8,"feedbackRevision":3,"notificationRevision":4,"laterCanceledDecision":null}'::jsonb,
-  're-observation correction permits enrollment independent of suitability and changes only exact revisions'
-);
 select ok(
-  exists (
-    select 1
-    from public.ops_task_events event
-    where event.task_id = '99100000-0000-4000-8000-000000000145'
-      and event.event_type = 'registration_track_event'
-      and (event.after_value::jsonb ->> 'event_type') = 'registration_observation_withdrawn'
-      and event.after_value::jsonb -> 'metadata' @> '{"beforeDecision":"re_observation","afterDecision":"enrollment","reason":"원장 재검토로 등록 결정"}'::jsonb
-  ),
-  'correction audit contains exact before after decision and required reason'
-);
-
-select is(
   (
-    select count(*)
-    from public.ops_registration_enrollments enrollment
-    where enrollment.track_id in (
-      '99100000-0000-4000-8000-000000000116',
-      '99100000-0000-4000-8000-000000000136',
-      '99100000-0000-4000-8000-000000000146'
+    select pg_catalog.bool_and(
+      definition not like '%40001%'
+      and definition like '%pg_catalog.pg_advisory_xact_lock%'
+      and definition like '%for update%'
     )
-  ),
-  0::bigint,
-  'booking and withdrawal lifecycle creates no enrollment rows'
-);
-
-select is(
-  (
-    select pg_catalog.jsonb_agg(
-      pg_catalog.jsonb_build_object(
-        'trackId', baseline.track_id,
-        'enrollmentBefore', baseline.enrollment_rows,
-        'enrollmentAfter', (
-          select count(*)
-          from public.ops_registration_enrollments enrollment
-          where enrollment.track_id = baseline.track_id
-        ),
-        'admissionBefore', baseline.admission_rows,
-        'admissionAfter', (
-          select count(*)
-          from public.ops_registration_admission_batches admission
-          where admission.task_id = baseline.task_id
-        ),
-        'paymentBefore', baseline.payment_rows,
-        'paymentAfter', (
-          select count(*)
-          from public.ops_registration_admission_batches payment
-          where payment.task_id = baseline.task_id
-            and payment.payment_confirmed_at is not null
-        )
+    from (
+      select pg_catalog.lower(pg_catalog.pg_get_functiondef(procedure.oid))
+        as definition
+      from pg_catalog.pg_proc procedure
+      where procedure.oid in (
+        'dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)'::regprocedure,
+        'dashboard_private.save_registration_observation_booking_v1_impl(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)'::regprocedure,
+        'dashboard_private.cancel_registration_observation_v1_impl(uuid,integer,bigint,text)'::regprocedure
       )
-      order by baseline.track_id
-    )
-    from registration_observation_withdraw_side_effect_baseline baseline
+    ) source
   ),
-  '[{"trackId":"99100000-0000-4000-8000-000000000116","enrollmentBefore":0,"enrollmentAfter":0,"admissionBefore":0,"admissionAfter":0,"paymentBefore":0,"paymentAfter":0},{"trackId":"99100000-0000-4000-8000-000000000136","enrollmentBefore":0,"enrollmentAfter":0,"admissionBefore":0,"admissionAfter":0,"paymentBefore":0,"paymentAfter":0},{"trackId":"99100000-0000-4000-8000-000000000146","enrollmentBefore":0,"enrollmentAfter":0,"admissionBefore":0,"admissionAfter":0,"paymentBefore":0,"paymentAfter":0},{"trackId":"99100000-0000-4000-8000-000000000176","enrollmentBefore":0,"enrollmentAfter":0,"admissionBefore":0,"admissionAfter":0,"paymentBefore":0,"paymentAfter":0}]'::jsonb,
-  'every successful withdrawal branch leaves enrollment admission and payment row counts unchanged'
+  'final observation mutations retain advisory and row locks without a synthetic retryable 40001'
 );
 
-create temporary table registration_observation_concurrency_results(
-  scenario text not null,
-  worker text not null,
-  sqlstate text not null,
-  response jsonb,
-  message text
-) on commit drop;
-
-select dblink_connect('booking_withdraw_book', 'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr()) || ' port=5432 dbname=' || current_database() || ' user=postgres password=postgres');
-select dblink_connect('booking_withdraw_exit', 'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr()) || ' port=5432 dbname=' || current_database() || ' user=postgres password=postgres');
-select dblink_connect('reschedule_cancel_reschedule', 'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr()) || ' port=5432 dbname=' || current_database() || ' user=postgres password=postgres');
-select dblink_connect('reschedule_cancel_cancel', 'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr()) || ' port=5432 dbname=' || current_database() || ' user=postgres password=postgres');
-
-select dblink_exec(connection_name, $remote$
-  create or replace function pg_temp.registration_observation_capture(p_sql text)
-  returns table(result_sqlstate text, response jsonb, message text)
-  language plpgsql
-  as $capture$
-  begin
-    begin
-      execute p_sql into response;
-      result_sqlstate := '00000';
-      message := null;
-      return next;
-    exception
-      when others then
-        get stacked diagnostics result_sqlstate = returned_sqlstate, message = message_text;
-        response := null;
-        return next;
-    end;
-  end;
-  $capture$;
-  do $actor$
-  begin
-    perform pg_catalog.set_config('request.jwt.claim.sub', '99000000-0000-4000-8000-000000000001', false);
-    perform pg_catalog.set_config('request.jwt.claim.role', 'authenticated', false);
-  end;
-  $actor$;
-  set role authenticated;
-$remote$)
-from (values
-  ('booking_withdraw_book'),
-  ('booking_withdraw_exit'),
-  ('reschedule_cancel_reschedule'),
-  ('reschedule_cancel_cancel')
-) connection(connection_name);
-
-select dblink_send_query(
-  'booking_withdraw_book',
-  $query$select * from pg_temp.registration_observation_capture($statement$
-    with delay as materialized (select pg_catalog.pg_sleep(0.35))
-    select public.save_registration_observation_booking_v1(
-      '99000000-0000-4000-8000-000000000106', null,
-      '99000000-0000-4000-8000-000000000103', 'normalized',
-      '99000000-0000-4000-8000-000000000104', null,
-      1, null, null, 'runner-book-race'
-    ) from delay
-  $statement$)$query$
-);
-select dblink_send_query(
-  'booking_withdraw_exit',
-  $query$select * from pg_temp.registration_observation_capture($statement$
-    select public.withdraw_registration_observation_v1(
-      '99000000-0000-4000-8000-000000000106', 'return_to_previous',
-      'consultation_completed', null, 1, null, null, null,
-      'runner-withdraw-race'
-    )
-  $statement$)$query$
-);
-insert into registration_observation_concurrency_results
-select 'book-withdraw', 'book', result.*
-from dblink_get_result('booking_withdraw_book')
-  as result(sqlstate text, response jsonb, message text);
-insert into registration_observation_concurrency_results
-select 'book-withdraw', 'withdraw', result.*
-from dblink_get_result('booking_withdraw_exit')
-  as result(sqlstate text, response jsonb, message text);
-select is(
+select ok(
   (
-    select pg_catalog.jsonb_build_object(
-      'successes', count(*) filter (where sqlstate = '00000'),
-      'stale', count(*) filter (where sqlstate = '40001'),
-      'attempts', (
-        select observation_attempt_count
-        from public.ops_registration_subject_tracks
-        where id = '99000000-0000-4000-8000-000000000106'
-      ),
-      'observations', (
-        select count(*) from public.ops_registration_observations
-        where track_id = '99000000-0000-4000-8000-000000000106'
+    select pg_catalog.bool_and(
+      pg_catalog.strpos(
+        definition,
+        'from dashboard_private.registration_observation_mutation_requests'
+      ) > 0
+      and pg_catalog.strpos(
+        definition,
+        'from dashboard_private.registration_observation_mutation_requests'
+      ) < pg_catalog.strpos(
+        definition,
+        'perform dashboard_private.assert_registration_observation_runtime_v1()'
+      )
+      and pg_catalog.strpos(
+        definition,
+        'perform dashboard_private.assert_registration_observation_runtime_v1()'
+      ) < pg_catalog.strpos(
+        definition,
+        'perform dashboard_private.assert_registration_observation_manager_access_v1('
       )
     )
-    from registration_observation_concurrency_results
-    where scenario = 'book-withdraw'
-  ),
-  '{"successes":1,"stale":1,"attempts":0,"observations":0}'::jsonb,
-  'book versus withdraw finishes without deadlock and failed insert increments nothing'
-);
-
-select dblink_send_query(
-  'reschedule_cancel_reschedule',
-  $query$select * from pg_temp.registration_observation_capture($statement$
-    select public.save_registration_observation_booking_v1(
-      '99000000-0000-4000-8000-000000000116',
-      '99000000-0000-4000-8000-000000000118',
-      '99000000-0000-4000-8000-000000000103', 'normalized',
-      '99000000-0000-4000-8000-000000000114', null,
-      null, 1, 1, 'runner-reschedule-race'
-    )
-  $statement$)$query$
-);
-select dblink_send_query(
-  'reschedule_cancel_cancel',
-  $query$select * from pg_temp.registration_observation_capture($statement$
-    select public.cancel_registration_observation_v1(
-      '99000000-0000-4000-8000-000000000118', 1, 1,
-      'runner-cancel-race'
-    )
-  $statement$)$query$
-);
-insert into registration_observation_concurrency_results
-select 'reschedule-cancel', 'reschedule', result.*
-from dblink_get_result('reschedule_cancel_reschedule')
-  as result(sqlstate text, response jsonb, message text);
-insert into registration_observation_concurrency_results
-select 'reschedule-cancel', 'cancel', result.*
-from dblink_get_result('reschedule_cancel_cancel')
-  as result(sqlstate text, response jsonb, message text);
-select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'successes', count(*) filter (where sqlstate = '00000'),
-      'stale', count(*) filter (where sqlstate = '40001'),
-      'observationRevision', (
-        select revision from public.ops_registration_observations
-        where id = '99000000-0000-4000-8000-000000000118'
-      ),
-      'notificationRevision', (
-        select notification_revision from public.ops_registration_appointments
-        where id = '99000000-0000-4000-8000-000000000117'
-      ),
-      'events', (
-        select count(*) from dashboard_private.registration_observation_domain_events
-        where observation_id = '99000000-0000-4000-8000-000000000118'
+    from (
+      select pg_catalog.lower(pg_catalog.pg_get_functiondef(procedure.oid))
+        as definition
+      from pg_catalog.pg_proc procedure
+      where procedure.oid in (
+        'dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)'::regprocedure,
+        'dashboard_private.save_registration_observation_booking_v1_impl(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)'::regprocedure,
+        'dashboard_private.cancel_registration_observation_v1_impl(uuid,integer,bigint,text)'::regprocedure
       )
-    )
-    from registration_observation_concurrency_results
-    where scenario = 'reschedule-cancel'
+    ) source
   ),
-  '{"successes":1,"stale":1,"observationRevision":2,"notificationRevision":2,"events":1}'::jsonb,
-  'reschedule versus cancel serializes with one success one stale and one event'
+  'idempotent replay and key conflicts resolve before runtime readiness and manager access checks'
 );
 
-select dblink_disconnect('booking_withdraw_book');
-select dblink_disconnect('booking_withdraw_exit');
-select dblink_disconnect('reschedule_cancel_reschedule');
-select dblink_disconnect('reschedule_cancel_cancel');
-
+reset role;
 create or replace function pg_temp.registration_observation_fail_event()
 returns trigger
 language plpgsql
@@ -1673,6 +1306,7 @@ $$;
 create trigger registration_observation_fail_event
 before insert on dashboard_private.registration_observation_domain_events
 for each row execute function pg_temp.registration_observation_fail_event();
+set local role authenticated;
 select throws_ok(
   $$select public.save_registration_observation_booking_v1(
     '99100000-0000-4000-8000-000000000156', null,
@@ -1683,6 +1317,7 @@ select throws_ok(
   'P0001', 'synthetic_registration_observation_event_failure',
   'domain event failure aborts the booking statement'
 );
+reset role;
 drop trigger registration_observation_fail_event
   on dashboard_private.registration_observation_domain_events;
 select is(

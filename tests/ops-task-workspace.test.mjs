@@ -691,7 +691,7 @@ test("custom listboxes and registration tabs implement their declared keyboard p
   ]);
 });
 
-test("required task listboxes expose opt-in accessibility semantics without changing optional defaults", async () => {
+test("task listboxes retain opt-in accessibility semantics while registration grade stays optional", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const taskListboxSource = source.slice(
     source.indexOf("function TaskListboxField"),
@@ -712,7 +712,8 @@ test("required task listboxes expose opt-in accessibility semantics without chan
     "aria-describedby={required ? requiredDescriptionId : undefined}",
     '<span id={requiredDescriptionId} className="sr-only">필수 입력</span>',
   ]);
-  assert.match(gradeFieldSource, /<TaskListboxField[\s\S]*?\n\s+required\n/);
+  assert.match(gradeFieldSource, /<RegistrationFieldLabel label="학년" requirement="optional"/);
+  assert.doesNotMatch(gradeFieldSource, /\n\s+required\n/);
 });
 
 test("dedicated operations are split into separate admin routes", async () => {
@@ -845,7 +846,6 @@ test("registration workspace replaces Notion registration management with one ap
     "RegistrationWorkflowStatusBadge",
     "RegistrationDetailPanel",
     "getRegistrationCaseTabCounts",
-    "collectRegistrationLegacySourceIds",
     "dispatchLegacyOpsTaskSources",
     "textbookPreparation",
     "visitConsultationPlace",
@@ -901,16 +901,92 @@ test("registration workspace replaces Notion registration management with one ap
   ]);
 });
 
-test("fixture registration create keeps production conditions and follows management-role permissions", async () => {
+test("registration create follows management-role permissions in production and fixtures", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const createGate = workspaceSource.slice(
-    workspaceSource.indexOf("const showToolbarCreate"),
+    workspaceSource.indexOf("const showEmptyCreate"),
     workspaceSource.indexOf("const hasLoadBlocker"),
+  );
+  const openCreate = workspaceSource.slice(
+    workspaceSource.indexOf("async function openCreate"),
+    workspaceSource.indexOf("function openEdit"),
   );
 
   assert.match(workspaceSource, /const canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/);
-  assert.match(createGate, /\(!registrationFixtureEnabled \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /\(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /const showEmptyCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /const showToolbarCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
+  assert.doesNotMatch(createGate, /!registrationFixtureEnabled \|\| canManageRegistrationWorkflow/);
   assert.match(createGate, /!isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)/);
+  assert.match(openCreate, /if \(type === "registration" && !canManageRegistrationWorkflow\) return/);
+});
+
+test("registration mutation handlers and legacy controls fail closed for teachers", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const openEdit = source.slice(
+    source.indexOf("const openEdit = useCallback"),
+    source.indexOf("const openWordRetestRetryForm"),
+  );
+  const workflowStatus = source.slice(
+    source.indexOf("const handleRegistrationWorkflowStatusChange"),
+    source.indexOf("const closeRegistrationApplicationHost"),
+  );
+  const legacyStatus = source.slice(
+    source.indexOf("const changeStatus = async"),
+    source.indexOf("const changeRegistrationPipeline"),
+  );
+  const legacyPipeline = source.slice(
+    source.indexOf("const changeRegistrationPipeline"),
+    source.indexOf("const undoStatusChange"),
+  );
+  const secondaryStatuses = source.slice(
+    source.indexOf("function getSecondaryTaskStatusOptions"),
+    source.indexOf("function shouldShowDetailStatusBadge"),
+  );
+  const legacyDetail = source.slice(
+    source.indexOf("!isCompletedProcessDetail && !isCanonicalRegistrationTrackDetail"),
+    source.indexOf("!isCanonicalRegistrationTrackDetail && (", source.indexOf("!isCompletedProcessDetail && !isCanonicalRegistrationTrackDetail")),
+  );
+
+  assert.match(openEdit, /if \(task\.type === "registration" && !canManageRegistrationWorkflow\) return/);
+  assert.match(workflowStatus, /if \([\s\S]*?!canManageRegistrationWorkflow/);
+  assert.match(legacyStatus, /if \(task\.type === "registration"\) return/);
+  assert.match(legacyPipeline, /if \(!canManageRegistrationWorkflow\) return/);
+  assert.match(secondaryStatuses, /if \(task\.type === "registration"\) return \[\]/);
+  assert.match(legacyDetail, /selectedTaskFresh\.type === "registration" && !isCanonicalRegistrationTrackDetail && canManageRegistrationWorkflow/);
+  assert.match(legacyDetail, /\(!isRegistrationDetail \|\| canManageRegistrationWorkflow\) && !isProcessDetail && getSecondaryTaskStatusOptions/);
+  assert.match(source, /const selectedTaskCanEdit = selectedTaskFresh \? \(!isRegistrationDetail \|\| canManageRegistrationWorkflow\)/);
+  assert.match(source, /!isProcessDetail && \(!isRegistrationDetail \|\| canManageRegistrationWorkflow\) && \(\s*<CompletionBlockerActionPanel/);
+});
+
+test("registration fact edits and status mutations never auto-dispatch legacy providers", async () => {
+  const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
+  const submitForm = source.slice(
+    source.indexOf("const submitForm = async"),
+    source.indexOf("const handleFormKeyDown", source.indexOf("const submitForm = async")),
+  );
+  const legacyStatus = source.slice(
+    source.indexOf("const changeStatus = async"),
+    source.indexOf("const changeRegistrationPipeline"),
+  );
+  const legacyPipeline = source.slice(
+    source.indexOf("const changeRegistrationPipeline"),
+    source.indexOf("const undoStatusChange"),
+  );
+  const undoStatus = source.slice(
+    source.indexOf("const undoStatusChange"),
+    source.indexOf("const submitComment"),
+  );
+
+  assert.doesNotMatch(source, /collectRegistrationLegacySourceIds/);
+  assert.match(submitForm, /if \(payload\.type !== "registration"\) \{[\s\S]*?dispatchLegacyOpsTaskSources/);
+  assert.doesNotMatch(legacyStatus, /loadRegistrationLegacyNotificationSourceIds/);
+  assert.match(legacyStatus, /if \(task\.type === "registration"\) return[\s\S]*?dispatchLegacyOpsTaskSources/);
+  assert.doesNotMatch(legacyPipeline, /loadRegistrationLegacyNotificationSourceIds|dispatchLegacyOpsTaskSources/);
+  assert.doesNotMatch(undoStatus, /loadRegistrationLegacyNotificationSourceIds/);
+  assert.match(undoStatus, /if \(currentTask\.type === "registration"\)[\s\S]*?return[\s\S]*?dispatchLegacyOpsTaskSources/);
+  assert.doesNotMatch(source, /retryPendingRegistrationVisitNotifications|pendingRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(source, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/);
 });
 
 test("fixture registration stays loading until its runtime adapter is installed", async () => {
@@ -954,27 +1030,19 @@ test("fixture registration withholds every provider token even before its runtim
 
   assertIncludesAll(workspaceSource, [
     'const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken',
-    "sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken)",
     "notificationToken={registrationNotificationSessionToken}",
   ]);
+  assert.doesNotMatch(workspaceSource, /sendRegistrationVisitNotificationTarget/);
   assert.doesNotMatch(workspaceSource, /showLegacyNotificationSettingsLauncher/);
 });
 
-test("leaving a registration fixture clears provider retry targets before production resumes", async () => {
+test("registration workspace has no automatic visit-provider retry state to revive after a fixture", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const fixtureRetryCleanup = workspaceSource.slice(
-    workspaceSource.indexOf("const registrationVisitNotificationRetryGenerationRef"),
-    workspaceSource.indexOf("const withdrawalCreateHandledRef"),
-  );
 
-  assertIncludesAll(fixtureRetryCleanup, [
-    "if (registrationFixtureRequested) return",
-    "registrationVisitNotificationRetryGenerationRef.current += 1",
-    "registrationVisitNotificationRetryInFlightRef.current = false",
-    "setPendingRegistrationVisitNotificationTargets([])",
-    "setRetryingRegistrationVisitNotifications(false)",
-    "[registrationFixtureRequested]",
-  ]);
+  assert.doesNotMatch(workspaceSource, /registrationVisitNotificationRetryGenerationRef/);
+  assert.doesNotMatch(workspaceSource, /registrationVisitNotificationRetryInFlightRef/);
+  assert.doesNotMatch(workspaceSource, /setPendingRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(workspaceSource, /setRetryingRegistrationVisitNotifications/);
 });
 
 test("registration keeps the observation tab in its fixed position before runtime probing settles", async () => {
@@ -1438,7 +1506,6 @@ test("registration hold and terminal states expose only valid explicit actions",
   assertIncludesAll(workspaceSource, [
     'task.status === "on_hold" ? `보류 · ${pipelineLabel}` : pipelineLabel',
     'task.status === "on_hold") return null',
-    'return [{ value: "in_progress", label: "다시 진행" }]',
     "isCanonicalRegistrationTrackDetail",
     "!isCanonicalRegistrationTrackDetail",
     'getRegistrationPipelinePrefix(selectedTaskFresh.registration?.pipelineStatus) === "9."',
@@ -1453,7 +1520,7 @@ test("registration hold and terminal states expose only valid explicit actions",
     '"2.": "진행 후 상담 결과 입력"',
   ]);
   assert.match(actionSource, /if \(task\.type === "registration"\) return null/);
-  assert.match(actionSource, /if \(task\.status === "on_hold"\) return \[\{ value: "in_progress", label: "다시 진행" \}\]/);
+  assert.match(actionSource, /if \(task\.type === "registration"\) return \[\]/);
 });
 
 test("registration load failure can retry and a committed create survives detail refresh failure", async () => {
@@ -1749,17 +1816,13 @@ test("registration workspace probes observation runtime without moving its tab",
   assert.doesNotMatch(source, /다른 등록 업무는 계속 처리할 수 있습니다/)
 })
 
-test("registration create uses the canonical initial plan, exact runtime matrix, and frozen retry envelope", async () => {
-  const [source, createSource, inquiryFieldsSource, subjectPickerSource, initialPlanSource, intakeWorkflowSource, registrationWorkflowSource, sampleWorkflowSource, browserWorkflowSource] = await Promise.all([
+test("registration create persists one flat fact row without runtime, workflow, or notification gates", async () => {
+  const [source, createSource, inquiryFieldsSource, subjectPickerSource, intakeWorkflowSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
     readSource("src/features/tasks/registration-application-create.tsx"),
     readSource("src/features/tasks/registration-application-inquiry-fields.tsx"),
     readSource("src/features/tasks/registration-subject-picker.tsx"),
-    readSource("src/features/tasks/registration-initial-plan-control.tsx"),
     readSource("src/features/tasks/registration-intake-workflow.ts"),
-    readSource("src/features/tasks/registration-workflow.js"),
-    readSource("scripts/verify-ops-task-sample-workflow.mjs"),
-    readSource("scripts/verify-ops-task-browser-workflow.mjs"),
   ]);
   const formDialogSource = source.slice(
     source.indexOf("<Dialog open={workspaceDataBelongsToCurrentViewer && formOpen}"),
@@ -1769,38 +1832,25 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     source.indexOf('if (form.type === "registration") {', source.indexOf("function TypeSpecificFields")),
     source.indexOf('if (form.type === "withdrawal")', source.indexOf("function TypeSpecificFields")),
   );
-  const registrationCreateDefaultsSource = registrationWorkflowSource.slice(
-    registrationWorkflowSource.indexOf("export function getRegistrationCreateDefaults"),
-    registrationWorkflowSource.indexOf("export function getRegistrationPrefillPipelineStatus"),
-  );
-  const readyCreateSource = source.slice(
-    source.indexOf('if (createAttempt.writer === "atomic")'),
-    source.indexOf("const inquiryOnlyPayload", source.indexOf('if (createAttempt.writer === "atomic")')),
-  );
   const submitFormSource = source.slice(
     source.indexOf("const submitForm = async"),
     source.indexOf("const handleFormKeyDown", source.indexOf("const submitForm = async")),
   );
+  const createBranchSource = submitFormSource.slice(
+    submitFormSource.indexOf('if (createPayload.type === "registration")'),
+    submitFormSource.indexOf('const receipt = createPayload.type === "transfer"'),
+  );
 
   assertIncludesAll(source, [
     'import { RegistrationApplicationCreate } from "./registration-application-create"',
-    "probeRegistrationIntakeWorkflowRuntime",
-    "probeRegistrationSubjectTrackRuntime",
-    "probeRegistrationInitialPersistence",
-    "createRegistrationCaseWithInitialWorkflow",
+    "FACT_ONLY_REGISTRATION_PERSISTENCE",
     "createRegistrationCase",
     "createRegistrationCreateAttempt",
-    "assertRegistrationCreateAttemptPersistenceMode",
-    "markRegistrationLegacyCreateStarted",
-    "dispatchRegistrationVisitNotificationTargets",
     "registrationCreateAttemptRef",
-    'createAttempt.writer === "atomic"',
-    'createAttempt.writer === "canonical"',
-    'createAttempt.writer === "legacy"',
-    'registrationPersistence.mode === "blocked_maintenance"',
-    'registrationPersistence.mode === "blocked_mismatch"',
-    'registrationPersistence.mode === "blocked_indeterminate"',
   ]);
+  assert.doesNotMatch(submitFormSource, /probeRegistrationInitialPersistence|probeRegistrationIntakeWorkflowRuntime|probeRegistrationSubjectTrackRuntime/);
+  assert.doesNotMatch(submitFormSource, /createRegistrationCaseWithInitialWorkflow|dispatchRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(submitFormSource, /getRegistrationCreateBlockers|getRegistrationCreateErrorMessage/);
   assert.doesNotMatch(formDialogSource, /담당자 및 일시 이력/);
 
   assertIncludesAll(registrationFormSource, [
@@ -1813,62 +1863,11 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.doesNotMatch(registrationFormSource, /phoneConsultationAt|levelTestAt|visitConsultationAt|visitConsultationPlace|levelTestMaterialLink/);
   assert.doesNotMatch(createSource, /RegistrationApplicationPlacementSection|RegistrationApplicationAdmissionSection/);
   assert.doesNotMatch(source, /inquiryChannel|\{문의채널\}|문의채널|문의 채널/);
-  assert.doesNotMatch(sampleWorkflowSource, /inquiry_channel/);
-  assert.doesNotMatch(browserWorkflowSource, /inquiry_channel/);
-  assertIncludesAll(browserWorkflowSource, [
-    '[data-registration-focus="subject"] button[aria-pressed]',
-    "applicationHost.getByLabel(/^학년/)",
-    'selectRegistrationOption(createControls.schoolGrade, "고1")',
-    "applicationHost.getByLabel(/^학교/)",
-    "새봄고",
-    "새봄초",
-    "새봄중",
-    "과목별 등록 진행",
-    "registration-subject-tab-",
-    "기존 입력",
-    'data-registration-application-section="registration"',
-    'width: 1349, height: 987',
-  ]);
-  assert.doesNotMatch(browserWorkflowSource, /fillIfPresent\(dialog, "학년"/);
   assert.doesNotMatch(source, /ensureRegistrationInquiryAt/);
-  assert.match(registrationCreateDefaultsSource, /campus: "본관"/);
-  assert.match(readyCreateSource, /createRegistrationCaseWithInitialWorkflow\(\{/);
-  assert.match(readyCreateSource, /normalizedInitialWorkflow\.subjectPlans/);
-  assert.match(readyCreateSource, /normalizedInitialWorkflow\.levelTestAppointment/);
-  assert.match(readyCreateSource, /normalizedInitialWorkflow\.visitAppointment/);
-  assert.match(readyCreateSource, /normalizedInitialWorkflow\.directorOverrides/);
-  assert.doesNotMatch(readyCreateSource, /createRegistrationCase\(\{/);
-  assert.doesNotMatch(readyCreateSource, /persistCreatedRegistrationDirectorDefaults/);
-  assert.doesNotMatch(submitFormSource, /directorOverrides:\s*\{\s*\.\.\.registrationResolvedDirectorIds/);
-  assert.doesNotMatch(source, /persistCreatedRegistrationDirectorDefaults/);
   assert.match(
     submitFormSource,
     /getRegistrationPersistenceErrorMessage\(error,\s*getOpsTaskActionErrorMessage\(error, "저장하지 못했습니다\."\)\)/,
   );
-  const registrationDateTimeControls = initialPlanSource.match(/<DateTimePickerControl[\s\S]*?\/>/g) || [];
-  assert.equal(registrationDateTimeControls.length, 2);
-  for (const controlSource of registrationDateTimeControls) {
-    assert.match(controlSource, /disablePortal/);
-    assert.match(controlSource, /timeOptions=\{REGISTRATION_TIME_OPTIONS\}/);
-  }
-  assertIncludesAll(initialPlanSource, [
-    "ProcessSubjectPicker",
-    "전화상담",
-    "레벨테스트",
-    "방문상담",
-    "상담 책임자",
-    "dateAriaLabel=\"레벨테스트 예약일 날짜\"",
-    "timeAriaLabel=\"레벨테스트 예약일 시각\"",
-    "dateAriaLabel=\"방문상담일 날짜\"",
-    "timeAriaLabel=\"방문상담일 시각\"",
-    "레벨테스트 장소",
-    "방문상담 예약일시",
-    'data-registration-focus="visitConsultationPlace"',
-  ]);
-  assert.doesNotMatch(initialPlanSource, /전화상담 예약일시|phoneConsultationAt|시험지·결과지 URL|levelTestMaterialLink|결과 링크|전화상담 대기 기준일시|상담 결과|참여 과목|ParticipantBadges/);
-  assertInOrder(initialPlanSource, ["상담 책임자", "방문상담 예약일시", 'data-registration-focus="visitConsultationPlace"', "<span>장소</span>"]);
-  assertInOrder(initialPlanSource, ["레벨테스트 예약일시", "레벨테스트 장소"]);
-  assert.match(source, /getRegistrationCreateDefaults\(new Date\(\)\.toISOString\(\)\)/);
 
   const inquirySource = `${subjectPickerSource}\n${inquiryFieldsSource}`;
   assert.match(inquiryFieldsSource, /sm:grid-cols-2/);
@@ -1889,50 +1888,31 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
     );
   }
   assertIncludesAll(inquirySource, ["문의 과목", "학생명", "문의일시", "학년", "학교", "학부모 전화", "학생 전화"]);
-  assert.doesNotMatch(inquirySource, /focusKey="inquiryAt"|DateTimePickerControl/);
+  assert.match(inquiryFieldsSource, /data-common-field="inquiry-at"[\s\S]*?type="datetime-local"/);
+  assert.match(inquiryFieldsSource, /data-common-field="school-name"/);
+  assert.doesNotMatch(inquirySource, /focusKey="inquiryAt"|DateTimePickerControl|required/);
   assert.doesNotMatch(createSource, /label="캠퍼스"|updateForm\("campus"/);
   assert.doesNotMatch(inquirySource, /autoFocus=/);
-  assertIncludesAll(source, [
-    "aria-describedby={required ? requiredDescriptionId : undefined}",
-    "하나 이상 선택해야 하는 필수 항목입니다.",
-  ]);
+  assert.match(createSource, /options=\{ACADEMIC_SUBJECT_VALUES\}/);
+  assert.doesNotMatch(createSource, /availableSubjects|disabledSubjects|reconcileRegistrationSubjectsForGrade/);
   assert.doesNotMatch(inquirySource, /기존 학생 연결/);
   assert.match(
     formDialogSource,
     /disabled=\{saving \|\| \(!canSubmitCurrentForm && form\.type !== "registration"\)\}/,
   );
-  assert.match(
-    source,
-    /getRegistrationPrefillPipelineStatus\(inputWithCompletionIntent\)/,
-  );
-  assert.match(source, /const submissionForm = form[\s\S]*?getRegistrationCreateBlockers\(submissionForm\)/);
-  assert.match(source, /prepareRegistrationPipelineTransition/);
-  assert.match(source, /setMessage\(getRegistrationCreateErrorMessage\(submissionForm\)\)/);
-
   assert.match(intakeWorkflowSource, /type RegistrationCreateAttempt = \{[\s\S]*?fingerprint: string[\s\S]*?requestKey: string[\s\S]*?inquiryAt: string[\s\S]*?normalizedInitialWorkflow:/);
-  assert.match(intakeWorkflowSource, /if \(mode === "ready_atomic"\) return "atomic"/);
-  assert.match(source, /registrationCreateAttemptRef\.current = createRegistrationCreateAttempt/);
-  assert.match(source, /persistenceMode: registrationPersistence\.mode/);
-  assert.match(source, /assertRegistrationCreateAttemptPersistenceMode\([\s\S]*?registrationCreateAttemptRef\.current[\s\S]*?registrationPersistence\.mode/);
-  assert.match(source, /if \(createAttempt\.writer === "atomic"\)/);
-  assert.match(source, /if \(createAttempt\.writer === "canonical"\)/);
-  assert.match(source, /if \(createAttempt\.writer === "legacy"\)/);
-  assert.match(source, /inquiryAt: createAttempt\.inquiryAt/);
-  assert.match(source, /sanitizeRegistrationInquiryOnlyInput\(registrationReceiptPayload\)/);
-  const inquirySanitizerSource = source.slice(
-    source.indexOf("function sanitizeRegistrationInquiryOnlyInput"),
-    source.indexOf("function getWordRetestStudentPayload"),
-  );
-  assertIncludesAll(inquirySanitizerSource, [
-    'status: "requested"',
-    'completedAt: ""',
-    'secondaryAssigneeId: ""',
-    'classId: ""',
-    'textbookId: ""',
-    "pipelineStatus: REGISTRATION_PIPELINE_STATUSES[0]",
-  ]);
-  assert.match(source, /registrationCreateAttemptRef\.current = null[\s\S]*?dispatchRegistrationVisitNotificationTargets/);
-  assert.match(source, /registrationCreateAttemptRef\.current = markRegistrationLegacyCreateStarted\(createAttempt\)[\s\S]*?createOpsTask\(inquiryOnlyPayload\)/);
+  assert.match(source, /mode: "canonical_inquiry"/);
+  assert.match(createBranchSource, /registrationCreateAttemptRef\.current = createRegistrationCreateAttempt/);
+  assert.match(createBranchSource, /persistenceMode: "canonical_inquiry"/);
+  assert.match(createBranchSource, /createInquiryAt: \(\) => ""/);
+  assert.match(createBranchSource, /const subjects = parseRegistrationSubjects\(createPayload\.subject\)/);
+  assert.match(createBranchSource, /const response = await createRegistrationCase\(\{/);
+  assert.match(createBranchSource, /inquiryAt: createAttempt\.inquiryAt/);
+  assert.match(createBranchSource, /requestKey: createAttempt\.requestKey/);
+  assert.match(createBranchSource, /const committed: RegistrationCommittedReceipt/);
+  assert.match(createBranchSource, /await rehydrateCommittedRegistrationCase\(committed\)/);
+  assert.doesNotMatch(createBranchSource, /createOpsTask|createRegistrationCaseWithInitialWorkflow|notificationTargets|dispatchRegistrationVisitNotificationTargets/);
+  assert.match(submitFormSource, /submissionForm\.type === "registration" \? "등록 신청"/);
   assert.match(source, /function discardFormAndClose\(\)[\s\S]*?registrationCreateAttemptRef\.current = null/);
   assert.match(source, /function openCreate\([\s\S]*?registrationCreateAttemptRef\.current = null/);
 
@@ -1948,7 +1928,6 @@ test("registration create uses the canonical initial plan, exact runtime matrix,
   assert.match(editBranch, /registrationTracks: updatedDetail\.tracks/);
   assert.match(editBranch, /registrationTracks: editingTask\.registrationTracks/);
   assert.doesNotMatch(editBranch, /updateOpsTask\(editingTask\.id, payload\)/);
-  assert.match(submitFormSource, /sanitizeRegistrationInquiryOnlyInput/);
 });
 
 test("canonical registration application opens one honest read-only timeline from the detail header", async () => {
@@ -1973,13 +1952,13 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.match(editorSource, /import \{ RegistrationApplicationHistoryAction \} from "\.\/registration-application-history-action"/);
   assertIncludesAll(editorSource, [
     "const genericTracks = useMemo(",
-    "const workflowStatus = resolveRegistrationWorkspaceWorkflowStatus(track)",
-    "if (!workflowStatus) return []",
+    "workflowStatus: resolveRegistrationWorkspaceWorkflowStatus(track),",
     "const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({",
     "tracks: genericTracks,",
     "trackContexts: TrackContext[] = genericTracks.map",
     "historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}",
   ]);
+  assert.doesNotMatch(editorSource, /if \(!workflowStatus\) return \[\]/);
   assert.equal(
     editorSource.split("historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}").length - 1,
     1,
@@ -2022,73 +2001,23 @@ test("canonical registration application opens one honest read-only timeline fro
   );
 });
 
-test("committed initial visit notifications expose an in-session notification-only retry", async () => {
+test("fact-only registration workspace exposes no historical automatic visit notification retry", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const retryStart = source.indexOf("async function retryPendingRegistrationVisitNotifications")
-  const retryEnd = source.indexOf("\n  }", retryStart) + 4
-  const retrySource = source.slice(retryStart, retryEnd)
+  assert.doesNotMatch(source, /pendingRegistrationVisitNotificationTargets/)
+  assert.doesNotMatch(source, /retryPendingRegistrationVisitNotifications/)
+  assert.doesNotMatch(source, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/)
+  assert.doesNotMatch(source, /방문상담 알림 재시도/)
 
-  assert.ok(retryStart >= 0, "notification-only retry handler should exist")
-  assertIncludesAll(source, [
-    "pendingRegistrationVisitNotificationTargets",
-    "setPendingRegistrationVisitNotificationTargets",
-    "dispatchRegistrationVisitNotificationTargets",
-    "방문상담 알림 재시도",
-  ])
-  assert.match(
-    source,
-    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/,
-    "the list-level retry alert must remain visible even after another action clears notice",
-  )
-  assert.match(
-    source,
-    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && \([\s\S]*?notice \|\| `방문상담 알림 \$\{pendingRegistrationVisitNotificationTargets\.length\}건/,
-    "the detail-level retry alert must render a fallback message without notice",
-  )
-  assert.doesNotMatch(
-    source,
-    /\{notice && !detailOpen && \([\s\S]*?pendingRegistrationVisitNotificationTargets\.length > 0/,
-  )
-  assert.match(retrySource, /dispatchRegistrationVisitNotificationTargets/)
-  assert.match(
-    retrySource,
-    /setPendingRegistrationVisitNotificationTargets\(\(current\) => \([\s\S]*?reconcileRegistrationVisitNotificationRetryTargets\([\s\S]*?current[\s\S]*?retryTargets[\s\S]*?result\.failedTargets/,
-    "retry completion must reconcile against current targets so concurrent failures survive",
-  )
-  assertIncludesAll(retrySource, [
-    "registrationVisitNotificationRetryGenerationRef.current",
-    "latestWorkspaceViewerIdRef.current !== retryViewerId",
-    "workspaceMountedRef.current",
-  ])
-  assert.doesNotMatch(retrySource, /createRegistrationCaseWithInitialWorkflow|createRegistrationCase\(|createOpsTask\(/)
-
-  const viewerResetSource = source.slice(
-    source.indexOf("workspaceMountedRef.current = false"),
-    source.indexOf("const deferRegistrationWorkspaceLoad"),
-  )
-  assertIncludesAll(viewerResetSource, [
-    "workspaceViewerGenerationRef.current += 1",
-    "registrationVisitNotificationRetryGenerationRef.current += 1",
-    "registrationVisitNotificationRetryInFlightRef.current = false",
-  ])
-
-  const atomicStart = source.indexOf('if (createAttempt.writer === "atomic")')
-  const atomicEnd = source.indexOf("const inquiryOnlyPayload", atomicStart)
-  const atomicSource = source.slice(atomicStart, atomicEnd)
-  assertInOrder(atomicSource, [
-    "createRegistrationCaseWithInitialWorkflow",
-    "registrationCreateAttemptRef.current === createAttempt",
-    "registrationCreateAttemptRef.current = null",
-    "dispatchRegistrationVisitNotificationTargets",
-    "registrationSubmissionStillOwnsWorkspace",
-    "setPendingRegistrationVisitNotificationTargets",
-  ])
+  const submitStart = source.indexOf("const submitForm = async")
+  const submitEnd = source.indexOf("const handleFormKeyDown", submitStart)
+  const submitSource = source.slice(submitStart, submitEnd)
+  assert.match(submitSource, /await createRegistrationCase\(\{/)
+  assert.doesNotMatch(submitSource, /createRegistrationCaseWithInitialWorkflow|dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/)
   assert.match(
     source,
     /const registrationSubmissionStillOwnsWorkspace = \(\) => isRegistrationSubmissionOwnershipCurrent\(\{[\s\S]*?mounted: workspaceMountedRef\.current[\s\S]*?currentViewerId: latestWorkspaceViewerIdRef\.current[\s\S]*?currentViewerGeneration: workspaceViewerGenerationRef\.current/,
     "post-commit ownership must be evaluated from live refs rather than cached before an await",
   )
-  assert.doesNotMatch(atomicSource, /const notificationStateBelongsToSubmissionViewer/)
   assert.match(source, /const submissionViewerId = currentUserId[\s\S]*?const submissionViewerGeneration = workspaceViewerGenerationRef\.current/)
 })
 
@@ -2104,7 +2033,7 @@ test("automatic word-retest absence attempts stay quarantined for the lifetime o
   assert.doesNotMatch(effect, /autoAbsentWordRetestIdsRef\.current\.delete/);
 });
 
-test("post-commit registration work rejects a viewer generation change during notification delay", async () => {
+test("post-commit fact-only registration refresh rejects a viewer generation change", async () => {
   const isCurrent = registrationNotificationModel.isRegistrationSubmissionOwnershipCurrent;
   assert.equal(typeof isCurrent, "function", "production must expose the ownership predicate consumed by the workspace");
 
@@ -2147,27 +2076,13 @@ test("post-commit registration work rejects a viewer generation change during no
   const submitStart = source.indexOf("const submitForm = async");
   const submitEnd = source.indexOf("\n  const handleFormKeyDown", submitStart);
   const submit = source.slice(submitStart, submitEnd);
-  const atomicStart = submit.indexOf('if (createAttempt.writer === "atomic")');
-  const atomicEnd = submit.indexOf("const inquiryOnlyPayload", atomicStart);
-  const atomic = submit.slice(atomicStart, atomicEnd);
-  const canonicalStart = submit.indexOf('if (createAttempt.writer === "canonical")');
-  const canonicalEnd = submit.indexOf('if (createAttempt.writer === "legacy")', canonicalStart);
-  const canonical = submit.slice(canonicalStart, canonicalEnd);
+  const createStart = submit.indexOf('if (createPayload.type === "registration")');
+  const createEnd = submit.indexOf('const receipt = createPayload.type === "transfer"', createStart);
+  const canonical = submit.slice(createStart, createEnd);
 
-  assert.match(submit, /const submissionRegistrationNotificationSessionToken = registrationNotificationSessionToken/);
-  assert.match(submit, /await probeRegistrationInitialPersistence\([\s\S]*?if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return[\s\S]*?setRegistrationPersistence/);
-  const dispatchAt = atomic.indexOf("await dispatchRegistrationVisitNotificationTargets");
-  const postDispatchGuardAt = atomic.indexOf("if (!registrationSubmissionStillOwnsWorkspace()) return", dispatchAt);
-  const retryStateAt = atomic.indexOf("setPendingRegistrationVisitNotificationTargets", dispatchAt);
-  const atomicRehydrateAt = atomic.indexOf("await rehydrateCommittedRegistrationCase(committed)");
-  assert.ok(dispatchAt >= 0 && postDispatchGuardAt > dispatchAt, "atomic notification completion must re-check live ownership");
-  assert.equal(atomic.indexOf("if (!registrationSubmissionStillOwnsWorkspace()) return"), postDispatchGuardAt, "atomic delivery must not be skipped when ownership changes after commit");
-  assert.ok(retryStateAt > postDispatchGuardAt, "stale notifications must not write retry state");
-  assert.ok(atomicRehydrateAt > postDispatchGuardAt, "stale notifications must not rehydrate an old case");
-  assert.match(atomic, /\} catch \{\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return[\s\S]*?setPendingRegistrationVisitNotificationTargets/);
-  assert.match(atomic, /sendRegistrationVisitNotificationTarget\(target, submissionRegistrationNotificationSessionToken\)/);
-  assert.match(atomic, /await rehydrateCommittedRegistrationCase\(committed\)\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return/);
   assert.match(canonical, /await createRegistrationCase\([\s\S]*?if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return[\s\S]*?await rehydrateCommittedRegistrationCase\(committed\)\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return/);
+  assert.doesNotMatch(canonical, /notification|dispatchRegistrationVisit|sendRegistrationVisit/);
+  assert.doesNotMatch(submit, /probeRegistrationInitialPersistence|createRegistrationCaseWithInitialWorkflow/);
   assert.match(submit, /\} catch \(error\) \{\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return\s*setMessage/);
   assert.match(submit, /\} finally \{\s*if \(registrationSubmissionStillOwnsWorkspace\(\)\) setSaving\(false\)\s*\}/);
 });
@@ -2249,25 +2164,20 @@ test("an in-flight direct registration detail owns its link before stale workspa
   assert.ok(staleTaskLookup > ownershipGuard, "host ownership must win before a stale list can clear the link");
 });
 
-test("successful legacy registration create closes and resets its common application before another submit", async () => {
+test("registration create has no legacy writer fallback", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const legacyStart = source.indexOf('if (createAttempt.writer === "legacy")');
-  const legacyEnd = source.indexOf("continue", legacyStart);
-  const legacySuccess = source.slice(legacyStart, legacyEnd);
+  const submitStart = source.indexOf("const submitForm = async");
+  const submitEnd = source.indexOf("const handleFormKeyDown", submitStart);
+  const submit = source.slice(submitStart, submitEnd);
+  const createStart = submit.indexOf('if (createPayload.type === "registration")');
+  const createEnd = submit.indexOf('const receipt = createPayload.type === "transfer"', createStart);
+  const canonical = submit.slice(createStart, createEnd);
 
-  assert.ok(legacyStart >= 0 && legacyEnd > legacyStart, "legacy registration create branch is missing");
-  assert.match(legacySuccess, /await createOpsTask\(inquiryOnlyPayload\)/);
-  assert.match(legacySuccess, /registrationCreateAttemptRef\.current = null/);
-  assert.match(legacySuccess, /setRegistrationApplicationHost\(\{ kind: "closed" \}\)/);
-  assert.match(legacySuccess, /setRegistrationInitialWorkflowDraft\(createRegistrationInitialWorkflowDraft\(\[\]\)\)/);
-  assert.match(legacySuccess, /setFormOpen\(false\)/);
-  assert.ok(
-    legacySuccess.indexOf('setRegistrationApplicationHost({ kind: "closed" })')
-      < legacySuccess.indexOf("loadSavedTaskOrFallback"),
-    "the duplicate-submit surface must close immediately after the writer succeeds",
-  );
-  assert.match(source.slice(legacyEnd, source.indexOf("} catch (error)", legacyEnd)), /prependTask|replaceTaskInState/);
-  assert.match(source.slice(legacyEnd, source.indexOf("} catch (error)", legacyEnd)), /setNotice/);
+  assert.match(canonical, /await createRegistrationCase\(\{/);
+  assert.match(canonical, /registrationCreateAttemptRef\.current = null/);
+  assert.match(canonical, /await rehydrateCommittedRegistrationCase\(committed\)/);
+  assert.doesNotMatch(canonical, /createOpsTask|legacy|atomic/);
+  assert.doesNotMatch(submit, /createAttempt\.writer|markRegistrationLegacyCreateStarted|sanitizeRegistrationInquiryOnlyInput/);
 });
 
 test("committed loading can close while create submission remains protected", async () => {
@@ -2331,9 +2241,9 @@ test("appointment refresh retry reuses canonical appointment validation and clea
 test("canonical registration host owns notification and error live regions without list duplicates", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
-  assert.match(source, /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/);
+  assert.match(source, /\{notice && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/);
   assert.match(source, /\{message && !formOpen && !detailOpen && registrationApplicationHost\.kind === "closed" && <div role="alert"/);
-  assert.match(source, /registrationApplicationHost\.kind === "detail"[\s\S]*?pendingRegistrationVisitNotificationTargets\.length > 0[\s\S]*?retryPendingRegistrationVisitNotifications/);
+  assert.doesNotMatch(source, /pendingRegistrationVisitNotificationTargets|retryPendingRegistrationVisitNotifications/);
 });
 
 test("registration application rows retain every subject during class sync", async () => {
@@ -2383,25 +2293,19 @@ test("registration application rows retain every subject during class sync", asy
   );
 });
 
-test("registration required inquiry fields remain invariant after the workflow advances", async () => {
-  const [workspaceSource, serviceSource] = await Promise.all([
+test("registration inquiry facts remain optional independently of workflow progress", async () => {
+  const [workspaceSource, inquiryFieldsSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
-    readSource("src/features/tasks/ops-task-service.ts"),
+    readSource("src/features/tasks/registration-application-inquiry-fields.tsx"),
   ]);
 
-  assert.match(
-    workspaceSource,
-    /const registrationCreateBlockers = submissionForm\.type === "registration"\s*\? getRegistrationCreateBlockers\(submissionForm\)\s*:\s*\[\]/,
-  );
-  assert.match(
-    serviceSource,
-    /function assertRegistrationInquiryBaseReady\(input: OpsTaskInput\)/,
-  );
-  assert.match(serviceSource, /assertRegistrationInquiryBaseReady\(input\)/);
-  assert.doesNotMatch(
-    serviceSource,
-    /assertRegistrationInquiryBaseReady\(input, existingTask\.registration\?\.pipelineStatus/,
-  );
+  const submitStart = workspaceSource.indexOf("const submitForm = async");
+  const submitEnd = workspaceSource.indexOf("const handleFormKeyDown", submitStart);
+  const submit = workspaceSource.slice(submitStart, submitEnd);
+  assert.doesNotMatch(submit, /getRegistrationCreateBlockers|getRegistrationCreateErrorMessage|assertRegistrationInquiryBaseReady/);
+  assert.match(submit, /submissionForm\.type === "registration" \? "등록 신청"/);
+  assert.match(inquiryFieldsSource, /requirement="선택"/);
+  assert.doesNotMatch(inquiryFieldsSource, /required=|isValidRegistrationMobilePhone/);
 });
 
 test("registration create keeps counselor assignment out of inquiry-only intake", async () => {
@@ -2967,12 +2871,12 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assert.match(
     detailDialogSource,
-    /!isProcessDetail && \(\s*<CompletionBlockerActionPanel/,
+    /!isProcessDetail && \(!isRegistrationDetail \|\| canManageRegistrationWorkflow\) && \(\s*<CompletionBlockerActionPanel/,
     "withdrawal detail should not show the completion blocker chip group",
   );
   assert.match(
     detailDialogSource,
-    /!isProcessDetail && getSecondaryTaskStatusOptions\(selectedTaskFresh\)/,
+    /\(!isRegistrationDetail \|\| canManageRegistrationWorkflow\) && !isProcessDetail && getSecondaryTaskStatusOptions\(selectedTaskFresh\)/,
     "withdrawal detail should not show hold or cancel secondary actions",
   );
   assert.match(
@@ -4327,7 +4231,7 @@ test("word retest expected schedule keeps reference-only editing, approved form 
 
   const expectedOnlySubmitSource = workspaceSource.slice(
     workspaceSource.indexOf('submissionForm.type === "word_retest"\n      && editingTask\n      && wordRetestEditMode === "expected_only"'),
-    workspaceSource.indexOf("const registrationCreateBlockers"),
+    workspaceSource.indexOf("const transferRequiredBlockers"),
   );
   assert.match(expectedOnlySubmitSource, /updateWordRetestExpectedAt\(\{/);
   assert.match(expectedOnlySubmitSource, /expectedRetestAt: getWordRetestExpectedAtInputValue\(submissionForm\.wordRetest\?\.expectedRetestAt\)/);
@@ -4745,7 +4649,8 @@ test("completed operational task details are locked after management sync", asyn
   assertIncludesAll(workspaceSource, [
     "function canEditTaskDetails(task: Pick<OpsTask, \"type\" | \"status\">)",
     "task.type === \"general\" || task.status !== \"done\"",
-    "const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false",
+    "const selectedTaskCanEdit = selectedTaskFresh ? (!isRegistrationDetail || canManageRegistrationWorkflow)",
+    "&& canEditTaskDetails(selectedTaskFresh) : false",
     "canEditTaskDetails(task) &&",
     "selectedTaskCanEdit &&",
   ]);
@@ -5204,14 +5109,14 @@ test("registration dirty aggregation drives the application host close guard", a
   assert.match(workspace, /setConfirmingFormClose\(true\)/);
 });
 
-test("canonical registration writers rehydrate their committed receipt in the same host", async () => {
+test("the canonical fact-only registration writer rehydrates its committed receipt in the same host", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const atomicStart = source.indexOf('if (createAttempt.writer === "atomic")');
-  const atomicEnd = source.indexOf("const inquiryOnlyPayload", atomicStart);
-  const atomic = source.slice(atomicStart, atomicEnd);
-  const canonicalStart = source.indexOf('if (createAttempt.writer === "canonical")');
-  const canonicalEnd = source.indexOf('if (createAttempt.writer === "legacy")', canonicalStart);
-  const canonical = source.slice(canonicalStart, canonicalEnd);
+  const submitStart = source.indexOf("const submitForm = async");
+  const submitEnd = source.indexOf("const handleFormKeyDown", submitStart);
+  const submit = source.slice(submitStart, submitEnd);
+  const canonicalStart = submit.indexOf('if (createPayload.type === "registration")');
+  const canonicalEnd = submit.indexOf('const receipt = createPayload.type === "transfer"', canonicalStart);
+  const canonical = submit.slice(canonicalStart, canonicalEnd);
 
   assert.match(source, /type RegistrationCommittedReceipt = \{[\s\S]*?taskId: string[\s\S]*?tracks:/);
   assert.match(source, /const rehydrateCommittedRegistrationCase = useCallback/);
@@ -5226,18 +5131,11 @@ test("canonical registration writers rehydrate their committed receipt in the sa
   const rehydrate = source.slice(rehydrateStart, rehydrateEnd);
   assert.doesNotMatch(rehydrate, /setFormOpen\(false\)/);
 
-  for (const branch of [atomic, canonical]) {
-    assert.match(branch, /if \(registrationCreateAttemptRef\.current === createAttempt\) \{\s*registrationCreateAttemptRef\.current = null\s*\}/);
-    assert.match(branch, /registrationCreateAttemptRef\.current = null/);
-    assert.match(branch, /const committed: RegistrationCommittedReceipt = \{/);
-    assert.match(branch, /await rehydrateCommittedRegistrationCase\(committed\)/);
-    assert.doesNotMatch(branch, /setFormOpen\(false\)/);
-    assert.doesNotMatch(branch, /savedTasks\.push/);
-  }
-  assert.match(atomic, /dispatchRegistrationVisitNotificationTargets\(\s*response\.notificationTargets/);
-  assert.match(atomic, /try \{[\s\S]*?dispatchRegistrationVisitNotificationTargets[\s\S]*?\} catch \{[\s\S]*?setPendingRegistrationVisitNotificationTargets/);
-  assert.match(atomic, /\} catch \{[\s\S]*?await rehydrateCommittedRegistrationCase\(committed\)/);
-  assert.doesNotMatch(canonical, /notificationTargets|dispatchRegistrationVisitNotificationTargets/);
+  assert.match(canonical, /if \(registrationCreateAttemptRef\.current === createAttempt\) \{\s*registrationCreateAttemptRef\.current = null\s*\}/);
+  assert.match(canonical, /const committed: RegistrationCommittedReceipt = \{/);
+  assert.match(canonical, /await rehydrateCommittedRegistrationCase\(committed\)/);
+  assert.doesNotMatch(canonical, /setFormOpen\(false\)|savedTasks\.push|notificationTargets|dispatchRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(submit, /createRegistrationCaseWithInitialWorkflow|createAttempt\.writer/);
 });
 
 test("post-commit refresh failure is load-only and remains in the registration host", async () => {

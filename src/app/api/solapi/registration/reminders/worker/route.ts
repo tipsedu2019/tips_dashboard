@@ -1,11 +1,11 @@
-import { createProductionRegistrationCustomerReminderRouteHandlers } from "@/features/tasks/server/registration-customer-reminder-route"
+import { NextResponse } from "next/server"
 
 export const runtime = "nodejs"
 export const dynamic = "force-dynamic"
 
-let handlers: ReturnType<typeof createProductionRegistrationCustomerReminderRouteHandlers> | null = null
-
-export function POST(request: Request) {
-  handlers ??= createProductionRegistrationCustomerReminderRouteHandlers()
-  return handlers.worker(request)
+export function POST() {
+  return NextResponse.json({
+    ok: false,
+    error: "registration_customer_reminder_automatic_delivery_retired",
+  }, { status: 410 })
 }

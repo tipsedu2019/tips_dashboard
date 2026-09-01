@@ -105,6 +105,53 @@ as $$
     and mutation.mutation_type = 'save_registration_level_test_result';
 $$;
 
+create or replace function pg_temp.registration_level_result_artifact_counts()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'notificationEvents', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_events
+    ),
+    'notificationDeliveries', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_deliveries
+    ),
+    'notificationFanoutJobs', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_event_fanout_jobs
+    ),
+    'reminderJobs', (
+      select pg_catalog.count(*)
+      from dashboard_private.registration_customer_reminder_jobs
+    ),
+    'observationDomainEvents', (
+      select pg_catalog.count(*)
+      from dashboard_private.registration_observation_domain_events
+    ),
+    'observationChatJobs', (
+      select pg_catalog.count(*)
+      from dashboard_private.registration_observation_chat_jobs
+    ),
+    'customerMessagePreviews', (
+      select pg_catalog.count(*)
+      from public.ops_registration_customer_message_previews
+    ),
+    'customerMessages', (
+      select pg_catalog.count(*)
+      from public.ops_registration_customer_messages
+    ),
+    'lightweightAlertDeliveries', (
+      select pg_catalog.count(*)
+      from dashboard_private.lightweight_registration_alert_deliveries
+    )
+  );
+$$;
+
 create temporary table registration_level_result_cases(
   case_key text primary key,
   payload jsonb not null
@@ -120,45 +167,76 @@ insert into registration_level_result_cases(case_key, payload)
 values
   (
     'single_completed',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 완료 학생', '중1', '레벨결과중', '01077007251', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
-      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-25T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-single-completed'
+      'parent reconciliation fixture', 'normal',
+      'level-result-parent-single-completed'
     )
   ),
   (
     'single_absent',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 결석 학생', '중1', '레벨결과중', '01077007252', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
-      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-26T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-single-absent'
+      'parent reconciliation fixture', 'normal',
+      'level-result-parent-single-absent'
     )
   ),
   (
     'single_canceled',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 취소 학생', '중1', '레벨결과중', '01077007253', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
-      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-27T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-single-canceled'
+      'parent reconciliation fixture', 'normal',
+      'level-result-parent-single-canceled'
     )
   ),
   (
     'shared_terminal',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 공유 학생', '중1', '레벨결과중', '01077007254', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어', '수학'],
       'parent reconciliation fixture', 'normal',
-      '{"영어":"level_test","수학":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-28T10:00:00+09:00","place":"본관","subjects":["영어","수학"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-shared-terminal'
+      'level-result-parent-shared-terminal'
     )
   );
+
+-- Flat case creation intentionally ignores operational plans. Book each level
+-- test explicitly through the independent appointment action that production
+-- clients use after storing the case facts.
+create temporary table registration_level_result_appointments(
+  case_key text primary key,
+  response jsonb not null
+) on commit drop;
+
+insert into registration_level_result_appointments(case_key, response)
+select
+  fixture.case_key,
+  public.save_registration_appointment_details_v1(
+    null,
+    (fixture.payload ->> 'taskId')::uuid,
+    'level_test',
+    case fixture.case_key
+      when 'single_completed' then '2026-08-25 10:00+09'::timestamptz
+      when 'single_absent' then '2026-08-26 10:00+09'::timestamptz
+      when 'single_canceled' then '2026-08-27 10:00+09'::timestamptz
+      else '2026-08-28 10:00+09'::timestamptz
+    end,
+    '본관',
+    array(
+      select (track_item.value ->> 'id')::uuid
+      from pg_catalog.jsonb_array_elements(
+        fixture.payload -> 'tracks'
+      ) track_item(value)
+      order by track_item.value ->> 'subject'
+    ),
+    null,
+    'level-result-parent-appointment-' || fixture.case_key
+  )
+from registration_level_result_cases fixture;
+
+grant select on registration_level_result_appointments to authenticated;
 
 create temporary table registration_level_result_ids on commit drop as
 select
@@ -171,8 +249,11 @@ select
 from registration_level_result_cases fixture
 join public.ops_tasks task
   on task.id = (fixture.payload ->> 'taskId')::uuid
+join registration_level_result_appointments booking
+  on booking.case_key = fixture.case_key
 join public.ops_registration_appointments appointment
-  on appointment.task_id = task.id
+  on appointment.id = (booking.response ->> 'appointmentId')::uuid
+ and appointment.task_id = task.id
  and appointment.kind = 'level_test'
 join public.ops_registration_subject_tracks track
   on track.task_id = task.id
@@ -237,10 +318,28 @@ select is(
   'stale workflow revisions use a non-retryable domain SQLSTATE'
 );
 
--- The current RPC writes the child first and relies on deferred integrity checks.
--- Catch the deferred error in a subtransaction so RED remains a normal pgTAP
--- assertion instead of aborting the entire packet. Every valid call explicitly
--- forces deferred triggers before returning.
+create temporary table registration_level_result_workflow_baselines
+on commit drop as
+select
+  track.id as track_id,
+  track.workflow_status,
+  track.workflow_revision
+from public.ops_registration_subject_tracks track
+join registration_level_result_ids ids on ids.track_id = track.id
+order by track.id;
+grant select on registration_level_result_workflow_baselines to authenticated;
+
+create temporary table registration_level_result_artifact_baseline(
+  artifact_counts jsonb not null
+) on commit drop;
+insert into registration_level_result_artifact_baseline(artifact_counts)
+values (pg_temp.registration_level_result_artifact_counts());
+grant select on registration_level_result_artifact_baseline to authenticated;
+
+-- The result RPC writes the child first and relies on deferred integrity checks.
+-- Catch any deferred error in a subtransaction so it remains a normal pgTAP
+-- assertion instead of aborting the packet. Every valid call explicitly forces
+-- deferred triggers before returning.
 create or replace function pg_temp.registration_level_result_save(
   p_attempt_id uuid,
   p_status text,
@@ -284,8 +383,7 @@ create temporary table registration_level_result_calls(
 ) on commit drop;
 grant select, insert on registration_level_result_calls to authenticated;
 
--- Sole completed child: this is RED before the forward wrapper because the
--- appointment remains scheduled and the deferred integrity trigger rejects it.
+-- A sole completed child closes its explicitly booked appointment.
 insert into registration_level_result_calls(case_key, invocation, result)
 select
   ids.case_key,
@@ -331,8 +429,8 @@ select is(
       on detail.task_id = ids.task_id
     where ids.case_key = 'single_completed'
   ),
-  'level_test_scheduled:in_progress:1. 레벨테스트 예약',
-  'data-only result save leaves manual track workflow and registration parent projection unchanged'
+  'inquiry:requested:0. 등록 문의',
+  'explicit booking and data-only result save leave manual registration status projections unchanged'
 );
 
 -- A fresh request key is an intentional correction, not an idempotent replay.
@@ -526,7 +624,7 @@ select is(
 );
 
 -- Same request key must replay without writing a second result event or changing
--- the appointment revision. Current code writes the event twice, so this is RED.
+-- the appointment revision.
 insert into registration_level_result_calls(case_key, invocation, result)
 select
   ids.case_key,
@@ -564,14 +662,14 @@ select is(
     from public.ops_task_events event
     join registration_level_result_ids ids
       on ids.task_id = event.task_id
-     and event.field_name = 'registration_track:' || ids.track_id::text
+     and event.field_name = 'registration_fact:' || ids.track_id::text
     where ids.case_key = 'shared_terminal'
       and ids.subject = '영어'
-      and event.event_type = 'registration_track_event'
-      and event.after_value::jsonb ->> 'event_type' = 'registration_level_test_result_saved'
+      and event.event_type = 'registration_fact_saved'
+      and event.after_value::jsonb ->> 'factType' = 'level_test_result'
   ),
   1,
-  'same request key creates exactly one result event for the shared child'
+  'same request key creates exactly one fact audit event for the shared child'
 );
 
 -- Reusing the request key for a different target must fail closed instead of
@@ -608,6 +706,75 @@ select is(
   ),
   1,
   'level-test result persistence records exactly one durable request receipt'
+);
+
+-- A receipt is not an authorization grant. Replays must re-check both the
+-- current management role and the current auth-account state before returning
+-- the stored response.
+set local role postgres;
+update public.profiles
+set role = 'teacher',
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
+);
+select throws_ok(
+  $$
+    select public.save_registration_level_test_result_v1(
+      (select ids.attempt_id
+       from registration_level_result_ids ids
+       where ids.case_key = 'shared_terminal'
+         and ids.subject = '영어'),
+      'completed',
+      'https://drive.invalid/registration-level-result/shared-english',
+      'level-result-parent-shared-first'
+    )
+  $$,
+  '42501',
+  'registration_access_denied',
+  'demoted receipt owner cannot replay a stored level-test result'
+);
+
+set local role postgres;
+update public.profiles
+set role = 'admin',
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+update auth.users
+set banned_until = pg_catalog.now() + interval '1 day',
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
+);
+select throws_ok(
+  $$
+    select public.save_registration_level_test_result_v1(
+      (select ids.attempt_id
+       from registration_level_result_ids ids
+       where ids.case_key = 'shared_terminal'
+         and ids.subject = '영어'),
+      'completed',
+      'https://drive.invalid/registration-level-result/shared-english',
+      'level-result-parent-shared-first'
+    )
+  $$,
+  '42501',
+  'registration_access_denied',
+  'disabled receipt owner cannot replay a stored level-test result'
+);
+
+set local role postgres;
+update auth.users
+set banned_until = null,
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
 );
 
 select is(
@@ -658,6 +825,59 @@ select is(
   ),
   'completed:2',
   'last terminal child reconciles a shared appointment exactly once'
+);
+
+select is(
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'trackId', track.id,
+        'workflowStatus', track.workflow_status,
+        'workflowRevision', track.workflow_revision
+      )
+      order by track.id
+    )
+    from public.ops_registration_subject_tracks track
+    join registration_level_result_ids ids on ids.track_id = track.id
+  ),
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'trackId', baseline.track_id,
+        'workflowStatus', baseline.workflow_status,
+        'workflowRevision', baseline.workflow_revision
+      )
+      order by baseline.track_id
+    )
+    from registration_level_result_workflow_baselines baseline
+  ),
+  'level-test result saves leave every track workflow status and revision unchanged'
+);
+
+select is(
+  pg_temp.registration_level_result_artifact_counts(),
+  (
+    select baseline.artifact_counts
+    from registration_level_result_artifact_baseline baseline
+  ),
+  'level-test result saves and denied replays create no notification, reminder, chat, or customer-message artifacts'
+);
+
+select is(
+  (
+    select pg_catalog.count(*)::integer
+    from public.ops_task_events event
+    where event.task_id in (
+      select ids.task_id
+      from registration_level_result_ids ids
+    )
+      and event.event_type = 'registration_track_event'
+      and event.after_value is not null
+      and event.after_value::jsonb ->> 'event_type' =
+        'registration_level_test_result_saved'
+  ),
+  0,
+  'level-test result saves create zero legacy registration track events'
 );
 
 select * from finish();

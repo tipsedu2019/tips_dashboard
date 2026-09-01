@@ -116,6 +116,17 @@ begin
 end;
 $body$;
 select cron.unschedule('notification-daily-old');
+do $body$
+begin
+  if exists (
+    select 1
+    from cron.job job
+    where job.jobname = 'notification-daily-old-guarded'
+  ) then
+    perform cron.unschedule('notification-daily-old-guarded');
+  end if;
+end;
+$body$;
 `,
   })
 

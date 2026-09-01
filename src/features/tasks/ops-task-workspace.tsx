@@ -136,9 +136,7 @@ import {
   getRegistrationBlockerFocusKey,
   getRegistrationBlockerSection,
   getRegistrationBranchActions,
-  getRegistrationCreateBlockers,
   getRegistrationCreateDefaults,
-  getRegistrationCreateErrorMessage,
   getRegistrationGradeOptions,
   getSelectableRegistrationScheduleSessions,
   getRegistrationMobileSections,
@@ -148,7 +146,6 @@ import {
   getRegistrationReopenStatus,
   getRegistrationTaskStatusForPipeline,
   getRegistrationTransitionBlockers,
-  isValidRegistrationMobilePhone,
   isRegistrationCompletionImmutable,
   normalizeRegistrationPhone,
   normalizeRegistrationCampus,
@@ -204,13 +201,8 @@ import { createRegistrationCustomerMessageClient } from "./registration-customer
 import type { RegistrationCustomerMessageClient } from "./registration-customer-message-contract"
 import {
   createRegistrationCase,
-  createRegistrationCaseWithInitialWorkflow,
   createRegistrationMutationRequestKey,
-  ensureRegistrationWorkflowNotificationSourceIds,
-  loadRegistrationLegacyNotificationSourceIds,
-  probeRegistrationIntakeWorkflowRuntime,
   probeRegistrationObservationRuntime,
-  probeRegistrationSubjectTrackRuntime,
   setRegistrationWorkflowStatus,
   toObservationAwareCaseDetail,
   updateRegistrationCaseCommon,
@@ -231,27 +223,16 @@ import { isRegistrationObservationWorkflowStatus } from "./registration-workflow
 import { RegistrationApplicationCreate } from "./registration-application-create"
 import { resolveRegistrationCreateCatalogStatus } from "./registration-application-model"
 import {
-  assertRegistrationCreateAttemptPersistenceMode,
   createRegistrationCreateAttempt,
   createRegistrationInitialWorkflowDraft,
-  getRegistrationSubjectPickerAvailability,
-  markRegistrationLegacyCreateStarted,
   normalizeRegistrationInitialWorkflow,
-  probeRegistrationInitialPersistence,
   reconcileRegistrationInitialWorkflowDraft,
-  reconcileRegistrationSubjectsForGrade,
   type RegistrationCreateAttempt,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
 import {
-  dispatchRegistrationManagementNotificationSources,
-  dispatchRegistrationVisitNotificationTargets,
-  isRegistrationManagementNotificationWorkflowStatus,
   isRegistrationSubmissionOwnershipCurrent,
-  mergeRegistrationVisitNotificationTargets,
-  reconcileRegistrationVisitNotificationRetryTargets,
-  sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
   installRegistrationSubjectTrackFixtureRuntime,
@@ -264,7 +245,11 @@ import { WordRetestManualDialog } from "./word-retest-manual-dialog"
 
 type RegistrationSubjectTrackFixtureModule = typeof import("./registration-track-fixtures")
 
-type RegistrationVisitNotificationTarget = { appointmentId: string; notificationRevision: number }
+const FACT_ONLY_REGISTRATION_PERSISTENCE: RegistrationInitialPersistenceProbeResult = {
+  mode: "canonical_inquiry",
+  subjectRuntime: { mode: "ready", version: 1 },
+  intakeRuntime: { available: false, version: 0 },
+}
 type RegistrationApplicationHostState =
   | { kind: "closed" }
   | { kind: "create" }
@@ -880,52 +865,31 @@ function RegistrationFieldLabel({
 function RegistrationSubjectField({
   label,
   values,
-  grade,
-  capabilities,
   onChange,
-  required = false,
 }: {
   label: ReactNode
   values: string[]
-  grade: string
-  capabilities: readonly RegistrationSubjectCapability[]
   onChange: (values: string[]) => void
-  required?: boolean
 }) {
   const fieldId = useId()
-  const requiredDescriptionId = useId()
   const valueSet = new Set(values)
-  const availability = getRegistrationSubjectPickerAvailability({
-    capabilities,
-    grade,
-    selectedSubjects: values as RegistrationSubject[],
-  })
-  const options = availability.options.map((subject) => ({ value: subject, label: subject }))
+  const options = ACADEMIC_SUBJECT_VALUES.map((subject) => ({ value: subject, label: subject }))
 
   return (
     <div className="grid min-w-0 gap-1.5 text-sm font-medium">
       <span id={fieldId}>{label}</span>
-      {required && (
-        <span id={requiredDescriptionId} className="sr-only">
-          하나 이상 선택해야 하는 필수 항목입니다.
-        </span>
-      )}
       <div
         className="grid grid-cols-1 gap-1.5 sm:grid-cols-3"
         role="group"
         aria-labelledby={fieldId}
-        aria-describedby={required ? requiredDescriptionId : undefined}
       >
         {options.map((option) => {
           const selected = valueSet.has(option.value)
-          const disabledReason = availability.disabledReasonBySubject[option.value]
           return (
             <button
               key={option.value}
               type="button"
               aria-pressed={selected}
-              disabled={Boolean(disabledReason)}
-              title={disabledReason}
               onClick={() => onChange(selected
                 ? values.filter((value) => value !== option.value)
                 : [...values, option.value])}
@@ -942,9 +906,6 @@ function RegistrationSubjectField({
           )
         })}
       </div>
-      {[...new Set(Object.values(availability.disabledReasonBySubject).filter(Boolean))].map((reason) => (
-        <span key={reason} className="text-xs font-normal text-muted-foreground">{reason}</span>
-      ))}
     </div>
   )
 }
@@ -1660,7 +1621,7 @@ function getTransferRequiredInputBlockers(input: OpsTaskInput) {
 
 function canSubmitOpsTaskForm(input: OpsTaskInput, isEditing: boolean) {
   if (input.type === "registration" && !isEditing) {
-    return getRegistrationCreateBlockers(input).length === 0
+    return true
   }
   if (input.type === "transfer") {
     return getTransferRequiredInputBlockers(input).length === 0
@@ -7122,15 +7083,6 @@ async function dispatchLegacyOpsTaskSourcesRequest(sourceEventIds: string[], ses
   return Array.from(new Set(results.flatMap((result) => result.status === "fulfilled" ? result.value : [])))
 }
 
-async function collectRegistrationLegacySourceIds(tasks: OpsTask[]) {
-  const results = await Promise.allSettled(
-    tasks
-      .filter((task) => task.type === "registration")
-      .map((task) => loadRegistrationLegacyNotificationSourceIds(task.id)),
-  )
-  return results.flatMap((result) => result.status === "fulfilled" ? result.value : [])
-}
-
 function DashboardMetric({
   label,
   value,
@@ -7226,23 +7178,9 @@ function TodoPriorityBadge({ priority, showNormal = false }: { priority: OpsTask
   )
 }
 
-function registrationObservationFeedbackId(
-  task: Pick<OpsTask, "type"> & Partial<Pick<OpsTask, "memo">>,
-) {
-  if (task.type !== "general") return null
-  return (task.memo || "").match(/registration_observation_feedback:([0-9a-f-]{36})/i)?.[1] || null
-}
-
-function isRegistrationObservationFeedbackTask(
-  task: Pick<OpsTask, "type"> & Partial<Pick<OpsTask, "memo">>,
-) {
-  return Boolean(registrationObservationFeedbackId(task))
-}
-
 function getNextTaskStatusAction(
-  task: Pick<OpsTask, "status" | "type"> & Partial<Pick<OpsTask, "memo">>,
+  task: Pick<OpsTask, "status" | "type">,
 ): { status: OpsTaskStatus; label: string } | null {
-  if (isRegistrationObservationFeedbackTask(task)) return null
   if (task.type === "registration") return null
   if (task.type === "withdrawal" && task.status === "done") return null
   if (task.type === "transfer" && task.status === "done") return null
@@ -7412,10 +7350,7 @@ function getNextRegistrationPipelineAction(task: Pick<OpsTask, "type" | "status"
 function getSecondaryTaskStatusOptions(task: Pick<OpsTask, "status" | "type">) {
   if (task.status === "done" || task.status === "canceled") return []
   if (task.type === "word_retest") return []
-  if (task.type === "registration") {
-    if (task.status === "on_hold") return [{ value: "in_progress", label: "다시 진행" }]
-    return OPS_TASK_STATUSES.filter((status) => status.value === "on_hold" && status.value !== task.status)
-  }
+  if (task.type === "registration") return []
   if (task.type !== "general") {
     return OPS_TASK_STATUSES.filter((status) => (
       ["on_hold", "canceled"].includes(status.value) &&
@@ -7562,30 +7497,6 @@ function normalizeFormForSubmit(input: OpsTaskInput): OpsTaskInput {
     status: nextStatus,
     completedAt: nextCompletedAt,
     registration: prepareRegistrationPipelineTransition(input.registration || {}, pipelineStatus, transitionAt),
-  }
-}
-
-function sanitizeRegistrationInquiryOnlyInput(input: OpsTaskInput): OpsTaskInput {
-  if (input.type !== "registration") return input
-  const registration = input.registration || {}
-  return {
-    ...input,
-    status: "requested",
-    completedAt: "",
-    classId: "",
-    className: "",
-    textbookId: "",
-    textbookTitle: "",
-    secondaryAssigneeId: "",
-    registration: {
-      pipelineStatus: REGISTRATION_PIPELINE_STATUSES[0]?.value || "0. 등록 문의",
-      inquiryAt: registration.inquiryAt || "",
-      schoolGrade: registration.schoolGrade || "",
-      schoolName: registration.schoolName || "",
-      parentPhone: registration.parentPhone || "",
-      studentPhone: registration.studentPhone || "",
-      requestNote: registration.requestNote || "",
-    },
   }
 }
 
@@ -8088,10 +7999,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [registrationInitialWorkflowDraft, setRegistrationInitialWorkflowDraft] = useState<RegistrationInitialWorkflowDraft>(() => (
     createRegistrationInitialWorkflowDraft([])
   ))
-  const [registrationPersistence, setRegistrationPersistence] = useState<RegistrationInitialPersistenceProbeResult>(() => ({
-    mode: "blocked_indeterminate",
-    error: new Error("registration_runtime_not_probed"),
-  }))
+  const registrationPersistence = FACT_ONLY_REGISTRATION_PERSISTENCE
   const formBaselineRef = useRef(serializeOpsTaskInput(form))
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
@@ -8127,17 +8035,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   } | null>(null)
   const pushedTaskDetailHistoryUrlRef = useRef("")
   const registrationCloseHistoryRestoreRef = useRef<"forward" | "replace">("replace")
-  const [pendingRegistrationVisitNotificationTargets, setPendingRegistrationVisitNotificationTargets] = useState<RegistrationVisitNotificationTarget[]>([])
-  const [retryingRegistrationVisitNotifications, setRetryingRegistrationVisitNotifications] = useState(false)
-  const registrationVisitNotificationRetryInFlightRef = useRef(false)
-  const registrationVisitNotificationRetryGenerationRef = useRef(0)
-  useEffect(() => {
-    if (registrationFixtureRequested) return
-    registrationVisitNotificationRetryGenerationRef.current += 1
-    registrationVisitNotificationRetryInFlightRef.current = false
-    setPendingRegistrationVisitNotificationTargets([])
-    setRetryingRegistrationVisitNotifications(false)
-  }, [registrationFixtureRequested])
   const withdrawalCreateHandledRef = useRef("")
   const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => Promise<void>) | null>(null)
   const registrationOptionsLoadedRef = useRef(false)
@@ -8526,8 +8423,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       taskOptionsLoadGenerationRef.current += 1
       registrationOptionsLoadGenerationRef.current += 1
       workspaceViewerGenerationRef.current += 1
-      registrationVisitNotificationRetryGenerationRef.current += 1
-      registrationVisitNotificationRetryInFlightRef.current = false
     }
   }, [])
 
@@ -9180,23 +9075,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ))
   }, [form.type, registrationInitialSubjects])
 
-  useEffect(() => {
-    if (registrationApplicationHost.kind !== "create" || form.type !== "registration" || editingTask) return
-    let active = true
-    setRegistrationPersistence({
-      mode: "blocked_indeterminate",
-      error: new Error("registration_runtime_probe_pending"),
-    })
-    void probeRegistrationInitialPersistence({
-      probeSubjectRuntime: probeRegistrationSubjectTrackRuntime,
-      probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
-    }).then((result) => {
-      if (active) setRegistrationPersistence(result)
-    })
-    return () => {
-      active = false
-    }
-  }, [editingTask, form.type, registrationApplicationHost.kind])
   const confirmationByTaskId = useMemo(() => buildOperationConfirmationMap(
     tasks,
     optionIndexes,
@@ -9592,8 +9470,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const visibleWorkspaceItemCount = isRegistrationWorkspace
     ? visibleRegistrationCaseItems.length
     : visibleTasks.length
-  const showEmptyCreate = !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
-  const showToolbarCreate = (!registrationFixtureEnabled || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
+  const showEmptyCreate = (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
+  const showToolbarCreate = (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
   const hasLoadBlocker = Boolean(data && !data.schemaReady)
   const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)
   const createActionDisabled = saving || !canOpenCreate
@@ -9691,6 +9569,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   async function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
+    if (type === "registration" && !canManageRegistrationWorkflow) return
     const taskOptions = type === "registration" ? null : await ensureTaskOptions()
     if (type === "registration") void ensureRegistrationOptions(true)
     else if (!taskOptions) return
@@ -9792,6 +9671,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ])
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
+    if (task.type === "registration" && !canManageRegistrationWorkflow) return
     if (task.type === "registration") void ensureRegistrationOptions(true)
     else void ensureTaskOptions()
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
@@ -9818,7 +9698,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     setFormOpen(true)
-  }, [ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
+  }, [canManageRegistrationWorkflow, ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
 
   const openWordRetestRetryForm = useCallback((task: OpsTask, retryReason: WordRetestRetryReason) => {
     const baseForm = formFromTask(task)
@@ -10743,7 +10623,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     workflowStatus: OpsRegistrationWorkflowStatus,
   ) => {
     if (
-      saving
+      !canManageRegistrationWorkflow
+      || saving
       || track.workflowStatus === workflowStatus
       || isRegistrationObservationWorkflowStatus(track.workflowStatus)
       || isRegistrationObservationWorkflowStatus(workflowStatus)
@@ -10751,43 +10632,20 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSaving(true)
     setMessage("")
     try {
-      const savedStatus = await setRegistrationWorkflowStatus({
+      await setRegistrationWorkflowStatus({
         trackId: track.trackId,
         workflowStatus,
         expectedWorkflowRevision: track.workflowRevision,
         requestKey: createRegistrationMutationRequestKey("registration-workflow-status", track.trackId),
       })
-      let managementNotificationFailed = false
-      if (
-        registrationNotificationSessionToken
-        && isRegistrationManagementNotificationWorkflowStatus(workflowStatus)
-      ) {
-        try {
-          const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
-            trackId: savedStatus.trackId,
-            workflowRevision: savedStatus.workflowRevision,
-          })
-          const dispatchResult = await dispatchRegistrationManagementNotificationSources(
-            sourceEventIds,
-            registrationNotificationSessionToken,
-          )
-          managementNotificationFailed = sourceEventIds.length === 0
-            || dispatchResult.failedSourceEventIds.length > 0
-        } catch {
-          managementNotificationFailed = true
-        }
-      }
       await reload(true, false)
-      if (managementNotificationFailed) {
-        setMessage("진행상태는 저장됐지만 관리팀 구글챗 알림은 전송하지 못했습니다.")
-      }
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
       await reload(true, false).catch(() => undefined)
     } finally {
       setSaving(false)
     }
-  }, [registrationNotificationSessionToken, reload, saving])
+  }, [canManageRegistrationWorkflow, reload, saving])
 
   const closeRegistrationApplicationHost = useCallback(() => {
     registrationObservationLoadOwnershipRef.current.invalidate()
@@ -11386,49 +11244,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }
 
-  async function retryPendingRegistrationVisitNotifications() {
-    if (registrationVisitNotificationRetryInFlightRef.current || pendingRegistrationVisitNotificationTargets.length === 0) return
-    const retryTargets = [...pendingRegistrationVisitNotificationTargets]
-    const retryViewerId = currentUserId
-    const retryGeneration = registrationVisitNotificationRetryGenerationRef.current + 1
-    registrationVisitNotificationRetryGenerationRef.current = retryGeneration
-    registrationVisitNotificationRetryInFlightRef.current = true
-    setRetryingRegistrationVisitNotifications(true)
-    try {
-      const result = await dispatchRegistrationVisitNotificationTargets(
-        retryTargets,
-        (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken),
-      )
-      if (
-        !workspaceMountedRef.current
-        || latestWorkspaceViewerIdRef.current !== retryViewerId
-        || registrationVisitNotificationRetryGenerationRef.current !== retryGeneration
-      ) return
-      setPendingRegistrationVisitNotificationTargets((current) => (
-        reconcileRegistrationVisitNotificationRetryTargets(current, retryTargets, result.failedTargets)
-      ))
-      if (result.failedTargets.length > 0) {
-        setNotice(`방문상담 알림 ${result.failedTargets.length}건을 아직 전송하지 못했습니다. 같은 저장본으로 다시 시도할 수 있습니다.`)
-      } else if (result.warnings.length > 0) {
-        setNotice("방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요.")
-      } else {
-        setNotice("선택한 방문상담 알림 재시도를 마쳤습니다.")
-      }
-    } finally {
-      if (registrationVisitNotificationRetryGenerationRef.current === retryGeneration) {
-        registrationVisitNotificationRetryInFlightRef.current = false
-        if (workspaceMountedRef.current && latestWorkspaceViewerIdRef.current === retryViewerId) {
-          setRetryingRegistrationVisitNotifications(false)
-        }
-      }
-    }
-  }
-
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const submissionViewerId = currentUserId
     const submissionViewerGeneration = workspaceViewerGenerationRef.current
-    const submissionRegistrationNotificationSessionToken = registrationNotificationSessionToken
     const registrationSubmissionStillOwnsWorkspace = () => isRegistrationSubmissionOwnershipCurrent({
       mounted: workspaceMountedRef.current,
       submissionViewerId,
@@ -11481,15 +11300,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       return
     }
-    const registrationCreateBlockers = submissionForm.type === "registration"
-      ? getRegistrationCreateBlockers(submissionForm)
-      : []
-    if (registrationCreateBlockers.length > 0) {
-      setMessage(getRegistrationCreateErrorMessage(submissionForm))
-      setFormCompletionBlockers(registrationCreateBlockers)
-      focusRegistrationFormSection(registrationCreateBlockers[0])
-      return
-    }
     const transferRequiredBlockers = getTransferRequiredInputBlockers(submissionForm)
     if (transferRequiredBlockers.length > 0) {
       setMessage(`전반 신청 전에 필수 항목을 모두 입력하세요: ${transferRequiredBlockers.map((blocker) => BLOCKER_ACTION_LABELS[blocker] || blocker).join(", ")}`)
@@ -11498,7 +11308,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       if (transferRequiredStep) setFormDetailStep(transferRequiredStep)
       return
     }
-    const nextTitle = submissionForm.title.trim() || buildFallbackTaskTitle(submissionForm)
+    const nextTitle = submissionForm.title.trim()
+      || (submissionForm.type === "registration" ? "등록 신청" : buildFallbackTaskTitle(submissionForm))
     if (!nextTitle) {
       setMessage(submissionForm.type === "general" ? "할 일을 입력하세요." : "학생명이나 수업명 중 하나를 입력하세요.")
       setNotice("")
@@ -11511,8 +11322,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     let savedWithRefreshWarning = false
-    let savedWithNotificationDeliveryFailure = false
-    let savedWithNotificationAuditWarning = false
     const legacyOpsTaskSourceEventIds: string[] = []
     const loadSavedTaskOrFallback = async (taskId: string, input: OpsTaskInput, existing?: OpsTask) => {
       try {
@@ -11712,29 +11521,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           if (createPayload.type === "registration") {
             const registration = createPayload.registration || {}
             const subjects = parseRegistrationSubjects(createPayload.subject) as RegistrationSubject[]
-            const registrationPersistence = await probeRegistrationInitialPersistence({
-              probeSubjectRuntime: probeRegistrationSubjectTrackRuntime,
-              probeIntakeRuntime: probeRegistrationIntakeWorkflowRuntime,
-            })
-            if (!registrationSubmissionStillOwnsWorkspace()) return
-            setRegistrationPersistence(registrationPersistence)
-            assertRegistrationCreateAttemptPersistenceMode(
-              registrationCreateAttemptRef.current,
-              registrationPersistence.mode,
+            const normalizedFactOnlyWorkflow = normalizeRegistrationInitialWorkflow(
+              createRegistrationInitialWorkflowDraft(subjects),
+              subjects,
             )
-
-            if (registrationPersistence.mode === "blocked_maintenance") {
-              throw new Error("등록 데이터 전환 중입니다. 전환이 끝난 뒤 다시 저장하세요.")
-            }
-            if (registrationPersistence.mode === "blocked_mismatch") {
-              throw new Error("registration_runtime_version_mismatch")
-            }
-            if (registrationPersistence.mode === "blocked_indeterminate") {
-              throw registrationPersistence.error
-            }
-
-            const initialDraft = createRegistrationInitialWorkflowDraft(subjects)
-            const normalizedInitialWorkflow = normalizeRegistrationInitialWorkflow(initialDraft, subjects)
             registrationCreateAttemptRef.current = createRegistrationCreateAttempt(
               registrationCreateAttemptRef.current,
               {
@@ -11749,117 +11539,35 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 requestNote: registration.requestNote || "",
                 priority: createPayload.priority || "normal",
               },
-              normalizedInitialWorkflow,
+              normalizedFactOnlyWorkflow,
               {
-                persistenceMode: registrationPersistence.mode,
+                persistenceMode: "canonical_inquiry",
                 createRequestKey: () => createRegistrationMutationRequestKey("registration-create"),
-                createInquiryAt: () => new Date().toISOString(),
+                createInquiryAt: () => "",
               },
             )
             const createAttempt = registrationCreateAttemptRef.current
-            const registrationReceiptPayload: OpsTaskInput = {
-              ...createPayload,
-              registration: {
-                ...registration,
-                inquiryAt: createAttempt.inquiryAt,
-              },
-            }
-
-            if (createAttempt.writer === "atomic") {
-              const response = await createRegistrationCaseWithInitialWorkflow({
-                ...createAttempt.common,
-                inquiryAt: createAttempt.inquiryAt,
-                subjectPlans: createAttempt.normalizedInitialWorkflow.subjectPlans,
-                levelTestAppointment: createAttempt.normalizedInitialWorkflow.levelTestAppointment,
-                visitAppointment: createAttempt.normalizedInitialWorkflow.visitAppointment,
-                directorOverrides: createAttempt.normalizedInitialWorkflow.directorOverrides,
-                requestKey: createAttempt.requestKey,
-              })
-              if (registrationCreateAttemptRef.current === createAttempt) {
-                registrationCreateAttemptRef.current = null
-              }
-              const committed: RegistrationCommittedReceipt = {
-                taskId: response.taskId,
-                tracks: response.tracks,
-              }
-              try {
-                const notificationResult = await dispatchRegistrationVisitNotificationTargets(
-                  response.notificationTargets,
-                  (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, submissionRegistrationNotificationSessionToken),
-                )
-                if (!registrationSubmissionStillOwnsWorkspace()) return
-                if (notificationResult.failedTargets.length > 0) {
-                  setPendingRegistrationVisitNotificationTargets((current) => (
-                    mergeRegistrationVisitNotificationTargets(current, notificationResult.failedTargets)
-                  ))
-                  savedWithNotificationDeliveryFailure = true
-                }
-                if (notificationResult.warnings.length > 0) {
-                  savedWithNotificationAuditWarning = true
-                }
-              } catch {
-                if (!registrationSubmissionStillOwnsWorkspace()) return
-                if (response.notificationTargets.length > 0) {
-                  setPendingRegistrationVisitNotificationTargets((current) => (
-                    mergeRegistrationVisitNotificationTargets(current, response.notificationTargets)
-                  ))
-                  savedWithNotificationDeliveryFailure = true
-                }
-              }
-              setFormCompletionBlockers([])
-              setFormCompletionIntent(null)
-              setConfirmingFormClose(false)
-              setQuery("")
-              setNotice(savedWithNotificationAuditWarning && savedWithNotificationDeliveryFailure
-                ? "등록을 추가했습니다. 일부 방문상담 알림의 전달 상태와 감사 이력을 확인하세요. 업무는 정상 저장되었습니다."
-                : savedWithNotificationAuditWarning
-                  ? "등록을 추가했습니다. 방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요."
-                  : savedWithNotificationDeliveryFailure
-                    ? "등록을 추가했습니다. 방문상담 알림은 전송하지 못했습니다. 업무는 정상 저장되었습니다."
-                    : "등록을 추가했습니다.")
-              await rehydrateCommittedRegistrationCase(committed)
-              if (!registrationSubmissionStillOwnsWorkspace()) return
-              return
-            }
-
-            const inquiryOnlyPayload = sanitizeRegistrationInquiryOnlyInput(registrationReceiptPayload)
-            if (createAttempt.writer === "canonical") {
-              const response = await createRegistrationCase({
-                ...createAttempt.common,
-                inquiryAt: createAttempt.inquiryAt,
-                requestKey: createAttempt.requestKey,
-              })
-              if (registrationCreateAttemptRef.current === createAttempt) {
-                registrationCreateAttemptRef.current = null
-              }
-              const committed: RegistrationCommittedReceipt = {
-                taskId: response.taskId,
-                tracks: response.tracks,
-              }
-              if (!registrationSubmissionStillOwnsWorkspace()) return
-              setFormCompletionBlockers([])
-              setFormCompletionIntent(null)
-              setConfirmingFormClose(false)
-              setQuery("")
-              setNotice("등록을 추가했습니다.")
-              await rehydrateCommittedRegistrationCase(committed)
-              if (!registrationSubmissionStillOwnsWorkspace()) return
-              return
-            }
-            if (createAttempt.writer === "legacy") {
-              registrationCreateAttemptRef.current = markRegistrationLegacyCreateStarted(createAttempt)
-              const receipt = await createOpsTask(inquiryOnlyPayload)
-              publicClassesCacheRefreshPending ||= receipt.publicClassesCacheRefresh?.status === "pending"
-              const taskId = receipt.taskId
-              legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
+            const response = await createRegistrationCase({
+              ...createAttempt.common,
+              inquiryAt: createAttempt.inquiryAt,
+              requestKey: createAttempt.requestKey,
+            })
+            if (registrationCreateAttemptRef.current === createAttempt) {
               registrationCreateAttemptRef.current = null
-              setRegistrationApplicationHost({ kind: "closed" })
-              setRegistrationInitialWorkflowDraft(createRegistrationInitialWorkflowDraft([]))
-              setRegistrationApplicationDirty(false)
-              setFormOpen(false)
-              savedTasks.push(await loadSavedTaskOrFallback(taskId, inquiryOnlyPayload))
-              continue
             }
+            const committed: RegistrationCommittedReceipt = {
+              taskId: response.taskId,
+              tracks: response.tracks,
+            }
+            if (!registrationSubmissionStillOwnsWorkspace()) return
+            setFormCompletionBlockers([])
+            setFormCompletionIntent(null)
+            setConfirmingFormClose(false)
+            setQuery("")
+            setNotice("등록을 추가했습니다.")
+            await rehydrateCommittedRegistrationCase(committed)
+            if (!registrationSubmissionStillOwnsWorkspace()) return
+            return
           }
           const receipt = createPayload.type === "transfer" || createPayload.type === "withdrawal"
             ? await createOpsTransitionTask(createPayload)
@@ -11883,21 +11591,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setQuery("")
       }
       await refreshFirstTaskPageAfterMutation()
-      legacyOpsTaskSourceEventIds.push(...await collectRegistrationLegacySourceIds(savedTasks))
-      await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, registrationNotificationSessionToken)
+      if (payload.type !== "registration") {
+        await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, registrationNotificationSessionToken)
+      }
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
       const savedNotice = wasEditing
         ? `${itemLabel}을 수정했습니다.`
         : savedTasks.length > 1
           ? `${itemLabel} ${savedTasks.length}건을 추가했습니다.`
           : `${itemLabel}을 추가했습니다.`
-      setNotice(savedWithNotificationAuditWarning && savedWithNotificationDeliveryFailure
-        ? `${savedNotice} 일부 방문상담 알림의 전달 상태와 감사 이력을 확인하세요. 업무는 정상 저장되었습니다.`
-        : savedWithNotificationAuditWarning
-          ? `${savedNotice} 방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요.`
-          : savedWithNotificationDeliveryFailure
-            ? `${savedNotice} 방문상담 알림은 전송하지 못했습니다. 업무는 정상 저장되었습니다.`
-        : publicClassesCacheRefreshPending
+      setNotice(publicClassesCacheRefreshPending
           ? `${savedNotice} 공개 수업 캐시 갱신 대기 중`
         : savedWithRefreshWarning
           ? `${savedNotice} 최신 상세는 새로고침해 확인하세요.`
@@ -11943,13 +11646,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const changeStatus = async (task: OpsTask, status: OpsTaskStatus) => {
+    if (task.type === "registration") return
     setSaving(true)
     setMessage("")
     setNotice("")
     setStatusUndo(null)
     try {
       const receipt = await updateOpsTaskStatus(task, status)
-      const shouldRefreshSyncedTask = status === "done" || task.type === "registration" || task.type === "word_retest"
+      const shouldRefreshSyncedTask = status === "done" || task.type === "word_retest"
       const syncedTask = shouldRefreshSyncedTask ? await loadOpsTaskById(task.id) : null
       const changedAt = new Date().toISOString()
       if (syncedTask) {
@@ -11961,13 +11665,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         })
       }
       await refreshFirstTaskPageAfterMutation()
-      const registrationSourceEventIds = task.type === "registration"
-        ? await loadRegistrationLegacyNotificationSourceIds(task.id).catch(() => [])
-        : []
-      await dispatchLegacyOpsTaskSources([
-        ...receipt.sourceEventIds,
-        ...registrationSourceEventIds,
-      ], registrationNotificationSessionToken)
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, registrationNotificationSessionToken)
       const canUndoStatusChange = task.type === "general" || status !== "done"
       if (canUndoStatusChange) {
         setStatusUndo({
@@ -12223,6 +11921,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
+    if (!canManageRegistrationWorkflow) return
     const currentPipelinePrefix = getRegistrationPipelinePrefix(task.registration?.pipelineStatus)
     const nextPipelinePrefix = getRegistrationPipelinePrefix(pipelineStatus)
     if (currentPipelinePrefix.startsWith("4-") && nextPipelinePrefix === "1.") {
@@ -12283,11 +11982,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       }
       replaceTaskInState(notificationTask)
       await refreshFirstTaskPageAfterMutation()
-      const registrationSourceEventIds = await loadRegistrationLegacyNotificationSourceIds(task.id).catch(() => [])
-      await dispatchLegacyOpsTaskSources([
-        ...receipt.sourceEventIds,
-        ...registrationSourceEventIds,
-      ], registrationNotificationSessionToken)
       setNotice(receipt.publicClassesCacheRefresh?.status === "pending"
         ? `등록 단계를 변경했습니다. 공개 수업 캐시 갱신 대기 중${refreshWarning ? ` ${refreshWarning}` : ""}`
         : refreshWarning ? `등록 단계를 변경했습니다. ${refreshWarning}` : "등록 단계를 변경했습니다.")
@@ -12305,12 +11999,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       setStatusUndo(null)
       return
     }
+    if (currentTask.type === "registration") {
+      setStatusUndo(null)
+      return
+    }
 
     setSaving(true)
     setMessage("")
     try {
       const receipt = await updateOpsTaskStatus(currentTask, statusUndo.previousStatus)
-      const shouldRefreshSyncedTask = currentTask.type === "registration" || currentTask.type === "word_retest"
+      const shouldRefreshSyncedTask = currentTask.type === "word_retest"
       const syncedTask = shouldRefreshSyncedTask ? await loadOpsTaskById(statusUndo.taskId) : null
       if (syncedTask) {
         replaceTaskInState(syncedTask)
@@ -12321,13 +12019,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         })
       }
       await refreshFirstTaskPageAfterMutation()
-      const registrationSourceEventIds = currentTask.type === "registration"
-        ? await loadRegistrationLegacyNotificationSourceIds(currentTask.id).catch(() => [])
-        : []
-      await dispatchLegacyOpsTaskSources([
-        ...receipt.sourceEventIds,
-        ...registrationSourceEventIds,
-      ], registrationNotificationSessionToken)
+      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, registrationNotificationSessionToken)
       setStatusUndo(null)
       setNotice("진행상태 변경을 되돌렸습니다.")
     } catch (error) {
@@ -12518,7 +12210,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? selectedRegistrationAction.pipelineStatus.startsWith("7.") && completionBlockers.length > 0
     : nextActionBlocked
   const detailBlockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
-  const selectedTaskCanEdit = selectedTaskFresh ? canEditTaskDetails(selectedTaskFresh) : false
+  const selectedTaskCanEdit = selectedTaskFresh ? (!isRegistrationDetail || canManageRegistrationWorkflow)
+    && canEditTaskDetails(selectedTaskFresh) : false
   const showRegistrationDetailCompletionBlockers = Boolean(
     isRegistrationDetail && shouldShowRegistrationCompletionBlockers(selectedTaskFresh?.registration?.pipelineStatus),
   )
@@ -13063,23 +12756,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             </Button>
           </div>
         )}
-        {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && !detailOpen && registrationApplicationHost.kind === "closed" && (
+        {notice && !detailOpen && registrationApplicationHost.kind === "closed" && (
           <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-            <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
-            {pendingRegistrationVisitNotificationTargets.length > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => void retryPendingRegistrationVisitNotifications()}
-                disabled={retryingRegistrationVisitNotifications}
-                className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
-              >
-                {retryingRegistrationVisitNotifications
-                  ? "방문상담 알림 재시도 중"
-                  : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
-              </Button>
-            )}
+            <span>{notice}</span>
             {statusUndo && (
               <Button
                 type="button"
@@ -13787,23 +13466,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               </DialogDescription>
             </DialogHeader>
           ) : null}
-          {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && (
+          {notice && (
             <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-              <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
-              {pendingRegistrationVisitNotificationTargets.length > 0 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void retryPendingRegistrationVisitNotifications()}
-                  disabled={retryingRegistrationVisitNotifications}
-                  className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
-                >
-                  {retryingRegistrationVisitNotifications
-                    ? "방문상담 알림 재시도 중"
-                    : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
-                </Button>
-              )}
+              <span>{notice}</span>
               {statusUndo && (
                 <Button
                   type="button"
@@ -13928,7 +13593,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                     </dl>
                   </>
                 )}
-                {!isProcessDetail && (
+                {!isProcessDetail && (!isRegistrationDetail || canManageRegistrationWorkflow) && (
                   <CompletionBlockerActionPanel
                     task={selectedTaskFresh}
                     blockers={detailCompletionBlockers}
@@ -13955,14 +13620,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                      ))}
 	                    </>
 	                  )}
-                  {selectedTaskFresh.type === "registration" && !isCanonicalRegistrationTrackDetail ? (
+                  {selectedTaskFresh.type === "registration" && !isCanonicalRegistrationTrackDetail && canManageRegistrationWorkflow ? (
                     <RegistrationDecisionActions
                       task={selectedTaskFresh}
                       onSelect={(task, pipelineStatus) => void changeRegistrationPipeline(task, pipelineStatus)}
                       disabled={saving || !canManageRegistrationWorkflow}
                     />
                   ) : null}
-                  {selectedTaskFresh.type === "registration" && selectedRegistrationReopenStatus ? (
+                  {selectedTaskFresh.type === "registration" && selectedRegistrationReopenStatus && canManageRegistrationWorkflow ? (
                     <Button
                       type="button"
                       size="sm"
@@ -13999,7 +13664,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       {detailPrimaryActionBlocked ? detailBlockedActionLabel : detailPrimaryAction.label}
                     </Button>
                   )}
-                  {!isProcessDetail && getSecondaryTaskStatusOptions(selectedTaskFresh)
+                  {(!isRegistrationDetail || canManageRegistrationWorkflow) && !isProcessDetail && getSecondaryTaskStatusOptions(selectedTaskFresh)
                     .map((status) => (
                       <Button
                         key={status.value}
@@ -14250,23 +13915,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             <div data-registration-application-dirty={registrationApplicationDirty ? "true" : "false"} className="grid gap-4">
               <DialogTitle className="sr-only">등록 신청서</DialogTitle>
               <DialogDescription className="sr-only">저장된 등록 신청서 내용을 확인하고 수정합니다.</DialogDescription>
-              {(notice || pendingRegistrationVisitNotificationTargets.length > 0) ? (
+              {notice ? (
                 <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-                  <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
-                  {pendingRegistrationVisitNotificationTargets.length > 0 ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void retryPendingRegistrationVisitNotifications()}
-                      disabled={retryingRegistrationVisitNotifications}
-                      className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
-                    >
-                      {retryingRegistrationVisitNotifications
-                        ? "방문상담 알림 재시도 중"
-                        : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
-                    </Button>
-                  ) : null}
+                  <span>{notice}</span>
                 </div>
               ) : null}
               {message ? (
@@ -15016,26 +14667,22 @@ function TypeSpecificFields({
             ) : (
               <RegistrationFocusTarget focusKey="subject">
                 <RegistrationSubjectField
-                  label={<RegistrationFieldLabel label="과목" requirement="required" />}
+                  label={<RegistrationFieldLabel label="과목" requirement="optional" />}
                   values={registrationSubjects}
-                  grade={registration.schoolGrade || ""}
-                  capabilities={registrationSubjectCapabilities || getRegistrationSubjectCompatibilityCapabilities()}
-                  required
                   onChange={(values) => updateForm("subject", serializeRegistrationSubjects(values))}
                 />
               </RegistrationFocusTarget>
             )}
             <RegistrationFocusTarget focusKey="studentName">
               <TextField
-                label={<RegistrationFieldLabel label="학생명" requirement="required" />}
+                label={<RegistrationFieldLabel label="학생명" requirement="optional" />}
                 value={form.studentName || ""}
-                required
                 onChange={(value) => updateForm("studentName", value)}
               />
             </RegistrationFocusTarget>
             <RegistrationFocusTarget focusKey="schoolGrade">
               <TaskListboxField
-                label={<RegistrationFieldLabel label="학년" requirement="required" />}
+                label={<RegistrationFieldLabel label="학년" requirement="optional" />}
                 value={registration.schoolGrade || ""}
                 options={[
                   { value: "", label: "미정" },
@@ -15044,26 +14691,7 @@ function TypeSpecificFields({
                     : []),
                   ...REGISTRATION_GRADE_OPTIONS.map((grade) => ({ value: grade, label: grade })),
                 ]}
-                required
-                onChange={(value) => {
-                  updateRegistration("schoolGrade", value)
-                  if (
-                    registrationInitialWorkflowDraft
-                    && onRegistrationInitialWorkflowChange
-                    && registrationSubjectCapabilities
-                  ) {
-                    const reconciled = reconcileRegistrationSubjectsForGrade({
-                      capabilities: registrationSubjectCapabilities,
-                      grade: value,
-                      subjects: registrationSubjects,
-                      draft: registrationInitialWorkflowDraft,
-                    })
-                    if (reconciled.removedSubjects.length > 0) {
-                      updateForm("subject", serializeRegistrationSubjects(reconciled.subjects))
-                      onRegistrationInitialWorkflowChange(reconciled.draft)
-                    }
-                  }
-                }}
+                onChange={(value) => updateRegistration("schoolGrade", value)}
               />
             </RegistrationFocusTarget>
             <TextField
@@ -15073,13 +14701,9 @@ function TypeSpecificFields({
             />
             <RegistrationFocusTarget focusKey="parentPhone">
               <TextField
-                label={<RegistrationFieldLabel label="학부모 전화" requirement="required" />}
+                label={<RegistrationFieldLabel label="학부모 전화" requirement="optional" />}
                 value={registration.parentPhone || ""}
                 inputMode="tel"
-                required
-                error={registration.parentPhone && !isValidRegistrationMobilePhone(registration.parentPhone)
-                  ? "010으로 시작하는 휴대전화 번호를 입력하세요."
-                  : ""}
                 onChange={(value) => updateRegistration("parentPhone", normalizeRegistrationPhone(value))}
               />
             </RegistrationFocusTarget>
@@ -15088,6 +14712,12 @@ function TypeSpecificFields({
               value={registration.studentPhone || ""}
               inputMode="tel"
               onChange={(value) => updateRegistration("studentPhone", normalizeRegistrationPhone(value))}
+            />
+            <TextField
+              label={<RegistrationFieldLabel label="문의일시" requirement="optional" />}
+              type="datetime-local"
+              value={registration.inquiryAt || ""}
+              onChange={(value) => updateRegistration("inquiryAt", value)}
             />
           </div>
           <TextField
@@ -17236,8 +16866,10 @@ function DetailInfoTile({ label, value, children }: { label: string; value?: str
 }
 
 function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
-  const observationId = registrationObservationFeedbackId(task)
-  const visibleMemo = task.memo.replace(/\s*registration_observation_feedback:[0-9a-f-]{36}\s*/i, "").trim()
+  const visibleMemo = task.memo.replace(
+    /\s*\b[a-z][a-z0-9_]*:[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}\b\s*/gi,
+    " ",
+  ).trim()
   return (
     <dl className="grid gap-3">
       <div className="grid gap-3 md:grid-cols-[160px_minmax(0,1fr)]">
@@ -17255,9 +16887,6 @@ function GeneralTaskDetailPanel({ task }: { task: OpsTask }) {
         <DetailInfoTile label="마감일" value={dateLabel(task.dueAt) === "-" ? "미지정" : dateLabel(task.dueAt)} />
       </div>
       <DetailInfoTile label="메모" value={visibleMemo || "미입력"} />
-      {observationId ? (
-        <div><Button asChild><a href={`/admin/registration/observations/${observationId}/feedback`}>피드백 작성</a></Button></div>
-      ) : null}
       <div className="grid gap-3 border-t pt-3 md:grid-cols-3">
         <DetailInfoTile label="요청팀" value={task.requestedTeam || "미지정"} />
         <DetailInfoTile label="요청자" value={task.requestedByLabel || "미지정"} />

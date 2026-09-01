@@ -124,11 +124,9 @@ test("new registration inquiry fields follow the requested three-column reading 
       schoolName: "",
       parentPhone: "",
       studentPhone: "",
+      inquiryAt: "2026-09-01T09:49:00Z",
       requestNote: "",
     },
-    inquiryAtLabel: "저장 시각",
-    schoolChoices: [],
-    schoolCatalogStatus: "authoritative",
     onChange: () => {},
   }));
 
@@ -141,6 +139,12 @@ test("new registration inquiry fields follow the requested three-column reading 
     "문의일시",
     "요청 사항",
   ]);
+  assert.match(html, /data-common-field="school-name"/);
+  assert.match(html, /data-common-field="inquiry-at"/);
+  assert.match(html, /type="datetime-local"/);
+  assert.match(html, /value="2026-09-01T18:49"/);
+  assert.doesNotMatch(html, /\srequired=""/);
+  assert.doesNotMatch(html, /문의일시 자동/);
 });
 
 const subjectOrder = ["영어", "수학", "과학"];
