@@ -842,11 +842,15 @@ export function shouldRenderRegistrationConsultationOutcome(input = {}) {
     && Boolean(input.canEdit)
 }
 
+export function canManageRegistrationCase(viewerRole) {
+  return ["admin", "staff"].includes(String(viewerRole || ""))
+}
+
 export function getRegistrationActionPermissions(input = {}) {
-  const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
+  const canManage = canManageRegistrationCase(input.viewerRole)
   const consultation = input.activeConsultation
   const ownsConsultation = Boolean(
-    ["admin", "staff", "teacher"].includes(String(input.viewerRole || ""))
+    canManage
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && consultation?.trackId === input.track?.id
@@ -866,9 +870,9 @@ export function getRegistrationActionPermissions(input = {}) {
 }
 
 export function getRegistrationSummaryActionPermissions(input = {}) {
-  const canManage = ["admin", "staff"].includes(String(input.viewerRole || ""))
+  const canManage = canManageRegistrationCase(input.viewerRole)
   const canOpenOwnConsultationHint = Boolean(
-    (input.viewerRole === "admin" || (input.viewerRole === "teacher" && input.track?.subject === "과학"))
+    canManage
     && input.viewerId
     && input.track?.directorProfileId === input.viewerId
     && ["consultation_waiting", "visit_consultation_scheduled"].includes(input.track?.status),

@@ -39,7 +39,6 @@ import { RegistrationApplicationShell } from "./registration-application-shell"
 import { RegistrationApplicationSubjectTabs } from "./registration-application-subject-tabs"
 import {
   RegistrationObservationEditor,
-  buildRegistrationObservationWithdrawalInput,
   canLoadRegistrationObservationWorkspace,
   canUseRegistrationObservationDetail,
   getRegistrationObservationUiErrorMessage,
@@ -47,8 +46,6 @@ import {
 } from "./registration-observation-editor"
 import {
   RegistrationObservationFeedbackPanel,
-  canEditRegistrationObservationFeedback,
-  canKeepRegistrationObservationFeedbackHistoryMounted,
   getRegistrationObservationFeedbackMountPlan,
   getRegistrationObservationFeedbackRefreshPlan,
   loadRegistrationObservationFeedbackForOwnedPanel,
@@ -63,8 +60,6 @@ import {
   RegistrationMigrationReviewEditor,
   RegistrationTrackDirectorSection,
   RegistrationWaitingDetailsEditor,
-  canStartRegistrationObservation,
-  getRegistrationIdentityEditLock,
   type RegistrationMigrationConflictState,
   type RegistrationMigrationDirtyScope,
   type RegistrationTrackActionPermissions,
@@ -98,31 +93,29 @@ import {
 } from "./registration-observation-model"
 import {
   cancelRegistrationObservation,
-  correctRegistrationObservationFeedback,
   decideRegistrationObservation,
-  enterRegistrationObservation,
   loadRegistrationObservationFeedback,
   loadRegistrationObservationManagerDetail,
   loadRegistrationObservationSessions,
   recordRegistrationObservationAttendance,
   saveRegistrationObservationBooking,
-  submitRegistrationObservationFeedback,
-  withdrawRegistrationObservation,
   type RegistrationObservationClient,
 } from "./registration-observation-service"
 import { ACADEMIC_SUBJECT_VALUES } from "../../lib/academic-subject-registry.ts"
 import {
+  canManageRegistrationCase,
   getRegistrationActionPermissions,
   getRegistrationActiveConsultation,
   shouldRenderRegistrationConsultationOutcome,
 } from "./registration-track-model.js"
 import {
-  ensureRegistrationWorkflowNotificationSourceIds,
   cancelRegistrationAppointment,
-  saveRegistrationCaseInquiry,
+  ensureRegistrationWorkflowNotificationSourceIds,
   saveRegistrationConsultationDetails,
   saveRegistrationPhoneConsultation,
+  syncRegistrationCaseSubjects,
   setRegistrationWorkflowStatus,
+  updateRegistrationCaseCommon,
   isOpsRegistrationWorkflowStatus,
   type OpsRegistrationAppointment,
   type OpsRegistrationCaseDetail,
@@ -134,7 +127,7 @@ import {
 import { createRegistrationObservationAsyncOwnership } from "./registration-workspace-route"
 import {
   dispatchRegistrationManagementNotificationSources,
-  isRegistrationManagementNotificationWorkflowStatus,
+  getRegistrationManagementNotificationReadiness,
   sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
@@ -151,21 +144,13 @@ const UNAVAILABLE_REGISTRATION_OBSERVATION_RUNTIME: RegistrationObservationRunti
 
 const registrationObservationClient = supabase as unknown as RegistrationObservationClient
 const registrationObservationActions: RegistrationObservationActions = {
-  enterRegistrationObservation: (input) => enterRegistrationObservation(registrationObservationClient, input),
   loadRegistrationObservationSessions: (input) => loadRegistrationObservationSessions(registrationObservationClient, input),
   saveRegistrationObservationBooking: (input) => saveRegistrationObservationBooking(registrationObservationClient, input),
   cancelRegistrationObservation: (input) => cancelRegistrationObservation(registrationObservationClient, input),
-  withdrawRegistrationObservation: (input) => withdrawRegistrationObservation(registrationObservationClient, input),
 }
 const registrationObservationFeedbackActions: RegistrationObservationFeedbackActions = {
   recordRegistrationObservationAttendance: (input) => (
     recordRegistrationObservationAttendance(registrationObservationClient, input)
-  ),
-  submitRegistrationObservationFeedback: (input) => (
-    submitRegistrationObservationFeedback(registrationObservationClient, input)
-  ),
-  correctRegistrationObservationFeedback: (input) => (
-    correctRegistrationObservationFeedback(registrationObservationClient, input)
   ),
   decideRegistrationObservation: (input) => (
     decideRegistrationObservation(registrationObservationClient, input)
@@ -329,10 +314,6 @@ export function RegistrationApplication({
   directorCatalogStatus = "loading",
   subjectCapabilities,
   onRetryDirectorCatalog,
-  schools = [],
-  schoolCatalogStatus = "loading",
-  schoolCatalogError = "",
-  onRetrySchools,
   classOptions = [],
   textbookOptions = [],
   customerMessageClient,
@@ -352,6 +333,7 @@ export function RegistrationApplication({
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
+  const [managementNotificationSending, setManagementNotificationSending] = useState(false)
   const [latestGoogleChatEventId, setLatestGoogleChatEventId] = useState<string | null>(null)
   const [observationDetail, setObservationDetail] = useState<RegistrationObservationManagerDetail | null>(null)
   const [observationDetailLoading, setObservationDetailLoading] = useState(false)
@@ -381,7 +363,12 @@ export function RegistrationApplication({
   if (initialFocusRequestRef.current.taskId !== detail.task.id) {
     initialFocusRequestRef.current = { taskId: detail.task.id, trackId: focusTrackId }
   }
-  const canManageCase = viewerRole === "admin" || viewerRole === "staff"
+  const canManageCase = canManageRegistrationCase(viewerRole)
+  useEffect(() => {
+    if (canManageCase) return
+    setConsultationSwitchPending(false)
+    setConsultationCancelPending(false)
+  }, [canManageCase])
   const openCustomerMessage = useCallback((target: RegistrationCustomerMessageTarget) => {
     if (!canManageCase) return
     customerMessageTriggerRef.current = document.activeElement instanceof HTMLElement
@@ -450,21 +437,12 @@ export function RegistrationApplication({
     activeTrackId: activeTrack?.id || null,
     detailTrackId: observationDetail?.track.trackId || null,
   }) ? observationDetail : null
-  const observationWorkflowActionable = Boolean(activeTrack && (
-    canStartRegistrationObservation(activeTrack)
-    || isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
-  ))
-  const observationTrackEligible = Boolean(activeTrack && (
-    observationWorkflowActionable
-    || deepLinkedObservationHistoryEligible
-    || canKeepRegistrationObservationFeedbackHistoryMounted({
-      canManageCase,
-      observationAttemptCount: activeTrack.observationAttemptCount,
-    })
-  ))
+  const observationWorkflowActionable = Boolean(
+    activeTrack && canManageActiveObservation,
+  )
   const observationWorkspaceAvailable = Boolean(activeTrack && canLoadRegistrationObservationWorkspace({
-    runtimeAvailable: observationRuntime.available && observationTrackEligible,
-    observationSummaryVisible: activeTrack.observationSummaryVisible || deepLinkedObservationHistoryEligible,
+    runtimeAvailable: observationRuntime.available && canManageActiveObservation,
+    observationSummaryVisible: true,
   }))
   const activeObservationManagerKey = activeTrack && observationWorkspaceAvailable
     ? `${detail.task.id}:${activeTrack.id}:manager`
@@ -799,17 +777,14 @@ export function RegistrationApplication({
   const activeFeedbackObservationId = activeDeepLinkedAttempt?.observationId
     || activeFeedbackMountPlan?.observationId
     || null
-  const activeFeedbackCorrectionOnly = activeDeepLinkedAttempt
+  const activeFeedbackHistoryOnlyMode = activeDeepLinkedAttempt
     ? activeDeepLinkedAttempt.decisionKind !== null
-    : activeFeedbackMountPlan?.correctionOnly === true
+    : activeFeedbackMountPlan?.historyOnly === true
   const activeFeedbackHistoryOnly = !activeDeepLinkedAttempt
     && shouldMountRegistrationObservationFeedbackOnly({
-      correctionOnly: activeFeedbackCorrectionOnly,
+      historyOnly: activeFeedbackHistoryOnlyMode,
       workflowActionable: observationWorkflowActionable,
     })
-  const activeFeedbackTeacherProfileId = activeDeepLinkedAttempt?.teacherProfileId
-    || activeObservationDetail?.currentObservation?.teacherProfileId
-    || null
   const activeFeedbackOwnershipKey = activeTrack
     && activeFeedbackObservationId
     ? `${detail.task.id}:${activeTrack.id}:${activeFeedbackObservationId}`
@@ -990,21 +965,11 @@ export function RegistrationApplication({
     await handleObservationSaved()
     await refreshActiveObservationFeedback(activeFeedbackObservationId)
   }, [activeFeedbackObservationId, handleObservationSaved, refreshActiveObservationFeedback])
-  const canEnterObservationFromWorkflowStatus = Boolean(
-    activeGenericTrack
-    && canManageActiveObservation
-    && observationRuntime.available
-    && canStartRegistrationObservation(activeGenericTrack),
-  )
   const observationSectionLockReason = !canManageActiveObservation
     ? "청강 예약을 처리할 권한이 없습니다"
     : observationWorkspaceAvailable
       ? ""
-      : observationRuntime.available
-        ? canEnterObservationFromWorkflowStatus
-          ? "우측 진행상태에서 청강 예약 필요를 선택하세요"
-          : "상담 완료 또는 대기 단계에서 청강 예약 필요를 선택하면 청강 회차를 예약할 수 있습니다."
-        : "청강 신청 기능을 사용할 수 없습니다. 등록 정보를 다시 불러와 주세요."
+      : "청강 신청 기능을 사용할 수 없습니다. 등록 정보를 다시 불러와 주세요."
   const openSectionStates = Object.fromEntries(
     Object.entries(sectionStates).map(([section, state]) => [section, {
       ...state,
@@ -1033,132 +998,75 @@ export function RegistrationApplication({
   const waitingState = splitPlacementState()
   const registrationState = splitPlacementState()
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
-  const genericWorkflowStatusOptions = activeGenericTrack
+  const workflowStatusOptions = activeGenericTrack
     ? getRegistrationWorkflowStatusOptions({
       viewerId,
       viewerRole,
       directorProfileId: activeGenericTrack.directorProfileId,
     })
     : []
-  const workflowStatusOptions = [
-    ...genericWorkflowStatusOptions,
-    ...(canEnterObservationFromWorkflowStatus
-      ? [{ value: "observation_requested", label: REGISTRATION_WORKFLOW_STATUS_LABELS.observation_requested }]
-      : []),
-  ]
-  const observationReturnWorkflowStatus = activeObservationDetail?.track.observationReturnWorkflowStatus
-    ?? activeTrack?.observationReturnWorkflowStatus
-    ?? null
-  const observationHasCurrentAttempt = activeObservationDetail
-    ? activeObservationDetail.currentObservation !== null
-    : activeTrack?.observationCurrentId !== null
-  const observationWorkflowStatusOptions = activeTrack
-    && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus)
-    && !observationHasCurrentAttempt
-    && observationReturnWorkflowStatus
-    && canManageActiveObservation
-    ? [{
-        value: observationReturnWorkflowStatus,
-        label: REGISTRATION_WORKFLOW_STATUS_LABELS[observationReturnWorkflowStatus],
-      }]
-    : []
+  const notificationReadiness = getRegistrationManagementNotificationReadiness({
+    workflowStatus: activeGenericTrack?.workflowStatus,
+    studentName: detail.task.studentName,
+    subject: activeGenericTrack?.subject,
+    schoolGrade: detail.task.registration?.schoolGrade,
+    inquiryAt: detail.task.registration?.inquiryAt,
+  })
   async function changeWorkflowStatus(nextStatus: string) {
+    if (!canManageCase) return
     if (!activeGenericTrack || nextStatus === activeGenericTrack.workflowStatus || workflowStatusSaving) return
     const nextOption = workflowStatusOptions.find((option) => option.value === nextStatus)
     if (!nextOption) return
-    if (nextOption.value === "observation_requested") {
-      if (!canEnterObservationFromWorkflowStatus) return
-      setWorkflowStatusSaving(true)
-      try {
-        await registrationObservationActions.enterRegistrationObservation({
-          trackId: activeGenericTrack.id,
-          expectedWorkflowRevision: activeGenericTrack.workflowRevision,
-          requestKey: `registration-observation-enter:${activeGenericTrack.id}:${crypto.randomUUID()}`,
-        })
-        await onReload(activeGenericTrack.id)
-      } catch (error) {
-        onWarning(getRegistrationObservationUiErrorMessage(
-          error,
-          "청강 진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요.",
-        ))
-      } finally {
-        setWorkflowStatusSaving(false)
-      }
-      return
-    }
-    if (
-      isRegistrationObservationWorkflowStatus(activeGenericTrack.workflowStatus)
-      || isRegistrationObservationWorkflowStatus(nextStatus)
-    ) return
     setWorkflowStatusSaving(true)
     try {
-      const savedStatus = await setRegistrationWorkflowStatus({
+      await setRegistrationWorkflowStatus({
         trackId: activeGenericTrack.id,
         workflowStatus: nextOption.value as OpsRegistrationWorkflowStatus,
         expectedWorkflowRevision: activeGenericTrack.workflowRevision,
         requestKey: `registration-workflow-status:${activeGenericTrack.id}:${crypto.randomUUID()}`,
       })
-      let managementNotificationFailed = false
-      if (notificationToken && isRegistrationManagementNotificationWorkflowStatus(nextOption.value)) {
-        try {
-          const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
-            trackId: savedStatus.trackId,
-            workflowRevision: savedStatus.workflowRevision,
-          })
-          const dispatchResult = await dispatchRegistrationManagementNotificationSources(
-            sourceEventIds,
-            notificationToken,
-          )
-          setLatestGoogleChatEventId(
-            dispatchResult.googleChatEventIds[dispatchResult.googleChatEventIds.length - 1] || null,
-          )
-          managementNotificationFailed = sourceEventIds.length === 0
-            || dispatchResult.failedSourceEventIds.length > 0
-        } catch {
-          managementNotificationFailed = true
-        }
-      }
       await onReload(activeGenericTrack.id)
-      if (managementNotificationFailed) {
-        onWarning("진행상태는 저장됐지만 관리팀 구글챗 알림은 전송하지 못했습니다.")
-      }
     } catch (error) {
       onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
     } finally {
       setWorkflowStatusSaving(false)
     }
   }
-  async function changeObservationWorkflowStatus(nextStatus: string) {
+  async function sendRegistrationManagementNotification() {
     if (
-      !activeTrack
-      || workflowStatusSaving
-      || nextStatus === activeTrack.workflowStatus
+      !canManageCase
+      || !activeGenericTrack
+      || !notificationReadiness.ready
+      || !notificationToken
+      || managementNotificationSending
     ) return
-    const nextObservationStatus = observationWorkflowStatusOptions.find(
-      (option) => option.value === nextStatus,
-    )?.value
-    if (!nextObservationStatus) return
-    setWorkflowStatusSaving(true)
+    setManagementNotificationSending(true)
     try {
-      await registrationObservationActions.withdrawRegistrationObservation(
-        buildRegistrationObservationWithdrawalInput({
-          trackId: activeTrack.id,
-          workflowRevision: activeTrack.workflowRevision,
-          exitKind: "return_to_previous",
-          targetWorkflowStatus: nextObservationStatus,
-          reason: "",
-          requestKey: `registration-observation-withdraw:${activeTrack.id}:${crypto.randomUUID()}`,
-          correction: null,
-        }),
+      const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
+        trackId: activeGenericTrack.id,
+        workflowRevision: activeGenericTrack.workflowRevision,
+        requestKey: crypto.randomUUID(),
+      })
+      if (sourceEventIds.length === 0) {
+        throw new Error("registration_management_notification_source_missing")
+      }
+      const result = await dispatchRegistrationManagementNotificationSources(
+        sourceEventIds,
+        notificationToken,
       )
-      await onReload(activeTrack.id)
+      if (result.failedSourceEventIds.length > 0 || result.googleChatEventIds.length === 0) {
+        throw new Error("registration_management_notification_dispatch_failed")
+      }
+      setLatestGoogleChatEventId(
+        result.googleChatEventIds[result.googleChatEventIds.length - 1] || null,
+      )
     } catch (error) {
-      onWarning(getRegistrationObservationUiErrorMessage(
-        error,
-        "청강 진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요.",
-      ))
+      const message = errorMessage(error, "")
+      onWarning(message.includes("registration_management_notification_not_ready")
+        ? `알림에 필요한 내용을 먼저 입력하세요: ${notificationReadiness.missingFields.join(", ")}`
+        : "관리팀 구글챗 알림을 보내지 못했습니다. 발송 상태를 확인해 주세요.")
     } finally {
-      setWorkflowStatusSaving(false)
+      setManagementNotificationSending(false)
     }
   }
   const migrationReviewPanelId = reviewTrack ? `registration-inquiry-${reviewTrack.id}` : null
@@ -1218,31 +1126,50 @@ export function RegistrationApplication({
   }, [activeTrack, activeTrackId, deepLinkedObservationHistoryEligible, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable, reviewTrack?.id])
 
   async function saveInquiry(draft: RegistrationInquiryDraft, requestKey: string) {
-    try {
-      await saveRegistrationCaseInquiry({
-        ...draft,
+    if (!canManageCase) throw new Error("등록 정보를 수정할 권한이 없습니다.")
+    const writes = await Promise.allSettled([
+      updateRegistrationCaseCommon({
+        taskId: detail.task.id,
+        studentName: draft.studentName.trim(),
+        schoolGrade: draft.schoolGrade.trim(),
         schoolName: draft.schoolName.trim(),
         parentPhone: draft.parentPhone.trim(),
         studentPhone: draft.studentPhone.trim(),
         campus: draft.campus.trim(),
         inquiryAt: draft.inquiryAt,
         requestNote: draft.requestNote.trim(),
-        taskId: detail.task.id,
+        priority: draft.priority,
         expectedCommonRevision: detail.commonRevision,
-        expectedSubjects: orderedTracks.map((track) => track.subject),
-        requestKey,
-      })
-    } catch (error) {
-      const message = errorMessage(error, "")
-      if (
-        message.includes("registration_common_revision_conflict")
+        requestKey: `${requestKey}:facts`,
+      }),
+      syncRegistrationCaseSubjects({
+        taskId: detail.task.id,
+        subjects: draft.subjects,
+        requestKey: `${requestKey}:subjects`,
+      }),
+    ])
+    const rejectedWrites = writes.filter((result): result is PromiseRejectedResult => (
+      result.status === "rejected"
+    ))
+    if (rejectedWrites.some(({ reason }) => {
+      const message = errorMessage(reason, "")
+      return message.includes("registration_common_revision_conflict")
         || message.includes("registration_subjects_conflict")
-      ) {
-        return "conflict" as const
-      }
-      throw error
+    })) {
+      return "conflict" as const
     }
-    return "saved" as const
+    if (rejectedWrites.length === 0) return "saved" as const
+    if (rejectedWrites.length === 2) throw rejectedWrites[0].reason
+
+    onWarning(writes[0].status === "rejected"
+      ? "과목은 저장됐지만 문의 정보는 저장하지 못했습니다. 성공한 저장은 유지하며 최신 내용을 다시 불러옵니다."
+      : "문의 정보는 저장됐지만 과목은 저장하지 못했습니다. 성공한 저장은 유지하며 최신 내용을 다시 불러옵니다.")
+    try {
+      await onReload()
+    } catch {
+      onWarning("일부 변경은 저장됐지만 최신 내용을 다시 불러오지 못했습니다.")
+    }
+    return "partial" as const
   }
 
   function handleSubjectTabChange(trackId: string) {
@@ -1250,6 +1177,7 @@ export function RegistrationApplication({
   }
 
   async function handleAppointmentSaved(saved: RegistrationAppointmentMutationResponse) {
+    if (!canManageCase) return
     await onAppointmentSaved?.(saved)
     await onReload()
     if (saved.requiresDirectorAssignmentTrackIds.length > 0) {
@@ -1292,6 +1220,7 @@ export function RegistrationApplication({
   }
 
   function setConsultationDirectorDirty(trackId: string, dirty: boolean) {
+    if (!canManageCase) return
     setConsultationDirectorDirtyByTrackId((current) => {
       if (Boolean(current[trackId]) === dirty) return current
       return { ...current, [trackId]: dirty }
@@ -1428,7 +1357,7 @@ export function RegistrationApplication({
     : false
 
   function selectConsultationMode(mode: RegistrationConsultationMode) {
-    if (!activeGenericTrack || !activeConsultationMode) return
+    if (!canManageCase || !activeGenericTrack || !activeConsultationMode) return
     const next = getRegistrationConsultationModeDraft({
       draftMode: mode,
       savedMode: activeConsultationMode.savedMode,
@@ -1438,6 +1367,7 @@ export function RegistrationApplication({
   }
 
   async function saveActiveConsultationDirector() {
+    if (!canManageCase) return false
     if (activeConsultationDirectorRef.current) {
       return activeConsultationDirectorRef.current.savePending()
     }
@@ -1447,7 +1377,7 @@ export function RegistrationApplication({
   }
 
   async function savePhoneConsultation() {
-    if (!activeGenericTrack || consultationSharedSaving) return
+    if (!canManageCase || !activeGenericTrack || consultationSharedSaving) return
     if (activeVisitAppointment) {
       setConsultationSwitchPending(true)
       return
@@ -1470,7 +1400,7 @@ export function RegistrationApplication({
   }
 
   async function confirmVisitToPhoneSwitch() {
-    if (!activeGenericTrack || !activeVisitAppointment || consultationSharedSaving) return
+    if (!canManageCase || !activeGenericTrack || !activeVisitAppointment || consultationSharedSaving) return
     setConsultationSharedSaving(true)
     try {
       const directorSaved = await saveActiveConsultationDirector()
@@ -1503,7 +1433,7 @@ export function RegistrationApplication({
   }
 
   async function confirmPhoneConsultationCancellation() {
-    if (!phoneConsultation || consultationSharedSaving) return
+    if (!canManageCase || !phoneConsultation || consultationSharedSaving) return
     setConsultationSharedSaving(true)
     try {
       await saveRegistrationConsultationDetails({
@@ -1526,23 +1456,12 @@ export function RegistrationApplication({
     === activeFeedbackObservationId ? (
       <RegistrationObservationFeedbackPanel
         detail={observationFeedbackDetail}
-        canRecordAttendance={!activeDeepLinkedAttemptTerminal && canManageCase && !activeFeedbackCorrectionOnly}
-        canEditFeedback={!activeDeepLinkedAttemptCanceled && (activeFeedbackCorrectionOnly
-          ? canManageCase
-          : canEditRegistrationObservationFeedback({
-              canManageCase,
-              isAssignedTeacher: Boolean(
-                viewerId
-                && viewerId === activeFeedbackTeacherProfileId
-              ),
-              decisionKind: observationFeedbackDetail.decisionKind,
-            }))}
-        canDecide={!activeDeepLinkedAttemptCanceled && !activeFeedbackCorrectionOnly && (
-          canManageCase || Boolean(
-            viewerId
-            && viewerId === activeTrack?.directorProfileId
-          )
-        )}
+        canRecordAttendance={!activeDeepLinkedAttemptTerminal
+          && canManageCase
+          && !activeFeedbackHistoryOnlyMode}
+        canDecide={!activeDeepLinkedAttemptCanceled
+          && !activeFeedbackHistoryOnlyMode
+          && canManageCase}
         actions={registrationObservationFeedbackActions}
         onSaved={handleObservationFeedbackSaved}
         onReload={reloadObservationFeedback}
@@ -1584,29 +1503,13 @@ export function RegistrationApplication({
             panelIdsByTrackId={subjectPanelIdsByTrackId}
             onValueChange={handleSubjectTabChange}
           />
-          {activeTrack && isRegistrationObservationWorkflowStatus(activeTrack.workflowStatus) ? (
-            <div data-registration-workflow-status="observation" className="grid min-w-0 gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">진행상태</span>
-              <select
-                aria-label={`${activeTrack.subject} 진행상태`}
-                value={activeTrack.workflowStatus}
-                disabled={workflowStatusSaving || observationWorkflowStatusOptions.length === 0}
-                onChange={(event) => void changeObservationWorkflowStatus(event.target.value)}
-                className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value={activeTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeTrack.workflowStatus]}</option>
-                {observationWorkflowStatusOptions.map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-            </div>
-          ) : activeGenericTrack ? (
+          {activeGenericTrack ? (
             <div data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
               <span className="text-xs font-medium text-muted-foreground">진행상태</span>
               <select
                 aria-label={`${activeGenericTrack.subject} 진행상태`}
                 value={activeGenericTrack.workflowStatus}
-                disabled={workflowStatusSaving || workflowStatusOptions.length === 0}
+                disabled={!canManageCase || workflowStatusSaving || workflowStatusOptions.length === 0}
                 onChange={(event) => void changeWorkflowStatus(event.target.value)}
                 className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
               >
@@ -1615,7 +1518,31 @@ export function RegistrationApplication({
                   <option key={option.value} value={option.value}>{option.label}</option>
                 ))}
               </select>
-              <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={onWarning} />
+              {canManageCase && notificationReadiness.eventKey ? (
+                <div className="grid gap-1.5">
+                  <Button
+                    type="button"
+                    variant="outline"
+                    disabled={
+                      workflowStatusSaving
+                      || managementNotificationSending
+                      || !notificationToken
+                      || !notificationReadiness.ready
+                    }
+                    onClick={() => void sendRegistrationManagementNotification()}
+                  >
+                    {managementNotificationSending ? "알림 보내는 중" : "관리팀 알림 보내기"}
+                  </Button>
+                  {!notificationReadiness.ready ? (
+                    <p className="text-xs text-muted-foreground">
+                      알림에 필요한 내용: {notificationReadiness.missingFields.join(", ")}
+                    </p>
+                  ) : !notificationToken ? (
+                    <p className="text-xs text-muted-foreground">알림 연결을 확인한 뒤 보낼 수 있습니다.</p>
+                  ) : null}
+                  <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={onWarning} />
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
@@ -1631,13 +1558,7 @@ export function RegistrationApplication({
             <RegistrationInquiryEditor
               key={detail.task.id}
               detail={genericDetail}
-              identityLocked={getRegistrationIdentityEditLock(genericDetail)}
               canEdit={canManageCase}
-              subjectCapabilities={subjectCapabilities}
-              schools={schools}
-              schoolCatalogStatus={schoolCatalogStatus}
-              schoolCatalogError={schoolCatalogError}
-              onRetrySchools={onRetrySchools}
               onSave={saveInquiry}
               onReload={onReload}
               onWarning={onWarning}
@@ -1662,6 +1583,7 @@ export function RegistrationApplication({
               initialTrackId={activeGenericTrack.id}
               appointment={activeLevelTestAppointment}
               activities={detail.levelTests}
+              readOnly={!canManageCase}
               embedded
               subjectScoped
               visibleTrackId={activeGenericTrack.id}
@@ -1690,7 +1612,7 @@ export function RegistrationApplication({
                     variant={activeConsultationMode.mode === "phone" ? "default" : "outline"}
                     className="h-10"
                     onClick={() => selectConsultationMode("phone")}
-                    disabled={consultationSharedSaving}
+                    disabled={!canManageCase || consultationSharedSaving}
                   >전화상담</Button>
                   <Button
                     type="button"
@@ -1698,7 +1620,7 @@ export function RegistrationApplication({
                     variant={activeConsultationMode.mode === "visit" ? "default" : "outline"}
                     className="h-10"
                     onClick={() => selectConsultationMode("visit")}
-                    disabled={consultationSharedSaving}
+                    disabled={!canManageCase || consultationSharedSaving}
                   >방문상담</Button>
                 </div>
               </fieldset>
@@ -1712,10 +1634,12 @@ export function RegistrationApplication({
                   initialTrackId={activeGenericTrack.id}
                   appointment={activeVisitAppointment}
                   activities={detail.consultations.filter((item) => item.mode === "visit")}
+                  readOnly={!canManageCase}
                   embedded
                   subjectScoped
                   visibleTrackId={activeGenericTrack.id}
                   onSaved={async (saved) => {
+                    if (!canManageCase) return
                     setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
                     await handleAppointmentSaved(saved)
                   }}
@@ -1736,14 +1660,18 @@ export function RegistrationApplication({
                     <Button
                       type="button"
                       variant="outline"
-                      disabled={consultationSharedSaving}
-                      onClick={() => setConsultationCancelPending(true)}
+                      disabled={!canManageCase || consultationSharedSaving}
+                      onClick={() => {
+                        if (!canManageCase) return
+                        setConsultationCancelPending(true)
+                      }}
                     >상담 취소</Button>
                   ) : null}
                   <RegistrationSaveButton
                     type="button"
                     dirty={activeConsultationDirectorDirty || !phoneConsultation}
                     saving={consultationSharedSaving}
+                    blocked={!canManageCase}
                     actionLabel="상담 정보 저장"
                     cleanLabel={phoneConsultation ? "저장됨" : activeGenericTrack.directorProfileId ? "상담 정보 저장" : "상담 책임자를 선택하세요"}
                     aria-label={`${activeGenericTrack.subject} 상담 정보 저장`}
@@ -1757,8 +1685,8 @@ export function RegistrationApplication({
                   <h4 id="registration-consultation-switch-title" className="font-semibold">전화상담으로 변경할까요?</h4>
                   <p className="text-sm">기존 방문상담 예약과 예정된 리마인드가 취소됩니다.</p>
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <Button type="button" variant="outline" disabled={consultationSharedSaving} onClick={() => setConsultationSwitchPending(false)}>돌아가기</Button>
-                    <Button type="button" disabled={consultationSharedSaving} onClick={() => void confirmVisitToPhoneSwitch()}>전화상담으로 변경</Button>
+                    <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationSwitchPending(false)}>돌아가기</Button>
+                    <Button type="button" disabled={!canManageCase || consultationSharedSaving} onClick={() => void confirmVisitToPhoneSwitch()}>전화상담으로 변경</Button>
                   </div>
                 </div>
               ) : null}
@@ -1767,8 +1695,8 @@ export function RegistrationApplication({
                 <div role="alertdialog" aria-labelledby="registration-phone-consultation-cancel-title" className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-950">
                   <h4 id="registration-phone-consultation-cancel-title" className="font-semibold">전화상담을 취소할까요?</h4>
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <Button type="button" variant="outline" disabled={consultationSharedSaving} onClick={() => setConsultationCancelPending(false)}>돌아가기</Button>
-                    <Button type="button" variant="destructive" disabled={consultationSharedSaving} onClick={() => void confirmPhoneConsultationCancellation()}>상담 취소</Button>
+                    <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationCancelPending(false)}>돌아가기</Button>
+                    <Button type="button" variant="destructive" disabled={!canManageCase || consultationSharedSaving} onClick={() => void confirmPhoneConsultationCancellation()}>상담 취소</Button>
                   </div>
                 </div>
               ) : null}

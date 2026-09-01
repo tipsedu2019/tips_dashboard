@@ -2008,10 +2008,16 @@ export function RegistrationMigrationReviewEditor({
                     { value: "", label: "대기 종류 선택" },
                     ...WAITING_KIND_OPTIONS,
                   ]}
-                  onValueChange={(value) => setWaitingKinds((current) => ({ ...current, [track.id]: value as RegistrationWaitingKind }))}
-                  disabled={Boolean(conflictState) || reviewRefreshPending || saving}
+                  onValueChange={(value) => {
+                    if (!permissions.canManage) return
+                    setWaitingKinds((current) => ({ ...current, [track.id]: value as RegistrationWaitingKind }))
+                  }}
+                  disabled={Boolean(conflictState) || reviewRefreshPending || !permissions.canManage || saving}
                 />
-                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => setClassIds((current) => ({ ...current, [track.id]: value }))} classOptions={classOptions} disabled={Boolean(conflictState) || reviewRefreshPending || saving} /> : null}
+                {waitingKind === "current_class" ? <SubjectClassSelect subject={track.subject} value={classIds[track.id] || ""} onChange={(value) => {
+                  if (!permissions.canManage) return
+                  setClassIds((current) => ({ ...current, [track.id]: value }))
+                }} classOptions={classOptions} disabled={Boolean(conflictState) || reviewRefreshPending || !permissions.canManage || saving} /> : null}
               </div>
             ) : null}
           </div>

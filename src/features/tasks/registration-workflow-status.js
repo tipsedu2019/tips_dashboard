@@ -46,7 +46,7 @@ export const REGISTRATION_WORKFLOW_STATUS_LABELS = Object.freeze({
   waiting_new_class: "신규반 대기 신청",
   waiting_next_opening: "다음 개강 알림 요청",
   observation_requested: "청강 예약 필요",
-  observation_feedback_pending: "교사 피드백 대기",
+  observation_feedback_pending: "원장 확인 대기",
   observation_completed: "청강 완료",
   enrollment_requested: "등록 신청",
   payment_in_progress: "입학 진행 중",
@@ -87,24 +87,6 @@ const LEGACY_PIPELINE_TO_WORKFLOW = Object.freeze({
   inquiry_closed: "inquiry_only",
 })
 
-const OPERATIONS_WORKFLOW_STATUSES = Object.freeze([
-  "inquiry",
-  "level_test_requested",
-  "consultation_requested",
-  "payment_in_progress",
-  "registered",
-  "inquiry_only",
-])
-
-const DIRECTOR_WORKFLOW_STATUSES = Object.freeze([
-  "consultation_completed",
-  "waiting_current_class",
-  "waiting_new_class",
-  "waiting_next_opening",
-  "enrollment_requested",
-  "not_registered",
-])
-
 function text(value) {
   return value === null || value === undefined ? "" : String(value).trim()
 }
@@ -133,22 +115,10 @@ export function getRegistrationWorkflowStatusFromLegacyTrack(track = {}) {
 }
 
 export function getRegistrationWorkflowStatusOptions(input = {}) {
-  if (text(input.viewerRole) === "admin") {
-    return REGISTRATION_WORKFLOW_STATUSES.map(workflowStatusOption)
-  }
-
-  if (text(input.viewerRole) === "staff") {
-    return OPERATIONS_WORKFLOW_STATUSES.map(workflowStatusOption)
-  }
-
-  if (
-    text(input.viewerId)
-    && text(input.viewerId) === text(input.directorProfileId)
-  ) {
-    return DIRECTOR_WORKFLOW_STATUSES.map(workflowStatusOption)
-  }
-
-  return []
+  const role = text(input.viewerRole)
+  return role === "admin" || role === "staff"
+    ? REGISTRATION_WORKFLOW_STATUSES.map(workflowStatusOption)
+    : []
 }
 
 export function getRegistrationInlineWorkflowStatusOptions(input = {}) {

@@ -1248,11 +1248,14 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
           || input.messageKind === "observation_reminder"
           ? "ops_registration_observations"
           : "ops_registration_appointments"
-      const result = await actorClient(input.context)
+      const sourceQuery = actorClient(input.context)
         .from(table)
         .select("task_id")
         .eq("id", input.sourceId)
-        .maybeSingle()
+      const visibleSourceQuery = table === "ops_registration_subject_tracks"
+        ? sourceQuery.is("archived_at", null)
+        : sourceQuery
+      const result = await visibleSourceQuery.maybeSingle()
       if (result.error) {
         httpError(503, "registration_customer_message_runtime_unavailable")
       }

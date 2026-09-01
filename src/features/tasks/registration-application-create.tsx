@@ -13,15 +13,10 @@ import {
 } from "./registration-application-model"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import {
-  getRegistrationSubjectPickerAvailability,
   reconcileRegistrationInitialWorkflowDraft,
-  reconcileRegistrationSubjectsForGrade,
   type RegistrationInitialPersistenceProbeResult,
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
-import {
-  getRegistrationSchoolChoices,
-} from "./registration-school-options"
 import type {
   OpsSchoolOption,
   OpsTaskInput,
@@ -30,7 +25,10 @@ import type {
 import { RegistrationSubjectPicker } from "./registration-subject-picker"
 import type { RegistrationSubject } from "./registration-track-service"
 import type { RegistrationSubjectCapability } from "./registration-subject-capability-probe"
-import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts"
+import {
+  ACADEMIC_SUBJECT_VALUES,
+  sortAcademicSubjects,
+} from "../../lib/academic-subject-registry.ts"
 import {
   normalizeRegistrationPhone,
   parseRegistrationSubjects,
@@ -66,8 +64,9 @@ export type RegistrationApplicationCreateProps = {
 }
 
 function persistenceNote(mode: RegistrationInitialPersistenceProbeResult["mode"]) {
-  if (mode === "canonical_inquiry") return "초기 일정 기능 준비 전에는 문의 정보만 저장합니다."
-  if (mode === "legacy_inquiry") return "기존 등록 환경에서는 문의 정보만 저장합니다."
+  if (mode === "canonical_inquiry" || mode === "legacy_inquiry") {
+    return "등록 정보는 예약·알림과 별도로 저장됩니다."
+  }
   if (mode === "blocked_maintenance") return "등록 데이터 전환 중입니다. 전환이 끝난 뒤 다시 저장하세요."
   if (mode === "blocked_mismatch") return "등록 런타임 버전이 일치하지 않아 저장할 수 없습니다."
   if (mode === "blocked_indeterminate") return "등록 저장 환경을 확인하고 있습니다. 잠시 후 다시 시도하세요."
@@ -78,13 +77,7 @@ export function RegistrationApplicationCreate({
   form,
   draft,
   persistence,
-  subjectCapabilities,
-  subjectCapabilityError = "",
   disabled,
-  schools = [],
-  schoolCatalogStatus = "loading",
-  schoolCatalogError = "",
-  onRetrySchools,
   closeAction,
   onFormPatch,
   onRegistrationFieldChange,
@@ -92,11 +85,6 @@ export function RegistrationApplicationCreate({
 }: RegistrationApplicationCreateProps) {
   const registration = form.registration || {}
   const subjects = parseRegistrationSubjects(form.subject) as RegistrationSubject[]
-  const subjectAvailability = useMemo(() => getRegistrationSubjectPickerAvailability({
-    capabilities: subjectCapabilities,
-    grade: registration.schoolGrade || "",
-    selectedSubjects: subjects,
-  }), [registration.schoolGrade, subjectCapabilities, subjects])
   const note = persistenceNote(persistence.mode)
   const inquiryLockReason = disabled
     ? "저장 중입니다"
@@ -123,37 +111,13 @@ export function RegistrationApplicationCreate({
     onDraftChange(reconcileRegistrationInitialWorkflowDraft(draft, next))
   }
 
-  const schoolChoices = getRegistrationSchoolChoices({
-    schools,
-    grade: registration.schoolGrade || "",
-    currentSchoolName: registration.schoolName || "",
-  })
-
   function handleInquiryFieldChange(field: RegistrationInquiryFieldName, value: string) {
     if (field === "studentName") {
       onFormPatch({ studentName: value })
       return
     }
     if (field === "schoolGrade") {
-      const catalogChoices = getRegistrationSchoolChoices({ schools, grade: value })
       onRegistrationFieldChange("schoolGrade", value)
-      const reconciled = reconcileRegistrationSubjectsForGrade({
-        capabilities: subjectCapabilities,
-        grade: value,
-        subjects,
-        draft,
-      })
-      if (reconciled.removedSubjects.length > 0) {
-        onFormPatch({ subject: serializeRegistrationSubjects(reconciled.subjects) })
-        onDraftChange(reconciled.draft)
-      }
-      if (
-        schoolCatalogStatus === "authoritative"
-        && registration.schoolName
-        && !catalogChoices.some((choice) => choice.value === registration.schoolName)
-      ) {
-        onRegistrationFieldChange("schoolName", "")
-      }
       return
     }
     if (field === "parentPhone" || field === "studentPhone") {
@@ -177,9 +141,8 @@ export function RegistrationApplicationCreate({
           subjectSyncContent={(
             <RegistrationSubjectPicker
               value={subjects}
-              options={subjectAvailability.options}
+              options={ACADEMIC_SUBJECT_VALUES}
               grade={registration.schoolGrade || ""}
-              disabledReasonBySubject={subjectAvailability.disabledReasonBySubject}
               disabled={disabled || !writable}
               onToggle={updateSubjects}
             />
@@ -192,20 +155,15 @@ export function RegistrationApplicationCreate({
                 schoolName: registration.schoolName || "",
                 parentPhone: registration.parentPhone || "",
                 studentPhone: registration.studentPhone || "",
+                inquiryAt: registration.inquiryAt || "",
                 requestNote: registration.requestNote || "",
               }}
-              inquiryAtLabel="저장 시각"
-              schoolChoices={schoolChoices}
-              schoolCatalogStatus={schoolCatalogStatus}
-              schoolCatalogError={schoolCatalogError}
               disabled={disabled || !writable}
               onChange={handleInquiryFieldChange}
-              onRetrySchools={onRetrySchools}
             />
           )}
           exceptionContent={(
             <div className="grid gap-3">
-              {subjectCapabilityError ? <p role="status" className="text-sm text-muted-foreground">{subjectCapabilityError}</p> : null}
               {showInquiryOnlyNote ? (
                 <p role="note" className="text-sm text-muted-foreground">
                   {note}

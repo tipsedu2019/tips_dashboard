@@ -288,6 +288,7 @@ async function loadMountedRegistrationApplication({
   isOpsStatus = () => true,
   workflowStatusOptions = () => [],
   canStartObservation = () => false,
+  consultationMode = "phone",
 }) {
   const fileName = new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url)
   const source = await readFile(fileName, "utf8")
@@ -314,6 +315,12 @@ async function loadMountedRegistrationApplication({
   }
   const RegistrationObservationFeedbackPanel = function MountedRegistrationObservationFeedbackPanel() {
     return createElement("div", { "data-mounted-observation-feedback": "" })
+  }
+  const RegistrationAppointmentEditor = function MountedRegistrationAppointmentEditor(props) {
+    return createElement("div", {
+      "data-mounted-registration-appointment": props.kind,
+      "data-read-only": String(props.readOnly),
+    })
   }
   const RegistrationAlimtalkPreviewDialog = function MountedRegistrationAlimtalkPreviewDialog(props) {
     return createElement("div", {
@@ -357,15 +364,15 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-application-level-test-section", { RegistrationApplicationLevelTestSection: Passthrough }],
     ["./registration-application-model", {
-      canManageRegistrationObservationTrack: ({ viewerId, viewerRole, directorProfileId }) => (
-        viewerRole === "admin" || viewerRole === "staff" || Boolean(viewerId && viewerId === directorProfileId)
+      canManageRegistrationObservationTrack: ({ viewerRole }) => (
+        viewerRole === "admin" || viewerRole === "staff"
       ),
       getRegistrationApplicationAppointmentActionPlans: () => [],
       getRegistrationApplicationCaseEditableSections: () => [],
       getRegistrationEnrollmentDirtyKey: (trackId, scope) => `enrollment:${trackId}:${scope}`,
       getRegistrationApplicationSectionStates: () => sectionStates,
       getRegistrationApplicationTrackState: ({ track }) => ({ trackId: track.id }),
-      getRegistrationConsultationModeDraft: () => ({ mode: "phone", dirty: false, phoneDisabled: false }),
+      getRegistrationConsultationModeDraft: () => ({ mode: consultationMode, savedMode: consultationMode, dirty: false, phoneDisabled: false }),
       getRegistrationObservationRefreshPlan: ({ savedTaskId, savedTrackId, activeTaskId, activeTrackId }) => ({
         loadManagerDetail: savedTaskId === activeTaskId && savedTrackId === activeTrackId,
         preferredTrackId: savedTaskId === activeTaskId && savedTrackId === activeTrackId ? savedTrackId : undefined,
@@ -409,19 +416,16 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-observation-feedback-panel", {
       RegistrationObservationFeedbackPanel,
-      canEditRegistrationObservationFeedback: ({ canManageCase, isAssignedTeacher, decisionKind }) => (
-        canManageCase || (decisionKind === null && isAssignedTeacher)
-      ),
       canKeepRegistrationObservationFeedbackHistoryMounted: ({ canManageCase, observationAttemptCount }) => (
         canManageCase && observationAttemptCount > 0
       ),
       getRegistrationObservationFeedbackMountPlan: ({ managerDetail, canManageObservation, canManageCase }) => {
         if (!canManageObservation || !managerDetail) return null
         if (managerDetail.currentObservation) {
-          return { observationId: managerDetail.currentObservation.observationId, correctionOnly: false }
+          return { observationId: managerDetail.currentObservation.observationId, historyOnly: false }
         }
         if (canManageCase && managerDetail.latestDecisionObservation) {
-          return { observationId: managerDetail.latestDecisionObservation.observationId, correctionOnly: true }
+          return { observationId: managerDetail.latestDecisionObservation.observationId, historyOnly: true }
         }
         return null
       },
@@ -431,7 +435,9 @@ async function loadMountedRegistrationApplication({
       loadRegistrationObservationFeedbackForOwnedPanel: ({ requestedOwnershipKey, currentOwnershipKey, load }) => (
         requestedOwnershipKey === currentOwnershipKey ? load() : Promise.resolve(null)
       ),
-      shouldMountRegistrationObservationFeedbackOnly: () => false,
+      shouldMountRegistrationObservationFeedbackOnly: ({ historyOnly, workflowActionable }) => (
+        historyOnly && !workflowActionable
+      ),
     }],
     ["./registration-application-track-actions", {
       REGISTRATION_DIRECTOR_VISIBLE_STATUSES: new Set(),
@@ -445,7 +451,7 @@ async function loadMountedRegistrationApplication({
       canStartRegistrationObservation: canStartObservation,
       getRegistrationIdentityEditLock: () => false,
     }],
-    ["./registration-appointment-editor", { RegistrationAppointmentEditor: Passthrough }],
+    ["./registration-appointment-editor", { RegistrationAppointmentEditor }],
     ["./registration-save-button", { RegistrationSaveButton: Button }],
     ["./registration-enrollment-editor", {
       clearRegistrationEnrollmentDrafts: () => undefined,
@@ -460,6 +466,7 @@ async function loadMountedRegistrationApplication({
     }],
     ["../../lib/academic-subject-registry.ts", { ACADEMIC_SUBJECT_VALUES: ["영어", "수학", "과학"] }],
     ["./registration-track-model.js", {
+      canManageRegistrationCase: (viewerRole) => viewerRole === "admin" || viewerRole === "staff",
       getRegistrationActionPermissions: () => ({ canManage: false, canCompleteConsultation: false, readOnly: true }),
       getRegistrationActiveConsultation: () => null,
       getRegistrationAdmissionApplicationState: () => ({
@@ -478,8 +485,14 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-workspace-route", { createRegistrationObservationAsyncOwnership }],
     ["./registration-consultation-notification.js", {
-      dispatchRegistrationManagementNotificationSources: async () => ({ failedSourceEventIds: [] }),
+      dispatchRegistrationManagementNotificationSources: async () => ({ failedSourceEventIds: [], googleChatEventIds: [] }),
+      getRegistrationManagementNotificationReadiness: () => ({
+        ready: false,
+        eventKey: null,
+        missingFields: [],
+      }),
       isRegistrationManagementNotificationWorkflowStatus: () => false,
+      sendRegistrationVisitNotificationTarget: async () => ({ ok: true }),
     }],
     ["./registration-workflow-status.js", {
       REGISTRATION_WORKFLOW_STATUS_LABELS: new Proxy({}, { get: () => "등록 신청" }),
@@ -504,6 +517,8 @@ async function loadMountedRegistrationApplication({
     RegistrationApplication: runtimeModule.exports.RegistrationApplication,
     RegistrationApplicationShell,
     RegistrationAlimtalkPreviewDialog,
+    RegistrationAppointmentEditor,
+    Button,
     RegistrationObservationEditor,
     RegistrationObservationFeedbackPanel,
   }
@@ -670,16 +685,10 @@ test("saved registration uses the subject status selector instead of a separate 
   const detail = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
 
   assert.match(detail, /aria-label=\{`\$\{activeGenericTrack\.subject\} 진행상태`\}/)
-  assert.match(detail, /aria-label=\{`\$\{activeTrack\.subject\} 진행상태`\}/)
-  assert.match(detail, /data-registration-workflow-status="observation"[\s\S]*?<select/)
-  assert.match(detail, /await registrationObservationActions\.withdrawRegistrationObservation\(/)
-  assert.match(detail, /exitKind:\s*"return_to_previous"/)
-  assert.match(detail, /targetWorkflowStatus:\s*nextObservationStatus/)
-  assert.doesNotMatch(
-    detail,
-    /changeObservationWorkflowStatus[\s\S]{0,1800}setRegistrationWorkflowStatus\(/,
-    "청강 상태는 일반 상태 변경 RPC가 아니라 청강 철회 계약을 사용해야 한다",
-  )
+  assert.equal((detail.match(/data-registration-workflow-status=/g) || []).length, 1)
+  assert.doesNotMatch(detail, /changeObservationWorkflowStatus/)
+  assert.doesNotMatch(detail, /registrationObservationActions\.withdrawRegistrationObservation/)
+  assert.doesNotMatch(detail, /registrationObservationActions\.enterRegistrationObservation/)
   assert.match(detail, /await setRegistrationWorkflowStatus\(/)
   assert.match(detail, /progress=\{null\}/)
   assert.doesNotMatch(detail, /progress=\{<RegistrationApplicationProgressStepper/)
@@ -709,8 +718,9 @@ test("new registration saves inquiry basics only and starts every subject at reg
   assert.match(shell, /CREATE_UI_SECTION_ORDER = \["inquiry"\]/)
   assert.doesNotMatch(create, /RegistrationInitialLevelTestFields|RegistrationInitialConsultationFields/)
   assert.doesNotMatch(create, /levelTest=|consultation=/)
-  assert.match(workspace, /const initialDraft = createRegistrationInitialWorkflowDraft\(subjects\)/)
-  assert.doesNotMatch(workspace, /const initialDraft = registrationPersistence\.mode === "ready_atomic"/)
+  assert.match(workspace, /const normalizedFactOnlyWorkflow = normalizeRegistrationInitialWorkflow\([\s\S]*?createRegistrationInitialWorkflowDraft\(subjects\)/)
+  assert.match(workspace, /const response = await createRegistrationCase\(\{/)
+  assert.doesNotMatch(workspace, /createRegistrationCaseWithInitialWorkflow|persistenceMode: registrationPersistence\.mode/)
 })
 
 test("registration selects use the shared dashboard select and disabled gray treatment", async () => {
@@ -808,9 +818,38 @@ test("create and detail share the approved subject-first inquiry controls", asyn
   assert.match(picker, /grid-cols-3/)
   assert.match(picker, /locked \? "disabled:opacity-100"/)
   assert.doesNotMatch(picker, /\["영어", "수학"\]/)
-  assert.match(create, /getRegistrationSubjectPickerAvailability/)
-  assert.match(create, /reconcileRegistrationSubjectsForGrade/)
+  assert.match(create, /options=\{ACADEMIC_SUBJECT_VALUES\}/)
+  assert.match(inquiry, /options=\{ACADEMIC_SUBJECT_VALUES\}/)
+  assert.doesNotMatch(create, /getRegistrationSubjectPickerAvailability|reconcileRegistrationSubjectsForGrade/)
+  assert.doesNotMatch(inquiry, /getRegistrationSubjectPickerAvailability|disabledSubjects=/)
+  assert.match(fields, /data-common-field="school-name"/)
+  assert.match(fields, /type="datetime-local"/)
+  assert.doesNotMatch(fields, /getRegistrationSchoolLevelFromGrade|schoolCatalogStatus|schoolChoices/)
   assert.match(inquiry, /sortAcademicSubjects/)
+})
+
+test("inquiry fact inputs stay editable without catalog, grade, identity, or completion gates", async () => {
+  const [fields, create, inquiry] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-application-inquiry-fields.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8"),
+  ])
+  const createGradeChange = sourceBetween(
+    create,
+    'if (field === "schoolGrade") {',
+    'if (field === "parentPhone" || field === "studentPhone")',
+  )
+  const submit = sourceBetween(inquiry, "async function submit()", "async function retryConflictRefresh")
+
+  assert.match(fields, /data-common-field="school-name"[\s\S]*?value=\{values\.schoolName\}/)
+  assert.match(fields, /data-common-field="inquiry-at"[\s\S]*?type="datetime-local"[\s\S]*?value=\{toRegistrationInquiryDateTimeLocal\(values\.inquiryAt\)\}/)
+  assert.doesNotMatch(fields, /\brequired\b|aria-invalid|isValidRegistrationMobilePhone/)
+  assert.doesNotMatch(fields, /schoolCatalog|getRegistrationSchool|RegistrationSchoolChoice/)
+  assert.match(createGradeChange, /onRegistrationFieldChange\("schoolGrade", value\)/)
+  assert.doesNotMatch(createGradeChange, /schoolName|reconcileRegistrationSubjectsForGrade|getRegistrationSchoolChoices/)
+  assert.doesNotMatch(inquiry, /identityLocked|학생 연결 보정 필요/)
+  assert.doesNotMatch(submit, /if \(!valid\)|필수 문의 정보|focusFirstInvalid|isValidRegistrationMobilePhone/)
+  assert.match(submit, /const outcome = await onSave\(attemptedDraft, requestKey\)/)
 })
 
 test("saved subject tabs fit mobile without truncating the active subject while root-subject controls stay dense", async () => {
@@ -834,7 +873,7 @@ test("saved subject tabs fit mobile without truncating the active subject while 
   assert.match(application, /ACADEMIC_SUBJECT_VALUES\.indexOf\(right\.subject\)/)
 })
 
-test("science director UI consumes only the configured capability profile and teacher completion remains read-only", async () => {
+test("science director UI consumes only the configured capability profile and every teacher remains read-only", async () => {
   const [actions, application, model, workspace] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-application-track-actions.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
@@ -849,8 +888,14 @@ test("science director UI consumes only the configured capability profile and te
   assert.doesNotMatch(workspace, /subject === "과학" \|\| subject === "과학팀"/)
   assert.match(actions, /capabilities: subjectCapabilities/)
   assert.match(application, /subjectCapabilities=\{subjectCapabilities\}/)
-  assert.match(model, /input\.viewerRole === "teacher" && input\.track\?\.subject === "과학"/)
+  assert.doesNotMatch(model, /input\.viewerRole === "teacher"/)
+  assert.match(model, /canManageRegistrationCase\(input\.viewerRole\)/)
   assert.match(model, /readOnly: !canManage/)
+
+  const migrationReview = actions.slice(actions.indexOf("export function RegistrationMigrationReviewEditor"))
+  assert.match(migrationReview, /aria-label=\{`\$\{track\.subject\} 대기 종류`\}[\s\S]*?disabled=\{Boolean\(conflictState\) \|\| reviewRefreshPending \|\| !permissions\.canManage \|\| saving\}/)
+  assert.match(migrationReview, /<SubjectClassSelect[\s\S]*?disabled=\{Boolean\(conflictState\) \|\| reviewRefreshPending \|\| !permissions\.canManage \|\| saving\}/)
+  assert.ok((migrationReview.match(/if \(!permissions\.canManage\) return/g) || []).length >= 2)
 })
 
 test("consultation outcomes do not load a separate class catalog", async () => {
@@ -877,10 +922,10 @@ test("registration create mounts the shared application with only actionable int
   assert.doesNotMatch(create, /useState\(|createRegistrationInitialWorkflowDraft/)
 
   assert.match(create, /mode="create"/)
-  assert.match(create, /inquiryAtLabel="저장 시각"/)
+  assert.match(create, /inquiryAt: registration\.inquiryAt \|\| ""/)
   assert.doesNotMatch(create + workspace, /문의 채널|문의채널|inquiryChannel/)
 
-  assert.match(workspace, /const initialDraft = createRegistrationInitialWorkflowDraft\(subjects\)/)
+  assert.match(workspace, /const normalizedFactOnlyWorkflow = normalizeRegistrationInitialWorkflow\([\s\S]*?createRegistrationInitialWorkflowDraft\(subjects\)/)
   assert.doesNotMatch(create, /레벨테스트 예약일시|방문상담 예약일시|상담 책임자/)
   assert.doesNotMatch(create, /RegistrationApplicationPlacementSection|RegistrationApplicationAdmissionSection|대기 종류|수업 시작 일정/)
   assert.doesNotMatch(create, /첫 저장 후 자동 기록됩니다/)
@@ -1042,7 +1087,7 @@ test("registration create keeps only actionable fields visible and controls dash
 
   assert.doesNotMatch(create, /waiting=\{|registration=\{|admission=\{/)
   assert.doesNotMatch(create, /ReadonlyCreateField|첫 저장 후 자동 기록됩니다/)
-  assert.match(create, /inquiryAtLabel="저장 시각"/)
+  assert.match(create, /inquiryAt: registration\.inquiryAt \|\| ""/)
   assert.doesNotMatch(create, /RegistrationApplicationProgressStepper|enabledKeys=|progress=\{/)
 
   assert.doesNotMatch(initialPlan, /결과 링크|전화상담 대기 기준일시|상담 결과/)
@@ -1575,11 +1620,12 @@ test("track editor shows common information once and subject-scoped navigation",
     "export type RegistrationApplicationInquirySectionProps",
   )
   assert.match(application, /<RegistrationInquiryEditor/)
-  assert.match(application, /saveRegistrationCaseInquiry/)
+  assert.match(application, /updateRegistrationCaseCommon/)
+  assert.match(application, /syncRegistrationCaseSubjects/)
+  assert.doesNotMatch(application, /saveRegistrationCaseInquiry/)
   assert.match(application, /expectedCommonRevision:\s*detail\.commonRevision/)
-  assert.match(application, /expectedSubjects:\s*orderedTracks\.map/)
   assert.match(application, /const genericDetail = useMemo<OpsRegistrationCaseDetail>/)
-  assert.match(application, /getRegistrationIdentityEditLock\(genericDetail\)/)
+  assert.doesNotMatch(editorSource, /identityLocked|getRegistrationIdentityEditLock/)
   assert.match(application, /activeTrackId/)
   assert.match(application, /track\.subject/)
   assert.match(application, /track\.status/)
@@ -1588,11 +1634,15 @@ test("track editor shows common information once and subject-scoped navigation",
   assert.doesNotMatch(editorSource, /DateTimePickerControl/)
   assert.match(
     editorSource,
-    /inquiryAt: toLocalDateTime\(registration\.inquiryAt \|\| detail\.task\.createdAt\)/,
-    "legacy cases without inquiryAt must remain editable by falling back to their immutable creation time",
+    /inquiryAt: toRegistrationInquiryDateTimeLocal\(registration\.inquiryAt\)/,
+    "a deliberately blank inquiryAt must stay blank instead of inheriting task creation time",
   )
+  assert.doesNotMatch(editorSource, /registration\.inquiryAt \|\| detail\.task\.createdAt/)
   assert.match(editorSource, /campus: detail\.task\.campus \|\| "본관"/)
-  assert.match(editorSource, /const valid = Boolean\([\s\S]*?draft\.campus\.trim\(\)[\s\S]*?draft\.inquiryAt/)
+  assert.doesNotMatch(editorSource, /const valid = Boolean|isValidRegistrationMobilePhone|scienceGradeInvalid/)
+  assert.match(editorSource, /if \(!canEdit \|\| saving \|\| refreshPending \|\| conflictAttempt\) return/)
+  assert.match(editorSource, /options=\{ACADEMIC_SUBJECT_VALUES\}/)
+  assert.doesNotMatch(editorSource, /disabledSubjects=|draft\.subjects\.length === 1/)
   assert.doesNotMatch(editorSource, /requiredLabel\("캠퍼스"|aria-label="캠퍼스"/)
   assert.doesNotMatch(editorSource, /requiredLabel\("우선순위"/)
   assert.match(inquiry, /<RegistrationSaveButton[\s\S]*?dirty=\{dirty\}[\s\S]*?actionLabel="변경사항 저장"/)
@@ -1684,7 +1734,7 @@ test("two tracks at different statuses expose both current sections and actions 
   assert.doesNotMatch(source, /selectedStageEditor|현재 업무/)
 })
 
-test("terminal subjects do not gate common edits and progressed subjects cannot be removed by sync", async () => {
+test("Notion-style inquiry facts and subjects save independently without history or capability locks", async () => {
   const [application, inquiry] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-inquiry-section.tsx", import.meta.url), "utf8"),
@@ -1692,13 +1742,18 @@ test("terminal subjects do not gate common edits and progressed subjects cannot 
   const saveInquiry = sourceBetween(application, "async function saveInquiry", "function handleSubjectTabChange")
 
   assert.match(application, /<RegistrationInquiryEditor[\s\S]*?canEdit=\{canManageCase\}/)
-  assert.match(saveInquiry, /saveRegistrationCaseInquiry/)
-  assert.match(saveInquiry, /subjects/)
-  assert.match(saveInquiry, /expectedSubjects/)
-  assert.match(inquiry, /track\.status !== "inquiry" \|\| track\.migrationReviewRequired/)
-  assert.match(inquiry, /disabledSubjects=/)
-  assert.match(inquiry, /canonicalSubjects\.includes\(subject\) && !removableSubjects\.has\(subject\)/)
-  assert.match(inquiry, /registration_subject_removal_blocked/)
+  assert.match(saveInquiry, /Promise\.allSettled\(\[/)
+  assert.match(saveInquiry, /updateRegistrationCaseCommon\(\{/)
+  assert.match(saveInquiry, /syncRegistrationCaseSubjects\(\{/)
+  assert.match(saveInquiry, /requestKey: `\$\{requestKey\}:facts`/)
+  assert.match(saveInquiry, /requestKey: `\$\{requestKey\}:subjects`/)
+  assert.match(saveInquiry, /rejectedWrites\.some\([\s\S]*?registration_common_revision_conflict[\s\S]*?registration_subjects_conflict[\s\S]*?return "conflict"/)
+  assert.match(saveInquiry, /rejectedWrites\.length === 2[\s\S]*?throw/)
+  assert.match(saveInquiry, /onWarning\([\s\S]*?await onReload\(\)[\s\S]*?return "partial"/)
+  assert.doesNotMatch(saveInquiry, /saveRegistrationCaseInquiry|expectedSubjects/)
+  assert.doesNotMatch(inquiry, /registrationTrackCanBeRemoved|getRegistrationSubjectPickerAvailability|disabledSubjects=|registration_subject_removal_blocked/)
+  assert.match(inquiry, /disabled=\{!canEdit \|\| saving \|\| refreshPending \|\| Boolean\(conflictAttempt\)\}/)
+  assert.match(inquiry, /\{canEdit \? \([\s\S]*?<RegistrationSaveButton/)
 })
 
 test("all subjects share one case-level admission checklist without target badges", async () => {
@@ -1779,11 +1834,11 @@ test("registration application threads the exact deep-linked attempt into the re
   assert.match(detail, /const activeDeepLinkedAttempt = deepLinkedAttempt[\s\S]*?deepLinkedAttempt\.trackId === activeTrack\?\.id/)
   assert.match(detail, /deepLinkedAttempt=\{activeDeepLinkedAttempt\}/)
   assert.match(detail, /activeFeedbackObservationId = activeDeepLinkedAttempt\?\.observationId/)
-  assert.match(
-    detail,
-    /const activeFeedbackTeacherProfileId = activeDeepLinkedAttempt\?\.teacherProfileId[\s\S]*?activeObservationDetail\?\.currentObservation\?\.teacherProfileId/,
-  )
-  assert.match(detail, /viewerId === activeFeedbackTeacherProfileId/)
+  assert.doesNotMatch(detail, /activeFeedbackTeacherProfileId/)
+  assert.doesNotMatch(detail, /viewerId === activeDeepLinkedAttempt\?\.teacherProfileId/)
+  assert.match(detail, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal[\s\S]*?canManageCase/)
+  assert.match(detail, /canDecide=\{!activeDeepLinkedAttemptCanceled[\s\S]*?canManageCase/)
+  assert.doesNotMatch(detail, /canEditFeedback=/)
 })
 
 test("mounted registration application accepts only its canonical observation booking target", async () => {
@@ -1929,7 +1984,7 @@ test("mounted registration application accepts only its canonical observation bo
   }
 })
 
-test("mounted observation status selector returns an unbooked request through the withdrawal RPC", async () => {
+test("legacy observation status selector resolves to its decoupled manual target", async () => {
   const taskId = "76600000-0000-4000-8000-000000000001"
   const trackId = "76600000-0000-4000-8000-000000000002"
   const directorId = "76600000-0000-4000-8000-000000000003"
@@ -1965,6 +2020,7 @@ test("mounted observation status selector returns an unbooked request through th
       genericStatusCalls.push(input)
     },
     isOpsStatus: (status) => !String(status).startsWith("observation_"),
+    workflowStatusOptions: () => [{ value: "waiting_current_class", label: "현재반 대기" }],
   })
   const props = {
     task: { id: taskId, title: "성다엘 등록", studentName: "성다엘", type: "registration" },
@@ -2040,7 +2096,7 @@ test("mounted observation status selector returns an unbooked request through th
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
-      ["observation_requested", "waiting_current_class"],
+      ["waiting_current_class"],
     )
 
     hookHarness.flushEffects()
@@ -2059,27 +2115,15 @@ test("mounted observation status selector returns an unbooked request through th
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
-      ["observation_requested", "waiting_current_class"],
+      ["waiting_current_class"],
     )
 
     statusSelect.props.onChange({ target: { value: "waiting_current_class" } })
     await flushMountedRegistrationWork()
 
+    assert.equal(withdrawalCalls.length, 0)
     assert.equal(genericStatusCalls.length, 0)
-    assert.equal(withdrawalCalls.length, 1)
-    assert.deepEqual(withdrawalCalls[0], {
-      trackId,
-      expectedWorkflowRevision: 5,
-      exitKind: "return_to_previous",
-      targetWorkflowStatus: "waiting_current_class",
-      decisionObservationId: null,
-      expectedDecisionObservationRevision: null,
-      expectedDecisionFeedbackRevision: null,
-      reason: "",
-      requestKey: withdrawalCalls[0].requestKey,
-    })
-    assert.match(withdrawalCalls[0].requestKey, new RegExp(`^registration-observation-withdraw:${trackId}:`))
-    assert.deepEqual(reloadCalls, [trackId])
+    assert.deepEqual(reloadCalls, [])
   } finally {
     hookHarness.cleanup()
     globalThis.window = originalWindow
@@ -2088,7 +2132,7 @@ test("mounted observation status selector returns an unbooked request through th
   }
 })
 
-test("mounted consultation status selector enters observation through the same top-level control", async () => {
+test("mounted consultation status selector never starts an observation process", async () => {
   const taskId = "76700000-0000-4000-8000-000000000001"
   const trackId = "76700000-0000-4000-8000-000000000002"
   const directorId = "76700000-0000-4000-8000-000000000003"
@@ -2121,7 +2165,10 @@ test("mounted consultation status selector enters observation through the same t
       return { changed: true }
     },
     setWorkflowStatus: async (input) => genericStatusCalls.push(input),
-    workflowStatusOptions: () => [{ value: "consultation_completed", label: "상담 완료" }],
+    workflowStatusOptions: () => [
+      { value: "consultation_completed", label: "상담 완료" },
+      { value: "waiting_next_opening", label: "다음 개강 알림" },
+    ],
     canStartObservation: (track) => track.workflowStatus === "consultation_completed",
   })
   const props = {
@@ -2185,20 +2232,21 @@ test("mounted consultation status selector enters observation through the same t
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
-      ["consultation_completed", "observation_requested"],
+      ["consultation_completed", "waiting_next_opening"],
     )
 
-    statusSelect.props.onChange({ target: { value: "observation_requested" } })
+    statusSelect.props.onChange({ target: { value: "waiting_next_opening" } })
     await flushMountedRegistrationWork()
 
-    assert.equal(genericStatusCalls.length, 0)
-    assert.equal(enterCalls.length, 1)
-    assert.deepEqual(enterCalls[0], {
+    assert.equal(enterCalls.length, 0)
+    assert.equal(genericStatusCalls.length, 1)
+    assert.deepEqual(genericStatusCalls[0], {
       trackId,
       expectedWorkflowRevision: 6,
-      requestKey: enterCalls[0].requestKey,
+      workflowStatus: "waiting_next_opening",
+      requestKey: genericStatusCalls[0].requestKey,
     })
-    assert.match(enterCalls[0].requestKey, new RegExp(`^registration-observation-enter:${trackId}:`))
+    assert.match(genericStatusCalls[0].requestKey, new RegExp(`^registration-workflow-status:${trackId}:`))
     assert.deepEqual(reloadCalls, [trackId])
   } finally {
     hookHarness.cleanup()
@@ -2208,14 +2256,129 @@ test("mounted consultation status selector enters observation through the same t
   }
 })
 
-test("mounted pre-observation detail keeps the guided observation section visible", async () => {
-  const taskId = "76800000-0000-4000-8000-000000000001"
-  const trackId = "76800000-0000-4000-8000-000000000002"
-  const directorId = "76800000-0000-4000-8000-000000000003"
+test("mounted teacher registration detail keeps every mutation surface read-only", async () => {
+  const taskId = "76750000-0000-4000-8000-000000000001"
+  const trackId = "76750000-0000-4000-8000-000000000002"
+  const teacherId = "76750000-0000-4000-8000-000000000003"
+  const statusCalls = []
+  const reloadCalls = []
   const hookHarness = createRegistrationEditorHookHarness()
   const mounted = await loadMountedRegistrationApplication({
     hookHarness,
-    loadManagerDetail: async () => null,
+    setWorkflowStatus: async (input) => statusCalls.push(input),
+    workflowStatusOptions: () => [
+      { value: "consultation_requested", label: "상담 신청" },
+      { value: "waiting_next_opening", label: "다음 개강 알림 요청" },
+    ],
+  })
+  const props = {
+    task: { id: taskId, title: "교사 읽기 전용 등록", studentName: "김학생", type: "registration" },
+    detail: {
+      task: {
+        id: taskId,
+        title: "교사 읽기 전용 등록",
+        studentName: "김학생",
+        registration: { schoolGrade: "중2", inquiryAt: "2026-09-01T10:00:00+09:00" },
+      },
+      commonRevision: 1,
+      tracks: [{
+        id: trackId,
+        taskId,
+        subject: "영어",
+        status: "consultation_waiting",
+        workflowStatus: "consultation_requested",
+        workflowRevision: 2,
+        directorProfileId: teacherId,
+        observationAttemptCount: 0,
+        observationCurrentId: null,
+        observationSummaryVisible: false,
+        migrationReviewRequired: false,
+        legacy: false,
+        waitingKind: null,
+      }],
+      appointments: [],
+      levelTests: [],
+      consultations: [],
+      enrollments: [],
+      admissionBatches: [],
+      admissionApplicationMessageStatus: "not_sent",
+      admissionApplicationMessageClaimActive: false,
+      admissionApplicationMessageId: null,
+    },
+    focusTrackId: trackId,
+    viewerId: teacherId,
+    viewerRole: "teacher",
+    onFocusTrack: () => undefined,
+    onReload: async (preferredTrackId) => reloadCalls.push(preferredTrackId),
+    onWarning: () => undefined,
+    subjectCapabilities: [],
+    customerMessageClient: {},
+    observationRuntime: { available: true, runtimeVersion: 1 },
+    notificationToken: "teacher-must-not-send",
+    closeAction: null,
+  }
+  const originalWindow = globalThis.window
+  const originalDocument = globalThis.document
+  const originalHTMLElement = globalThis.HTMLElement
+  globalThis.HTMLElement = class HTMLElement {}
+  globalThis.window = { requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
+
+  try {
+    const view = hookHarness.render(mounted.RegistrationApplication, props)
+    const shell = findMountedRegistrationElement(
+      view,
+      (node) => node.type === mounted.RegistrationApplicationShell,
+      "teacher read-only registration application shell",
+    )
+    const statusSelect = findMountedRegistrationElement(
+      shell.props.subjectNavigation,
+      (node) => node.type === "select" && node.props["aria-label"] === "영어 진행상태",
+      "teacher read-only workflow status select",
+    )
+
+    assert.equal(statusSelect.props.disabled, true)
+    for (const section of ["inquiry", "level_test", "consultation", "waiting", "observation", "registration", "admission"]) {
+      assert.equal(shell.props.sectionStates[section].editable, false, `${section} must be read-only`)
+    }
+    assert.doesNotMatch(renderToStaticMarkup(shell.props.subjectNavigation), /관리팀 알림 보내기/u)
+
+    statusSelect.props.onChange({ target: { value: "waiting_next_opening" } })
+    await flushMountedRegistrationWork()
+    assert.deepEqual(statusCalls, [])
+    assert.deepEqual(reloadCalls, [])
+  } finally {
+    hookHarness.cleanup()
+    globalThis.window = originalWindow
+    globalThis.document = originalDocument
+    globalThis.HTMLElement = originalHTMLElement
+  }
+})
+
+test("mounted pre-observation detail exposes an empty booking table independently of status", async () => {
+  const taskId = "76800000-0000-4000-8000-000000000001"
+  const trackId = "76800000-0000-4000-8000-000000000002"
+  const directorId = "76800000-0000-4000-8000-000000000003"
+  const managerDetail = {
+    track: {
+      trackId,
+      taskId,
+      subject: "영어",
+      workflowStatus: "consultation_requested",
+      workflowRevision: 1,
+      observationReturnWorkflowStatus: null,
+      directorProfileId: directorId,
+    },
+    currentObservation: null,
+    latestEnrollmentDecisionObservationId: null,
+    latestDecisionObservation: null,
+    attempts: [],
+    classes: [],
+  }
+  const hookHarness = createRegistrationEditorHookHarness()
+  const mounted = await loadMountedRegistrationApplication({
+    hookHarness,
+    loadManagerDetail: async () => managerDetail,
     loadFeedback: async () => null,
   })
   const props = {
@@ -2230,7 +2393,7 @@ test("mounted pre-observation detail keeps the guided observation section visibl
         workflowRevision: 1,
         directorProfileId: directorId,
         observationAttemptCount: 0,
-        observationSummaryVisible: false,
+        observationSummaryVisible: true,
         migrationReviewRequired: false,
         legacy: false,
         waitingKind: null,
@@ -2265,10 +2428,18 @@ test("mounted pre-observation detail keeps the guided observation section visibl
   globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
 
   try {
-    const view = hookHarness.render(mounted.RegistrationApplication, props)
+    let view = hookHarness.render(mounted.RegistrationApplication, props)
+    hookHarness.flushEffects()
+    await flushMountedRegistrationWork()
+    view = hookHarness.render(mounted.RegistrationApplication, props)
     const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "pre-observation application shell")
     assert.notEqual(shell.props.observation, undefined)
-    assert.match(renderToStaticMarkup(shell.props.observation), /상담 완료 또는 대기 단계에서 청강 예약 필요를 선택하면 청강 회차를 예약할 수 있습니다\./)
+    const editor = findMountedRegistrationElement(
+      shell.props.observation,
+      (node) => node.type === mounted.RegistrationObservationEditor,
+      "status-independent observation editor",
+    )
+    assert.equal(editor.props.detail, managerDetail)
   } finally {
     hookHarness.cleanup()
     globalThis.window = originalWindow
@@ -2439,6 +2610,12 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
         "registration application shell",
       )
       assert.ok(shell.props.observation, `${roleCase.label}:${status} keeps history mounted`)
+      if (!roleCase.canManageCase) {
+        assert.match(renderToStaticMarkup(shell.props.observation), /권한/u)
+        assert.equal(managerLoads, 0)
+        assert.equal(feedbackLoads, 0)
+        return null
+      }
       const editor = findMountedRegistrationElement(
         shell.props.observation,
         (node) => node.type === mounted.RegistrationObservationEditor,
@@ -2464,22 +2641,30 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
   }
 
   try {
-    await t.test("completed decisions keep correction for management only", async () => {
+    await t.test("completed decisions keep read-only history without reopening feedback input", async () => {
       for (const roleCase of roleCases) {
         const feedback = await mountTerminalHistory({ status: "completed", decisionKind: "enrollment", roleCase })
+        if (!roleCase.canManageCase) {
+          assert.equal(feedback, null)
+          continue
+        }
         assert.equal(feedback.canRecordAttendance, false)
-        assert.equal(feedback.canEditFeedback, roleCase.canManageCase, roleCase.label)
+        assert.equal("canEditFeedback" in feedback, false, roleCase.label)
         assert.equal(feedback.canDecide, false, roleCase.label)
       }
     })
 
-    await t.test("undecided completed and no-show attempts keep manager decisions", async () => {
+    await t.test("undecided completed and no-show attempts keep admin and staff decisions only", async () => {
       for (const status of ["completed", "no_show"]) {
         for (const roleCase of roleCases) {
           const feedback = await mountTerminalHistory({ status, decisionKind: null, roleCase })
+          if (!roleCase.canManageCase) {
+            assert.equal(feedback, null)
+            continue
+          }
           assert.equal(feedback.canRecordAttendance, false)
-          assert.equal(feedback.canEditFeedback, roleCase.canManageCase, `${roleCase.label}:${status}`)
-          assert.equal(feedback.canDecide, true, `${roleCase.label}:${status}`)
+          assert.equal("canEditFeedback" in feedback, false, `${roleCase.label}:${status}`)
+          assert.equal(feedback.canDecide, roleCase.canManageCase, `${roleCase.label}:${status}`)
         }
       }
     })
@@ -2487,13 +2672,15 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
     await t.test("canceled attempts keep every feedback action closed", async () => {
       for (const roleCase of roleCases) {
         const feedback = await mountTerminalHistory({ status: "canceled", decisionKind: null, roleCase })
+        if (!roleCase.canManageCase) {
+          assert.equal(feedback, null)
+          continue
+        }
         assert.equal(feedback.canRecordAttendance, false)
-        assert.equal(feedback.canEditFeedback, false, roleCase.label)
+        assert.equal("canEditFeedback" in feedback, false, roleCase.label)
         assert.equal(feedback.canDecide, false, roleCase.label)
       }
     })
-    assert.equal(scrolledPanelIds.length, 12)
-    assert.ok(scrolledPanelIds.every((id) => id === "registration-application-observation"))
   } finally {
     globalThis.window = originalWindow
     globalThis.document = originalDocument
@@ -2777,7 +2964,7 @@ test("common information conflicts retain the attempted draft when latest-data r
   ])
   const editor = sourceBetween(inquiry, "export function RegistrationInquiryEditor", "export type RegistrationApplicationInquirySectionProps")
   const saveInquiry = sourceBetween(application, "async function saveInquiry", "function handleSubjectTabChange")
-  const conflict = sourceBetween(editor, 'outcome === "conflict"', '} else {')
+  const conflict = sourceBetween(editor, 'outcome === "conflict"', '} else if (outcome === "saved") {')
   const retry = sourceBetween(editor, "async function retryConflictRefresh", "async function retryRefresh")
 
   assert.match(inquiry, /type RegistrationInquirySaveOutcome|Promise<RegistrationInquirySaveOutcome>/)
@@ -2789,7 +2976,136 @@ test("common information conflicts retain the attempted draft when latest-data r
   assert.match(retry, /await onReload\(\)/)
   assert.doesNotMatch(retry, /onSave/)
   assert.match(saveInquiry, /registration_common_revision_conflict[\s\S]*?registration_subjects_conflict[\s\S]*?return "conflict"/)
-  assert.doesNotMatch(saveInquiry, /await onReload/)
+  assert.match(saveInquiry, /return "conflict"[\s\S]*?rejectedWrites\.length === 2[\s\S]*?await onReload\(\)[\s\S]*?return "partial"/)
+})
+
+test("canonical registration mutation closures fail closed outside management roles", async () => {
+  const application = await readRegistrationApplicationSource()
+  const workflowStatus = sourceBetween(application, "async function changeWorkflowStatus", "async function sendRegistrationManagementNotification")
+  const managementNotification = sourceBetween(application, "async function sendRegistrationManagementNotification", "async function saveInquiry")
+  const saveInquiry = sourceBetween(application, "async function saveInquiry", "function handleSubjectTabChange")
+
+  assert.match(workflowStatus, /if \(!canManageCase\) return/)
+  assert.match(managementNotification, /if \([\s\S]*?!canManageCase/)
+  assert.match(saveInquiry, /if \(!canManageCase\) throw new Error\("등록 정보를 수정할 권한이 없습니다\."\)/)
+})
+
+test("level-test and consultation editors pass the manager-only lock into every mutation boundary", async () => {
+  const [application, appointment] = await Promise.all([
+    readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
+    readRegistrationAppointmentEditorSource(),
+  ])
+  const selectMode = sourceBetween(application, "function selectConsultationMode", "async function saveActiveConsultationDirector")
+  const saveDirector = sourceBetween(application, "async function saveActiveConsultationDirector", "async function savePhoneConsultation")
+  const savePhone = sourceBetween(application, "async function savePhoneConsultation", "async function confirmVisitToPhoneSwitch")
+  const switchToPhone = sourceBetween(application, "async function confirmVisitToPhoneSwitch", "async function confirmPhoneConsultationCancellation")
+  const cancelPhone = sourceBetween(application, "async function confirmPhoneConsultationCancellation", "const activeObservationFeedbackPanel")
+  const modeControls = sourceBetween(application, '<fieldset className="m-0 grid min-w-0 gap-1.5 border-0 p-0">', "</fieldset>")
+  const saveAppointment = sourceBetween(appointment, "async function saveAppointment", "async function performSaveAppointment")
+  const performAppointmentSave = sourceBetween(appointment, "async function performSaveAppointment", "function dismissAppointmentConfirmation")
+  const cancelAppointment = sourceBetween(appointment, "async function confirmAppointmentCancellation", "async function completeAttempt")
+  const saveLevelTestResult = sourceBetween(appointment, "async function completeAttempt", "return (")
+
+  assert.match(application, /canManageRegistrationCase\(viewerRole\)/)
+  assert.equal((application.match(/readOnly=\{!canManageCase\}/g) || []).length, 2)
+  assert.equal((modeControls.match(/disabled=\{!canManageCase \|\| consultationSharedSaving\}/g) || []).length, 2)
+  assert.match(application, /blocked=\{!canManageCase\}/)
+  for (const handler of [selectMode, saveDirector, savePhone, switchToPhone, cancelPhone]) {
+    assert.match(handler, /if \(!canManageCase/)
+  }
+
+  assert.match(appointment, /readOnly\?: boolean/)
+  assert.match(appointment, /readOnly = false/)
+  for (const handler of [saveAppointment, performAppointmentSave, cancelAppointment, saveLevelTestResult]) {
+    assert.match(handler, /if \(readOnly/)
+  }
+  assert.match(appointment, /disabled=\{readOnly \|\| saving \|\| confirmationPending \|\| mutationLocked\}/)
+  assert.match(appointment, /disabled=\{readOnly \|\| trackRefreshPending \|\| activitySavingId === activity\.id\}/)
+  assert.match(appointment, /blocked=\{readOnly \|\| trackRefreshPending \|\| !materialLink\.trim\(\)\}/)
+})
+
+test("mounted registration detail makes level-test, visit-consultation, and mode controls read-only for teachers and assistants", async () => {
+  const taskId = "7a000000-0000-4000-8000-000000000001"
+  const trackId = "7a000000-0000-4000-8000-000000000002"
+  const baseDetail = {
+    task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
+    commonRevision: 1,
+    tracks: [{
+      id: trackId,
+      taskId,
+      subject: "영어",
+      status: "consultation_waiting",
+      workflowStatus: "consultation_requested",
+      workflowRevision: 1,
+      directorProfileId: "7a000000-0000-4000-8000-000000000003",
+      observationAttemptCount: 0,
+      observationSummaryVisible: false,
+      migrationReviewRequired: false,
+      legacy: false,
+      waitingKind: null,
+    }],
+    appointments: [],
+    levelTests: [],
+    consultations: [],
+    enrollments: [],
+    admissionBatches: [],
+    admissionApplicationMessageStatus: "not_sent",
+    admissionApplicationMessageClaimActive: false,
+    admissionApplicationMessageId: null,
+  }
+  const roleCases = [
+    { role: "admin", readOnly: false },
+    { role: "staff", readOnly: false },
+    { role: "teacher", readOnly: true },
+    { role: "assistant", readOnly: true },
+  ]
+
+  for (const roleCase of roleCases) {
+    const hookHarness = createRegistrationEditorHookHarness()
+    const mounted = await loadMountedRegistrationApplication({
+      hookHarness,
+      loadManagerDetail: async () => null,
+      loadFeedback: async () => null,
+      consultationMode: "visit",
+    })
+    try {
+      const view = hookHarness.render(mounted.RegistrationApplication, {
+        task: baseDetail.task,
+        detail: baseDetail,
+        focusTrackId: trackId,
+        viewerId: `viewer-${roleCase.role}`,
+        viewerRole: roleCase.role,
+        onFocusTrack: () => undefined,
+        onReload: async () => undefined,
+        onWarning: () => undefined,
+        subjectCapabilities: [],
+        customerMessageClient: {},
+        closeAction: null,
+      })
+      const shell = findMountedRegistrationElement(
+        view,
+        (node) => node.type === mounted.RegistrationApplicationShell,
+        `${roleCase.role} registration shell`,
+      )
+      const appointmentEditors = [shell.props.levelTest, shell.props.consultation].flatMap((content) => (
+        findMountedRegistrationElements(content, (node) => node.type === mounted.RegistrationAppointmentEditor)
+      ))
+      assert.equal(appointmentEditors.length, 2, roleCase.role)
+      assert.deepEqual(
+        appointmentEditors.map((editor) => editor.props.readOnly),
+        [roleCase.readOnly, roleCase.readOnly],
+        roleCase.role,
+      )
+      const modeButtons = findMountedRegistrationElements(shell.props.consultation, (node) => (
+        node.type === mounted.Button
+        && ["전화상담", "방문상담"].includes(collectMountedRegistrationText(node).join(""))
+      ))
+      assert.equal(modeButtons.length, 2, roleCase.role)
+      assert.deepEqual(modeButtons.map((button) => button.props.disabled), [roleCase.readOnly, roleCase.readOnly], roleCase.role)
+    } finally {
+      hookHarness.cleanup()
+    }
+  }
 })
 
 test("ordinary tracks expose compact manual director selection and visit reassignment guidance", async () => {
@@ -2971,10 +3287,10 @@ test("new appointments start with the active subject selected", async () => {
   assert.match(workspace, /eligibleTracks=\{genericTracks\}/)
 })
 
-test("subject removal renders the deployed history-block error inline", async () => {
+test("subject removal is a plain editable fact without a history-block UI", async () => {
   const source = await readRegistrationApplicationSource()
-  assert.match(source, /registration_subject_removal_blocked/)
-  assert.doesNotMatch(source, /registration_subject_has_history/)
+  assert.doesNotMatch(source, /registration_subject_removal_blocked|registration_subject_has_history/)
+  assert.doesNotMatch(source, /disabledSubjects=/)
 })
 
 test("workspace preloads the unified editor while canonical subject detail data loads", async () => {
@@ -3025,18 +3341,27 @@ test("canonical detail renders before option catalogs begin loading", async () =
   }
 })
 
-test("ready-mode creation uses one guarded initial-workflow RPC without a director follow-up", async () => {
+test("new registration always creates one fact-only row without runtime, workflow, or notification gates", async () => {
   const source = await readWorkspaceSource()
-  assert.match(source, /probeRegistrationSubjectTrackRuntime/)
-  assert.match(source, /probeRegistrationIntakeWorkflowRuntime/)
-  assert.match(source, /const initialDraft = createRegistrationInitialWorkflowDraft\(subjects\)/)
-  assert.match(source, /normalizeRegistrationInitialWorkflow\(initialDraft, subjects\)/)
-  assert.match(source, /createRegistrationCaseWithInitialWorkflow\(\{/)
+  const submit = sourceBetween(source, "const submitForm = async", "const handleFormKeyDown")
+  const registrationCreate = sourceBetween(
+    submit,
+    'if (createPayload.type === "registration") {',
+    'const receipt = createPayload.type === "transfer"',
+  )
+  const canSubmit = sourceBetween(source, "function canSubmitOpsTaskForm", "function isRegistrationPipelineComplete")
+
+  assert.match(registrationCreate, /createRegistrationCase\(\{/)
   assert.match(source, /const subjects = parseRegistrationSubjects\(createPayload\.subject\)/)
   assert.match(source, /createRegistrationCreateAttempt\([\s\S]*?subjects,/)
   assert.match(source, /registrationCreateAttemptRef/)
-  assert.doesNotMatch(source, /persistCreatedRegistrationDirectorDefaults/)
-  assert.match(source, /registrationPersistence\.mode === "blocked_maintenance"/)
+  assert.match(registrationCreate, /persistenceMode: "canonical_inquiry"/)
+  assert.match(registrationCreate, /createInquiryAt: \(\) => ""/)
+  assert.doesNotMatch(registrationCreate, /createRegistrationCaseWithInitialWorkflow|dispatchRegistrationVisitNotificationTargets|probeRegistrationInitialPersistence/)
+  assert.doesNotMatch(registrationCreate, /blocked_maintenance|blocked_mismatch|blocked_indeterminate|writer ===/)
+  assert.doesNotMatch(submit, /getRegistrationCreateBlockers|getRegistrationCreateErrorMessage/)
+  assert.match(canSubmit, /input\.type === "registration"[\s\S]*?return true/)
+  assert.match(source, /submissionForm\.type === "registration" \? "등록 신청"/)
 })
 
 test("registration director options resolve science as its own subject", async () => {
@@ -4112,7 +4437,7 @@ test("common revision conflicts show attempted and latest values before an expli
   assert.match(editor, /최신 값 사용/)
   assert.match(editor, /내 입력 다시 적용/)
   assert.match(inquiry, /subjects: "과목"/)
-  assert.doesNotMatch(sourceBetween(editor, 'outcome === "conflict"', '} else {'), /await onSave/)
+  assert.doesNotMatch(sourceBetween(editor, 'outcome === "conflict"', '} else if (outcome === "saved") {'), /await onSave/)
 })
 
 test("manual director revision conflicts compare the attempted and latest director before retry", async () => {
@@ -4213,10 +4538,10 @@ test("appointment save confirmation stays visible inside the registration detail
   assert.match(appointment, /aria-labelledby="registration-appointment-confirmation-title"/)
   assert.match(appointment, /id="registration-appointment-confirmation-title"[\s\S]*?예약을 저장할까요\?/)
   assert.doesNotMatch(appointment, /registration-appointment-confirmation-description|pendingConfirmation\.message/)
-  assert.match(appointment, /className="min-h-11 min-w-11" variant="outline" onClick=\{dismissAppointmentConfirmation\} disabled=\{saving\}>돌아가기<\/Button>/)
-  assert.match(appointment, /className="min-h-11 min-w-11" onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\} disabled=\{saving\}>저장<\/Button>/)
-  assert.match(appointment, /blocked=\{mutationLocked \|\| confirmationPending \|\| Boolean\(conflict\)\}/)
-  assert.match(appointment, /disabled=\{saving \|\| confirmationPending \|\| mutationLocked\}/)
+  assert.match(appointment, /className="min-h-11 min-w-11" variant="outline" onClick=\{dismissAppointmentConfirmation\} disabled=\{readOnly \|\| saving\}>돌아가기<\/Button>/)
+  assert.match(appointment, /className="min-h-11 min-w-11" onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\} disabled=\{readOnly \|\| saving\}>저장<\/Button>/)
+  assert.match(appointment, /blocked=\{readOnly \|\| mutationLocked \|\| confirmationPending \|\| Boolean\(conflict\)\}/)
+  assert.match(appointment, /disabled=\{readOnly \|\| saving \|\| confirmationPending \|\| mutationLocked\}/)
 })
 
 test("enrollment cancellation validation is local and focuses subject-owned controls", async () => {

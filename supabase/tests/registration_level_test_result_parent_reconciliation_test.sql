@@ -120,45 +120,76 @@ insert into registration_level_result_cases(case_key, payload)
 values
   (
     'single_completed',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 완료 학생', '중1', '레벨결과중', '01077007251', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
-      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-25T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-single-completed'
+      'parent reconciliation fixture', 'normal',
+      'level-result-parent-single-completed'
     )
   ),
   (
     'single_absent',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 결석 학생', '중1', '레벨결과중', '01077007252', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
-      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-26T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-single-absent'
+      'parent reconciliation fixture', 'normal',
+      'level-result-parent-single-absent'
     )
   ),
   (
     'single_canceled',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 취소 학생', '중1', '레벨결과중', '01077007253', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어'],
-      'parent reconciliation fixture', 'normal', '{"영어":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-27T10:00:00+09:00","place":"본관","subjects":["영어"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-single-canceled'
+      'parent reconciliation fixture', 'normal',
+      'level-result-parent-single-canceled'
     )
   ),
   (
     'shared_terminal',
-    public.create_registration_case_with_initial_workflow_v1(
+    public.create_registration_case(
       '레벨결과 공유 학생', '중1', '레벨결과중', '01077007254', null,
       '본관', '2026-08-20 09:30+09'::timestamptz, array['영어', '수학'],
       'parent reconciliation fixture', 'normal',
-      '{"영어":"level_test","수학":"level_test"}'::jsonb,
-      '{"scheduledAt":"2026-08-28T10:00:00+09:00","place":"본관","subjects":["영어","수학"]}'::jsonb,
-      null, '{}'::jsonb, 'level-result-parent-shared-terminal'
+      'level-result-parent-shared-terminal'
     )
   );
+
+-- Flat case creation intentionally ignores operational plans. Book each level
+-- test explicitly through the independent appointment action that production
+-- clients use after storing the case facts.
+create temporary table registration_level_result_appointments(
+  case_key text primary key,
+  response jsonb not null
+) on commit drop;
+
+insert into registration_level_result_appointments(case_key, response)
+select
+  fixture.case_key,
+  public.save_registration_appointment_details_v1(
+    null,
+    (fixture.payload ->> 'taskId')::uuid,
+    'level_test',
+    case fixture.case_key
+      when 'single_completed' then '2026-08-25 10:00+09'::timestamptz
+      when 'single_absent' then '2026-08-26 10:00+09'::timestamptz
+      when 'single_canceled' then '2026-08-27 10:00+09'::timestamptz
+      else '2026-08-28 10:00+09'::timestamptz
+    end,
+    '본관',
+    array(
+      select (track_item.value ->> 'id')::uuid
+      from pg_catalog.jsonb_array_elements(
+        fixture.payload -> 'tracks'
+      ) track_item(value)
+      order by track_item.value ->> 'subject'
+    ),
+    null,
+    'level-result-parent-appointment-' || fixture.case_key
+  )
+from registration_level_result_cases fixture;
+
+grant select on registration_level_result_appointments to authenticated;
 
 create temporary table registration_level_result_ids on commit drop as
 select
@@ -171,8 +202,11 @@ select
 from registration_level_result_cases fixture
 join public.ops_tasks task
   on task.id = (fixture.payload ->> 'taskId')::uuid
+join registration_level_result_appointments booking
+  on booking.case_key = fixture.case_key
 join public.ops_registration_appointments appointment
-  on appointment.task_id = task.id
+  on appointment.id = (booking.response ->> 'appointmentId')::uuid
+ and appointment.task_id = task.id
  and appointment.kind = 'level_test'
 join public.ops_registration_subject_tracks track
   on track.task_id = task.id
@@ -237,10 +271,10 @@ select is(
   'stale workflow revisions use a non-retryable domain SQLSTATE'
 );
 
--- The current RPC writes the child first and relies on deferred integrity checks.
--- Catch the deferred error in a subtransaction so RED remains a normal pgTAP
--- assertion instead of aborting the entire packet. Every valid call explicitly
--- forces deferred triggers before returning.
+-- The result RPC writes the child first and relies on deferred integrity checks.
+-- Catch any deferred error in a subtransaction so it remains a normal pgTAP
+-- assertion instead of aborting the packet. Every valid call explicitly forces
+-- deferred triggers before returning.
 create or replace function pg_temp.registration_level_result_save(
   p_attempt_id uuid,
   p_status text,
@@ -284,8 +318,7 @@ create temporary table registration_level_result_calls(
 ) on commit drop;
 grant select, insert on registration_level_result_calls to authenticated;
 
--- Sole completed child: this is RED before the forward wrapper because the
--- appointment remains scheduled and the deferred integrity trigger rejects it.
+-- A sole completed child closes its explicitly booked appointment.
 insert into registration_level_result_calls(case_key, invocation, result)
 select
   ids.case_key,
@@ -331,8 +364,8 @@ select is(
       on detail.task_id = ids.task_id
     where ids.case_key = 'single_completed'
   ),
-  'level_test_scheduled:in_progress:1. 레벨테스트 예약',
-  'data-only result save leaves manual track workflow and registration parent projection unchanged'
+  'inquiry:requested:0. 등록 문의',
+  'explicit booking and data-only result save leave manual registration status projections unchanged'
 );
 
 -- A fresh request key is an intentional correction, not an idempotent replay.
@@ -526,7 +559,7 @@ select is(
 );
 
 -- Same request key must replay without writing a second result event or changing
--- the appointment revision. Current code writes the event twice, so this is RED.
+-- the appointment revision.
 insert into registration_level_result_calls(case_key, invocation, result)
 select
   ids.case_key,

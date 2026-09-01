@@ -202,7 +202,7 @@ test("generic workflow replacement preserves its contract and guards observation
   );
 });
 
-test("booking pgTAP is planned exactly and covers lifecycle plus dblink concurrency", async () => {
+test("booking pgTAP is planned exactly and covers the status-independent lifecycle and lock contract", async () => {
   const sql = await readFile(pgTapPath, "utf8");
   assert.match(sql, /^begin;/i);
   assert.match(sql, /rollback;\s*$/i);
@@ -215,30 +215,20 @@ test("booking pgTAP is planned exactly and covers lifecycle plus dblink concurre
   for (const token of [
     "registration_observation_revision_combination_invalid",
     "registration_observation_request_key_conflict",
-    "registration_observation_transition_requires_action",
+    "enter is a no-op",
+    "registration_observation_withdraw_retired",
     "observation_scheduled",
     "observation_rescheduled",
     "observation_canceled",
     "return_to_previous",
-    "director_decision",
     "re_observation",
     "40001",
-    "dblink_connect",
-    "dblink_send_query",
-    "dblink_get_result",
     "lock_timeout",
     "statement_timeout",
   ]) {
     assert.match(sql, new RegExp(token, "i"));
   }
-  assert.match(
-    sql,
-    /dblink_connect\([^\n]+hostaddr=[^\n]+host\([^\n]+inet_server_addr\(\)\)[^\n]+port=5432 dbname=[^\n]+user=postgres password=postgres/i,
-  );
-  assert.ok(
-    sql.indexOf("select dblink_connect")
-      < sql.indexOf("create trigger registration_observation_fail_event"),
-  );
+  assert.doesNotMatch(sql, /\bdblink_(?:connect|send_query|get_result)\b/i);
   assert.doesNotMatch(sql, /select\s+no_plan\s*\(/i);
   assert.doesNotMatch(sql, /select\s+\*\s+from\s+finish\s*\(/i);
 });

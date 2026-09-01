@@ -43,7 +43,7 @@ as $$
   where procedure.oid = p_function;
 $$;
 
-select plan(21);
+select plan(30);
 
 select ok(
   pg_catalog.to_regprocedure('public.set_registration_workflow_status_v1(uuid,text,integer,text)') is not null,
@@ -214,6 +214,78 @@ select ok(
     '23514'
   ) > 0,
   'private implementation maps stale revisions to registration_workflow_status_refresh_required with 23514'
+);
+
+select ok(
+  pg_catalog.to_regprocedure('public.enter_registration_observation_v1(uuid,integer,text)') is not null,
+  'public observation entry wrapper exists with its exact signature'
+);
+
+select ok(
+  pg_catalog.to_regprocedure('dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)') is not null,
+  'private observation entry implementation exists with its exact signature'
+);
+
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('public.enter_registration_observation_v1(uuid,integer,text)')),
+    'dashboard_private.enter_registration_observation_v1_impl'
+  ) > 0,
+  'public observation entry wrapper delegates to the private implementation'
+);
+
+select is(
+  (
+    select not procedure.prosecdef
+    from pg_catalog.pg_proc procedure
+    where procedure.oid = pg_catalog.to_regprocedure('public.enter_registration_observation_v1(uuid,integer,text)')
+  ),
+  true,
+  'public observation entry wrapper remains security invoker'
+);
+
+select is(
+  (
+    select procedure.prosecdef
+    from pg_catalog.pg_proc procedure
+    where procedure.oid = pg_catalog.to_regprocedure('dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)')
+  ),
+  true,
+  'private observation entry implementation remains security definer'
+);
+
+select ok(
+  pg_temp.registration_workflow_function_boundary_is_exact(
+    'public.enter_registration_observation_v1(uuid,integer,text)'::pg_catalog.regprocedure
+  ),
+  'public observation entry wrapper preserves exact owner search path and ACL boundary'
+);
+
+select ok(
+  pg_temp.registration_workflow_function_boundary_is_exact(
+    'dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)'::pg_catalog.regprocedure
+  ),
+  'private observation entry implementation preserves exact owner search path and ACL boundary'
+);
+
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)')),
+    '40001'
+  ) = 0,
+  'private observation entry implementation does not manually raise SQLSTATE 40001'
+);
+
+select ok(
+  pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)')),
+    'registration_observation_stale_revision'
+  ) = 0
+  and pg_catalog.strpos(
+    pg_catalog.pg_get_functiondef(pg_catalog.to_regprocedure('dashboard_private.enter_registration_observation_v1_impl(uuid,integer,text)')),
+    'set workflow_status'
+  ) = 0,
+  'private observation entry is a compatibility no-op without a workflow revision gate or status mutation'
 );
 
 savepoint public_execute_grant_mutation;

@@ -168,6 +168,40 @@ export function isRegistrationManagementNotificationWorkflowStatus(status) {
   ].includes(text(status))
 }
 
+const REGISTRATION_MANAGEMENT_NOTIFICATION_EVENT_BY_STATUS = Object.freeze({
+  consultation_requested: "registration.case_created",
+  consultation_completed: "registration.consultation_completed",
+  waiting_current_class: "registration.waiting_transitioned",
+  waiting_new_class: "registration.waiting_transitioned",
+  waiting_next_opening: "registration.waiting_transitioned",
+  enrollment_requested: "registration.admission_started",
+})
+
+export function getRegistrationManagementNotificationReadiness(input = {}) {
+  const workflowStatus = text(input.workflowStatus)
+  const eventKey = REGISTRATION_MANAGEMENT_NOTIFICATION_EVENT_BY_STATUS[workflowStatus] || null
+  if (!eventKey) {
+    return {
+      ready: false,
+      eventKey: null,
+      missingFields: ["현재 진행상태에는 보낼 관리 알림이 없습니다"],
+    }
+  }
+
+  const missingFields = []
+  if (!text(input.studentName)) missingFields.push("학생 이름")
+  if (!text(input.subject)) missingFields.push("과목")
+  if (eventKey === "registration.case_created") {
+    if (!text(input.schoolGrade)) missingFields.push("학년")
+    if (!text(input.inquiryAt)) missingFields.push("문의 시각")
+  }
+  return {
+    ready: missingFields.length === 0,
+    eventKey,
+    missingFields,
+  }
+}
+
 export function getRegistrationVisitNotificationDedupeKey(input = {}) {
   return [
     "registration:visit",

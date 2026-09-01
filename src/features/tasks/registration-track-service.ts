@@ -835,6 +835,7 @@ type QueryBuilder = PromiseLike<QueryResult> & {
   retry?: (enabled: boolean) => QueryBuilder
   select: (columns: string, options?: Record<string, unknown>) => QueryBuilder
   eq: (column: string, value: unknown) => QueryBuilder
+  is: (column: string, value: unknown) => QueryBuilder
   neq: (column: string, value: unknown) => QueryBuilder
   gte: (column: string, value: unknown) => QueryBuilder
   lt: (column: string, value: unknown) => QueryBuilder
@@ -983,6 +984,16 @@ function text(input: unknown) {
 function nullableText(input: unknown) {
   const normalized = text(input)
   return normalized || null
+}
+
+function nullableRegistrationDateTime(input: unknown) {
+  const normalized = text(input)
+  if (!normalized) return null
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(normalized)) {
+    const parsed = new Date(`${normalized}:00+09:00`)
+    return Number.isNaN(parsed.getTime()) ? normalized : parsed.toISOString()
+  }
+  return normalized
 }
 
 function bool(input: unknown) {
@@ -2393,10 +2404,13 @@ export function createRegistrationTrackService(
         ),
         ...TASK_SCOPED_CASE_READS.map(([table, columns]) => {
           const taskQuery = client.from(table).select(columns).eq("task_id", safeTaskId)
+          const visibleTaskQuery = table === "ops_registration_subject_tracks"
+            ? taskQuery.is("archived_at", null)
+            : taskQuery
           return queryRows(
             table === "ops_registration_appointments"
-              ? taskQuery.neq("kind", "observation_class")
-              : taskQuery,
+              ? visibleTaskQuery.neq("kind", "observation_class")
+              : visibleTaskQuery,
             metrics,
             signal,
           )
@@ -2812,19 +2826,23 @@ export function createRegistrationTrackService(
     priority: string
     requestKey: string
   }): Promise<RegistrationCaseCreateResponse> {
-    const result = await callRpc<RegistrationCaseCreateResponse>("create_registration_case", {
-      p_student_name: input.studentName,
-      p_school_grade: input.schoolGrade,
-      p_school_name: input.schoolName,
-      p_parent_phone: input.parentPhone,
-      p_student_phone: input.studentPhone,
-      p_campus: input.campus,
-      p_inquiry_at: input.inquiryAt,
-      p_subjects: input.subjects,
-      p_request_note: input.requestNote,
-      p_priority: input.priority,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const result = await callRpc<RegistrationCaseCreateResponse>(
+      "create_registration_case",
+      {
+        p_student_name: input.studentName,
+        p_school_grade: input.schoolGrade,
+        p_school_name: input.schoolName,
+        p_parent_phone: input.parentPhone,
+        p_student_phone: input.studentPhone,
+        p_campus: input.campus,
+        p_inquiry_at: nullableRegistrationDateTime(input.inquiryAt),
+        p_subjects: input.subjects,
+        p_request_note: input.requestNote,
+        p_priority: input.priority,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
     return {
       ...result,
       tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
@@ -2873,11 +2891,15 @@ export function createRegistrationTrackService(
     subjects: RegistrationSubject[]
     requestKey: string
   }): Promise<RegistrationSubjectSyncResponse> {
-    const result = await callRpc<RegistrationSubjectSyncResponse>("sync_registration_case_subjects", {
-      p_task_id: input.taskId,
-      p_subjects: input.subjects,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const result = await callRpc<RegistrationSubjectSyncResponse>(
+      "sync_registration_case_subjects",
+      {
+        p_task_id: input.taskId,
+        p_subjects: input.subjects,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
     return {
       ...result,
       tracks: rows(value(result as unknown as Row, "tracks")).map((row) => mapTrack(row)),
@@ -2933,20 +2955,24 @@ export function createRegistrationTrackService(
     expectedCommonRevision: number
     requestKey: string
   }): Promise<RegistrationCommonUpdateResponse> {
-    return callRpc<RegistrationCommonUpdateResponse>("update_registration_case_common", {
-      p_task_id: input.taskId,
-      p_student_name: input.studentName,
-      p_school_grade: input.schoolGrade,
-      p_school_name: nullableText(input.schoolName),
-      p_parent_phone: input.parentPhone,
-      p_student_phone: nullableText(input.studentPhone),
-      p_campus: input.campus,
-      p_inquiry_at: input.inquiryAt,
-      p_request_note: nullableText(input.requestNote),
-      p_priority: input.priority,
-      p_expected_common_revision: input.expectedCommonRevision,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    return callRpc<RegistrationCommonUpdateResponse>(
+      "update_registration_case_common",
+      {
+        p_task_id: input.taskId,
+        p_student_name: input.studentName,
+        p_school_grade: input.schoolGrade,
+        p_school_name: nullableText(input.schoolName),
+        p_parent_phone: input.parentPhone,
+        p_student_phone: nullableText(input.studentPhone),
+        p_campus: input.campus,
+        p_inquiry_at: nullableRegistrationDateTime(input.inquiryAt),
+        p_request_note: nullableText(input.requestNote),
+        p_priority: input.priority,
+        p_expected_common_revision: input.expectedCommonRevision,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
   }
 
   async function routeRegistrationInquiry(input: {
@@ -3245,12 +3271,16 @@ export function createRegistrationTrackService(
     expectedWorkflowRevision: number
     requestKey: string
   }): Promise<RegistrationWorkflowStatusMutationResponse> {
-    const result = await callRpc<Row>("set_registration_workflow_status_v1", {
-      p_track_id: input.trackId,
-      p_workflow_status: input.workflowStatus,
-      p_expected_workflow_revision: input.expectedWorkflowRevision,
-      p_request_key: requireRequestKey(input.requestKey),
-    })
+    const result = await callRpc<Row>(
+      "set_registration_workflow_status_v1",
+      {
+        p_track_id: input.trackId,
+        p_workflow_status: input.workflowStatus,
+        p_expected_workflow_revision: input.expectedWorkflowRevision,
+        p_request_key: requireRequestKey(input.requestKey),
+      },
+      { runtimeChecked: true },
+    )
     const status = text(value(result, "workflow_status", "workflowStatus"))
     if (!isOpsRegistrationWorkflowStatus(status)) {
       throw new Error("registration_workflow_status_response_invalid")
@@ -3434,26 +3464,20 @@ export function createRegistrationTrackService(
     return stringList(value(row, "source_event_ids", "sourceEventIds"))
   }
 
-  async function ensureRegistrationCaseCreatedNotificationSourceIds(taskId: string): Promise<string[]> {
-    const normalizedTaskId = text(taskId)
-    if (!normalizedTaskId) throw new Error("registration_task_id_invalid")
-    const result = await callRpc<Row>("ensure_registration_case_created_notification_v1", {
-      p_task_id: normalizedTaskId,
-    })
-    return Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds"))))
-  }
-
   async function ensureRegistrationWorkflowNotificationSourceIds(input: {
     trackId: string
     workflowRevision: number
+    requestKey: string
   }): Promise<string[]> {
     const normalizedTrackId = text(input.trackId)
     if (!normalizedTrackId || !Number.isInteger(input.workflowRevision) || input.workflowRevision < 1) {
       throw new Error("registration_workflow_notification_source_invalid")
     }
-    const result = await callRpc<Row>("ensure_registration_workflow_notification_v1", {
+    const result = await callRpc<Row>("ensure_registration_workflow_notification_v2", {
       p_track_id: normalizedTrackId,
       p_workflow_revision: input.workflowRevision,
+      p_request_key: requireRequestKey(input.requestKey),
+      p_intent: "send_registration_management_notification",
     })
     return Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds"))))
   }
@@ -3701,7 +3725,6 @@ export function createRegistrationTrackService(
     saveRegistrationEnrollmentRows,
     saveRegistrationEnrollmentDetails,
     listRegistrationLegacySourceIds,
-    ensureRegistrationCaseCreatedNotificationSourceIds,
     ensureRegistrationWorkflowNotificationSourceIds,
     claimRegistrationAdmissionMessage,
     reconcileRegistrationAdmissionMessage,
@@ -4148,10 +4171,6 @@ export function claimRegistrationAdmissionMessage(
 
 export function loadRegistrationLegacyNotificationSourceIds(taskId: string): Promise<string[]> {
   return defaultRegistrationTrackService.listRegistrationLegacySourceIds(taskId)
-}
-
-export function ensureRegistrationCaseCreatedNotificationSourceIds(taskId: string): Promise<string[]> {
-  return defaultRegistrationTrackService.ensureRegistrationCaseCreatedNotificationSourceIds(taskId)
 }
 
 export function ensureRegistrationWorkflowNotificationSourceIds(

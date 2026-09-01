@@ -4087,7 +4087,10 @@ test("admission checklist is independent while registered status atomically fina
   assert.match(pgTap, /student_ids/)
   assert.match(pgTap, /class_ids/)
   assert.match(pgTap, /admission-register-isolated-unbatched-subject/)
-  assert.match(pgTap, /admission-register-mixed-batch-membership/)
+  assert.match(
+    pgTap,
+    /the private finalizer rejects mixed batched and unbatched rows with exact SQLSTATE 23514/,
+  )
   assert.match(pgTap, /admission-checklist-teacher-denied/)
   assert.match(pgTap, /23514/)
   assert.doesNotMatch(pgTap, /solapi|google_chat|http_post|net\.http|send_web_push/i)

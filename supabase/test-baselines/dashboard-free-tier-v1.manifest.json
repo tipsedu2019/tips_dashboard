@@ -229,6 +229,66 @@
       "fileName": "20260901072345_textbook_taxonomy_numbered_drafts.sql",
       "status": "final",
       "sha256": "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26"
+    },
+    {
+      "fileName": "20260901110000_registration_observation_stale_revision_nonretryable.sql",
+      "status": "final",
+      "sha256": "93a3b4542d21b337926079b644cd01341839cabe8d5cb35f5a5bb305c7f1f222"
+    },
+    {
+      "fileName": "20260901110100_registration_teacher_feedback_request_retirement.sql",
+      "status": "final",
+      "sha256": "b786c22838da6647dbc4c8af0fd4a704051e009104fbfea2fc02b45f7d0e0627"
+    },
+    {
+      "fileName": "20260901110200_registration_status_property_decoupling.sql",
+      "status": "final",
+      "sha256": "1fefac50812807dc7fc33a22c813dfe0e21877322caa314649c8d48c9f813dd3"
+    },
+    {
+      "fileName": "20260901110300_registration_observation_status_independence.sql",
+      "status": "final",
+      "sha256": "aeaf28249134783ec052a0b9698e330be1263c87cf9790c02b88c55919df64be"
+    },
+    {
+      "fileName": "20260901110400_registration_notification_readiness_decoupling.sql",
+      "status": "final",
+      "sha256": "8d7d7f92c659dd5e3f9a89b602f68380da54752d23adccbbd5d8c8b40e688a04"
+    },
+    {
+      "fileName": "20260901110500_registration_flat_common_input_decoupling.sql",
+      "status": "final",
+      "sha256": "1dc89222a261d987a5d799ac5c2fffbb29e67cd7f5e90b399995ab94db638c4a"
+    },
+    {
+      "fileName": "20260901110600_registration_subject_soft_archive.sql",
+      "status": "final",
+      "sha256": "db8d0fd037be403c7470fa7183489f2730dc6412488ceccd09cc087dfd3d61ba"
+    },
+    {
+      "fileName": "20260901110700_registration_flat_case_creation.sql",
+      "status": "final",
+      "sha256": "ff48d9f4c2b6928f755d9b899b2f4c01e03b5587511c30bc942ba132e262d5d6"
+    },
+    {
+      "fileName": "20260901110800_registration_collaboration_write_role.sql",
+      "status": "final",
+      "sha256": "b599d60d98abe41926cfeec0b3879147acfe1a47ba74e24a96a69b81fa90eb2f"
+    },
+    {
+      "fileName": "20260901110900_registration_archived_subject_delivery_fence.sql",
+      "status": "final",
+      "sha256": "4608ea51155040b79cc07d2a67ed7390a225631b5b31230df4d4d8364b333fe2"
+    },
+    {
+      "fileName": "20260901111000_registration_manager_write_and_integrity_fence.sql",
+      "status": "final",
+      "sha256": "0dc3f5dc6af59107c3927ea723c4b8a1fc7d9a1b3c7663ce7fdc66801cf10c36"
+    },
+    {
+      "fileName": "20260901111100_registration_management_notification_explicit_v2.sql",
+      "status": "final",
+      "sha256": "1e273a71cdd45ad3141f34a5e9ad6e46f295451775fdd4c07a1b42775f0b8234"
     }
   ]
 }

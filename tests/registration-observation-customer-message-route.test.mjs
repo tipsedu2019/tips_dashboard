@@ -1,5 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { readFile } from "node:fs/promises"
 
 import {
   createProductionRegistrationCustomerMessageRouteHandlers,
@@ -28,6 +29,21 @@ const IDS = Object.freeze({
 const OBSERVATION_BOOKING_TARGET = Object.freeze({
   messageKind: "observation_booking",
   sourceId: IDS.observation,
+})
+
+test("waiting message task authorization excludes archived registration tracks", async () => {
+  const source = await readFile(
+    new URL("../src/features/tasks/server/registration-customer-message-route.ts", import.meta.url),
+    "utf8",
+  )
+  const resolveTaskId = source.slice(
+    source.indexOf("async resolveTaskId(input)"),
+    source.indexOf("readPrivateSource:", source.indexOf("async resolveTaskId(input)")),
+  )
+
+  assert.match(resolveTaskId, /const visibleSourceQuery = table === "ops_registration_subject_tracks"/)
+  assert.match(resolveTaskId, /sourceQuery\.is\("archived_at", null\)/)
+  assert.match(resolveTaskId, /await visibleSourceQuery\.maybeSingle\(\)/)
 })
 
 const RAW_SOURCE = Object.freeze({

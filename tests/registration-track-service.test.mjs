@@ -473,6 +473,10 @@ function createClient({ queryHandler, rpcHandler } = {}) {
         query.filters.push(["eq", column, value]);
         return fluent;
       },
+      is(column, value) {
+        query.filters.push(["is", column, value]);
+        return fluent;
+      },
       neq(column, value) {
         query.filters.push(["neq", column, value]);
         return fluent;
@@ -882,7 +886,7 @@ test("manual workflow status uses only its dedicated revisioned RPC", async () =
   assert.equal(invalidations, 1);
 });
 
-test("registered workflow maps the canonical enrollment finalization receipt", async () => {
+test("registered workflow remains a status-only response without enrollment finalization", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     rpcHandler(name) {
@@ -893,13 +897,7 @@ test("registered workflow maps the canonical enrollment finalization receipt", a
           workflowStatus: "registered",
           workflowRevision: 2,
           workflowStatusEnteredAt: "2026-08-26T03:00:00.000Z",
-          enrollmentFinalization: {
-            trackId: "track-registered",
-            studentId: "student-1",
-            batchId: "batch-2",
-            enrollmentIds: ["enrollment-1", "enrollment-2"],
-            changed: true,
-          },
+          enrollmentFinalization: null,
         },
         error: null,
       };
@@ -914,13 +912,7 @@ test("registered workflow maps the canonical enrollment finalization receipt", a
     requestKey: "workflow-register-receipt",
   });
 
-  assert.deepEqual(JSON.parse(JSON.stringify(result.enrollmentFinalization)), {
-    trackId: "track-registered",
-    studentId: "student-1",
-    batchId: "batch-2",
-    enrollmentIds: ["enrollment-1", "enrollment-2"],
-    changed: true,
-  });
+  assert.equal(result.enrollmentFinalization, null);
 });
 
 test("admission checklist saves one independent item through its dedicated RPC", async () => {
@@ -971,21 +963,16 @@ test("admission checklist saves one independent item through its dedicated RPC",
   assert.equal(harness.queries.length, 0);
 });
 
-test("registration management notification producers return only server-issued source IDs", async () => {
+test("registration management notification uses only the explicit v2 producer with one request key", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     rpcHandler(name, args) {
-      if (name === "ensure_registration_case_created_notification_v1") {
-        assert.deepEqual({ ...args }, { p_task_id: "task-1" });
-        return {
-          data: { sourceEventIds: ["case-event", "", null] },
-          error: null,
-        };
-      }
-      assert.equal(name, "ensure_registration_workflow_notification_v1");
+      assert.equal(name, "ensure_registration_workflow_notification_v2");
       assert.deepEqual({ ...args }, {
         p_track_id: "track-1",
         p_workflow_revision: 4,
+        p_request_key: "99710000-0000-4000-8000-000000000901",
+        p_intent: "send_registration_management_notification",
       });
       return {
         data: { source_event_ids: ["workflow-event", "workflow-event", null] },
@@ -995,14 +982,12 @@ test("registration management notification producers return only server-issued s
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
-  assert.deepEqual(
-    Array.from(await service.ensureRegistrationCaseCreatedNotificationSourceIds("task-1")),
-    ["case-event"],
-  );
+  assert.equal("ensureRegistrationCaseCreatedNotificationSourceIds" in service, false);
   assert.deepEqual(
     Array.from(await service.ensureRegistrationWorkflowNotificationSourceIds({
       trackId: "track-1",
       workflowRevision: 4,
+      requestKey: "99710000-0000-4000-8000-000000000901",
     })),
     ["workflow-event"],
   );
@@ -2686,6 +2671,10 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   ]);
   assert.equal(messages.limit, 1);
   const tracks = harness.queries.find((query) => query.table === "ops_registration_subject_tracks");
+  assert.deepEqual(tracks.filters, [
+    ["eq", "task_id", "task-1"],
+    ["is", "archived_at", null],
+  ]);
   assert.match(tracks.columns, /level_tests:ops_registration_level_tests\(\*\)/);
   assert.match(tracks.columns, /consultations:ops_registration_consultations\(\*\)/);
   assert.match(tracks.columns, /enrollments:ops_registration_enrollments\(\*\)/);
@@ -2939,7 +2928,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
 
   await service.createRegistrationCase({ studentName: "김다미", schoolGrade: "고1", schoolName: "중앙여고", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "2026-07-12T01:00:00Z", subjects: ["영어", "수학"], requestNote: "", priority: "normal", requestKey: key });
   await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: ["영어"], requestKey: key });
-  await service.updateRegistrationCaseCommon({ taskId: "task-1", studentName: "김다미", schoolGrade: "고1", schoolName: "", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "2026-07-12T01:00:00Z", requestNote: "", priority: "normal", expectedCommonRevision: 3, requestKey: key });
+  await service.updateRegistrationCaseCommon({ taskId: "task-1", studentName: "김다미", schoolGrade: "고1", schoolName: "", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "   ", requestNote: "", priority: "normal", expectedCommonRevision: 3, requestKey: key });
   await service.routeRegistrationInquiry({ trackId: "track-1", destination: "waiting", waitingKind: "current_term_opening", classId: "", requestKey: key });
   await service.assignRegistrationTrackDirector({ trackId: "track-1", directorProfileId: "", assignmentSource: "manual", ruleKey: "", expectedCommonRevision: 3, requestKey: key });
   await service.saveRegistrationSharedAppointment({ appointmentId: "", taskId: "task-1", kind: "level_test", scheduledAt: "2026-07-13T01:00:00Z", place: "본관", trackIds: ["track-1"], replaceRemaining: false, expectedNotificationRevision: 0, requestKey: key });
@@ -2983,6 +2972,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   assert.equal(harness.rpcCalls[4][1].p_director_profile_id, null);
   assert.equal(harness.rpcCalls[2][1].p_school_name, null);
   assert.equal(harness.rpcCalls[2][1].p_student_phone, null);
+  assert.equal(harness.rpcCalls[2][1].p_inquiry_at, null);
   assert.equal(harness.rpcCalls[2][1].p_request_note, null);
   assert.equal(harness.rpcCalls[5][1].p_appointment_id, null);
   assert.equal(harness.rpcCalls[10][1].p_class_id, null);
@@ -3524,6 +3514,94 @@ test("receipt keys are required and maintenance blocks every new mutation before
     /데이터 전환 중/,
   );
   assert.equal(harness.rpcCalls.length, 0);
+});
+
+test("Notion-style fact mutations bypass runtime readiness while process mutations stay guarded", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let runtimeProbeCalls = 0;
+  const harness = createClient({
+    rpcHandler(name) {
+      if (name === "create_registration_case") {
+        return { data: { taskId: "task-1", commonRevision: 1, tracks: [] }, error: null };
+      }
+      if (name === "sync_registration_case_subjects") {
+        return { data: { taskId: "task-1", subjects: [], tracks: [] }, error: null };
+      }
+      if (name === "update_registration_case_common") {
+        return { data: { taskId: "task-1", commonRevision: 2 }, error: null };
+      }
+      if (name === "set_registration_workflow_status_v1") {
+        return { data: {
+          trackId: "track-1",
+          workflowStatus: "inquiry",
+          workflowRevision: 2,
+          workflowStatusEnteredAt: "2026-09-01T10:00:00Z",
+          enrollmentFinalization: null,
+        }, error: null };
+      }
+      return { data: {}, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    probeRuntime: async () => {
+      runtimeProbeCalls += 1;
+      throw new Error("runtime probe unavailable");
+    },
+  }));
+
+  await service.createRegistrationCase({
+    studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
+    campus: "", inquiryAt: "", subjects: [], requestNote: "", priority: "normal", requestKey: "fact-create",
+  });
+  await service.updateRegistrationCaseCommon({
+    taskId: "task-1", studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
+    campus: "", inquiryAt: "", requestNote: "", priority: "normal", expectedCommonRevision: 1, requestKey: "fact-common",
+  });
+  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: [], requestKey: "fact-subjects" });
+  await service.setRegistrationWorkflowStatus({
+    trackId: "track-1", workflowStatus: "inquiry", expectedWorkflowRevision: 1, requestKey: "fact-status",
+  });
+
+  assert.equal(runtimeProbeCalls, 0);
+  assert.deepEqual(harness.rpcCalls.map(([name]) => name), [
+    "create_registration_case",
+    "update_registration_case_common",
+    "sync_registration_case_subjects",
+    "set_registration_workflow_status_v1",
+  ]);
+  assert.equal(harness.rpcCalls[0][1].p_inquiry_at, null, "blank create inquiryAt must be sent as SQL null");
+  assert.equal(harness.rpcCalls[1][1].p_inquiry_at, null, "blank common inquiryAt must be sent as SQL null");
+
+  await assert.rejects(
+    service.reopenRegistrationTrack({ trackId: "track-1", destination: "inquiry", reason: "재개", requestKey: "process" }),
+    /runtime probe unavailable/,
+  );
+  assert.equal(runtimeProbeCalls, 1);
+});
+
+test("inquiry datetime-local facts are serialized as Seoul instants", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    rpcHandler(name) {
+      if (name === "create_registration_case") {
+        return { data: { taskId: "task-1", commonRevision: 1, tracks: [] }, error: null };
+      }
+      return { data: { taskId: "task-1", commonRevision: 2 }, error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await service.createRegistrationCase({
+    studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
+    campus: "", inquiryAt: "2026-09-01T18:49", subjects: [], requestNote: "", priority: "normal", requestKey: "create-local-time",
+  });
+  await service.updateRegistrationCaseCommon({
+    taskId: "task-1", studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
+    campus: "", inquiryAt: "2026-09-01T18:49", requestNote: "", priority: "normal", expectedCommonRevision: 1, requestKey: "update-local-time",
+  });
+
+  assert.equal(harness.rpcCalls[0][1].p_inquiry_at, "2026-09-01T09:49:00.000Z");
+  assert.equal(harness.rpcCalls[1][1].p_inquiry_at, "2026-09-01T09:49:00.000Z");
 });
 
 test("all cached registration reads require an authenticated viewer id", async () => {

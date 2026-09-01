@@ -117,6 +117,17 @@ jobs:
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --postdeploy-contract \
             --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
+            --test supabase/tests/registration_teacher_feedback_request_retirement_test.sql \
+            --test supabase/tests/registration_observation_status_independence_test.sql \
+            --test supabase/tests/registration_observation_booking_test.sql \
+            --test supabase/tests/registration_notification_readiness_decoupling_test.sql \
+            --test supabase/tests/registration_flat_common_input_decoupling_test.sql \
+            --test supabase/tests/registration_subject_soft_archive_test.sql \
+            --test supabase/tests/registration_flat_case_creation_test.sql \
+            --test supabase/tests/registration_collaboration_write_role_test.sql \
+            --test supabase/tests/registration_archived_subject_delivery_fence_test.sql \
+            --test supabase/tests/registration_manager_write_and_integrity_fence_test.sql \
+            --test supabase/tests/registration_management_notification_explicit_v2_test.sql \
             --test supabase/tests/registration_admission_order_independence_test.sql \
             --test supabase/tests/registration_admission_checklist_roster_consistency_test.sql \
             --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \

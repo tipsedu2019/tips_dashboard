@@ -1190,7 +1190,7 @@ test("UI action permissions mirror the database mutation matrix", () => {
     canCompleteConsultation: false,
     readOnly: true,
   })
-  assert.equal(getRegistrationActionPermissions({ viewerRole: "teacher", viewerId: "director-1", track, activeConsultation }).canCompleteConsultation, true)
+  assert.equal(getRegistrationActionPermissions({ viewerRole: "teacher", viewerId: "director-1", track, activeConsultation }).canCompleteConsultation, false)
   const scienceTrack = { ...track, id: "science", subject: "과학" }
   const scienceConsultation = { ...activeConsultation, trackId: "science" }
   assert.deepEqual(getRegistrationActionPermissions({
@@ -1200,7 +1200,7 @@ test("UI action permissions mirror the database mutation matrix", () => {
     activeConsultation: scienceConsultation,
   }), {
     canManage: false,
-    canCompleteConsultation: true,
+    canCompleteConsultation: false,
     readOnly: true,
   })
   assert.equal(getRegistrationActionPermissions({
@@ -1217,6 +1217,17 @@ test("UI action permissions mirror the database mutation matrix", () => {
   }).canCompleteConsultation, false)
   assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "admin", viewerId: "director-1", track }).canOpenConsultationCompletion, true)
   assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "admin", viewerId: "director-2", track }).canOpenConsultationCompletion, false)
+  assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "staff", viewerId: "director-1", track }).canOpenConsultationCompletion, true)
+  assert.equal(getRegistrationSummaryActionPermissions({ viewerRole: "teacher", viewerId: "director-1", track }).canOpenConsultationCompletion, false)
+})
+
+test("registration case editing is limited to admin and staff roles", () => {
+  assert.equal(typeof registrationTrackModel.canManageRegistrationCase, "function")
+  assert.equal(registrationTrackModel.canManageRegistrationCase("admin"), true)
+  assert.equal(registrationTrackModel.canManageRegistrationCase("staff"), true)
+  assert.equal(registrationTrackModel.canManageRegistrationCase("teacher"), false)
+  assert.equal(registrationTrackModel.canManageRegistrationCase("assistant"), false)
+  assert.equal(registrationTrackModel.canManageRegistrationCase(null), false)
 })
 
 test("active consultation selection follows persisted activity instead of the legacy pipeline status", () => {

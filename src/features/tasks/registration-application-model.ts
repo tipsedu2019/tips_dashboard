@@ -49,7 +49,6 @@ export function canManageRegistrationObservationTrack(input: {
 }) {
   return input.viewerRole === "admin"
     || input.viewerRole === "staff"
-    || Boolean(input.viewerId && input.viewerId === input.directorProfileId)
 }
 
 export function resolveRegistrationApplicationFocusPanelId(input: {

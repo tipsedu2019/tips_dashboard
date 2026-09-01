@@ -177,10 +177,10 @@ test("final-schema pgTAP enforces exact owner, empty search path, ACL rows, and 
     new URL("../supabase/tests/active_registration_workflow_sqlstate_contract_test.sql", import.meta.url),
     "utf8",
   )
-  assert.match(source, /select plan\(21\);/u)
+  assert.match(source, /select plan\(30\);/u)
   assert.equal(
     [...source.matchAll(/^select (?:ok|is|like|unlike|results_eq)\(/gmu)].length,
-    21,
+    30,
   )
   assert.match(source, /pg_catalog\.aclexplode\(\s*coalesce\(\s*procedure\.proacl,\s*pg_catalog\.acldefault\('f', procedure\.proowner\)\s*\)\s*\)/u)
   assert.match(source, /pg_catalog\.pg_get_userbyid\(acl\.grantee\)/u)

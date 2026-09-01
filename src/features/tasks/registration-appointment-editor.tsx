@@ -58,6 +58,7 @@ export type RegistrationAppointmentEditorProps = {
   initialTrackId?: string
   appointment: OpsRegistrationAppointment | null
   activities: RegistrationAppointmentActivity[]
+  readOnly?: boolean
   onSaved: (saved: RegistrationAppointmentMutationResponse) => void | Promise<void>
   onWarning: (message: string) => void
   onReload?: () => void | Promise<void>
@@ -178,6 +179,7 @@ export function RegistrationAppointmentEditor({
   initialTrackId = "",
   appointment,
   activities,
+  readOnly = false,
   onSaved,
   onWarning,
   onReload,
@@ -208,7 +210,7 @@ export function RegistrationAppointmentEditor({
       ? matchingActivities.filter((activity) => activity.appointmentId === appointment.id)
       : []
   ), [appointment, matchingActivities])
-  const canCancelAppointment = canCancelRegistrationSharedAppointment(
+  const canCancelAppointment = !readOnly && canCancelRegistrationSharedAppointment(
     kind,
     appointment,
     eligibleTracks,
@@ -311,6 +313,12 @@ export function RegistrationAppointmentEditor({
   }, [canCancelAppointment])
 
   useEffect(() => {
+    if (!readOnly) return
+    setPendingConfirmation(false)
+    setPendingCancellation(false)
+  }, [readOnly])
+
+  useEffect(() => {
     const workerCreatedAt = Date.parse(String(effectiveProcessingReadiness?.workerHeartbeat?.createdAt || ""))
     const watchdogCreatedAt = Date.parse(String(effectiveProcessingReadiness?.watchdogHeartbeat?.createdAt || ""))
     if (!Number.isFinite(workerCreatedAt) || !Number.isFinite(watchdogCreatedAt)) return
@@ -399,8 +407,8 @@ export function RegistrationAppointmentEditor({
     replaceRemaining: initialDraft?.replaceRemaining ?? editMode === "replace_remaining",
   })
   const appointmentDirty = JSON.stringify(appointmentDraft) !== JSON.stringify(initialAppointmentDraftRef.current)
-  const customerMessageBlocked = appointmentDirty || externalDirty || saving || confirmationPending || refreshPending || Boolean(conflict) || appointment?.status !== "scheduled"
-  useOwnedDirtyState(!mutationLocked && appointmentDirty, onDirtyChange)
+  const customerMessageBlocked = readOnly || appointmentDirty || externalDirty || saving || confirmationPending || refreshPending || Boolean(conflict) || appointment?.status !== "scheduled"
+  useOwnedDirtyState(!readOnly && !mutationLocked && appointmentDirty, onDirtyChange)
   const reportedTrackDirtyRef = useRef(new Set<string>())
   const onTrackDirtyChangeRef = useRef(onTrackDirtyChange)
   useEffect(() => {
@@ -408,11 +416,13 @@ export function RegistrationAppointmentEditor({
   }, [onTrackDirtyChange])
   useEffect(() => {
     const dirtyTrackIds = new Set<string>()
-    for (const activity of matchingActivities) {
-      if (!trackById.has(activity.trackId)) continue
-      const linkDirty = "materialLink" in activity
-        && (draftLinks[activity.id] ?? activity.materialLink ?? "") !== (activity.materialLink ?? "")
-      if (linkDirty) dirtyTrackIds.add(activity.trackId)
+    if (!readOnly) {
+      for (const activity of matchingActivities) {
+        if (!trackById.has(activity.trackId)) continue
+        const linkDirty = "materialLink" in activity
+          && (draftLinks[activity.id] ?? activity.materialLink ?? "") !== (activity.materialLink ?? "")
+        if (linkDirty) dirtyTrackIds.add(activity.trackId)
+      }
     }
     for (const trackId of new Set([...reportedTrackDirtyRef.current, ...dirtyTrackIds])) {
       const wasDirty = reportedTrackDirtyRef.current.has(trackId)
@@ -420,7 +430,7 @@ export function RegistrationAppointmentEditor({
       if (wasDirty !== isDirty) onTrackDirtyChangeRef.current?.(trackId, isDirty)
     }
     reportedTrackDirtyRef.current = dirtyTrackIds
-  }, [draftLinks, matchingActivities, trackById, trackRefreshPendingIds])
+  }, [draftLinks, matchingActivities, readOnly, trackById, trackRefreshPendingIds])
   useEffect(() => () => {
     for (const trackId of reportedTrackDirtyRef.current) onTrackDirtyChangeRef.current?.(trackId, false)
   }, [])
@@ -460,7 +470,8 @@ export function RegistrationAppointmentEditor({
       ? appointment.place
       : ""
   const canSave = Boolean(
-    scheduledAt
+    !readOnly
+    && scheduledAt
     && selectedPlace
     && appointmentDraft.trackIds.length > 0
     && !saving
@@ -514,7 +525,7 @@ export function RegistrationAppointmentEditor({
   }
 
   function applyConflictDraftAgain() {
-    if (!conflict || !canApplyConflictDraft) return
+    if (readOnly || !conflict || !canApplyConflictDraft) return
     const rebased = rebaseRegistrationAppointmentDraft({
       ...conflict,
       local: appointmentDraft,
@@ -533,6 +544,7 @@ export function RegistrationAppointmentEditor({
   }
 
   function continueEditingConflictDraft() {
+    if (readOnly) return
     persistConflictDraft()
     setShowConflictComparison(false)
   }
@@ -644,7 +656,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function retryCommittedNotifications() {
-    if (!committedAppointment || pendingNotificationTargets.length === 0 || saving) return
+    if (readOnly || !committedAppointment || pendingNotificationTargets.length === 0 || saving) return
     setSaving(true)
     try {
       const { failedTargets, warnings, failedMessages } = await dispatchNotificationTargets(pendingNotificationTargets)
@@ -663,7 +675,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function retryRegistrationNotificationJobStatus() {
-    if (!committedAppointment || saving) return
+    if (readOnly || !committedAppointment || saving) return
     if (!processingRuntimeIsStillReady()) {
       setNotificationProcessingPhase("idle")
       setNotificationJobStatuses([])
@@ -749,7 +761,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function saveAppointment() {
-    if (confirmationPending) return
+    if (readOnly || confirmationPending) return
     if (!canSave) {
       const message = "예약 일시와 장소를 모두 입력하세요."
       setValidationError(message)
@@ -775,6 +787,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function performSaveAppointment() {
+    if (readOnly) return
     if (onBeforeSave && !(await onBeforeSave())) return
     const kindKey = "registration-appointment"
     const requestKey = submissionKeys.getOrCreate(kindKey, normalizedDraft)
@@ -814,7 +827,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function confirmPreparedAppointmentMutation() {
-    if (!pendingConfirmation || saving) return
+    if (readOnly || !pendingConfirmation || saving) return
     setSaving(true)
     try {
       await performSaveAppointment()
@@ -825,7 +838,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function confirmAppointmentCancellation() {
-    if (!pendingCancellation || !appointment || !canCancelAppointment || saving) return
+    if (readOnly || !pendingCancellation || !appointment || !canCancelAppointment || saving) return
     const logicalDraft = JSON.stringify({
       appointmentId: appointment.id,
       expectedNotificationRevision: appointment.notificationRevision,
@@ -852,7 +865,7 @@ export function RegistrationAppointmentEditor({
   }
 
   async function completeAttempt(activity: OpsRegistrationLevelTest) {
-    if (trackRefreshPendingIds.has(activity.trackId)) return
+    if (readOnly || trackRefreshPendingIds.has(activity.trackId)) return
     const materialLink = (draftLinks[activity.id] || activity.materialLink || "").trim()
     const track = trackById.get(activity.trackId)
     if (!materialLink) {
@@ -921,9 +934,9 @@ export function RegistrationAppointmentEditor({
               </dl>
             ) : null}
             <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 예약 비교`} onClick={() => void compareLatestAppointment()} disabled={saving}>최신 예약 비교</Button>
-              <Button type="button" size="sm" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 다시 적용`} onClick={applyConflictDraftAgain} disabled={saving || !canApplyConflictDraft}>다시 적용</Button>
-              <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 계속 편집`} onClick={continueEditingConflictDraft} disabled={saving}>계속 편집</Button>
+              <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 최신 예약 비교`} onClick={() => void compareLatestAppointment()} disabled={readOnly || saving}>최신 예약 비교</Button>
+              <Button type="button" size="sm" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 다시 적용`} onClick={applyConflictDraftAgain} disabled={readOnly || saving || !canApplyConflictDraft}>다시 적용</Button>
+              <Button type="button" size="sm" variant="ghost" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 예약 계속 편집`} onClick={continueEditingConflictDraft} disabled={readOnly || saving}>계속 편집</Button>
             </div>
           </AlertDescription>
         </Alert>
@@ -940,7 +953,7 @@ export function RegistrationAppointmentEditor({
                 : "예약 저장됨 · 알림 재계산 중"}
           </span>
           {notificationProcessingPhase !== "succeeded" ? (
-            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재계산 다시 시도`} onClick={() => void retryRegistrationNotificationJobStatus()} disabled={saving}>
+            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재계산 다시 시도`} onClick={() => void retryRegistrationNotificationJobStatus()} disabled={readOnly || saving}>
               {notificationProcessingPhase === "failed" ? "다시 시도" : "상태 다시 확인"}
             </Button>
           ) : null}
@@ -952,7 +965,7 @@ export function RegistrationAppointmentEditor({
           <AlertTitle>예약은 저장되었습니다</AlertTitle>
           <AlertDescription className="flex-row flex-wrap items-center justify-between gap-2 text-amber-950">
             <span>실패한 방문상담 알림만 다시 보냅니다.</span>
-            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재시도`} onClick={() => void retryCommittedNotifications()} disabled={saving}>알림 재시도</Button>
+            <Button type="button" size="sm" variant="outline" aria-label={`${eligibleTracks.map((track) => track.subject).join("·") || "과목"} 알림 재시도`} onClick={() => void retryCommittedNotifications()} disabled={readOnly || saving}>알림 재시도</Button>
           </AlertDescription>
         </Alert>
       ) : refreshPending || (committedAppointment && !processingReady) ? (
@@ -977,12 +990,16 @@ export function RegistrationAppointmentEditor({
             <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
             <DateTimePickerControl
               value={scheduledAt}
-              onChange={(value) => { setValidationError(""); setScheduledAt(value) }}
+              onChange={(value) => {
+                if (readOnly) return
+                setValidationError("")
+                setScheduledAt(value)
+              }}
               dateAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜`}
               timeAriaLabel={`${appointmentParticipantSubjectLabel} 예약 시각`}
               clearAriaLabel={`${appointmentParticipantSubjectLabel} 예약 날짜와 시각 지우기`}
               required
-              disabled={saving || confirmationPending || mutationLocked}
+              disabled={readOnly || saving || confirmationPending || mutationLocked}
               disablePortal
               timeOptions={REGISTRATION_TIME_OPTIONS}
             />
@@ -998,8 +1015,12 @@ export function RegistrationAppointmentEditor({
                   aria-pressed={selectedPlace === option}
                   variant={selectedPlace === option ? "default" : "outline"}
                   className="h-10"
-                  onClick={() => { setValidationError(""); setPlace(option) }}
-                  disabled={saving || confirmationPending || mutationLocked}
+                  onClick={() => {
+                    if (readOnly) return
+                    setValidationError("")
+                    setPlace(option)
+                  }}
+                  disabled={readOnly || saving || confirmationPending || mutationLocked}
                 >
                   {option}
                 </Button>
@@ -1018,7 +1039,10 @@ export function RegistrationAppointmentEditor({
               className="min-h-11 min-w-11"
               variant="outline"
               disabled={saving || mutationLocked || confirmationPending || Boolean(conflict) || appointmentDirty || externalDirty}
-              onClick={() => setPendingCancellation(true)}
+              onClick={() => {
+                if (readOnly) return
+                setPendingCancellation(true)
+              }}
             >
               예약 취소
             </Button>
@@ -1028,7 +1052,7 @@ export function RegistrationAppointmentEditor({
             data-registration-primary-action={`${appointmentParticipantSubjectLabel}:appointment-save`}
             dirty={appointmentDirty || externalDirty}
             saving={saving}
-            blocked={mutationLocked || confirmationPending || Boolean(conflict)}
+            blocked={readOnly || mutationLocked || confirmationPending || Boolean(conflict)}
             actionLabel={actionLabel}
             cleanLabel={appointment ? "저장됨" : "예약 정보를 입력하세요"}
             aria-label={saveAriaLabel || `${appointmentParticipantSubjectLabel} 예약 저장`}
@@ -1070,8 +1094,8 @@ export function RegistrationAppointmentEditor({
           >
             <h4 id="registration-appointment-confirmation-title" className="font-semibold">예약을 저장할까요?</h4>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={dismissAppointmentConfirmation} disabled={saving}>돌아가기</Button>
-              <Button type="button" className="min-h-11 min-w-11" onClick={() => void confirmPreparedAppointmentMutation()} disabled={saving}>저장</Button>
+              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={dismissAppointmentConfirmation} disabled={readOnly || saving}>돌아가기</Button>
+              <Button type="button" className="min-h-11 min-w-11" onClick={() => void confirmPreparedAppointmentMutation()} disabled={readOnly || saving}>저장</Button>
             </div>
           </div>
         ) : null}
@@ -1088,8 +1112,8 @@ export function RegistrationAppointmentEditor({
             </h4>
             <p className="text-sm">예약과 예정된 리마인드가 취소됩니다.</p>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={() => setPendingCancellation(false)} disabled={saving}>돌아가기</Button>
-              <Button type="button" className="min-h-11 min-w-11" variant="destructive" onClick={() => void confirmAppointmentCancellation()} disabled={saving}>예약 취소</Button>
+              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={() => setPendingCancellation(false)} disabled={readOnly || saving}>돌아가기</Button>
+              <Button type="button" className="min-h-11 min-w-11" variant="destructive" onClick={() => void confirmAppointmentCancellation()} disabled={readOnly || saving}>예약 취소</Button>
             </div>
           </div>
         ) : null}
@@ -1126,9 +1150,12 @@ export function RegistrationAppointmentEditor({
                       type="url"
                       aria-label={`${track?.subject || "과목"} 레벨테스트 결과 링크`}
                       value={materialLink}
-                      onChange={(event) => setDraftLinks((current) => ({ ...current, [activity.id]: event.target.value }))}
+                      onChange={(event) => {
+                        if (readOnly) return
+                        setDraftLinks((current) => ({ ...current, [activity.id]: event.target.value }))
+                      }}
                       placeholder="https://chat.google.com/..."
-                      disabled={trackRefreshPending || activitySavingId === activity.id}
+                      disabled={readOnly || trackRefreshPending || activitySavingId === activity.id}
                     />
                   </Label>
                   <div className="flex items-center justify-end gap-2">
@@ -1148,7 +1175,7 @@ export function RegistrationAppointmentEditor({
                       type="button"
                       dirty={resultDirty}
                       saving={activitySavingId === activity.id}
-                      blocked={trackRefreshPending || !materialLink.trim()}
+                      blocked={readOnly || trackRefreshPending || !materialLink.trim()}
                       actionLabel="결과 저장"
                       cleanLabel={activity.materialLink ? "저장됨" : "결과 링크를 입력하세요"}
                       aria-label={`${track?.subject || "과목"} 레벨테스트 결과 저장`}

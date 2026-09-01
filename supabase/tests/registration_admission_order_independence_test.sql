@@ -122,8 +122,8 @@ select ok(
       'dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)'::regprocedure
     ),
     $contract$raise exception 'registration_student_identity_correction_required' using errcode = '23514'$contract$
-  ) > 0,
-  'frozen student identity changes remain decisive domain conflicts'
+  ) = 0,
+  'fact-only common edits no longer raise a frozen-student correction conflict'
 );
 
 select ok(
@@ -132,8 +132,8 @@ select ok(
       'dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)'::regprocedure
     ),
     'message.claim_active'
-  ) > 0,
-  'an active admission message claim still freezes identity edits'
+  ) = 0,
+  'an active admission message claim no longer freezes fact input'
 );
 
 select ok(
@@ -142,8 +142,8 @@ select ok(
       'dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)'::regprocedure
     ),
     'ops_registration_admission_batches'
-  ) > 0,
-  'admission batch history still freezes identity edits'
+  ) = 0,
+  'admission batch history no longer freezes fact input'
 );
 
 select ok(
@@ -152,8 +152,8 @@ select ok(
       'dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamp with time zone,text,text,integer,text)'::regprocedure
     ),
     'enrollment.status = ''planned'''
-  ) > 0,
-  'non-planned or batched enrollments still freeze identity edits'
+  ) = 0,
+  'enrollment state no longer freezes fact input'
 );
 
 set local timezone = 'Asia/Seoul';

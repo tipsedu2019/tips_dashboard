@@ -87,7 +87,7 @@ test("observation focus and refresh ownership fail closed across runtime, track 
   }), { loadManagerDetail: false, preferredTrackId: undefined })
 })
 
-test("observation booking authority includes only staff management and the exact track director", () => {
+test("observation booking authority includes only management staff and director admin accounts", () => {
   assert.equal(canManageRegistrationObservationTrack({
     viewerId: "staff-1",
     viewerRole: "staff",
@@ -97,7 +97,7 @@ test("observation booking authority includes only staff management and the exact
     viewerId: "director-1",
     viewerRole: "teacher",
     directorProfileId: "director-1",
-  }), true)
+  }), false)
   assert.equal(canManageRegistrationObservationTrack({
     viewerId: "director-2",
     viewerRole: "teacher",

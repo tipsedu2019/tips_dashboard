@@ -526,7 +526,7 @@ test("canonical task links come only from the server dispatch plan", () => {
   assert.doesNotMatch(routeSource, /new URL\([^)]*request\.url/);
 });
 
-test("canonical visit identity includes place while create dispatches only server targets", () => {
+test("canonical visit identity includes place while flat registration create stays provider-zero", () => {
 
   const message = notificationModel.buildRegistrationVisitCanonicalMessage?.({
     state: "updated",
@@ -541,10 +541,11 @@ test("canonical visit identity includes place while create dispatches only serve
   assert.match(workspaceSource, /dispatchRegistrationVisitNotificationTargets/);
   assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /getConsultationNotificationWarning\(result\.value\)/);
   assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /result\.value\?\.ok === false/);
-  assert.match(workspaceSource, /savedWithNotificationDeliveryFailure/);
-  assert.match(workspaceSource, /savedWithNotificationAuditWarning/);
-  assert.match(workspaceSource, /방문상담 알림 전달은 접수됐습니다\. 감사 이력을 확인하세요\./);
-  assert.match(workspaceSource, /방문상담 알림은 전송하지 못했습니다\. 업무는 정상 저장되었습니다\./);
+  const submitStart = workspaceSource.indexOf("const submitForm = async");
+  const submitEnd = workspaceSource.indexOf("const handleFormKeyDown", submitStart);
+  const submitSource = workspaceSource.slice(submitStart, submitEnd);
+  assert.match(submitSource, /await createRegistrationCase\(\{/);
+  assert.doesNotMatch(submitSource, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/);
   assert.doesNotMatch(workspaceSource, /notifyRegistrationConsultationReservation/);
 });
 
@@ -662,34 +663,38 @@ test("successful route warnings are returned to the client at runtime", () => {
 
 test("registration no longer has a generic browser Google Chat sender", () => {
   assert.doesNotMatch(workspaceSource, /async function notifyRegistrationWorkflow/);
-  assert.match(workspaceSource, /loadRegistrationLegacyNotificationSourceIds/);
+  assert.doesNotMatch(workspaceSource, /loadRegistrationLegacyNotificationSourceIds/);
   assert.match(workspaceSource, /dispatchLegacyOpsTaskSources/);
+  assert.match(workspaceSource, /if \(payload\.type !== "registration"\) \{[\s\S]*?dispatchLegacyOpsTaskSources/);
 });
 
-test("registration saves state before dispatching a status notification and does not notify on case creation", async () => {
+test("registration status saves never dispatch; management Chat uses a separate explicit action", async () => {
   const editor = await readFile(new URL(
     "../src/features/tasks/registration-track-editor.tsx",
     import.meta.url,
   ), "utf8")
   const editorStatus = editor.slice(
     editor.indexOf("async function changeWorkflowStatus"),
-    editor.indexOf("const migrationReviewPanelId"),
+    editor.indexOf("async function sendRegistrationManagementNotification"),
   )
   assert.match(editorStatus, /await setRegistrationWorkflowStatus/)
-  assert.match(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
-  assert.match(editorStatus, /dispatchRegistrationManagementNotificationSources/)
-  assert.ok(
-    editorStatus.indexOf("await setRegistrationWorkflowStatus")
-      < editorStatus.indexOf("ensureRegistrationWorkflowNotificationSourceIds"),
+  assert.doesNotMatch(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.doesNotMatch(editorStatus, /dispatchRegistrationManagementNotificationSources/)
+
+  const explicitNotification = editor.slice(
+    editor.indexOf("async function sendRegistrationManagementNotification"),
+    editor.indexOf("const migrationReviewPanelId"),
   )
+  assert.match(explicitNotification, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.match(explicitNotification, /dispatchRegistrationManagementNotificationSources/)
 
   const workspaceStatus = workspaceSource.slice(
     workspaceSource.indexOf("const handleRegistrationWorkflowStatusChange"),
     workspaceSource.indexOf("const closeRegistrationApplicationHost"),
   )
   assert.match(workspaceStatus, /await setRegistrationWorkflowStatus/)
-  assert.match(workspaceStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
-  assert.match(workspaceStatus, /dispatchRegistrationManagementNotificationSources/)
+  assert.doesNotMatch(workspaceStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
+  assert.doesNotMatch(workspaceStatus, /dispatchRegistrationManagementNotificationSources/)
 
   const atomicCreate = workspaceSource.slice(
     workspaceSource.indexOf('if (createAttempt.writer === "atomic")'),

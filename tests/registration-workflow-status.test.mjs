@@ -75,8 +75,23 @@ test("legacy technical tracks map deterministically without inventing consultati
   assert.notEqual(getRegistrationWorkflowStatusFromLegacyTrack({ status: "consultation_waiting" }), "consultation_completed")
 })
 
-test("workflow status choices follow operations and assigned-director ownership", async () => {
+test("workflow status is one property with the same choices for every authorized writer", async () => {
   const { getRegistrationWorkflowStatusOptions } = await loadWorkflowStatus()
+
+  const allStatuses = [
+    "inquiry",
+    "level_test_requested",
+    "consultation_requested",
+    "consultation_completed",
+    "waiting_current_class",
+    "waiting_new_class",
+    "waiting_next_opening",
+    "enrollment_requested",
+    "payment_in_progress",
+    "registered",
+    "not_registered",
+    "inquiry_only",
+  ]
 
   assert.deepEqual(
     getRegistrationWorkflowStatusOptions({
@@ -84,29 +99,15 @@ test("workflow status choices follow operations and assigned-director ownership"
       viewerId: "staff-1",
       directorProfileId: "director-1",
     }).map(({ value }) => value),
-    [
-      "inquiry",
-      "level_test_requested",
-      "consultation_requested",
-      "payment_in_progress",
-      "registered",
-      "inquiry_only",
-    ],
+    allStatuses,
   )
   assert.deepEqual(
     getRegistrationWorkflowStatusOptions({
       viewerRole: "teacher",
       viewerId: "director-1",
       directorProfileId: "director-1",
-    }).map(({ value }) => value),
-    [
-      "consultation_completed",
-      "waiting_current_class",
-      "waiting_new_class",
-      "waiting_next_opening",
-      "enrollment_requested",
-      "not_registered",
-    ],
+    }),
+    [],
   )
   assert.deepEqual(
     getRegistrationWorkflowStatusOptions({
@@ -118,20 +119,7 @@ test("workflow status choices follow operations and assigned-director ownership"
   )
   assert.deepEqual(
     getRegistrationWorkflowStatusOptions({ viewerRole: "admin" }).map(({ value }) => value),
-    [
-      "inquiry",
-      "level_test_requested",
-      "consultation_requested",
-      "consultation_completed",
-      "waiting_current_class",
-      "waiting_new_class",
-      "waiting_next_opening",
-      "enrollment_requested",
-      "payment_in_progress",
-      "registered",
-      "not_registered",
-      "inquiry_only",
-    ],
+    allStatuses,
   )
 })
 
@@ -157,7 +145,7 @@ test("generic workflow choices never accept observation source or target states"
   assert.equal(isRegistrationObservationWorkflowStatus("enrollment_requested"), false)
 })
 
-test("inline status choices always retain the current value and expose only the viewer's allowed changes", async () => {
+test("inline status choices retain the current value and expose the full property to authorized writers", async () => {
   const { getRegistrationInlineWorkflowStatusOptions } = await loadWorkflowStatus()
 
   assert.deepEqual(
@@ -172,8 +160,13 @@ test("inline status choices always retain the current value and expose only the 
       "inquiry",
       "level_test_requested",
       "consultation_requested",
+      "consultation_completed",
+      "waiting_current_class",
+      "waiting_new_class",
+      "waiting_next_opening",
       "payment_in_progress",
       "registered",
+      "not_registered",
       "inquiry_only",
     ],
   )
