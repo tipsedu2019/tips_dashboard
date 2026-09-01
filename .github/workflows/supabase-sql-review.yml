@@ -76,7 +76,7 @@ jobs:
             echo "No added or modified Supabase migrations to lint."
             exit 0
           fi
-          "${RUNNER_TEMP}/squawk" --pg-version 17 "${migration_files[@]}"
+          "${RUNNER_TEMP}/squawk" --no-error-on-unmatched-pattern --pg-version 17 "${migration_files[@]}"
 
   supabase-schema-contract:
     runs-on: ubuntu-latest

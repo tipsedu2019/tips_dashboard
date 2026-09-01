@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto"
 import { readdir, readFile, writeFile } from "node:fs/promises"
 import { isAbsolute, relative, resolve } from "node:path"
 import { pathToFileURL } from "node:url"
@@ -5,9 +6,24 @@ import { pathToFileURL } from "node:url"
 const MIGRATION_VERSION_PATTERN = /^(\d{14})_.+\.sql$/
 const LEDGER_VERSION_PATTERN = /^\d{14}$/
 const TRANSACTION_CONTROL_PATTERN = /^(?:begin\b|start\s+transaction\b|commit\b|end\b|rollback\b|abort\b|prepare\s+transaction\b(?!.*\bas\b))/i
+const APPROVED_INTERLEAVED_PENDING_MIGRATIONS = Object.freeze([
+  ["20260831013310_management_numbered_pages.sql", "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667"],
+  ["20260831031913_ops_task_numbered_pages.sql", "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"],
+  ["20260831052546_academic_operations_numbered_pages.sql", "32b51bd8ac1fc14d32bf01a260d1fa22a9324b658960de265f5b89bc0c61b0df"],
+  ["20260831061736_approval_numbered_pages.sql", "f371ec311759886788112090fc0aeaeb9242ffb7f86d98348216eb553cbc799d"],
+  ["20260831063537_approval_detail_trim_parity.sql", "6fb6efd7e5ba2441aa1ce91d23f2903d975c79567e42bea9d061aa5d6bf74c9b"],
+  ["20260831065351_makeup_numbered_pages.sql", "9c5bd203b41adee3cdceb4723c6a1f440b4abd67a6adfea0bfb06e3d5f0465bf"],
+  ["20260831101449_makeup_system_note_whitespace_parity.sql", "940613f164be35b25661750e8be5c0f15409409890308a5e046ef0fed31369ff"],
+  ["20260831103631_makeup_source_precision_parity.sql", "47413b333331c9abfe4e771f52e9078b4edc8d88e8cf2b0125dc437a246328ba"],
+  ["20260831123610_textbook_inventory_numbered_reads.sql", "f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5"],
+])
 
 function fail(code) {
   throw new Error(code)
+}
+
+function sha256(source) {
+  return createHash("sha256").update(source).digest("hex")
 }
 
 function resolveInsideRepo(repoRoot, candidate) {
@@ -83,19 +99,16 @@ function migrationLedgerState(ledger) {
     fail("transactional_preflight_remote_history_drift")
   }
 
+  const remoteVersionSet = new Set(remoteVersions)
   const remoteMaxVersion = remoteVersions.at(-1)
-  if (rows.some(({ local, remote }) => local && !remote && local <= remoteMaxVersion)) {
-    fail("transactional_preflight_unapplied_legacy_migration")
-  }
-
   const pendingVersions = rows
-    .filter(({ local, remote }) => local && !remote && local > remoteMaxVersion)
+    .filter(({ local, remote }) => local && !remote)
     .map(({ local }) => local)
     .sort()
   if (new Set(pendingVersions).size !== pendingVersions.length) {
     fail("transactional_preflight_pending_ledger_mismatch")
   }
-  return { pendingVersions, remoteMaxVersion }
+  return { pendingVersions, remoteMaxVersion, remoteVersionSet }
 }
 
 function maskSqlOpaqueRegions(source) {
@@ -268,14 +281,27 @@ export async function buildTransactionalPreflightSql({
   forwardMigrationsPath,
   focusedTestPath,
 }) {
-  const { pendingVersions: ledgerPendingVersions, remoteMaxVersion } =
+  const { pendingVersions: ledgerPendingVersions, remoteMaxVersion, remoteVersionSet } =
     migrationLedgerState(migrationLedger)
   const migrationDirectory = resolveInsideRepo(repoRoot, forwardMigrationsPath)
   const focusedTestFile = resolveInsideRepo(repoRoot, focusedTestPath)
 
+  const approvedInterleavedByVersion = new Map(
+    APPROVED_INTERLEAVED_PENDING_MIGRATIONS.map(([file, expectedHash]) => [
+      file.slice(0, 14),
+      { file, expectedHash },
+    ]),
+  )
+  if (ledgerPendingVersions.some(
+    (version) => version <= remoteMaxVersion && !approvedInterleavedByVersion.has(version),
+  )) {
+    fail("transactional_preflight_unapplied_legacy_migration")
+  }
   const migrationFiles = (await readdir(migrationDirectory))
     .map((file) => ({ file, version: file.match(MIGRATION_VERSION_PATTERN)?.[1] }))
-    .filter(({ version }) => version && version > remoteMaxVersion)
+    .filter(({ version }) => version && !remoteVersionSet.has(version) && (
+      version > remoteMaxVersion || approvedInterleavedByVersion.has(version)
+    ))
     .sort((left, right) => left.version.localeCompare(right.version) || left.file.localeCompare(right.file))
   const migrationFileVersions = migrationFiles.map(({ version }) => version)
   if (
@@ -285,6 +311,21 @@ export async function buildTransactionalPreflightSql({
     fail("transactional_preflight_pending_ledger_mismatch")
   }
   const pendingFiles = migrationFiles
+  const interleavedPendingVersions = pendingFiles
+    .filter(({ version }) => version <= remoteMaxVersion)
+    .map(({ version }) => version)
+
+  for (const { file, version } of pendingFiles) {
+    if (version > remoteMaxVersion) continue
+    const approved = approvedInterleavedByVersion.get(version)
+    if (!approved || approved.file !== file) {
+      fail("transactional_preflight_unapplied_legacy_migration")
+    }
+    const source = await readFile(resolveInsideRepo(repoRoot, `${forwardMigrationsPath}/${file}`))
+    if (sha256(source) !== approved.expectedHash) {
+      fail("transactional_preflight_interleaved_hash_mismatch")
+    }
+  }
 
   const migrationSections = []
   for (const { file, version } of pendingFiles) {
@@ -306,6 +347,7 @@ export async function buildTransactionalPreflightSql({
     sql: `${lines.join("\n")}\n`,
     pendingVersions: pendingFiles.map(({ version }) => version),
     pendingFiles: pendingFiles.map(({ file }) => file),
+    interleavedPendingVersions,
     remoteMaxVersion,
   }
 }

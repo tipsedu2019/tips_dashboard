@@ -44,6 +44,11 @@ const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
 const SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS = Object.freeze([
+  "supabase/migrations/20260827135933_add_worksheet_v2_snapshots.sql",
+  "supabase/migrations/20260827135956_add_worksheet_paper_kind_export.sql",
+  "supabase/migrations/20260827135958_redact_legacy_gemini_error_text.sql",
+  "supabase/migrations/20260827140002_record_worksheet_output_projection.sql",
+  "supabase/migrations/20260828160941_secure_worksheet_history_ownership.sql",
   "supabase/migrations/20260831013310_management_numbered_pages.sql",
   "supabase/migrations/20260831031913_ops_task_numbered_pages.sql",
   "supabase/migrations/20260831061736_approval_numbered_pages.sql",
@@ -52,6 +57,7 @@ const SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS = Object.freeze([
   "supabase/migrations/20260831101449_makeup_system_note_whitespace_parity.sql",
   "supabase/migrations/20260831103631_makeup_source_precision_parity.sql",
   "supabase/migrations/20260831123610_textbook_inventory_numbered_reads.sql",
+  "supabase/migrations/20260831151654_record_worksheet_ox_output_projection.sql",
   "supabase/migrations/20260831152429_textbook_workflow_numbered_reads.sql",
   "supabase/migrations/20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
   "supabase/migrations/20260831170552_textbook_closing_work_context_reads.sql",
@@ -93,6 +99,12 @@ const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260819122911_registration_enrollment_external_correction.sql", "ef1885dfe3c8b964e4ca8994a9836ebc43220307c73fa315dface239aa0ce848"],
   ["20260819151002_registration_admission_preview_status_compatibility.sql", "c292103602b495efe7b6c49c3e92f7b92ebd264cf52d2d781871a3542c306eeb"],
   ["20260819152417_registration_admission_preview_active_resolver_status_compatibility.sql", "0f2653938f2f5726e7c4ed6c494fa8862230f8cd588208667cd9d9595cb98bd9"],
+  ["20260827135933_add_worksheet_v2_snapshots.sql", "0a7a93800ba8ab49485a27f15af95b891aa5eafcd4b027885c58b99c9a0a7785"],
+  ["20260827135956_add_worksheet_paper_kind_export.sql", "c22f35ecb6ae606f5ade508c7c73cfe445d3d8695f42f248684a650a0019fdb5"],
+  ["20260827135958_redact_legacy_gemini_error_text.sql", "00985e9d463c6c2feae6511ef71fe9c2b2b6adb2c4e9abf839e00017214de65e"],
+  ["20260827140002_record_worksheet_output_projection.sql", "49b805b839e1a5fb567d704a6527bc1de1384d24b0ecabe6968b96ed5a637fd9"],
+  ["20260828160941_secure_worksheet_history_ownership.sql", "1251d6e51e32e0085f212d2f874b6b5eadb65c9c34f2c30fb5cba5a44e269723"],
+  ["20260831151654_record_worksheet_ox_output_projection.sql", "951576acef6b2533f81b8d0241ac4a48ba57639400451589cd39e608465ad188"],
 ])
 const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
   "20260730143000_notification_google_chat_connection_catalog.sql",
@@ -1743,10 +1755,10 @@ test("SQL review workflow는 PR base/head SHA로 immutable-final boundary를 호
   assert.doesNotMatch(workflow, /secrets\./u)
 })
 
-test("Squawk 예외는 manifest 해시로 고정된 immutable final 파일만 정확히 허용한다", async () => {
+test("Squawk 예외는 manifest final 또는 remote-history 해시로 고정된 파일만 허용한다", async () => {
   const config = await readFile(join(repoRoot, ".squawk.toml"), "utf8")
   const expected = [
-    "# Hash-attested immutable final migrations; new migration files remain linted.",
+    "# Hash-attested immutable migrations; new migration files remain linted.",
     "excluded_paths = [",
     ...SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS.map((path) => `  ${JSON.stringify(path)},`),
     "]",
@@ -1761,11 +1773,18 @@ test("Squawk 예외는 manifest 해시로 고정된 immutable final 파일만 �
     join(repoRoot, "supabase", "test-baselines", "dashboard-free-tier-v1.manifest.json"),
     "utf8",
   ))
+  const remoteHistoryHashes = new Map(REMOTE_HISTORY_ALIGNED_SQL)
   for (const path of SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS) {
     const fileName = path.slice(path.lastIndexOf("/") + 1)
     const entry = manifest.orderedNewMigrations.find((candidate) => candidate.fileName === fileName)
-    assert.equal(entry?.status, "final", fileName)
-    assert.equal(entry?.sha256, await sha256(join(repoRoot, path)), fileName)
+    const remoteHistoryHash = remoteHistoryHashes.get(fileName)
+    const actualHash = await sha256(join(repoRoot, path))
+    if (entry) {
+      assert.equal(entry.status, "final", fileName)
+      assert.equal(entry.sha256, actualHash, fileName)
+    } else {
+      assert.equal(remoteHistoryHash, actualHash, fileName)
+    }
   }
 })
 
@@ -1884,7 +1903,7 @@ test("SQL review workflow는 migration rename destination을 Squawk에 전달한
   })
   assert.equal(result.status, 0, result.stderr)
   const args = (await readFile(squawkArgs, "utf8")).split("\0").filter(Boolean)
-  assert.deepEqual(args, ["--pg-version", "17", renamed])
+  assert.deepEqual(args, ["--no-error-on-unmatched-pattern", "--pg-version", "17", renamed])
 })
 
 test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {

@@ -40,9 +40,9 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "ff2ac1e3eef41bd422d422cc10775af1f4c4636760d30b76d77e7cea122c992f"
+  "c1aa246ab7906b68fda81a0bcaf6006c8b1220be371b8537a55c28d2aaaecbf8"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
-  "d60cc00d379fd993e0357fd21bf237a5f78044c0490c0c1d14f1bf6378bd8307"
+  "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "8ec5eadf18411ab3946228e9bf4a85fcd9e5152d2a92e7e888f1b35fda6f0258"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
@@ -106,6 +106,12 @@ const REMOTE_HISTORY_ALIGNED_SQL = Object.freeze([
   ["20260819122911_registration_enrollment_external_correction.sql", "ef1885dfe3c8b964e4ca8994a9836ebc43220307c73fa315dface239aa0ce848"],
   ["20260819151002_registration_admission_preview_status_compatibility.sql", "c292103602b495efe7b6c49c3e92f7b92ebd264cf52d2d781871a3542c306eeb"],
   ["20260819152417_registration_admission_preview_active_resolver_status_compatibility.sql", "0f2653938f2f5726e7c4ed6c494fa8862230f8cd588208667cd9d9595cb98bd9"],
+  ["20260827135933_add_worksheet_v2_snapshots.sql", "0a7a93800ba8ab49485a27f15af95b891aa5eafcd4b027885c58b99c9a0a7785"],
+  ["20260827135956_add_worksheet_paper_kind_export.sql", "c22f35ecb6ae606f5ade508c7c73cfe445d3d8695f42f248684a650a0019fdb5"],
+  ["20260827135958_redact_legacy_gemini_error_text.sql", "00985e9d463c6c2feae6511ef71fe9c2b2b6adb2c4e9abf839e00017214de65e"],
+  ["20260827140002_record_worksheet_output_projection.sql", "49b805b839e1a5fb567d704a6527bc1de1384d24b0ecabe6968b96ed5a637fd9"],
+  ["20260828160941_secure_worksheet_history_ownership.sql", "1251d6e51e32e0085f212d2f874b6b5eadb65c9c34f2c30fb5cba5a44e269723"],
+  ["20260831151654_record_worksheet_ox_output_projection.sql", "951576acef6b2533f81b8d0241ac4a48ba57639400451589cd39e608465ad188"],
 ])
 const OBSOLETE_REMOTE_HISTORY_SQL = Object.freeze([
   "20260730143000_notification_google_chat_connection_catalog.sql",

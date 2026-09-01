@@ -1,7 +1,8 @@
 import assert from "node:assert/strict"
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises"
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import test, { after } from "node:test"
 
 const fixtureRoots = []
@@ -9,6 +10,45 @@ const builderUrl = new URL(
   "../scripts/build-supabase-transactional-preflight.mjs",
   import.meta.url,
 )
+const repoRoot = fileURLToPath(new URL("..", import.meta.url))
+const dashboardPendingVersions = Object.freeze([
+  "20260831013310",
+  "20260831031913",
+  "20260831052546",
+  "20260831061736",
+  "20260831063537",
+  "20260831065351",
+  "20260831101449",
+  "20260831103631",
+  "20260831123610",
+  "20260831152429",
+  "20260831164103",
+  "20260831170552",
+  "20260831184952",
+  "20260831234634",
+  "20260901045629",
+  "20260901065056",
+  "20260901072345",
+])
+const dashboardPendingFiles = Object.freeze([
+  "20260831013310_management_numbered_pages.sql",
+  "20260831031913_ops_task_numbered_pages.sql",
+  "20260831052546_academic_operations_numbered_pages.sql",
+  "20260831061736_approval_numbered_pages.sql",
+  "20260831063537_approval_detail_trim_parity.sql",
+  "20260831065351_makeup_numbered_pages.sql",
+  "20260831101449_makeup_system_note_whitespace_parity.sql",
+  "20260831103631_makeup_source_precision_parity.sql",
+  "20260831123610_textbook_inventory_numbered_reads.sql",
+  "20260831152429_textbook_workflow_numbered_reads.sql",
+  "20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
+  "20260831170552_textbook_closing_work_context_reads.sql",
+  "20260831184952_textbook_reference_numbered_reads.sql",
+  "20260831234634_textbook_class_sale_roster_school.sql",
+  "20260901045629_textbook_supplier_numbered_reads.sql",
+  "20260901065056_textbook_owner_settings_contract_fix.sql",
+  "20260901072345_textbook_taxonomy_numbered_drafts.sql",
+])
 
 const supabaseCli2115Ledger = JSON.stringify({
   migrations: [
@@ -273,6 +313,54 @@ test("remote-only 또는 과거 local-only ledger drift는 migration 선택 전�
     }),
     { message: "transactional_preflight_unapplied_legacy_migration" },
   )
+})
+
+test("현재 final manifest의 exact interleaved pending 집합만 운영 remote max 이전이어도 사전 검증한다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const root = await mkdtemp(join(tmpdir(), "tips-dashboard-interleaved-preflight-"))
+  fixtureRoots.push(root)
+  await mkdir(join(root, "supabase", "migrations"), { recursive: true })
+  await mkdir(join(root, "supabase", "tests"), { recursive: true })
+  await Promise.all(dashboardPendingFiles.map(async (fileName) => {
+    await writeFile(
+      join(root, "supabase", "migrations", fileName),
+      await readFile(join(repoRoot, "supabase", "migrations", fileName)),
+    )
+  }))
+  await writeFile(
+    join(root, "supabase", "tests", "focused.sql"),
+    await readFile(
+      join(repoRoot, "supabase", "tests", "registration_level_test_result_parent_reconciliation_test.sql"),
+    ),
+  )
+  const migrationLedger = JSON.stringify({
+    migrations: [
+      {
+        local: "20260831151654",
+        remote: "20260831151654",
+        time: "2026-08-31 15:16:54",
+      },
+      ...dashboardPendingVersions.map((version) => ({
+        local: version,
+        remote: "",
+        time: "2026-09-01 00:00:00",
+      })),
+    ],
+    message: "Migrations listed",
+  })
+
+  const result = await buildTransactionalPreflightSql({
+    repoRoot: root,
+    migrationLedger,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+
+  assert.deepEqual(result.pendingVersions, dashboardPendingVersions)
+  assert.deepEqual(result.interleavedPendingVersions, dashboardPendingVersions.slice(0, 9))
+  assert.match(result.sql, /transactional preflight migration 20260831013310/u)
+  assert.match(result.sql, /transactional preflight migration 20260901072345/u)
+  assert.match(result.sql.trimEnd(), /rollback;$/iu)
 })
 
 test("forward migration 파일과 linked ledger의 pending 집합이 다르면 fail closed 한다", async () => {

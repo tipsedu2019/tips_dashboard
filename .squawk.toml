@@ -1,5 +1,10 @@
-# Hash-attested immutable final migrations; new migration files remain linted.
+# Hash-attested immutable migrations; new migration files remain linted.
 excluded_paths = [
+  "supabase/migrations/20260827135933_add_worksheet_v2_snapshots.sql",
+  "supabase/migrations/20260827135956_add_worksheet_paper_kind_export.sql",
+  "supabase/migrations/20260827135958_redact_legacy_gemini_error_text.sql",
+  "supabase/migrations/20260827140002_record_worksheet_output_projection.sql",
+  "supabase/migrations/20260828160941_secure_worksheet_history_ownership.sql",
   "supabase/migrations/20260831013310_management_numbered_pages.sql",
   "supabase/migrations/20260831031913_ops_task_numbered_pages.sql",
   "supabase/migrations/20260831061736_approval_numbered_pages.sql",
@@ -8,6 +13,7 @@ excluded_paths = [
   "supabase/migrations/20260831101449_makeup_system_note_whitespace_parity.sql",
   "supabase/migrations/20260831103631_makeup_source_precision_parity.sql",
   "supabase/migrations/20260831123610_textbook_inventory_numbered_reads.sql",
+  "supabase/migrations/20260831151654_record_worksheet_ox_output_projection.sql",
   "supabase/migrations/20260831152429_textbook_workflow_numbered_reads.sql",
   "supabase/migrations/20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
   "supabase/migrations/20260831170552_textbook_closing_work_context_reads.sql",
