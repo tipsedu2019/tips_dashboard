@@ -19,7 +19,7 @@ test("consultation outcome renders only in the consultation section", () => {
   assert.equal(shouldRenderRegistrationConsultationOutcome({ ...input, section: "consultation", canEdit: false }), false)
 })
 
-test("five consultation outcomes are editable with conditional waiting requirements", () => {
+test("five consultation outcomes are independent facts without waiting-detail requirements", () => {
   for (const outcome of ["undecided", "waiting", "observation", "enrollment", "not_registered"]) {
     const state = getRegistrationConsultationOutcomeSaveState({
       savedOutcome: "",
@@ -32,12 +32,12 @@ test("five consultation outcomes are editable with conditional waiting requireme
     })
     assert.equal(state.canSave, true, outcome)
   }
-  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
+  assert.equal(getRegistrationConsultationOutcomeSaveState({
     draftOutcome: "waiting", canEdit: true,
-  }).blockers, ["대기 유형"])
-  assert.deepEqual(getRegistrationConsultationOutcomeSaveState({
-    draftOutcome: "waiting", waitingKind: "current_class", canEdit: true,
-  }).blockers, ["대기 반"])
+  }).canSave, true)
+  assert.equal(getRegistrationConsultationOutcomeSaveState({
+    draftOutcome: "enrollment", waitingKind: "current_class", classId: "stale-class", canEdit: true,
+  }).canSave, true)
 })
 
 test("completed consultation note-only correction remains dirty for its owner", () => {

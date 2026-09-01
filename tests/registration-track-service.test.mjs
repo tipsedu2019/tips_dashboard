@@ -80,6 +80,7 @@ async function loadFactory(extraGlobals = {}) {
     module: sandboxModule,
     exports: sandboxModule.exports,
     AbortController,
+    AbortSignal,
     clearTimeout,
     crypto: { randomUUID: () => "uuid-from-crypto" },
     normalizeRegistrationLevelTestPlace,
@@ -436,6 +437,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
     queries.push({
       ...query,
       filters: query.filters.map((filter) => [...filter]),
+      limits: query.limits.map(([value, options]) => [value, options ? { ...options } : options]),
     });
     activeQueries += 1;
     maxActiveQueries = Math.max(maxActiveQueries, activeQueries);
@@ -453,15 +455,23 @@ function createClient({ queryHandler, rpcHandler } = {}) {
       filters: [],
       order: [],
       limit: null,
+      limits: [],
+      signal: null,
+      retryEnabled: null,
       single: false,
     };
     const fluent = {
       abortSignal(signal) {
+        query.signal = signal;
         if (signal.aborted) {
           abortedQueries += 1;
         } else {
           signal.addEventListener("abort", () => { abortedQueries += 1; }, { once: true });
         }
+        return fluent;
+      },
+      retry(enabled) {
+        query.retryEnabled = enabled;
         return fluent;
       },
       select(columns, options) {
@@ -505,8 +515,9 @@ function createClient({ queryHandler, rpcHandler } = {}) {
         query.order.push([column, options]);
         return fluent;
       },
-      limit(value) {
-        query.limit = value;
+      limit(value, options) {
+        query.limits.push([value, options]);
+        if (!options?.referencedTable && !options?.foreignTable) query.limit = value;
         return fluent;
       },
       single() {
@@ -1248,7 +1259,7 @@ function detailRows(table) {
       notification_revision: 2,
       created_at: "2026-07-12T01:00:00Z",
       updated_at: "2026-07-12T02:00:00Z",
-    }], error: null };
+    }], count: 1, error: null };
   }
   if (table === "ops_registration_admission_batches") {
     return { data: [{
@@ -1310,7 +1321,7 @@ function detailRows(table) {
       class_start_session: null, status: "planned", makeedu_registered: false,
       roster_active: false, roster_released_at: null, roster_release_reason: null,
       roster_release_source_task_id: null, roster_release_kind: null, sort_order: 0,
-    }], error: null };
+    }], count: 1, error: null };
   }
   throw new Error(`unexpected detail table: ${table}`);
 }
@@ -1715,17 +1726,35 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
 }
 
 function assertCaseDetailUsesServerPrivacyFilters(harness) {
-  const appointmentQuery = harness.queries.find(
+  const hasQueryFilter = (query, method, column, expectedValue) => query.filters.some((filter) => (
+    filter[0] === method
+    && filter[1] === column
+    && JSON.stringify(filter[2]) === JSON.stringify(expectedValue)
+  ));
+  const appointmentQueries = harness.queries.filter(
     (query) => query.table === "ops_registration_appointments",
   );
+  const scheduledAppointmentQuery = appointmentQueries.find((query) => (
+    hasQueryFilter(query, "in", "status", ["scheduled"])
+  ));
+  const appointmentHistoryQuery = appointmentQueries.find((query) => (
+    hasQueryFilter(query, "in", "status", ["completed", "canceled"])
+  ));
   const eventQuery = harness.queries.find((query) => query.table === "ops_task_events");
-  assert.deepEqual({
-    appointmentFilters: appointmentQuery.filters,
+  assert.deepEqual(JSON.parse(JSON.stringify({
+    scheduledAppointmentFilters: scheduledAppointmentQuery?.filters,
+    appointmentHistoryFilters: appointmentHistoryQuery?.filters,
     eventFilters: eventQuery.filters,
-  }, {
-    appointmentFilters: [
+  })), {
+    scheduledAppointmentFilters: [
       ["eq", "task_id", "task-1"],
       ["neq", "kind", "observation_class"],
+      ["in", "status", ["scheduled"]],
+    ],
+    appointmentHistoryFilters: [
+      ["eq", "task_id", "task-1"],
+      ["neq", "kind", "observation_class"],
+      ["in", "status", ["completed", "canceled"]],
     ],
     eventFilters: [
       ["eq", "task_id", "task-1"],
@@ -2155,9 +2184,11 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
   await Promise.resolve();
 
   try {
-    assert.equal(harness.queries.length, 6);
+    assert.equal(harness.queries.length, 8);
     assert.deepEqual(harness.queries.map((query) => query.table).sort(), [
       "ops_registration_admission_batches",
+      "ops_registration_admission_batches",
+      "ops_registration_appointments",
       "ops_registration_appointments",
       "ops_registration_messages",
       "ops_registration_subject_tracks",
@@ -2219,6 +2250,515 @@ test("case detail excludes observation rows at the server query boundary", async
   await service.loadCaseDetail("task-1", "viewer-1");
 
   assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("case detail bounds the active subject-track read and disables automatic retries", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  await service.loadCaseDetail("task-1", "viewer-1");
+
+  const tracks = harness.queries.find(
+    (query) => query.table === "ops_registration_subject_tracks",
+  );
+  assert.ok(tracks);
+  assert.deepEqual(tracks.filters, [
+    ["eq", "task_id", "task-1"],
+    ["is", "archived_at", null],
+    ["in", "active_level_tests.status", ["scheduled", "in_progress"]],
+    ["in", "level_test_history.status", ["completed", "absent", "canceled"]],
+    ["in", "active_consultations.status", ["waiting", "scheduled"]],
+    ["in", "consultation_history.status", ["completed", "canceled"]],
+  ]);
+  assert.equal(tracks.columns.includes("*"), false);
+  assert.match(
+    tracks.columns,
+    /active_level_tests:ops_registration_level_tests\(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link\)/,
+  );
+  assert.match(
+    tracks.columns,
+    /level_test_history:ops_registration_level_tests\(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link\)/,
+  );
+  assert.match(
+    tracks.columns,
+    /active_consultations:ops_registration_consultations\(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at\)/,
+  );
+  assert.match(
+    tracks.columns,
+    /consultation_history:ops_registration_consultations\(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at\)/,
+  );
+  assert.doesNotMatch(tracks.columns, /enrollments:ops_registration_enrollments/);
+  assert.deepEqual(JSON.parse(JSON.stringify(tracks.order.filter(
+    ([, options]) => !options?.referencedTable,
+  ))), [
+    ["subject", { ascending: true }],
+    ["id", { ascending: true }],
+  ]);
+  assert.equal(tracks.limit, 30);
+  assert.ok(tracks.signal instanceof AbortSignal);
+  assert.equal(tracks.retryEnabled, false);
+});
+
+test("case detail keeps a scheduled appointment outside the terminal history window", async () => {
+  // Production break caught: a scheduled appointment must not disappear just
+  // because 30 newer completed/canceled rows occupy the bounded history page.
+  const { createRegistrationTrackService } = await loadFactory();
+  const scheduled = {
+    id: "appointment-current", task_id: "task-1", kind: "level_test",
+    scheduled_at: "2026-08-10T01:00:00Z", place: "본관", status: "scheduled",
+    notification_revision: 7, created_at: "2026-07-01T01:00:00Z", updated_at: "2026-07-01T01:00:00Z",
+  };
+  const terminal = {
+    ...scheduled,
+    id: "appointment-terminal",
+    status: "completed",
+    scheduled_at: "2026-07-10T01:00:00Z",
+    updated_at: "2026-08-01T01:00:00Z",
+  };
+  const hasFilter = (query, method, column, value) => query.filters.some((filter) => (
+    filter[0] === method && filter[1] === column && JSON.stringify(filter[2]) === JSON.stringify(value)
+  ));
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table !== "ops_registration_appointments") return detailRows(query.table);
+      if (hasFilter(query, "in", "status", ["scheduled"])) {
+        return { data: [scheduled], count: 1, error: null };
+      }
+      if (hasFilter(query, "in", "status", ["completed", "canceled"])) {
+        return { data: [terminal, { ...scheduled, status: "canceled" }], error: null };
+      }
+      return { data: [terminal], error: null };
+    },
+    rpcHandler(name) {
+      assert.equal(name, "get_registration_customer_reminder_summaries_v1");
+      return {
+        data: [scheduled, terminal].map((appointment) => ({
+          appointment_id: appointment.id,
+          state: appointment.status === "scheduled" ? "scheduled" : "canceled",
+          scheduled_for: appointment.status === "scheduled" ? "2026-08-09T01:00:00.000Z" : null,
+          sent_at: null,
+          updated_at: appointment.updated_at,
+        })),
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.deepEqual(Array.from(detail.appointments, (appointment) => appointment.id), [
+    scheduled.id,
+    terminal.id,
+  ]);
+  const appointmentQueries = harness.queries.filter(
+    (query) => query.table === "ops_registration_appointments",
+  );
+  assert.equal(appointmentQueries.length, 2);
+  const currentQuery = appointmentQueries.find((query) => (
+    hasFilter(query, "in", "status", ["scheduled"])
+  ));
+  const historyQuery = appointmentQueries.find((query) => (
+    hasFilter(query, "in", "status", ["completed", "canceled"])
+  ));
+  assert.deepEqual(JSON.parse(JSON.stringify(currentQuery?.options)), { count: "exact" });
+  assert.deepEqual(JSON.parse(JSON.stringify(currentQuery?.order)), [
+    ["scheduled_at", { ascending: true }],
+    ["id", { ascending: true }],
+  ]);
+  assert.equal(currentQuery?.limit, 30);
+  assert.equal(currentQuery?.retryEnabled, false);
+  assert.ok(currentQuery?.signal instanceof AbortSignal);
+  assert.deepEqual(JSON.parse(JSON.stringify(historyQuery?.order)), [
+    ["updated_at", { ascending: false }],
+    ["id", { ascending: false }],
+  ]);
+  assert.equal(historyQuery?.limit, 30);
+  assert.equal(historyQuery?.retryEnabled, false);
+  assert.ok(historyQuery?.signal instanceof AbortSignal);
+});
+
+test("case detail preserves factual editing and marks more than 30 scheduled appointments as overflow", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table !== "ops_registration_appointments") return detailRows(query.table);
+      const current = query.filters.some((filter) => (
+        filter[0] === "in" && filter[1] === "status" && JSON.stringify(filter[2]) === '["scheduled"]'
+      ));
+      if (!current) return { data: [], error: null };
+      return {
+        data: Array.from({ length: 30 }, (_, index) => ({
+          id: `appointment-current-${index}`,
+          task_id: "task-1",
+          kind: "level_test",
+          scheduled_at: "2026-08-10T01:00:00Z",
+          place: "본관",
+          status: "scheduled",
+          notification_revision: 1,
+          created_at: "2026-07-01T01:00:00Z",
+          updated_at: "2026-07-01T01:00:00Z",
+        })),
+        count: 31,
+        error: null,
+      };
+    },
+    rpcHandler(name) {
+      assert.equal(name, "get_registration_customer_reminder_summaries_v1");
+      return {
+        data: Array.from({ length: 30 }, (_, index) => ({
+          appointment_id: `appointment-current-${index}`,
+          state: "scheduled",
+          scheduled_for: "2026-08-10T01:00:00Z",
+          sent_at: null,
+          updated_at: "2026-07-01T01:00:00Z",
+        })),
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.equal(detail.appointments.length, 30);
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows.scheduledAppointments)), {
+    loadedCount: 30,
+    totalCount: 31,
+    overflow: true,
+  });
+});
+
+test("case detail keeps the one open admission batch outside terminal history", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const open = {
+    id: "batch-open", task_id: "task-1", revision_number: 2, status: "draft",
+    invoice_sent_at: null, payment_confirmed_at: null,
+    created_at: "2026-07-01T01:00:00Z", updated_at: "2026-07-01T01:00:00Z",
+  };
+  const terminal = {
+    ...open, id: "batch-terminal", revision_number: 40, status: "completed",
+    invoice_sent_at: "2026-08-01T01:00:00Z", payment_confirmed_at: "2026-08-02T01:00:00Z",
+    updated_at: "2026-08-03T01:00:00Z",
+  };
+  const hasStatuses = (query, statuses) => query.filters.some((filter) => (
+    filter[0] === "in" && filter[1] === "status" && JSON.stringify(filter[2]) === JSON.stringify(statuses)
+  ));
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table !== "ops_registration_admission_batches") return detailRows(query.table);
+      if (hasStatuses(query, ["draft", "invoiced", "paid"])) return { data: [open], error: null };
+      if (hasStatuses(query, ["completed", "canceled"])) return { data: [terminal], error: null };
+      return { data: [terminal], error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.deepEqual(Array.from(detail.admissionBatches, (batch) => batch.id), [open.id, terminal.id]);
+  const batchQueries = harness.queries.filter(
+    (query) => query.table === "ops_registration_admission_batches",
+  );
+  assert.equal(batchQueries.length, 2);
+  const openQuery = batchQueries.find((query) => hasStatuses(query, ["draft", "invoiced", "paid"]));
+  const historyQuery = batchQueries.find((query) => hasStatuses(query, ["completed", "canceled"]));
+  assert.deepEqual(JSON.parse(JSON.stringify(openQuery?.order)), [
+    ["revision_number", { ascending: false }],
+    ["id", { ascending: false }],
+  ]);
+  assert.equal(openQuery?.limit, 1);
+  assert.equal(openQuery?.retryEnabled, false);
+  assert.ok(openQuery?.signal instanceof AbortSignal);
+  assert.deepEqual(JSON.parse(JSON.stringify(historyQuery?.order)), [
+    ["revision_number", { ascending: false }],
+    ["id", { ascending: false }],
+  ]);
+  assert.equal(historyQuery?.limit, 30);
+  assert.equal(historyQuery?.retryEnabled, false);
+  assert.ok(historyQuery?.signal instanceof AbortSignal);
+});
+
+test("case detail bounds active and historical embedded children independently", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const baseTrack = detailRows("ops_registration_subject_tracks").data[0];
+  const activeLevelTest = {
+    id: "test-active", track_id: "track-1", appointment_id: "appointment-1",
+    attempt_number: 9, status: "in_progress", started_at: "2026-08-02T01:00:00Z",
+    completed_at: null, material_link: null,
+  };
+  const historyLevelTest = {
+    ...activeLevelTest, id: "test-history", attempt_number: 8, status: "completed",
+    completed_at: "2026-08-01T02:00:00Z", material_link: "https://drive.test/history",
+  };
+  const activeConsultation = {
+    id: "consultation-active", track_id: "track-1", appointment_id: "appointment-1",
+    mode: "visit", status: "scheduled", director_profile_id: "director-1",
+    ready_at: null, ready_source: null, completed_at: null, outcome: null, note: null,
+    created_at: "2026-08-02T01:00:00Z", updated_at: "2026-08-02T01:00:00Z",
+  };
+  const historyConsultation = {
+    ...activeConsultation, id: "consultation-history", appointment_id: null,
+    mode: "phone", status: "completed", completed_at: "2026-08-01T01:00:00Z",
+    outcome: "waiting", updated_at: "2026-08-01T01:00:00Z",
+  };
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table !== "ops_registration_subject_tracks") return detailRows(query.table);
+      if (!query.columns.includes("active_level_tests:")) {
+        return {
+          data: [{
+            ...baseTrack,
+            level_tests: [historyLevelTest],
+            consultations: [historyConsultation],
+          }],
+          error: null,
+        };
+      }
+      return {
+        data: [{
+          ...baseTrack,
+          level_tests: undefined,
+          consultations: undefined,
+          enrollments: undefined,
+          active_level_tests: [activeLevelTest],
+          level_test_history: [historyLevelTest],
+          active_consultations: [activeConsultation],
+          consultation_history: [historyConsultation],
+        }],
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.deepEqual(Array.from(detail.levelTests, (row) => row.id), [activeLevelTest.id, historyLevelTest.id]);
+  assert.deepEqual(Array.from(detail.consultations, (row) => row.id), [activeConsultation.id, historyConsultation.id]);
+  const tracks = harness.queries.find((query) => query.table === "ops_registration_subject_tracks");
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    tracks?.limits.filter(([, options]) => options?.referencedTable),
+  )), [
+    [1, { referencedTable: "active_level_tests" }],
+    [30, { referencedTable: "level_test_history" }],
+    [1, { referencedTable: "active_consultations" }],
+    [30, { referencedTable: "consultation_history" }],
+  ]);
+  assert.deepEqual(JSON.parse(JSON.stringify(
+    tracks?.order.filter(([, options]) => options?.referencedTable),
+  )), [
+    ["attempt_number", { ascending: false, referencedTable: "active_level_tests" }],
+    ["id", { ascending: false, referencedTable: "active_level_tests" }],
+    ["attempt_number", { ascending: false, referencedTable: "level_test_history" }],
+    ["id", { ascending: false, referencedTable: "level_test_history" }],
+    ["created_at", { ascending: false, referencedTable: "active_consultations" }],
+    ["id", { ascending: false, referencedTable: "active_consultations" }],
+    ["updated_at", { ascending: false, referencedTable: "consultation_history" }],
+    ["id", { ascending: false, referencedTable: "consultation_history" }],
+  ]);
+});
+
+test("case detail keeps a recently corrected consultation inside the 30-row history window", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const baseTrack = detailRows("ops_registration_subject_tracks").data[0];
+  const ordinaryHistory = Array.from({ length: 30 }, (_, index) => ({
+    id: `consultation-history-${String(index + 1).padStart(2, "0")}`,
+    track_id: "track-1",
+    appointment_id: null,
+    mode: "phone",
+    status: "completed",
+    director_profile_id: "director-1",
+    ready_at: null,
+    ready_source: null,
+    completed_at: `2026-08-${String(index + 1).padStart(2, "0")}T01:00:00Z`,
+    outcome: "waiting",
+    note: null,
+    created_at: `2026-08-${String(index + 1).padStart(2, "0")}T01:00:00Z`,
+    updated_at: `2026-08-${String(index + 1).padStart(2, "0")}T01:00:00Z`,
+  }));
+  const recentlyCorrected = {
+    ...ordinaryHistory[0],
+    id: "consultation-history-corrected",
+    created_at: "2026-07-01T01:00:00Z",
+    updated_at: "2026-09-01T01:00:00Z",
+    note: "최근 정정",
+  };
+  const allHistory = [...ordinaryHistory, recentlyCorrected];
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table !== "ops_registration_subject_tracks") return detailRows(query.table);
+      const historyOrder = query.order.filter(([, options]) => (
+        options?.referencedTable === "consultation_history"
+      ));
+      const primaryColumn = historyOrder[0]?.[0];
+      const history = [...allHistory]
+        .sort((left, right) => {
+          const primary = String(right[primaryColumn] || "").localeCompare(String(left[primaryColumn] || ""));
+          return primary || right.id.localeCompare(left.id);
+        })
+        .slice(0, 30);
+      return {
+        data: [{
+          ...baseTrack,
+          level_tests: undefined,
+          consultations: undefined,
+          enrollments: undefined,
+          active_level_tests: [],
+          level_test_history: [],
+          active_consultations: [],
+          consultation_history: history,
+        }],
+        error: null,
+      };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.equal(detail.consultations.length, 30);
+  assert.equal(detail.consultations.some((row) => row.id === recentlyCorrected.id), true);
+  assert.equal(detail.consultations.some((row) => row.id === ordinaryHistory[0].id), false);
+});
+
+test("case detail keeps current enrollments separate from bounded terminal history", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const baseTrack = detailRows("ops_registration_subject_tracks").data[0];
+  const current = {
+    id: "enrollment-current", track_id: "track-1", student_id: null,
+    admission_batch_id: null, class_id: "class-current", textbook_id: null,
+    class_start_date: null, class_start_session_key: null,
+    class_start_lesson_session_id: null, class_start_session: null,
+    class_start_source_observation_id: null, status: "planned", makeedu_registered: false,
+    roster_active: false, roster_released_at: null, roster_release_reason: null,
+    roster_release_source_task_id: null, roster_release_kind: null, sort_order: 0,
+    created_at: "2026-07-01T01:00:00Z", updated_at: "2026-07-01T01:00:00Z",
+  };
+  const terminal = {
+    ...current, id: "enrollment-terminal", class_id: "class-terminal", status: "canceled",
+    created_at: "2026-08-01T01:00:00Z", updated_at: "2026-08-01T01:00:00Z",
+  };
+  const currentFilter = "status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)";
+  const terminalFilter = "status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)";
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_subject_tracks") {
+        return { data: [{ ...baseTrack, enrollments: [terminal] }], error: null };
+      }
+      if (query.table !== "ops_registration_enrollments") return detailRows(query.table);
+      if (query.filters.some((filter) => filter[0] === "or" && filter[1] === currentFilter)) {
+        return { data: [current], count: 1, error: null };
+      }
+      if (query.filters.some((filter) => filter[0] === "or" && filter[1] === terminalFilter)) {
+        return { data: [terminal], error: null };
+      }
+      throw new Error("unbounded enrollment query");
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.deepEqual(Array.from(detail.enrollments, (row) => row.id), [current.id, terminal.id]);
+  const enrollmentQueries = harness.queries.filter(
+    (query) => query.table === "ops_registration_enrollments",
+  );
+  assert.equal(enrollmentQueries.length, 2);
+  const currentQuery = enrollmentQueries.find((query) => query.filters.some(
+    (filter) => filter[0] === "or" && filter[1] === currentFilter,
+  ));
+  const historyQuery = enrollmentQueries.find((query) => query.filters.some(
+    (filter) => filter[0] === "or" && filter[1] === terminalFilter,
+  ));
+  assert.deepEqual(JSON.parse(JSON.stringify(currentQuery?.options)), { count: "exact" });
+  assert.deepEqual(JSON.parse(JSON.stringify(currentQuery?.order)), [
+    ["created_at", { ascending: false }],
+    ["id", { ascending: false }],
+  ]);
+  assert.equal(currentQuery?.limit, 30);
+  assert.equal(currentQuery?.retryEnabled, false);
+  assert.ok(currentQuery?.signal instanceof AbortSignal);
+  assert.deepEqual(JSON.parse(JSON.stringify(historyQuery?.order)), [
+    ["updated_at", { ascending: false }],
+    ["id", { ascending: false }],
+  ]);
+  assert.equal(historyQuery?.limit, 30);
+  assert.equal(historyQuery?.retryEnabled, false);
+  assert.ok(historyQuery?.signal instanceof AbortSignal);
+});
+
+test("case detail preserves factual editing and marks more than 30 current enrollments as overflow", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const baseTrack = detailRows("ops_registration_subject_tracks").data[0];
+  const currentFilter = "status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)";
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_subject_tracks") {
+        return { data: [{ ...baseTrack, enrollments: [] }], error: null };
+      }
+      if (query.table !== "ops_registration_enrollments") return detailRows(query.table);
+      if (query.filters.some((filter) => filter[0] === "or" && filter[1] === currentFilter)) {
+        return {
+          data: Array.from({ length: 30 }, (_, index) => ({
+            id: `enrollment-current-${index}`, track_id: "track-1", status: "planned",
+            class_id: `class-${index}`, roster_active: false,
+          })),
+          count: 31,
+          error: null,
+        };
+      }
+      return { data: [], error: null };
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.equal(detail.enrollments.length, 30);
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows.currentEnrollments)), {
+    loadedCount: 30,
+    totalCount: 31,
+    overflow: true,
+  });
+});
+
+test("case detail keeps factual editing available when exact current counts are unavailable", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const harness = createClient({
+    queryHandler(query) {
+      const result = detailRows(query.table);
+      if (query.table === "ops_registration_appointments") {
+        return { ...result, count: null };
+      }
+      if (query.table === "ops_registration_enrollments") {
+        return { ...result, count: null };
+      }
+      return result;
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+
+  const detail = await service.loadCaseDetail("task-1", "viewer-1");
+
+  assert.equal(detail.task.id, "task-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows)), {
+    scheduledAppointments: {
+      loadedCount: 1,
+      totalCount: null,
+      overflow: null,
+    },
+    currentEnrollments: {
+      loadedCount: 1,
+      totalCount: null,
+      overflow: null,
+    },
+  });
 });
 
 test("generic case detail preserves nested observation-like and version20 history without booking secrets", async () => {
@@ -2555,7 +3095,7 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   stalledEvents.resolve(detailRows("ops_task_events"));
   await Promise.resolve();
   assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1"), detail);
-  assert.equal(harness.queries.length, 12);
+  assert.equal(harness.queries.length, 18);
 });
 
 test("a stalled appointment cancellation returns control to the editor", async () => {
@@ -2605,11 +3145,11 @@ test("a runtime-probe failure aborts the parallel case-detail reads", async () =
     service.loadCaseDetail("task-1", "viewer-1", { force: true }),
     (error) => error === runtimeError,
   );
-  assert.equal(harness.queries.length, 6);
-  assert.equal(harness.getAbortedQueryCount(), 6);
+  assert.equal(harness.queries.length, 8);
+  assert.equal(harness.getAbortedQueryCount(), 8);
 });
 
-test("detail loader embeds track children in six scoped reads, maps rows, and shares same-viewer in-flight work", async () => {
+test("detail loader bounds current and historical rows, maps them, and shares same-viewer in-flight work", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const gate = deferred();
   let first = true;
@@ -2638,7 +3178,7 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   gate.resolve();
   const detail = await left;
 
-  assert.equal(harness.queries.length, 6);
+  assert.equal(harness.queries.length, 10);
   assert.equal(detail.commonRevision, 3);
   assert.equal(detail.tracks[0].directorName, "강부희");
   assert.equal(detail.tracks[0].phoneReadyAt, "2026-07-12T01:00:00Z");
@@ -2651,6 +3191,10 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   assert.equal(detail.consultations[0].readyAt, "2026-07-12T01:00:00Z");
   assert.equal(detail.consultations[0].readySource, "level_test_completion");
   assert.equal(detail.enrollments[0].textbookId, null);
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.collectionWindows)), {
+    scheduledAppointments: { loadedCount: 1, totalCount: 1, overflow: false },
+    currentEnrollments: { loadedCount: 1, totalCount: 1, overflow: false },
+  });
   assert.equal(detail.events[0].eventType, "consultation_completed");
   assert.equal(detail.events[0].trackId, "track-1");
   assert.deepEqual({ ...detail.events[0].metadata }, { consultationId: "consultation-1" });
@@ -2674,19 +3218,28 @@ test("detail loader embeds track children in six scoped reads, maps rows, and sh
   assert.deepEqual(tracks.filters, [
     ["eq", "task_id", "task-1"],
     ["is", "archived_at", null],
+    ["in", "active_level_tests.status", ["scheduled", "in_progress"]],
+    ["in", "level_test_history.status", ["completed", "absent", "canceled"]],
+    ["in", "active_consultations.status", ["waiting", "scheduled"]],
+    ["in", "consultation_history.status", ["completed", "canceled"]],
   ]);
-  assert.match(tracks.columns, /level_tests:ops_registration_level_tests\(\*\)/);
-  assert.match(tracks.columns, /consultations:ops_registration_consultations\(\*\)/);
-  assert.match(tracks.columns, /enrollments:ops_registration_enrollments\(\*\)/);
+  assert.match(tracks.columns, /active_level_tests:ops_registration_level_tests\(id,/);
+  assert.match(tracks.columns, /level_test_history:ops_registration_level_tests\(id,/);
+  assert.match(tracks.columns, /active_consultations:ops_registration_consultations\(id,/);
+  assert.match(tracks.columns, /consultation_history:ops_registration_consultations\(id,/);
+  assert.doesNotMatch(tracks.columns, /enrollments:ops_registration_enrollments\(id,/);
   assert.equal(harness.queries.some((query) => [
-    "ops_registration_level_tests", "ops_registration_consultations", "ops_registration_enrollments",
+    "ops_registration_level_tests", "ops_registration_consultations",
   ].includes(query.table)), false);
-  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 7, ok: true }]);
+  assert.equal(harness.queries.filter(
+    (query) => query.table === "ops_registration_enrollments",
+  ).length, 2);
+  assert.deepEqual(measures, [{ name: "registration:case-detail", cacheHit: false, queryCount: 11, ok: true }]);
   assert.ok(performanceCalls.some((entry) => entry[0] === "measure" && entry[1] === "registration:case-detail"));
 
   const cached = await service.loadCaseDetail("task-1", "viewer-1");
   assert.strictEqual(cached, detail);
-  assert.equal(harness.queries.length, 6);
+  assert.equal(harness.queries.length, 10);
   assert.deepEqual(measures.at(-1), {
     name: "registration:case-detail", cacheHit: true, queryCount: 0, ok: true,
   });
@@ -2712,11 +3265,11 @@ test("detail caches are viewer-scoped, rejected reads are removed, and clear ign
   await service.loadCaseDetail("task-1", "viewer-1");
   const afterViewerOne = harness.queries.length;
   await service.loadCaseDetail("task-1", "viewer-2");
-  assert.equal(harness.queries.length, afterViewerOne + 6);
+  assert.equal(harness.queries.length, afterViewerOne + 10);
 
   service.clearCaches();
   await service.loadCaseDetail("task-1", "viewer-1");
-  assert.equal(harness.queries.length, afterViewerOne + 12);
+  assert.equal(harness.queries.length, afterViewerOne + 20);
 });
 
 test("registration option loader starts five reads, includes schools, excludes students and inactive rows", async () => {

@@ -1885,6 +1885,26 @@ function caseDetail(input: {
     consultations: input.consultations || [],
     admissionBatches: input.admissionBatches || [],
     enrollments: input.enrollments || [],
+    collectionWindows: {
+      scheduledAppointments: {
+        loadedCount: input.appointments?.filter((item) => item.status === "scheduled").length || 0,
+        totalCount: input.appointments?.filter((item) => item.status === "scheduled").length || 0,
+        overflow: false,
+      },
+      currentEnrollments: {
+        loadedCount: input.enrollments?.filter((item) => (
+          item.status === "planned"
+          || item.status === "waitlisted"
+          || (item.status === "enrolled" && item.rosterActive)
+        )).length || 0,
+        totalCount: input.enrollments?.filter((item) => (
+          item.status === "planned"
+          || item.status === "waitlisted"
+          || (item.status === "enrolled" && item.rosterActive)
+        )).length || 0,
+        overflow: false,
+      },
+    },
     events: input.events || [],
     migrationLegacy: input.migrationLegacy || null,
   }

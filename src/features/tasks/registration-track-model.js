@@ -817,21 +817,11 @@ export function getRegistrationConsultationOutcomeSaveState(input = {}) {
   const savedNote = enrollmentText(input.savedNote)
   const draftNote = enrollmentText(input.draftNote)
   const editable = Boolean(input.canEdit ?? input.canCompleteConsultation)
-  const waitingKind = enrollmentText(input.waitingKind)
-  const classId = enrollmentText(input.classId)
-  const blockers = []
   const dirty = draftOutcome !== savedOutcome || draftNote !== savedNote
-  if (dirty && draftOutcome === "waiting" && savedOutcome !== "waiting") {
-    if (!waitingKind) blockers.push("대기 유형")
-    else if (waitingKind === "current_class" && !classId) blockers.push("대기 반")
-  } else if (dirty && draftOutcome !== "waiting" && (waitingKind || classId)) {
-    blockers.push("대기 정보")
-  }
   return {
     editable,
     dirty,
-    ...(blockers.length > 0 ? { blockers } : {}),
-    canSave: editable && dirty && Boolean(draftOutcome) && blockers.length === 0,
+    canSave: editable && dirty && Boolean(draftOutcome),
     label: dirty ? "상담 결과 저장" : savedOutcome ? "저장됨" : "상담 결과를 선택하세요",
   }
 }

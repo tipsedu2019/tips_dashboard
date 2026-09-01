@@ -313,6 +313,18 @@ test("a successful observation mutation clears stale appointment warnings", asyn
   assert.match(source, /const handleObservationSaved = useCallback\(async \(\) => \{\s*onWarning\(""\)/)
 })
 
+test("observation fact save only exposes a later explicit single-source message action", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx")
+  const saveStart = source.indexOf("async function saveBooking()")
+  const saveEnd = source.indexOf("async function cancelBooking()", saveStart)
+  assert.ok(saveStart >= 0 && saveEnd > saveStart)
+  const saveBooking = source.slice(saveStart, saveEnd)
+
+  assert.match(saveBooking, /messageKind: "observation_booking",\s*sourceId: savedObservation\.observationId/)
+  assert.doesNotMatch(saveBooking, /onOpenCustomerMessage|\.preview\(|\.send\(|fetch\(/)
+  assert.match(source, /disabled=\{saving \|\| !customerMessageTarget\}/)
+})
+
 test("mounted saved observation exposes one booking AlimTalk action with the canonical observation ID", async () => {
   const RegistrationObservationEditor = await loadMountedObservationEditor()
   const scheduled = observationAttempt(

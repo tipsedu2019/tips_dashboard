@@ -128,7 +128,6 @@ import { createRegistrationObservationAsyncOwnership } from "./registration-work
 import {
   dispatchRegistrationManagementNotificationSources,
   getRegistrationManagementNotificationReadiness,
-  sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
   REGISTRATION_WORKFLOW_STATUS_LABELS,
@@ -225,20 +224,15 @@ function hasRegistrationTrackFrameContent({
   reviewTrackId: string | null
 }) {
   const { track } = context
-  if (isRegistrationObservationWorkflowStatus(track.workflowStatus)) return false
   if (section === "admission") return false
   if (section === "inquiry") return track.migrationReviewRequired && reviewTrackId === track.id
-  if (track.migrationReviewRequired) return section === "placement" && placementMode === "waiting"
   return section === "consultation"
     || (section === "placement" && (placementMode === "waiting" || placementMode === "registration"))
 }
 
-function getRegistrationTrackFocusPanelId(context: TrackContext, reviewTrackId: string | null) {
+function getRegistrationTrackFocusPanelId(context: TrackContext) {
   const { track } = context
   const { currentSection } = context.state
-  if (track.migrationReviewRequired) {
-    return reviewTrackId ? `registration-inquiry-${reviewTrackId}` : null
-  }
   if (currentSection === "admission" || currentSection === "level_test") return null
   const panelSection = currentSection === "placement"
     ? track.status === "waiting" ? "waiting" : "registration"
@@ -395,11 +389,10 @@ export function RegistrationApplication({
     || left.id.localeCompare(right.id)
   )), [detail.tracks])
   const genericTracks = useMemo(
-    () => orderedTracks.flatMap((track) => {
-      const workflowStatus = resolveRegistrationWorkspaceWorkflowStatus(track)
-      if (!workflowStatus) return []
-      return [{ ...track, workflowStatus }]
-    }),
+    () => orderedTracks.map((track) => ({
+      ...track,
+      workflowStatus: resolveRegistrationWorkspaceWorkflowStatus(track),
+    })),
     [orderedTracks],
   )
   const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({
@@ -738,21 +731,35 @@ export function RegistrationApplication({
       ? customerMessageTarget.sourceId === detail.task.id
       : customerMessageTarget.messageKind === "waiting_notice"
         ? orderedTracks.some((track) => track.id === customerMessageTarget.sourceId)
-        : customerMessageTarget.messageKind === "observation_booking_bundle"
+        : customerMessageTarget.messageKind === "observation_booking"
           ? activeObservationDetail?.track.taskId === detail.task.id
-            && customerMessageTarget.sourceId === detail.task.id
-        : customerMessageTarget.messageKind === "level_test_booking_bundle"
-          || customerMessageTarget.messageKind === "visit_consultation_booking_bundle"
-          ? customerMessageTarget.sourceId === detail.task.id
+            && activeObservationDetail.currentObservation?.status === "scheduled"
+            && activeObservationDetail.currentObservation.appointmentStatus === "scheduled"
+            && customerMessageTarget.sourceId === activeObservationDetail.currentObservation.observationId
+        : customerMessageTarget.messageKind === "level_test_booking"
+          || customerMessageTarget.messageKind === "visit_consultation_booking"
+          ? detail.appointments.some((appointment) => (
+            appointment.id === customerMessageTarget.sourceId
+            && appointment.status === "scheduled"
+            && appointment.kind === (customerMessageTarget.messageKind === "level_test_booking"
+              ? "level_test"
+              : "visit_consultation")
+          ))
         : detail.appointments.some((appointment) => appointment.id === customerMessageTarget.sourceId)
   ) ? customerMessageTarget : null
-  const admissionEditable = canManageCase
+  const scheduledAppointmentWindowComplete = !detail.collectionWindows
+    || detail.collectionWindows.scheduledAppointments.overflow === false
+  const currentEnrollmentWindowComplete = !detail.collectionWindows
+    || detail.collectionWindows.currentEnrollments.overflow === false
+  const canManageAppointments = canManageCase && scheduledAppointmentWindowComplete
+  const admissionEditable = canManageCase && currentEnrollmentWindowComplete
   const appointmentActionPlans = getRegistrationApplicationAppointmentActionPlans({
     tracks: genericTracks,
     appointments: detail.appointments,
     levelTests: detail.levelTests,
     consultations: detail.consultations,
     actionableTrackIds: genericTracks
+      .filter(() => canManageAppointments)
       .filter((track) => permissionsByTrackId.get(track.id)?.canManage)
       .map((track) => track.id),
   })
@@ -979,24 +986,37 @@ export function RegistrationApplication({
         ? false
         : section === "admission"
           ? admissionEditable
+          : section === "level_test"
+            ? canManageAppointments
           : section === "observation" ? canManageActiveObservation && observationWorkspaceAvailable : canManageCase,
       lockReason: section === "history"
         ? "저장 시 자동 기록됩니다"
         : section === "observation"
           ? observationSectionLockReason
-          : canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
+          : !canManageCase
+            ? "등록 정보를 수정할 권한이 없습니다"
+            : section === "level_test" && !scheduledAppointmentWindowComplete
+              ? "현재 예약 이력이 조회 범위를 넘어 이 영역만 잠겼습니다"
+              : section === "admission" && !currentEnrollmentWindowComplete
+                ? "현재 등록 실행 이력이 조회 범위를 넘어 이 영역만 잠겼습니다"
+                : "",
     }]),
   ) as typeof sectionStates
-  const splitPlacementState = () => {
+  const splitPlacementState = (collectionComplete = true) => {
+    const editable = canManageCase && collectionComplete
     return {
       current: true,
-      editable: canManageCase,
+      editable,
       upcoming: false,
-      lockReason: canManageCase ? "" : "등록 정보를 수정할 권한이 없습니다",
+      lockReason: !canManageCase
+        ? "등록 정보를 수정할 권한이 없습니다"
+        : collectionComplete
+          ? ""
+          : "현재 등록 실행 이력이 조회 범위를 넘어 이 영역만 잠겼습니다",
     }
   }
   const waitingState = splitPlacementState()
-  const registrationState = splitPlacementState()
+  const registrationState = splitPlacementState(currentEnrollmentWindowComplete)
   const focusedContext = trackContexts.find((context) => context.track.id === activeTrackId) || null
   const workflowStatusOptions = activeGenericTrack
     ? getRegistrationWorkflowStatusOptions({
@@ -1069,14 +1089,10 @@ export function RegistrationApplication({
       setManagementNotificationSending(false)
     }
   }
-  const migrationReviewPanelId = reviewTrack ? `registration-inquiry-${reviewTrack.id}` : null
   const subjectPanelIdsByTrackId = Object.fromEntries(orderedTracks.map((track) => {
     const context = trackContexts.find((candidate) => candidate.track.id === track.id)
     if (!context) return [track.id, ["registration-application-observation"]] as const
-    return [context.track.id,
-      context.track.migrationReviewRequired
-      ? migrationReviewPanelId ? [migrationReviewPanelId] : []
-      : [
+    return [context.track.id, [
       { section: "inquiry" as const, panel: "inquiry" as const, placementMode: undefined },
       { section: "level_test" as const, panel: "level_test" as const, placementMode: undefined },
       { section: "consultation" as const, panel: "consultation" as const, placementMode: undefined },
@@ -1087,8 +1103,7 @@ export function RegistrationApplication({
       context,
       placementMode: candidate.placementMode,
       reviewTrackId: reviewTrack?.id || null,
-      })).map((candidate) => `registration-${candidate.panel}-${context.track.id}`),
-    ] as const
+      })).map((candidate) => `registration-${candidate.panel}-${context.track.id}`)] as const
   }))
 
   useEffect(() => {
@@ -1113,7 +1128,7 @@ export function RegistrationApplication({
         )
       ),
       genericFocusPanelId: focusedContext
-        ? getRegistrationTrackFocusPanelId(focusedContext, reviewTrack?.id || null)
+        ? getRegistrationTrackFocusPanelId(focusedContext)
         : null,
     })
     if (!focusPanelId) return
@@ -1123,7 +1138,7 @@ export function RegistrationApplication({
         ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
     })
     return () => window.cancelAnimationFrame(frame)
-  }, [activeTrack, activeTrackId, deepLinkedObservationHistoryEligible, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable, reviewTrack?.id])
+  }, [activeTrack, activeTrackId, deepLinkedObservationHistoryEligible, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable])
 
   async function saveInquiry(draft: RegistrationInquiryDraft, requestKey: string) {
     if (!canManageCase) throw new Error("등록 정보를 수정할 권한이 없습니다.")
@@ -1177,7 +1192,7 @@ export function RegistrationApplication({
   }
 
   async function handleAppointmentSaved(saved: RegistrationAppointmentMutationResponse) {
-    if (!canManageCase) return
+    if (!canManageAppointments) return
     await onAppointmentSaved?.(saved)
     await onReload()
     if (saved.requiresDirectorAssignmentTrackIds.length > 0) {
@@ -1200,14 +1215,15 @@ export function RegistrationApplication({
         />
       )
     }
-    if (track.migrationReviewRequired) return null
     if (section === "placement" && placementMode === "registration") {
       return (
         <RegistrationEnrollmentTrackEditor
           detail={genericDetail}
           track={track}
           viewerId={viewerId || ""}
-          permissions={permissions}
+          permissions={currentEnrollmentWindowComplete
+            ? permissions
+            : { ...permissions, canManage: false, canCompleteConsultation: false, readOnly: true }}
           classOptions={classOptions}
           textbookOptions={textbookOptions}
           onReload={onReload}
@@ -1285,10 +1301,9 @@ export function RegistrationApplication({
             />
           </>
         ) : null}
-        {section === "consultation" && !context.track.migrationReviewRequired ? (
+        {section === "consultation" ? (
           <RegistrationTrackDirectorSection
             ref={activeTrackId === context.track.id ? activeConsultationDirectorRef : undefined}
-            task={task}
             detail={genericDetail}
             track={context.track}
             permissions={context.permissions}
@@ -1315,7 +1330,6 @@ export function RegistrationApplication({
               subject={context.track.subject}
               consultation={context.latestConsultation}
               track={context.track}
-              classOptions={classOptions}
               editable={Boolean(context.permissions.canManage || context.permissions.canCompleteConsultation || context.permissions.canEditConsultationResult)}
               onReload={onReload}
               onWarning={onWarning}
@@ -1357,7 +1371,7 @@ export function RegistrationApplication({
     : false
 
   function selectConsultationMode(mode: RegistrationConsultationMode) {
-    if (!canManageCase || !activeGenericTrack || !activeConsultationMode) return
+    if (!canManageAppointments || !activeGenericTrack || !activeConsultationMode) return
     const next = getRegistrationConsultationModeDraft({
       draftMode: mode,
       savedMode: activeConsultationMode.savedMode,
@@ -1371,9 +1385,16 @@ export function RegistrationApplication({
     if (activeConsultationDirectorRef.current) {
       return activeConsultationDirectorRef.current.savePending()
     }
-    if (activeGenericTrack?.directorProfileId) return true
-    onWarning("상담 책임자를 선택하세요.")
-    return false
+    return true
+  }
+
+  async function trySaveActiveConsultationDirector() {
+    try {
+      return await saveActiveConsultationDirector()
+    } catch (error) {
+      onWarning(errorMessage(error, "담당자 정보를 저장하지 못했습니다."))
+      return false
+    }
   }
 
   async function savePhoneConsultation() {
@@ -1383,50 +1404,85 @@ export function RegistrationApplication({
       return
     }
     setConsultationSharedSaving(true)
+    const directorWasDirty = activeConsultationDirectorDirty
     try {
-      const saved = await saveActiveConsultationDirector()
-      if (!saved) return
-      await saveRegistrationPhoneConsultation({
-        trackId: activeGenericTrack.id,
-        requestKey: `registration-phone-consultation:${activeGenericTrack.id}:${crypto.randomUUID()}`,
-      })
+      const directorSaved = await trySaveActiveConsultationDirector()
+      try {
+        await saveRegistrationPhoneConsultation({
+          trackId: activeGenericTrack.id,
+          requestKey: `registration-phone-consultation:${activeGenericTrack.id}:${crypto.randomUUID()}`,
+        })
+      } catch (error) {
+        onWarning(directorWasDirty && directorSaved
+          ? `담당자 정보는 저장되었지만 ${errorMessage(error, "전화상담 정보를 저장하지 못했습니다.")}`
+          : errorMessage(error, "전화상담 정보를 저장하지 못했습니다."))
+        return
+      }
       setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
-      await onReload(activeGenericTrack.id)
-    } catch (error) {
-      onWarning(errorMessage(error, "상담 정보를 저장하지 못했습니다."))
+      let refreshFailed = false
+      try {
+        await onReload(activeGenericTrack.id)
+      } catch {
+        refreshFailed = true
+      }
+      const partialWarnings = [
+        ...(!directorSaved ? ["담당자 정보는 저장되지 않았습니다. 담당자를 입력한 뒤 관리 알림을 따로 보내세요."] : []),
+        ...(refreshFailed ? ["최신 내용을 다시 불러오지 못했습니다."] : []),
+      ]
+      if (partialWarnings.length > 0) {
+        onWarning(`전화상담은 저장되었습니다. ${partialWarnings.join(" ")}`)
+      }
     } finally {
       setConsultationSharedSaving(false)
     }
   }
 
   async function confirmVisitToPhoneSwitch() {
-    if (!canManageCase || !activeGenericTrack || !activeVisitAppointment || consultationSharedSaving) return
+    if (!canManageAppointments || !activeGenericTrack || !activeVisitAppointment || consultationSharedSaving) return
     setConsultationSharedSaving(true)
+    const directorWasDirty = activeConsultationDirectorDirty
     try {
-      const directorSaved = await saveActiveConsultationDirector()
-      if (!directorSaved) return
-      const saved = await cancelRegistrationAppointment({
-        appointmentId: activeVisitAppointment.id,
-        expectedNotificationRevision: activeVisitAppointment.notificationRevision,
-        reason: "전화상담으로 변경",
-        requestKey: `registration-appointment-switch-to-phone:${activeVisitAppointment.id}:${crypto.randomUUID()}`,
-      })
-      const failedTargets: string[] = []
-      for (const target of saved.notificationTargets) {
-        try {
-          await sendRegistrationVisitNotificationTarget(target, notificationToken)
-        } catch (error) {
-          failedTargets.push(errorMessage(error, "방문상담 변경 알림을 보내지 못했습니다."))
-        }
+      const directorSaved = await trySaveActiveConsultationDirector()
+      let saved: RegistrationAppointmentMutationResponse
+      try {
+        saved = await cancelRegistrationAppointment({
+          appointmentId: activeVisitAppointment.id,
+          expectedNotificationRevision: activeVisitAppointment.notificationRevision,
+          reason: "전화상담으로 변경",
+          requestKey: `registration-appointment-switch-to-phone:${activeVisitAppointment.id}:${crypto.randomUUID()}`,
+        })
+      } catch (error) {
+        onWarning(directorWasDirty && directorSaved
+          ? `담당자 정보는 저장되었지만 ${errorMessage(error, "방문상담 예약을 취소하지 못했습니다.")}`
+          : errorMessage(error, "방문상담 예약을 취소하지 못했습니다."))
+        return
       }
-      setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
       setConsultationSwitchPending(false)
-      await handleAppointmentSaved(saved)
-      if (failedTargets.length > 0) {
-        onWarning(`전화상담 변경은 저장되었습니다. ${failedTargets[0]}`)
+      let phoneSaved = false
+      try {
+        await saveRegistrationPhoneConsultation({
+          trackId: activeGenericTrack.id,
+          requestKey: `registration-phone-consultation:${activeGenericTrack.id}:${crypto.randomUUID()}`,
+        })
+        phoneSaved = true
+        setDirty(`consultation:mode-${activeGenericTrack.id}`, false)
+      } catch {
+        // The canceled visit remains committed and is reloaded below.
       }
-    } catch (error) {
-      onWarning(errorMessage(error, "전화상담으로 변경하지 못했습니다."))
+      let refreshFailed = false
+      try {
+        await handleAppointmentSaved(saved)
+      } catch {
+        refreshFailed = true
+      }
+      const partialWarnings = [
+        ...(!phoneSaved ? ["전화상담 정보는 저장하지 못했습니다."] : []),
+        ...(!directorSaved ? ["담당자 정보는 저장되지 않았습니다. 담당자를 입력한 뒤 관리 알림을 따로 보내세요."] : []),
+        ...(refreshFailed ? ["최신 내용을 다시 불러오지 못했습니다."] : []),
+      ]
+      if (partialWarnings.length > 0) {
+        onWarning(`방문상담 예약은 취소되었습니다. ${partialWarnings.join(" ")}`)
+      }
     } finally {
       setConsultationSharedSaving(false)
     }
@@ -1469,7 +1525,7 @@ export function RegistrationApplication({
     ) : observationFeedbackError ? (
       <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
     ) : observationFeedbackLoading ? (
-      <p className="text-sm text-muted-foreground">청강 피드백을 불러오는 중입니다.</p>
+      <p className="text-sm text-muted-foreground">청강 확인 정보를 불러오는 중입니다.</p>
     ) : null
 
   const registrationSection = (
@@ -1545,6 +1601,11 @@ export function RegistrationApplication({
               ) : null}
             </div>
           ) : null}
+          {!scheduledAppointmentWindowComplete || !currentEnrollmentWindowComplete ? (
+            <p role="alert" className="text-sm text-amber-700 md:col-span-2">
+              일부 예약 또는 등록 실행 이력이 조회 범위를 넘었습니다. 해당 실행 영역만 잠기며 기본정보와 진행상태는 계속 수정할 수 있습니다.
+            </p>
+          ) : null}
         </div>
       )}
       progress={null}
@@ -1579,21 +1640,21 @@ export function RegistrationApplication({
               key={`level_test:${activeGenericTrack.id}:${activeLevelTestAppointment?.id || "new"}:${activeLevelTestAppointment?.notificationRevision ?? "new"}`}
               kind="level_test"
               taskId={detail.task.id}
+              studentName={detail.task.studentName}
               eligibleTracks={genericTracks}
               initialTrackId={activeGenericTrack.id}
               appointment={activeLevelTestAppointment}
               activities={detail.levelTests}
-              readOnly={!canManageCase}
+              readOnly={!canManageAppointments}
               embedded
               subjectScoped
               visibleTrackId={activeGenericTrack.id}
               onSaved={handleAppointmentSaved}
               onWarning={onWarning}
               onReload={onReload}
-              notificationToken={notificationToken}
               onDirtyChange={(dirty) => setDirty(`level_test:appointment-${activeLevelTestAppointment?.id || activeGenericTrack.id}`, dirty)}
               onTrackDirtyChange={(trackId, dirty) => setDirty(`level_test:track-${trackId}`, dirty)}
-              canOpenCustomerMessage={canManageCase}
+              canOpenCustomerMessage={canManageAppointments}
               onOpenCustomerMessage={openCustomerMessage}
             />
           ) : null}
@@ -1612,7 +1673,7 @@ export function RegistrationApplication({
                     variant={activeConsultationMode.mode === "phone" ? "default" : "outline"}
                     className="h-10"
                     onClick={() => selectConsultationMode("phone")}
-                    disabled={!canManageCase || consultationSharedSaving}
+                    disabled={!canManageAppointments || consultationSharedSaving}
                   >전화상담</Button>
                   <Button
                     type="button"
@@ -1620,7 +1681,7 @@ export function RegistrationApplication({
                     variant={activeConsultationMode.mode === "visit" ? "default" : "outline"}
                     className="h-10"
                     onClick={() => selectConsultationMode("visit")}
-                    disabled={!canManageCase || consultationSharedSaving}
+                    disabled={!canManageAppointments || consultationSharedSaving}
                   >방문상담</Button>
                 </div>
               </fieldset>
@@ -1630,11 +1691,12 @@ export function RegistrationApplication({
                   key={`visit_consultation:${activeGenericTrack.id}:${activeVisitAppointment?.id || "new"}:${activeVisitAppointment?.notificationRevision ?? "new"}`}
                   kind="visit_consultation"
                   taskId={detail.task.id}
+                  studentName={detail.task.studentName}
                   eligibleTracks={genericTracks}
                   initialTrackId={activeGenericTrack.id}
                   appointment={activeVisitAppointment}
                   activities={detail.consultations.filter((item) => item.mode === "visit")}
-                  readOnly={!canManageCase}
+                  readOnly={!canManageAppointments}
                   embedded
                   subjectScoped
                   visibleTrackId={activeGenericTrack.id}
@@ -1651,8 +1713,9 @@ export function RegistrationApplication({
                   onReload={onReload}
                   notificationToken={notificationToken}
                   onDirtyChange={(dirty) => setDirty(`consultation:appointment-${activeVisitAppointment?.id || activeGenericTrack.id}`, dirty)}
-                  canOpenCustomerMessage={canManageCase}
+                  canOpenCustomerMessage={canManageAppointments}
                   onOpenCustomerMessage={openCustomerMessage}
+                  canSendManagementNotification={canManageAppointments}
                 />
               ) : (
                 <div className="flex flex-wrap justify-end gap-2">
@@ -1673,7 +1736,7 @@ export function RegistrationApplication({
                     saving={consultationSharedSaving}
                     blocked={!canManageCase}
                     actionLabel="상담 정보 저장"
-                    cleanLabel={phoneConsultation ? "저장됨" : activeGenericTrack.directorProfileId ? "상담 정보 저장" : "상담 책임자를 선택하세요"}
+                    cleanLabel={phoneConsultation ? "저장됨" : "상담 정보 저장"}
                     aria-label={`${activeGenericTrack.subject} 상담 정보 저장`}
                     onClick={() => void savePhoneConsultation()}
                   />
@@ -1683,7 +1746,7 @@ export function RegistrationApplication({
               {consultationSwitchPending ? (
                 <div role="alertdialog" aria-labelledby="registration-consultation-switch-title" className="grid gap-3 rounded-lg border border-blue-200 bg-blue-50 p-4 text-blue-950">
                   <h4 id="registration-consultation-switch-title" className="font-semibold">전화상담으로 변경할까요?</h4>
-                  <p className="text-sm">기존 방문상담 예약과 예정된 리마인드가 취소됩니다.</p>
+                  <p className="text-sm">기존 방문상담 예약 사실을 취소하고 전화상담 정보를 저장합니다. 알림은 자동으로 전송되지 않습니다.</p>
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
                     <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationSwitchPending(false)}>돌아가기</Button>
                     <Button type="button" disabled={!canManageCase || consultationSharedSaving} onClick={() => void confirmVisitToPhoneSwitch()}>전화상담으로 변경</Button>
@@ -1759,7 +1822,7 @@ export function RegistrationApplication({
             <RegistrationAdmissionPanel
               taskId={detail.task.id}
               checklist={detail.admissionChecklist}
-              permissions={{ canManage: canManageCase, readOnly: !canManageCase }}
+              permissions={{ canManage: admissionEditable, readOnly: !admissionEditable }}
               onWarning={onWarning}
             />
           )}

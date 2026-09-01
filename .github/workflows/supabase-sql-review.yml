@@ -128,6 +128,7 @@ jobs:
             --test supabase/tests/registration_archived_subject_delivery_fence_test.sql \
             --test supabase/tests/registration_manager_write_and_integrity_fence_test.sql \
             --test supabase/tests/registration_management_notification_explicit_v2_test.sql \
+            --test supabase/tests/registration_flat_fact_runtime_finalization_test.sql \
             --test supabase/tests/registration_admission_order_independence_test.sql \
             --test supabase/tests/registration_admission_checklist_roster_consistency_test.sql \
             --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \

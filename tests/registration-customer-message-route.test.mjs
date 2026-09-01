@@ -198,14 +198,23 @@ function createProductionHistoryHarness({
           filters.push([column, value])
           return this
         },
-        async maybeSingle() {
+        maybeSingle() {
           if (table === "ops_registration_observations") {
             assert.deepEqual(filters, [["id", TERMINAL_OBSERVATION_TARGET.sourceId]])
-            return { data: sourceExists ? { task_id: IDS.task } : null, error: null }
+            return this
           }
           assert.equal(table, "ops_tasks")
           assert.deepEqual(filters, [["id", IDS.task], ["type", "registration"]])
-          return { data: taskVisible ? { id: IDS.task, type: "registration" } : null, error: null }
+          return Promise.resolve({ data: taskVisible ? { id: IDS.task, type: "registration" } : null, error: null })
+        },
+        abortSignal(signal) {
+          assert.equal(signal instanceof AbortSignal, true)
+          return this
+        },
+        async retry(value) {
+          assert.equal(table, "ops_registration_observations")
+          assert.equal(value, false)
+          return { data: sourceExists ? { task_id: IDS.task } : null, error: null }
         },
       }
     },

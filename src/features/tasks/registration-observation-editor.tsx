@@ -619,7 +619,7 @@ export function RegistrationObservationEditor({
     && current.appointmentStatus === "scheduled"
     && observationRevision !== null
     && appointmentNotificationRevision !== null
-    ? { messageKind: "observation_booking_bundle", sourceId: detail.track.taskId }
+    ? { messageKind: "observation_booking", sourceId: current.observationId }
     : null
   const customerMessageTarget = receipt === "예약 필요"
     ? null
@@ -798,8 +798,8 @@ export function RegistrationObservationEditor({
       && savedObservation.appointmentNotificationRevision === savedAppointment.notificationRevision
     ) {
       setSavedCustomerMessageTarget({
-        messageKind: "observation_booking_bundle",
-        sourceId: detail.track.taskId,
+        messageKind: "observation_booking",
+        sourceId: savedObservation.observationId,
       })
     } else {
       setSavedCustomerMessageTarget(null)

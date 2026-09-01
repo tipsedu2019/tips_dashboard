@@ -1049,6 +1049,29 @@ function actorClient(context: HandlerAuthContext) {
   return context.actorClient as SupabaseClient
 }
 
+async function readRegistrationCustomerMessageSourceTask(
+  client: SupabaseClient,
+  table: string,
+  sourceId: string,
+  activeSubjectOnly: boolean,
+) {
+  const sourceQuery = client
+    .from(table)
+    .select("task_id")
+    .eq("id", sourceId)
+  if (activeSubjectOnly) {
+    return sourceQuery
+      .is("archived_at", null)
+      .abortSignal(AbortSignal.timeout(8_000))
+      .maybeSingle()
+      .retry(false)
+  }
+  return sourceQuery
+    .abortSignal(AbortSignal.timeout(8_000))
+    .maybeSingle()
+    .retry(false)
+}
+
 async function rpc(context: HandlerAuthContext, name: string, args: JsonRecord) {
   const result = await serviceClient(context).rpc(name, args)
   if (result.error) {
@@ -1248,14 +1271,12 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
           || input.messageKind === "observation_reminder"
           ? "ops_registration_observations"
           : "ops_registration_appointments"
-      const sourceQuery = actorClient(input.context)
-        .from(table)
-        .select("task_id")
-        .eq("id", input.sourceId)
-      const visibleSourceQuery = table === "ops_registration_subject_tracks"
-        ? sourceQuery.is("archived_at", null)
-        : sourceQuery
-      const result = await visibleSourceQuery.maybeSingle()
+      const result = await readRegistrationCustomerMessageSourceTask(
+        actorClient(input.context),
+        table,
+        input.sourceId,
+        table === "ops_registration_subject_tracks",
+      )
       if (result.error) {
         httpError(503, "registration_customer_message_runtime_unavailable")
       }

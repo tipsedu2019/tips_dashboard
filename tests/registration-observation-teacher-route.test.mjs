@@ -18,13 +18,8 @@ const feedbackPanelUrl = new URL(
   root,
 )
 
-test("retired teacher feedback deep link always resolves to not found", async () => {
-  const source = await readFile(pageUrl, "utf8")
-
-  assert.match(source, /import \{ notFound \} from "next\/navigation"/)
-  assert.match(source, /RegistrationObservationFeedbackPage[\s\S]*notFound\(\)/)
-  assert.doesNotMatch(source, /RegistrationObservationTeacherFeedback/)
-  assert.doesNotMatch(source, /observationId|UUID_SEGMENT/)
+test("retired teacher feedback deep link route is removed", async () => {
+  await assert.rejects(access(pageUrl))
 })
 
 test("teacher feedback form implementation is removed", async () => {

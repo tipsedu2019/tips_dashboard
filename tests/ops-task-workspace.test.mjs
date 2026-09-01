@@ -985,7 +985,8 @@ test("registration fact edits and status mutations never auto-dispatch legacy pr
   assert.doesNotMatch(legacyPipeline, /loadRegistrationLegacyNotificationSourceIds|dispatchLegacyOpsTaskSources/);
   assert.doesNotMatch(undoStatus, /loadRegistrationLegacyNotificationSourceIds/);
   assert.match(undoStatus, /if \(currentTask\.type === "registration"\)[\s\S]*?return[\s\S]*?dispatchLegacyOpsTaskSources/);
-  assert.match(source, /async function retryPendingRegistrationVisitNotifications[\s\S]*?dispatchRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(source, /retryPendingRegistrationVisitNotifications|pendingRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(source, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/);
 });
 
 test("fixture registration stays loading until its runtime adapter is installed", async () => {
@@ -1029,27 +1030,19 @@ test("fixture registration withholds every provider token even before its runtim
 
   assertIncludesAll(workspaceSource, [
     'const registrationNotificationSessionToken = registrationFixtureRequested ? "" : notificationSessionToken',
-    "sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken)",
     "notificationToken={registrationNotificationSessionToken}",
   ]);
+  assert.doesNotMatch(workspaceSource, /sendRegistrationVisitNotificationTarget/);
   assert.doesNotMatch(workspaceSource, /showLegacyNotificationSettingsLauncher/);
 });
 
-test("leaving a registration fixture clears provider retry targets before production resumes", async () => {
+test("registration workspace has no automatic visit-provider retry state to revive after a fixture", async () => {
   const workspaceSource = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const fixtureRetryCleanup = workspaceSource.slice(
-    workspaceSource.indexOf("const registrationVisitNotificationRetryGenerationRef"),
-    workspaceSource.indexOf("const withdrawalCreateHandledRef"),
-  );
 
-  assertIncludesAll(fixtureRetryCleanup, [
-    "if (registrationFixtureRequested) return",
-    "registrationVisitNotificationRetryGenerationRef.current += 1",
-    "registrationVisitNotificationRetryInFlightRef.current = false",
-    "setPendingRegistrationVisitNotificationTargets([])",
-    "setRetryingRegistrationVisitNotifications(false)",
-    "[registrationFixtureRequested]",
-  ]);
+  assert.doesNotMatch(workspaceSource, /registrationVisitNotificationRetryGenerationRef/);
+  assert.doesNotMatch(workspaceSource, /registrationVisitNotificationRetryInFlightRef/);
+  assert.doesNotMatch(workspaceSource, /setPendingRegistrationVisitNotificationTargets/);
+  assert.doesNotMatch(workspaceSource, /setRetryingRegistrationVisitNotifications/);
 });
 
 test("registration keeps the observation tab in its fixed position before runtime probing settles", async () => {
@@ -1959,13 +1952,13 @@ test("canonical registration application opens one honest read-only timeline fro
   assert.match(editorSource, /import \{ RegistrationApplicationHistoryAction \} from "\.\/registration-application-history-action"/);
   assertIncludesAll(editorSource, [
     "const genericTracks = useMemo(",
-    "const workflowStatus = resolveRegistrationWorkspaceWorkflowStatus(track)",
-    "if (!workflowStatus) return []",
+    "workflowStatus: resolveRegistrationWorkspaceWorkflowStatus(track),",
     "const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({",
     "tracks: genericTracks,",
     "trackContexts: TrackContext[] = genericTracks.map",
     "historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}",
   ]);
+  assert.doesNotMatch(editorSource, /if \(!workflowStatus\) return \[\]/);
   assert.equal(
     editorSource.split("historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}").length - 1,
     1,
@@ -2008,55 +2001,12 @@ test("canonical registration application opens one honest read-only timeline fro
   );
 });
 
-test("historical visit notification retry stays isolated from fact-only registration creation", async () => {
+test("fact-only registration workspace exposes no historical automatic visit notification retry", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
-  const retryStart = source.indexOf("async function retryPendingRegistrationVisitNotifications")
-  const retryEnd = source.indexOf("\n  }", retryStart) + 4
-  const retrySource = source.slice(retryStart, retryEnd)
-
-  assert.ok(retryStart >= 0, "notification-only retry handler should exist")
-  assertIncludesAll(source, [
-    "pendingRegistrationVisitNotificationTargets",
-    "setPendingRegistrationVisitNotificationTargets",
-    "dispatchRegistrationVisitNotificationTargets",
-    "방문상담 알림 재시도",
-  ])
-  assert.match(
-    source,
-    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/,
-    "the list-level retry alert must remain visible even after another action clears notice",
-  )
-  assert.match(
-    source,
-    /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && \([\s\S]*?notice \|\| `방문상담 알림 \$\{pendingRegistrationVisitNotificationTargets\.length\}건/,
-    "the detail-level retry alert must render a fallback message without notice",
-  )
-  assert.doesNotMatch(
-    source,
-    /\{notice && !detailOpen && \([\s\S]*?pendingRegistrationVisitNotificationTargets\.length > 0/,
-  )
-  assert.match(retrySource, /dispatchRegistrationVisitNotificationTargets/)
-  assert.match(
-    retrySource,
-    /setPendingRegistrationVisitNotificationTargets\(\(current\) => \([\s\S]*?reconcileRegistrationVisitNotificationRetryTargets\([\s\S]*?current[\s\S]*?retryTargets[\s\S]*?result\.failedTargets/,
-    "retry completion must reconcile against current targets so concurrent failures survive",
-  )
-  assertIncludesAll(retrySource, [
-    "registrationVisitNotificationRetryGenerationRef.current",
-    "latestWorkspaceViewerIdRef.current !== retryViewerId",
-    "workspaceMountedRef.current",
-  ])
-  assert.doesNotMatch(retrySource, /createRegistrationCaseWithInitialWorkflow|createRegistrationCase\(|createOpsTask\(/)
-
-  const viewerResetSource = source.slice(
-    source.indexOf("workspaceMountedRef.current = false"),
-    source.indexOf("const deferRegistrationWorkspaceLoad"),
-  )
-  assertIncludesAll(viewerResetSource, [
-    "workspaceViewerGenerationRef.current += 1",
-    "registrationVisitNotificationRetryGenerationRef.current += 1",
-    "registrationVisitNotificationRetryInFlightRef.current = false",
-  ])
+  assert.doesNotMatch(source, /pendingRegistrationVisitNotificationTargets/)
+  assert.doesNotMatch(source, /retryPendingRegistrationVisitNotifications/)
+  assert.doesNotMatch(source, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/)
+  assert.doesNotMatch(source, /방문상담 알림 재시도/)
 
   const submitStart = source.indexOf("const submitForm = async")
   const submitEnd = source.indexOf("const handleFormKeyDown", submitStart)
@@ -2291,9 +2241,9 @@ test("appointment refresh retry reuses canonical appointment validation and clea
 test("canonical registration host owns notification and error live regions without list duplicates", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
-  assert.match(source, /\{\(notice \|\| pendingRegistrationVisitNotificationTargets\.length > 0\) && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/);
+  assert.match(source, /\{notice && !detailOpen && registrationApplicationHost\.kind === "closed" && \(/);
   assert.match(source, /\{message && !formOpen && !detailOpen && registrationApplicationHost\.kind === "closed" && <div role="alert"/);
-  assert.match(source, /registrationApplicationHost\.kind === "detail"[\s\S]*?pendingRegistrationVisitNotificationTargets\.length > 0[\s\S]*?retryPendingRegistrationVisitNotifications/);
+  assert.doesNotMatch(source, /pendingRegistrationVisitNotificationTargets|retryPendingRegistrationVisitNotifications/);
 });
 
 test("registration application rows retain every subject during class sync", async () => {

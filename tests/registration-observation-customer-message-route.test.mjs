@@ -1,6 +1,5 @@
 import assert from "node:assert/strict"
 import test from "node:test"
-import { readFile } from "node:fs/promises"
 
 import {
   createProductionRegistrationCustomerMessageRouteHandlers,
@@ -32,18 +31,68 @@ const OBSERVATION_BOOKING_TARGET = Object.freeze({
 })
 
 test("waiting message task authorization excludes archived registration tracks", async () => {
-  const source = await readFile(
-    new URL("../src/features/tasks/server/registration-customer-message-route.ts", import.meta.url),
-    "utf8",
-  )
-  const resolveTaskId = source.slice(
-    source.indexOf("async resolveTaskId(input)"),
-    source.indexOf("readPrivateSource:", source.indexOf("async resolveTaskId(input)")),
-  )
+  for (const [active, expectedAuthorizedTaskIds] of [[true, [IDS.task]], [false, []]]) {
+    const filters = []
+    const queryControls = []
+    const authorizedTaskIds = []
+    const actorClient = {
+      from(table) {
+        assert.equal(table, "ops_registration_subject_tracks")
+        return {
+          select(columns) {
+            assert.equal(columns, "task_id")
+            return this
+          },
+          eq(column, value) {
+            filters.push([column, value])
+            return this
+          },
+          is(column, value) {
+            filters.push([column, value])
+            return this
+          },
+          maybeSingle() {
+            queryControls.push("maybeSingle")
+            return this
+          },
+          abortSignal(signal) {
+            assert.equal(signal instanceof AbortSignal, true)
+            queryControls.push("abortSignal")
+            return this
+          },
+          async retry(value) {
+            assert.equal(value, false)
+            queryControls.push("retry:false")
+            return { data: active ? { task_id: IDS.task } : null, error: null }
+          },
+        }
+      },
+    }
+    const handlers = createProductionRegistrationCustomerMessageRouteHandlers({
+      auth: {
+        async authenticate() {
+          return { actorProfileId: IDS.actor, role: "staff", actorClient, serviceClient: {} }
+        },
+        async authorizeTask(_context, taskId) {
+          authorizedTaskIds.push(taskId)
+          return false
+        },
+      },
+      environment: FIXED_ENV,
+      providerFetch: async () => {
+        throw new Error("authorization_must_not_call_provider")
+      },
+    })
+    const response = await handlers.messages(new Request(
+      `http://localhost/messages?messageKind=waiting_notice&sourceId=${IDS.track}`,
+      { headers: { authorization: "Bearer local-operator" } },
+    ))
 
-  assert.match(resolveTaskId, /const visibleSourceQuery = table === "ops_registration_subject_tracks"/)
-  assert.match(resolveTaskId, /sourceQuery\.is\("archived_at", null\)/)
-  assert.match(resolveTaskId, /await visibleSourceQuery\.maybeSingle\(\)/)
+    assert.equal(response.status, 404)
+    assert.deepEqual(filters, [["id", IDS.track], ["archived_at", null]])
+    assert.deepEqual(queryControls, ["abortSignal", "maybeSingle", "retry:false"])
+    assert.deepEqual(authorizedTaskIds, expectedAuthorizedTaskIds)
+  }
 })
 
 const RAW_SOURCE = Object.freeze({
@@ -177,8 +226,16 @@ function createObservationProductionHarness({
           filters.push([column, value])
           return this
         },
-        async maybeSingle() {
+        maybeSingle() {
           assert.deepEqual(filters, [["id", IDS.observation]])
+          return this
+        },
+        abortSignal(signal) {
+          assert.equal(signal instanceof AbortSignal, true)
+          return this
+        },
+        async retry(value) {
+          assert.equal(value, false)
           return table === "ops_registration_observations"
             ? { data: { task_id: IDS.task }, error: null }
             : { data: null, error: { code: "wrong_source_table" } }

@@ -982,7 +982,7 @@ test("클라이언트 서비스는 모든 실제 알림 원본 ID를 타입이 �
 
 test("업무 화면은 생성·수정·상태·재시험 전용 동작·댓글 receipt를 legacy bridge까지 전달한다", async () => {
   const workspace = await source(workspaceUrl)
-  const quickAdd = block(workspace, "const submitQuickAdd", "async function retryPendingRegistrationVisitNotifications")
+  const quickAdd = block(workspace, "const submitQuickAdd", "const submitForm")
   const submitForm = block(workspace, "const submitForm", "const handleFormKeyDown")
   const changeStatus = block(workspace, "const changeStatus", "const updateWithdrawalChecklist")
   const wordFlow = block(workspace, "const updateWordRetestFlow", "const submitWordRetestCompletion")
@@ -995,8 +995,10 @@ test("업무 화면은 생성·수정·상태·재시험 전용 동작·댓글 r
   assert.match(submitForm, /const retryReceipt = await retryWordRetest\(/)
   assert.match(submitForm, /legacyOpsTaskSourceEventIds\.push\(\.\.\.receipt\.sourceEventIds\)/)
   assert.match(submitForm, /dispatchLegacyOpsTaskSources\(retryReceipt\.sourceEventIds, notificationSessionToken\)/)
+  assert.match(changeStatus, /if \(task\.type === "registration"\) return/)
   assert.match(changeStatus, /const receipt = await updateOpsTaskStatus\(/)
-  assert.match(changeStatus, /\.\.\.receipt\.sourceEventIds/)
+  assert.match(changeStatus, /dispatchLegacyOpsTaskSources\(receipt\.sourceEventIds, registrationNotificationSessionToken\)/)
+  assert.doesNotMatch(changeStatus, /loadRegistrationLegacyNotificationSourceIds/)
 
   assert.match(wordFlow, /await reportWordRetestResult\(/)
   assert.match(wordFlow, /await reportWordRetestAbsent\(/)

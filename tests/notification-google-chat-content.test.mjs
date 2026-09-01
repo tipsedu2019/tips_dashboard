@@ -60,7 +60,7 @@ function context(overrides = {}) {
   }
 }
 
-test("공유 dashboard 링크 정책은 exact 청강 tuple과 교사 피드백 route만 허용한다", async () => {
+test("공유 dashboard 링크 정책은 exact 청강 tuple만 허용하고 퇴역한 교사 피드백 route를 거부한다", async () => {
   const {
     buildNotificationAppLink,
     validateNotificationAppDeepLink,
@@ -75,12 +75,8 @@ test("공유 dashboard 링크 정책은 exact 청강 tuple과 교사 피드백 r
     absoluteUrl: `https://tipsedu.co.kr${observationDetailUrl}`,
     buttonText: "청강 상세 보기",
   })
-  assert.equal(validateNotificationAppDeepLink(feedbackUrl, "registration"), feedbackUrl)
-  assert.deepEqual(buildNotificationAppLink(feedbackUrl, "registration"), {
-    relativeUrl: feedbackUrl,
-    absoluteUrl: `https://tipsedu.co.kr${feedbackUrl}`,
-    buttonText: "피드백 입력",
-  })
+  assert.throws(() => validateNotificationAppDeepLink(feedbackUrl, "registration"))
+  assert.throws(() => buildNotificationAppLink(feedbackUrl, "registration"))
   const reorderedObservationDetailUrl =
     `/admin/registration?view=calendar&observationId=${OBSERVATION_ID}&appointmentId=${APPOINTMENT_ID}&trackId=${TRACK_ID}&taskId=${TASK_ID}`
   assert.equal(
@@ -191,7 +187,7 @@ test("Google Chat 카드 본문은 markup-like text를 escape 대상이 아니�
   assert.deepEqual(built, { ok: false, errorCode: "render_validation_failed" })
 })
 
-test("Google Chat card button text는 검증된 observation route에서만 구체화된다", async () => {
+test("Google Chat card button text는 현재 유효한 observation 상세 route에서만 구체화된다", async () => {
   const { buildGoogleChatCardPayload } = await import(providerUrl.href)
 
   const detailCard = buildGoogleChatCardPayload(context({ href: observationDetailUrl }))
@@ -206,11 +202,7 @@ test("Google Chat card button text는 검증된 observation route에서만 구�
     detailCard.payload.cardsV2[0].card.sections[0].widgets[1].buttonList.buttons[0].text,
     "청강 상세 보기",
   )
-  assert.equal(feedbackCard.ok, true)
-  assert.equal(
-    feedbackCard.payload.cardsV2[0].card.sections[0].widgets[1].buttonList.buttons[0].text,
-    "피드백 입력",
-  )
+  assert.deepEqual(feedbackCard, { ok: false, errorCode: "render_validation_failed" })
   assert.equal(taskCard.ok, true)
   assert.equal(
     taskCard.payload.cardsV2[0].card.sections[0].widgets[1].buttonList.buttons[0].text,
@@ -239,7 +231,7 @@ test("Google Chat provider는 workflow key 없는 legacy-like context를 전송 
   assert.equal(fetchCount, 0)
 })
 
-test("registration adapter는 일곱 observation event에 canonical appointment tuple 또는 feedback route만 만든다", async () => {
+test("registration adapter는 과거 feedback 요청을 거부하고 나머지 observation 이력만 canonical 상세로 연결한다", async () => {
   const { createRegistrationNotificationAdapter } = await import(registrationAdapterUrl.href)
   const booking = Object.freeze({
     class_id: CLASS_ID,
@@ -300,7 +292,7 @@ test("registration adapter는 일곱 observation event에 canonical appointment 
       connectionKey: null,
       ruleVariantKey: "immediate",
     }
-    const href = await adapter.buildDeepLink({
+    const linkInput = {
       eventId: EVENT_ID,
       workflowKey: "registration",
       eventKey: payload.event_kind,
@@ -323,14 +315,13 @@ test("registration adapter는 일곱 observation event에 canonical appointment 
         targetSnapshot: { connection_key: connectionKey },
       },
       scheduledFor: payload.occurred_at,
-    })
-    assert.equal(
-      href,
-      payload.event_kind === "registration.observation_feedback_due"
-        ? feedbackUrl
-        : observationDetailUrl,
-      `${payload.event_kind} must never degrade to a partial registration link`,
-    )
+    }
+    if (payload.event_kind === "registration.observation_feedback_due") {
+      await assert.rejects(() => adapter.buildDeepLink(linkInput))
+      continue
+    }
+    const href = await adapter.buildDeepLink(linkInput)
+    assert.equal(href, observationDetailUrl, `${payload.event_kind} must never degrade to a partial registration link`)
   }
 })
 

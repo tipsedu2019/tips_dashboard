@@ -232,10 +232,7 @@ import {
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
 import {
-  dispatchRegistrationVisitNotificationTargets,
   isRegistrationSubmissionOwnershipCurrent,
-  reconcileRegistrationVisitNotificationRetryTargets,
-  sendRegistrationVisitNotificationTarget,
 } from "./registration-consultation-notification.js"
 import {
   installRegistrationSubjectTrackFixtureRuntime,
@@ -248,7 +245,6 @@ import { WordRetestManualDialog } from "./word-retest-manual-dialog"
 
 type RegistrationSubjectTrackFixtureModule = typeof import("./registration-track-fixtures")
 
-type RegistrationVisitNotificationTarget = { appointmentId: string; notificationRevision: number }
 const FACT_ONLY_REGISTRATION_PERSISTENCE: RegistrationInitialPersistenceProbeResult = {
   mode: "canonical_inquiry",
   subjectRuntime: { mode: "ready", version: 1 },
@@ -8039,17 +8035,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   } | null>(null)
   const pushedTaskDetailHistoryUrlRef = useRef("")
   const registrationCloseHistoryRestoreRef = useRef<"forward" | "replace">("replace")
-  const [pendingRegistrationVisitNotificationTargets, setPendingRegistrationVisitNotificationTargets] = useState<RegistrationVisitNotificationTarget[]>([])
-  const [retryingRegistrationVisitNotifications, setRetryingRegistrationVisitNotifications] = useState(false)
-  const registrationVisitNotificationRetryInFlightRef = useRef(false)
-  const registrationVisitNotificationRetryGenerationRef = useRef(0)
-  useEffect(() => {
-    if (registrationFixtureRequested) return
-    registrationVisitNotificationRetryGenerationRef.current += 1
-    registrationVisitNotificationRetryInFlightRef.current = false
-    setPendingRegistrationVisitNotificationTargets([])
-    setRetryingRegistrationVisitNotifications(false)
-  }, [registrationFixtureRequested])
   const withdrawalCreateHandledRef = useRef("")
   const openCreateRef = useRef<((type: OpsTaskType, initialValues?: Partial<OpsTaskInput>) => Promise<void>) | null>(null)
   const registrationOptionsLoadedRef = useRef(false)
@@ -8438,8 +8423,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       taskOptionsLoadGenerationRef.current += 1
       registrationOptionsLoadGenerationRef.current += 1
       workspaceViewerGenerationRef.current += 1
-      registrationVisitNotificationRetryGenerationRef.current += 1
-      registrationVisitNotificationRetryInFlightRef.current = false
     }
   }, [])
 
@@ -11261,44 +11244,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }
 
-  async function retryPendingRegistrationVisitNotifications() {
-    if (registrationVisitNotificationRetryInFlightRef.current || pendingRegistrationVisitNotificationTargets.length === 0) return
-    const retryTargets = [...pendingRegistrationVisitNotificationTargets]
-    const retryViewerId = currentUserId
-    const retryGeneration = registrationVisitNotificationRetryGenerationRef.current + 1
-    registrationVisitNotificationRetryGenerationRef.current = retryGeneration
-    registrationVisitNotificationRetryInFlightRef.current = true
-    setRetryingRegistrationVisitNotifications(true)
-    try {
-      const result = await dispatchRegistrationVisitNotificationTargets(
-        retryTargets,
-        (target: RegistrationVisitNotificationTarget) => sendRegistrationVisitNotificationTarget(target, registrationNotificationSessionToken),
-      )
-      if (
-        !workspaceMountedRef.current
-        || latestWorkspaceViewerIdRef.current !== retryViewerId
-        || registrationVisitNotificationRetryGenerationRef.current !== retryGeneration
-      ) return
-      setPendingRegistrationVisitNotificationTargets((current) => (
-        reconcileRegistrationVisitNotificationRetryTargets(current, retryTargets, result.failedTargets)
-      ))
-      if (result.failedTargets.length > 0) {
-        setNotice(`방문상담 알림 ${result.failedTargets.length}건을 아직 전송하지 못했습니다. 같은 저장본으로 다시 시도할 수 있습니다.`)
-      } else if (result.warnings.length > 0) {
-        setNotice("방문상담 알림 전달은 접수됐습니다. 감사 이력을 확인하세요.")
-      } else {
-        setNotice("선택한 방문상담 알림 재시도를 마쳤습니다.")
-      }
-    } finally {
-      if (registrationVisitNotificationRetryGenerationRef.current === retryGeneration) {
-        registrationVisitNotificationRetryInFlightRef.current = false
-        if (workspaceMountedRef.current && latestWorkspaceViewerIdRef.current === retryViewerId) {
-          setRetryingRegistrationVisitNotifications(false)
-        }
-      }
-    }
-  }
-
   const submitForm = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault()
     const submissionViewerId = currentUserId
@@ -12811,23 +12756,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             </Button>
           </div>
         )}
-        {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && !detailOpen && registrationApplicationHost.kind === "closed" && (
+        {notice && !detailOpen && registrationApplicationHost.kind === "closed" && (
           <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-            <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
-            {pendingRegistrationVisitNotificationTargets.length > 0 && (
-              <Button
-                type="button"
-                variant="ghost"
-                size="sm"
-                onClick={() => void retryPendingRegistrationVisitNotifications()}
-                disabled={retryingRegistrationVisitNotifications}
-                className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
-              >
-                {retryingRegistrationVisitNotifications
-                  ? "방문상담 알림 재시도 중"
-                  : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
-              </Button>
-            )}
+            <span>{notice}</span>
             {statusUndo && (
               <Button
                 type="button"
@@ -13535,23 +13466,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               </DialogDescription>
             </DialogHeader>
           ) : null}
-          {(notice || pendingRegistrationVisitNotificationTargets.length > 0) && (
+          {notice && (
             <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-              <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
-              {pendingRegistrationVisitNotificationTargets.length > 0 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => void retryPendingRegistrationVisitNotifications()}
-                  disabled={retryingRegistrationVisitNotifications}
-                  className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
-                >
-                  {retryingRegistrationVisitNotifications
-                    ? "방문상담 알림 재시도 중"
-                    : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
-                </Button>
-              )}
+              <span>{notice}</span>
               {statusUndo && (
                 <Button
                   type="button"
@@ -13998,23 +13915,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             <div data-registration-application-dirty={registrationApplicationDirty ? "true" : "false"} className="grid gap-4">
               <DialogTitle className="sr-only">등록 신청서</DialogTitle>
               <DialogDescription className="sr-only">저장된 등록 신청서 내용을 확인하고 수정합니다.</DialogDescription>
-              {(notice || pendingRegistrationVisitNotificationTargets.length > 0) ? (
+              {notice ? (
                 <div role="status" aria-live="polite" className="flex flex-col gap-2 rounded-md border border-primary/25 bg-primary/5 px-3 py-2 text-sm font-medium text-primary sm:flex-row sm:items-center sm:justify-between">
-                  <span>{notice || `방문상담 알림 ${pendingRegistrationVisitNotificationTargets.length}건을 전송하지 못했습니다. 알림 재시도를 눌러 주세요.`}</span>
-                  {pendingRegistrationVisitNotificationTargets.length > 0 ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      onClick={() => void retryPendingRegistrationVisitNotifications()}
-                      disabled={retryingRegistrationVisitNotifications}
-                      className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
-                    >
-                      {retryingRegistrationVisitNotifications
-                        ? "방문상담 알림 재시도 중"
-                        : `방문상담 알림 재시도 (${pendingRegistrationVisitNotificationTargets.length})`}
-                    </Button>
-                  ) : null}
+                  <span>{notice}</span>
                 </div>
               ) : null}
               {message ? (

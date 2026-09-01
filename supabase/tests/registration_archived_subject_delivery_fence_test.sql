@@ -116,28 +116,28 @@ select ok(
 
 select ok(
   (
-    select definition like '%registration_appointment_has_active_subject_v1%'
-      and definition like '%last_error_code = ''subject_archived''%'
-      and definition like '%job.status = ''canceled''%'
+    select definition like '%return 0%'
+      and definition not like '%registration_appointment_has_active_subject_v1%'
     from (
       select pg_catalog.lower(pg_catalog.pg_get_functiondef(
         'dashboard_private.sync_registration_customer_reminder_jobs_v1()'::regprocedure
       )) as definition
     ) source
   ),
-  'reminder worker lazily cancels archived-only work and may restore an exact current reminder'
+  'the retired automatic reminder synchronizer is a constant provider-zero no-op'
 );
 
 select ok(
   (
-    select definition like '%resolve_registration_customer_message_source_v1_impl%appointment_reminder%'
+    select definition like '%return null%'
+      and definition not like '%resolve_registration_customer_message_source_v1_impl%'
     from (
       select pg_catalog.lower(pg_catalog.pg_get_functiondef(
         'public.claim_registration_customer_reminder_job_v1()'::regprocedure
       )) as definition
     ) source
   ),
-  'reminder claim re-resolves and locks appointment source facts'
+  'the retired automatic reminder claim returns no work'
 );
 
 select ok(
@@ -178,56 +178,90 @@ select ok(
 );
 
 select ok(
-  not exists (
+  exists (
     select 1
     from pg_catalog.pg_constraint constraint_row
     where constraint_row.conrelid =
       'public.ops_registration_customer_messages'::regclass
       and constraint_row.conname =
         'ops_registration_customer_messages_dedupe_key_key'
+      and constraint_row.contype = 'u'
+      and constraint_row.convalidated
   )
-  and exists (
+  and not exists (
     select 1
     from pg_catalog.pg_indexes index_row
     where index_row.schemaname = 'public'
       and index_row.tablename = 'ops_registration_customer_messages'
       and index_row.indexname =
         'ops_registration_customer_messages_dedupe_key_active_uidx'
-      and pg_catalog.lower(index_row.indexdef)
-        like '%error_code is distinct from ''subject_archived''%'
-  )
-  and (
-    select pg_catalog.count(*) = 6
-    from pg_catalog.pg_indexes index_row
-    where index_row.schemaname = 'public'
-      and index_row.tablename = 'ops_registration_customer_messages'
-      and index_row.indexname = any (array[
-        'ops_reg_customer_msg_appointment_revision_once_idx',
-        'ops_reg_customer_msg_reminder_lifetime_once_idx',
-        'ops_reg_customer_msg_waiting_once_idx',
-        'ops_reg_customer_msg_admission_once_idx',
-        'ops_reg_customer_msg_observation_revision_once_idx',
-        'ops_reg_customer_msg_booking_bundle_once_idx'
-      ]::text[])
-      and pg_catalog.lower(index_row.indexdef)
-        like '%error_code is distinct from ''subject_archived''%'
   ),
-  'asynchronously held audit rows can release only their active message identity'
+  'message dedupe remains lifetime unique and is not released by archive state'
+);
+
+select ok(
+  (
+    select pg_catalog.count(*) = 6
+    from (
+      values
+        ('public.ops_reg_customer_msg_appointment_revision_once_idx'::text),
+        ('public.ops_reg_customer_msg_reminder_lifetime_once_idx'::text),
+        ('public.ops_reg_customer_msg_waiting_once_idx'::text),
+        ('public.ops_reg_customer_msg_admission_once_idx'::text),
+        ('public.ops_reg_customer_msg_observation_revision_once_idx'::text),
+        ('public.ops_reg_customer_msg_booking_bundle_once_idx'::text)
+    ) expected(index_name)
+    join pg_catalog.pg_class index_relation
+      on index_relation.oid = pg_catalog.to_regclass(expected.index_name)
+    join pg_catalog.pg_index index_row
+      on index_row.indexrelid = index_relation.oid
+    where index_row.indisunique
+      and index_row.indisvalid
+      and index_row.indisready
+      and pg_catalog.lower(coalesce(
+        pg_catalog.pg_get_expr(index_row.indpred, index_row.indrelid),
+        ''
+      )) not like '%subject_archived%'
+  ),
+  'message business identities remain lifetime unique across subject archive'
 );
 
 select ok(
   (
     select pg_catalog.count(*) = 2
-    from pg_catalog.pg_indexes index_row
-    where index_row.schemaname = 'dashboard_private'
-      and index_row.tablename = 'registration_customer_message_bundles'
-      and index_row.indexname = any (array[
-        'registration_customer_message_booking_bundle_revision_idx',
-        'registration_customer_message_reminder_bundle_revision_idx'
-      ]::text[])
-      and pg_catalog.lower(index_row.indexdef) like '%status <> ''canceled''%'
+    from (
+      values
+        ('dashboard_private.registration_customer_message_booking_bundle_revision_idx'::text),
+        ('dashboard_private.registration_customer_message_reminder_bundle_revision_idx'::text)
+    ) expected(index_name)
+    join pg_catalog.pg_class index_relation
+      on index_relation.oid = pg_catalog.to_regclass(expected.index_name)
+    join pg_catalog.pg_index index_row
+      on index_row.indexrelid = index_relation.oid
+    where index_row.indisunique
+      and index_row.indisvalid
+      and index_row.indisready
+      and pg_catalog.lower(coalesce(
+        pg_catalog.pg_get_expr(index_row.indpred, index_row.indrelid),
+        ''
+      )) not like '%canceled%'
   ),
-  'asynchronously canceled bundle snapshots release only their active uniqueness identities'
+  'bundle revisions remain lifetime unique across subject archive'
+);
+
+select ok(
+  (
+    select pg_catalog.bool_and(
+      pg_catalog.lower(pg_catalog.pg_get_functiondef(identity))
+        not like '%subject_archived%'
+    )
+    from (
+      values
+        ('dashboard_private.claim_registration_customer_message_pre_observation_v1(uuid,uuid,text,jsonb)'::regprocedure),
+        ('public.claim_registration_customer_message_v1(uuid,uuid,text,jsonb)'::regprocedure)
+    ) claims(identity)
+  ),
+  'manual message claims do not reinterpret archive state as a released identity'
 );
 
 select hasnt_function(
@@ -351,6 +385,8 @@ values
     'visit', 'scheduled', '98710000-0000-4000-8000-000000000001'
   );
 
+-- Direct postgres-only inert fixture: automatic producers and claims remain
+-- retired; this row exists only to prove fact writes do not wait on it.
 insert into dashboard_private.registration_customer_reminder_jobs(
   job_id, appointment_id, task_id, message_kind, source_revision,
   scheduled_for, due_at, available_at, request_key, status
@@ -815,22 +851,6 @@ select
 from public.ops_registration_observations observation
 where observation.id = '98710000-0000-4000-8000-000000000605';
 
-update dashboard_private.registration_observation_chat_jobs job
-set status = 'claimed',
-    next_attempt_at = null,
-    claimed_by = 'archive-delivery-chat-worker',
-    claim_token = '98710000-0000-4000-8000-000000000607',
-    lease_expires_at = now() + interval '5 minutes',
-    updated_at = now()
-where job.job_id = (
-  select candidate.job_id
-  from dashboard_private.registration_observation_chat_jobs candidate
-  where candidate.observation_id = '98710000-0000-4000-8000-000000000605'
-    and candidate.status = 'pending'
-  order by candidate.job_id
-  limit 1
-);
-
 select ok(
   dashboard_private.registration_appointment_has_active_subject_v1(
     '98710000-0000-4000-8000-000000000301',
@@ -847,11 +867,10 @@ select ok(
       on fixture.bundle_id = item.bundle_id
     where fixture.label = 'before_archive'
   )
-  and exists (
+  and not exists (
     select 1
     from dashboard_private.registration_observation_chat_jobs job
     where job.observation_id = '98710000-0000-4000-8000-000000000605'
-      and job.status = 'claimed'
   )
   and (
     select delivery.status = 'sending'
@@ -860,7 +879,7 @@ select ok(
     join archive_delivery_notification_fixture fixture
       on fixture.delivery_id = delivery.id
   ),
-  'pre-archive fixtures include a two-subject bundle, claimed Chat job, and sending delivery'
+  'pre-archive fixtures include a two-subject bundle and manual sending delivery but no automatic Chat job'
 );
 
 select lives_ok(
@@ -920,13 +939,10 @@ select ok(
 );
 
 select ok(
-  exists (
+  not exists (
     select 1
     from dashboard_private.registration_observation_chat_jobs job
     where job.observation_id = '98710000-0000-4000-8000-000000000605'
-      and job.status = 'claimed'
-      and job.claim_token = '98710000-0000-4000-8000-000000000607'
-      and job.last_error_code is null
   )
   and (
     select delivery.status = 'sending'
@@ -937,7 +953,7 @@ select ok(
     join archive_delivery_notification_fixture fixture
       on fixture.delivery_id = delivery.id
   ),
-  'archive leaves claimed Chat and sending delivery uncertainty to their worker fences'
+  'archive creates no automatic Chat job and preserves manual sending-delivery uncertainty'
 );
 
 insert into archive_delivery_bundle_fixture(label, bundle_id)
@@ -1082,22 +1098,32 @@ select ok(
     from public.ops_registration_customer_messages message
     where message.id = '98710000-0000-4000-8000-000000000562'
   ),
-  'archiving the last participant leaves stale provider-zero work for lazy validation'
+  'archiving the last participant leaves the inert provider-zero row untouched'
 );
 
 select pg_catalog.set_config('request.jwt.claim.role', 'service_role', true);
 select lives_ok(
   $$select dashboard_private.sync_registration_customer_reminder_jobs_v1()$$,
-  'the reminder worker reconciles archived-only work outside the fact transaction'
+  'the retired reminder synchronizer remains a harmless no-op'
+);
+select is(
+  public.claim_registration_customer_reminder_job_v1(),
+  null::jsonb,
+  'a directly seeded inert reminder is never claimable'
+);
+select is(
+  public.has_registration_customer_reminder_backlog_v1(),
+  false,
+  'a directly seeded inert reminder never reactivates the automatic backlog'
 );
 select pg_catalog.set_config('request.jwt.claim.role', '', true);
 
 select ok(
   (
-    select job.status = 'canceled'
-      and job.last_error_code = 'subject_archived'
+    select job.status = 'pending'
+      and job.last_error_code is null
       and job.claim_token is null
-      and job.available_at is null
+      and job.available_at is not null
     from dashboard_private.registration_customer_reminder_jobs job
     where job.job_id = '98710000-0000-4000-8000-000000000501'
   )
@@ -1113,7 +1139,7 @@ select ok(
     from public.ops_registration_customer_messages message
     where message.id = '98710000-0000-4000-8000-000000000541'
   ),
-  'lazy reconciliation cancels provider-zero reminder work and preserves provider-marker uncertainty'
+  'retired synchronization leaves the inert reminder row and provider-marker uncertainty untouched'
 );
 
 select lives_ok(
@@ -1130,20 +1156,20 @@ select ok(
     '98710000-0000-4000-8000-000000000101'
   )
   and (
-    select job.status = 'canceled'
-      and job.last_error_code = 'subject_archived'
-      and job.available_at is null
+    select job.status = 'pending'
+      and job.last_error_code is null
+      and job.available_at is not null
       and job.claim_token is null
     from dashboard_private.registration_customer_reminder_jobs job
     where job.job_id = '98710000-0000-4000-8000-000000000501'
   ),
-  'restoring a fact still leaves reminder state untouched until worker reconciliation'
+  'restoring a fact leaves the inert reminder state untouched'
 );
 
 select pg_catalog.set_config('request.jwt.claim.role', 'service_role', true);
 select lives_ok(
   $$select dashboard_private.sync_registration_customer_reminder_jobs_v1()$$,
-  'the reminder worker may reactivate an exact current reminder after restore'
+  'the retired reminder synchronizer cannot reactivate work after restore'
 );
 select pg_catalog.set_config('request.jwt.claim.role', '', true);
 
@@ -1156,7 +1182,7 @@ select ok(
     from dashboard_private.registration_customer_reminder_jobs job
     where job.job_id = '98710000-0000-4000-8000-000000000501'
   ),
-  'worker reconciliation reactivates only the restored exact appointment revision'
+  'retired synchronization leaves the restored appointment reminder inert'
 );
 
 insert into archive_delivery_bundle_fixture(label, bundle_id)
@@ -1356,7 +1382,7 @@ select is(
     ) result(state text)
   )::jsonb,
   '{"archived":true,"jobError":null,"jobStatus":"pending"}'::jsonb,
-  'the lock-independent archive leaves the committed reminder row byte-for-byte eligible for lazy cleanup'
+  'the lock-independent archive leaves the committed inert reminder row byte-for-byte unchanged'
 );
 
 select dblink_exec('archive_delivery_lock_blocker', 'rollback');

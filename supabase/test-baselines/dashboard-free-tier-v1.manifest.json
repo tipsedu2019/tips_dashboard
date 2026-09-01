@@ -263,7 +263,12 @@
     {
       "fileName": "20260901110600_registration_subject_soft_archive.sql",
       "status": "final",
-      "sha256": "db8d0fd037be403c7470fa7183489f2730dc6412488ceccd09cc087dfd3d61ba"
+      "sha256": "3435f142e0642bb7a6a6bc7f2b0bbbfd7d3ef730cfef1659cbcf86b269f005f3"
+    },
+    {
+      "fileName": "20260901110650_registration_subject_soft_archive_validate.sql",
+      "status": "final",
+      "sha256": "75b55328cd7df6a2db72be1444b967417fa3a4000996d3e0069504d139cd5d30"
     },
     {
       "fileName": "20260901110700_registration_flat_case_creation.sql",
@@ -278,7 +283,7 @@
     {
       "fileName": "20260901110900_registration_archived_subject_delivery_fence.sql",
       "status": "final",
-      "sha256": "4608ea51155040b79cc07d2a67ed7390a225631b5b31230df4d4d8364b333fe2"
+      "sha256": "ad75e49923afa71d3bab42b977f6e7877ce5bf643adb74614984549b934ef08c"
     },
     {
       "fileName": "20260901111000_registration_manager_write_and_integrity_fence.sql",
@@ -289,6 +294,11 @@
       "fileName": "20260901111100_registration_management_notification_explicit_v2.sql",
       "status": "final",
       "sha256": "1e273a71cdd45ad3141f34a5e9ad6e46f295451775fdd4c07a1b42775f0b8234"
+    },
+    {
+      "fileName": "20260901111200_registration_flat_fact_runtime_finalization.sql",
+      "status": "final",
+      "sha256": "a79232c880a436ae2b99a01c621fd87aa8ce6ba18c69ed98062fdead90a44975"
     }
   ]
 }

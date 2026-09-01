@@ -1530,7 +1530,7 @@ export function createRegistrationNotificationAdapter(
         const payload = observationPayload(input)
         observationPresentationInput(input, payload)
         if (payload.event_kind === "registration.observation_feedback_due") {
-          return `/admin/registration/observations/${payload.observation_id}/feedback`
+          adapterError("payload_schema_unsupported")
         }
         const query = new URLSearchParams()
         query.set("taskId", payload.task_id)

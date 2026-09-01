@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "27116b0903cbc5c3965007fd3cbbc5b7201d98b0ae2bf178c7bb82d2db172a9f"
+  "c3585cd62f9893822419fac4824b2613c1fb892b79d5d852c06fa3a20efb6fc5"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -469,10 +469,19 @@ test("admission-order patch is immutable, runs in PR schema CI, and is covered b
     2,
     "both patched final definitions must reject an admission-notice prerequisite",
   )
+  const expectedFunctionsBlock = postdeploySql.match(
+    /with expected_functions\([^)]+\) as \(\s*values([\s\S]*?)\n\),\nfunctions as \(/u,
+  )?.[1]
+  assert.ok(expectedFunctionsBlock, "postdeploy expected_functions must stay statically readable")
+  assert.equal(
+    (expectedFunctionsBlock.match(/'::text,\s*(?:true|false),\s*(?:true|false),\s*(?:true|false)\s*\)/gu) ?? []).length,
+    59,
+    "postdeploy must pin every active registration function contract",
+  )
   assert.doesNotMatch(
-    postdeploySql,
-    /\n\s*false\s*\n\s*\)/,
-    "all four postdeploy function contracts must reject retryable 40001",
+    expectedFunctionsBlock,
+    /'::text,\s*(?:true|false),\s*(?:true|false),\s*false\s*\)/u,
+    "every postdeploy function contract must reject retryable 40001",
   )
   for (const marker of [
     "v_start_pipeline_status_old_fragment",
@@ -2250,7 +2259,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   const requiredPredicates = [
     ["public signature", "public.set_registration_workflow_status_v1(uuid,text,integer,text)"],
     ["private signature", "dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)"],
-    ["expanded final function count", "(select count(*) from functions where oid is not null) = 37"],
+    ["expanded final function count", "(select count(*) from functions where oid is not null) = 59"],
     ["delegation", "dashboard_private.set_registration_workflow_status_v1_impl%"],
     ["security definer modes", "security_definer_required and not prosecdef"],
     ["security invoker modes", "not security_definer_required and prosecdef"],
@@ -2370,8 +2379,8 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["archive bundle materialization lock", "order by track.id%for share%"],
     ["archive bundle task recheck", "track.task_id = p_task_id%"],
     ["archive lazy reminder reconcile", "delivery_guard.function_key = 'reminder_sync'"],
-    ["archive lazy reminder provider-zero", "job.message_id is null%"],
-    ["archive lazy reminder exact revision", "appointment.notification_revision = job.source_revision%"],
+    ["archive retired reminder sync provider-zero", "delivery_guard.definition not like '%return 0%'"],
+    ["archive retired reminder claim provider-zero", "delivery_guard.definition not like '%return null%'"],
     ["archive reminder claim guard", "delivery_guard.function_key = 'reminder_claim'"],
     ["archive reminder begin guard", "delivery_guard.function_key = 'reminder_begin'"],
     ["archive reminder race classification", "delivery_guard.definition not like '%''subject_archived''%'"],
@@ -2379,9 +2388,11 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["archive appointment source guard", "delivery_guard.function_key = 'appointment_source'"],
     ["archive waiting-admission source guard", "delivery_guard.function_key = 'waiting_admission_source'"],
     ["archive provider marker current-source assertion", "dashboard_private.registration_customer_message_assert_current_v1%"],
-    ["archive partial identity count", "select pg_catalog.count(*) = 9"],
-    ["archive bundle partial identity", "registration_customer_message_booking_bundle_revision_idx"],
-    ["archive outbox partial identity", "ops_registration_customer_messages_dedupe_key_active_uidx"],
+    ["archive lifetime identity count", "select pg_catalog.count(*) = 8"],
+    ["archive bundle lifetime identity", "registration_customer_message_booking_bundle_revision_idx"],
+    ["archive outbox lifetime dedupe", "ops_registration_customer_messages_dedupe_key_key"],
+    ["archive message identity is not released", "not like '%subject_archived%'"],
+    ["archive bundle identity is not released", "not like '%canceled%'"],
     ["feedback retired marker", "registration_observation_feedback_retired%"],
     ["feedback retired SQLSTATE", "definition not like '%55000%'"],
     ["checklist item validation", "registration_admission_checklist_item_invalid%"],
@@ -2425,7 +2436,6 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["subject hard delete forbidden", "definition ~* ('de' || 'lete[[:space:]]+from[[:space:]]+public[.]ops_registration_subject_tracks')"],
     ["unified subject delegate", "definition not like '%dashboard_private.sync_registration_case_subjects_impl%'"],
     ["archive pair constraint", "ops_registration_subject_tracks_archive_pair_check"],
-    ["active subject index", "ops_registration_subject_tracks_active_task_subject_idx"],
     ["active subject RLS", "ops_registration_subject_tracks_select_v2"],
     ["empty subject inquiry visibility", "matching_track.matching_track_id is not null"],
     ["archived legacy dispatch plan", "public.get_registration_core_legacy_dispatch_plan_v1(uuid,uuid)"],

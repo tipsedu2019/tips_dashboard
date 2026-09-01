@@ -268,6 +268,160 @@ with expected_functions(
       true,
       false,
       true
+    ),
+    (
+      'appointment_details_private',
+      'dashboard_private.save_registration_appointment_details_impl(uuid,uuid,text,timestamp with time zone,text,uuid[],integer,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'appointment_cancel_private',
+      'dashboard_private.cancel_registration_appointment_impl(uuid,integer,text,text)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'appointment_cancel_compat_private',
+      'dashboard_private.cancel_registration_appointment_with_reminders_v1_impl(uuid,integer,text,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'phone_consultation_private',
+      'dashboard_private.save_registration_phone_consultation_v1_impl(uuid,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'waiting_details_private',
+      'dashboard_private.save_registration_waiting_details_v2_impl(uuid,text,uuid,text,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'consultation_details_private',
+      'dashboard_private.save_registration_consultation_details_impl(uuid,text,text,text,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'consultation_result_public',
+      'public.save_registration_consultation_result_v2(uuid,text,text,text,uuid,integer,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'director_assignment_private',
+      'dashboard_private.assign_registration_track_director_impl(uuid,uuid,text,text,integer,text)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'director_assignment_compat_private',
+      'dashboard_private.assign_registration_track_director_with_reminders_v1_impl(uuid,uuid,text,text,integer,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'enrollment_details_private',
+      'dashboard_private.save_registration_enrollment_details_impl(uuid,jsonb,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'enrollment_details_base_private',
+      'dashboard_private.save_registration_enrollment_details_impl_base(uuid,jsonb,text)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'enrollment_rows_canonical_private',
+      'dashboard_private.save_registration_enrollment_rows_canonical_v1(uuid,jsonb,uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'enrollment_observation_reference_private',
+      'dashboard_private.validate_registration_observation_class_start_source_v1(uuid,uuid,uuid,date,text,uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'appointment_parent_reconcile_private',
+      'dashboard_private.reconcile_registration_appointment_parent_v1(uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'level_test_result_private',
+      'dashboard_private.save_registration_level_test_result_impl(uuid,text,text,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'visit_event_v2_private',
+      'dashboard_private.write_registration_track_event_v2(uuid,uuid,text,text,text,text,jsonb,text,text)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'visit_event_v2_base_private',
+      'dashboard_private.write_registration_track_event_v2_base(uuid,uuid,text,text,text,text,jsonb,text,text)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'visit_notification_snapshot_private',
+      'dashboard_private.registration_visit_notification_fact_snapshot_v1(uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'visit_notification_source_current_private',
+      'dashboard_private.registration_visit_notification_source_current_v1(uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'visit_notification_ensure_public',
+      'public.ensure_registration_visit_notification_v1(uuid,integer,text,text)'::text,
+      true,
+      true,
+      true
+    ),
+    (
+      'visit_notification_plan_base_public',
+      'public.get_registration_visit_legacy_dispatch_plan_v1_base(uuid,uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'visit_notification_plan_public',
+      'public.get_registration_visit_legacy_dispatch_plan_v1(uuid,uuid)'::text,
+      true,
+      true,
+      true
     )
 ),
 functions as (
@@ -288,7 +442,7 @@ functions as (
     on procedure.oid = pg_catalog.to_regprocedure(expected_functions.function_name)
 )
 select (
-  (select count(*) from functions where oid is not null) = 37
+  (select count(*) from functions where oid is not null) = 59
   and not exists (
     select 1
     from functions
@@ -641,6 +795,210 @@ select (
         or definition not like '%track.task_id = p_task_id%'
         or pg_catalog.regexp_count(definition, 'track[.]archived_at is null') < 3
       ))
+      or (function_key = 'appointment_details_private' and (
+        definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+        or definition not like '%registration_appointment_revision_conflict%using errcode = ''23514''%'
+        or definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_appointments')
+        or definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_level_tests.*status = ''canceled''')
+        or definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_consultations.*status = ''canceled''')
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition like '%assert_registration_track_director_ready%'
+        or definition like '%registration_appointment_participants_locked%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%workflow_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%notificationTargets%'
+        or definition like '%notificationJobs%'
+      ))
+      or (function_key = 'appointment_cancel_private' and (
+        definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_appointments.*status = ''canceled''')
+        or definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_level_tests.*status = ''canceled''')
+        or definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_consultations.*status = ''canceled''')
+        or definition not like '%registration_appointment_revision_conflict%using errcode = ''23514''%'
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition ~* ('up' || 'date[[:space:]]+public[.]ops_registration_subject_tracks')
+        or definition ~* ('in' || 'sert[[:space:]]+into[[:space:]]+public[.]ops_registration_consultations')
+        or definition like '%transition_registration_track_status%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%workflow_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%notificationTargets%'
+        or definition like '%notificationJobs%'
+      ))
+      or (function_key = 'appointment_cancel_compat_private' and (
+        definition not like '%dashboard_private.cancel_registration_appointment_impl%'
+        or definition like '%assert_registration_reminder_runtime_v1%'
+        or definition like '%cancel_registration_appointment_reminders_v1%'
+        or definition like '%notification_control_plane%'
+      ))
+      or (function_key = 'phone_consultation_private' and (
+        definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+        or definition !~* ('in' || 'sert[[:space:]]+into[[:space:]]+public[.]ops_registration_consultations')
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition like '%assert_registration_track_director_ready%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%workflow_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'waiting_details_private' and (
+        definition not like '%waiting_detail_kind = v_waiting_kind%'
+        or definition not like '%waiting_detail_class_id = p_class_id%'
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%workflow_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'consultation_details_private' and (
+        definition not like '%note = v_note%'
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition like '%p_status <> ''completed'' and v_note is not null%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%workflow_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'consultation_result_public' and (
+        definition not like '%status = ''completed''%'
+        or definition not like '%outcome = v_outcome%'
+        or definition not like '%note = v_note%'
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition ~* ('up' || 'date[[:space:]]+public[.]ops_registration_subject_tracks')
+        or definition like '%ops_registration_observations%'
+        or definition like '%ops_registration_enrollments%'
+        or definition like '%apply_student_class_roster_mode%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'director_assignment_private' and (
+        definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+        or definition not like '%director_profile_id = p_director_profile_id%'
+        or definition not like '%dashboard_private.is_active_subject_director%'
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition ~* ('up' || 'date[[:space:]]+public[.]ops_registration_(appointments|consultations|details)')
+        or definition ~* ('up' || 'date[[:space:]]+public[.]ops_tasks')
+        or definition like '%registration_director_assignment_terminal%'
+        or definition like '%registration_visit_reassign_requires_reschedule%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%materialize_registration_phone_legacy_v1%'
+        or definition like '%dashboard_notifications%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'director_assignment_compat_private' and (
+        definition not like '%dashboard_private.assign_registration_track_director_impl%'
+        or definition like '%assert_registration_reminder_runtime_v1%'
+        or definition like '%notification_control_plane%'
+        or definition like '%materialize_registration_appointment_reminders_v1%'
+      ))
+      or (function_key = 'enrollment_details_private' and (
+        definition not like '%dashboard_private.save_registration_enrollment_rows_canonical_v1%'
+        or definition not like '%enrollment_detail_rows = v_rows%'
+        or definition not like '%externalReconciliationRequired%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%workflow_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'enrollment_details_base_private' and (
+        definition not like '%dashboard_private.save_registration_enrollment_details_impl%'
+      ))
+      or (function_key = 'enrollment_rows_canonical_private' and (
+        definition like '%registration_invalid_source_state%'
+        or definition like '%assert_registration_observation_runtime_v1%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%notification_%'
+      ))
+      or (function_key = 'enrollment_observation_reference_private' and (
+        definition like '%observation.status = ''completed''%'
+        or definition like '%observation.attendance = ''attended''%'
+        or definition like '%observation.suitability_result = ''fit''%'
+        or definition like '%observation.decision_kind = ''enrollment''%'
+      ))
+      or (function_key = 'appointment_parent_reconcile_private' and (
+        definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_appointments')
+        or definition not like '%notification_revision = appointment.notification_revision + 1%'
+        or definition like '%cancel_registration_appointment_reminders_v1%'
+        or definition like '%notification_events%'
+        or definition like '%notification_deliveries%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%pipeline_status%'
+        or definition like '%workflow_status%'
+      ))
+      or (function_key = 'level_test_result_private' and (
+        definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+        or definition !~* ('up' || 'date[[:space:]]+public[.]ops_registration_level_tests')
+        or definition not like '%dashboard_private.record_registration_fact_audit_v1%'
+        or definition not like '%dashboard_private.reconcile_registration_appointment_parent_v1%'
+        or definition like '%write_registration_track_event%'
+        or definition like '%cancel_registration_appointment_reminders_v1%'
+        or definition like '%recompute_registration_parent%'
+        or definition like '%transition_registration_track_status%'
+        or definition like '%pipeline_status%'
+        or definition like '%workflow_status%'
+        or definition like '%notification_events%'
+        or definition like '%notification_deliveries%'
+      ))
+      or (function_key = 'visit_event_v2_private' and (
+        definition not like '%dashboard_private.write_registration_track_event_v2_base%'
+      ))
+      or (function_key = 'visit_event_v2_base_private' and (
+        definition not like '%registration_visit_notification_revision_mismatch%using errcode = ''23514''%'
+      ))
+      or (function_key = 'visit_notification_snapshot_private' and (
+        definition not like '%appointment.kind = ''visit_consultation''%'
+        or definition not like '%consultation.status = ''scheduled''%'
+        or definition not like '%track.archived_at is null%'
+        or definition not like '%notificationRevision%'
+        or definition not like '%recipientRevision%'
+      ))
+      or (function_key = 'visit_notification_source_current_private' and (
+        definition not like '%dashboard_private.notification_events%'
+        or definition not like '%registration_visit_notification_fact_snapshot_v1%'
+        or definition not like '%source_revision%notificationRevision%'
+        or definition not like '%recipient_revision%recipientRevision%'
+        or definition not like '%track_ids%trackIds%'
+        or definition not like '%director_profile_ids%directorProfileIds%'
+      ))
+      or (function_key = 'visit_notification_ensure_public' and (
+        definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+        or definition not like '%p_intent is distinct from ''send_registration_visit_notification''%'
+        or definition not like '%registration_visit_notification_not_ready%using errcode = ''23514''%'
+        or definition not like '%notification_request_ledger%'
+        or definition not like '%dashboard_private.registration_visit_notification_source_current_v1%'
+        or definition not like '%dashboard_private.write_registration_track_event_v2%'
+        or definition not like '%pg_catalog.pg_advisory_xact_lock%'
+        or definition not like '%track.archived_at is null%'
+        or definition like '%begin_registration_%external_attempt%'
+        or definition like ('%net' || '.http_%')
+        or definition ~* ('in' || 'sert[[:space:]]+into[[:space:]]+dashboard_private[.]notification_deliveries')
+        or definition ~* ('in' || 'sert[[:space:]]+into[[:space:]]+public[.]ops_registration_customer_messages')
+      ))
+      or (function_key = 'visit_notification_plan_base_public' and (
+        definition not like '%registration_visit_notification_event_not_found%'
+        or definition not like '%dashboard_private.notification_events%'
+      ))
+      or (function_key = 'visit_notification_plan_public' and (
+        definition not like '%v_actor_id uuid := (select auth.uid())%'
+        or definition not like '%p_actor_profile_id is distinct from v_actor_id%'
+        or definition not like '%registration_access_denied%using errcode = ''42501''%'
+        or definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%v_actor_id%'
+        or definition not like '%dashboard_private.registration_visit_notification_source_current_v1%'
+        or definition not like '%public.get_registration_visit_legacy_dispatch_plan_v1_base%'
+        or definition not like '%registration_visit_notification_refresh_required%using errcode = ''23514''%'
+      ))
       or (function_key = 'notification_record_private' and (
         definition not like '%track.archived_at is null%'
         or definition not like '%dashboard_private.record_notification_event_v1%'
@@ -829,6 +1187,49 @@ select (
       and trigger.tgdeferrable
       and trigger.tginitdeferred
   )
+  and not exists (
+    select 1
+    from (
+      values
+        (
+          'registration_observation_google_chat_materializer'::name,
+          'dashboard_private.registration_observation_domain_events'::pg_catalog.regclass
+        ),
+        (
+          'registration_observation_google_chat_assignment_materializer'::name,
+          'dashboard_private.notification_assignment_change_facts'::pg_catalog.regclass
+        ),
+        (
+          'capture_lightweight_registration_booking_alerts'::name,
+          'public.ops_registration_appointments'::pg_catalog.regclass
+        ),
+        (
+          'write_registration_phone_queue_event_v1'::name,
+          'public.ops_registration_consultations'::pg_catalog.regclass
+        ),
+        (
+          'capture_registration_observation_teacher_change'::name,
+          'public.ops_registration_observations'::pg_catalog.regclass
+        ),
+        (
+          'capture_registration_director_change'::name,
+          'public.ops_task_events'::pg_catalog.regclass
+        )
+    ) retired(trigger_name, relation_id)
+    join pg_catalog.pg_trigger trigger
+      on trigger.tgrelid = retired.relation_id
+     and trigger.tgname = retired.trigger_name
+     and not trigger.tgisinternal
+  )
+  and exists (
+    select 1
+    from pg_catalog.pg_attribute attribute
+    where attribute.attrelid =
+        'public.ops_registration_consultations'::pg_catalog.regclass
+      and attribute.attname = 'director_profile_id'
+      and not attribute.attisdropped
+      and not attribute.attnotnull
+  )
   and pg_catalog.to_regprocedure(
     'dashboard_private.cancel_registration_archived_subject_delivery_v1()'
   ) is null
@@ -928,24 +1329,21 @@ select (
       or (
         delivery_guard.function_key = 'reminder_sync'
         and (
-          delivery_guard.definition not like
+          delivery_guard.definition not like '%return 0%'
+          or delivery_guard.definition like
+            '%dashboard_private.registration_customer_reminder_jobs%'
+          or delivery_guard.definition like
             '%dashboard_private.registration_appointment_has_active_subject_v1%'
-          or delivery_guard.definition not like '%last_error_code = ''subject_archived''%'
-          or delivery_guard.definition not like '%job.status = ''canceled''%'
-          or delivery_guard.definition not like '%job.message_id is null%'
-          or delivery_guard.definition not like '%appointment.status = ''scheduled''%'
-          or delivery_guard.definition not like '%appointment.scheduled_at > v_now%'
-          or delivery_guard.definition not like '%appointment.notification_revision = job.source_revision%'
         )
       )
       or (
         delivery_guard.function_key = 'reminder_claim'
         and (
-          delivery_guard.definition not like
-            '%dashboard_private.registration_appointment_has_active_subject_v1%'
-          or delivery_guard.definition not like
+          delivery_guard.definition not like '%return null%'
+          or delivery_guard.definition like
+            '%dashboard_private.registration_customer_reminder_jobs%'
+          or delivery_guard.definition like
             '%dashboard_private.resolve_registration_customer_message_source_v1_impl%'
-          or delivery_guard.definition not like '%''subject_archived''%'
         )
       )
       or (
@@ -995,47 +1393,32 @@ select (
           '%dashboard_private.registration_customer_message_assert_current_v1%'
       )
   )
+  and exists (
+    select 1
+    from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid =
+        'public.ops_registration_customer_messages'::pg_catalog.regclass
+      and constraint_row.conname =
+        'ops_registration_customer_messages_dedupe_key_key'
+      and constraint_row.contype = 'u'
+      and constraint_row.convalidated
+  )
+  and pg_catalog.to_regclass(
+    'public.ops_registration_customer_messages_dedupe_key_active_uidx'
+  ) is null
   and (
-    select pg_catalog.count(*) = 9
+    select pg_catalog.count(*) = 8
     from (
       values
-        (
-          'dashboard_private.registration_customer_message_booking_bundle_revision_idx'::text,
-          'status <> ''canceled'''::text
-        ),
-        (
-          'dashboard_private.registration_customer_message_reminder_bundle_revision_idx'::text,
-          'status <> ''canceled'''::text
-        ),
-        (
-          'public.ops_registration_customer_messages_dedupe_key_active_uidx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        ),
-        (
-          'public.ops_reg_customer_msg_appointment_revision_once_idx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        ),
-        (
-          'public.ops_reg_customer_msg_reminder_lifetime_once_idx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        ),
-        (
-          'public.ops_reg_customer_msg_waiting_once_idx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        ),
-        (
-          'public.ops_reg_customer_msg_admission_once_idx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        ),
-        (
-          'public.ops_reg_customer_msg_observation_revision_once_idx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        ),
-        (
-          'public.ops_reg_customer_msg_booking_bundle_once_idx'::text,
-          'error_code IS DISTINCT FROM ''subject_archived'''::text
-        )
-    ) expected(index_name, predicate_marker)
+        ('dashboard_private.registration_customer_message_booking_bundle_revision_idx'::text),
+        ('dashboard_private.registration_customer_message_reminder_bundle_revision_idx'::text),
+        ('public.ops_reg_customer_msg_appointment_revision_once_idx'::text),
+        ('public.ops_reg_customer_msg_reminder_lifetime_once_idx'::text),
+        ('public.ops_reg_customer_msg_waiting_once_idx'::text),
+        ('public.ops_reg_customer_msg_admission_once_idx'::text),
+        ('public.ops_reg_customer_msg_observation_revision_once_idx'::text),
+        ('public.ops_reg_customer_msg_booking_bundle_once_idx'::text)
+    ) expected(index_name)
     join pg_catalog.pg_class index_relation
       on index_relation.oid = pg_catalog.to_regclass(expected.index_name)
     join pg_catalog.pg_index index_row
@@ -1043,8 +1426,14 @@ select (
     where index_row.indisunique
       and index_row.indisvalid
       and index_row.indisready
-      and pg_catalog.pg_get_expr(index_row.indpred, index_row.indrelid)
-        like '%' || expected.predicate_marker || '%'
+      and pg_catalog.lower(coalesce(
+        pg_catalog.pg_get_expr(index_row.indpred, index_row.indrelid),
+        ''
+      )) not like '%subject_archived%'
+      and pg_catalog.lower(coalesce(
+        pg_catalog.pg_get_expr(index_row.indpred, index_row.indrelid),
+        ''
+      )) not like '%canceled%'
   )
   and (
     select pg_catalog.count(*) = 2
@@ -1085,22 +1474,6 @@ select (
             like '%archived_at IS NULL%archived_by IS NULL%archived_at IS NOT NULL%archived_by IS NOT NULL%'
         )
       )
-  )
-  and exists (
-    select 1
-    from pg_catalog.pg_index index_row
-    join pg_catalog.pg_class index_relation
-      on index_relation.oid = index_row.indexrelid
-    where index_row.indrelid =
-        'public.ops_registration_subject_tracks'::pg_catalog.regclass
-      and index_relation.relname =
-        'ops_registration_subject_tracks_active_task_subject_idx'
-      and index_row.indisvalid
-      and index_row.indisready
-      and pg_catalog.pg_get_expr(
-        index_row.indpred,
-        index_row.indrelid
-      ) ~* 'archived_at[[:space:]]+is[[:space:]]+null'
   )
   and exists (
     select 1
@@ -1253,6 +1626,263 @@ select (
       and policy.cmd = ('IN' || 'SERT')
       and policy.with_check like
         '%registration_observation_current_actor_is_active_manager_v1%'
+  )
+  and exists (
+    select 1
+    from dashboard_private.registration_customer_reminder_settings settings
+    where settings.singleton
+      and not settings.enabled
+  )
+  and not exists (
+    select 1
+    from "cron".job job
+    where job.jobname = 'tips-registration-customer-reminder-v1'
+  )
+  and not exists (
+    select 1
+    from pg_catalog.pg_trigger trigger
+    where trigger.tgrelid =
+        'dashboard_private.registration_customer_reminder_settings'::pg_catalog.regclass
+      and trigger.tgname = 'sync_registration_customer_reminder_cron_active'
+      and not trigger.tgisinternal
+  )
+  and not exists (
+    select 1
+    from dashboard_private.registration_customer_reminder_jobs job
+    where job.status in ('pending', 'claimed')
+  )
+  and not exists (
+    select 1
+    from (
+      select
+        expected.function_key,
+        procedure.oid,
+        pg_catalog.pg_get_functiondef(procedure.oid) as definition
+      from (
+        values
+          (
+            'reminder_materializer',
+            'dashboard_private.materialize_registration_observation_solapi_events_v1(integer)'::text
+          ),
+          (
+            'reminder_sync',
+            'dashboard_private.sync_registration_customer_reminder_jobs_v1()'::text
+          ),
+          (
+            'reminder_claim',
+            'public.claim_registration_customer_reminder_job_v1()'::text
+          ),
+          (
+            'reminder_backlog',
+            'public.has_registration_customer_reminder_backlog_v1()'::text
+          ),
+          (
+            'reminder_continue',
+            'public.continue_registration_customer_reminder_worker_v1()'::text
+          ),
+          (
+            'reminder_invoke',
+            'dashboard_private.invoke_registration_customer_reminder_worker_v1()'::text
+          ),
+          (
+            'reminder_schedule_ready',
+            'dashboard_private.registration_customer_reminder_schedule_ready_v1()'::text
+          ),
+          (
+            'reminder_schedule_manage',
+            'public.manage_registration_customer_reminder_schedule_v1(text)'::text
+          )
+      ) expected(function_key, signature)
+      left join pg_catalog.pg_proc procedure
+        on procedure.oid = pg_catalog.to_regprocedure(expected.signature)
+    ) automatic_reminder_fence
+    where automatic_reminder_fence.oid is null
+      or automatic_reminder_fence.definition like '%40001%'
+      or automatic_reminder_fence.definition like ('%net' || '.http_%')
+      or automatic_reminder_fence.definition ~* (
+        '(in' || 'sert[[:space:]]+into|up' || 'date)[[:space:]]+'
+        || '(dashboard_private[.]registration_customer_reminder_jobs|'
+        || 'dashboard_private[.]registration_observation_solapi_event_consumptions|'
+        || 'public[.]ops_registration_customer_messages)'
+      )
+      or (
+        automatic_reminder_fence.function_key in (
+          'reminder_materializer', 'reminder_sync'
+        )
+        and automatic_reminder_fence.definition not like '%return 0%'
+      )
+      or (
+        automatic_reminder_fence.function_key in (
+          'reminder_claim', 'reminder_continue', 'reminder_invoke'
+        )
+        and automatic_reminder_fence.definition not like '%return null%'
+        and automatic_reminder_fence.definition not like '%select null::bigint%'
+      )
+      or (
+        automatic_reminder_fence.function_key in (
+          'reminder_backlog', 'reminder_schedule_ready'
+        )
+        and automatic_reminder_fence.definition not like '%false%'
+      )
+      or (
+        automatic_reminder_fence.function_key = 'reminder_schedule_manage'
+        and automatic_reminder_fence.definition not like
+          '%registration_customer_reminder_schedule_retired%using errcode = ''55000''%'
+      )
+  )
+  and not exists (
+    select 1
+    from (
+      values
+        ('dashboard_private.materialize_registration_observation_solapi_events_v1(integer)'::text, false),
+        ('dashboard_private.sync_registration_customer_reminder_jobs_v1()'::text, false),
+        ('dashboard_private.invoke_registration_customer_reminder_worker_v1()'::text, false),
+        ('dashboard_private.registration_customer_reminder_schedule_ready_v1()'::text, false),
+        ('public.claim_registration_customer_reminder_job_v1()'::text, true),
+        ('public.has_registration_customer_reminder_backlog_v1()'::text, true),
+        ('public.continue_registration_customer_reminder_worker_v1()'::text, true),
+        ('public.manage_registration_customer_reminder_schedule_v1(text)'::text, true)
+    ) expected(signature, service_role_execute_required)
+    left join pg_catalog.pg_proc procedure
+      on procedure.oid = pg_catalog.to_regprocedure(expected.signature)
+    where procedure.oid is null
+      or not procedure.prosecdef
+      or pg_catalog.pg_get_userbyid(procedure.proowner) <> 'postgres'
+      or pg_catalog.has_function_privilege('public', procedure.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege('anon', procedure.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege(
+        'service_role', procedure.oid, 'EXECUTE'
+      ) is distinct from expected.service_role_execute_required
+  )
+  and exists (
+    select 1
+    from dashboard_private.lightweight_registration_alert_runtime_settings settings
+    where settings.singleton
+      and not settings.enabled
+  )
+  and not exists (
+    select 1
+    from "cron".job job
+    where job.jobname = 'tips-lightweight-registration-reminder-v1'
+  )
+  and not exists (
+    select 1
+    from dashboard_private.lightweight_registration_alert_deliveries delivery
+    where delivery.status in ('pending', 'claimed')
+  )
+  and not exists (
+    select 1
+    from dashboard_private.registration_observation_chat_jobs job
+    where job.status in ('pending', 'claimed')
+  )
+  and not exists (
+    select 1
+    from (
+      select
+        expected.function_key,
+        expected.service_role_execute_required,
+        procedure.oid,
+        procedure.prosecdef,
+        procedure.proowner,
+        pg_catalog.pg_get_functiondef(procedure.oid) as definition
+      from (
+        values
+          (
+            'lightweight_enqueue_private',
+            'dashboard_private.enqueue_lightweight_registration_alerts_v1(text,uuid,bigint,text,text)'::text,
+            false
+          ),
+          (
+            'lightweight_booking_public',
+            'public.enqueue_lightweight_registration_booking_alerts_v1(text,uuid,bigint)'::text,
+            true
+          ),
+          (
+            'lightweight_due_public',
+            'public.enqueue_due_lightweight_registration_reminders_v1()'::text,
+            true
+          ),
+          (
+            'lightweight_schedule_public',
+            'public.manage_lightweight_registration_alert_schedule_v1(text)'::text,
+            true
+          ),
+          (
+            'automatic_settings_public',
+            'public.set_registration_customer_reminder_settings_v1(uuid,boolean,smallint,bigint,jsonb)'::text,
+            true
+          )
+      ) expected(function_key, signature, service_role_execute_required)
+      left join pg_catalog.pg_proc procedure
+        on procedure.oid = pg_catalog.to_regprocedure(expected.signature)
+    ) lightweight_fence
+    where lightweight_fence.oid is null
+      or not lightweight_fence.prosecdef
+      or pg_catalog.pg_get_userbyid(lightweight_fence.proowner) <> 'postgres'
+      or lightweight_fence.definition like '%40001%'
+      or lightweight_fence.definition like ('%net' || '.http_%')
+      or pg_catalog.has_function_privilege('public', lightweight_fence.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege('anon', lightweight_fence.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege('authenticated', lightweight_fence.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege(
+        'service_role', lightweight_fence.oid, 'EXECUTE'
+      ) is distinct from lightweight_fence.service_role_execute_required
+      or (
+        lightweight_fence.function_key in (
+          'lightweight_enqueue_private', 'lightweight_booking_public'
+        )
+        and lightweight_fence.definition not like '%0%'
+      )
+      or (
+        lightweight_fence.function_key = 'lightweight_due_public'
+        and lightweight_fence.definition not like '%''status'', ''explicit_only''%'
+      )
+      or (
+        lightweight_fence.function_key = 'lightweight_schedule_public'
+        and lightweight_fence.definition not like
+          '%lightweight_registration_alert_schedule_retired%using errcode = ''55000''%'
+      )
+      or (
+        lightweight_fence.function_key = 'automatic_settings_public'
+        and (
+          lightweight_fence.definition not like '%p_enabled is distinct from false%'
+          or lightweight_fence.definition not like
+            '%registration_customer_reminder_automatic_delivery_retired%using errcode = ''55000''%'
+          or lightweight_fence.definition not like
+            '%registration_customer_reminder_settings_conflict%using errcode = ''23514''%'
+        )
+      )
+  )
+  and not exists (
+    select 1
+    from (
+      values
+        (
+          'public.claim_registration_observation_chat_jobs_v1(text,integer,integer)'::text,
+          'return;'
+        ),
+        (
+          'public.materialize_registration_observation_chat_job_v1(uuid,uuid,integer,jsonb)'::text,
+          'registration_observation_chat_automatic_materialization_retired'
+        )
+    ) expected(signature, required_marker)
+    left join pg_catalog.pg_proc procedure
+      on procedure.oid = pg_catalog.to_regprocedure(expected.signature)
+    where procedure.oid is null
+      or not procedure.prosecdef
+      or pg_catalog.pg_get_userbyid(procedure.proowner) <> 'postgres'
+      or pg_catalog.pg_get_functiondef(procedure.oid) not like
+        '%' || expected.required_marker || '%'
+      or pg_catalog.pg_get_functiondef(procedure.oid) like '%40001%'
+      or pg_catalog.pg_get_functiondef(procedure.oid) like
+        '%dashboard_private.notification_events%'
+      or pg_catalog.pg_get_functiondef(procedure.oid) like
+        '%dashboard_private.registration_observation_chat_jobs%'
+      or pg_catalog.has_function_privilege('public', procedure.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege('anon', procedure.oid, 'EXECUTE')
+      or pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
+      or not pg_catalog.has_function_privilege('service_role', procedure.oid, 'EXECUTE')
   )
   and exists (
     select 1

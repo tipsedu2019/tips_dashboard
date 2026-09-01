@@ -45,6 +45,12 @@ test("observation keeps the previous registration workflow visible", () => {
     workflowStatus: "level_test_requested",
     observationReturnWorkflowStatus: null,
   }), "level_test_requested")
+  assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
+    workflowStatus: "observation_feedback_pending",
+    observationReturnWorkflowStatus: null,
+    status: "waiting",
+    waitingKind: "current_class",
+  }), "waiting_current_class", "a missing observation return value must not remove the fact editors")
 })
 
 test("observation focus and refresh ownership fail closed across runtime, track switches, and close", () => {

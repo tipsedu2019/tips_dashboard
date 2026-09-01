@@ -21,19 +21,6 @@ alter table public.ops_registration_subject_tracks
       or (archived_at is not null and archived_by is not null)
     ) not valid;
 
-alter table public.ops_registration_subject_tracks
-  validate constraint ops_registration_subject_tracks_archived_by_fkey;
-alter table public.ops_registration_subject_tracks
-  validate constraint ops_registration_subject_tracks_archive_pair_check;
-
-create index ops_registration_subject_tracks_active_task_subject_idx
-  on public.ops_registration_subject_tracks(
-    task_id,
-    subject,
-    id
-  )
-  where archived_at is null;
-
 -- The management table reads the active selection. Historical children remain
 -- available through their reviewed history/read RPCs.
 drop policy if exists ops_registration_subject_tracks_authenticated_select

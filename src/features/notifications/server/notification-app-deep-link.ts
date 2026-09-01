@@ -3,7 +3,7 @@ import type { NotificationWorkflowKey } from "../notification-control-plane-type
 export type NotificationAppLink = Readonly<{
   relativeUrl: string
   absoluteUrl: string
-  buttonText: "대시보드에서 보기" | "청강 상세 보기" | "피드백 입력"
+  buttonText: "대시보드에서 보기" | "청강 상세 보기"
 }>
 
 type StaticNotificationPath =
@@ -24,9 +24,6 @@ const CANONICAL_UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab]
 const UNSAFE_LINK_TEXT_PATTERN = /[\u0000-\u001f\u007f-\u009f\u061c\u200e\u200f\u202a-\u202e\u2066-\u2069<>]/u
 const ENCODED_PATH_SEPARATOR_OR_TRAVERSAL = /%(?:2e|2f|5c)/iu
 const RAW_PATH_SEPARATOR_OR_TRAVERSAL = /(?:\\|(?:^|\/)\.{1,2}(?:\/|$))/u
-const REGISTRATION_OBSERVATION_FEEDBACK_PATH =
-  /^\/admin\/registration\/observations\/[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\/feedback$/iu
-
 const STATIC_QUERY_KEYS: Readonly<Record<StaticNotificationPath, ReadonlySet<string>>> = Object.freeze({
   "/admin/tasks": new Set(["taskId", "focus"]),
   "/admin/word-retests": new Set(["taskId"]),
@@ -135,16 +132,6 @@ function parseNotificationAppLink(
     || parsed.pathname !== rawPath
   ) {
     linkError()
-  }
-
-  if (REGISTRATION_OBSERVATION_FEEDBACK_PATH.test(parsed.pathname)) {
-    if (workflowKey !== "registration" || parsed.search || value.includes("?")) linkError()
-    return Object.freeze({
-      relativeUrl: value,
-      absoluteUrl: `${APP_ORIGIN}${value}`,
-      buttonText: "피드백 입력",
-      workflowKey,
-    })
   }
 
   const path = staticPath(parsed.pathname)

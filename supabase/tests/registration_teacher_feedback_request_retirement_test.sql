@@ -122,10 +122,8 @@ select is(
   'the feedback-due producer returns before validating or inserting a job'
 );
 
--- The fixtures below exercise attendance and decision state. Their synthetic
--- source hashes intentionally do not emulate the full Chat source projection.
-alter table dashboard_private.registration_observation_domain_events
-  disable trigger registration_observation_google_chat_materializer;
+-- The fixtures below exercise attendance and decision state. The Chat
+-- projection trigger is retired by the final fact-only boundary.
 
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password,
@@ -468,7 +466,5 @@ select is(
   'attendance and decision create no teacher feedback task links'
 );
 
-alter table dashboard_private.registration_observation_domain_events
-  enable trigger registration_observation_google_chat_materializer;
 select * from finish();
 rollback;

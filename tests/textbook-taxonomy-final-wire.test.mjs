@@ -54,7 +54,7 @@ function wire(data) {
 test("Task6b immutable final artifacts bind the six original wire payloads", () => {
   assert.equal(sha256(readFileSync(migrationUrl)), "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26");
   assert.equal(sha256(readFileSync(tapUrl)), "2423547bea88e72e6668834b8286302d214dcdde0b5df6c1ba3048bdc17bbf9e");
-  assert.equal(sha256(readFileSync(manifestUrl)), "468fb430635df8e17f915374bdf6e12eb07b75902ea06e01572787566484600b");
+  assert.equal(sha256(readFileSync(manifestUrl)), "9fb706b1d920449dffee1ca4703fb2dc38a8431ef782cb432606aac74439bf3e");
   const manifest = JSON.parse(readFileSync(manifestUrl, "utf8"));
   assert.deepEqual(manifest.orderedNewMigrations.find(entry => entry.fileName === "20260901072345_textbook_taxonomy_numbered_drafts.sql"), {
     fileName: "20260901072345_textbook_taxonomy_numbered_drafts.sql",

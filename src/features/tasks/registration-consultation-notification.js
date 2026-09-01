@@ -202,6 +202,38 @@ export function getRegistrationManagementNotificationReadiness(input = {}) {
   }
 }
 
+const REGISTRATION_APPOINTMENT_NOTIFICATION_REQUIRED_FIELDS = Object.freeze([
+  "학생",
+  "일시",
+  "장소",
+  "과목",
+  "담당자",
+])
+
+export function getRegistrationAppointmentNotificationReadiness(input = {}) {
+  const participants = Array.isArray(input.participants) ? input.participants : []
+  const missingFields = []
+  if (!text(input.studentName)) missingFields.push("학생")
+  if (!text(input.scheduledAt)) missingFields.push("일시")
+  if (!text(input.place)) missingFields.push("장소")
+  if (participants.length === 0 || participants.some((participant) => !text(participant?.subject))) {
+    missingFields.push("과목")
+  }
+  if (
+    participants.length === 0
+    || participants.some((participant) => (
+      !text(participant?.directorProfileId) || !text(participant?.directorName)
+    ))
+  ) {
+    missingFields.push("담당자")
+  }
+  return {
+    ready: missingFields.length === 0,
+    requiredFields: [...REGISTRATION_APPOINTMENT_NOTIFICATION_REQUIRED_FIELDS],
+    missingFields,
+  }
+}
+
 export function getRegistrationVisitNotificationDedupeKey(input = {}) {
   return [
     "registration:visit",
@@ -274,7 +306,11 @@ export function buildRegistrationVisitCanonicalMessage(input = {}) {
 
 export async function sendRegistrationVisitNotificationTarget(target = {}, sessionToken = "") {
   const appointmentId = text(target.appointmentId)
+  const notificationRevision = Number(target.notificationRevision)
   if (!appointmentId) throw new Error("방문상담 예약 ID를 확인하세요.")
+  if (!Number.isInteger(notificationRevision) || notificationRevision < 1) {
+    throw new Error("방문상담 예약의 최신 버전을 확인하세요.")
+  }
   const fixtureModule = await import("./registration-track-fixture-runtime").catch(() => null)
   const fixture = fixtureModule?.executeRegistrationSubjectTrackFixtureAction(
     "sendRegistrationVisitNotificationTarget",
@@ -282,6 +318,7 @@ export async function sendRegistrationVisitNotificationTarget(target = {}, sessi
   ) || null
   if (fixture) return fixture
   if (!text(sessionToken)) throw new Error("로그인 세션을 확인하세요.")
+  const requestKey = crypto.randomUUID()
 
   const response = await fetch("/api/registration/consultation-notification", {
     method: "POST",
@@ -289,7 +326,7 @@ export async function sendRegistrationVisitNotificationTarget(target = {}, sessi
       Authorization: `Bearer ${text(sessionToken)}`,
       "Content-Type": "application/json",
     },
-    body: JSON.stringify({ appointmentId }),
+    body: JSON.stringify({ appointmentId, notificationRevision, requestKey }),
   })
   const payload = await response.json().catch(() => ({}))
   if (!response.ok || payload?.ok !== true) {

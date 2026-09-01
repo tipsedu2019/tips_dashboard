@@ -8,6 +8,10 @@ const migrationUrl = new URL(
   "../supabase/migrations/20260809105000_registration_observation_google_chat.sql",
   import.meta.url,
 )
+const finalBoundaryUrl = new URL(
+  "../supabase/migrations/20260901111200_registration_flat_fact_runtime_finalization.sql",
+  import.meta.url,
+)
 
 test("observation Chat consumes the stable domain outbox without replacing core mutations", async () => {
   const sql = await readFile(migrationUrl, "utf8")
@@ -42,6 +46,7 @@ test("all eight observation destination rules are immediate and default OFF", as
 
 test("observation Chat leaves protected generic functions byte-identical", async () => {
   const sql = await readFile(migrationUrl, "utf8")
+  const finalBoundarySql = await readFile(finalBoundaryUrl, "utf8")
   assert.doesNotMatch(sql, /\bclaim_notification_deliveries_v1\b/i)
   assert.doesNotMatch(sql, /\bprepare_notification_immediate_delivery_v1\b/i)
   assert.doesNotMatch(sql, /\brevalidate_immediate_notification_delivery_v1\b/i)
@@ -49,6 +54,22 @@ test("observation Chat leaves protected generic functions byte-identical", async
   assert.match(sql, /prepare_registration_observation_notification_delivery_v1/i)
   assert.match(sql, /commit_notification_in_app_delivery_v1/i)
   assert.match(sql, /begin_notification_delivery_send_v1/i)
+  assert.match(
+    finalBoundarySql,
+    /create or replace function public\.claim_registration_observation_chat_jobs_v1\([\s\S]*?return;/i,
+  )
+  assert.match(
+    finalBoundarySql,
+    /registration_observation_chat_automatic_materialization_retired[\s\S]*?errcode = '55000'/i,
+  )
+  assert.match(
+    finalBoundarySql,
+    /update dashboard_private\.registration_observation_chat_jobs job[\s\S]*?status = 'canceled'[\s\S]*?last_error_code = 'explicit_action_required'/i,
+  )
+  assert.doesNotMatch(
+    finalBoundarySql,
+    /create or replace function public\.(?:claim_notification_deliveries_v1|prepare_notification_immediate_delivery_v1|revalidate_immediate_notification_delivery_v1)/i,
+  )
 
   const result = spawnSync(
     process.execPath,

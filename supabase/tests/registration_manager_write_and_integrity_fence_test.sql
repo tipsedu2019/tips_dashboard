@@ -97,14 +97,16 @@ select ok(
   (
     select pg_catalog.strpos(definition, 'assert_registration_actor_is_active_manager_v1') > 0
       and pg_catalog.strpos(definition, 'assert_registration_actor_is_active_manager_v1')
-        < pg_catalog.strpos(definition, 'save_registration_consultation_result_v2_base')
+        < pg_catalog.strpos(definition, 'from public.ops_registration_consultations')
+      and definition not like '%save_registration_consultation_result_v2_base%'
+      and definition like '%dashboard_private.record_registration_fact_audit_v1%'
     from (
       select pg_catalog.pg_get_functiondef(
         'public.save_registration_consultation_result_v2(uuid,text,text,text,uuid,integer,text)'::regprocedure
       ) as definition
     ) source
   ),
-  'legacy consultation-result authorization runs before the teacher-capable base function'
+  'consultation-result authorization runs before the direct fact-table implementation'
 );
 
 select ok(
