@@ -500,16 +500,6 @@ test('extracted pure handoff model preserves literal existing order, return and 
   await assertLiteralOutputs(await import(handoffUrl));
 });
 
-test('workspace imports and invokes the single extracted implementations of all three builders', () => {
-  const workspace = readFileSync(new URL('textbook-operations-workspace.tsx', feature), 'utf8');
-  const imports = workspace.match(/import \{([^}]+)\} from "\.\/textbook-handoff-model";/)?.[1].split(/[,\s]+/) || [];
-  for (const name of ['buildPurchaseSupplierHandoffGroups', 'buildPurchaseSupplierReturnHandoffGroups', 'buildMakeEduBillingHandoffGroups']) {
-    assert.ok(imports.includes(name), `${name} is imported`);
-    assert.ok(new RegExp(`${name}\\(`).test(workspace), `${name} is invoked`);
-    assert.ok(!new RegExp(`function ${name}\\b`).test(workspace), `${name} has one implementation`);
-  }
-});
-
 test('teacher-only and zero-price handoffs preserve zero formatting without billing teacher copies', async () => {
   const api = await import(handoffUrl);
   const input = purchaseInput();

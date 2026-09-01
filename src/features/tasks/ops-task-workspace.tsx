@@ -13293,7 +13293,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               pageSize={listNumberedPage.pageSize}
               totalCount={listNumberedPage.totalCount}
               loading={numberedPage.loading}
-              pageSizeMode={numberedServerPage ? numberedPage.pageSizeMode : fixturePageSize.mode}
               onPageChange={(page) => {
                 if (hasUnsavedWorkspaceInput) {
                   if (registrationApplicationHost.kind !== "closed") requestRegistrationApplicationClose()

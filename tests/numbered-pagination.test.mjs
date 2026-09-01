@@ -10,7 +10,8 @@ import {
 
 test("shared numbered-pagination contracts export page envelopes and size preferences", async () => {
   const source = await readFile(new URL("../src/lib/numbered-pagination.ts", import.meta.url), "utf8")
-  assert.match(source, /export type DataTablePageSizePreference = "auto" \| DataTablePageSize/)
+  assert.match(source, /export type DataTablePageSizePreference = DataTablePageSize/)
+  assert.doesNotMatch(source, /DataTablePageSizePreference = "auto"/)
   assert.match(source, /export type NumberedPage<T> = \{\s*rows: T\[\]\s*page: number\s*pageSize: DataTablePageSize\s*totalCount: number\s*\}/s)
 })
 
@@ -78,5 +79,6 @@ test("invalid pages normalize to one and page sizes are strictly limited", () =>
   assert.throws(() => validatePageSize(0), /page size/i)
   assert.throws(() => validatePageSize(5), /page size/i)
   assert.throws(() => validatePageSize(30), /page size/i)
+  assert.throws(() => validatePageSize("auto"), /page size/i)
   assert.throws(() => getNumberedPagination({ page: 1, pageSize: 5, totalCount: 10 }), /page size/i)
 })

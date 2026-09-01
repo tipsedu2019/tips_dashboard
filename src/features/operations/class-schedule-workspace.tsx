@@ -2707,7 +2707,7 @@ export function ClassScheduleWorkspace() {
   const {
     data: scopedData,
     loading,
-    page: displayedPage, pageSize, totalCount, goToPage, pageSizeMode, setPageSizePreference,
+    page: displayedPage, pageSize, totalCount, goToPage, setPageSizePreference,
     actorScope, dataMatchesCurrentScope, displayRequest,
     error,
     refresh,
@@ -6748,7 +6748,7 @@ export function ClassScheduleWorkspace() {
           </div>
           <div className="border-t px-4 py-3">
             <DataTablePagination page={displayedPage} pageSize={pageSize} totalCount={totalCount} loading={loading}
-              onPageChange={handlePageChange} pageSizeMode={pageSizeMode} onPageSizeChange={setPageSizePreference} />
+              onPageChange={handlePageChange} onPageSizeChange={setPageSizePreference} />
           </div>
         </section>
 

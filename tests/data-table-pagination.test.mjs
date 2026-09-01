@@ -150,7 +150,7 @@ test("pager disables navigation at empty and known boundaries", async (t) => {
   await act(async () => root.unmount())
 })
 
-test("pager exposes automatic page-size selection, loading safety, and per-list navigation label", async (t) => {
+test("pager exposes only 10, 15, and 20 row choices with loading safety and a per-list navigation label", async (t) => {
   const dom = installDom()
   t.after(() => dom.window.close())
   const numbered = await import("../src/lib/numbered-pagination.ts")
@@ -165,17 +165,21 @@ test("pager exposes automatic page-size selection, loading safety, and per-list 
   const container = document.createElement("div")
   const root = createRoot(container)
   await act(async () => root.render(createElement(DataTablePagination, {
-    page: 11, pageSize: 15, pageSizeMode: "manual", totalCount: 390, loading: true,
+    page: 11, pageSize: 15, totalCount: 390, loading: true,
     ariaLabel: "학생 목록 페이지 탐색", onPageChange: () => assert.fail("loading navigation must be disabled"),
     onPageSizeChange: (preference) => preferences.push(preference),
   })))
   assert.equal(container.querySelector("nav")?.getAttribute("aria-label"), "학생 목록 페이지 탐색")
   assert.equal(container.querySelector("button[data-page-size-value='15']")?.getAttribute("aria-pressed"), "true")
-  assert.ok(container.querySelector("button[data-page-size-value='auto']"))
+  assert.deepEqual(
+    [...container.querySelectorAll("button[data-page-size-value]")].map((button) => button.getAttribute("data-page-size-value")),
+    ["10", "15", "20"],
+  )
+  assert.equal(container.querySelector("button[data-page-size-value='auto']"), null)
   assert.ok([...container.querySelectorAll("[data-slot=pagination-number-group] button")].every((button) => button.disabled))
   assert.deepEqual([...container.querySelectorAll("[data-slot=pagination-number-group] button")].map((button) => button.textContent), ["11", "12", "13", "14", "15", "16", "17", "18", "19", "20"])
-  await act(async () => container.querySelector("button[data-page-size-value='auto']").click())
-  assert.deepEqual(preferences, ["auto"])
+  await act(async () => container.querySelector("button[data-page-size-value='20']").click())
+  assert.deepEqual(preferences, [20])
   await act(async () => root.unmount())
 })
 
@@ -197,7 +201,7 @@ test("pager renders the partial final block without removing later page buttons"
   await act(async () => root.unmount())
 })
 
-test("page-size preference hydrates before exposing a requestable size and handles storage failures", async (t) => {
+test("page-size preference defaults to fixed 10 rows and rejects the removed automatic mode", async (t) => {
   const dom = installDom()
   t.after(() => dom.window.close())
   const numbered = await import("../src/lib/numbered-pagination.ts")
@@ -214,29 +218,25 @@ test("page-size preference hydrates before exposing a requestable size and handl
   await act(async () => root.render(createElement(Probe)))
   assert.equal(seen[0].ready, false)
   assert.equal(seen.at(-1).ready, true)
-  assert.equal(seen.at(-1).mode, "auto")
-  assert.ok([10, 15, 20].includes(seen.at(-1).pageSize))
+  assert.equal(seen.at(-1).pageSize, 10)
+  assert.equal("mode" in seen.at(-1), false)
+  assert.equal("setAutoPageSize" in seen.at(-1), false)
   await act(async () => seen.at(-1).setPreference(15))
-  assert.equal(seen.at(-1).mode, "manual")
   assert.equal(seen.at(-1).pageSize, 15)
   assert.deepEqual(JSON.parse(localStorage.getItem("tips.data-table-page-size.v1") ?? "{}"), {
     students: { mode: "manual", pageSize: 15 },
   })
   assert.throws(() => seen.at(-1).setPreference(5), /page size/i)
-  await act(async () => seen.at(-1).setPreference("auto"))
-  assert.equal(seen.at(-1).mode, "auto")
-  await act(async () => seen.at(-1).setAutoPageSize(20))
-  assert.equal(seen.at(-1).pageSize, 20)
-  const saved = JSON.parse(localStorage.getItem("tips.data-table-page-size.v1") ?? "{}")
-  assert.deepEqual(saved, {})
+  assert.throws(() => seen.at(-1).setPreference("auto"), /page size/i)
   await act(async () => root.unmount())
 })
 
-test("measured auto sizing cannot overwrite a manual preference", async (t) => {
+test("stored fixed page-size preference is the only value restored", async (t) => {
   const dom = installDom()
   t.after(() => dom.window.close())
   const numbered = await import("../src/lib/numbered-pagination.ts")
   const { useDataTablePageSize } = await loadTypeScript(hookUrl, new Map([["@/lib/numbered-pagination", numbered]]))
+  localStorage.setItem("tips.data-table-page-size.v1", JSON.stringify({ classes: { mode: "manual", pageSize: 15 } }))
   const seen = []
   function Probe() {
     const state = useDataTablePageSize("classes")
@@ -245,12 +245,9 @@ test("measured auto sizing cannot overwrite a manual preference", async (t) => {
   }
   const root = createRoot(document.createElement("div"))
   await act(async () => root.render(createElement(Probe)))
-  await act(async () => {
-    seen.at(-1).setPreference(15)
-    seen.at(-1).setAutoPageSize(20)
-  })
-  assert.equal(seen.at(-1).mode, "manual")
   assert.equal(seen.at(-1).pageSize, 15)
+  assert.equal("mode" in seen.at(-1), false)
+  assert.equal("setAutoPageSize" in seen.at(-1), false)
   assert.deepEqual(JSON.parse(localStorage.getItem("tips.data-table-page-size.v1") ?? "{}"), {
     classes: { mode: "manual", pageSize: 15 },
   })
@@ -272,18 +269,13 @@ test("management migrates legacy manual size once without overriding shared pref
   const root = createRoot(document.createElement("div"))
   await act(async () => root.render(createElement(Probe)))
   assert.equal(state.pageSize, 20)
-  assert.equal(state.mode, "manual")
   await act(async () => state.setPreference(15))
   await act(async () => root.unmount())
   const second = createRoot(document.createElement("div"))
   await act(async () => second.render(createElement(Probe)))
   assert.equal(state.pageSize, 15)
-  await act(async () => state.setPreference("auto"))
+  assert.throws(() => state.setPreference("auto"), /page size/i)
   await act(async () => second.unmount())
-  const third = createRoot(document.createElement("div"))
-  await act(async () => third.render(createElement(Probe)))
-  assert.equal(state.mode, "auto", "legacy value must not revive after choosing auto")
-  await act(async () => third.unmount())
 })
 
 test("page-size preference tolerates malformed and unavailable browser storage", async (t) => {

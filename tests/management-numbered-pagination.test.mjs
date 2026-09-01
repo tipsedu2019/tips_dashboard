@@ -90,7 +90,7 @@ async function mountClassConsumer(t, { renderTable = false, deferDefault = false
       pageSize: 10, enabled, authorizationScope: actor, page, sort, onQueryChange: ({ page }) => setPage(page),
     });
     useEffect(() => { state = result; query = page; }, [result, page]);
-    return renderTable ? createElement(ManagementDataTable, { ...result, kind: "classes", displayedScope: result.scope, pageSizeMode: "manual",
+    return renderTable ? createElement(ManagementDataTable, { ...result, kind: "classes", displayedScope: result.scope,
       actions: {}, badgeLabel: "과목", statusLabel: "상태", emptyLabel: "수업", onPageChange: result.goToPage, onSortChange: result.setSort }) : null;
   }
   const root = createRoot(document.getElementById("root"));
@@ -239,7 +239,7 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
   for (const key of ["HTMLElement", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
-  if (preference !== "auto") window.localStorage.setItem("tips.data-table-page-size.v1", JSON.stringify({ [`management:${kind}`]: { mode: "manual", pageSize: preference } }));
+  if (Number.isInteger(preference)) window.localStorage.setItem("tips.data-table-page-size.v1", JSON.stringify({ [`management:${kind}`]: { mode: "manual", pageSize: preference } }));
   const { supabase, requests, finish } = transport();
   const actualService = loadHook(supabase, "src/features/management/management-service.js");
   const mutations = [];
@@ -305,19 +305,14 @@ test("actual manual size handler never requests old page with the new size durin
   assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 10], [1, 15], [11, 15]], "Back/navigation restores page 11 at the selected size");
 });
 
-test("actual auto measurement preserves initial restored page and atomically resets later size changes", async (t) => {
-  const page = await mountManagementPage(t, { preference: "auto", holdNavigation: true });
-  assert.equal(page.requests.length, 0);
-  await act(async () => page.table.onAutoPageSizeChange(15));
-  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 15]]);
+test("management defaults to fixed 10 rows without an automatic measurement callback", async (t) => {
+  const page = await mountManagementPage(t, { preference: null });
+  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 10]]);
+  assert.equal(page.table.pageSizeMode, undefined);
+  assert.equal(page.table.onAutoPageSizeChange, undefined);
   await act(async () => page.finish(0));
-  await act(async () => page.table.onAutoPageSizeChange(20));
-  assert.deepEqual(page.requests.map((request) => [request.args.p_page, request.args.p_page_size]), [[11, 15], [1, 20]]);
-  await act(async () => page.releaseNavigation());
-  assert.equal(page.requests.length, 2);
-  await act(async () => page.requests[1].reject(new Error("offline")));
-  assert.equal(page.table.page, 11); assert.equal(page.table.pageSize, 15);
-  assert.equal(page.table.rows.length, 15);
+  assert.equal(page.table.page, 11);
+  assert.equal(page.table.rows.length, 10);
 });
 
 for (const totalAfter of [101, 100]) {
@@ -589,11 +584,11 @@ test("the real table renders server page rows unchanged, routes sort headers and
   });
   const { normalizeClassManagementRecord } = await import("../src/features/management/records.js");
   const rows = [normalizeClassManagementRecord({ id: "z", name: "Z class", subject: "수학", status: "수강" }), normalizeClassManagementRecord({ id: "a", name: "A class", subject: "수학", status: "수강" })];
-  const sorts = [], pages = [], measurements = [];
+  const sorts = [], pages = [];
   const root = createRoot(document.getElementById("root"));
   const props = { kind: "classes", rows, stats: [], loading: false, page: 11, pageSize: 10, totalCount: 102,
-    sort: [{ id: "title", desc: false }], displayedScope: "scope", pageSizeMode: "auto", filterOptions: {}, actions: {}, badgeLabel: "과목", statusLabel: "상태", emptyLabel: "수업",
-    onPageChange: (page) => pages.push(page), onSortChange: (sort) => sorts.push(sort), onAutoPageSizeChange: (size) => measurements.push(size), onPageSizePreferenceChange() {} };
+    sort: [{ id: "title", desc: false }], displayedScope: "scope", filterOptions: {}, actions: {}, badgeLabel: "과목", statusLabel: "상태", emptyLabel: "수업",
+    onPageChange: (page) => pages.push(page), onSortChange: (sort) => sorts.push(sort), onPageSizePreferenceChange() {} };
   await act(async () => root.render(createElement(ManagementDataTable, props)));
   const renderedRows = [...document.querySelectorAll('tr[data-management-row="true"]')];
   assert.equal(renderedRows.length, 2, "server page 11 must not be sliced locally again");
@@ -609,6 +604,8 @@ test("the real table renders server page rows unchanged, routes sort headers and
   assert.ok(document.body.textContent.includes("전체 수업 102개 · 서버 집계"));
   await act(async () => document.querySelector('button[aria-label="이전 페이지"]').click());
   assert.deepEqual(pages, [10]);
-  assert.ok(measurements.length > 0, "hidden desktop scrollport must settle auto sizing for mobile cards");
+  await act(async () => root.render(createElement(ManagementDataTable, { ...props, loading: true })));
+  assert.equal(document.querySelectorAll('tr[data-management-row="true"]').length, 2, "page navigation must retain the previous rows while loading");
+  assert.doesNotMatch(document.body.textContent, /수업 불러오는 중|수업 데이터를 불러오는 중/);
   await act(async () => root.unmount());
 });

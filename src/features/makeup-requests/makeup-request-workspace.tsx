@@ -2681,7 +2681,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           onOpenDetail={(request) => { setSelectedDetailRequest(null); setDetailId(request.id) }}
         />
         <DataTablePagination page={pageState.page} pageSize={pageState.totalCount === null ? pageSize.pageSize : pageState.pageSize} totalCount={pageState.totalCount} loading={loading}
-          pageSizeMode={pageSize.mode} onPageSizeChange={(preference) => { setNavigation({ filters: acceptedFilters, page: 1 }); pageSize.setPreference(preference) }}
+          onPageSizeChange={(preference) => { setNavigation({ filters: acceptedFilters, page: 1 }); pageSize.setPreference(preference) }}
           onPageChange={(page) => setNavigation({ filters: acceptedFilters, page })} ariaLabel="휴보강 페이지 탐색" />
       </div>
 

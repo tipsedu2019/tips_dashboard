@@ -51,7 +51,7 @@ test("curriculum summary shows actionable planning workload", async () => {
   assert.doesNotMatch(source, /미배정 회차 \$\{model\.summary\.pendingSessions\}회/);
 });
 
-test("curriculum overview has a PC-first work queue and dense table shell", async () => {
+test("curriculum overview has a PC-first work queue, dense table shell, and shared numbered pager", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
   const modelSource = await readFile(new URL("src/features/academic/records.js", root), "utf8");
 
@@ -61,11 +61,12 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /data-testid="curriculum-work-queue"/);
   assert.match(source, /className="grid grid-cols-2 gap-2 xl:grid-cols-5"/);
   assert.match(source, /flex h-10 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors/);
-  assert.match(source, /const CURRICULUM_CLASS_PAGE_SIZE = 30/);
+  assert.match(source, /import \{ DataTablePagination \} from "@\/components\/data-table\/data-table-pagination"/);
   assert.match(source, /useAcademicWorkspaceData\(\{\s*mode: "curriculum"/);
   assert.match(source, /cursor: null/);
+  assert.match(source, /page: navigation\.page/);
+  assert.match(source, /navigationKey: navigation\.key/);
   assert.match(source, /const visibleViewRows = model\.rows/);
-  assert.match(source, /const hasMoreViewRows = Boolean\(page\?\.hasMore\)/);
   assert.match(source, /const viewRowSessionCount = Number\(model\.summary\.totalSessions/);
   assert.match(source, /const curriculumViewModeCounts = model\.summary\.viewModeCounts/);
   assert.match(source, /data-testid="curriculum-mobile-list"/);
@@ -74,8 +75,11 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.match(source, /<ScrollArea className="hidden h-\[38rem\] \[contain-intrinsic-size:640px\] \[content-visibility:auto\] md:block">/);
   assert.match(source, /const curriculumViewModeCounts = model\.summary\.viewModeCounts/);
   assert.match(source, /\{visibleViewRows\.map\(\(row\) =>/);
-  assert.match(source, /onClick=\{\(\) => void loadMore\(\)\}/);
-  assert.match(source, /`다음 \$\{CURRICULUM_CLASS_PAGE_SIZE\}건`/);
+  assert.match(source, /<DataTablePagination page=\{displayedPage\} pageSize=\{pageSize\} totalCount=\{totalCount\} loading=\{loading\}/);
+  assert.match(source, /onPageChange=\{handlePageChange\} onPageSizeChange=\{setPageSizePreference\}/);
+  assert.doesNotMatch(source, /CURRICULUM_CLASS_PAGE_SIZE/);
+  assert.doesNotMatch(source, /loadMore/);
+  assert.doesNotMatch(source, /hasMoreViewRows/);
   assert.match(source, /\{viewRowSessionCount\}회차 · \{viewRowTextbookCount\}권/);
   assert.doesNotMatch(source, /\{model\.summary\.totalSessions\}회차 · \{model\.summary\.linkedTextbooks\}권/);
   assert.doesNotMatch(source, /selectedClassId/);
@@ -102,32 +106,36 @@ test("curriculum overview has a PC-first work queue and dense table shell", asyn
   assert.doesNotMatch(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
 });
 
-test("curriculum workspace delegates all filters and continuation to the scoped service", async () => {
+test("curriculum workspace delegates all filters and numbered navigation to the scoped service", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
   const hookSource = await readFile(new URL("src/features/academic/use-academic-workspace-data.ts", root), "utf8");
   assert.match(source, /periodId: period \|\| null/);
-  assert.match(source, /search: deferredSearch/);
+  assert.match(source, /\n\s+search,/);
   assert.match(source, /status,/);
   assert.match(source, /subject,/);
   assert.match(source, /grade,/);
   assert.match(source, /teacher,/);
   assert.match(source, /classroom,/);
   assert.match(source, /viewMode,/);
-  assert.match(source, /loadingMore/);
+  assert.match(source, /page: navigation\.page/);
+  assert.match(source, /navigationKey: navigation\.key/);
+  assert.match(source, /return goToPage\(page\)/);
   assert.match(hookSource, /loadCurriculumDetail/);
-  assert.match(hookSource, /loadingMoreFingerprint/);
+  assert.match(hookSource, /createNumberedPageController/);
+  assert.match(hookSource, /readCurriculumNumberedPage/);
+  assert.match(hookSource, /useDataTablePageSize\("academic:curriculum"\)/);
   assert.match(hookSource, /successfulRequest/);
   assert.match(hookSource, /dataMatchesCurrentScope/);
-  assert.match(hookSource, /const \{ session, user, role, loading: authLoading \} = useAuth\(\)/);
-  assert.match(hookSource, /createAcademicExecutionContext/);
-  assert.match(hookSource, /selectAcademicScopedValue/);
+  assert.match(hookSource, /const \{ user, role, loading: authLoading \} = useAuth\(\)/);
+  assert.match(hookSource, /createAcademicReadService/);
   assert.doesNotMatch(hookSource, /app_metadata\?\.role/);
-  assert.match(source, /const renderData = dataMatchesCurrentScope \? curriculumData : null/);
-  assert.match(source, /if \(loading && !dataMatchesCurrentScope\)/);
+  assert.match(source, /const renderData = curriculumData/);
+  assert.match(source, /if \(loading && !renderData\)/);
   assert.match(source, /onClick=\{\(\) => void refresh\(\)\}/);
   assert.match(source, /다시 시도/);
   assert.doesNotMatch(source, /setPeriod\(normalizedPeriod\)/);
   assert.doesNotMatch(source, /\.slice\(0, classListLimit\)/);
+  assert.doesNotMatch(source, /loadingMore/);
 });
 
 test("curriculum workspace removes duplicated right detail panel", async () => {

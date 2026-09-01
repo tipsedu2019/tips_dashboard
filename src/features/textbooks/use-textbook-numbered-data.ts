@@ -168,7 +168,7 @@ function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: Text
   const snapshot = actor && display.actor === actor ? display.snapshot : emptyPage<T>()
   const acceptedFilters = useMemo(() => snapshot.scope === null ? null : (JSON.parse(snapshot.scope) as { filters: F }).filters, [snapshot.scope])
   return { page: { ...snapshot, loading: Boolean(actor && enabled && (!preference.ready || snapshot.loading)), acceptedFilters,
-    goToPage, retry, refresh, pageSizeMode: preference.mode, setPageSizePreference },
+    goToPage, retry, refresh, setPageSizePreference },
     resourceScope, resourceReady: preference.ready,
   }
 }

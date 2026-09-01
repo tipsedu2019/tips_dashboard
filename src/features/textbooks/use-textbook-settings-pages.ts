@@ -60,7 +60,6 @@ export type TextbookSettingsPageResource<T, P extends PageEnvelope<T>> = {
   goToPage: (page: number) => void;
   retry: () => void;
   refresh: () => void;
-  pageSizeMode: "auto" | "manual";
   setPageSizePreference?: (preference: DataTablePageSizePreference) => void;
 };
 
@@ -161,7 +160,6 @@ function useSettingsPage<C, T, P extends PageEnvelope<T>>({
     goToPage,
     retry,
     refresh,
-    pageSizeMode: fixedPageSize ? "manual" : preference.mode,
     setPageSizePreference: fixedPageSize ? undefined : setPageSizePreference,
   };
 }

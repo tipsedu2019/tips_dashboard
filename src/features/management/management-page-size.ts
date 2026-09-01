@@ -12,11 +12,6 @@ export function clampManagementPageIndex(pageIndex: number, rowCount: number, pa
   return Math.min(safePageIndex, lastPageIndex);
 }
 
-export function pickManagementListPageSize(fitRows: number): ManagementListPageSize {
-  const safeFit = Number.isFinite(fitRows) ? Math.floor(fitRows) : 20;
-  return [...MANAGEMENT_LIST_PAGE_SIZES].reverse().find((size) => size <= safeFit) ?? 10;
-}
-
 export function getManagementListViewportHeight({
   viewportHeight,
   viewportDocumentTop,
@@ -33,35 +28,6 @@ export function getManagementListViewportHeight({
   // Extremely short windows may scroll the page; never collapse the table to zero.
   return Math.max(160, Math.floor(viewportHeight - viewportDocumentTop
     - footerHeight - Math.max(0, footerGap) - Math.max(0, bottomReserve)));
-}
-
-export function getManagementListRowCapacity({
-  viewportHeight,
-  bodyViewportTop,
-  documentScrollTop,
-  rowHeight,
-  footerHeight,
-  bodyToFooterGap,
-  bottomReserve,
-}: {
-  viewportHeight: number;
-  bodyViewportTop: number;
-  documentScrollTop: number;
-  rowHeight: number;
-  footerHeight: number;
-  bodyToFooterGap: number;
-  bottomReserve: number;
-}) {
-  const bodyDocumentTop = bodyViewportTop + documentScrollTop;
-  const availableHeight = viewportHeight - bodyDocumentTop - footerHeight
-    - Math.max(0, bodyToFooterGap) - Math.max(0, bottomReserve);
-  return Math.max(0, Math.floor(availableHeight / (rowHeight > 0 ? rowHeight : 34)));
-}
-
-export function estimateManagementListPageSize(viewportHeight: number): ManagementListPageSize {
-  if (viewportHeight >= 940) return 20;
-  if (viewportHeight >= 760) return 15;
-  return 10;
 }
 
 export function parseManagementPageSizePreference(raw: string | null): ManagementPageSizePreference | null {

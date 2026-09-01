@@ -112,5 +112,5 @@ export function useOpsTaskNumberedPage({ viewerId, viewerRole, filters, enabled,
   }, [actor, enabled, goToPage, preference.ready, retry, scope, snapshot.page, snapshot.scope])
   const setPageSizePreference = preference.setPreference
   return { ...snapshot, loading: Boolean(actor) && (!preference.ready || snapshot.loading || (snapshot.scope === null && !snapshot.error)),
-    goToPage, retry, refresh, pageSizeMode: preference.mode, setPageSizePreference }
+    goToPage, retry, refresh, setPageSizePreference }
 }
