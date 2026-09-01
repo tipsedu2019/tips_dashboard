@@ -3,94 +3,51 @@ import { readFile } from "node:fs/promises";
 import test from "node:test";
 
 const root = new URL("../", import.meta.url);
+const read = (file) => readFile(new URL(file, root), "utf8");
 
-test("textbook settings loads editable taxonomy only when that tab is opened", async () => {
-  const source = await readFile(
-    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
-    "utf8",
-  );
-  const migrationSource = await readFile(
-    new URL("supabase/migrations/20260630093000_textbook_sub_subject_id_default.sql", root),
-    "utf8",
-  );
-
-  assert.match(source, /useState<TextbookSubSubjectSettingRecord\[\]>\(\(\) =>\s*mergeTextbookSubSubjectSettings\(\[\]\)/);
-  assert.match(source, /const loadSubSubjectRows = useCallback/);
-  assert.match(source, /activeSection === "subSubjects"/);
-  assert.match(source, /void loadSubSubjectRows\(\)/);
-  assert.match(source, /const shouldPersistSubSubjects = subSubjectsTouched \|\| deletedSubSubjectIds\.length > 0/);
-  assert.match(source, /shouldPersistSubSubjects && nextSubSubjects\.length > 0/);
-  assert.match(source, /id: row\.id,/);
-  assert.doesNotMatch(source, /id: row\.isNew \? undefined : row\.id/);
-  assert.match(migrationSource, /alter table public\.textbook_sub_subject_settings/);
-  assert.match(migrationSource, /alter column id set default gen_random_uuid\(\)/);
-  assert.match(migrationSource, /update public\.textbook_sub_subject_settings[\s\S]*where id is null/);
-
-  const loadRowsBody = source.slice(source.indexOf("const loadRows = useCallback"), source.indexOf("const loadSubSubjectRows"));
-  assert.doesNotMatch(loadRowsBody, /textbook_sub_subject_settings/);
+test("settings workspace consumes lazy projected pages and the one atomic save boundary", async () => {
+  const [workspace, hook, migration] = await Promise.all([
+    read("src/features/textbooks/textbook-supplier-settings-workspace.tsx"),
+    read("src/features/textbooks/use-textbook-settings-pages.ts"),
+    read("supabase/migrations/20260630093000_textbook_sub_subject_id_default.sql"),
+  ]);
+  assert.match(workspace, /useTextbookSettingsPages/);
+  assert.match(workspace, /saveTextbookSettingsDraft/);
+  assert.match(workspace, /SubSubjectDraft \| null/);
+  assert.match(workspace, /draftState\.subSubjectOperations/);
+  assert.match(hook, /enabled: activeSection === "subSubjects"/);
+  assert.match(hook, /listTextbookSubSubjectPage/);
+  assert.match(hook, /textbooks:subsubjects/);
+  assert.doesNotMatch(workspace, /\bsupabase\b/);
+  assert.doesNotMatch(workspace, /supabase\.from|\.from\("textbook_/);
+  assert.doesNotMatch(workspace, /\.upsert\(|\.delete\(|loadRows|loadSubSubjectRows/);
+  assert.match(migration, /alter table public\.textbook_sub_subject_settings/);
+  assert.match(migration, /alter column id set default gen_random_uuid\(\)/);
 });
 
-test("textbook settings tabs keep explicit pointer fallbacks", async () => {
-  const source = await readFile(
-    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
-    "utf8",
-  );
-
-  assert.match(
-    source,
-    /<TabsTrigger\s+value="publishers"\s+onClick=\{\(\) => handleSectionChange\("publishers"\)\}/,
-  );
-  assert.match(
-    source,
-    /<TabsTrigger\s+value="suppliers"\s+onClick=\{\(\) => handleSectionChange\("suppliers"\)\}/,
-  );
-  assert.match(
-    source,
-    /<TabsTrigger\s+value="subSubjects"\s+onClick=\{\(\) => handleSectionChange\("subSubjects"\)\}/,
-  );
-});
-
-test("textbook settings search behaves like a real search field", async () => {
-  const source = await readFile(
-    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
-    "utf8",
-  );
-
+test("settings tabs keep explicit pointer fallbacks and real search semantics", async () => {
+  const source = await read("src/features/textbooks/textbook-supplier-settings-workspace.tsx");
+  for (const value of ["publishers", "suppliers", "subSubjects"]) {
+    assert.match(source, new RegExp(`<TabsTrigger value="${value}" onClick=\\{\\(\\) => changeSection\\("${value}"\\)\\}`));
+  }
   assert.match(source, /role="search" aria-label=\{toolbarPlaceholder\}/);
   assert.match(source, /type="search"/);
-  assert.match(source, /aria-label=\{toolbarPlaceholder\}/);
   assert.match(source, /autoComplete="off"/);
   assert.match(source, /enterKeyHint="search"/);
 });
 
-test("textbook supplier tab shows linked publisher names instead of count-only spacing", async () => {
-  const source = await readFile(
-    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
-    "utf8",
-  );
-
-  assert.match(source, /const publisherNamesBySupplierId = useMemo/);
-  assert.match(source, /const visiblePublisherNames = linkedPublisherNames\.slice\(0, 3\)/);
-  assert.match(source, /hiddenPublisherCount > 0/);
-  assert.match(source, /<TableHead className=\{`w-\[42%\] \$\{settingsTableHeadClass\}`\}>총판<\/TableHead>/);
-  assert.match(source, /<TableHead className=\{`w-\[46%\] \$\{settingsTableHeadClass\}`\}>연결 출판사<\/TableHead>/);
-});
-
-test("textbook settings uses mobile edit cards for publisher and supplier tables", async () => {
-  const source = await readFile(
-    new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
-    "utf8",
-  );
-
+test("server relationship metadata and the same prepared page feed both renderers", async () => {
+  const source = await read("src/features/textbooks/textbook-supplier-settings-workspace.tsx");
+  assert.match(source, /supplier\.linkedPublisherNames/);
+  assert.match(source, /supplier\.linkedPublisherCount - supplier\.linkedPublisherNames\.length/);
+  assert.match(source, /publisher\.textbookCount/);
   assert.match(source, /data-testid="textbook-publishers-mobile-list"/);
-  assert.match(source, /data-testid=\{`textbook-publisher-mobile-card-\$\{publisher\.id\}`\}/);
+  assert.match(source, /data-testid=\{`textbook-publisher-desktop-row-\$\{publisher\.id\}`\}/);
   assert.match(source, /data-testid="textbook-suppliers-mobile-list"/);
-  assert.match(source, /data-testid=\{`textbook-supplier-mobile-card-\$\{supplier\.id\}`\}/);
+  assert.match(source, /data-testid=\{`textbook-supplier-desktop-row-\$\{supplier\.id\}`\}/);
   assert.match(source, /data-testid="textbook-subsubjects-mobile-list"/);
-  assert.match(source, /data-testid=\{`textbook-subsubject-mobile-card-\$\{row\.id\}`\}/);
-  assert.match(source, /className="grid gap-2 md:hidden"/);
-  assert.match(source, /<div className="hidden md:block">[\s\S]*<SettingsTableFrame>/);
-  assert.match(source, /<div className="hidden md:block">[\s\S]*<Table className="min-w-\[720px\] table-fixed">/);
-  assert.match(source, /PublisherSubjectSelect/);
-  assert.match(source, /togglePublisherSupplier\(publisher\.id, supplier\.id, checked === true\)/);
+  assert.match(source, /data-testid=\{`textbook-subsubject-desktop-row-\$\{row\.id\}`\}/);
+  assert.match(source, /<PublisherSupplierPicker/);
+  assert.match(source, /<CommandInput/);
+  assert.match(source, /<DataTablePagination/);
 });

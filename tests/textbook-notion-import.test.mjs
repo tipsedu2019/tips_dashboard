@@ -47,13 +47,18 @@ test("textbook settings exposes publisher supplier management", async () => {
     new URL("src/features/textbooks/textbook-supplier-settings-workspace.tsx", root),
     "utf8",
   );
+  const settingsPagesSource = await readFile(
+    new URL("src/features/textbooks/use-textbook-settings-pages.ts", root),
+    "utf8",
+  );
 
   assert.match(navigationSource, /\/admin\/settings\/textbook-suppliers/);
   assert.match(navigationSource, /교재 설정/);
   assert.match(pageSource, /TextbookSupplierSettingsWorkspace/);
-  assert.match(workspaceSource, /textbook_publishers/);
-  assert.match(workspaceSource, /textbook_suppliers/);
-  assert.match(workspaceSource, /textbook_publisher_supplier_links/);
+  assert.match(settingsPagesSource, /listTextbookPublisherPage/);
+  assert.match(settingsPagesSource, /listTextbookSupplierPage/);
+  assert.match(settingsPagesSource, /listTextbookSupplierSettingPickerPage/);
+  assert.doesNotMatch(workspaceSource, /\.from\("textbook_/);
   assert.match(workspaceSource, /출판사/);
   assert.match(workspaceSource, /총판/);
   assert.match(workspaceSource, /세부과목/);
@@ -65,14 +70,13 @@ test("textbook supplier settings shows publisher textbook counts and selectable 
     "utf8",
   );
 
-  assert.match(workspaceSource, /publisherTextbookCounts/);
-  assert.match(workspaceSource, /textbookResult/);
-  assert.match(workspaceSource, /\.from\("textbooks"\)/);
+  assert.match(workspaceSource, /publisher\.textbookCount/);
+  assert.match(workspaceSource, /ownerCounts\.publishers/);
+  assert.doesNotMatch(workspaceSource, /textbookResult|\.from\("textbooks"\)/);
   assert.match(workspaceSource, /function PublisherSubjectSelect/);
-  assert.match(workspaceSource, /togglePublisherSubject/);
+  assert.match(workspaceSource, /setPublisherPatch\(publisher\.id, \{ subjects \}\)/);
   assert.match(workspaceSource, /SUBJECT_OPTIONS/);
-  assert.match(workspaceSource, /getPublisherTextbookCount/);
-  assert.match(workspaceSource, /formatQuantity\(getPublisherTextbookCount\(publisher\)\)/);
+  assert.match(workspaceSource, /formatQuantity\(publisher\.textbookCount\)/);
   assert.doesNotMatch(workspaceSource, /event\.target\.value\.split\(","\)/);
 });
 

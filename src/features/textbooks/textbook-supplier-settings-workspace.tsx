@@ -1,1350 +1,807 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, ChevronDown, Plus, Search, Trash2, X } from "lucide-react";
 
+import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
+import {
+  Command,
+  CommandEmpty,
+  CommandGroup,
+  CommandInput,
+  CommandItem,
+  CommandList,
+} from "@/components/ui/command";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { createId } from "@/features/management/management-service.js";
 import {
   SettingsTableFrame,
   SettingsWorkspaceShell,
   settingsTableCellClass,
   settingsTableHeadClass,
 } from "@/features/management/settings-master-layout";
-import { supabase } from "@/lib/supabase";
 import { cn } from "@/lib/utils";
+import { useAuth } from "@/providers/auth-provider";
 
+import { saveTextbookSettingsDraft } from "./textbook-settings-draft-service";
 import {
-  TEXTBOOK_SUBJECT_OPTIONS,
-  type TextbookSubSubjectSettingRecord,
-  mergeTextbookSubSubjectSettings,
-} from "./textbook-taxonomy";
-
-type Row = Record<string, unknown>;
-
-type PublisherRecord = {
-  id: string;
-  name: string;
-  subjects: string[];
-  supplierIds: string[];
-  sourceNotionUrl: string;
-  isNew?: boolean;
-};
-
-type SupplierRecord = {
-  id: string;
-  name: string;
-  contact: string;
-  memo: string;
-  isNew?: boolean;
-};
-
-type SettingsSection = "publishers" | "suppliers" | "subSubjects";
+  acceptTextbookOwnerRevision,
+  acceptTextbookSubSubjectRevision,
+  acknowledgeTextbookSettingsSave,
+  appendTextbookOwnerOperation,
+  appendTextbookSubSubjectOperation,
+  classifyTextbookSettingsSaveError,
+  createTextbookSettingsDraftState,
+  discardTextbookSettingsDrafts,
+  freezeTextbookSettingsSave,
+  hasTextbookSettingsChanges,
+  markTextbookSettingsSaveUnknown,
+  overlayPublisherSettingRow,
+  overlaySubSubjectSettingRow,
+  overlaySupplierSettingRow,
+  rejectTextbookSettingsSave,
+  type TextbookSettingsDraftState,
+} from "./textbook-settings-draft-model";
+import type {
+  OwnerCounts,
+  OwnerDraft,
+  OwnerDraftOperation,
+  PublisherSettingRow,
+  SubSubjectCounts,
+  SubSubjectDraft,
+  SubSubjectDraftOperation,
+  SupplierSettingRow,
+  TextbookSettingsSubject,
+  TextbookSubSubjectSettingRow,
+} from "./textbook-settings-types";
+import { TEXTBOOK_SUBJECT_OPTIONS } from "./textbook-taxonomy";
+import {
+  useTextbookSettingsPages,
+  type TextbookSettingsSection,
+} from "./use-textbook-settings-pages";
 
 const SUBJECT_OPTIONS = TEXTBOOK_SUBJECT_OPTIONS;
-
 const SUBJECT_LABELS: Record<string, string> = Object.fromEntries(
   SUBJECT_OPTIONS.map((option) => [option.value, option.label]),
 );
+const EMPTY_OWNER_COUNTS: OwnerCounts = { publishers: 0, suppliers: 0 };
+const EMPTY_SUBJECT_COUNTS: SubSubjectCounts = { english: 0, math: 0, science: 0, other: 0 };
 
-function text(value: unknown) {
-  return String(value || "").trim();
-}
-
-function normalizeList(value: unknown) {
-  return [...new Set((Array.isArray(value) ? value : []).map((item) => text(item)).filter(Boolean))];
-}
-
-function toPublisherRecord(row: Row): PublisherRecord {
-  return {
-    id: text(row.id) || createId(),
-    name: text(row.name),
-    subjects: normalizeList(row.subjects),
-    supplierIds: [],
-    sourceNotionUrl: text(row.source_notion_url || row.sourceNotionUrl),
-  };
-}
-
-function toSupplierRecord(row: Row): SupplierRecord {
-  return {
-    id: text(row.id) || createId(),
-    name: text(row.name),
-    contact: text(row.contact),
-    memo: text(row.memo),
-  };
+function formatQuantity(value: number) {
+  return new Intl.NumberFormat("ko-KR").format(Number.isFinite(value) ? value : 0);
 }
 
 function getErrorMessage(error: unknown, fallback: string) {
   if (error instanceof Error && error.message) return error.message;
   if (typeof error === "string" && error.trim()) return error;
   if (error && typeof error === "object") {
-    const maybeError = error as { message?: unknown; details?: unknown; hint?: unknown };
-    const parts = [maybeError.message, maybeError.details, maybeError.hint]
-      .map((part) => (typeof part === "string" ? part.trim() : ""))
-      .filter(Boolean);
-    if (parts.length > 0) return parts.join(" ");
+    const candidate = error as { message?: unknown; details?: unknown; hint?: unknown };
+    const message = [candidate.message, candidate.details, candidate.hint]
+      .filter((part): part is string => typeof part === "string" && Boolean(part.trim()))
+      .join(" ");
+    if (message) return message;
   }
   return fallback;
 }
 
-function isMissingOptionalTableError(error: unknown) {
-  const code = text((error as { code?: unknown })?.code);
-  const message = text((error as { message?: unknown })?.message).toLowerCase();
-  return (
-    code === "42P01" ||
-    code === "PGRST205" ||
-    message.includes("does not exist") ||
-    message.includes("could not find the table")
-  );
-}
-
 function subjectLabel(subjects: string[]) {
-  const labels = normalizeList(subjects).map((subject) => SUBJECT_LABELS[subject] || subject);
+  const labels = subjects.map((subject) => SUBJECT_LABELS[subject] || subject);
   return labels.length > 0 ? labels.join(", ") : "미설정";
 }
 
-function formatQuantity(value: unknown) {
-  const count = Number(value || 0);
-  return new Intl.NumberFormat("ko-KR").format(Number.isFinite(count) ? count : 0);
+function isPresent<T>(value: T | null): value is T {
+  return value !== null;
 }
 
-function sortSubSubjectRows(rows: TextbookSubSubjectSettingRecord[]) {
-  return [...rows].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name, "ko", { numeric: true }));
-}
-
-function createPublisher(): PublisherRecord {
+function publisherAddRow(
+  operation: Extract<OwnerDraftOperation, { type: "publisher.add" }>,
+): PublisherSettingRow {
   return {
-    id: createId(),
-    name: "",
-    subjects: [],
-    supplierIds: [],
-    sourceNotionUrl: "",
+    id: operation.id,
+    name: operation.name,
+    subjects: [...operation.subjects],
+    suppliers: operation.supplierIds.map((id) => ({ id, name: "" })),
+    textbookCount: 0,
     isNew: true,
   };
 }
 
-function createSupplier(): SupplierRecord {
+function supplierAddRow(
+  operation: Extract<OwnerDraftOperation, { type: "supplier.add" }>,
+): SupplierSettingRow {
   return {
-    id: createId(),
-    name: "",
-    contact: "",
-    memo: "",
+    id: operation.id,
+    name: operation.name,
+    contact: operation.contact,
+    memo: operation.memo,
+    linkedPublisherCount: 0,
+    linkedPublisherNames: [],
     isNew: true,
   };
 }
 
-function createSubSubject(subject: string, sortOrder: number): TextbookSubSubjectSettingRecord {
+function subSubjectAddRow(
+  operation: Extract<SubSubjectDraftOperation, { type: "add" }>,
+  canMoveUp: boolean,
+  canMoveDown: boolean,
+  sortOrder: number,
+): TextbookSubSubjectSettingRow {
   return {
-    id: createId(),
-    subject,
-    name: "",
+    id: operation.id,
+    subject: operation.subject,
+    name: operation.name,
     sortOrder,
-    isVisible: true,
-    isNew: true,
+    isVisible: operation.isVisible,
+    kind: "added",
+    canMoveUp,
+    canMoveDown,
   };
 }
 
 function PublisherSubjectSelect({
   publisher,
-  onSubjectChange,
+  disabled,
+  onChange,
 }: {
-  publisher: PublisherRecord;
-  onSubjectChange: (subject: string, checked: boolean) => void;
+  publisher: PublisherSettingRow;
+  disabled: boolean;
+  onChange: (subjects: string[]) => void;
 }) {
-  const selectedSubjects = normalizeList(publisher.subjects);
-
   return (
     <Popover>
       <PopoverTrigger asChild>
-        <Button type="button" variant="outline" className="h-9 w-full justify-between overflow-hidden px-3">
-          <span className={cn("truncate", selectedSubjects.length === 0 && "text-muted-foreground")}>
-            {subjectLabel(selectedSubjects)}
+        <Button type="button" variant="outline" className="h-9 w-full justify-between overflow-hidden px-3" disabled={disabled}>
+          <span className={cn("truncate", publisher.subjects.length === 0 && "text-muted-foreground")}>
+            {subjectLabel(publisher.subjects)}
           </span>
           <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" />
         </Button>
       </PopoverTrigger>
       <PopoverContent align="start" className="w-52 p-2">
         <div className="grid gap-1">
-          {SUBJECT_OPTIONS.map((option) => (
-            <label
-              key={option.value}
-              className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70"
-            >
-              <Checkbox
-                checked={selectedSubjects.includes(option.value)}
-                onCheckedChange={(checked) => onSubjectChange(option.value, checked === true)}
-              />
-              <span>{option.label}</span>
-            </label>
-          ))}
+          {SUBJECT_OPTIONS.map((option) => {
+            const checked = publisher.subjects.includes(option.value);
+            return (
+              <label key={option.value} className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70">
+                <Checkbox
+                  checked={checked}
+                  onCheckedChange={(value) => onChange(value === true
+                    ? [...new Set([...publisher.subjects, option.value])]
+                    : publisher.subjects.filter((subject) => subject !== option.value))}
+                />
+                <span>{option.label}</span>
+              </label>
+            );
+          })}
         </div>
       </PopoverContent>
     </Popover>
   );
 }
 
-function SubSubjectSettingsPanel({
-  rows,
-  activeSubject,
-  searchQuery,
-  saving,
-  onActiveSubjectChange,
-  onNameChange,
-  onVisibleChange,
-  onMove,
-  onDelete,
+type SettingsPages = ReturnType<typeof useTextbookSettingsPages>;
+
+function PublisherSupplierPicker({
+  anchor,
+  publisher,
+  pages,
+  pickerAnchor,
+  disabled,
+  onPickerAnchorChange,
+  onSupplierIdsChange,
 }: {
-  rows: TextbookSubSubjectSettingRecord[];
-  activeSubject: string;
-  searchQuery: string;
-  saving: boolean;
-  onActiveSubjectChange: (subject: string) => void;
-  onNameChange: (id: string, value: string) => void;
-  onVisibleChange: (id: string, value: boolean) => void;
-  onMove: (id: string, direction: "up" | "down") => void;
-  onDelete: (row: TextbookSubSubjectSettingRecord) => void;
+  anchor: string;
+  publisher: PublisherSettingRow;
+  pages: SettingsPages;
+  pickerAnchor: string | null;
+  disabled: boolean;
+  onPickerAnchorChange: (value: string | null) => void;
+  onSupplierIdsChange: (ids: string[]) => void;
 }) {
-  const safeQuery = searchQuery.trim().toLowerCase();
-  const activeRows = sortSubSubjectRows(rows.filter((row) => row.subject === activeSubject)).filter((row) =>
-    safeQuery ? row.name.toLowerCase().includes(safeQuery) : true,
-  );
+  const picker = pages.supplierPicker;
+  const open = picker.publisherId === publisher.id && pickerAnchor === anchor;
+  const completePublisher = picker.detailCurrent && picker.detail?.id === publisher.id ? picker.detail : publisher;
+  const selectedIds = completePublisher.suppliers.map((supplier) => supplier.id);
+  const selectedNames = completePublisher.suppliers.map((supplier) => supplier.name).filter(Boolean);
 
   return (
-    <SettingsTableFrame>
-      <div className="flex flex-wrap items-center justify-between gap-2 border-b px-3 py-3">
-        <div className="flex flex-wrap items-center gap-1.5" aria-label="세부과목 과목 선택">
-          {SUBJECT_OPTIONS.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              size="sm"
-              variant={activeSubject === option.value ? "default" : "outline"}
-              className="h-8 rounded-md"
-              aria-pressed={activeSubject === option.value}
-              onClick={() => onActiveSubjectChange(option.value)}
-            >
-              {option.label}
-            </Button>
-          ))}
+    <Popover
+      open={open}
+      onOpenChange={(nextOpen) => {
+        if (nextOpen) {
+          onPickerAnchorChange(anchor);
+          picker.open(publisher.id);
+        } else if (open) {
+          onPickerAnchorChange(null);
+          picker.close();
+        }
+      }}
+    >
+      <PopoverTrigger asChild>
+        <Button type="button" variant="outline" className="h-9 w-full justify-between overflow-hidden px-3" disabled={disabled}>
+          <span className={cn("truncate", selectedIds.length === 0 && "text-muted-foreground")}>
+            {selectedNames.length > 0 ? selectedNames.join(", ") : selectedIds.length > 0 ? `${selectedIds.length}개 선택` : "총판 선택"}
+          </span>
+          <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" />
+        </Button>
+      </PopoverTrigger>
+      <PopoverContent align="start" className="w-[min(92vw,34rem)] p-0">
+        <Command shouldFilter={false}>
+          <CommandInput value={picker.search} onValueChange={picker.setSearch} placeholder="총판 검색" aria-label="연결할 총판 검색" />
+          <CommandList className="max-h-72">
+            {picker.detailError ? (
+              <div className="border-b p-2 text-sm text-destructive">
+                <p>{getErrorMessage(picker.detailError, "출판사 연결 정보를 불러오지 못했습니다.")}</p>
+                <Button type="button" variant="ghost" size="sm" className="mt-1" onClick={picker.retryDetail}>다시 시도</Button>
+              </div>
+            ) : null}
+            {picker.page.error ? (
+              <div className="border-b p-2 text-sm text-destructive">
+                <p>{getErrorMessage(picker.page.error, "총판 목록을 불러오지 못했습니다.")}</p>
+                <Button type="button" variant="ghost" size="sm" className="mt-1" onClick={picker.page.retry}>다시 시도</Button>
+              </div>
+            ) : null}
+            <CommandEmpty>{picker.page.loading ? "불러오는 중" : "표시할 총판이 없습니다."}</CommandEmpty>
+            <CommandGroup>
+              {picker.page.rows.map((supplier) => {
+                const checked = selectedIds.includes(supplier.id);
+                return (
+                  <CommandItem
+                    key={supplier.id}
+                    value={`${supplier.id}:${supplier.name}`}
+                    onSelect={() => onSupplierIdsChange(checked
+                      ? selectedIds.filter((id) => id !== supplier.id)
+                      : [...selectedIds, supplier.id])}
+                  >
+                    <Checkbox
+                      checked={checked}
+                      aria-label={`${supplier.name} 연결`}
+                      onClick={(event) => event.stopPropagation()}
+                      onCheckedChange={(value) => onSupplierIdsChange(value === true
+                        ? [...new Set([...selectedIds, supplier.id])]
+                        : selectedIds.filter((id) => id !== supplier.id))}
+                    />
+                    <span className="truncate">{supplier.name}</span>
+                  </CommandItem>
+                );
+              })}
+            </CommandGroup>
+          </CommandList>
+        </Command>
+        <div className="border-t p-2">
+          <DataTablePagination page={picker.page.page} pageSize={10} totalCount={picker.page.totalCount} loading={picker.page.loading} onPageChange={picker.page.goToPage} ariaLabel="총판 선택 페이지 탐색" />
         </div>
-      </div>
-      <div data-testid="textbook-subsubjects-mobile-list" className="grid gap-2 p-3 md:hidden">
-        {activeRows.length === 0 ? (
-          <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
-            표시할 세부과목이 없습니다.
-          </div>
-        ) : (
-          activeRows.map((row, index) => (
-            <section
-              key={`textbook-subsubject-mobile-card-${row.id}`}
-              data-testid={`textbook-subsubject-mobile-card-${row.id}`}
-              className="rounded-lg border border-border/70 bg-background px-3 py-3"
-            >
-              <div className="mb-3 flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                  <p className="truncate text-sm font-semibold text-foreground">
-                    {row.name || "새 세부과목"}
-                  </p>
-                  <p className="text-xs text-muted-foreground">
-                    {SUBJECT_LABELS[row.subject] || row.subject}
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-2">
-                  <Checkbox
-                    aria-label={`${row.name || "세부과목"} 표시 여부`}
-                    checked={row.isVisible}
-                    onCheckedChange={(checked) => onVisibleChange(row.id, checked === true)}
-                  />
-                  <span className="text-xs text-muted-foreground">표시</span>
-                </div>
-              </div>
+      </PopoverContent>
+    </Popover>
+  );
+}
 
-              <div className="grid gap-2">
-                <Input
-                  value={row.name}
-                  onChange={(event) => onNameChange(row.id, event.target.value)}
-                  className="h-9"
-                  placeholder="세부과목명"
-                  aria-label={`${SUBJECT_LABELS[row.subject] || row.subject} 세부과목명`}
-                />
-                <div className="flex justify-end gap-2">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="size-8"
-                    onClick={() => onMove(row.id, "up")}
-                    disabled={saving || index === 0}
-                    aria-label={`${row.name || "세부과목"} 위로 이동`}
-                  >
-                    <ArrowUp className="size-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="icon"
-                    className="size-8"
-                    onClick={() => onMove(row.id, "down")}
-                    disabled={saving || index === activeRows.length - 1}
-                    aria-label={`${row.name || "세부과목"} 아래로 이동`}
-                  >
-                    <ArrowDown className="size-4" />
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="size-8 text-destructive hover:text-destructive"
-                    onClick={() => onDelete(row)}
-                    disabled={saving}
-                    aria-label={`${row.name || "세부과목"} 삭제`}
-                  >
-                    <Trash2 className="size-4" />
-                  </Button>
-                </div>
-              </div>
-            </section>
-          ))
-        )}
-      </div>
-      <div className="hidden md:block">
-      <Table className="min-w-[720px] table-fixed">
-        <caption className="sr-only">교재 세부과목 설정</caption>
-        <TableHeader>
-          <TableRow>
-            <TableHead className={`w-[62%] ${settingsTableHeadClass}`}>세부과목</TableHead>
-            <TableHead className={`w-[14%] text-center ${settingsTableHeadClass}`}>순서</TableHead>
-            <TableHead className={`w-[12%] text-center ${settingsTableHeadClass}`}>표시</TableHead>
-            <TableHead className={`sticky right-0 z-10 w-[12%] bg-muted text-right ${settingsTableHeadClass}`}>작업</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {activeRows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={4} className="px-3 py-8 text-center text-sm text-muted-foreground">
-                표시할 세부과목이 없습니다.
-              </TableCell>
-            </TableRow>
-          ) : (
-            activeRows.map((row, index) => (
-              <TableRow key={row.id}>
-                <TableCell className={settingsTableCellClass}>
-                  <Input
-                    value={row.name}
-                    onChange={(event) => onNameChange(row.id, event.target.value)}
-                    className="h-9"
-                    placeholder="세부과목명"
-                    aria-label={`${SUBJECT_LABELS[row.subject] || row.subject} 세부과목명`}
-                  />
-                </TableCell>
-                <TableCell className={`${settingsTableCellClass} text-center`}>
-                  <div className="flex justify-center gap-1">
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="size-8"
-                      onClick={() => onMove(row.id, "up")}
-                      disabled={saving || index === 0}
-                      aria-label={`${row.name || "세부과목"} 위로 이동`}
-                    >
-                      <ArrowUp className="size-4" />
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="icon"
-                      className="size-8"
-                      onClick={() => onMove(row.id, "down")}
-                      disabled={saving || index === activeRows.length - 1}
-                      aria-label={`${row.name || "세부과목"} 아래로 이동`}
-                    >
-                      <ArrowDown className="size-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-                <TableCell className={`${settingsTableCellClass} text-center`}>
-                  <Checkbox
-                    checked={row.isVisible}
-                    onCheckedChange={(checked) => onVisibleChange(row.id, checked === true)}
-                    aria-label={`${row.name || "세부과목"} 표시`}
-                  />
-                </TableCell>
-                <TableCell className={`${settingsTableCellClass} sticky right-0 bg-background`}>
-                  <div className="flex justify-end">
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="icon"
-                      className="size-8 text-destructive hover:text-destructive"
-                      onClick={() => onDelete(row)}
-                      disabled={saving}
-                      aria-label="세부과목 삭제"
-                    >
-                      <Trash2 className="size-4" />
-                    </Button>
-                  </div>
-                </TableCell>
-              </TableRow>
-            ))
-          )}
-        </TableBody>
-      </Table>
-      </div>
-    </SettingsTableFrame>
+function PageError({ error, onRetry }: { error: unknown; onRetry: () => void }) {
+  if (!error) return null;
+  return (
+    <Alert variant="destructive" className="mt-3">
+      <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+        <span>{getErrorMessage(error, "목록을 불러오지 못했습니다.")}</span>
+        <Button type="button" variant="outline" size="sm" onClick={onRetry}>다시 시도</Button>
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+type FooterResource = {
+  page: number;
+  pageSize: 10 | 15 | 20;
+  totalCount: number | null;
+  loading: boolean;
+  goToPage: (page: number) => void;
+  pageSizeMode: "auto" | "manual";
+  setPageSizePreference?: (value: "auto" | 10 | 15 | 20) => void;
+};
+
+function PageFooter({ resource, label }: { resource: FooterResource; label: string }) {
+  return (
+    <div className="border-t px-3 py-3">
+      <DataTablePagination page={resource.page} pageSize={resource.pageSize} totalCount={resource.totalCount} loading={resource.loading} onPageChange={resource.goToPage} pageSizeMode={resource.pageSizeMode} onPageSizeChange={resource.setPageSizePreference} ariaLabel={label} />
+    </div>
   );
 }
 
 export function TextbookSupplierSettingsWorkspace() {
-  const [publishers, setPublishers] = useState<PublisherRecord[]>([]);
-  const [suppliers, setSuppliers] = useState<SupplierRecord[]>([]);
-  const [subSubjects, setSubSubjects] = useState<TextbookSubSubjectSettingRecord[]>(() =>
-    mergeTextbookSubSubjectSettings([]),
+  const { user, role, loading } = useAuth();
+  const actorScope = !loading && user?.id && role ? `${user.id}:${role}` : null;
+  if (!actorScope) return <div role="status">로그인 정보를 확인하는 중입니다.</div>;
+  return (
+    <TextbookSupplierSettingsSession
+      key={actorScope}
+      actorScope={actorScope}
+      canManage={role === "admin" || role === "staff"}
+    />
   );
-  const [activeSubSubject, setActiveSubSubject] = useState("english");
-  const [activeSection, setActiveSection] = useState<SettingsSection>("publishers");
-  const [publisherTextbookCounts, setPublisherTextbookCounts] = useState<Record<string, number>>({});
-  const [deletedPublisherIds, setDeletedPublisherIds] = useState<string[]>([]);
-  const [deletedSupplierIds, setDeletedSupplierIds] = useState<string[]>([]);
-  const [deletedSubSubjectIds, setDeletedSubSubjectIds] = useState<string[]>([]);
-  const [subSubjectSettingsLoaded, setSubSubjectSettingsLoaded] = useState(false);
-  const [subSubjectsTouched, setSubSubjectsTouched] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [isDirty, setIsDirty] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+}
+
+function TextbookSupplierSettingsSession({
+  actorScope,
+  canManage,
+}: {
+  actorScope: string;
+  canManage: boolean;
+}) {
+  const [draftState, setDraftState] = useState<TextbookSettingsDraftState>(() => createTextbookSettingsDraftState(actorScope));
+  const draftRef = useRef(draftState);
+  const [activeSection, setActiveSection] = useState<TextbookSettingsSection>("publishers");
+  const [activeSubject, setActiveSubject] = useState<TextbookSettingsSubject>("english");
   const [query, setQuery] = useState("");
+  const [ownerCounts, setOwnerCounts] = useState<OwnerCounts>(EMPTY_OWNER_COUNTS);
+  const [visibleSubSubjectCount, setVisibleSubSubjectCount] = useState(0);
+  const [subjectCounts, setSubjectCounts] = useState<SubSubjectCounts>(EMPTY_SUBJECT_COUNTS);
+  const [saving, setSaving] = useState(false);
+  const savingRef = useRef(false);
+  const aliveRef = useRef(true);
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [conflictPending, setConflictPending] = useState(false);
+  const [conflictOpen, setConflictOpen] = useState(false);
+  const [publisherBaselineReloading, setPublisherBaselineReloading] = useState(false);
+  const [supplierBaselineReloading, setSupplierBaselineReloading] = useState(false);
+  const [subSubjectBaselineReloading, setSubSubjectBaselineReloading] = useState(false);
+  const [reloadVersion, setReloadVersion] = useState(0);
+  const [pendingFocusId, setPendingFocusId] = useState<string | null>(null);
+  const [subSubjectAddPages, setSubSubjectAddPages] = useState<Record<string, number>>({});
+  const [pickerAnchor, setPickerAnchor] = useState<string | null>(null);
+  const ownerDraft = useMemo<OwnerDraft | null>(() => draftState.ownerOperations.length > 0 ? {
+    version: 1,
+    baseRevision: draftState.ownerBaseRevision!,
+    operations: draftState.ownerOperations,
+  } : null, [draftState.ownerBaseRevision, draftState.ownerOperations]);
+  const subSubjectDraft = useMemo<SubSubjectDraft | null>(() => draftState.subSubjectOperations.length > 0 ? {
+    version: 1,
+    baseRevision: draftState.subSubjectBaseRevision!,
+    operations: draftState.subSubjectOperations,
+  } : null, [draftState.subSubjectBaseRevision, draftState.subSubjectOperations]);
+  const rawPages = useTextbookSettingsPages({
+    actorScope,
+    activeSection,
+    activeSubject,
+    search: query,
+    ownerDraft,
+    subSubjectDraft,
+    publisherBaselineOnly: publisherBaselineReloading,
+    supplierBaselineOnly: supplierBaselineReloading,
+    subSubjectBaselineOnly: subSubjectBaselineReloading,
+    reloadVersion,
+  });
+  const publisherAdditions = useMemo(() => {
+    if (query.trim() || rawPages.publishers.requestedPage !== 1) return [];
+    const pageIds = new Set(rawPages.publishers.rows.map((row) => row.id));
+    return draftState.ownerOperations
+      .filter((operation): operation is Extract<OwnerDraftOperation, { type: "publisher.add" }> => operation.type === "publisher.add")
+      .filter((operation) => !pageIds.has(operation.id))
+      .map(publisherAddRow)
+      .reverse()
+      .map((row) => overlayPublisherSettingRow(row, draftState))
+      .filter(isPresent);
+  }, [draftState, query, rawPages.publishers.requestedPage, rawPages.publishers.rows]);
+  const supplierAdditions = useMemo(() => {
+    if (query.trim() || rawPages.suppliers.requestedPage !== 1) return [];
+    const pageIds = new Set(rawPages.suppliers.rows.map((row) => row.id));
+    return draftState.ownerOperations
+      .filter((operation): operation is Extract<OwnerDraftOperation, { type: "supplier.add" }> => operation.type === "supplier.add")
+      .filter((operation) => !pageIds.has(operation.id))
+      .map(supplierAddRow)
+      .reverse()
+      .map((row) => overlaySupplierSettingRow(row, draftState))
+      .filter(isPresent);
+  }, [draftState, query, rawPages.suppliers.requestedPage, rawPages.suppliers.rows]);
+  const subSubjectAdditions = useMemo(() => {
+    if (query.trim()) return [];
+    const pageIds = new Set(rawPages.subSubjects.rows.map((row) => row.id));
+    return draftState.subSubjectOperations
+      .filter((operation): operation is Extract<SubSubjectDraftOperation, { type: "add" }> => (
+        operation.type === "add"
+        && operation.subject === activeSubject
+        && !pageIds.has(operation.id)
+        && subSubjectAddPages[operation.id] === rawPages.subSubjects.requestedPage
+      ))
+      .map((operation, index, rows) => subSubjectAddRow(
+        operation,
+        subjectCounts[activeSubject] > rows.length || index > 0,
+        index < rows.length - 1,
+        (subjectCounts[activeSubject] - rows.length + index + 1) * 10,
+      ))
+      .map((row) => overlaySubSubjectSettingRow(row, draftState))
+      .filter(isPresent);
+  }, [activeSubject, draftState, query, rawPages.subSubjects.requestedPage, rawPages.subSubjects.rows, subSubjectAddPages, subjectCounts]);
+  const pages = {
+    ...rawPages,
+    publishers: publisherAdditions.length > 0 ? {
+      ...rawPages.publishers,
+      page: rawPages.publishers.requestedPage,
+      totalCount: Math.max(rawPages.publishers.totalCount || 0, ownerCounts.publishers),
+    } : rawPages.publishers,
+    suppliers: supplierAdditions.length > 0 ? {
+      ...rawPages.suppliers,
+      page: rawPages.suppliers.requestedPage,
+      totalCount: Math.max(rawPages.suppliers.totalCount || 0, ownerCounts.suppliers),
+    } : rawPages.suppliers,
+    subSubjects: subSubjectAdditions.length > 0 ? {
+      ...rawPages.subSubjects,
+      page: rawPages.subSubjects.requestedPage,
+      totalCount: Math.max(rawPages.subSubjects.totalCount || 0, subjectCounts[activeSubject]),
+    } : rawPages.subSubjects,
+  };
+  const publisherAccepted = pages.publishers.accepted;
+  const publisherCurrent = pages.publishers.current;
+  const supplierAccepted = pages.suppliers.accepted;
+  const supplierCurrent = pages.suppliers.current;
+  const subSubjectAccepted = pages.subSubjects.accepted;
+  const subSubjectCurrent = pages.subSubjects.current;
 
-  const loadRows = useCallback(async () => {
-    if (!supabase) {
-      setError("Supabase 연결 설정을 확인해 주세요.");
-      setLoading(false);
-      return;
-    }
-
-    setLoading(true);
-    setError(null);
-
-    try {
-      const [publisherResult, supplierResult, linkResult, textbookResult] = await Promise.all([
-        supabase.from("textbook_publishers").select("*").order("name", { ascending: true }),
-        supabase.from("textbook_suppliers").select("*").order("name", { ascending: true }),
-        supabase.from("textbook_publisher_supplier_links").select("*"),
-        supabase.from("textbooks").select("id, publisher_id, publisher"),
-      ]);
-
-      if (publisherResult.error) throw publisherResult.error;
-      if (supplierResult.error) throw supplierResult.error;
-      if (linkResult.error) throw linkResult.error;
-      if (textbookResult.error) throw textbookResult.error;
-
-      const linksByPublisher = new Map<string, string[]>();
-      for (const link of (linkResult.data || []) as Row[]) {
-        const publisherId = text(link.publisher_id);
-        const supplierId = text(link.supplier_id);
-        if (!publisherId || !supplierId) continue;
-        linksByPublisher.set(publisherId, [...(linksByPublisher.get(publisherId) || []), supplierId]);
-      }
-
-      const nextPublishers = ((publisherResult.data || []) as Row[]).map((row) => {
-        const publisher = toPublisherRecord(row);
-        return { ...publisher, supplierIds: linksByPublisher.get(publisher.id) || [] };
-      });
-
-      const publisherIdByName = new Map(nextPublishers.map((publisher) => [publisher.name, publisher.id]));
-      const nextPublisherTextbookCounts: Record<string, number> = {};
-      for (const textbook of (textbookResult.data || []) as Row[]) {
-        const publisherId = text(textbook.publisher_id) || publisherIdByName.get(text(textbook.publisher));
-        if (!publisherId) continue;
-        nextPublisherTextbookCounts[publisherId] = (nextPublisherTextbookCounts[publisherId] || 0) + 1;
-      }
-
-      setPublishers(nextPublishers);
-      setPublisherTextbookCounts(nextPublisherTextbookCounts);
-      setSuppliers(((supplierResult.data || []) as Row[]).map(toSupplierRecord));
-      setDeletedPublisherIds([]);
-      setDeletedSupplierIds([]);
-      setIsDirty(false);
-    } catch (loadError) {
-      setError(getErrorMessage(loadError, "교재 설정을 불러오지 못했습니다."));
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
   }, []);
 
-  const loadSubSubjectRows = useCallback(async () => {
-    if (!supabase || subSubjectSettingsLoaded) {
-      return;
-    }
-
-    const { data, error: subSubjectError } = await supabase
-      .from("textbook_sub_subject_settings")
-      .select("*")
-      .order("subject", { ascending: true })
-      .order("sort_order", { ascending: true });
-
-    if (subSubjectError && !isMissingOptionalTableError(subSubjectError)) {
-      setError(getErrorMessage(subSubjectError, "세부과목 설정을 불러오지 못했습니다."));
-      return;
-    }
-
-    setSubSubjects(mergeTextbookSubSubjectSettings((subSubjectError ? [] : data || []) as Row[]));
-    setDeletedSubSubjectIds([]);
-    setSubSubjectsTouched(false);
-    setSubSubjectSettingsLoaded(true);
-  }, [subSubjectSettingsLoaded]);
-
-  useEffect(() => {
-    void loadRows();
-  }, [loadRows]);
-
-  useEffect(() => {
-    if (activeSection === "subSubjects") {
-      void loadSubSubjectRows();
-    }
-  }, [activeSection, loadSubSubjectRows]);
-
-  const suppliersById = useMemo(() => new Map(suppliers.map((supplier) => [supplier.id, supplier])), [suppliers]);
-
-  const publisherLinkCounts = useMemo(() => {
-    const counts = new Map<string, number>();
-    for (const publisher of publishers) {
-      for (const supplierId of publisher.supplierIds) {
-        counts.set(supplierId, (counts.get(supplierId) || 0) + 1);
-      }
-    }
-    return counts;
-  }, [publishers]);
-
-  const publisherNamesBySupplierId = useMemo(() => {
-    const namesBySupplier = new Map<string, string[]>();
-    for (const publisher of publishers) {
-      for (const supplierId of publisher.supplierIds) {
-        const names = namesBySupplier.get(supplierId) || [];
-        names.push(publisher.name);
-        namesBySupplier.set(supplierId, names);
-      }
-    }
-
-    for (const names of namesBySupplier.values()) {
-      names.sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
-    }
-
-    return namesBySupplier;
-  }, [publishers]);
-
-  const filteredPublishers = useMemo(() => {
-    const safeQuery = query.trim().toLowerCase();
-    if (!safeQuery) return publishers;
-    return publishers.filter((publisher) => {
-      const supplierNames = publisher.supplierIds
-        .map((supplierId) => suppliersById.get(supplierId)?.name || "")
-        .join(" ");
-      return `${publisher.name} ${subjectLabel(publisher.subjects)} ${supplierNames}`.toLowerCase().includes(safeQuery);
+  function updateDraft(updater: (current: TextbookSettingsDraftState) => TextbookSettingsDraftState) {
+    setDraftState((current) => {
+      const next = updater(current);
+      draftRef.current = next;
+      return next;
     });
-  }, [publishers, query, suppliersById]);
-
-  const filteredSuppliers = useMemo(() => {
-    const safeQuery = query.trim().toLowerCase();
-    if (!safeQuery) return suppliers;
-    return suppliers.filter((supplier) => {
-      const linkedPublishers = publishers
-        .filter((publisher) => publisher.supplierIds.includes(supplier.id))
-        .map((publisher) => publisher.name)
-        .join(" ");
-      return `${supplier.name} ${linkedPublishers}`.toLowerCase().includes(safeQuery);
-    });
-  }, [publishers, query, suppliers]);
-
-  function setPublisherField(id: string, field: keyof PublisherRecord, value: string | string[]) {
-    setPublishers((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
-    setIsDirty(true);
   }
 
-  function setSupplierField(id: string, field: keyof SupplierRecord, value: string) {
-    setSuppliers((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
-    setIsDirty(true);
+  useEffect(() => {
+    const accepted = publisherCurrent ? publisherAccepted : null;
+    if (!accepted) return;
+    setOwnerCounts(accepted.ownerCounts);
+    updateDraft((current) => acceptTextbookOwnerRevision(current, accepted.baseRevision));
+    if (publisherBaselineReloading) {
+      setPublisherBaselineReloading(false);
+      setSaveError(null);
+      setNotice("최신 출판사 설정을 불러왔습니다.");
+    }
+  }, [publisherAccepted, publisherBaselineReloading, publisherCurrent]);
+
+  useEffect(() => {
+    const accepted = supplierCurrent ? supplierAccepted : null;
+    if (!accepted) return;
+    setOwnerCounts(accepted.ownerCounts);
+    updateDraft((current) => acceptTextbookOwnerRevision(current, accepted.baseRevision));
+    if (supplierBaselineReloading) {
+      setSupplierBaselineReloading(false);
+      setSaveError(null);
+      setNotice("최신 총판 설정을 불러왔습니다.");
+    }
+  }, [supplierAccepted, supplierBaselineReloading, supplierCurrent]);
+
+  useEffect(() => {
+    const accepted = subSubjectCurrent ? subSubjectAccepted : null;
+    if (!accepted) return;
+    setVisibleSubSubjectCount(accepted.visibleCount);
+    setSubjectCounts(accepted.subjectCounts);
+    updateDraft((current) => acceptTextbookSubSubjectRevision(current, accepted.baseRevision));
+    if (subSubjectBaselineReloading) {
+      setSubSubjectBaselineReloading(false);
+      setSaveError(null);
+      setNotice("최신 세부과목 설정을 불러왔습니다.");
+    }
+  }, [subSubjectAccepted, subSubjectBaselineReloading, subSubjectCurrent]);
+
+  const activeResource = activeSection === "publishers" ? pages.publishers : activeSection === "suppliers" ? pages.suppliers : pages.subSubjects;
+  const publisherRows = useMemo(() => {
+    const accepted = pages.publishers.rows
+      .map((row) => overlayPublisherSettingRow(row, draftState))
+      .filter(isPresent);
+    if (publisherAdditions.length === 0) return accepted;
+    if (rawPages.publishers.page !== rawPages.publishers.requestedPage) {
+      return publisherAdditions.slice(0, pages.publishers.pageSize);
+    }
+    return [...publisherAdditions, ...accepted].slice(0, pages.publishers.pageSize);
+  }, [draftState, pages.publishers.pageSize, pages.publishers.rows, publisherAdditions, rawPages.publishers.page, rawPages.publishers.requestedPage]);
+
+  const supplierRows = useMemo(() => {
+    const accepted = pages.suppliers.rows
+      .map((row) => overlaySupplierSettingRow(row, draftState))
+      .filter(isPresent);
+    if (supplierAdditions.length === 0) return accepted;
+    if (rawPages.suppliers.page !== rawPages.suppliers.requestedPage) {
+      return supplierAdditions.slice(0, pages.suppliers.pageSize);
+    }
+    return [...supplierAdditions, ...accepted].slice(0, pages.suppliers.pageSize);
+  }, [draftState, pages.suppliers.pageSize, pages.suppliers.rows, rawPages.suppliers.page, rawPages.suppliers.requestedPage, supplierAdditions]);
+
+  const subSubjectRows = useMemo(() => {
+    const accepted = pages.subSubjects.rows
+      .map((row) => overlaySubSubjectSettingRow(row, draftState))
+      .filter(isPresent);
+    if (subSubjectAdditions.length === 0) return accepted;
+    if (rawPages.subSubjects.page !== rawPages.subSubjects.requestedPage) {
+      return subSubjectAdditions.slice(0, pages.subSubjects.pageSize);
+    }
+    return [
+      ...accepted.slice(0, Math.max(0, pages.subSubjects.pageSize - subSubjectAdditions.length)),
+      ...subSubjectAdditions,
+    ];
+  }, [draftState, pages.subSubjects.pageSize, pages.subSubjects.rows, rawPages.subSubjects.page, rawPages.subSubjects.requestedPage, subSubjectAdditions]);
+
+  useEffect(() => {
+    if (!pendingFocusId) return;
+    const mode = typeof window !== "undefined" && window.matchMedia?.("(min-width: 768px)").matches ? "desktop" : "mobile";
+    const input = document.querySelector<HTMLInputElement>(`input[data-focus-id="${pendingFocusId}"][data-focus-mode="${mode}"]`)
+      || document.querySelector<HTMLInputElement>(`input[data-focus-id="${pendingFocusId}"]`);
+    if (!input) return;
+    input.focus();
+    setPendingFocusId(null);
+  }, [activeResource.loading, pendingFocusId, publisherRows, subSubjectRows, supplierRows]);
+
+  const isDirty = hasTextbookSettingsChanges(draftState);
+  const saveUnknown = draftState.pendingSave?.status === "unknown";
+  const ownerReady = Boolean(draftState.ownerBaseRevision);
+  const subSubjectsReady = Boolean(draftState.subSubjectBaseRevision);
+  const activeBaselineReloading = activeSection === "publishers"
+    ? publisherBaselineReloading
+    : activeSection === "suppliers"
+      ? supplierBaselineReloading
+      : subSubjectBaselineReloading;
+  const activeBaselineReady = activeSection === "subSubjects" ? subSubjectsReady : ownerReady;
+  const dirtyBaselinesReady = (draftState.ownerOperations.length === 0 || ownerReady)
+    && (draftState.subSubjectOperations.length === 0 || subSubjectsReady);
+  const editingDisabled = !canManage || activeBaselineReloading || !activeBaselineReady;
+
+  function appendOwner(operation: OwnerDraftOperation) {
+    if (!canManage || activeBaselineReloading || !ownerReady) return;
+    setNotice(null);
+    if (operation.type === "publisher.add") {
+      setOwnerCounts((current) => ({ ...current, publishers: current.publishers + 1 }));
+    } else if (operation.type === "publisher.delete") {
+      setOwnerCounts((current) => ({ ...current, publishers: Math.max(0, current.publishers - 1) }));
+    } else if (operation.type === "supplier.add") {
+      setOwnerCounts((current) => ({ ...current, suppliers: current.suppliers + 1 }));
+    } else if (operation.type === "supplier.delete") {
+      setOwnerCounts((current) => ({ ...current, suppliers: Math.max(0, current.suppliers - 1) }));
+    }
+    updateDraft((current) => appendTextbookOwnerOperation(current, operation));
   }
 
-  function setSubSubjectField(id: string, patch: Partial<TextbookSubSubjectSettingRecord>) {
-    setSubSubjects((current) => current.map((row) => (row.id === id ? { ...row, ...patch } : row)));
-    setSubSubjectsTouched(true);
-    setIsDirty(true);
+  function appendSubSubject(operation: SubSubjectDraftOperation) {
+    if (!canManage || subSubjectBaselineReloading || !subSubjectsReady) return;
+    setNotice(null);
+    if (operation.type === "delete") {
+      const row = subSubjectRows.find((candidate) => candidate.id === operation.id);
+      if (row) {
+        setSubjectCounts((current) => ({
+          ...current,
+          [row.subject]: Math.max(0, current[row.subject] - 1),
+        }));
+        if (row.isVisible) setVisibleSubSubjectCount((current) => Math.max(0, current - 1));
+      }
+    }
+    updateDraft((current) => appendTextbookSubSubjectOperation(current, operation));
+  }
+
+  function setPublisherPatch(id: string, patch: Extract<OwnerDraftOperation, { type: "publisher.patch" }>["patch"]) {
+    appendOwner({ type: "publisher.patch", id, patch });
+  }
+
+  function setSupplierPatch(id: string, patch: Extract<OwnerDraftOperation, { type: "supplier.patch" }>["patch"]) {
+    appendOwner({ type: "supplier.patch", id, patch });
+  }
+
+  function setSubSubjectPatch(id: string, patch: Extract<SubSubjectDraftOperation, { type: "patch" }>["patch"]) {
+    if (typeof patch.isVisible === "boolean") {
+      const row = subSubjectRows.find((candidate) => candidate.id === id);
+      if (row && row.isVisible !== patch.isVisible) {
+        setVisibleSubSubjectCount((current) => Math.max(0, current + (patch.isVisible ? 1 : -1)));
+      }
+    }
+    appendSubSubject({ type: "patch", id, patch });
+  }
+
+  function setSearch(value: string) {
+    activeResource.goToPage(1);
+    setQuery(value);
+  }
+
+  function changeSection(value: string) {
+    const section = value as TextbookSettingsSection;
+    const resource = section === "publishers" ? pages.publishers : section === "suppliers" ? pages.suppliers : pages.subSubjects;
+    resource.goToPage(1);
+    setPickerAnchor(null);
+    pages.supplierPicker.close();
+    setQuery("");
+    setActiveSection(section);
+  }
+
+  function addPublisher() {
+    if (!canManage || publisherBaselineReloading || !ownerReady) return;
+    const id = crypto.randomUUID();
+    pages.publishers.goToPage(1);
+    setQuery("");
+    setPendingFocusId(id);
+    appendOwner({ type: "publisher.add", id, name: "", subjects: [], supplierIds: [] });
+  }
+
+  function addSupplier() {
+    if (!canManage || supplierBaselineReloading || !ownerReady) return;
+    const id = crypto.randomUUID();
+    pages.suppliers.goToPage(1);
+    setQuery("");
+    setPendingFocusId(id);
+    appendOwner({ type: "supplier.add", id, name: "", contact: "", memo: "" });
   }
 
   function addSubSubject() {
-    const activeRows = sortSubSubjectRows(subSubjects.filter((row) => row.subject === activeSubSubject));
-    const maxSortOrder = activeRows.reduce((max, row) => Math.max(max, row.sortOrder), 0);
-    setSubSubjects((current) => [createSubSubject(activeSubSubject, maxSortOrder + 10), ...current]);
-    setSubSubjectsTouched(true);
-    setIsDirty(true);
+    if (!canManage || subSubjectBaselineReloading || !subSubjectsReady) return;
+    const id = crypto.randomUUID();
+    const nextCount = subjectCounts[activeSubject] + 1;
+    const finalPage = Math.max(1, Math.ceil(nextCount / pages.subSubjects.pageSize));
+    pages.subSubjects.goToPage(finalPage);
+    setQuery("");
+    setPendingFocusId(id);
+    setSubSubjectAddPages((current) => ({ ...current, [id]: finalPage }));
+    setSubjectCounts((current) => ({ ...current, [activeSubject]: nextCount }));
+    setVisibleSubSubjectCount((current) => current + 1);
+    appendSubSubject({ type: "add", id, subject: activeSubject, name: "", isVisible: true });
   }
 
-  function moveSubSubject(id: string, direction: "up" | "down") {
-    const activeRows = sortSubSubjectRows(subSubjects.filter((row) => row.subject === activeSubSubject));
-    const currentIndex = activeRows.findIndex((row) => row.id === id);
-    const targetIndex = direction === "up" ? currentIndex - 1 : currentIndex + 1;
-    if (currentIndex < 0 || targetIndex < 0 || targetIndex >= activeRows.length) {
-      return;
-    }
-
-    const reorderedRows = [...activeRows];
-    [reorderedRows[currentIndex], reorderedRows[targetIndex]] = [reorderedRows[targetIndex], reorderedRows[currentIndex]];
-    const nextSortOrders = new Map(reorderedRows.map((row, index) => [row.id, (index + 1) * 10]));
-
-    setSubSubjects((current) =>
-      current.map((row) => {
-        const sortOrder = nextSortOrders.get(row.id);
-        return sortOrder === undefined ? row : { ...row, sortOrder };
-      }),
-    );
-    setSubSubjectsTouched(true);
-    setIsDirty(true);
-  }
-
-  function togglePublisherSubject(publisherId: string, subject: string, checked: boolean) {
-    setPublishers((current) =>
-      current.map((publisher) => {
-        if (publisher.id !== publisherId) return publisher;
-        const subjects = normalizeList(publisher.subjects);
-        return {
-          ...publisher,
-          subjects: checked ? [...new Set([...subjects, subject])] : subjects.filter((item) => item !== subject),
-        };
-      }),
-    );
-    setIsDirty(true);
-  }
-
-  function togglePublisherSupplier(publisherId: string, supplierId: string, checked: boolean) {
-    setPublishers((current) =>
-      current.map((publisher) => {
-        if (publisher.id !== publisherId) return publisher;
-        const currentIds = normalizeList(publisher.supplierIds);
-        return {
-          ...publisher,
-          supplierIds: checked ? [...new Set([...currentIds, supplierId])] : currentIds.filter((id) => id !== supplierId),
-        };
-      }),
-    );
-    setIsDirty(true);
-  }
-
-  function handleDeletePublisher(publisher: PublisherRecord) {
-    if (!publisher.isNew) {
-      setDeletedPublisherIds((current) => (current.includes(publisher.id) ? current : [...current, publisher.id]));
-    }
-    setPublishers((current) => current.filter((row) => row.id !== publisher.id));
-    setIsDirty(true);
-  }
-
-  function handleDeleteSupplier(supplier: SupplierRecord) {
-    if (!supplier.isNew) {
-      setDeletedSupplierIds((current) => (current.includes(supplier.id) ? current : [...current, supplier.id]));
-    }
-    setSuppliers((current) => current.filter((row) => row.id !== supplier.id));
-    setPublishers((current) =>
-      current.map((publisher) => ({
-        ...publisher,
-        supplierIds: publisher.supplierIds.filter((id) => id !== supplier.id),
-      })),
-    );
-    setIsDirty(true);
-  }
-
-  function handleDeleteSubSubject(row: TextbookSubSubjectSettingRecord) {
-    if (!row.isNew) {
-      setDeletedSubSubjectIds((current) => (current.includes(row.id) ? current : [...current, row.id]));
-    }
-    setSubSubjects((current) => current.filter((item) => item.id !== row.id));
-    setSubSubjectsTouched(true);
-    setIsDirty(true);
-  }
-
-  function getPublisherTextbookCount(publisher: PublisherRecord) {
-    return publisherTextbookCounts[publisher.id] || 0;
+  function deletePublisher(publisher: PublisherSettingRow) {
+    if (!canManage || publisherBaselineReloading || !ownerReady) return;
+    appendOwner({ type: "publisher.delete", id: publisher.id });
   }
 
   async function saveRows() {
-    if (!supabase) {
-      setError("Supabase 연결 설정을 확인해 주세요.");
-      return;
-    }
-
-    const nextPublishers = publishers.map((publisher) => ({ ...publisher, name: publisher.name.trim() }));
-    const nextSuppliers = suppliers.map((supplier) => ({ ...supplier, name: supplier.name.trim() }));
-    const nextSubSubjects = subSubjects
-      .map((row, index) => ({
-        ...row,
-        name: row.name.trim(),
-        sortOrder: row.sortOrder || (index + 1) * 10,
-      }))
-      .filter((row) => row.name);
-
-    if (nextPublishers.some((publisher) => !publisher.name)) {
-      setError("출판사명이 비어 있습니다.");
-      return;
-    }
-    if (nextSuppliers.some((supplier) => !supplier.name)) {
-      setError("총판명이 비어 있습니다.");
-      return;
-    }
-
-    const shouldPersistSubSubjects = subSubjectsTouched || deletedSubSubjectIds.length > 0;
-    if (shouldPersistSubSubjects) {
-      const duplicateSubSubject = nextSubSubjects.find((row, index) =>
-        nextSubSubjects.findIndex((item) => item.subject === row.subject && item.name === row.name) !== index,
-      );
-      if (duplicateSubSubject) {
-        setError(`${SUBJECT_LABELS[duplicateSubSubject.subject] || duplicateSubSubject.subject} 세부과목이 중복되었습니다.`);
-        return;
-      }
-    }
-
-    setSaving(true);
-    setError(null);
-
+    if (!canManage || savingRef.current || !dirtyBaselinesReady || conflictPending) return;
+    let frozen: ReturnType<typeof freezeTextbookSettingsSave>;
     try {
-      if (deletedPublisherIds.length > 0) {
-        const { error: deletePublisherError } = await supabase.from("textbook_publishers").delete().in("id", deletedPublisherIds);
-        if (deletePublisherError) throw deletePublisherError;
-      }
-
-      if (deletedSupplierIds.length > 0) {
-        const { error: deleteSupplierError } = await supabase.from("textbook_suppliers").delete().in("id", deletedSupplierIds);
-        if (deleteSupplierError) throw deleteSupplierError;
-      }
-
-      if (shouldPersistSubSubjects && deletedSubSubjectIds.length > 0) {
-        const { error: deleteSubSubjectError } = await supabase
-          .from("textbook_sub_subject_settings")
-          .delete()
-          .in("id", deletedSubSubjectIds);
-        if (deleteSubSubjectError) throw deleteSubSubjectError;
-      }
-
-      if (shouldPersistSubSubjects && nextSubSubjects.length > 0) {
-        const { error: subSubjectError } = await supabase.from("textbook_sub_subject_settings").upsert(
-          nextSubSubjects.map((row, index) => ({
-            id: row.id,
-            subject: row.subject,
-            name: row.name,
-            sort_order: row.sortOrder || (index + 1) * 10,
-            is_visible: row.isVisible,
-          })),
-        );
-        if (subSubjectError) throw subSubjectError;
-      }
-
-      if (nextSuppliers.length > 0) {
-        const { error: supplierError } = await supabase.from("textbook_suppliers").upsert(
-          nextSuppliers.map((supplier) => ({
-            id: supplier.id,
-            name: supplier.name,
-            contact: supplier.contact.trim(),
-            memo: supplier.memo.trim(),
-          })),
-        );
-        if (supplierError) throw supplierError;
-      }
-
-      if (nextPublishers.length > 0) {
-        const { error: publisherError } = await supabase.from("textbook_publishers").upsert(
-          nextPublishers.map((publisher) => ({
-            id: publisher.id,
-            name: publisher.name,
-            subjects: normalizeList(publisher.subjects),
-            source_notion_url: publisher.sourceNotionUrl || null,
-          })),
-        );
-        if (publisherError) throw publisherError;
-      }
-
-      const publisherIds = nextPublishers.map((publisher) => publisher.id);
-      if (publisherIds.length > 0) {
-        const { error: resetLinkError } = await supabase
-          .from("textbook_publisher_supplier_links")
-          .delete()
-          .in("publisher_id", publisherIds);
-        if (resetLinkError) throw resetLinkError;
-
-        const nextLinks = nextPublishers.flatMap((publisher) =>
-          normalizeList(publisher.supplierIds).map((supplierId, index) => ({
-            publisher_id: publisher.id,
-            supplier_id: supplierId,
-            priority: index + 1,
-            is_primary: index === 0,
-          })),
-        );
-
-        if (nextLinks.length > 0) {
-          const { error: linkError } = await supabase.from("textbook_publisher_supplier_links").insert(nextLinks);
-          if (linkError) throw linkError;
+      frozen = freezeTextbookSettingsSave(draftRef.current);
+    } catch (error) {
+      setSaveError(getErrorMessage(error, "저장할 변경사항을 확인해 주세요."));
+      return;
+    }
+    draftRef.current = frozen.state;
+    setDraftState(frozen.state);
+    savingRef.current = true;
+    setSaving(true);
+    setSaveError(null);
+    setNotice(null);
+    try {
+      const result = await saveTextbookSettingsDraft(frozen.request);
+      if (!aliveRef.current || draftRef.current.actorScope !== actorScope) return;
+      const next = acknowledgeTextbookSettingsSave(draftRef.current, result);
+      draftRef.current = next;
+      setDraftState(next);
+      setConflictPending(false);
+      setNotice(hasTextbookSettingsChanges(next) ? "제출한 변경을 저장했습니다. 저장 중 추가한 변경은 아직 남아 있습니다." : "변경사항을 저장했습니다.");
+    } catch (error) {
+      if (!aliveRef.current || draftRef.current.actorScope !== actorScope) return;
+      const kind = classifyTextbookSettingsSaveError(error);
+      if (kind === "unknown") {
+        updateDraft(markTextbookSettingsSaveUnknown);
+        setSaveError("저장 결과를 확인하지 못했습니다. 자동 재시도하지 않았습니다.");
+      } else {
+        updateDraft(rejectTextbookSettingsSave);
+        if (kind === "conflict") {
+          setConflictPending(true);
+          setConflictOpen(true);
+          setSaveError("다른 사용자가 먼저 설정을 변경했습니다. 초안을 유지하거나 버리고 최신 설정을 불러오세요.");
+        } else {
+          setSaveError(getErrorMessage(error, "교재 설정을 저장하지 못했습니다."));
         }
       }
-
-      setSubSubjectsTouched(false);
-      await loadRows();
-    } catch (saveError) {
-      setError(getErrorMessage(saveError, "교재 설정을 저장하지 못했습니다."));
     } finally {
-      setSaving(false);
+      savingRef.current = false;
+      if (aliveRef.current) setSaving(false);
     }
   }
 
-  const toolbarPlaceholder =
-    activeSection === "publishers"
-      ? "출판사, 총판 검색"
-      : activeSection === "suppliers"
-        ? "총판, 연결 출판사 검색"
-        : "세부과목 검색";
-
-  function handleSectionChange(value: string) {
-    setActiveSection(value as SettingsSection);
-    setQuery("");
+  function confirmDiscardAndReload() {
+    try {
+      const next = discardTextbookSettingsDrafts(draftRef.current);
+      draftRef.current = next;
+      setDraftState(next);
+      setConflictPending(false);
+      setConflictOpen(false);
+      setPublisherBaselineReloading(true);
+      setSupplierBaselineReloading(true);
+      setSubSubjectBaselineReloading(true);
+      setSubSubjectAddPages({});
+      setSaveError(null);
+      setNotice(null);
+      setReloadVersion((value) => value + 1);
+    } catch (error) {
+      setSaveError(getErrorMessage(error, "저장 결과를 먼저 확인해 주세요."));
+    }
   }
 
-  const isSearchActive = query.trim().length > 0;
+  const toolbarPlaceholder = activeSection === "publishers" ? "출판사, 총판 검색" : activeSection === "suppliers" ? "총판, 연결 출판사 검색" : "세부과목 검색";
 
   return (
     <SettingsWorkspaceShell>
       <div className="flex flex-col gap-3">
-        <Tabs value={activeSection} onValueChange={handleSectionChange} className="min-w-0">
+        <Tabs value={activeSection} onValueChange={changeSection} className="min-w-0">
           <div className="sticky top-0 z-20 -mx-1 bg-background/95 px-1 pb-3 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/85">
-          <TabsList className="grid h-auto w-full grid-cols-3 rounded-lg border bg-muted/35 p-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
-            <TabsTrigger
-              value="publishers"
-              onClick={() => handleSectionChange("publishers")}
-              className="h-10 rounded-md px-3 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none data-[state=active]:[&_span[data-slot=badge]]:bg-primary-foreground/20 data-[state=active]:[&_span[data-slot=badge]]:text-primary-foreground"
-            >
-              <span>출판사</span>
-              <Badge variant="secondary" className="rounded-md px-1.5 text-[11px]">
-                {formatQuantity(publishers.length)}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger
-              value="suppliers"
-              onClick={() => handleSectionChange("suppliers")}
-              className="h-10 rounded-md px-3 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none data-[state=active]:[&_span[data-slot=badge]]:bg-primary-foreground/20 data-[state=active]:[&_span[data-slot=badge]]:text-primary-foreground"
-            >
-              <span>총판</span>
-              <Badge variant="secondary" className="rounded-md px-1.5 text-[11px]">
-                {formatQuantity(suppliers.length)}
-              </Badge>
-            </TabsTrigger>
-            <TabsTrigger
-              value="subSubjects"
-              onClick={() => handleSectionChange("subSubjects")}
-              className="h-10 rounded-md px-3 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-none data-[state=active]:[&_span[data-slot=badge]]:bg-primary-foreground/20 data-[state=active]:[&_span[data-slot=badge]]:text-primary-foreground"
-            >
-              <span>세부과목</span>
-              <Badge variant="secondary" className="rounded-md px-1.5 text-[11px]">
-                {formatQuantity(subSubjects.filter((row) => row.isVisible).length)}
-              </Badge>
-            </TabsTrigger>
-          </TabsList>
+            <TabsList className="grid h-auto w-full grid-cols-3 rounded-lg border bg-muted/35 p-1 shadow-[0_1px_2px_rgba(15,23,42,0.04)]">
+              <TabsTrigger value="publishers" onClick={() => changeSection("publishers")} className="h-10 rounded-md px-3 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><span>출판사</span><Badge variant="secondary" className="rounded-md px-1.5 text-[11px]">{formatQuantity(ownerCounts.publishers)}</Badge></TabsTrigger>
+              <TabsTrigger value="suppliers" onClick={() => changeSection("suppliers")} className="h-10 rounded-md px-3 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><span>총판</span><Badge variant="secondary" className="rounded-md px-1.5 text-[11px]">{formatQuantity(ownerCounts.suppliers)}</Badge></TabsTrigger>
+              <TabsTrigger value="subSubjects" onClick={() => changeSection("subSubjects")} className="h-10 rounded-md px-3 text-sm data-[state=active]:bg-primary data-[state=active]:text-primary-foreground"><span>세부과목</span><Badge variant="secondary" className="rounded-md px-1.5 text-[11px]">{formatQuantity(visibleSubSubjectCount)}</Badge></TabsTrigger>
+            </TabsList>
 
-          <div className="mt-3 flex flex-col gap-3 rounded-lg border border-border/70 bg-background p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] lg:flex-row lg:items-center lg:justify-between">
-          <div className="relative min-w-0 flex-1" role="search" aria-label={toolbarPlaceholder}>
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder={toolbarPlaceholder}
-              aria-label={toolbarPlaceholder}
-              autoComplete="off"
-              enterKeyHint="search"
-              className="h-10 w-full max-w-xl pl-9 pr-10"
-            />
-            {isSearchActive ? (
-              <Button
-                type="button"
-                variant="ghost"
-                size="icon"
-                className="absolute right-1 top-1/2 size-8 -translate-y-1/2 text-muted-foreground"
-                onClick={() => setQuery("")}
-                aria-label="검색어 지우기"
-              >
-                <X className="size-4" />
-              </Button>
-            ) : null}
-          </div>
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            {activeSection === "publishers" ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-10"
-                onClick={() => {
-                  setPublishers((current) => [createPublisher(), ...current]);
-                  setIsDirty(true);
-                }}
-              >
-                <Plus className="mr-2 size-4" />
-                출판사 추가
-              </Button>
-            ) : null}
-            {activeSection === "suppliers" ? (
-              <Button
-                type="button"
-                size="sm"
-                className="h-10"
-                onClick={() => {
-                  setSuppliers((current) => [createSupplier(), ...current]);
-                  setIsDirty(true);
-                }}
-              >
-                <Plus className="mr-2 size-4" />
-                총판 추가
-              </Button>
-            ) : null}
-            {activeSection === "subSubjects" ? (
-              <Button type="button" size="sm" className="h-10" onClick={addSubSubject} disabled={saving}>
-                <Plus className="mr-2 size-4" />
-                세부과목 추가
-              </Button>
-            ) : null}
-            <Button
-              type="button"
-              size="sm"
-              variant={isDirty ? "default" : "secondary"}
-              className="h-10 min-w-28"
-              onClick={() => void saveRows()}
-              disabled={!isDirty || saving}
-            >
-              {saving ? "저장 중" : "변경 저장"}
-            </Button>
-          </div>
-          </div>
+            <div className="mt-3 flex flex-col gap-3 rounded-lg border border-border/70 bg-background p-3 shadow-[0_1px_2px_rgba(15,23,42,0.04)] lg:flex-row lg:items-center lg:justify-between">
+              <div className="relative min-w-0 flex-1" role="search" aria-label={toolbarPlaceholder}>
+                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+                <Input type="search" value={query} onChange={(event) => setSearch(event.target.value)} placeholder={toolbarPlaceholder} aria-label={toolbarPlaceholder} autoComplete="off" enterKeyHint="search" className="h-10 w-full max-w-xl pl-9 pr-10" />
+                {query ? <Button type="button" variant="ghost" size="icon" className="absolute right-1 top-1/2 size-8 -translate-y-1/2 text-muted-foreground" onClick={() => setSearch("")} aria-label="검색어 지우기"><X className="size-4" /></Button> : null}
+              </div>
+              <div className="flex flex-wrap items-center justify-end gap-2">
+                {activeSection === "publishers" ? <Button type="button" size="sm" className="h-10" onClick={addPublisher} disabled={editingDisabled || !ownerReady}><Plus className="mr-2 size-4" />출판사 추가</Button> : null}
+                {activeSection === "suppliers" ? <Button type="button" size="sm" className="h-10" onClick={addSupplier} disabled={editingDisabled || !ownerReady}><Plus className="mr-2 size-4" />총판 추가</Button> : null}
+                {activeSection === "subSubjects" ? <Button type="button" size="sm" className="h-10" onClick={addSubSubject} disabled={editingDisabled || !subSubjectsReady}><Plus className="mr-2 size-4" />세부과목 추가</Button> : null}
+                <Button type="button" size="sm" variant={isDirty ? "default" : "secondary"} className="h-10 min-w-28" onClick={() => void saveRows()} disabled={!canManage || !isDirty || saving || !dirtyBaselinesReady || conflictPending}>{saving ? "저장 중" : saveUnknown ? "저장 결과 확인" : "변경 저장"}</Button>
+              </div>
+            </div>
           </div>
 
-          {error ? (
-            <Alert variant="destructive" className="mt-3">
-              <AlertDescription>{error}</AlertDescription>
+          {saveError ? (
+            <Alert variant="destructive">
+              <AlertDescription className="flex flex-wrap items-center justify-between gap-2">
+                <span>{saveError}</span>
+                {conflictPending ? <Button type="button" variant="outline" size="sm" onClick={confirmDiscardAndReload}>초안 버리고 새로 불러오기</Button> : null}
+              </AlertDescription>
             </Alert>
           ) : null}
+          {notice ? <Alert><AlertDescription>{notice}</AlertDescription></Alert> : null}
+          {activeBaselineReloading ? <Alert><AlertDescription>이 탭의 최신 설정을 불러오는 중입니다. 완료될 때까지 편집할 수 없습니다.</AlertDescription></Alert> : null}
+          <PageError error={activeResource.error} onRetry={activeResource.retry} />
 
-            <TabsContent value="publishers" className="mt-3 min-w-0">
-              <div data-testid="textbook-publishers-mobile-list" className="grid gap-2 md:hidden">
-                {loading ? (
-                  Array.from({ length: 6 }).map((_, index) => (
-                    <Skeleton key={`publisher-mobile-loading-${index}`} className="h-56 w-full" />
-                  ))
-                ) : filteredPublishers.length === 0 ? (
-                  <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
-                    표시할 출판사가 없습니다.
-                  </div>
-                ) : (
-                  filteredPublishers.map((publisher) => (
-                    <section
-                      key={`textbook-publisher-mobile-card-${publisher.id}`}
-                      data-testid={`textbook-publisher-mobile-card-${publisher.id}`}
-                      className="rounded-lg border border-border/70 bg-background px-3 py-3"
-                    >
-                      <div className="mb-3 flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-foreground">
-                            {publisher.name || "새 출판사"}
-                          </p>
-                          <p className="text-xs text-muted-foreground">
-                            {subjectLabel(publisher.subjects)} · {formatQuantity(getPublisherTextbookCount(publisher))}종
-                          </p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="ghost"
-                          size="icon"
-                          className="size-8 shrink-0 text-destructive hover:text-destructive"
-                          onClick={() => handleDeletePublisher(publisher)}
-                          disabled={saving}
-                          aria-label="출판사 삭제"
-                        >
-                          <Trash2 className="size-4" />
-                        </Button>
-                      </div>
+          <TabsContent value="publishers" className="mt-3 min-w-0">
+            <div data-testid="textbook-publishers-mobile-list" className="grid gap-2 md:hidden">
+              {pages.publishers.loading && publisherRows.length === 0 ? Array.from({ length: 10 }, (_, index) => <Skeleton key={index} className="h-56 w-full" />) : publisherRows.length === 0 ? <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">표시할 출판사가 없습니다.</div> : publisherRows.map((publisher) => (
+                <section key={publisher.id} data-testid={`textbook-publisher-mobile-card-${publisher.id}`} className="rounded-lg border border-border/70 bg-background px-3 py-3">
+                  <div className="mb-3 flex items-start justify-between gap-3"><div className="min-w-0"><p className="truncate text-sm font-semibold">{publisher.name || "새 출판사"}</p><p className="text-xs text-muted-foreground">{subjectLabel(publisher.subjects)} · {formatQuantity(publisher.textbookCount)}종</p></div><Button type="button" variant="ghost" size="icon" className="size-8 text-destructive" disabled={editingDisabled} onClick={() => deletePublisher(publisher)} aria-label="출판사 삭제"><Trash2 className="size-4" /></Button></div>
+                  <div className="grid gap-2"><PublisherSubjectSelect publisher={publisher} disabled={editingDisabled} onChange={(subjects) => setPublisherPatch(publisher.id, { subjects })} /><Input data-focus-id={publisher.id} data-focus-mode="mobile" value={publisher.name} onChange={(event) => setPublisherPatch(publisher.id, { name: event.target.value })} className="h-9" placeholder="출판사명" disabled={editingDisabled} /><PublisherSupplierPicker anchor={`mobile:${publisher.id}`} publisher={publisher} pages={pages} pickerAnchor={pickerAnchor} disabled={editingDisabled} onPickerAnchorChange={setPickerAnchor} onSupplierIdsChange={(supplierIds) => setPublisherPatch(publisher.id, { supplierIds })} /></div>
+                </section>
+              ))}
+            </div>
+            <div className="hidden md:block"><SettingsTableFrame><Table className="min-w-[900px] table-fixed"><caption className="sr-only">출판사별 총판 설정</caption><TableHeader><TableRow><TableHead className={`w-[18%] ${settingsTableHeadClass}`}>과목</TableHead><TableHead className={`w-[32%] ${settingsTableHeadClass}`}>출판사</TableHead><TableHead className={`w-[10%] text-center ${settingsTableHeadClass}`}>교재</TableHead><TableHead className={`w-[28%] ${settingsTableHeadClass}`}>총판</TableHead><TableHead className={`sticky right-0 w-[12%] bg-muted text-right ${settingsTableHeadClass}`}>작업</TableHead></TableRow></TableHeader><TableBody>{pages.publishers.loading && publisherRows.length === 0 ? Array.from({ length: 10 }, (_, index) => <TableRow key={index}><TableCell colSpan={5}><Skeleton className="h-9 w-full" /></TableCell></TableRow>) : publisherRows.length === 0 ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">표시할 출판사가 없습니다.</TableCell></TableRow> : publisherRows.map((publisher) => <TableRow key={publisher.id} data-testid={`textbook-publisher-desktop-row-${publisher.id}`}><TableCell className={settingsTableCellClass}><PublisherSubjectSelect publisher={publisher} disabled={editingDisabled} onChange={(subjects) => setPublisherPatch(publisher.id, { subjects })} /></TableCell><TableCell className={settingsTableCellClass}><Input data-focus-id={publisher.id} data-focus-mode="desktop" value={publisher.name} onChange={(event) => setPublisherPatch(publisher.id, { name: event.target.value })} className="h-9" placeholder="출판사명" disabled={editingDisabled} /></TableCell><TableCell className={`${settingsTableCellClass} text-center`}><Badge variant="secondary">{formatQuantity(publisher.textbookCount)}종</Badge></TableCell><TableCell className={settingsTableCellClass}><PublisherSupplierPicker anchor={`desktop:${publisher.id}`} publisher={publisher} pages={pages} pickerAnchor={pickerAnchor} disabled={editingDisabled} onPickerAnchorChange={setPickerAnchor} onSupplierIdsChange={(supplierIds) => setPublisherPatch(publisher.id, { supplierIds })} /></TableCell><TableCell className={`${settingsTableCellClass} sticky right-0 bg-background text-right`}><Button type="button" variant="ghost" size="icon" className="size-8 text-destructive" disabled={editingDisabled} onClick={() => appendOwner({ type: "publisher.delete", id: publisher.id })} aria-label="출판사 삭제"><Trash2 className="size-4" /></Button></TableCell></TableRow>)}</TableBody></Table><PageFooter resource={pages.publishers} label="출판사 목록 페이지 탐색" /></SettingsTableFrame></div>
+            <div className="mt-3 md:hidden"><PageFooter resource={pages.publishers} label="출판사 목록 페이지 탐색" /></div>
+          </TabsContent>
 
-                      <div className="grid gap-2">
-                        <div className="grid gap-1.5">
-                          <span className="text-xs font-medium text-muted-foreground">과목</span>
-                          <PublisherSubjectSelect
-                            publisher={publisher}
-                            onSubjectChange={(subject, checked) => togglePublisherSubject(publisher.id, subject, checked)}
-                          />
-                        </div>
+          <TabsContent value="suppliers" className="mt-3 min-w-0">
+            <div data-testid="textbook-suppliers-mobile-list" className="grid gap-2 md:hidden">
+              {pages.suppliers.loading && supplierRows.length === 0 ? Array.from({ length: 10 }, (_, index) => <Skeleton key={index} className="h-52 w-full" />) : supplierRows.length === 0 ? <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">표시할 총판이 없습니다.</div> : supplierRows.map((supplier) => { const hidden = Math.max(0, supplier.linkedPublisherCount - supplier.linkedPublisherNames.length); return <section key={supplier.id} data-testid={`textbook-supplier-mobile-card-${supplier.id}`} className="rounded-lg border border-border/70 bg-background px-3 py-3"><div className="mb-3 flex justify-between gap-3"><div><p className="text-sm font-semibold">{supplier.name || "새 총판"}</p><p className="text-xs text-muted-foreground">연결 출판사 {supplier.linkedPublisherCount}개</p></div><Button type="button" variant="ghost" size="icon" className="size-8 text-destructive" disabled={editingDisabled} onClick={() => appendOwner({ type: "supplier.delete", id: supplier.id })} aria-label="총판 삭제"><Trash2 className="size-4" /></Button></div><div className="grid gap-2"><Input data-focus-id={supplier.id} data-focus-mode="mobile" value={supplier.name} onChange={(event) => setSupplierPatch(supplier.id, { name: event.target.value })} placeholder="총판명" disabled={editingDisabled} /><Input value={supplier.contact} onChange={(event) => setSupplierPatch(supplier.id, { contact: event.target.value })} placeholder="연락처" disabled={editingDisabled} /><Input value={supplier.memo} onChange={(event) => setSupplierPatch(supplier.id, { memo: event.target.value })} placeholder="메모" disabled={editingDisabled} /></div><div className="mt-3 flex flex-wrap gap-1">{supplier.linkedPublisherNames.map((name) => <Badge key={name} variant="secondary">{name}</Badge>)}{hidden > 0 ? <Badge variant="outline">+{hidden}</Badge> : null}</div></section>; })}
+            </div>
+            <div className="hidden md:block"><SettingsTableFrame><Table className="min-w-[960px] table-fixed"><caption className="sr-only">교재 총판 목록</caption><TableHeader><TableRow><TableHead className={`w-[22%] ${settingsTableHeadClass}`}>총판</TableHead><TableHead className={`w-[18%] ${settingsTableHeadClass}`}>연락처</TableHead><TableHead className={`w-[20%] ${settingsTableHeadClass}`}>메모</TableHead><TableHead className={`w-[28%] ${settingsTableHeadClass}`}>연결 출판사</TableHead><TableHead className={`sticky right-0 w-[12%] bg-muted text-right ${settingsTableHeadClass}`}>작업</TableHead></TableRow></TableHeader><TableBody>{pages.suppliers.loading && supplierRows.length === 0 ? Array.from({ length: 10 }, (_, index) => <TableRow key={index}><TableCell colSpan={5}><Skeleton className="h-9 w-full" /></TableCell></TableRow>) : supplierRows.length === 0 ? <TableRow><TableCell colSpan={5} className="py-10 text-center text-muted-foreground">표시할 총판이 없습니다.</TableCell></TableRow> : supplierRows.map((supplier) => { const hidden = Math.max(0, supplier.linkedPublisherCount - supplier.linkedPublisherNames.length); return <TableRow key={supplier.id} data-testid={`textbook-supplier-desktop-row-${supplier.id}`}><TableCell className={settingsTableCellClass}><Input data-focus-id={supplier.id} data-focus-mode="desktop" value={supplier.name} onChange={(event) => setSupplierPatch(supplier.id, { name: event.target.value })} placeholder="총판명" disabled={editingDisabled} /></TableCell><TableCell className={settingsTableCellClass}><Input value={supplier.contact} onChange={(event) => setSupplierPatch(supplier.id, { contact: event.target.value })} placeholder="연락처" disabled={editingDisabled} /></TableCell><TableCell className={settingsTableCellClass}><Input value={supplier.memo} onChange={(event) => setSupplierPatch(supplier.id, { memo: event.target.value })} placeholder="메모" disabled={editingDisabled} /></TableCell><TableCell className={settingsTableCellClass}><div className="flex flex-wrap gap-1">{supplier.linkedPublisherNames.map((name) => <Badge key={name} variant="secondary">{name}</Badge>)}{hidden > 0 ? <Badge variant="outline">+{hidden}</Badge> : null}</div></TableCell><TableCell className={`${settingsTableCellClass} sticky right-0 bg-background text-right`}><Button type="button" variant="ghost" size="icon" className="size-8 text-destructive" disabled={editingDisabled} onClick={() => appendOwner({ type: "supplier.delete", id: supplier.id })} aria-label="총판 삭제"><Trash2 className="size-4" /></Button></TableCell></TableRow>; })}</TableBody></Table><PageFooter resource={pages.suppliers} label="총판 목록 페이지 탐색" /></SettingsTableFrame></div>
+            <div className="mt-3 md:hidden"><PageFooter resource={pages.suppliers} label="총판 목록 페이지 탐색" /></div>
+          </TabsContent>
 
-                        <div className="grid gap-1.5">
-                          <span className="text-xs font-medium text-muted-foreground">출판사</span>
-                          <Input
-                            value={publisher.name}
-                            onChange={(event) => setPublisherField(publisher.id, "name", event.target.value)}
-                            className="h-9"
-                            placeholder="출판사명"
-                          />
-                        </div>
-
-                        <div className="grid gap-1.5">
-                          <span className="text-xs font-medium text-muted-foreground">총판</span>
-                          <Popover>
-                            <PopoverTrigger asChild>
-                              <Button type="button" variant="outline" className="h-9 w-full justify-between overflow-hidden px-3">
-                                <span className="truncate">
-                                  {publisher.supplierIds.length > 0
-                                    ? publisher.supplierIds
-                                        .map((supplierId) => suppliersById.get(supplierId)?.name)
-                                        .filter(Boolean)
-                                        .join(", ")
-                                    : "총판 선택"}
-                                </span>
-                                <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" />
-                              </Button>
-                            </PopoverTrigger>
-                            <PopoverContent align="start" className="w-72 p-2">
-                              <div className="grid max-h-72 gap-1 overflow-y-auto">
-                                {suppliers.map((supplier) => (
-                                  <label
-                                    key={supplier.id}
-                                    className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70"
-                                  >
-                                    <Checkbox
-                                      checked={publisher.supplierIds.includes(supplier.id)}
-                                      onCheckedChange={(checked) =>
-                                        togglePublisherSupplier(publisher.id, supplier.id, checked === true)
-                                      }
-                                    />
-                                    <span className="truncate">{supplier.name}</span>
-                                  </label>
-                                ))}
-                              </div>
-                            </PopoverContent>
-                          </Popover>
-                        </div>
-
-                        <Badge variant="secondary" className="h-8 w-fit justify-center rounded-md px-2 text-xs">
-                          교재 {formatQuantity(getPublisherTextbookCount(publisher))}종
-                        </Badge>
-                      </div>
-                    </section>
-                  ))
-                )}
-              </div>
-              <div className="hidden md:block">
-              <SettingsTableFrame>
-                <Table className="min-w-[900px] table-fixed">
-                  <caption className="sr-only">출판사별 총판 설정</caption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>과목</TableHead>
-                      <TableHead className={`w-[34%] ${settingsTableHeadClass}`}>출판사</TableHead>
-                      <TableHead className={`w-[10%] text-center ${settingsTableHeadClass}`}>교재</TableHead>
-                      <TableHead className={`w-[28%] ${settingsTableHeadClass}`}>총판</TableHead>
-                      <TableHead className={`sticky right-0 z-10 w-[12%] bg-muted text-right ${settingsTableHeadClass}`}>작업</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? (
-                      Array.from({ length: 6 }).map((_, index) => (
-                        <TableRow key={`publisher-loading-${index}`}>
-                          <TableCell colSpan={5} className="px-3 py-2">
-                            <Skeleton className="h-10 w-full" />
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : filteredPublishers.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={5} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                          표시할 출판사가 없습니다.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredPublishers.map((publisher) => (
-                        <TableRow key={publisher.id}>
-                          <TableCell className={settingsTableCellClass}>
-                            <PublisherSubjectSelect
-                              publisher={publisher}
-                              onSubjectChange={(subject, checked) => togglePublisherSubject(publisher.id, subject, checked)}
-                            />
-                          </TableCell>
-                          <TableCell className={settingsTableCellClass}>
-                            <Input
-                              value={publisher.name}
-                              onChange={(event) => setPublisherField(publisher.id, "name", event.target.value)}
-                              className="h-9"
-                              placeholder="출판사명"
-                            />
-                          </TableCell>
-                          <TableCell className={`${settingsTableCellClass} text-center`}>
-                            <Badge variant="secondary" className="h-8 min-w-16 justify-center rounded-md px-2 text-xs">
-                              {formatQuantity(getPublisherTextbookCount(publisher))}종
-                            </Badge>
-                          </TableCell>
-                          <TableCell className={settingsTableCellClass}>
-                            <Popover>
-                              <PopoverTrigger asChild>
-                                <Button type="button" variant="outline" className="h-9 w-full justify-between overflow-hidden px-3">
-                                  <span className="truncate">
-                                    {publisher.supplierIds.length > 0
-                                      ? publisher.supplierIds
-                                          .map((supplierId) => suppliersById.get(supplierId)?.name)
-                                          .filter(Boolean)
-                                          .join(", ")
-                                      : "총판 선택"}
-                                  </span>
-                                  <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" />
-                                </Button>
-                              </PopoverTrigger>
-                              <PopoverContent align="start" className="w-72 p-2">
-                                <div className="grid max-h-72 gap-1 overflow-y-auto">
-                                  {suppliers.map((supplier) => (
-                                    <label
-                                      key={supplier.id}
-                                      className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70"
-                                    >
-                                      <Checkbox
-                                        checked={publisher.supplierIds.includes(supplier.id)}
-                                        onCheckedChange={(checked) =>
-                                          togglePublisherSupplier(publisher.id, supplier.id, checked === true)
-                                        }
-                                      />
-                                      <span className="truncate">{supplier.name}</span>
-                                    </label>
-                                  ))}
-                                </div>
-                              </PopoverContent>
-                            </Popover>
-                          </TableCell>
-                          <TableCell className={`${settingsTableCellClass} sticky right-0 bg-background`}>
-                            <div className="flex justify-end">
-                              <Button
-                                type="button"
-                                variant="ghost"
-                                size="icon"
-                                className="size-8 text-destructive hover:text-destructive"
-                                onClick={() => handleDeletePublisher(publisher)}
-                                disabled={saving}
-                                aria-label="출판사 삭제"
-                              >
-                                <Trash2 className="size-4" />
-                              </Button>
-                            </div>
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    )}
-                  </TableBody>
-                </Table>
-              </SettingsTableFrame>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="suppliers" className="mt-3 min-w-0">
-              <div data-testid="textbook-suppliers-mobile-list" className="grid gap-2 md:hidden">
-                {loading ? (
-                  Array.from({ length: 6 }).map((_, index) => (
-                    <Skeleton key={`supplier-mobile-loading-${index}`} className="h-36 w-full" />
-                  ))
-                ) : filteredSuppliers.length === 0 ? (
-                  <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">
-                    표시할 총판이 없습니다.
-                  </div>
-                ) : (
-                  filteredSuppliers.map((supplier) => {
-                    const linkCount = publisherLinkCounts.get(supplier.id) || 0;
-                    const linkedPublisherNames = publisherNamesBySupplierId.get(supplier.id) || [];
-                    const visiblePublisherNames = linkedPublisherNames.slice(0, 3);
-                    const hiddenPublisherCount = Math.max(linkedPublisherNames.length - visiblePublisherNames.length, 0);
-
-                    return (
-                      <section
-                        key={`textbook-supplier-mobile-card-${supplier.id}`}
-                        data-testid={`textbook-supplier-mobile-card-${supplier.id}`}
-                        className="rounded-lg border border-border/70 bg-background px-3 py-3"
-                      >
-                        <div className="mb-3 flex items-start justify-between gap-3">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-foreground">
-                              {supplier.name || "새 총판"}
-                            </p>
-                            <p className="text-xs text-muted-foreground">연결 출판사 {linkCount}개</p>
-                          </div>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="icon"
-                            className="size-8 shrink-0 text-destructive hover:text-destructive"
-                            onClick={() => handleDeleteSupplier(supplier)}
-                            disabled={saving}
-                            aria-label="총판 삭제"
-                          >
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-
-                        <div className="grid gap-2">
-                          <div className="grid gap-1.5">
-                            <span className="text-xs font-medium text-muted-foreground">총판</span>
-                            <Input
-                              value={supplier.name}
-                              onChange={(event) => setSupplierField(supplier.id, "name", event.target.value)}
-                              className="h-9"
-                              placeholder="총판명"
-                            />
-                          </div>
-
-                          <div className="flex min-h-9 flex-wrap items-center gap-1.5">
-                            {visiblePublisherNames.length > 0 ? (
-                              <>
-                                {visiblePublisherNames.map((publisherName) => (
-                                  <Badge
-                                    key={`${supplier.id}-mobile-${publisherName}`}
-                                    variant="secondary"
-                                    className="max-w-full justify-center truncate rounded-md px-2 text-xs"
-                                  >
-                                    {publisherName}
-                                  </Badge>
-                                ))}
-                                {hiddenPublisherCount > 0 ? (
-                                  <Badge variant="outline" className="rounded-md px-2 text-xs">
-                                    +{hiddenPublisherCount}
-                                  </Badge>
-                                ) : null}
-                              </>
-                            ) : (
-                              <span className="text-sm text-muted-foreground">연결 출판사 없음</span>
-                            )}
-                            <Badge
-                              variant="outline"
-                              className={cn("ml-auto min-w-10 justify-center rounded-md", linkCount === 0 && "text-muted-foreground")}
-                            >
-                              {linkCount}
-                            </Badge>
-                          </div>
-                        </div>
-                      </section>
-                    );
-                  })
-                )}
-              </div>
-              <div className="hidden md:block">
-              <SettingsTableFrame>
-                <Table className="min-w-[760px] table-fixed">
-                  <caption className="sr-only">교재 총판 목록</caption>
-                  <TableHeader>
-                    <TableRow>
-                      <TableHead className={`w-[42%] ${settingsTableHeadClass}`}>총판</TableHead>
-                      <TableHead className={`w-[46%] ${settingsTableHeadClass}`}>연결 출판사</TableHead>
-                      <TableHead className={`sticky right-0 z-10 w-[12%] bg-muted text-right ${settingsTableHeadClass}`}>작업</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {loading ? (
-                      Array.from({ length: 6 }).map((_, index) => (
-                        <TableRow key={`supplier-loading-${index}`}>
-                          <TableCell colSpan={3} className="px-3 py-2">
-                            <Skeleton className="h-10 w-full" />
-                          </TableCell>
-                        </TableRow>
-                      ))
-                    ) : filteredSuppliers.length === 0 ? (
-                      <TableRow>
-                        <TableCell colSpan={3} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                          표시할 총판이 없습니다.
-                        </TableCell>
-                      </TableRow>
-                    ) : (
-                      filteredSuppliers.map((supplier) => {
-                        const linkCount = publisherLinkCounts.get(supplier.id) || 0;
-                        const linkedPublisherNames = publisherNamesBySupplierId.get(supplier.id) || [];
-                        const visiblePublisherNames = linkedPublisherNames.slice(0, 3);
-                        const hiddenPublisherCount = Math.max(linkedPublisherNames.length - visiblePublisherNames.length, 0);
-                        return (
-                          <TableRow key={supplier.id}>
-                            <TableCell className={settingsTableCellClass}>
-                              <Input
-                                value={supplier.name}
-                                onChange={(event) => setSupplierField(supplier.id, "name", event.target.value)}
-                                className="h-9"
-                                placeholder="총판명"
-                              />
-                            </TableCell>
-                            <TableCell className={settingsTableCellClass}>
-                              <div className="flex min-h-9 flex-wrap items-center gap-1.5">
-                                {visiblePublisherNames.length > 0 ? (
-                                  <>
-                                    {visiblePublisherNames.map((publisherName) => (
-                                      <Badge
-                                        key={`${supplier.id}-${publisherName}`}
-                                        variant="secondary"
-                                        className="max-w-36 justify-center truncate rounded-md px-2 text-xs"
-                                      >
-                                        {publisherName}
-                                      </Badge>
-                                    ))}
-                                    {hiddenPublisherCount > 0 ? (
-                                      <Badge variant="outline" className="rounded-md px-2 text-xs">
-                                        +{hiddenPublisherCount}
-                                      </Badge>
-                                    ) : null}
-                                  </>
-                                ) : (
-                                  <span className="text-sm text-muted-foreground">-</span>
-                                )}
-                                <Badge
-                                  variant="outline"
-                                  className={cn("ml-auto min-w-10 justify-center rounded-md", linkCount === 0 && "text-muted-foreground")}
-                                >
-                                  {linkCount}
-                                </Badge>
-                              </div>
-                            </TableCell>
-                            <TableCell className={`${settingsTableCellClass} sticky right-0 bg-background`}>
-                              <div className="flex justify-end">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="icon"
-                                  className="size-8 text-destructive hover:text-destructive"
-                                  onClick={() => handleDeleteSupplier(supplier)}
-                                  disabled={saving}
-                                  aria-label="총판 삭제"
-                                >
-                                  <Trash2 className="size-4" />
-                                </Button>
-                              </div>
-                            </TableCell>
-                          </TableRow>
-                        );
-                      })
-                    )}
-                  </TableBody>
-                </Table>
-              </SettingsTableFrame>
-              </div>
-            </TabsContent>
-
-            <TabsContent value="subSubjects" className="mt-3 min-w-0">
-              <SubSubjectSettingsPanel
-                rows={subSubjects}
-                activeSubject={activeSubSubject}
-                searchQuery={query}
-                saving={saving}
-                onActiveSubjectChange={setActiveSubSubject}
-                onNameChange={(id, value) => setSubSubjectField(id, { name: value })}
-                onVisibleChange={(id, value) => setSubSubjectField(id, { isVisible: value })}
-                onMove={moveSubSubject}
-                onDelete={handleDeleteSubSubject}
-              />
-            </TabsContent>
+          <TabsContent value="subSubjects" className="mt-3 min-w-0">
+            <SettingsTableFrame>
+              <div className="flex flex-wrap items-center gap-1.5 border-b px-3 py-3" aria-label="세부과목 과목 선택">{SUBJECT_OPTIONS.map((option) => <Button key={option.value} type="button" size="sm" variant={activeSubject === option.value ? "default" : "outline"} aria-pressed={activeSubject === option.value} onClick={() => { pages.subSubjects.goToPage(1); setActiveSubject(option.value as TextbookSettingsSubject); }}>{option.label}</Button>)}</div>
+              <div data-testid="textbook-subsubjects-mobile-list" className="grid gap-2 p-3 md:hidden">{pages.subSubjects.loading && subSubjectRows.length === 0 ? Array.from({ length: 10 }, (_, index) => <Skeleton key={index} className="h-32 w-full" />) : subSubjectRows.length === 0 ? <div className="rounded-lg border border-dashed px-3 py-8 text-center text-sm text-muted-foreground">표시할 세부과목이 없습니다.</div> : subSubjectRows.map((row) => <section key={row.id} data-testid={`textbook-subsubject-mobile-card-${row.id}`} className="rounded-lg border border-border/70 bg-background px-3 py-3"><div className="mb-3 flex items-center justify-between gap-2"><span className="text-sm font-semibold">{row.name || "새 세부과목"}</span><label className="flex items-center gap-2 text-xs text-muted-foreground"><Checkbox checked={row.isVisible} onCheckedChange={(value) => setSubSubjectPatch(row.id, { isVisible: value === true })} disabled={editingDisabled} />표시</label></div><Input data-focus-id={row.id} data-focus-mode="mobile" value={row.name} onChange={(event) => setSubSubjectPatch(row.id, { name: event.target.value })} placeholder="세부과목명" disabled={editingDisabled} /><div className="mt-2 flex justify-end gap-1"><Button type="button" variant="outline" size="icon" className="size-8" onClick={() => appendSubSubject({ type: "move", id: row.id, direction: "up" })} disabled={editingDisabled || !row.canMoveUp} aria-label={`${row.name || "세부과목"} 위로 이동`}><ArrowUp className="size-4" /></Button><Button type="button" variant="outline" size="icon" className="size-8" onClick={() => appendSubSubject({ type: "move", id: row.id, direction: "down" })} disabled={editingDisabled || !row.canMoveDown} aria-label={`${row.name || "세부과목"} 아래로 이동`}><ArrowDown className="size-4" /></Button><Button type="button" variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => appendSubSubject({ type: "delete", id: row.id })} disabled={editingDisabled} aria-label="세부과목 삭제"><Trash2 className="size-4" /></Button></div></section>)}</div>
+              <div className="hidden md:block"><Table className="min-w-[720px] table-fixed"><caption className="sr-only">교재 세부과목 설정</caption><TableHeader><TableRow><TableHead className={`w-[62%] ${settingsTableHeadClass}`}>세부과목</TableHead><TableHead className={`w-[14%] text-center ${settingsTableHeadClass}`}>순서</TableHead><TableHead className={`w-[12%] text-center ${settingsTableHeadClass}`}>표시</TableHead><TableHead className={`sticky right-0 w-[12%] bg-muted text-right ${settingsTableHeadClass}`}>작업</TableHead></TableRow></TableHeader><TableBody>{pages.subSubjects.loading && subSubjectRows.length === 0 ? Array.from({ length: 10 }, (_, index) => <TableRow key={index}><TableCell colSpan={4}><Skeleton className="h-9 w-full" /></TableCell></TableRow>) : subSubjectRows.length === 0 ? <TableRow><TableCell colSpan={4} className="py-10 text-center text-muted-foreground">표시할 세부과목이 없습니다.</TableCell></TableRow> : subSubjectRows.map((row) => <TableRow key={row.id} data-testid={`textbook-subsubject-desktop-row-${row.id}`}><TableCell className={settingsTableCellClass}><Input data-focus-id={row.id} data-focus-mode="desktop" value={row.name} onChange={(event) => setSubSubjectPatch(row.id, { name: event.target.value })} placeholder="세부과목명" disabled={editingDisabled} /></TableCell><TableCell className={`${settingsTableCellClass} text-center`}><div className="flex justify-center gap-1"><Button type="button" variant="outline" size="icon" className="size-8" onClick={() => appendSubSubject({ type: "move", id: row.id, direction: "up" })} disabled={editingDisabled || !row.canMoveUp} aria-label={`${row.name || "세부과목"} 위로 이동`}><ArrowUp className="size-4" /></Button><Button type="button" variant="outline" size="icon" className="size-8" onClick={() => appendSubSubject({ type: "move", id: row.id, direction: "down" })} disabled={editingDisabled || !row.canMoveDown} aria-label={`${row.name || "세부과목"} 아래로 이동`}><ArrowDown className="size-4" /></Button></div></TableCell><TableCell className={`${settingsTableCellClass} text-center`}><Checkbox checked={row.isVisible} onCheckedChange={(value) => setSubSubjectPatch(row.id, { isVisible: value === true })} disabled={editingDisabled} aria-label={`${row.name || "세부과목"} 표시`} /></TableCell><TableCell className={`${settingsTableCellClass} sticky right-0 bg-background text-right`}><Button type="button" variant="ghost" size="icon" className="size-8 text-destructive" onClick={() => appendSubSubject({ type: "delete", id: row.id })} disabled={editingDisabled} aria-label="세부과목 삭제"><Trash2 className="size-4" /></Button></TableCell></TableRow>)}</TableBody></Table></div>
+              <PageFooter resource={pages.subSubjects} label="세부과목 목록 페이지 탐색" />
+            </SettingsTableFrame>
+          </TabsContent>
         </Tabs>
       </div>
+
+      <Dialog open={conflictOpen} onOpenChange={setConflictOpen}><DialogContent><DialogHeader><DialogTitle>최신 설정을 다시 불러올까요?</DialogTitle><DialogDescription>현재 초안을 버리고 다른 사용자가 저장한 최신 설정을 불러옵니다. 취소하면 초안은 그대로 유지됩니다.</DialogDescription></DialogHeader><DialogFooter><Button type="button" variant="outline" onClick={() => setConflictOpen(false)}>취소</Button><Button type="button" variant="destructive" onClick={confirmDiscardAndReload}>초안 버리고 새로 불러오기</Button></DialogFooter></DialogContent></Dialog>
     </SettingsWorkspaceShell>
   );
 }

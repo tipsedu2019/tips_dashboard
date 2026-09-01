@@ -683,6 +683,7 @@ test("textbook settings manage subject taxonomy for textbook filters", async () 
     "utf8",
   );
   const taxonomySource = await readFile(new URL("src/features/textbooks/textbook-taxonomy.ts", root), "utf8");
+  const settingsPagesSource = await readFile(new URL("src/features/textbooks/use-textbook-settings-pages.ts", root), "utf8");
   const serviceSource = await readFile(new URL("src/features/textbooks/textbook-service.ts", root), "utf8");
   const navigationSource = await readFile(new URL("src/lib/navigation.ts", root), "utf8");
   const migrationSource = await readFile(
@@ -691,8 +692,11 @@ test("textbook settings manage subject taxonomy for textbook filters", async () 
   );
 
   assert.match(navigationSource, /title: "교재 설정"/);
-  assert.match(settingsSource, /SubSubjectSettingsPanel/);
-  assert.match(settingsSource, /textbook_sub_subject_settings/);
+  assert.match(settingsSource, /useTextbookSettingsPages/);
+  assert.match(settingsSource, /data-testid="textbook-subsubjects-mobile-list"/);
+  assert.match(settingsPagesSource, /listTextbookSubSubjectPage/);
+  assert.match(settingsPagesSource, /enabled: activeSection === "subSubjects"/);
+  assert.doesNotMatch(settingsSource, /textbook_sub_subject_settings|\.from\("textbook_/);
   assert.match(settingsSource, /세부과목 추가/);
   assert.match(settingsSource, /순서/);
   assert.match(settingsSource, /표시/);

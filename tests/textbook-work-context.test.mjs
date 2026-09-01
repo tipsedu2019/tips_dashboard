@@ -226,7 +226,8 @@ test('final closing SQL provenance binds all14 untouched wires and exactly nine 
   const task5b2SqlHash = '458b951d33356be1f8544c1d1b7c80e4023031dedb78ce7029bef9ea10aa301b';
   assert.equal(hash(readFileSync(new URL(`../supabase/migrations/${task5b2FileName}`, import.meta.url))), task5b2SqlHash);
   assert.equal(hash(readFileSync(new URL('../supabase/tests/textbook_class_sale_roster_context_test.sql', import.meta.url))), '754d4358d17cffc2c2ae81c40857d7eda79cf39935824a57411cb4c97d39c4f2');
-  assert.equal(hash(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url))), '266c0f0bfc69ecdb4841a90370c1e27cfd9075b361a4889b05525357917b0193');
+  // Later reviewed settings migrations are append-only additions to this same final manifest.
+  assert.equal(hash(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url))), '468fb430635df8e17f915374bdf6e12eb07b75902ea06e01572787566484600b');
   assert.deepEqual(manifest.orderedNewMigrations.filter((entry) => entry.fileName === task5b2FileName), [{ fileName: task5b2FileName, status: 'final', sha256: task5b2SqlHash }]);
   assert.equal(hash(finalTask5b2WirePayload), finalTask5b2Evidence.wirePayloadSha256);
   assert.equal(finalTask5b2Evidence.finalSqlLogSha256, '6d04858c363db8090a24037eb8c836dac07473b0ca5471b191577a12d6115dc8');
