@@ -3,7 +3,7 @@ import { getClosingDetailSearchHaystack } from "./textbook-closing-model";
 import { buildPurchaseSupplierHandoffGroups, buildPurchaseSupplierReturnHandoffGroups, buildMakeEduBillingHandoffGroups, getSaleLineMonth, getSaleLineStatus, isBillableSaleLineStatus, normalizeMonthInput } from "./textbook-handoff-model";
 import { filterStockMovesForClosing, getTextbookByReference, listIds } from "./textbook-ledger.js";
 import { normalizeTextbookLookup, text } from "./textbook-read-model";
-import type { Row, PurchaseFilters, SaleFilters, ClosingMovementFilters, TextbookHandoffResult, TextbookClosingSaveContext, TextbookClosingMovementExport, ClassTextbookSaleContextInput, ClassTextbookSaleContext } from "./textbook-read-types";
+import type { Row, PurchaseFilters, SaleFilters, ClosingMovementFilters, TextbookHandoffResult, TextbookClosingSaveContext, TextbookClosingMovementExport, ClassTextbookSaleContextInput, ClassTextbookSaleContext, ClassTextbookSaleStudentRecord } from "./textbook-read-types";
 const v: typeof textbookPurposeValidation = textbookPurposeValidation;
 
 function rows(value: unknown, parser: (item: unknown) => void): Row[] {
@@ -27,6 +27,9 @@ function countSources(data: Row, source: Row[], count = "sourceLineCount", ids =
 function books(value: unknown) { return rows(value, (row) => v.fields(row, v.workflowBookShape)); }
 function classes(value: unknown) { return rows(value, (row) => { v.reference(row, "class"); if (row === null) v.fail(); }); }
 function students(value: unknown) { return rows(value, (row) => v.fields(row, { id: "uuid", name: "text", grade: "nullableText" })); }
+function classStudents(value: unknown) {
+  return rows(value, (row) => v.fields(row, { id: "uuid", name: "text", grade: "nullableText", school: "nullableText" })) as ClassTextbookSaleStudentRecord[];
+}
 function saleLines(value: unknown) {
   return rows(value, (row) => {
     // Complete contexts carry the physical raw line; the existing workflow
@@ -137,7 +140,7 @@ export async function getClassTextbookSaleContext(input: ClassTextbookSaleContex
     if (!v.sameValue(data.input, { classId: input.classId.toLowerCase(), textbookId: input.textbookId.toLowerCase(), locationId: input.locationId.toLowerCase(), chargeMonth: normalizeMonthInput(input.chargeMonth) })) v.fail();
     v.exact(data.class, ["id", "name", "student_ids"]); if (data.class.id !== input.classId.toLowerCase() || typeof data.class.name !== "string") v.fail();
     const enrolled = listIds(data.class.student_ids); sameIds(data.enrolledStudentIds, enrolled);
-    const studentRows = students(data.students); const studentMap = byId(studentRows);
+    const studentRows = classStudents(data.students); const studentMap = byId(studentRows);
     if (studentRows.some((row) => !enrolled.includes(String(row.id)))) v.fail();
     sameIds(data.missingStudentIds, enrolled.filter((id) => !studentMap.has(id)));
     v.reference(data.textbook, "book", input.textbookId.toLowerCase()); v.reference(data.location, "location", input.locationId.toLowerCase());

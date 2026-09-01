@@ -42,6 +42,11 @@ const finalClosingWirePayloads = [
   "{\"data\": {\"closing\": {\"saleAmount\": 0, \"needsReview\": true, \"teamMargins\": [{\"team\": \"english\", \"saleAmount\": 300.29999999999995, \"marginAmount\": 30.299999999999955, \"saleQuantity\": 3, \"purchaseCostAmount\": 270}, {\"team\": \"math\", \"saleAmount\": 0, \"marginAmount\": 0, \"saleQuantity\": 0, \"purchaseCostAmount\": 0}, {\"team\": \"science\", \"saleAmount\": 0, \"marginAmount\": 0, \"saleQuantity\": 0, \"purchaseCostAmount\": 0}, {\"team\": \"other\", \"saleAmount\": 0, \"marginAmount\": 0, \"saleQuantity\": 0, \"purchaseCostAmount\": 0}], \"endingAmount\": 0, \"saleQuantity\": 3, \"openingAmount\": 0, \"endingQuantity\": -3, \"purchaseAmount\": 0, \"receivedAmount\": 0, \"openingQuantity\": 0, \"adjustmentAmount\": 0, \"purchaseQuantity\": 0, \"paymentDifference\": 0, \"adjustmentQuantity\": 0, \"settlementDifference\": 30.299999999999955, \"textbookMarginAmount\": 30.299999999999955, \"supplierPaymentAmount\": 0}, \"subject\": \"english\", \"closingMonth\": \"2097-04\", \"sourceLineCount\": 1}, \"input\": {\"subject\": \"english\", \"closingMonth\": \"2097-04\", \"openingAmount\": 0, \"openingQuantity\": 0}, \"method\": \"getTextbookClosingPreview\", \"actorId\": \"3c000000-0000-4000-8000-000000000901\"}",
   "{\"data\": {\"rows\": [{\"at\": \"2099-09-01T00:00:00+00:00\", \"id\": \"3c000000-0000-4000-8000-000000002200\", \"amount\": -40000, \"quantity\": -2, \"typeLabel\": \"출고\", \"locationName\": \"본관\", \"marginAmount\": 2000, \"textbookTitle\": \"__t3c_small__\"}], \"complete\": true, \"sourceLineIds\": [\"3c000000-0000-4000-8000-000000002200\"], \"sourceLineCount\": 1}, \"input\": {\"search\": \"\", \"subject\": \"science\", \"closingMonth\": \"2099-09\"}, \"method\": \"getTextbookClosingMovementExport\", \"actorId\": \"3c000000-0000-4000-8000-000000000901\"}",
 ];
+const finalTask5b2Evidence = Object.freeze({
+  finalSqlLogSha256: '6d04858c363db8090a24037eb8c836dac07473b0ca5471b191577a12d6115dc8',
+  wirePayloadSha256: 'a097a5252eca36e08b15407ce05af90ec195f00ad5bd0847d30fc99fb6988328',
+});
+const finalTask5b2WirePayload = "{\"data\": {\"class\": {\"id\": \"5b200000-0000-4000-8000-000000000600\", \"name\": \"__t5b2_class__\", \"student_ids\": [\"5b200000-0000-4000-8000-000000001001\", \"5b200000-0000-4000-8000-000000001002\", \"5b200000-0000-4000-8000-000000001003\", \"5b200000-0000-4000-8000-000000001004\", \"5b200000-0000-4000-8000-000000001005\", \"5b200000-0000-4000-8000-000000001006\", \"5b200000-0000-4000-8000-000000001007\", \"5b200000-0000-4000-8000-000000001008\", \"5b200000-0000-4000-8000-000000001009\", \"5b200000-0000-4000-8000-000000001010\", \"5b200000-0000-4000-8000-000000001011\", \"5b200000-0000-4000-8000-000000001012\", \"5b200000-0000-4000-8000-000000001013\", \"5b200000-0000-4000-8000-000000001014\", \"5b200000-0000-4000-8000-000000001015\", \"5b200000-0000-4000-8000-000000001016\", \"5b200000-0000-4000-8000-000000001017\", \"5b200000-0000-4000-8000-000000001018\", \"5b200000-0000-4000-8000-000000001019\", \"5b200000-0000-4000-8000-000000001020\", \"5b200000-0000-4000-8000-000000001021\", \"5b200000-0000-4000-8000-000000001022\", \"5b200000-0000-4000-8000-000000001001\", \"legacy-school-id\"]}, \"input\": {\"classId\": \"5b200000-0000-4000-8000-000000000600\", \"locationId\": \"5b200000-0000-4000-8000-000000000800\", \"textbookId\": \"5b200000-0000-4000-8000-000000000700\", \"chargeMonth\": \"2099-08\"}, \"complete\": true, \"location\": {\"id\": \"5b200000-0000-4000-8000-000000000800\", \"code\": \"__t5b2_main__\", \"name\": \"Task5b2 본관\"}, \"students\": [{\"id\": \"5b200000-0000-4000-8000-000000001001\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": null}, {\"id\": \"5b200000-0000-4000-8000-000000001002\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001003\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001004\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001005\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001006\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001007\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001008\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001009\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001010\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001011\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001012\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001013\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001014\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001015\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001016\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001017\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001018\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001019\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001020\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001021\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_default\"}, {\"id\": \"5b200000-0000-4000-8000-000000001022\", \"name\": \"__t5b2_same_name\", \"grade\": \"중2\", \"school\": \"__t5b2_school_offpage\"}], \"textbook\": {\"id\": \"5b200000-0000-4000-8000-000000000700\", \"name\": \"__t5b2_book__\", \"price\": 10001, \"title\": \"__t5b2_book__\", \"isbn13\": null, \"status\": \"active\", \"barcode\": null, \"subject\": \"english\", \"publisher\": \"__t5b2_publisher__\", \"list_price\": 0, \"sale_price\": 10001, \"publisher_id\": null, \"is_returnable\": false, \"default_supplier_id\": null}, \"inventory\": {\"stockValue\": -20002, \"textbookId\": \"5b200000-0000-4000-8000-000000000700\", \"totalQuantity\": -2, \"currentQuantity\": -2, \"studentQuantity\": -2, \"teacherQuantity\": 0, \"locationQuantities\": {\"5b200000-0000-4000-8000-000000000800\": -2}, \"studentLocationQuantities\": {\"5b200000-0000-4000-8000-000000000800\": -2}, \"teacherLocationQuantities\": {\"5b200000-0000-4000-8000-000000000800\": 0}}, \"duplicateCount\": 1, \"duplicateLines\": [{\"id\": \"5b200000-0000-4000-8000-000000004000\", \"memo\": \"\", \"status\": \"paid\", \"sale_id\": \"5b200000-0000-4000-8000-000000003000\", \"class_id\": null, \"quantity\": 1, \"copy_scope\": \"student\", \"created_at\": \"2099-08-01T00:00:00+00:00\", \"student_id\": \"5b200000-0000-4000-8000-000000001022\", \"teacher_id\": null, \"unit_price\": 10001, \"updated_at\": null, \"location_id\": \"5b200000-0000-4000-8000-000000000800\", \"textbook_id\": \"5b200000-0000-4000-8000-000000000700\", \"charge_month\": \"2099-08-25\", \"makeedu_memo\": null, \"teacher_name\": \"\", \"makeedu_paid_at\": null, \"exclusion_reason\": \"\", \"makeedu_item_name\": null, \"makeedu_synced_at\": null, \"makeedu_import_key\": null, \"makeedu_student_no\": null, \"makeedu_paid_amount\": 0, \"makeedu_card_company\": null, \"makeedu_charge_month\": null, \"makeedu_charge_amount\": 0, \"makeedu_unpaid_amount\": 0, \"makeedu_payment_method\": null, \"makeedu_payment_status\": null, \"makeedu_discount_amount\": 0, \"makeedu_saved_point_amount\": 0, \"makeedu_payment_method_detail\": null}], \"duplicateSales\": [{\"id\": \"5b200000-0000-4000-8000-000000003000\", \"memo\": \"\", \"status\": \"charged\", \"class_id\": \"5b200000-0000-4000-8000-000000000600\", \"sale_date\": \"2099-08-01\", \"created_at\": \"2099-08-01T00:00:00+00:00\", \"created_by\": null, \"updated_at\": null, \"charge_month\": \"2099-08\"}], \"duplicateLineIds\": [\"5b200000-0000-4000-8000-000000004000\"], \"missingStudentIds\": [\"legacy-school-id\"], \"duplicateLineCount\": 1, \"enrolledStudentIds\": [\"5b200000-0000-4000-8000-000000001001\", \"5b200000-0000-4000-8000-000000001002\", \"5b200000-0000-4000-8000-000000001003\", \"5b200000-0000-4000-8000-000000001004\", \"5b200000-0000-4000-8000-000000001005\", \"5b200000-0000-4000-8000-000000001006\", \"5b200000-0000-4000-8000-000000001007\", \"5b200000-0000-4000-8000-000000001008\", \"5b200000-0000-4000-8000-000000001009\", \"5b200000-0000-4000-8000-000000001010\", \"5b200000-0000-4000-8000-000000001011\", \"5b200000-0000-4000-8000-000000001012\", \"5b200000-0000-4000-8000-000000001013\", \"5b200000-0000-4000-8000-000000001014\", \"5b200000-0000-4000-8000-000000001015\", \"5b200000-0000-4000-8000-000000001016\", \"5b200000-0000-4000-8000-000000001017\", \"5b200000-0000-4000-8000-000000001018\", \"5b200000-0000-4000-8000-000000001019\", \"5b200000-0000-4000-8000-000000001020\", \"5b200000-0000-4000-8000-000000001021\", \"5b200000-0000-4000-8000-000000001022\", \"5b200000-0000-4000-8000-000000001001\", \"legacy-school-id\"], \"duplicateStudentIds\": [\"5b200000-0000-4000-8000-000000001022\"]}, \"input\": {\"classId\": \"5b200000-0000-4000-8000-000000000600\", \"locationId\": \"5b200000-0000-4000-8000-000000000800\", \"textbookId\": \"5b200000-0000-4000-8000-000000000700\", \"chargeMonth\": \"2099-08\"}, \"method\": \"getClassTextbookSaleContext\", \"actorId\": \"5b200000-0000-4000-8000-000000000901\"}";
 const contextId = (n) => `3c000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const contextFilters = { mode: 'order', search: '', boardScope: 'all', requestFilter: 'all', orderFilter: 'all' };
 const emptyReferences = () => ({ textbooks: [], publishers: [], suppliers: [], publisherSupplierLinks: [] });
@@ -51,9 +56,10 @@ const emptyBilling = () => ({ sourceLineCount: 0, sourceLineIds: [], lines: [], 
 const classInput = { classId: contextId(1), textbookId: contextId(2), locationId: contextId(3), chargeMonth: '2026-08' };
 const contextBook = () => ({ id: contextId(2), title: '교재', name: '교재', status: 'active', subject: 'english', publisher: null, publisher_id: null, default_supplier_id: null, price: 10001, sale_price: 10001, list_price: 0, isbn13: null, barcode: null, is_returnable: false });
 const classPayload = () => ({ input: classInput, class: { id: contextId(1), name: '중2반', student_ids: [contextId(4), contextId(4), 'legacy'] }, enrolledStudentIds: [contextId(4), contextId(4), 'legacy'],
-  students: [{ id: contextId(4), name: '학생', grade: '중2' }], missingStudentIds: ['legacy'], textbook: contextBook(), location: { id: contextId(3), code: 'main', name: '본관' },
+  students: [{ id: contextId(4), name: '학생', grade: '중2', school: '__t5b2_school_primary' }], missingStudentIds: ['legacy'], textbook: contextBook(), location: { id: contextId(3), code: 'main', name: '본관' },
   inventory: { textbookId: contextId(2), currentQuantity: 123, locationQuantities: { [contextId(3)]: 123 }, studentLocationQuantities: { [contextId(3)]: 120 }, teacherLocationQuantities: { [contextId(3)]: 3 }, totalQuantity: 123, studentQuantity: 120, teacherQuantity: 3, stockValue: 111.5 },
   duplicateLines: [], duplicateSales: [], duplicateLineIds: [], duplicateLineCount: 0, duplicateStudentIds: [], duplicateCount: 0, complete: true });
+const billingStudents = () => classPayload().students.map(({ id, name, grade }) => ({ id, name, grade }));
 const completePurchaseLine = (n, scope = 'student') => ({ id: contextId(n), purchase_order_id: contextId(500), textbook_id: contextId(2), requested_textbook_title: '', class_id: contextId(1), location_id: contextId(3), requested_quantity: 1, ordered_quantity: 1, received_quantity: 1, teacher_ordered_quantity: 0, teacher_received_quantity: 0, unit_cost: 0, copy_scope: scope, memo: '', created_at: null, updated_at: null, status: 'partially_received',
   order: { id: contextId(500), supplier_id: null, requested_by: '합성', requested_date: '2026-08-01', order_date: '2026-08-01', expected_date: null, ordered_at: null, received_at: null, status: 'partially_received', statement_number: '', memo: '', created_by: null, created_at: null, updated_at: null } });
 const completeSale = () => ({ id: contextId(600), class_id: contextId(1), charge_month: '2026-08', sale_date: '2026-08-01', status: 'charged', memo: '', created_by: null, created_at: null, updated_at: null });
@@ -95,7 +101,7 @@ test('complete contexts execute all real handoff builders across113 raw lines, r
   for (const patch of [{ textbooks: [] }, { classes: [] }, { locations: [] }, { sourceLineCount: 10 }, { resolvedTextbookIds: [] }, { lines: [...purchase.lines.slice(0, -1), purchase.lines[0]] }]) {
     await assert.rejects(() => api.getTextbookPurchaseHandoff(contextFilters, 'order', { client: contextWire({ ...purchase, ...patch }).client }), /response_invalid/);
   }
-  const billing = { ...emptyBilling(), sourceLineCount: 113, lines: Array.from({ length: 113 }, (_, i) => completeSaleLine(3000 + i)), sales: [completeSale()], textbooks: [contextBook()], classes: purchase.classes, students: classPayload().students };
+  const billing = { ...emptyBilling(), sourceLineCount: 113, lines: Array.from({ length: 113 }, (_, i) => completeSaleLine(3000 + i)), sales: [completeSale()], textbooks: [contextBook()], classes: purchase.classes, students: billingStudents() };
   billing.sourceLineIds = billing.lines.map((line) => line.id);
   const result = await api.getTextbookBillingHandoff({ search: '', status: 'all' }, { client: contextWire(billing).client });
   assert.equal(result.sourceLineCount, 113); assert.equal(result.groups[0].lines.length, 113); assert.equal(result.groups[0].totalQuantity, 226); assert.equal(result.groups[0].totalAmount, 2260226);
@@ -117,7 +123,7 @@ test('complete class duplicate context preserves distinct student count and null
 });
 test('complete raw sale-line schema validates imported nullable fields without changing old selected projections', async () => {
   const api = await import(contextUrl);
-  const data = { ...emptyBilling(), sourceLineCount: 1, sourceLineIds: [contextId(3000)], lines: [completeSaleLine(3000)], sales: [completeSale()], textbooks: [contextBook()], classes: [{ id: contextId(1), name: '중2반', studentCount: 1 }], students: classPayload().students };
+  const data = { ...emptyBilling(), sourceLineCount: 1, sourceLineIds: [contextId(3000)], lines: [completeSaleLine(3000)], sales: [completeSale()], textbooks: [contextBook()], classes: [{ id: contextId(1), name: '중2반', studentCount: 1 }], students: billingStudents() };
   assert.equal((await api.getTextbookBillingHandoff({ search: '', status: 'all' }, { client: contextWire(data).client })).sourceLineCount, 1);
   for (const patch of [{ makeedu_paid_amount: '0' }, { makeedu_import_key: 4 }, { makeedu_synced_at: 'bad-date' }, { makeedu_paid_at: '2026-02-31' }]) {
     await assert.rejects(() => api.getTextbookBillingHandoff({ search: '', status: 'all' }, { client: contextWire({ ...data, lines: [{ ...data.lines[0], ...patch }] }).client }), /response_invalid/);
@@ -133,6 +139,45 @@ test('class context retains repeated normalized roster and missing-record identi
   for (const patch of [{ enrolledStudentIds: [contextId(4), 'legacy'] }, { missingStudentIds: [] }, { students: [] }, { duplicateCount: 1 }, { complete: false }, { textbook: null }, { inventory: { ...classPayload().inventory, currentQuantity: 1 } }]) {
     await assert.rejects(() => api.getClassTextbookSaleContext(classInput, { client: contextWire({ ...classPayload(), ...patch }).client }), /response_invalid/);
   }
+});
+test('class context requires exact nullable school while billing retains its three-field student contract', async () => {
+  const api = await import(contextUrl);
+  const withSchool = classPayload();
+  assert.deepEqual((await api.getClassTextbookSaleContext(classInput, { client: contextWire(withSchool).client })).students, withSchool.students);
+  const withNullSchool = classPayload(); withNullSchool.students[0].school = null;
+  assert.equal((await api.getClassTextbookSaleContext(classInput, { client: contextWire(withNullSchool).client })).students[0].school, null);
+  const withoutSchool = classPayload(); delete withoutSchool.students[0].school;
+  await assert.rejects(() => api.getClassTextbookSaleContext(classInput, { client: contextWire(withoutSchool).client }), /response_invalid/);
+  const withAlias = classPayload(); withAlias.students[0].school_name = withAlias.students[0].school;
+  await assert.rejects(() => api.getClassTextbookSaleContext(classInput, { client: contextWire(withAlias).client }), /response_invalid/);
+
+  const billing = { ...emptyBilling(), sourceLineCount: 1, sourceLineIds: [contextId(3000)], lines: [completeSaleLine(3000)], sales: [completeSale()],
+    textbooks: [contextBook()], classes: [{ id: contextId(1), name: '중2반', studentCount: 1 }], students: billingStudents() };
+  assert.equal((await api.getTextbookBillingHandoff({ search: '', status: 'all' }, { client: contextWire(billing).client })).sourceLineCount, 1);
+  await assert.rejects(() => api.getTextbookBillingHandoff({ search: '', status: 'all' }, { client: contextWire({ ...billing, students: classPayload().students }).client }), /response_invalid/);
+});
+test('class context preserves over20 roster school search records without changing roster, duplicate, balance or draft meaning', async () => {
+  const api = await import(contextUrl); const ledger = await import(new URL('textbook-ledger.js', feature));
+  const students = Array.from({ length: 22 }, (_, index) => ({
+    id: contextId(100 + index), name: '동명 학생', grade: '중2', school: index === 21 ? '__t5b2_school_offpage' : index === 0 ? null : '__t5b2_school_default',
+  }));
+  const enrolledStudentIds = [...students.map((student) => student.id), students[0].id, 'legacy-school-id'];
+  const offpageStudent = students.at(-1);
+  const duplicateLine = { ...completeSaleLine(9000), student_id: offpageStudent.id };
+  const data = { ...classPayload(), class: { ...classPayload().class, student_ids: enrolledStudentIds }, enrolledStudentIds, students, missingStudentIds: ['legacy-school-id'],
+    inventory: { ...classPayload().inventory, currentQuantity: -2, locationQuantities: { [contextId(3)]: -2 }, studentLocationQuantities: { [contextId(3)]: -2 },
+      teacherLocationQuantities: { [contextId(3)]: 0 }, totalQuantity: -2, studentQuantity: -2, teacherQuantity: 0, stockValue: -20002 },
+    duplicateLines: [duplicateLine], duplicateSales: [completeSale()], duplicateLineIds: [duplicateLine.id], duplicateLineCount: 1,
+    duplicateStudentIds: [offpageStudent.id], duplicateCount: 1 };
+  const context = await api.getClassTextbookSaleContext(classInput, { client: contextWire(data).client });
+  assert.equal(context.students.length, 22); assert.equal(context.students[0].school, null);
+  assert.equal(context.students[21].school, '__t5b2_school_offpage'); assert.equal(context.students[21].name, context.students[0].name); assert.equal(context.students[21].grade, context.students[0].grade);
+  assert.deepEqual(context.enrolledStudentIds, enrolledStudentIds); assert.deepEqual(context.missingStudentIds, ['legacy-school-id']);
+  assert.deepEqual(context.duplicateLineIds, [duplicateLine.id]); assert.equal(context.duplicateCount, 1); assert.equal(context.inventory.currentQuantity, -2);
+  const draft = ledger.buildTextbookSaleDraft({ classRecord: context.class, students: context.students, textbook: context.textbook,
+    chargeMonth: context.input.chargeMonth, locationId: context.location.id, availableQuantity: context.inventory.currentQuantity });
+  assert.deepEqual(draft.lines.map((line) => line.student_id), enrolledStudentIds);
+  assert.equal(draft.totalQuantity, 24); assert.equal(draft.totalAmount, 240024); assert.equal(draft.stockShortage, 26); assert.equal(draft.hasStockShortage, true);
 });
 test('selected class snapshot feeds unchanged legacy class sale draft through an explicit adapter', async () => {
   const api = await import(contextUrl); const legacy = await import(new URL('textbook-service.ts', feature));
@@ -177,6 +222,20 @@ test('final closing SQL provenance binds all14 untouched wires and exactly nine 
   assert.equal(hash(readFileSync(new URL('../supabase/tests/textbook_closing_work_context_reads_test.sql', import.meta.url))), 'f929210e61f66fa34f6afadbdf69c790dcc4090e9636becdb80250463707ab78');
   const manifest = JSON.parse(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url), 'utf8'));
   assert.deepEqual(manifest.orderedNewMigrations.find((entry) => entry.fileName === fileName), { fileName, status: 'final', sha256: sqlHash });
+  const task5b2FileName = '20260831234634_textbook_class_sale_roster_school.sql';
+  const task5b2SqlHash = '458b951d33356be1f8544c1d1b7c80e4023031dedb78ce7029bef9ea10aa301b';
+  assert.equal(hash(readFileSync(new URL(`../supabase/migrations/${task5b2FileName}`, import.meta.url))), task5b2SqlHash);
+  assert.equal(hash(readFileSync(new URL('../supabase/tests/textbook_class_sale_roster_context_test.sql', import.meta.url))), '754d4358d17cffc2c2ae81c40857d7eda79cf39935824a57411cb4c97d39c4f2');
+  assert.equal(hash(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url))), '266c0f0bfc69ecdb4841a90370c1e27cfd9075b361a4889b05525357917b0193');
+  assert.deepEqual(manifest.orderedNewMigrations.filter((entry) => entry.fileName === task5b2FileName), [{ fileName: task5b2FileName, status: 'final', sha256: task5b2SqlHash }]);
+  assert.equal(hash(finalTask5b2WirePayload), finalTask5b2Evidence.wirePayloadSha256);
+  assert.equal(finalTask5b2Evidence.finalSqlLogSha256, '6d04858c363db8090a24037eb8c836dac07473b0ca5471b191577a12d6115dc8');
+  const finalTask5b2Capture = JSON.parse(finalTask5b2WirePayload);
+  assert.deepEqual(Object.keys(finalTask5b2Capture).sort(), ['actorId', 'data', 'input', 'method']);
+  assert.equal(finalTask5b2Capture.method, 'getClassTextbookSaleContext');
+  assert.equal(finalTask5b2Capture.actorId, '5b200000-0000-4000-8000-000000000901');
+  assert.ok(('# TASK5B2_WIRE ' + finalTask5b2WirePayload).length <= 8000);
+  assert.ok(finalTask5b2Capture.data.students.every((student) => JSON.stringify(Object.keys(student).sort()) === JSON.stringify(['grade', 'id', 'name', 'school'])));
   assert.equal(finalClosingWirePayloads.length, 14);
   assert.equal(hash(finalClosingWirePayloads.join('\n')), '1eaf5fa1d97443b64bdedcd283b11b2c759b1fa893716ec44947660fafae9410');
   for (const payload of finalClosingWirePayloads) {
@@ -190,13 +249,22 @@ test('final closing SQL provenance binds all14 untouched wires and exactly nine 
     'listTextbookClosingPage', 'listTextbookClosingMovementPage', 'getTextbookClosingDetail', 'getTextbookClosingPreview',
     'getClassTextbookSaleContext', 'getTextbookPurchaseHandoff', 'getTextbookBillingHandoff', 'getTextbookClosingSaveContext', 'getTextbookClosingMovementExport',
   ].sort());
+  const supersededClassCaptures = finalClosingWirePayloads.map((payload) => JSON.parse(payload)).filter((capture) => capture.method === 'getClassTextbookSaleContext');
+  assert.equal(supersededClassCaptures.length, 1);
+  assert.deepEqual(Object.keys(supersededClassCaptures[0].data.students[0]).sort(), ['grade', 'id', 'name']);
+  assert.equal('school' in supersededClassCaptures[0].data.students[0], false, 'the untouched Task3c class capture is explicitly superseded by Task5b2');
 });
-test('all14 final SQL wires replay through real services, handoff builders, original closing and signed save ledger', async () => {
+test('old13 non-class final SQL wires replay, old class remains superseded, and final Task5b2 class wire feeds draft parity', async () => {
   const api = { ...await import(contextUrl), ...await import(new URL('textbook-read-service.ts', feature)) };
   const handoff = await import(handoffUrl); const ledger = await import(new URL('textbook-ledger.js', feature)); const original = await closingOracle();
   const results = [];
   for (const payload of finalClosingWirePayloads) {
     const capture = JSON.parse(payload); const { method, input, data } = capture;
+    if (method === 'getClassTextbookSaleContext') {
+      assert.deepEqual(Object.keys(data.students[0]).sort(), ['grade', 'id', 'name']);
+      assert.equal('school' in data.students[0], false, 'Task3c class wire cannot pass the Task5b2 current contract');
+      continue;
+    }
     const args = Array.isArray(input) ? input : [input]; const wire = contextWire(data);
     const result = await api[method](...args, { client: wire.client }); results.push({ ...capture, result });
     assert.equal(wire.calls.length, 1); assert.equal(wire.calls[0].retry, false); assert.ok(wire.calls[0].signal instanceof AbortSignal);
@@ -232,6 +300,7 @@ test('all14 final SQL wires replay through real services, handoff builders, orig
     else broken.preview.sourceLineCount = -1;
     await assert.rejects(() => api[method](...args, { client: contextWire(broken).client }), /response_invalid/);
   }
+  assert.equal(results.length, 13);
   const pick = (method, month) => results.find((capture) => capture.method === method && (capture.input.closingMonth || capture.input[0]) === month);
   for (const month of ['2099-09', '2097-05']) {
     const save = pick('getTextbookClosingSaveContext', month).result; const preview = pick('getTextbookClosingPreview', month);
@@ -250,13 +319,20 @@ test('all14 final SQL wires replay through real services, handoff builders, orig
   const decimalPreview = pick('getTextbookClosingPreview', '2097-04').result;
   assert.equal(decimalExport.rows[0].marginAmount, 30.299999999999983);
   assert.equal(decimalPreview.closing.textbookMarginAmount, 30.299999999999955);
-  const actualClass = results.find((capture) => capture.method === 'getClassTextbookSaleContext').result;
-  assert.deepEqual(actualClass.enrolledStudentIds, [contextId(1001), contextId(1001), 'legacy']);
-  assert.deepEqual(actualClass.missingStudentIds, ['legacy']); assert.equal(actualClass.duplicateCount, 1); assert.equal(actualClass.inventory.currentQuantity, -2);
+
+  const finalClassCapture = JSON.parse(finalTask5b2WirePayload); const finalWire = contextWire(finalClassCapture.data);
+  const actualClass = await api.getClassTextbookSaleContext(finalClassCapture.input, { client: finalWire.client });
+  assert.equal(finalWire.calls.length, 1); assert.equal(finalWire.calls[0].name, 'get_class_textbook_sale_context_v1');
+  assert.deepEqual(finalWire.calls[0].args, { p_input: finalClassCapture.input }); assert.equal(finalWire.calls[0].retry, false);
+  assert.ok(finalWire.calls[0].signal instanceof AbortSignal); assert.deepEqual(actualClass, finalClassCapture.data);
+  assert.equal(actualClass.students.length, 22); assert.equal(actualClass.enrolledStudentIds.length, 24); assert.deepEqual(actualClass.missingStudentIds, ['legacy-school-id']);
+  assert.equal(actualClass.students[0].school, null); assert.equal(actualClass.students[21].school, '__t5b2_school_offpage');
+  assert.deepEqual(Object.keys(actualClass.students[21]).sort(), ['grade', 'id', 'name', 'school']);
+  assert.equal(actualClass.duplicateCount, 1); assert.equal(actualClass.inventory.currentQuantity, -2);
   const draft = ledger.buildTextbookSaleDraft({ classRecord: actualClass.class, students: actualClass.students, textbook: actualClass.textbook,
     chargeMonth: actualClass.input.chargeMonth, locationId: actualClass.location.id, availableQuantity: actualClass.inventory.currentQuantity });
-  assert.deepEqual(draft.lines.map((line) => line.student_id), [contextId(1001), contextId(1001), 'legacy']);
-  assert.equal(draft.totalQuantity, 3); assert.equal(draft.totalAmount, 30003); assert.equal(draft.stockShortage, 5); assert.equal(draft.hasStockShortage, true);
+  assert.deepEqual(draft.lines.map((line) => line.student_id), actualClass.enrolledStudentIds);
+  assert.equal(draft.totalQuantity, 24); assert.equal(draft.totalAmount, 240024); assert.equal(draft.stockShortage, 26); assert.equal(draft.hasStockShortage, true);
 });
 const completeCases = [
   ['getTextbookPurchaseHandoff', [contextFilters, 'order'], 'get_textbook_purchase_handoff_context_v1', { p_filters: contextFilters, p_kind: 'order' }, emptyPurchase, () => ({ groups: [], sourceLineCount: 0, complete: true })],

@@ -216,8 +216,9 @@ export type TextbookClosingDetail = { row: ClosingRow | null; preview: TextbookC
 export type TextbookClosingSaveContext = { closingMonth: string; subject: string; sourceLineCount: number; sourceLineIds: string[];
   stockMoves: Row[]; textbooks: Row[]; publishers: Row[]; suppliers: Row[]; publisherSupplierLinks: Row[]; complete: true };
 export type ClassTextbookSaleContextInput = { classId: string; textbookId: string; chargeMonth: string; locationId: string };
+export type ClassTextbookSaleStudentRecord = { id: string; name: string; grade: string | null; school: string | null };
 export type ClassTextbookSaleContext = {
-  input: ClassTextbookSaleContextInput; class: Row; enrolledStudentIds: string[]; students: Row[]; missingStudentIds: string[];
+  input: ClassTextbookSaleContextInput; class: Row; enrolledStudentIds: string[]; students: ClassTextbookSaleStudentRecord[]; missingStudentIds: string[];
   textbook: WorkflowTextbookReference; location: WorkflowLocationReference; inventory: TextbookInventoryBalanceRow;
   duplicateLines: SaleMemberSource[]; duplicateSales: SaleSource[]; duplicateLineIds: string[]; duplicateLineCount: number;
   duplicateStudentIds: string[]; duplicateCount: number; complete: true;
