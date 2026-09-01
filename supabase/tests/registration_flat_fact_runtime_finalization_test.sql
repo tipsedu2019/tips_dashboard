@@ -43,6 +43,41 @@ select ok(
 );
 
 select ok(
+  pg_catalog.to_regprocedure(
+    'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+  ) is null
+  or (
+    pg_catalog.pg_get_functiondef(
+      pg_catalog.to_regprocedure(
+        'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+      )
+    ) not like '%40001%'
+    and pg_catalog.pg_get_userbyid((
+      select procedure.proowner
+      from pg_catalog.pg_proc procedure
+      where procedure.oid = pg_catalog.to_regprocedure(
+        'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+      )
+    )) = 'postgres'
+    and not pg_catalog.has_function_privilege(
+      'public',
+      pg_catalog.to_regprocedure(
+        'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+      ),
+      'EXECUTE'
+    )
+    and not pg_catalog.has_function_privilege(
+      'authenticated',
+      pg_catalog.to_regprocedure(
+        'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+      ),
+      'EXECUTE'
+    )
+  ),
+  'an optional production payload-v3 event writer is non-retryable and private'
+);
+
+select ok(
   not coalesce((
     select settings.enabled
     from dashboard_private.registration_customer_reminder_settings settings

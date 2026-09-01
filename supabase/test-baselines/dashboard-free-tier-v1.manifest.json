@@ -296,6 +296,11 @@
       "sha256": "1e273a71cdd45ad3141f34a5e9ad6e46f295451775fdd4c07a1b42775f0b8234"
     },
     {
+      "fileName": "20260901111150_registration_track_event_payload_sqlstate_compatibility.sql",
+      "status": "final",
+      "sha256": "fa1dd028ece6fb29775804e5cae6668b9b39081bb914274d54d64518faf4e855"
+    },
+    {
       "fileName": "20260901111200_registration_flat_fact_runtime_finalization.sql",
       "status": "final",
       "sha256": "860c2235c7ad170f41ca8b31911f6b432b8e848f1dd32165c5435840ef4ea891"

@@ -130,6 +130,34 @@ test("linked ledger 이후의 forward migrations만 순서대로 넣고 하나�
   assert.match(result.sql.trimEnd(), /rollback;$/i)
 })
 
+test("각 forward migration 경계에서 deferred constraint events를 commit처럼 검증한다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const { root, ledger } = await createFixture()
+  const result = await buildTransactionalPreflightSql({
+    repoRoot: root,
+    migrationLedger: ledger,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+
+  assert.match(
+    result.sql,
+    /pending_first_marker[\s\S]*set constraints all immediate;[\s\S]*set constraints all deferred;[\s\S]*-- end migration 20260820152710[\s\S]*pending_second_marker/u,
+  )
+  assert.match(
+    result.sql,
+    /pending_second_marker[\s\S]*set constraints all immediate;[\s\S]*set constraints all deferred;[\s\S]*-- end migration 20260820160000[\s\S]*select no_plan\(\);/u,
+  )
+  assert.equal(
+    (result.sql.match(/^set constraints all immediate;$/gimu) ?? []).length,
+    result.pendingVersions.length,
+  )
+  assert.equal(
+    (result.sql.match(/^set constraints all deferred;$/gimu) ?? []).length,
+    result.pendingVersions.length,
+  )
+})
+
 test("Supabase CLI 2.115 JSON ledger에서 forward migrations만 정확히 고른다", async () => {
   const { buildTransactionalPreflightSql } = await import(builderUrl)
   const { root } = await createFixture({ ledger: supabaseCli2115Ledger })

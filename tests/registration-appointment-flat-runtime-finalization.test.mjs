@@ -313,6 +313,41 @@ test("the explicit visit command is readiness-fenced, source-current, and replay
   assert.match(normalizedPlan, /registration_access_denied[^;]*42501/u);
 });
 
+test("the production payload-v3 compatibility migration is conditional, exact, and non-retryable", async () => {
+  const entries = await migrationEntries();
+  const compatibility = entries.find(
+    ({ file }) => file === "20260901111150_registration_track_event_payload_sqlstate_compatibility.sql",
+  );
+  const finalization = entries.find(
+    ({ file }) => file === "20260901111200_registration_flat_fact_runtime_finalization.sql",
+  );
+  assert.ok(compatibility);
+  assert.ok(finalization);
+  assert.ok(compatibility.file > boundaryBaseline);
+  assert.ok(compatibility.file < finalization.file);
+
+  const normalized = normalizeSql(compatibility.sql);
+  assert.match(normalized, /if v_payload_signature is not null then/u);
+  assert.match(normalized, /v_match_count <> 1/u);
+  assert.match(normalized, /quote_literal\('23514'\)/u);
+  assert.match(normalized, /write_registration_track_event_payload_v3/u);
+  assert.match(normalized, /compatibility marker consumed by the immediately following immutable/u);
+  assert.doesNotMatch(
+    normalized,
+    /raise exception [^;]*using errcode = '40001'|drop (?:function|table)|grant execute/u,
+  );
+
+  const postdeploy = normalizeSql(await readFile(postdeployUrl, "utf8"));
+  assert.match(
+    postdeploy,
+    /write_registration_track_event_payload_v3\(uuid,uuid,text,text,text,text,jsonb,text,text\)/u,
+  );
+  assert.match(
+    postdeploy,
+    /pg_get_functiondef\(procedure\.oid\) like '%40001%'/u,
+  );
+});
+
 test("automatic customer reminder producers are retired without touching explicit preview and send APIs", async () => {
   const automaticFunctions = [
     ["dashboard_private.materialize_registration_observation_solapi_events_v1(", /return 0/u],
