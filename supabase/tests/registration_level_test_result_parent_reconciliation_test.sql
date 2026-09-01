@@ -105,6 +105,53 @@ as $$
     and mutation.mutation_type = 'save_registration_level_test_result';
 $$;
 
+create or replace function pg_temp.registration_level_result_artifact_counts()
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'notificationEvents', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_events
+    ),
+    'notificationDeliveries', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_deliveries
+    ),
+    'notificationFanoutJobs', (
+      select pg_catalog.count(*)
+      from dashboard_private.notification_event_fanout_jobs
+    ),
+    'reminderJobs', (
+      select pg_catalog.count(*)
+      from dashboard_private.registration_customer_reminder_jobs
+    ),
+    'observationDomainEvents', (
+      select pg_catalog.count(*)
+      from dashboard_private.registration_observation_domain_events
+    ),
+    'observationChatJobs', (
+      select pg_catalog.count(*)
+      from dashboard_private.registration_observation_chat_jobs
+    ),
+    'customerMessagePreviews', (
+      select pg_catalog.count(*)
+      from public.ops_registration_customer_message_previews
+    ),
+    'customerMessages', (
+      select pg_catalog.count(*)
+      from public.ops_registration_customer_messages
+    ),
+    'lightweightAlertDeliveries', (
+      select pg_catalog.count(*)
+      from dashboard_private.lightweight_registration_alert_deliveries
+    )
+  );
+$$;
+
 create temporary table registration_level_result_cases(
   case_key text primary key,
   payload jsonb not null
@@ -270,6 +317,24 @@ select is(
   '23514:registration_workflow_status_refresh_required',
   'stale workflow revisions use a non-retryable domain SQLSTATE'
 );
+
+create temporary table registration_level_result_workflow_baselines
+on commit drop as
+select
+  track.id as track_id,
+  track.workflow_status,
+  track.workflow_revision
+from public.ops_registration_subject_tracks track
+join registration_level_result_ids ids on ids.track_id = track.id
+order by track.id;
+grant select on registration_level_result_workflow_baselines to authenticated;
+
+create temporary table registration_level_result_artifact_baseline(
+  artifact_counts jsonb not null
+) on commit drop;
+insert into registration_level_result_artifact_baseline(artifact_counts)
+values (pg_temp.registration_level_result_artifact_counts());
+grant select on registration_level_result_artifact_baseline to authenticated;
 
 -- The result RPC writes the child first and relies on deferred integrity checks.
 -- Catch any deferred error in a subtransaction so it remains a normal pgTAP
@@ -597,14 +662,14 @@ select is(
     from public.ops_task_events event
     join registration_level_result_ids ids
       on ids.task_id = event.task_id
-     and event.field_name = 'registration_track:' || ids.track_id::text
+     and event.field_name = 'registration_fact:' || ids.track_id::text
     where ids.case_key = 'shared_terminal'
       and ids.subject = '영어'
-      and event.event_type = 'registration_track_event'
-      and event.after_value::jsonb ->> 'event_type' = 'registration_level_test_result_saved'
+      and event.event_type = 'registration_fact_saved'
+      and event.after_value::jsonb ->> 'factType' = 'level_test_result'
   ),
   1,
-  'same request key creates exactly one result event for the shared child'
+  'same request key creates exactly one fact audit event for the shared child'
 );
 
 -- Reusing the request key for a different target must fail closed instead of
@@ -641,6 +706,75 @@ select is(
   ),
   1,
   'level-test result persistence records exactly one durable request receipt'
+);
+
+-- A receipt is not an authorization grant. Replays must re-check both the
+-- current management role and the current auth-account state before returning
+-- the stored response.
+set local role postgres;
+update public.profiles
+set role = 'teacher',
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
+);
+select throws_ok(
+  $$
+    select public.save_registration_level_test_result_v1(
+      (select ids.attempt_id
+       from registration_level_result_ids ids
+       where ids.case_key = 'shared_terminal'
+         and ids.subject = '영어'),
+      'completed',
+      'https://drive.invalid/registration-level-result/shared-english',
+      'level-result-parent-shared-first'
+    )
+  $$,
+  '42501',
+  'registration_access_denied',
+  'demoted receipt owner cannot replay a stored level-test result'
+);
+
+set local role postgres;
+update public.profiles
+set role = 'admin',
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+update auth.users
+set banned_until = pg_catalog.now() + interval '1 day',
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
+);
+select throws_ok(
+  $$
+    select public.save_registration_level_test_result_v1(
+      (select ids.attempt_id
+       from registration_level_result_ids ids
+       where ids.case_key = 'shared_terminal'
+         and ids.subject = '영어'),
+      'completed',
+      'https://drive.invalid/registration-level-result/shared-english',
+      'level-result-parent-shared-first'
+    )
+  $$,
+  '42501',
+  'registration_access_denied',
+  'disabled receipt owner cannot replay a stored level-test result'
+);
+
+set local role postgres;
+update auth.users
+set banned_until = null,
+    updated_at = pg_catalog.now()
+where id = '10000000-0000-4000-8000-000000007251';
+set local role authenticated;
+select pg_temp.registration_level_result_set_actor(
+  '10000000-0000-4000-8000-000000007251'
 );
 
 select is(
@@ -691,6 +825,59 @@ select is(
   ),
   'completed:2',
   'last terminal child reconciles a shared appointment exactly once'
+);
+
+select is(
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'trackId', track.id,
+        'workflowStatus', track.workflow_status,
+        'workflowRevision', track.workflow_revision
+      )
+      order by track.id
+    )
+    from public.ops_registration_subject_tracks track
+    join registration_level_result_ids ids on ids.track_id = track.id
+  ),
+  (
+    select pg_catalog.jsonb_agg(
+      pg_catalog.jsonb_build_object(
+        'trackId', baseline.track_id,
+        'workflowStatus', baseline.workflow_status,
+        'workflowRevision', baseline.workflow_revision
+      )
+      order by baseline.track_id
+    )
+    from registration_level_result_workflow_baselines baseline
+  ),
+  'level-test result saves leave every track workflow status and revision unchanged'
+);
+
+select is(
+  pg_temp.registration_level_result_artifact_counts(),
+  (
+    select baseline.artifact_counts
+    from registration_level_result_artifact_baseline baseline
+  ),
+  'level-test result saves and denied replays create no notification, reminder, chat, or customer-message artifacts'
+);
+
+select is(
+  (
+    select pg_catalog.count(*)::integer
+    from public.ops_task_events event
+    where event.task_id in (
+      select ids.task_id
+      from registration_level_result_ids ids
+    )
+      and event.event_type = 'registration_track_event'
+      and event.after_value is not null
+      and event.after_value::jsonb ->> 'event_type' =
+        'registration_level_test_result_saved'
+  ),
+  0,
+  'level-test result saves create zero legacy registration track events'
 );
 
 select * from finish();
