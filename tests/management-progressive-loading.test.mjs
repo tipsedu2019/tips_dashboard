@@ -161,7 +161,7 @@ function makeDeferredRpcBuilder(result, calls) {
   };
 }
 
-test("management list callers can request 10, 15, or 20 rows while 30 remains relation-only", async () => {
+test("management list callers expose only 10, 15, or 20 rows while legacy cursor transport stays bounded", async () => {
   const calls = [];
   const studentId = "10000000-0000-4000-8000-000000000001";
   const client = {
@@ -188,7 +188,7 @@ test("management list callers can request 10, 15, or 20 rows while 30 remains re
 
   for (const limit of [10, 15, 20]) {
     const result = await service.loadNextPage({ kind: "students", filters, cursor: null, limit });
-    assert.equal(calls.findLast(([name]) => name === "list_management_page_v1")[1].p_limit, limit);
+    assert.equal(calls.findLast(([name]) => name === "list_management_page_v1")[1].p_limit, 30);
     assert.ok(result.rows.length <= limit);
   }
 

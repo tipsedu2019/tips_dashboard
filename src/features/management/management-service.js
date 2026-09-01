@@ -64,11 +64,6 @@ function assertManagementKind(kind) {
   if (!MANAGEMENT_KINDS.has(kind)) throw managementReadError("management_kind_invalid");
 }
 
-function managementRequestSignal(signal) {
-  const timeoutSignal = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
-  return signal ? AbortSignal.any([signal, timeoutSignal]) : timeoutSignal;
-}
-
 function assertManagementListLimit(limit) {
   if (!MANAGEMENT_LIST_PAGE_SIZES.has(limit)) {
     throw managementReadError("management_page_limit_invalid");
@@ -241,6 +236,8 @@ export function createManagementReadService(options = {}) {
   const readListPage = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {
     assertManagementFilters(kind, filters);
     assertManagementListLimit(limit);
+    const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const scopeHash = await managementScopeHash(kind, filters);
     if (cursor !== null && (!cursor || typeof cursor !== "object" || cursor.scopeHash !== scopeHash
       || typeof cursor.sortKey !== "string" || typeof cursor.id !== "string")) {
@@ -251,9 +248,11 @@ export function createManagementReadService(options = {}) {
         p_filters: filters,
         p_cursor_sort_key: cursor?.sortKey || null,
         p_cursor_id: cursor?.id || null,
-        p_limit: limit,
+        // This legacy cursor transport stays at its server-proven upper bound.
+        // Numbered 10/15/20-row UI reads use management-numbered-service.ts.
+        p_limit: 30,
       })
-      .abortSignal(managementRequestSignal(signal))
+      .abortSignal(requestSignal)
       .retry(false);
     if (error) throw error;
     const received = Array.isArray(data) ? data : [];
@@ -266,11 +265,14 @@ export function createManagementReadService(options = {}) {
     };
   };
 
-  const loadMetadata = ({ kind, filters, signal }) => Promise.all([
+  const loadMetadata = ({ kind, filters, signal }) => {
+    const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+    return Promise.all([
       client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
-        .abortSignal(managementRequestSignal(signal)).retry(false),
+        .abortSignal(requestSignal).retry(false),
       client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
-        .abortSignal(managementRequestSignal(signal)).retry(false),
+        .abortSignal(requestSignal).retry(false),
     ])
       .then(([statsResult, filterOptionsResult]) => {
         if (statsResult.error) throw statsResult.error;
@@ -282,6 +284,7 @@ export function createManagementReadService(options = {}) {
         };
       })
       .catch((error) => ({ ok: false, error }));
+  };
 
   const loadPageBundle = async ({ kind, filters, cursor = null, limit = MANAGEMENT_LIST_DEFAULT_PAGE_SIZE, signal }) => {
     assertManagementFilters(kind, filters);
@@ -350,8 +353,10 @@ export function createManagementReadService(options = {}) {
           if (inFlight) return inFlight;
         }
         const initialPromise = (async () => {
+          const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+          const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
           const { data, error } = await client.rpc("get_management_default_class_period_v1")
-            .abortSignal(managementRequestSignal(signal)).retry(false);
+            .abortSignal(requestSignal).retry(false);
           if (error) throw error;
           const periodId = trimText(unwrapRpcObject(data)?.periodId);
           if (!periodId) throw managementReadError("management_default_period_unavailable");

@@ -1323,14 +1323,16 @@ test("numbered RPC contract is separate from scalar RPCs and cannot relax unrela
   }`), [])
 })
 
-test("numbered RPC actual management service and hook retain verified timeout and pagination contracts", async () => {
-  for (const file of ["management-numbered-service.ts", "use-management-records.ts"]) {
+test("actual management services and hook retain verified timeout and pagination contracts", async () => {
+  for (const file of ["management-service.js", "management-numbered-service.ts", "use-management-records.ts"]) {
     const source = await readFile(new URL(`../src/features/management/${file}`, import.meta.url), "utf8")
     const violations = inspectQuerySurfaceSource({ surface: "management", file: `src/features/management/${file}`, source })
     // The hook also owns unchanged legacy detail helpers. Inspect the actual
     // numbered consumer; their separate debt remains the diff verifier's job.
-    const symbol = file === "use-management-records.ts" ? "useManagementRecords" : "createManagementNumberedReadService"
-    assert.deepEqual(violations.filter((violation) => violation.symbol === symbol), [], file)
+    const symbols = file === "management-service.js"
+      ? new Set(["createManagementReadService", "loadMetadata", "readListPage"])
+      : new Set([file === "use-management-records.ts" ? "useManagementRecords" : "createManagementNumberedReadService"])
+    assert.deepEqual(violations.filter((violation) => symbols.has(violation.symbol)), [], file)
   }
 })
 
