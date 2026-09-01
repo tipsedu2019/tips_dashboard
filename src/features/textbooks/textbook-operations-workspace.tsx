@@ -836,6 +836,14 @@ function purchaseSuccessMessage(stage: string, isEdit: boolean) {
   return isEdit ? `${stageLabel}로 업데이트했습니다.` : `${stageLabel}를 저장했습니다.`;
 }
 
+function isPreparedSchemaError(error: unknown): boolean {
+  if (!error || typeof error !== "object") return false;
+  const candidate = error as { code?: unknown; cause?: unknown };
+  const code = text(candidate.code);
+  if (["textbook_read_rpc_unavailable", "PGRST202", "PGRST204", "42883", "42P01", "42703"].includes(code)) return true;
+  return candidate.cause !== error && isPreparedSchemaError(candidate.cause);
+}
+
 function getPurchaseDialogTitle(stage: unknown, isEdit: boolean) {
   const normalizedStage = text(stage) || "request";
   const title = normalizedStage === "receive" ? "교재 입고" : normalizedStage === "order" ? "교재 주문" : "교재 요청";
@@ -1451,15 +1459,30 @@ function TextbookOperationsWorkspaceContent() {
   const actorKey = `${user?.id || ""}:${role || ""}`;
   const actionLifetimeRef = useRef({ actorKey, mounted: false });
   const actionSequenceRef = useRef(0);
+  const purchaseDirectIdentity = JSON.stringify(selectedPurchaseDetail ? {
+    anchorLineId: selectedPurchaseDetail.anchorLineId,
+    mode: selectedPurchaseDetail.mode,
+    memberLineIds: (["student", "teacher"] as TextbookCopyScope[]).map((scope) => selectedPurchaseScopeLineIds[scope]).filter(Boolean),
+  } : null);
+  const inventoryActionIdentity = JSON.stringify({
+    selection: selectedTextbookIds,
+    drafts: inventoryCountDrafts,
+    memos: inventoryCountMemoDrafts,
+    revisions: inventoryCountDraftRevisionsRef.current,
+  });
   const liveActionInputsRef = useRef({
     master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
     inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
+    purchaseDirect: purchaseDirectIdentity, saleRecipients: JSON.stringify(excludedStudentIds),
+    bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity,
   });
   liveActionInputsRef.current = {
     master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
     inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
+    purchaseDirect: purchaseDirectIdentity, saleRecipients: JSON.stringify(excludedStudentIds),
+    bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity,
   };
   useLayoutEffect(() => {
     actionLifetimeRef.current = { actorKey, mounted: true };
@@ -1545,7 +1568,20 @@ function TextbookOperationsWorkspaceContent() {
   const selectedLocationId = purchaseForm.locationId;
   const saleLocationId = saleForm.locationId;
   const selectedInventoryCountLocationId = preparedInventoryLocationId;
-  const schemaDisabled = false;
+  const preparedReferenceSchemaOwner = [
+    masterDialogOpen && referenceData.masterOptions.error ? referenceData.masterOptions : null,
+    masterDialogOpen && referenceData.masterDuplicate.error ? referenceData.masterDuplicate : null,
+    purchaseDialogOpen && purchaseReferenceError ? purchaseReferenceError : null,
+    saleDialogOpen && saleReferenceError ? saleReferenceError : null,
+    closingDialogOpen && referenceData.closingPreview.error ? referenceData.closingPreview : null,
+    activeTab === "inventory" && referenceData.locationOptions.error ? referenceData.locationOptions : null,
+  ].find((owner) => owner && isPreparedSchemaError(owner.error)) || null;
+  const preparedSchemaOwner = [
+    { id: "page", error: activePrimaryState.error, retry: activePrimaryState.retry },
+    { id: "summary", error: activeSummaryResource?.error, retry: activeSummaryResource?.retry || (() => Promise.resolve()) },
+    { id: "operations", error: numbered.operations.error, retry: numbered.operations.retry },
+  ].find((owner) => isPreparedSchemaError(owner.error)) || null;
+  const schemaDisabled = Boolean(preparedSchemaOwner || preparedReferenceSchemaOwner);
   const currentUserId = text(user?.id);
   const currentUserLabel = text(user?.email || user?.id);
   const currentUserEmail = normalizeEmailValue(user?.email);
@@ -1913,12 +1949,12 @@ function TextbookOperationsWorkspaceContent() {
   const saleReferencesAccepted = Boolean(selectedSaleTextbook
     && acceptedSelectedLocation?.id === saleLocationId
     && (isTeacherSale || acceptedSelectedClass?.id === saleForm.classId));
-  const saleSubmitDisabled = isTeacherSale
+  const saleSubmitDisabled = schemaDisabled || (isTeacherSale
     ? !saleReferencesAccepted || !saleTeacherName || saleTeacherQuantity <= 0 || !teacherSalePreviewAccepted
     : !saleReferencesAccepted || !selectedSaleClass ||
       !classSalePreviewAccepted ||
       saleDraft.lines.length === 0 ||
-      saleDuplicateLines.length > 0;
+      saleDuplicateLines.length > 0);
   const saleSubmitHint = !selectedSaleClass ? "수업을 선택하세요" : !selectedSaleTextbook ? "교재를 선택하세요" : saleDraft.lines.length === 0
     ? "출고 대상 학생이 없습니다"
     : saleDuplicateLines.length > 0
@@ -2041,7 +2077,7 @@ function TextbookOperationsWorkspaceContent() {
   const bulkCategoryOptions = acceptedMasterOptions?.bulkCategoryOptions || [];
   const masterOptionsAccepted = Boolean(acceptedMasterOptions);
   const masterTaxonomyValidation = validateTextbookTaxonomyForWrite(masterForm);
-  const masterSubmitDisabled = saving === "master" || !masterTitleValue || !masterTaxonomyValidation.valid || isNewMasterDuplicate
+  const masterSubmitDisabled = schemaDisabled || saving === "master" || !masterTitleValue || !masterTaxonomyValidation.valid || isNewMasterDuplicate
     || !masterOptionsAccepted || referenceData.masterDuplicate.loading || Boolean(referenceData.masterDuplicate.error) || !masterDuplicateAccepted;
   const purchaseBookAccepted = purchaseRequestInputMode === "manual" && purchaseForm.requestStage === "request"
     ? true : Boolean(acceptedSelectedBook && getRecordId(acceptedSelectedBook.textbook) === purchaseForm.textbookId);
@@ -2723,10 +2759,14 @@ function TextbookOperationsWorkspaceContent() {
     }
 
     const expectedSelection = JSON.stringify(selectedPurchaseLineIds);
+    const expectedBulkOrder = JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities });
+    const isCurrentBulkOrder = () => liveActionInputsRef.current.purchaseSelection === expectedSelection
+      && liveActionInputsRef.current.bulkOrder === expectedBulkOrder;
     void runAction(
       "purchase-bulk-order",
       async () => {
         const details = await readFreshPurchaseMembers(selectedBulkOrderLines, "request", expectedSelection);
+        if (!isCurrentBulkOrder()) throw new Error("주문 입력이 변경되었습니다. 다시 시도하세요.");
         const actualLines = details.flatMap((detail) => detail.lines.map((line) => ({ line, references: detail.references }))).filter(({ line }) => selectedPurchaseLineIds.includes(getRecordId(line)));
         if (actualLines.length !== selectedPurchaseLineIds.length) throw new Error("선택한 모든 구매 작업 대상을 찾을 수 없습니다.");
         for (const { line, references } of actualLines) {
@@ -2750,6 +2790,7 @@ function TextbookOperationsWorkspaceContent() {
       },
       `${formatQuantity(selectedBulkOrderLines.length)}건을 주문으로 전환했습니다.`,
       invalidatePurchase,
+      isCurrentBulkOrder,
     ).then((ok) => {
       if (ok) {
         setSelectedPurchaseLineIds([]);
@@ -2765,6 +2806,7 @@ function TextbookOperationsWorkspaceContent() {
     }
 
     const expectedSelection = JSON.stringify(selectedPurchaseLineIds);
+    const isCurrentSelection = () => liveActionInputsRef.current.purchaseSelection === expectedSelection;
     void runAction(
       "purchase-bulk-receive",
       async () => {
@@ -2793,6 +2835,7 @@ function TextbookOperationsWorkspaceContent() {
       },
       `${formatQuantity(selectedReceivablePurchaseLines.length)}건을 입고 완료했습니다.`,
       invalidatePurchase,
+      isCurrentSelection,
     ).then((ok) => { if (ok) setSelectedPurchaseLineIds([]); });
   }
 
@@ -3113,6 +3156,7 @@ function TextbookOperationsWorkspaceContent() {
     invalidate: () => Promise<void>,
     isCurrentInput: () => boolean = () => true,
   ) {
+    if (schemaDisabled) return false;
     const expectedActorKey = actorKey;
     const actionSequence = actionSequenceRef.current + 1;
     actionSequenceRef.current = actionSequence;
@@ -3240,81 +3284,92 @@ function TextbookOperationsWorkspaceContent() {
       setActionErrorMessage("교재 요청을 관리할 권한이 없습니다.");
       return;
     }
-    const purchasePayloads = (["student", "teacher"] as TextbookCopyScope[]).flatMap((scope) => {
-      const scopeLineId = selectedPurchaseScopeLineIds[scope] || "";
-      const scopeLine = scopeLineId ? purchaseLinesById.get(scopeLineId) : undefined;
-      const scopeOrder = scopeLine ? getPurchaseLineOrder(scopeLine, purchaseOrdersById) : undefined;
-      const requestedQuantity = normalizePurchaseQuantityField(`${scope}RequestedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "requested"));
-      const orderedQuantity = purchaseForm.requestStage === "request"
-        ? ""
-        : normalizePurchaseQuantityField(`${scope}OrderedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "ordered")) || requestedQuantity;
-      const receivedQuantity = purchaseForm.requestStage === "receive"
-        ? normalizePurchaseQuantityField(`${scope}ReceivedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "received")) || orderedQuantity
-        : "";
-      const stageQuantity = purchaseForm.requestStage === "receive"
-        ? numberValue(receivedQuantity)
-        : purchaseForm.requestStage === "order"
-          ? numberValue(orderedQuantity)
-          : numberValue(requestedQuantity);
-      const canKeepZeroQuantityRequestLine = purchaseForm.requestStage === "request" && Boolean(scopeLineId);
-
-      if (stageQuantity <= 0 && !canKeepZeroQuantityRequestLine) {
-        return [];
-      }
-
-      return [{
-        ...purchaseForm,
-        textbookId: selectedPurchaseTextbookId,
-        requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
-        requestedQuantity: requestedQuantity || (purchaseForm.requestStage === "request" ? orderedQuantity || receivedQuantity || "1" : "0"),
-        orderedQuantity,
-        receivedQuantity,
-        copyScope: scope,
-        copy_scope: scope,
-        supplierId: configuredPurchaseSupplierId,
-        unitCost: String(getConfiguredTextbookPurchaseUnitCost(
-          selectedPurchaseTextbook,
-          configuredPurchaseSupplierId,
-          selectedPurchaseSupplierRows,
-          purchaseForm.unitCost,
-          scope,
-        )),
-        locationId: selectedLocationId,
-        purchaseOrderId: getRecordId(scopeOrder || {}),
-        purchaseOrderLineId: scopeLineId,
-        statementNumber: normalizeStoredTextInput(purchaseForm.statementNumber),
-        createdBy: currentUserId,
-      }];
-    });
+    const directSnapshot = selectedPurchaseDetail && acceptedPurchaseDetail?.row ? {
+      input: { ...selectedPurchaseDetail },
+      memberLineIds: [...acceptedPurchaseDetail.row.memberLineIds],
+      scopeLineIds: { ...selectedPurchaseScopeLineIds },
+    } : null;
+    const expectedPurchaseDirect = purchaseDirectIdentity;
+    const isCurrentPurchaseAction = () => liveActionInputsRef.current.purchase === expectedPurchaseForm
+      && liveActionInputsRef.current.purchaseDirect === expectedPurchaseDirect;
     void runAction(
       "purchase",
       async () => {
-        let actualDetails: TextbookPurchaseCaseRow[] = [];
-        if (selectedPurchaseLineId) {
-          actualDetails = await readFreshPurchaseMembers(
-            [...new Set(Object.values(selectedPurchaseScopeLineIds).filter(Boolean))].map((id) => purchaseLinesById.get(id)).filter((line): line is Row => Boolean(line)),
-            purchaseForm.requestStage === "request" ? "request" : "order",
-          );
-          if (liveActionInputsRef.current.purchase !== expectedPurchaseForm) throw new Error("구매 입력이 변경되었습니다. 다시 시도하세요.");
+        if (!selectedPurchaseLineId) {
+          const newPurchasePayloads = (["student", "teacher"] as TextbookCopyScope[]).flatMap((scope) => {
+            const requestedQuantity = normalizePurchaseQuantityField(`${scope}RequestedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "requested"));
+            const orderedQuantity = normalizePurchaseQuantityField(`${scope}OrderedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "ordered")) || requestedQuantity;
+            const receivedQuantity = purchaseForm.requestStage === "receive"
+              ? normalizePurchaseQuantityField(`${scope}ReceivedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "received")) || orderedQuantity : "";
+            const stageQuantity = purchaseForm.requestStage === "receive" ? numberValue(receivedQuantity) : numberValue(orderedQuantity);
+            if (stageQuantity <= 0) return [];
+            return [{
+              ...purchaseForm,
+              textbookId: selectedPurchaseTextbookId,
+              requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
+              requestedQuantity: requestedQuantity || orderedQuantity || receivedQuantity || "1",
+              orderedQuantity,
+              receivedQuantity,
+              copyScope: scope,
+              copy_scope: scope,
+              supplierId: configuredPurchaseSupplierId,
+              unitCost: String(getConfiguredTextbookPurchaseUnitCost(selectedPurchaseTextbook, configuredPurchaseSupplierId, selectedPurchaseSupplierRows, purchaseForm.unitCost, scope)),
+              locationId: selectedLocationId,
+              purchaseOrderId: "",
+              purchaseOrderLineId: "",
+              statementNumber: normalizeStoredTextInput(purchaseForm.statementNumber),
+              createdBy: currentUserId,
+            }];
+          });
+          for (const purchasePayload of newPurchasePayloads) await textbookService.createPurchaseReceipt(purchasePayload);
+          return;
         }
+        if (!directSnapshot) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
+        const fresh = await getTextbookPurchaseDetail(directSnapshot.input);
+        if (!isCurrentPurchaseAction()) throw new Error("구매 입력이 변경되었습니다. 다시 시도하세요.");
+        const actualDetail = fresh.row;
+        if (!actualDetail || JSON.stringify(actualDetail.memberLineIds) !== JSON.stringify(directSnapshot.memberLineIds)) {
+          throw new Error("구매 작업 대상을 찾을 수 없습니다.");
+        }
+        const purchasePayloads = (["student", "teacher"] as TextbookCopyScope[]).flatMap((scope) => {
+          const scopeLineId = directSnapshot.scopeLineIds[scope] || "";
+          const actualLine = actualDetail.lines.find((line) => getTextbookCopyScope(line) === scope);
+          if (!scopeLineId || !actualLine || getRecordId(actualLine) !== scopeLineId) return [];
+          const requestedQuantity = normalizePurchaseQuantityField(`${scope}RequestedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "requested"));
+          const orderedQuantity = purchaseForm.requestStage === "request" ? ""
+            : normalizePurchaseQuantityField(`${scope}OrderedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "ordered")) || requestedQuantity;
+          const receivedQuantity = purchaseForm.requestStage === "receive"
+            ? normalizePurchaseQuantityField(`${scope}ReceivedQuantity`, getPurchaseScopeQuantity(purchaseForm, scope, "received")) || orderedQuantity : "";
+          const stageQuantity = purchaseForm.requestStage === "receive" ? numberValue(receivedQuantity)
+            : purchaseForm.requestStage === "order" ? numberValue(orderedQuantity) : numberValue(requestedQuantity);
+          if (stageQuantity <= 0 && purchaseForm.requestStage !== "request") return [];
+          return [{
+            ...purchaseForm,
+            textbookId: selectedPurchaseTextbookId,
+            requestedTextbookTitle: normalizeStoredTextInput(purchaseRequestTitle),
+            requestedQuantity: requestedQuantity || (purchaseForm.requestStage === "request" ? orderedQuantity || receivedQuantity || "1" : "0"),
+            orderedQuantity,
+            receivedQuantity,
+            copyScope: scope,
+            copy_scope: scope,
+            supplierId: configuredPurchaseSupplierId,
+            unitCost: String(getConfiguredTextbookPurchaseUnitCost(selectedPurchaseTextbook, configuredPurchaseSupplierId, selectedPurchaseSupplierRows, purchaseForm.unitCost, scope)),
+            locationId: selectedLocationId,
+            purchaseOrderId: getRecordId((actualLine.order as Row | null) || {}) || text(actualLine.purchase_order_id),
+            purchaseOrderLineId: getRecordId(actualLine),
+            statementNumber: normalizeStoredTextInput(purchaseForm.statementNumber),
+            createdBy: currentUserId,
+          }];
+        });
+        if (purchasePayloads.length === 0) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
+        if (!isCurrentPurchaseAction()) throw new Error("구매 입력이 변경되었습니다. 다시 시도하세요.");
         for (const purchasePayload of purchasePayloads) {
-          if (purchasePayload.purchaseOrderLineId) {
-            const actualDetail = actualDetails.find((detail) => detail.lines.some((line) => line.id === purchasePayload.purchaseOrderLineId));
-            const actualLine = actualDetail?.lines.find((line) => getTextbookCopyScope(line) === getTextbookCopyScope(purchasePayload));
-            if (!actualDetail || !actualLine) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
-            await textbookService.updatePurchaseLifecycle(applyConfiguredPurchasePricingToPayload({
-              ...purchasePayload,
-              purchaseOrderLineId: actualLine.id,
-              purchaseOrderId: (actualLine.order as { id?: string } | null)?.id || actualLine.purchase_order_id,
-            }, actualDetail.references));
-          } else {
-            await textbookService.createPurchaseReceipt(purchasePayload);
-          }
+          await textbookService.updatePurchaseLifecycle(applyConfiguredPurchasePricingToPayload(purchasePayload, actualDetail.references));
         }
       },
       purchaseSuccessMessage(purchaseForm.requestStage, Boolean(selectedPurchaseLineId)),
       invalidatePurchase,
-      () => liveActionInputsRef.current.purchase === expectedPurchaseForm,
+      isCurrentPurchaseAction,
     ).then((ok) => {
       if (ok) {
         showSavedPurchaseFlow(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook);
@@ -3343,13 +3398,16 @@ function TextbookOperationsWorkspaceContent() {
       createdBy: currentUserId,
     };
     const expectedSaleForm = JSON.stringify(saleForm);
+    const expectedSaleRecipients = JSON.stringify(excludedStudentIds);
     const expectedActorKey = actorKey;
+    const isCurrentSaleAction = () => liveActionInputsRef.current.sale === expectedSaleForm
+      && liveActionInputsRef.current.saleRecipients === expectedSaleRecipients;
     void runAction(
       "sale",
       async () => {
         if (isTeacherSale) {
           const balance = await getTextbookInventoryBalance({ textbookIds: [saleForm.textbookId], locationId: saleLocationId });
-          if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.sale !== expectedSaleForm) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
+          if (!isCurrentActionActor(expectedActorKey) || !isCurrentSaleAction()) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
           const balanceRow = balance.rows.find((row) => row.textbookId === saleForm.textbookId);
           if (!selectedSaleTextbook || acceptedSelectedLocation?.id !== saleLocationId || !balanceRow) throw new Error("출고 컨텍스트를 완성하지 못했습니다.");
           return textbookService.createTeacherTextbookIssue(
@@ -3365,7 +3423,7 @@ function TextbookOperationsWorkspaceContent() {
         }
         const input = { classId: saleForm.classId, textbookId: saleForm.textbookId, locationId: saleLocationId, chargeMonth: normalizedSaleChargeMonth };
         const context = await getClassTextbookSaleContext(input);
-        if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.sale !== expectedSaleForm) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
+        if (!isCurrentActionActor(expectedActorKey) || !isCurrentSaleAction()) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
         if (!context.complete) throw new Error("출고 컨텍스트를 완성하지 못했습니다.");
         if (context.duplicateCount > 0) throw new Error("이미 같은 월에 같은 수업·교재 출고가 있습니다.");
         return textbookService.createClassTextbookSale(
@@ -3379,7 +3437,7 @@ function TextbookOperationsWorkspaceContent() {
       },
       isTeacherSale ? "교사용 출고 대기 목록에 추가했습니다." : "출고 대기 목록에 추가했습니다.",
       invalidateSales,
-      () => liveActionInputsRef.current.sale === expectedSaleForm,
+      isCurrentSaleAction,
     ).then((ok) => {
       if (ok) {
         setActiveTab("sales");
@@ -3589,6 +3647,7 @@ function TextbookOperationsWorkspaceContent() {
       .filter(Boolean))];
 
     const expectedSelection = JSON.stringify(selectedSaleLineIds);
+    const isCurrentSelection = () => liveActionInputsRef.current.saleSelection === expectedSelection;
     void runAction(
       "sale-bulk-issue",
       async () => {
@@ -3599,6 +3658,7 @@ function TextbookOperationsWorkspaceContent() {
       },
       `${formatQuantity(selectedIssuableSaleLines.length)}건을 출고 완료했습니다.`,
       invalidateSales,
+      isCurrentSelection,
     ).then((ok) => {
       if (!ok) return;
       setSelectedSaleLineIds([]);
@@ -3635,6 +3695,7 @@ function TextbookOperationsWorkspaceContent() {
           },
           `${formatQuantity(details.length)}건을 출고 전 취소했습니다.`,
           invalidateSales,
+          () => liveActionInputsRef.current.saleSelection === expectedSelection,
         ).then((ok) => { if (ok) setSelectedSaleLineIds([]); });
         },
       });
@@ -3670,6 +3731,7 @@ function TextbookOperationsWorkspaceContent() {
           },
           `${formatQuantity(initialContexts.length)}건을 고객 반품으로 처리했습니다.`,
           invalidateSales,
+          () => liveActionInputsRef.current.saleSelection === expectedSelection,
         ).then((ok) => {
           if (!ok) return;
           setSelectedSaleLineIds([]);
@@ -3705,6 +3767,7 @@ function TextbookOperationsWorkspaceContent() {
           },
           `${formatQuantity(details.length)}건의 출고/반품 이력을 삭제했습니다.`,
           invalidateSales,
+          () => liveActionInputsRef.current.saleSelection === expectedSelection,
         ).then((ok) => { if (ok) setSelectedSaleLineIds([]); });
         },
       });
@@ -3838,6 +3901,7 @@ function TextbookOperationsWorkspaceContent() {
           },
           `${formatQuantity(details.length)}건을 공급처 반품으로 처리했습니다.`,
           invalidatePurchase,
+          () => liveActionInputsRef.current.purchaseSelection === expectedSelection,
         ).then((ok) => { if (ok) setSelectedPurchaseLineIds([]); });
         },
       });
@@ -3878,6 +3942,22 @@ function TextbookOperationsWorkspaceContent() {
     delete inventoryCountDraftRevisionsRef.current[draftKey];
   }
 
+  function isCurrentInventoryAction(
+    snapshots: Array<{ key: string; quantity: string; memo: string; revision: number }>,
+    expectedSelection?: string,
+  ) {
+    const current = JSON.parse(liveActionInputsRef.current.inventory) as {
+      selection: string[];
+      drafts: Record<string, string>;
+      memos: Record<string, string>;
+      revisions: Record<string, number>;
+    };
+    if (expectedSelection !== undefined && JSON.stringify(current.selection) !== expectedSelection) return false;
+    return snapshots.every((snapshot) => current.drafts[snapshot.key] === snapshot.quantity
+      && normalizeStoredTextInput(current.memos[snapshot.key]) === snapshot.memo
+      && (current.revisions[snapshot.key] || 0) === snapshot.revision);
+  }
+
   function submitInlineStockCount(row: InventoryCountRow, countedQuantity: string, memo = "") {
     const normalizedQuantity = normalizeQuantityInput(countedQuantity, { allowZero: true });
     const normalizedMemo = normalizeStoredTextInput(memo);
@@ -3889,11 +3969,13 @@ function TextbookOperationsWorkspaceContent() {
     const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
     const expectedActorKey = actorKey;
     const submittedRevision = inventoryCountDraftRevisionsRef.current[draftKey] || 0;
+    const snapshot = { key: draftKey, quantity: normalizedQuantity, memo: normalizedMemo, revision: submittedRevision };
+    const isCurrentCountAction = () => isCurrentInventoryAction([snapshot]);
     void runAction(
       `count-inline-${draftKey}`,
       async () => {
         const balance = await getTextbookInventoryBalance({ textbookIds: [row.id], locationId: row.locationId });
-        if (!isCurrentActionActor(expectedActorKey)) throw new Error("재고 작업 대상이 변경되었습니다.");
+        if (!isCurrentActionActor(expectedActorKey) || !isCurrentCountAction()) throw new Error("재고 작업 대상이 변경되었습니다.");
         const authoritative = balance.rows.find((item) => item.textbookId === row.id);
         if (!authoritative) throw new Error("재고 수량을 확인할 수 없습니다.");
         return textbookService.createStockCountAdjustment({
@@ -3903,6 +3985,7 @@ function TextbookOperationsWorkspaceContent() {
       },
       "실사 수량이 반영되었습니다.",
       invalidateInventory,
+      isCurrentCountAction,
     ).then((ok) => {
       if (ok) {
         setInventoryAuditFilter("done");
@@ -3933,43 +4016,50 @@ function TextbookOperationsWorkspaceContent() {
     }
 
     const expectedActorKey = actorKey;
+    const expectedSelection = JSON.stringify(selectedTextbookIds);
     const snapshots = readyRows.map((row) => {
       const key = getInventoryCountDraftKey(row.id, row.locationId);
       return { row, key, quantity: normalizeQuantityInput(inventoryCountDrafts[key], { allowZero: true }), memo: normalizeStoredTextInput(inventoryCountMemoDrafts[key]), revision: inventoryCountDraftRevisionsRef.current[key] || 0 };
     });
+    const completedSnapshots: typeof snapshots = [];
+    const isCurrentBulkCountAction = () => isCurrentInventoryAction(snapshots, expectedSelection);
     void runAction(
       "count-inline-bulk",
       async () => {
         const groups = new Map<string, string[]>();
         for (const snapshot of snapshots) groups.set(snapshot.row.locationId, [...new Set([...(groups.get(snapshot.row.locationId) || []), snapshot.row.id])]);
         const balances = await Promise.all([...groups].map(([locationId, textbookIds]) => getTextbookInventoryBalance({ textbookIds, locationId })));
-        if (!isCurrentActionActor(expectedActorKey)) throw new Error("재고 작업 대상이 변경되었습니다.");
+        if (!isCurrentActionActor(expectedActorKey) || !isCurrentBulkCountAction()) throw new Error("재고 작업 대상이 변경되었습니다.");
         for (const snapshot of snapshots) {
           const authoritative = balances.find((balance) => balance.locationId === snapshot.row.locationId)?.rows.find((item) => item.textbookId === snapshot.row.id);
           if (!authoritative) throw new Error("선택한 모든 재고 수량을 확인할 수 없습니다.");
         }
+        if (!isCurrentBulkCountAction()) throw new Error("재고 작업 대상이 변경되었습니다.");
         for (const snapshot of snapshots) {
           const authoritative = balances.find((balance) => balance.locationId === snapshot.row.locationId)!.rows.find((item) => item.textbookId === snapshot.row.id)!;
           await textbookService.createStockCountAdjustment({ textbookId: snapshot.row.id, locationId: snapshot.row.locationId, countedQuantity: snapshot.quantity,
             expectedQuantity: authoritative.currentQuantity, sale_price: getTextbookSalePrice(snapshot.row.source), memo: snapshot.memo, createdBy: currentUserId });
+          completedSnapshots.push(snapshot);
         }
       },
       `${formatQuantity(readyRows.length)}건의 실사 수량을 반영했습니다.`,
       invalidateInventory,
+      isCurrentBulkCountAction,
     ).then((ok) => {
-      if (!ok) return;
+      const acknowledged = completedSnapshots.filter((snapshot) => (inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision);
       setInventoryCountDrafts((current) => {
         const next = { ...current };
-        snapshots.forEach((snapshot) => { if ((inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision) delete next[snapshot.key]; });
+        acknowledged.forEach((snapshot) => { delete next[snapshot.key]; });
         return next;
       });
       setInventoryCountMemoDrafts((current) => {
         const next = { ...current };
-        snapshots.forEach((snapshot) => { if ((inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision) { delete next[snapshot.key]; delete inventoryCountDraftRevisionsRef.current[snapshot.key]; } });
+        acknowledged.forEach((snapshot) => { delete next[snapshot.key]; delete inventoryCountDraftRevisionsRef.current[snapshot.key]; });
         return next;
       });
-      const readyRowIds = new Set(readyRows.map((row) => row.id));
-      setSelectedTextbookIds((current) => current.filter((id) => !readyRowIds.has(id)));
+      const acknowledgedRowIds = new Set(acknowledged.map((snapshot) => snapshot.row.id));
+      setSelectedTextbookIds((current) => current.filter((id) => !acknowledgedRowIds.has(id)));
+      if (!ok) return;
       setInventoryAuditFilter("done");
       if (readyRows.length === 1) updateMasterSearchQuery(readyRows[0].title);
     });
@@ -4047,6 +4137,22 @@ function TextbookOperationsWorkspaceContent() {
 
   return (
     <div className="flex min-h-[calc(100dvh-5rem)] flex-col gap-4 px-4 py-4 lg:px-6">
+      {preparedSchemaOwner ? (
+        <Alert role="alert" variant="destructive">
+          <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <span>{getTextbookActionErrorMessage(preparedSchemaOwner.error)}</span>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="교재 운영 API 다시 시도"
+              onClick={() => { void preparedSchemaOwner.retry(); }}
+            >
+              다시 시도
+            </Button>
+          </AlertDescription>
+        </Alert>
+      ) : null}
       {actionErrorMessage || message ? (
         <Alert variant={actionErrorMessage ? "destructive" : "default"}>
           <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">

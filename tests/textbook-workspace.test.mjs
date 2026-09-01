@@ -1573,8 +1573,7 @@ test("purchase order edits allow zero requested quantities for direct management
   assert.match(workspaceSource, /const requestedQuantity = getRowFieldText\(primaryLine, "requested_quantity", "requestedQuantity"\)/);
   assert.match(workspaceSource, /\(purchaseForm\.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId\)/);
   assert.doesNotMatch(workspaceSource, /\|\|\s*!purchaseRequestedTotalQuantity\s*\|\|/);
-  assert.match(workspaceSource, /const canKeepZeroQuantityRequestLine = purchaseForm\.requestStage === "request" && Boolean\(scopeLineId\)/);
-  assert.match(workspaceSource, /if \(stageQuantity <= 0 && !canKeepZeroQuantityRequestLine\)/);
+  assert.match(workspaceSource, /if \(stageQuantity <= 0 && purchaseForm\.requestStage !== "request"\) return \[\]/);
   assert.match(workspaceSource, /requestedQuantity: requestedQuantity \|\| \(purchaseForm\.requestStage === "request" \? orderedQuantity \|\| receivedQuantity \|\| "1" : "0"\)/);
 });
 
@@ -1713,8 +1712,8 @@ test("inventory count is inline while monthly closing still uses modal entry", a
   assert.match(workspaceSource, /function InventoryCountMobileCard/);
   assert.match(workspaceSource, /submitInlineStockCount/);
   assert.match(workspaceSource, /onSubmitCount=\{submitInlineStockCount\}/);
-  assert.match(workspaceSource, /const readyRowIds = new Set\(readyRows\.map\(\(row\) => row\.id\)\)/);
-  assert.match(workspaceSource, /!readyRowIds\.has\(id\)/);
+  assert.match(workspaceSource, /const acknowledgedRowIds = new Set\(acknowledged\.map\(\(snapshot\) => snapshot\.row\.id\)\)/);
+  assert.match(workspaceSource, /!acknowledgedRowIds\.has\(id\)/);
   assert.doesNotMatch(workspaceSource, /!readyRows\.some\(\(row\) => row\.id === id\)/);
   assert.doesNotMatch(workspaceSource, /<Button type="button" onClick=\{openCountDialog\}>[\s\S]*실사 추가/);
   assert.match(workspaceSource, /월마감 추가/);
@@ -1847,7 +1846,8 @@ test("textbook workspace blocks writes when operation tables are not migrated", 
   assert.match(serviceSource, /missingTables/);
   assert.match(serviceSource, /isSchemaReady/);
   assert.match(workspaceSource, /schemaDisabled/);
-  assert.match(workspaceSource, /schemaDisabled = false/);
+  assert.doesNotMatch(workspaceSource, /schemaDisabled = false/);
+  assert.match(workspaceSource, /isPreparedSchemaError/);
 });
 
 test("textbook service blocks writes when request title column is missing from schema cache", async () => {
@@ -2578,7 +2578,7 @@ test("textbook workspace locks 50 master data-entry safeguards", async () => {
     /const masterTitleValue = text\(masterForm\.title\)/,
     /const masterDuplicatePreviewRows = masterDuplicateRows\.slice\(0, 3\)/,
     /const isNewMasterDuplicate = !masterForm\.id && masterDuplicateTotalCount > 0/,
-    /const masterSubmitDisabled = saving === "master" \|\| !masterTitleValue \|\| !masterTaxonomyValidation\.valid \|\| isNewMasterDuplicate/,
+    /const masterSubmitDisabled = schemaDisabled \|\| saving === "master" \|\| !masterTitleValue \|\| !masterTaxonomyValidation\.valid \|\| isNewMasterDuplicate/,
     /if \(isNewMasterDuplicate\)/,
     /setActionErrorMessage\("이미 등록된 교재입니다\. 기존 교재를 열어 수정하세요\."\)/,
     /title: normalizeStoredTextInput\(masterForm\.title\)/,
@@ -3028,7 +3028,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /setPurchaseForm\(emptyPurchaseForm\)/,
     /textbookId: selectedPurchaseTextbookId/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
-    /if \(purchasePayload\.purchaseOrderLineId\) \{[\s\S]*await textbookService\.updatePurchaseLifecycle\(applyConfiguredPurchasePricingToPayload/,
+    /const fresh = await getTextbookPurchaseDetail\(directSnapshot\.input\)[\s\S]*await textbookService\.updatePurchaseLifecycle\(applyConfiguredPurchasePricingToPayload/,
     /textbookService\.createPurchaseReceipt\(purchasePayload\)/,
     /purchaseActionLabel\(purchaseForm\.requestStage\)/,
     /activeTab === "purchase" && purchaseRequestFilter === "unregistered"/,

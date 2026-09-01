@@ -39,6 +39,28 @@ const classOption = {
 }
 const locationOption = { value: classSaleWire.input.locationId, label: classSaleWire.location.name, searchText: classSaleWire.location.code }
 const requestLocationOption = { value: id(900), label: "본관", searchText: "main" }
+
+async function waitForOption(h, label, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() <= deadline) {
+    const option = [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes(label))
+    if (option) return option
+    await h.act(() => new Promise((resolve) => window.setTimeout(resolve, 10)))
+  }
+  const options = [...document.querySelectorAll('[role="option"]')].map((node) => node.textContent.trim())
+  const comboboxes = [...document.querySelectorAll('[role="combobox"]')].map((node) => ({ label: node.getAttribute("aria-label"), expanded: node.getAttribute("aria-expanded"), disabled: node.disabled }))
+  assert.fail(`timed out waiting for option: ${label}; options=${JSON.stringify(options)}; comboboxes=${JSON.stringify(comboboxes)}; active=${document.activeElement?.getAttribute("aria-label") || document.activeElement?.tagName}`)
+}
+
+async function waitForComboboxFocus(h, label, timeoutMs = 1000) {
+  const deadline = Date.now() + timeoutMs
+  while (Date.now() <= deadline) {
+    if (document.activeElement?.getAttribute("aria-label") === label) return
+    await h.act(() => new Promise((resolve) => window.setTimeout(resolve, 10)))
+  }
+  assert.fail(`timed out waiting for focus: ${label}`)
+}
+
 const selectedWireBook = {
   ...classSaleWire.textbook,
   category: null, school_level: "middle", grade_level: "2", school_levels: ["middle"], grade_levels: ["2"],
@@ -312,7 +334,15 @@ test("mounted class sale uses the complete off-page school roster, duplicates, a
   assert.notEqual(saveContext, positivePreview, "save re-reads the full off-page roster instead of using its preview")
   assert.deepEqual(saveContext.args.p_input, positiveInput)
   assert.equal(h.requests.some((request) => request.table), false, "class writer waits for the complete fresh roster context")
+  const visibleStudent = document.querySelector('[aria-label$="출고 대상 선택"]')
+  await h.act(() => visibleStudent.click())
   await h.resolve(saveContext, positiveContext)
+  assert.equal(h.requests.some((request) => request.table), false, "changing excluded students while save context is pending keeps every writer closed")
+
+  await h.act(() => button("출고 대기 저장").click())
+  const retryContext = h.requests.findLast((request) => request.name === "get_class_textbook_sale_context_v1")
+  assert.notEqual(retryContext, saveContext)
+  await h.resolve(retryContext, positiveContext)
   const firstWriter = h.requests.find((request) => request.table)
   assert.equal(firstWriter.table, "textbook_sales")
   assert.equal(firstWriter.steps.find((step) => step.method === "insert").args[0].charge_month, "2099-09")
@@ -332,8 +362,10 @@ test("mounted teacher sale preserves a manual name and re-reads its exact accept
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), { rows: [requestLocationOption], page: 1, pageSize: 20, totalCount: 1, defaultLocation: { id: id(900), code: "main", name: "본관" } })
   await h.act(async () => { document.querySelector('[aria-label="교사용 수령 선생님 선택"]').click(); await new Promise((resolve) => window.requestAnimationFrame(resolve)) })
   await h.act(() => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes("수동 선생님")).click())
-  await h.act(async () => { document.querySelector('[aria-label="교재 선택"]').click(); await new Promise((resolve) => window.requestAnimationFrame(resolve)) })
-  await h.act(() => [...document.querySelectorAll('[role="option"]')].find((node) => node.textContent.includes("서버 교재 101")).click())
+  await waitForComboboxFocus(h, "교사용 수령 선생님 선택")
+  await h.act(() => document.querySelector('[aria-label="교재 선택"]').click())
+  const book = await waitForOption(h, "서버 교재 101")
+  await h.act(() => book.click())
   await h.resolve(h.requests.find((request) => request.name === "resolve_textbook_reference_v1"), selectedBookResult(h, 101, "서버 교재 101"))
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_location_reference_v1"), { row: { id: id(900), code: "main", name: "본관", option: requestLocationOption } })
   const balancePayload = { locationId: id(900), rows: [{ textbookId: id(101), currentQuantity: 7, locationQuantities: { [id(900)]: 7 }, studentLocationQuantities: {}, teacherLocationQuantities: { [id(900)]: 7 }, totalQuantity: 7, studentQuantity: 0, teacherQuantity: 7, stockValue: 70000 }] }
@@ -452,6 +484,54 @@ test("direct purchase hydration pins an off-page selected book label without a r
     option: { value: id(800), label: "중2반", searchText: "중2반", filterValues: {} },
   } })
   assert.equal(document.querySelector('[aria-label="선생님 선택"]').textContent.includes("수동 선생님"), true)
+})
+
+test("off-page direct purchase save re-reads its frozen direct identity and closes on identity change", async (t) => {
+  const direct = purchaseRow("request", 4)
+  const h = await setup(t, { search: `?textbookTab=requests&textbookPage=4&textbookPageSize=15&textbookDetailKind=purchase&textbookDetail=${direct.anchorLineId}` })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_detail_v1"), { row: direct })
+  await h.resolve(h.requests.find((request) => request.name === "resolve_textbook_reference_v1"), selectedBookResult(h, 105, "오프페이지 저장 교재"))
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_location_reference_v1"), {
+    row: { id: id(900), code: "main", name: "본관", option: requestLocationOption },
+  })
+  const directClassOption = { ...classOption, value: id(800), label: "중2반", description: "담당", searchText: "중2반 담당" }
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_class_reference_v1"), { row: {
+    id: id(800), name: "중2반", enrolledStudentCount: 3, defaultTeacherName: "담당", inferredLocation: { id: id(900), code: "main", name: "본관" },
+    option: directClassOption,
+  } })
+  const requestCount = h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").length
+  assert.equal(button("선택 건 저장").disabled, false, document.body.textContent)
+  await h.act(() => button("선택 건 저장").click())
+  const fresh = h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").at(-1)
+  assert.equal(h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").length, requestCount + 1)
+  assert.deepEqual(fresh.args, { p_anchor_line_id: direct.anchorLineId, p_mode: "request" })
+  assert.equal(h.requests.some((request) => request.table), false)
+  const freshOrderId = id(999)
+  const freshLines = direct.lines.map((line) => ({ ...line, purchase_order_id: freshOrderId, order: { ...line.order, id: freshOrderId } }))
+  const freshRow = { ...direct, line: { ...freshLines[0], purchaseScopeLines: freshLines }, lines: freshLines }
+  await h.resolve(fresh, { row: freshRow })
+  const writer = h.requests.find((request) => request.table)
+  assert.equal(writer.table, "textbook_purchase_orders")
+  assert.deepEqual(writer.steps.find((step) => step.method === "eq").args, ["id", freshOrderId])
+  await h.unmount()
+
+  const h2 = await setup(t, { search: `?textbookTab=requests&textbookPage=4&textbookPageSize=15&textbookDetailKind=purchase&textbookDetail=${direct.anchorLineId}` })
+  await h2.resolve(h2.requests.find((request) => request.name === "get_textbook_purchase_detail_v1"), { row: direct })
+  await h2.resolve(h2.requests.find((request) => request.name === "resolve_textbook_reference_v1"), selectedBookResult(h2, 105, "오프페이지 저장 교재"))
+  await h2.resolve(h2.requests.find((request) => request.name === "get_textbook_location_reference_v1"), {
+    row: { id: id(900), code: "main", name: "본관", option: requestLocationOption },
+  })
+  await h2.resolve(h2.requests.find((request) => request.name === "get_textbook_class_reference_v1"), { row: {
+    id: id(800), name: "중2반", enrolledStudentCount: 3, defaultTeacherName: "담당", inferredLocation: { id: id(900), code: "main", name: "본관" },
+    option: directClassOption,
+  } })
+  assert.equal(button("선택 건 저장").disabled, false)
+  await h2.act(() => button("선택 건 저장").click())
+  const pending = h2.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").at(-1)
+  await h2.popstate("?textbookTab=requests&textbookPage=4&textbookPageSize=15")
+  await h2.resolve(pending, { row: direct })
+  assert.equal(h2.requests.some((request) => request.table), false)
+  assert.equal(document.body.textContent.includes("요청 건이 저장되었습니다."), false)
 })
 
 test("external sale detail owns a cancellable direct read without reopening stale data", async (t) => {

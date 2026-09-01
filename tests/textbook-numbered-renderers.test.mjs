@@ -425,16 +425,7 @@ test("inventory page changes clear current-page selection while retaining page-o
   const linkWrite = h.requests.findLast((request) => request.table === "textbook_stock_counts" && request.steps.some((step) => step.method === "update"))
   await h.resolve(linkWrite, null)
   const refreshRequests = h.requests.slice(h.requests.indexOf(linkWrite) + 1).filter((request) => request.name)
-  const refreshNames = [...new Set(refreshRequests.map((request) => request.name))].sort()
-  assert.deepEqual(refreshNames, [
-    "get_textbook_inventory_summary_v1", "get_textbook_operations_summary_v1", "list_textbook_inventory_history_page_v1", "list_textbook_inventory_page_v1",
-  ], "count success invalidates only its enabled inventory page, history, summary, and operations")
-  for (const request of refreshRequests) {
-    if (request.name === "list_textbook_inventory_page_v1") await h.resolve(request, { rows: firstRows, page: 1, pageSize: 10, totalCount: 11 })
-    else if (request.name === "list_textbook_inventory_history_page_v1") await h.resolve(request, { rows: [], page: 1, pageSize: 10, totalCount: 0 })
-    else if (request.name === "get_textbook_inventory_summary_v1") await h.resolve(request, inventorySummaryPayload)
-    else await h.resolve(request, { requestCount: 0, unregisteredRequestCount: 0, orderNeededCount: 0, receivingBacklogCount: 0, partialReceiptCount: 0, issueWaitingCount: 0, stockRiskCount: 0 })
-  }
+  assert.deepEqual(refreshRequests, [], "a newer post-writer draft suppresses stale invalidation for the obsolete action")
   assert.equal(document.querySelector('[aria-label="교재 311 본관 실사 수량"]')?.value, "8", "newer quantity revision survives an older completed action")
   assert.equal(document.querySelector('[aria-label="교재 311 본관 실사 메모"]')?.value, "나중에 고친 메모", "newer memo revision survives an older completed action")
   assert.deepEqual([...new Set(h.requests.filter((request) => request.table).map((request) => request.table))].sort(), ["textbook_stock_counts", "textbook_stock_moves"], "action completion starts no legacy read table")
@@ -467,11 +458,16 @@ test("inventory bulk freezes selected displayed IDs and completes every actual-l
   assert.deepEqual(balances.map((request) => request.args.p_input).sort((a, b) => a.locationId.localeCompare(b.locationId)), [
     { textbookIds: [rows[0].id], locationId: mainId }, { textbookIds: [rows[1].id], locationId: annexId },
   ].sort((a, b) => a.locationId.localeCompare(b.locationId)), "unselected displayed draft is excluded and both actual locations are batched")
+  const changedDraft = document.querySelector('[aria-label="교재 321 본관 실사 수량"]')
+  await h.act(() => changedDraft[Object.keys(changedDraft).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: "70" } }))
+  await h.act(() => document.querySelector('[aria-label="교재 322 별관 재고 선택"]').click())
   await h.resolve(balances[0], { locationId: balances[0].args.p_input.locationId, rows: [{ textbookId: balances[0].args.p_input.textbookIds[0], currentQuantity: 11, locationQuantities: { [balances[0].args.p_input.locationId]: 11 }, studentLocationQuantities: { [balances[0].args.p_input.locationId]: 11 }, teacherLocationQuantities: { [balances[0].args.p_input.locationId]: 0 }, totalQuantity: 11, studentQuantity: 11, teacherQuantity: 0, stockValue: 110000 }] })
   assert.equal(h.requests.some((request) => request.table), false)
-  await h.resolve(balances[1], { locationId: balances[1].args.p_input.locationId, rows: [] })
-  assert.equal(h.requests.some((request) => request.table), false, "an incomplete location batch keeps every writer closed")
-  assert.equal(document.body.textContent.includes("textbook_read_response_invalid"), true, "strict incomplete balance is visible while every writer remains closed")
+  await h.resolve(balances[1], { locationId: balances[1].args.p_input.locationId, rows: [{ textbookId: balances[1].args.p_input.textbookIds[0], currentQuantity: 12, locationQuantities: { [balances[1].args.p_input.locationId]: 12 }, studentLocationQuantities: { [balances[1].args.p_input.locationId]: 12 }, teacherLocationQuantities: { [balances[1].args.p_input.locationId]: 0 }, totalQuantity: 12, studentQuantity: 12, teacherQuantity: 0, stockValue: 120000 }] })
+  assert.equal(h.requests.some((request) => request.table), false, "bulk draft or selection changes while balances are pending keep every writer closed")
+
+  await h.act(() => changedDraft[Object.keys(changedDraft).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: "7" } }))
+  await h.act(() => document.querySelector('[aria-label="교재 322 별관 재고 선택"]').click())
 
   await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
   balances = h.requests.filter((request) => request.name === "get_textbook_inventory_balance_v1").slice(-2)
@@ -483,6 +479,119 @@ test("inventory bulk freezes selected displayed IDs and completes every actual-l
   const firstPayload = firstWriter.steps.find((step) => step.method === "insert").args[0]
   assert.equal(firstPayload.textbook_id, balances[0].args.p_input.textbookIds[0])
   assert.equal(firstPayload.expected_quantity, 20, "the changed fresh balance owns the first grouped writer expectation")
+})
+
+test("bulk inventory acknowledges each completed row before a later row fails and retries only retained work", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  const makeRow = (n) => {
+    const source = masterRow(n, { locationQuantities: { [locationId]: 3 }, studentLocationQuantities: { [locationId]: 3 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 3, studentQuantity: 3, teacherQuantity: 0, stockValue: 30000,
+      locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 3 }] })
+    return { source, id: source.id, title: source.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 3, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }
+  }
+  const rows = [makeRow(341), makeRow(342)]
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_page_v1"), { rows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_summary_v1"), masterSummary(2, { auditCounts: { all: 2, recommended: 2, pending: 0, done: 0 }, locations: [{ id: locationId, code: "main", name: "본관", sortOrder: 1 }] }))
+  for (const [row, quantity, memo] of [[rows[0], "7", "A 메모"], [rows[1], "8", "B 메모"]]) {
+    const quantityInput = document.querySelector(`[aria-label="${row.title} 본관 실사 수량"]`)
+    const memoInput = document.querySelector(`[aria-label="${row.title} 본관 실사 메모"]`)
+    await h.act(() => quantityInput[Object.keys(quantityInput).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: quantity } }))
+    await h.act(() => memoInput[Object.keys(memoInput).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: memo } }))
+    await h.act(() => document.querySelector(`[aria-label="${row.title} 본관 재고 선택"]`).click())
+  }
+  await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
+  const balance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
+  await h.resolve(balance, { locationId, rows: rows.map((row, index) => ({ textbookId: row.id, currentQuantity: 10 + index, locationQuantities: { [locationId]: 10 + index }, studentLocationQuantities: { [locationId]: 10 + index }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10 + index, studentQuantity: 10 + index, teacherQuantity: 0, stockValue: (10 + index) * 10000 })) })
+
+  const firstCount = h.requests.find((request) => request.table === "textbook_stock_counts")
+  await h.resolve(firstCount, { id: id(2101) })
+  await h.resolve(h.requests.find((request) => request.table === "textbook_stock_moves"), { id: id(2102) })
+  await h.resolve(h.requests.findLast((request) => request.table === "textbook_stock_counts"), null)
+  const secondCount = h.requests.findLast((request) => request.table === "textbook_stock_counts")
+  assert.notEqual(secondCount, firstCount)
+  await h.reject(secondCount, { code: "23514", message: "__second_count_failed__" })
+
+  assert.equal(document.querySelector('[aria-label="교재 341 본관 실사 수량"]')?.value, "", "completed unchanged A quantity is acknowledged")
+  assert.equal(document.querySelector('[aria-label="교재 341 본관 실사 메모"]')?.value, "", "completed unchanged A memo is acknowledged")
+  assert.equal(document.querySelector('[aria-label="교재 341 본관 재고 선택"]').getAttribute("data-state"), "unchecked")
+  assert.equal(document.querySelector('[aria-label="교재 342 본관 실사 수량"]')?.value, "8")
+  assert.equal(document.querySelector('[aria-label="교재 342 본관 실사 메모"]')?.value, "B 메모")
+  assert.equal(document.querySelector('[aria-label="교재 342 본관 재고 선택"]').getAttribute("data-state"), "checked")
+
+  await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
+  const retryBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
+  assert.deepEqual(retryBalance.args.p_input, { textbookIds: [rows[1].id], locationId }, "retry excludes already committed A")
+})
+
+test("bulk inventory preserves a newer A draft made after A writer starts even when B later fails", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  const rows = [361, 362].map((n) => {
+    const source = masterRow(n, { locationQuantities: { [locationId]: 3 }, studentLocationQuantities: { [locationId]: 3 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 3, studentQuantity: 3, teacherQuantity: 0, stockValue: 30000,
+      locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 3 }] })
+    return { source, id: source.id, title: source.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 3, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }
+  })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_page_v1"), { rows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_summary_v1"), masterSummary(2, { auditCounts: { all: 2, recommended: 2, pending: 0, done: 0 }, locations: [{ id: locationId, code: "main", name: "본관", sortOrder: 1 }] }))
+  const edit = async (label, value) => {
+    const input = document.querySelector(`[aria-label="${label}"]`)
+    await h.act(() => input[Object.keys(input).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value } }))
+  }
+  for (const [row, quantity] of [[rows[0], "7"], [rows[1], "8"]]) {
+    await edit(`${row.title} 본관 실사 수량`, quantity)
+    await edit(`${row.title} 본관 실사 메모`, `${row.title} 원본`)
+    await h.act(() => document.querySelector(`[aria-label="${row.title} 본관 재고 선택"]`).click())
+  }
+  await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1"), { locationId, rows: rows.map((row) => ({ textbookId: row.id, currentQuantity: 10, locationQuantities: { [locationId]: 10 }, studentLocationQuantities: { [locationId]: 10 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10, studentQuantity: 10, teacherQuantity: 0, stockValue: 100000 })) })
+  const firstCount = h.requests.find((request) => request.table === "textbook_stock_counts")
+  await edit("교재 361 본관 실사 수량", "9")
+  await edit("교재 361 본관 실사 메모", "A 신규 의도")
+  await h.resolve(firstCount, { id: id(2201) })
+  await h.resolve(h.requests.find((request) => request.table === "textbook_stock_moves"), { id: id(2202) })
+  await h.resolve(h.requests.findLast((request) => request.table === "textbook_stock_counts"), null)
+  await h.reject(h.requests.findLast((request) => request.table === "textbook_stock_counts"), { code: "23514", message: "__later_B_failed__" })
+  assert.equal(document.querySelector('[aria-label="교재 361 본관 실사 수량"]')?.value, "9")
+  assert.equal(document.querySelector('[aria-label="교재 361 본관 실사 메모"]')?.value, "A 신규 의도")
+  assert.equal(document.querySelector('[aria-label="교재 361 본관 재고 선택"]').getAttribute("data-state"), "checked")
+})
+
+test("prepared schema errors disable actionable inventory writes and expose the owner retry", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  const source = masterRow(351, { locationQuantities: { [locationId]: 3 }, studentLocationQuantities: { [locationId]: 3 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 3, studentQuantity: 3, teacherQuantity: 0, stockValue: 30000,
+    locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 3 }] })
+  const row = { source, id: source.id, title: source.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 3, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_page_v1"), { rows: [row], page: 1, pageSize: 10, totalCount: 1 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  const summary = h.requests.find((request) => request.name === "get_textbook_inventory_summary_v1")
+  await h.reject(summary, { code: "PGRST202", message: "__prepared_inventory_summary_rpc_missing__" })
+  const quantity = document.querySelector('[aria-label="교재 351 본관 실사 수량"]')
+  await h.act(() => quantity[Object.keys(quantity).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: "7" } }))
+  const submit = document.querySelector('[aria-label="실사 반영 불가"]')
+  assert.ok(submit)
+  assert.equal(submit.disabled, true)
+  assert.equal(document.body.textContent.includes("교재 읽기 API가 아직 적용되지 않았습니다."), true)
+  const retry = document.querySelector('[aria-label="교재 운영 API 다시 시도"]')
+  assert.ok(retry)
+  await h.act(() => retry.click())
+  assert.equal(h.requests.filter((request) => request.name === "get_textbook_inventory_summary_v1").length, 2)
+  assert.equal(h.requests.some((request) => request.table), false)
+  assert.equal(h.requests.some((request) => request.name === "get_textbook_inventory_balance_v1"), false)
 })
 
 test("inventory single count preserves newer quantity and memo through an older completed action", async (t) => {
@@ -508,7 +617,13 @@ test("inventory single count preserves newer quantity and memo through an older 
   await edit("교재 331 본관 실사 메모", "먼저 쓴 메모")
   await h.act(() => document.querySelector('[aria-label="교재 331 본관 7권 반영"]').click())
   const balance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
+  await edit("교재 331 본관 실사 메모", "컨텍스트 대기 중 변경")
   await h.resolve(balance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 9, locationQuantities: { [locationId]: 9 }, studentLocationQuantities: { [locationId]: 9 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 9, studentQuantity: 9, teacherQuantity: 0, stockValue: 90000 }] })
+  assert.equal(h.requests.some((request) => request.table), false, "editing a single count while its balance is pending starts zero writers")
+
+  await h.act(() => document.querySelector('[aria-label="교재 331 본관 7권 반영"]').click())
+  const retryBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
+  await h.resolve(retryBalance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 9, locationQuantities: { [locationId]: 9 }, studentLocationQuantities: { [locationId]: 9 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 9, studentQuantity: 9, teacherQuantity: 0, stockValue: 90000 }] })
   const countWrite = h.requests.find((request) => request.table === "textbook_stock_counts")
   assert.equal(countWrite.steps.find((step) => step.method === "insert").args[0].expected_quantity, 9)
   await edit("교재 331 본관 실사 수량", "8")

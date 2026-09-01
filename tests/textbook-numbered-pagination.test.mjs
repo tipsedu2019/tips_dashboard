@@ -84,6 +84,68 @@ test('actor change after the first purchase writer lets the lifecycle finish but
   assert.equal(document.body.textContent.includes('요청 묶음을 삭제했습니다.'), false, 'former actor completion publishes no stale success');
 });
 
+test('bulk order quantity changes before writing and purchase selection changes after writing respect one frozen lifetime', async t => {
+  const h = await setup(t, { search: '?textbookTab=purchase&textbookPage=1&textbookPageSize=10' });
+  const row = purchaseRow('order');
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_purchase_page_v1'), { rows: [row], page: 1, pageSize: 10, totalCount: 1 });
+  await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_summary_v1'), purchaseSummary('order'));
+  const selector = document.querySelector('[aria-label="교재 101 일괄 처리 선택"]');
+  await h.act(() => selector.click());
+  await h.act(() => document.querySelector('[aria-label="선택 요청 일괄 주문"]').click());
+  const studentQuantity = document.querySelector('[aria-label="교재 101 학생용 주문 수량"]');
+  await h.act(() => button('일괄 주문').click());
+  const firstDetail = h.requests.find(request => request.name === 'get_textbook_purchase_detail_v1');
+  await h.act(() => studentQuantity[Object.keys(studentQuantity).find(key => key.startsWith('__reactProps$'))].onChange({ target: { value: '9' } }));
+  const requestDetailRow = { ...row, mode: 'request' };
+  await h.resolve(firstDetail, { row: requestDetailRow });
+  await h.act(() => Promise.resolve());
+  assert.equal(h.requests.some(request => request.table), false, 'bulk quantity change while detail is pending starts zero writers');
+
+  await h.act(() => button('일괄 주문').click());
+  const retryDetail = h.requests.findLast(request => request.name === 'get_textbook_purchase_detail_v1');
+  await h.resolve(retryDetail, { row: requestDetailRow });
+  await h.act(() => Promise.resolve());
+  assert.equal(h.requests.filter(request => request.table).length, 1, 'unchanged retry starts its first lifecycle writer');
+  const rpcCountAtWriter = h.requests.filter(request => request.name).length;
+  await h.act(() => selector.click());
+  for (let index = 0; index < 3; index += 1) {
+    const request = h.requests.filter(item => item.table)[index];
+    assert.ok(request, `purchase lifecycle writer ${index + 1}`);
+    if (request.table === 'textbook_purchase_orders') await h.resolve(request, { id: row.lines[Math.floor(index / 3)]?.purchase_order_id || id(200) });
+    else if (request.table === 'textbook_purchase_order_lines') await h.resolve(request, { id: row.lines[Math.floor(index / 3)]?.id || id(300) });
+    else await h.resolve(request, []);
+  }
+  assert.equal(h.requests.filter(request => request.name).length, rpcCountAtWriter, 'changed purchase selection suppresses stale targeted invalidation');
+  assert.equal(document.body.textContent.includes('건을 주문으로 전환했습니다.'), false, 'changed purchase selection suppresses stale success');
+});
+
+test('bulk sale selection change after the first writer lets writers finish but suppresses stale completion work', async t => {
+  const h = await setup(t, { search: '?textbookTab=sales&textbookPage=1&textbookPageSize=10' });
+  const rows = [saleRow(10), saleRow(11)];
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_sale_page_v1'), { rows, page: 1, pageSize: 10, totalCount: 2 });
+  await h.resolve(h.requests.find(request => request.name === 'get_textbook_sale_summary_v1'), saleSummary(2));
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_sale_history_page_v1'), { rows: [], page: 1, pageSize: 10, totalCount: 0 });
+  await h.resolve(h.requests.find(request => request.name === 'get_textbook_sale_history_summary_v1'), saleHistorySummary(0));
+  for (const row of rows) await h.act(() => document.querySelector(`[aria-label="${row.recipientName} ${row.textbook.title} 출고 선택"]`).click());
+  await h.act(() => document.querySelector('[aria-label="선택 출고 일괄 완료"]').click());
+  const details = h.requests.filter(request => request.name === 'get_textbook_sale_detail_v1');
+  assert.equal(details.length, 2);
+  for (const [index, request] of details.entries()) await h.resolve(request, { row: rows[index] });
+  const balance = h.requests.find(request => request.name === 'get_textbook_inventory_balance_v1');
+  await h.resolve(balance, { locationId: id(900), rows: rows.map((row, index) => ({ textbookId: row.textbook.id, currentQuantity: 20 + index, locationQuantities: { [id(900)]: 20 + index }, studentLocationQuantities: {}, teacherLocationQuantities: { [id(900)]: 20 + index }, totalQuantity: 20 + index, studentQuantity: 0, teacherQuantity: 20 + index, stockValue: (20 + index) * 10000 })) });
+  assert.equal(h.requests.filter(request => request.table).length, 1);
+  const rpcCountAtWriter = h.requests.filter(request => request.name).length;
+  await h.act(() => document.querySelector(`[aria-label="${rows[1].recipientName} ${rows[1].textbook.title} 출고 선택"]`).click());
+  for (let index = 0; index < 6; index += 1) {
+    const request = h.requests.filter(item => item.table)[index];
+    assert.ok(request, `sale lifecycle writer ${index + 1}`);
+    if (request.table === 'textbook_stock_moves' && request.steps.some(step => step.method === 'select')) await h.resolve(request, []);
+    else await h.resolve(request, null);
+  }
+  assert.equal(h.requests.filter(request => request.name).length, rpcCountAtWriter, 'changed sale selection suppresses stale targeted invalidation');
+  assert.equal(document.body.textContent.includes('건을 출고 완료했습니다.'), false);
+});
+
 test('inactive cleanup confirms five previews but rechecks and writes the complete frozen ID set', async t => {
   const h = await setup(t, { search: '?textbookTab=master&textbookPage=1&textbookPageSize=10' });
   const summaryPayload = masterSummary(12, { qualityCounts: { all: 12, attention: 12, duplicate: 0, missingCode: 0, missingPublisher: 0, missingCategory: 0, missingPrice: 0, subjectMismatch: 0, inactive: 12 } });
