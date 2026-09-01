@@ -985,6 +985,46 @@ test("isolated DB runner rejects an unlisted migration absent from the reviewed 
   await assert.doesNotReject(validateManifestMigrations({ root, manifest, baselineVersions: ["20260814000003"] }));
 });
 
+test("isolated DB runner excludes only the exact-byte externally applied migration from pending", async (t) => {
+  const { validateManifestMigrations } = await import(runnerUrl.href);
+  const root = await mkdtemp(join(tmpdir(), "tips-dashboard-external-migration-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const migrationDirectory = join(root, "supabase/migrations");
+  await mkdir(migrationDirectory, { recursive: true });
+  const fileName = "20260827135958_redact_legacy_gemini_error_text.sql";
+  const exactRemoteSource = [
+    "-- Raw provider and application error text may contain upstream diagnostics.",
+    "-- Keep only structured status/error-code columns; future writers persist fixed codes.",
+    "update public.gemini_api_keys",
+    "set last_error = null",
+    "where last_error is not null;",
+    "",
+    "update public.gemini_api_usage_logs",
+    "set error_message = null",
+    "where error_message is not null;",
+    "",
+  ].join("\n");
+  const migrationPath = join(migrationDirectory, fileName);
+  await writeFile(migrationPath, exactRemoteSource);
+  const manifest = { baselineVersion: "dashboard-free-tier-v1", orderedNewMigrations: [] };
+
+  await assert.doesNotReject(validateManifestMigrations({
+    root,
+    manifest,
+    baselineVersions: ["20260816000000"],
+  }));
+
+  await writeFile(migrationPath, `${exactRemoteSource}\n`);
+  await assert.rejects(
+    validateManifestMigrations({
+      root,
+      manifest,
+      baselineVersions: ["20260816000000"],
+    }),
+    /isolated_supabase_db_remote_history_hash_drift/,
+  );
+});
+
 test("reviewed catalog capture activates an immutable set and publishes canonical copies", async (t) => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const root = await makeRepo(t);

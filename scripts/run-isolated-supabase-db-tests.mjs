@@ -9,6 +9,14 @@ import { createServer } from "node:net";
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SHA40 = /^[a-f0-9]{40}$/u;
 const SHA256 = /^[a-f0-9]{64}$/u;
+const EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS = Object.freeze([
+  ["20260827135933_add_worksheet_v2_snapshots.sql", "0a7a93800ba8ab49485a27f15af95b891aa5eafcd4b027885c58b99c9a0a7785"],
+  ["20260827135956_add_worksheet_paper_kind_export.sql", "c22f35ecb6ae606f5ade508c7c73cfe445d3d8695f42f248684a650a0019fdb5"],
+  ["20260827135958_redact_legacy_gemini_error_text.sql", "00985e9d463c6c2feae6511ef71fe9c2b2b6adb2c4e9abf839e00017214de65e"],
+  ["20260827140002_record_worksheet_output_projection.sql", "49b805b839e1a5fb567d704a6527bc1de1384d24b0ecabe6968b96ed5a637fd9"],
+  ["20260828160941_secure_worksheet_history_ownership.sql", "1251d6e51e32e0085f212d2f874b6b5eadb65c9c34f2c30fb5cba5a44e269723"],
+  ["20260831151654_record_worksheet_ox_output_projection.sql", "951576acef6b2533f81b8d0241ac4a48ba57639400451589cd39e608465ad188"],
+]);
 const REQUEST_ID = /^[a-z0-9][a-z0-9-]{7,127}$/u;
 const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
 const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
@@ -257,6 +265,19 @@ async function validateArtifactPaths({ paths, manifest }) {
 export async function validateManifestMigrations({ root = ROOT, manifest, baselineVersions }) {
   if (!Array.isArray(baselineVersions) || !baselineVersions.every((version) => /^\d{14}$/u.test(version)) || new Set(baselineVersions).size !== baselineVersions.length) fail("isolated_supabase_db_manifest_invalid");
   const appliedVersions = new Set(baselineVersions);
+  if (manifest?.baselineVersion === "dashboard-free-tier-v1") {
+    for (const [fileName, expectedHash] of EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS) {
+      let contents;
+      try {
+        contents = await readFile(join(root, "supabase/migrations", fileName));
+      } catch (error) {
+        if (error?.code === "ENOENT") continue;
+        throw error;
+      }
+      if (sha256(contents) !== expectedHash) fail("isolated_supabase_db_remote_history_hash_drift");
+      appliedVersions.add(fileName.slice(0, 14));
+    }
+  }
   const pendingFiles = (await readdir(join(root, "supabase/migrations")))
     .filter((fileName) => {
       const match = fileName.match(MIGRATION);
