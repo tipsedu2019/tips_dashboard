@@ -840,7 +840,7 @@ function isPreparedSchemaError(error: unknown): boolean {
   if (!error || typeof error !== "object") return false;
   const candidate = error as { code?: unknown; cause?: unknown };
   const code = text(candidate.code);
-  if (["textbook_read_rpc_unavailable", "PGRST202", "PGRST204", "42883", "42P01", "42703"].includes(code)) return true;
+  if (["textbook_read_rpc_unavailable", "PGRST202", "PGRST204", "PGRST205", "42883", "42P01", "42703"].includes(code)) return true;
   return candidate.cause !== error && isPreparedSchemaError(candidate.cause);
 }
 
@@ -1115,6 +1115,7 @@ function TextbookOperationsWorkspaceContent() {
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
   const inventoryCountDraftRevisionsRef = useRef<Record<string, number>>({});
+  const textbookSelectionRevisionsRef = useRef<Record<string, number>>({});
   const [saleForm, setSaleForm] = useState(emptySaleForm);
   const saleAutoDefaultsRef = useRef({ locationId: "" });
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
@@ -1469,20 +1470,22 @@ function TextbookOperationsWorkspaceContent() {
     drafts: inventoryCountDrafts,
     memos: inventoryCountMemoDrafts,
     revisions: inventoryCountDraftRevisionsRef.current,
+    selectionRevisions: textbookSelectionRevisionsRef.current,
   });
+  const masterBulkIdentity = JSON.stringify({ selection: selectedTextbookIds, patch: bulkTextbookPatch });
   const liveActionInputsRef = useRef({
     master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
     inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
     purchaseDirect: purchaseDirectIdentity, saleRecipients: JSON.stringify(excludedStudentIds),
-    bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity,
+    bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity, masterBulk: masterBulkIdentity,
   });
   liveActionInputsRef.current = {
     master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
     inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
     purchaseDirect: purchaseDirectIdentity, saleRecipients: JSON.stringify(excludedStudentIds),
-    bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity,
+    bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity, masterBulk: masterBulkIdentity,
   };
   useLayoutEffect(() => {
     actionLifetimeRef.current = { actorKey, mounted: true };
@@ -1582,6 +1585,8 @@ function TextbookOperationsWorkspaceContent() {
     { id: "operations", error: numbered.operations.error, retry: numbered.operations.retry },
   ].find((owner) => isPreparedSchemaError(owner.error)) || null;
   const schemaDisabled = Boolean(preparedSchemaOwner || preparedReferenceSchemaOwner);
+  const schemaDisabledRef = useRef(schemaDisabled);
+  schemaDisabledRef.current = schemaDisabled;
   const currentUserId = text(user?.id);
   const currentUserLabel = text(user?.email || user?.id);
   const currentUserEmail = normalizeEmailValue(user?.email);
@@ -2411,7 +2416,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function clearMasterSelection() {
-    setSelectedTextbookIds([]);
+    updateTextbookSelectionIntent(() => []);
     setBulkTextbookPatch(emptyBulkTextbookPatch);
   }
 
@@ -2604,8 +2609,22 @@ function TextbookOperationsWorkspaceContent() {
     );
   }
 
-  function toggleTextbookSelection(id: string, checked: boolean) {
+  function updateTextbookSelectionIntent(update: (current: string[]) => string[]) {
     setSelectedTextbookIds((current) => {
+      const next = update(current);
+      const currentIds = new Set(current);
+      const nextIds = new Set(next);
+      for (const id of new Set([...currentIds, ...nextIds])) {
+        if (currentIds.has(id) !== nextIds.has(id)) {
+          textbookSelectionRevisionsRef.current[id] = (textbookSelectionRevisionsRef.current[id] || 0) + 1;
+        }
+      }
+      return next;
+    });
+  }
+
+  function toggleTextbookSelection(id: string, checked: boolean) {
+    updateTextbookSelectionIntent((current) => {
       if (!id) return current;
       if (checked) {
         return current.includes(id) ? current : [...current, id];
@@ -2615,7 +2634,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function toggleAllVisibleTextbooks(checked: boolean) {
-    setSelectedTextbookIds((current) => {
+    updateTextbookSelectionIntent((current) => {
       if (!checked) {
         return current.filter((id) => !visibleTextbookIdSet.has(id));
       }
@@ -2624,7 +2643,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function toggleVisibleTextbookIds(ids: string[], checked: boolean) {
-    setSelectedTextbookIds((current) => {
+    updateTextbookSelectionIntent((current) => {
       const idSet = new Set(ids);
       if (!checked) {
         return current.filter((id) => !idSet.has(id));
@@ -2714,6 +2733,7 @@ function TextbookOperationsWorkspaceContent() {
       return prepared?.anchorLineId || getRecordId(line);
     }).filter(Boolean))];
     const details = await Promise.all(anchors.map((anchorLineId) => getTextbookPurchaseDetail({ anchorLineId, mode })));
+    assertLivePreparedSchemaReady();
     if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.purchaseSelection !== expectedSelection)) {
       throw new Error("작업 대상이 변경되었습니다. 다시 시도하세요.");
     }
@@ -2922,57 +2942,70 @@ function TextbookOperationsWorkspaceContent() {
       bulkTextbookPatch.status !== "keep";
   }
 
-  function getBulkTextbookPatchValues(row: Row) {
+  function getBulkTextbookPatchValues(row: Row, patchInput = bulkTextbookPatch) {
     const patch: Row = {};
-    if (bulkTextbookPatch.subject !== "keep") patch.subject = bulkTextbookPatch.subject;
-    if (bulkTextbookPatch.subject === "science") {
-      patch.subjectAreaKey = bulkTextbookPatch.subjectAreaKey;
+    if (patchInput.subject !== "keep") patch.subject = patchInput.subject;
+    if (patchInput.subject === "science") {
+      patch.subjectAreaKey = patchInput.subjectAreaKey;
       patch.schoolLevels = [...SCIENCE_TEXTBOOK_TAXONOMY.schoolLevels];
       patch.gradeLevels = [...SCIENCE_TEXTBOOK_TAXONOMY.gradeLevels];
-      patch.subSubject = text(bulkTextbookPatch.category);
+      patch.subSubject = text(patchInput.category);
     }
-    if (text(bulkTextbookPatch.publisher)) patch.publisher = text(bulkTextbookPatch.publisher);
-    if (text(bulkTextbookPatch.price)) patch.price = text(bulkTextbookPatch.price);
-    if (bulkTextbookPatch.status !== "keep") patch.status = bulkTextbookPatch.status;
+    if (text(patchInput.publisher)) patch.publisher = text(patchInput.publisher);
+    if (text(patchInput.price)) patch.price = text(patchInput.price);
+    if (patchInput.status !== "keep") patch.status = patchInput.status;
 
-    const nextSubSubject = text(bulkTextbookPatch.category) || getTextbookSubSubject(row);
+    const nextSubSubject = text(patchInput.category) || getTextbookSubSubject(row);
     const taxonomyChanged =
-      bulkTextbookPatch.schoolLevels !== null ||
-      bulkTextbookPatch.gradeLevels !== null ||
-      Boolean(text(bulkTextbookPatch.category));
+      patchInput.schoolLevels !== null ||
+      patchInput.gradeLevels !== null ||
+      Boolean(text(patchInput.category));
 
     if (taxonomyChanged) {
-      if (bulkTextbookPatch.schoolLevels !== null) patch.schoolLevels = bulkTextbookPatch.schoolLevels;
-      if (bulkTextbookPatch.gradeLevels !== null) patch.gradeLevels = bulkTextbookPatch.gradeLevels;
-      if (text(bulkTextbookPatch.category)) patch.subSubject = nextSubSubject;
+      if (patchInput.schoolLevels !== null) patch.schoolLevels = patchInput.schoolLevels;
+      if (patchInput.gradeLevels !== null) patch.gradeLevels = patchInput.gradeLevels;
+      if (text(patchInput.category)) patch.subSubject = nextSubSubject;
     }
 
     return patch;
+  }
+
+  function createMasterBulkActionGuard() {
+    const expectedIdentity = liveActionInputsRef.current.masterBulk;
+    return () => liveActionInputsRef.current.masterBulk === expectedIdentity;
   }
 
   function applyBulkTextbookEdit() {
     if (!masterOptionsAccepted || selectedTextbookRows.length === 0 || !hasBulkTextbookPatchValues()) {
       return;
     }
+    const selectedRows = [...selectedTextbookRows];
+    const patchSnapshot = {
+      ...bulkTextbookPatch,
+      schoolLevels: bulkTextbookPatch.schoolLevels && [...bulkTextbookPatch.schoolLevels],
+      gradeLevels: bulkTextbookPatch.gradeLevels && [...bulkTextbookPatch.gradeLevels],
+    };
+    const isCurrentMasterBulk = createMasterBulkActionGuard();
 
     void runAction(
       "textbook-bulk-edit",
       async () => {
         await Promise.all(
-          selectedTextbookRows.map((row) =>
+          selectedRows.map((row) =>
             textbookService.upsertTextbookMaster({
               ...row,
               id: getRecordId(row),
               title: getTextbookTitle(row),
               price: text(row.sale_price || row.salePrice || row.price),
               status: normalizeStatusValue(row.status),
-              ...getBulkTextbookPatchValues(row),
+              ...getBulkTextbookPatchValues(row, patchSnapshot),
             }, { scienceSubjectAreas: acceptedMasterOptions?.scienceSubjectAreas || [] }),
           ),
         );
       },
-      `${formatQuantity(selectedTextbookRows.length)}개 교재를 수정했습니다.`,
+      `${formatQuantity(selectedRows.length)}개 교재를 수정했습니다.`,
       invalidateMaster,
+      isCurrentMasterBulk,
     ).then((ok) => { if (ok) { setSelectedTextbookIds([]); setBulkTextbookPatch(emptyBulkTextbookPatch); } });
   }
 
@@ -2981,12 +3014,14 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
+    const selectedRows = [...selectedTextbookRows];
+    const isCurrentMasterBulk = createMasterBulkActionGuard();
     const statusLabel = statusOptions.find((option) => option.value === status)?.label || status;
     void runAction(
       "textbook-bulk-status",
       async () => {
         await Promise.all(
-          selectedTextbookRows.map((row) =>
+          selectedRows.map((row) =>
             textbookService.upsertTextbookMaster({
               ...row,
               id: getRecordId(row),
@@ -2997,8 +3032,9 @@ function TextbookOperationsWorkspaceContent() {
           ),
         );
       },
-      `${formatQuantity(selectedTextbookRows.length)}개 교재를 ${statusLabel}으로 변경했습니다.`,
+      `${formatQuantity(selectedRows.length)}개 교재를 ${statusLabel}으로 변경했습니다.`,
       invalidateMaster,
+      isCurrentMasterBulk,
     ).then((ok) => { if (ok) { setSelectedTextbookIds([]); setBulkTextbookPatch(emptyBulkTextbookPatch); } });
   }
 
@@ -3022,6 +3058,7 @@ function TextbookOperationsWorkspaceContent() {
     const shouldClearSearchAfterDelete = Boolean(text(query)) &&
       filteredInventory.length > 0 &&
       filteredInventory.every((row) => targetIds.includes(getRecordId(row)));
+    const isCurrentMasterBulk = createMasterBulkActionGuard();
     setTextbookDeleteDialogOpen(false);
 
     void runAction(
@@ -3031,6 +3068,7 @@ function TextbookOperationsWorkspaceContent() {
       },
       () => getTextbookDeleteResultMessage(deleteResult, targetCount),
       invalidateMaster,
+      isCurrentMasterBulk,
     ).then((ok) => {
       if (!ok) return;
       if (shouldClearSearchAfterDelete) updateMasterSearchQuery(""); else clearMasterSelection();
@@ -3043,6 +3081,7 @@ function TextbookOperationsWorkspaceContent() {
     setActionErrorMessage("");
     try {
       const context = await getTextbookInactiveCleanupContext();
+      assertLivePreparedSchemaReady();
       if (!isCurrentActionActor(expectedActorKey)) return;
       if (context.targetIds.length === 0) { setMessage("비울 미사용 교재가 없습니다."); return; }
       const targetIds = [...context.targetIds];
@@ -3057,6 +3096,7 @@ function TextbookOperationsWorkspaceContent() {
             "textbook-trash-empty",
             async () => {
               const recheck = await getTextbookInactiveCleanupContext();
+              assertLivePreparedSchemaReady();
               if (!isCurrentActionActor(expectedActorKey) || JSON.stringify(recheck.targetIds) !== JSON.stringify(targetIds)) throw new Error("정리 대상이 변경되었습니다. 다시 확인하세요.");
               deleteResult = await textbookService.purgeInactiveTextbooks(targetIds);
             },
@@ -3156,11 +3196,11 @@ function TextbookOperationsWorkspaceContent() {
     invalidate: () => Promise<void>,
     isCurrentInput: () => boolean = () => true,
   ) {
-    if (schemaDisabled) return false;
+    if (schemaDisabledRef.current) return false;
     const expectedActorKey = actorKey;
     const actionSequence = actionSequenceRef.current + 1;
     actionSequenceRef.current = actionSequence;
-    const canPublish = () => isCurrentActionActor(expectedActorKey) && isCurrentInput();
+    const canPublish = () => isCurrentActionActor(expectedActorKey) && isCurrentInput() && !schemaDisabledRef.current;
     const clearOwnSaving = () => {
       if (isCurrentActionActor(expectedActorKey) && actionSequenceRef.current === actionSequence) setSaving("");
     };
@@ -3196,6 +3236,11 @@ function TextbookOperationsWorkspaceContent() {
       ? `${savedMessage} · 공개 수업 캐시 갱신 대기 중`
       : savedMessage);
     return true;
+  }
+
+  function assertLivePreparedSchemaReady() {
+    if (!schemaDisabledRef.current) return;
+    throw Object.assign(new Error("교재 읽기 API가 아직 적용되지 않았습니다."), { code: "textbook_read_rpc_unavailable" });
   }
 
   function submitMaster(event: FormEvent<HTMLFormElement>) {
@@ -3326,6 +3371,7 @@ function TextbookOperationsWorkspaceContent() {
         }
         if (!directSnapshot) throw new Error("구매 작업 대상을 찾을 수 없습니다.");
         const fresh = await getTextbookPurchaseDetail(directSnapshot.input);
+        assertLivePreparedSchemaReady();
         if (!isCurrentPurchaseAction()) throw new Error("구매 입력이 변경되었습니다. 다시 시도하세요.");
         const actualDetail = fresh.row;
         if (!actualDetail || JSON.stringify(actualDetail.memberLineIds) !== JSON.stringify(directSnapshot.memberLineIds)) {
@@ -3407,6 +3453,7 @@ function TextbookOperationsWorkspaceContent() {
       async () => {
         if (isTeacherSale) {
           const balance = await getTextbookInventoryBalance({ textbookIds: [saleForm.textbookId], locationId: saleLocationId });
+          assertLivePreparedSchemaReady();
           if (!isCurrentActionActor(expectedActorKey) || !isCurrentSaleAction()) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
           const balanceRow = balance.rows.find((row) => row.textbookId === saleForm.textbookId);
           if (!selectedSaleTextbook || acceptedSelectedLocation?.id !== saleLocationId || !balanceRow) throw new Error("출고 컨텍스트를 완성하지 못했습니다.");
@@ -3423,6 +3470,7 @@ function TextbookOperationsWorkspaceContent() {
         }
         const input = { classId: saleForm.classId, textbookId: saleForm.textbookId, locationId: saleLocationId, chargeMonth: normalizedSaleChargeMonth };
         const context = await getClassTextbookSaleContext(input);
+        assertLivePreparedSchemaReady();
         if (!isCurrentActionActor(expectedActorKey) || !isCurrentSaleAction()) throw new Error("출고 입력이 변경되었습니다. 다시 시도하세요.");
         if (!context.complete) throw new Error("출고 컨텍스트를 완성하지 못했습니다.");
         if (context.duplicateCount > 0) throw new Error("이미 같은 월에 같은 수업·교재 출고가 있습니다.");
@@ -3481,6 +3529,7 @@ function TextbookOperationsWorkspaceContent() {
       groups.set(locationId, [...new Set([...(groups.get(locationId) || []), textbookId])]);
     }
     const balances = await Promise.all([...groups].map(([locationId, textbookIds]) => getTextbookInventoryBalance({ textbookIds, locationId })));
+    assertLivePreparedSchemaReady();
     if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.saleSelection !== expectedSelection)) throw new Error("출고 작업 대상이 변경되었습니다.");
     return rows.map((row) => {
       const locationId = row.location?.id || text(row.line.location_id);
@@ -3495,6 +3544,7 @@ function TextbookOperationsWorkspaceContent() {
     const expectedActorKey = actorKey;
     const ids = [...new Set(lines.map(getRecordId).filter(Boolean))];
     const details = await Promise.all(ids.map((id) => getTextbookSaleDetail(id)));
+    assertLivePreparedSchemaReady();
     if (!isCurrentActionActor(expectedActorKey) || (expectedSelection !== undefined && liveActionInputsRef.current.saleSelection !== expectedSelection)) throw new Error("출고 작업 대상이 변경되었습니다.");
     const rows = details.map((detail) => detail.row).filter((row): row is NonNullable<typeof row> => Boolean(row));
     if (rows.length !== ids.length) throw new Error("출고 작업 대상을 찾을 수 없습니다.");
@@ -3510,6 +3560,7 @@ function TextbookOperationsWorkspaceContent() {
         const locationId = detail.row.location?.id || text(detail.row.line.location_id);
         const textbookId = getRecordId(detail.row.textbook);
         const balance = await getTextbookInventoryBalance({ textbookIds: [textbookId], locationId });
+        assertLivePreparedSchemaReady();
         if (!isCurrentActionActor(actorKey)) throw new Error("출고 작업 대상이 변경되었습니다.");
         const balanceRow = balance.rows.find((row) => row.textbookId === textbookId);
         if (!balanceRow) throw new Error("출고 재고를 확인할 수 없습니다.");
@@ -3943,7 +3994,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function isCurrentInventoryAction(
-    snapshots: Array<{ key: string; quantity: string; memo: string; revision: number }>,
+    snapshots: Array<{ key: string; textbookId: string; quantity: string; memo: string; revision: number; selectionRevision: number }>,
     expectedSelection?: string,
   ) {
     const current = JSON.parse(liveActionInputsRef.current.inventory) as {
@@ -3951,11 +4002,13 @@ function TextbookOperationsWorkspaceContent() {
       drafts: Record<string, string>;
       memos: Record<string, string>;
       revisions: Record<string, number>;
+      selectionRevisions: Record<string, number>;
     };
     if (expectedSelection !== undefined && JSON.stringify(current.selection) !== expectedSelection) return false;
     return snapshots.every((snapshot) => current.drafts[snapshot.key] === snapshot.quantity
       && normalizeStoredTextInput(current.memos[snapshot.key]) === snapshot.memo
-      && (current.revisions[snapshot.key] || 0) === snapshot.revision);
+      && (current.revisions[snapshot.key] || 0) === snapshot.revision
+      && (current.selectionRevisions[snapshot.textbookId] || 0) === snapshot.selectionRevision);
   }
 
   function submitInlineStockCount(row: InventoryCountRow, countedQuantity: string, memo = "") {
@@ -3969,12 +4022,14 @@ function TextbookOperationsWorkspaceContent() {
     const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
     const expectedActorKey = actorKey;
     const submittedRevision = inventoryCountDraftRevisionsRef.current[draftKey] || 0;
-    const snapshot = { key: draftKey, quantity: normalizedQuantity, memo: normalizedMemo, revision: submittedRevision };
+    const snapshot = { key: draftKey, textbookId: row.id, quantity: normalizedQuantity, memo: normalizedMemo, revision: submittedRevision,
+      selectionRevision: textbookSelectionRevisionsRef.current[row.id] || 0 };
     const isCurrentCountAction = () => isCurrentInventoryAction([snapshot]);
     void runAction(
       `count-inline-${draftKey}`,
       async () => {
         const balance = await getTextbookInventoryBalance({ textbookIds: [row.id], locationId: row.locationId });
+        assertLivePreparedSchemaReady();
         if (!isCurrentActionActor(expectedActorKey) || !isCurrentCountAction()) throw new Error("재고 작업 대상이 변경되었습니다.");
         const authoritative = balance.rows.find((item) => item.textbookId === row.id);
         if (!authoritative) throw new Error("재고 수량을 확인할 수 없습니다.");
@@ -4019,7 +4074,8 @@ function TextbookOperationsWorkspaceContent() {
     const expectedSelection = JSON.stringify(selectedTextbookIds);
     const snapshots = readyRows.map((row) => {
       const key = getInventoryCountDraftKey(row.id, row.locationId);
-      return { row, key, quantity: normalizeQuantityInput(inventoryCountDrafts[key], { allowZero: true }), memo: normalizeStoredTextInput(inventoryCountMemoDrafts[key]), revision: inventoryCountDraftRevisionsRef.current[key] || 0 };
+      return { row, key, textbookId: row.id, quantity: normalizeQuantityInput(inventoryCountDrafts[key], { allowZero: true }), memo: normalizeStoredTextInput(inventoryCountMemoDrafts[key]), revision: inventoryCountDraftRevisionsRef.current[key] || 0,
+        selectionRevision: textbookSelectionRevisionsRef.current[row.id] || 0 };
     });
     const completedSnapshots: typeof snapshots = [];
     const isCurrentBulkCountAction = () => isCurrentInventoryAction(snapshots, expectedSelection);
@@ -4029,6 +4085,7 @@ function TextbookOperationsWorkspaceContent() {
         const groups = new Map<string, string[]>();
         for (const snapshot of snapshots) groups.set(snapshot.row.locationId, [...new Set([...(groups.get(snapshot.row.locationId) || []), snapshot.row.id])]);
         const balances = await Promise.all([...groups].map(([locationId, textbookIds]) => getTextbookInventoryBalance({ textbookIds, locationId })));
+        assertLivePreparedSchemaReady();
         if (!isCurrentActionActor(expectedActorKey) || !isCurrentBulkCountAction()) throw new Error("재고 작업 대상이 변경되었습니다.");
         for (const snapshot of snapshots) {
           const authoritative = balances.find((balance) => balance.locationId === snapshot.row.locationId)?.rows.find((item) => item.textbookId === snapshot.row.id);
@@ -4046,7 +4103,8 @@ function TextbookOperationsWorkspaceContent() {
       invalidateInventory,
       isCurrentBulkCountAction,
     ).then((ok) => {
-      const acknowledged = completedSnapshots.filter((snapshot) => (inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision);
+      const acknowledged = completedSnapshots.filter((snapshot) => (inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision
+        && (textbookSelectionRevisionsRef.current[snapshot.textbookId] || 0) === snapshot.selectionRevision);
       setInventoryCountDrafts((current) => {
         const next = { ...current };
         acknowledged.forEach((snapshot) => { delete next[snapshot.key]; });
@@ -4120,6 +4178,7 @@ function TextbookOperationsWorkspaceContent() {
       "closing",
       async () => {
         const contexts = await Promise.all(closingTargetSubjects.map((subject) => getTextbookClosingSaveContext(normalizedClosingMonth, subject)));
+        assertLivePreparedSchemaReady();
         if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.closing !== expectedClosingForm) throw new Error("월마감 입력이 변경되었습니다. 다시 시도하세요.");
         for (let index = 0; index < closingTargetSubjects.length; index += 1) {
           await textbookService.upsertMonthlyClosing({ ...closingForm, subject: closingTargetSubjects[index] }, contexts[index] as unknown as Row);
