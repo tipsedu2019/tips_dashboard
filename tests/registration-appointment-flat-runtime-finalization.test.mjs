@@ -346,6 +346,16 @@ test("the production payload-v3 compatibility migration is conditional, exact, a
     postdeploy,
     /pg_get_functiondef\(procedure\.oid\) like '%40001%'/u,
   );
+  assert.match(
+    postdeploy,
+    /function_key = 'visit_event_v2_base_private'[\s\S]*definition like '%dashboard_private\.write_registration_track_event_payload_v3%'[\s\S]*to_regprocedure\([\s\S]*write_registration_track_event_payload_v3\(uuid,uuid,text,text,text,text,jsonb,text,text\)[\s\S]*\) is not null/u,
+    "the postdeploy receipt must accept the production wrapper only when payload-v3 exists",
+  );
+  assert.match(
+    postdeploy,
+    /write_registration_track_event_payload_v3\(uuid,uuid,text,text,text,text,jsonb,text,text\)'[\s\S]*pg_get_functiondef\(procedure\.oid\) not like '%registration_visit_notification_revision_mismatch%using errcode = ''23514''%'/u,
+    "the production payload-v3 implementation must retain the exact non-retryable conflict marker",
+  );
 });
 
 test("automatic customer reminder producers are retired without touching explicit preview and send APIs", async () => {
