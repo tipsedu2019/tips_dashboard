@@ -955,7 +955,15 @@ select (
         definition not like '%dashboard_private.write_registration_track_event_v2_base%'
       ))
       or (function_key = 'visit_event_v2_base_private' and (
-        definition not like '%registration_visit_notification_revision_mismatch%using errcode = ''23514''%'
+        not (
+          definition like '%registration_visit_notification_revision_mismatch%using errcode = ''23514''%'
+          or (
+            definition like '%dashboard_private.write_registration_track_event_payload_v3%'
+            and pg_catalog.to_regprocedure(
+              'dashboard_private.write_registration_track_event_payload_v3(uuid,uuid,text,text,text,text,jsonb,text,text)'
+            ) is not null
+          )
+        )
       ))
       or (function_key = 'visit_notification_snapshot_private' and (
         definition not like '%appointment.kind = ''visit_consultation''%'
@@ -1893,6 +1901,8 @@ select (
       and (
         pg_catalog.pg_get_userbyid(procedure.proowner) <> 'postgres'
         or pg_catalog.pg_get_functiondef(procedure.oid) like '%40001%'
+        or pg_catalog.pg_get_functiondef(procedure.oid) not like
+          '%registration_visit_notification_revision_mismatch%using errcode = ''23514''%'
         or pg_catalog.has_function_privilege('public', procedure.oid, 'EXECUTE')
         or pg_catalog.has_function_privilege('anon', procedure.oid, 'EXECUTE')
         or pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
