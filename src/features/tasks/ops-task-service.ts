@@ -1153,7 +1153,7 @@ async function readOpsRegistrationClassDetail(
       metrics.queryCount += 1
       const sessionResult = await supabase
         .from("class_lesson_sessions")
-        .select("id,session_key,session_date,schedule_state")
+        .select("id,session_key,session_date,schedule_state,legacy_billing_id,legacy_billing_label,legacy_billing_color")
         .eq("class_id", safeClassId)
         .order("session_date")
       if (sessionResult.error) {

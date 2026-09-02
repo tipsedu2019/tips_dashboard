@@ -2957,11 +2957,6 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
     "progress hours should not drop the first billing-cycle session just because it falls in the previous calendar month",
   );
   assert.match(
-    source,
-    /function getWithdrawalBillingCycleItems[\s\S]*sessionNumber === 1/,
-    "billing-cycle accumulation should start from the current cycle's 1회차",
-  );
-  assert.match(
     scheduleFieldSource,
     /getWithdrawalCalendarDisplaySessionLabel\(scheduleItem, \{ includeMonth: true \}\)/,
     "withdrawal calendar cells should show the month with the saved schedule label only for selectable schedules",
@@ -2975,9 +2970,12 @@ test("withdrawal schedule calendar defaults to current month and counts the bill
     "function getWithdrawalCalendarCellTitle",
     "function getWithdrawalCalendarCellToneClass",
     "if (!item || !isWithdrawalScheduleSelectable(item)) return \"\"",
-    "const billingLabel = getWithdrawalSessionBillingLabel(session)",
-    "billingLabel,",
-    "billingColor: getWithdrawalSessionBillingColor(session)",
+    "normalizeWithdrawalScheduleSessions",
+    "getWithdrawalDateSelectionItem",
+    "billingId: session.billingId",
+    "billingLabel: session.billingLabel",
+    "billingColor: session.billingColor",
+    'if (state === "skipped") return "제외"',
     "return options.includeMonth ? getWithdrawalScheduleSessionLabel(item) : item.label",
     "return [dateKey, sessionLabel, item.stateLabel].filter(Boolean).join(\" \")",
     "border border-sky-200 bg-sky-50",

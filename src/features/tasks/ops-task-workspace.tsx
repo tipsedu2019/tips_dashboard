@@ -157,6 +157,13 @@ import {
   shouldShowRegistrationCompletionBlockers,
 } from "./registration-workflow"
 import {
+  getWithdrawalBillingCycleItems,
+  getWithdrawalDateSelectionItem,
+  getWithdrawalSessionNumber,
+  isCountedWithdrawalScheduleState,
+  normalizeWithdrawalScheduleSessions,
+} from "./withdrawal-schedule-metrics.js"
+import {
   resolveRegistrationDirectorDefault,
 } from "./registration-director-default.js"
 import {
@@ -312,9 +319,12 @@ const EMPTY_DATE_TIME_PICKER_DRAFT: DateTimePickerDraftState = {
   isPartial: false,
 }
 type WithdrawalClassScheduleItem = WordRetestClassScheduleItem & {
+  sessionId: string
+  sourceIndex: number
   sessionNumber: number
   lessonHours: number
   stateLabel: string
+  billingId: string
   billingLabel: string
   billingColor: string
 }
@@ -4206,12 +4216,6 @@ function buildCalendarDateCells(calendarMonth: Date) {
   })
 }
 
-function recordValue(value: unknown): Record<string, unknown> | null {
-  return value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : null
-}
-
 function stringValue(value: unknown) {
   return String(value || "").trim()
 }
@@ -4253,13 +4257,13 @@ function getWithdrawalScheduleStateLabel(scheduleState: string) {
   const state = stringValue(scheduleState)
   if (state === "makeup") return "보강"
   if (["exception", "canceled", "cancelled"].includes(state)) return "휴강"
+  if (state === "skipped") return "제외"
   if (state === "tbd") return "미정"
   return "정상"
 }
 
 function isWithdrawalScheduleSelectable(item?: { state?: string }) {
-  const state = stringValue(item?.state) || "active"
-  return !["exception", "tbd", "canceled", "cancelled"].includes(state)
+  return isCountedWithdrawalScheduleState(item?.state)
 }
 
 function getWithdrawalNumberValue(value: unknown) {
@@ -4407,14 +4411,6 @@ function getWithdrawalSessionDateKey(session: Record<string, unknown>, fallbackD
   )
 }
 
-function getWithdrawalSessionBillingLabel(session: Record<string, unknown>) {
-  return stringValue(session.billingLabel || session.billing_label || session.periodLabel || session.period_label)
-}
-
-function getWithdrawalSessionBillingColor(session: Record<string, unknown>) {
-  return stringValue(session.billingColor || session.billing_color || session.periodColor || session.period_color)
-}
-
 function getWithdrawalSessionHours(
   session: Record<string, unknown> | null,
   classItem?: OpsClassOption,
@@ -4516,12 +4512,15 @@ function getFallbackWithdrawalClassScheduleItems(classItem?: OpsClassOption): Wi
     if (uniqueWeekdays.includes(cursor.getDay())) {
       const sessionNumber = items.length + 1
       items.push({
+        sessionId: `fallback:${toDateKey(cursor)}`,
+        sourceIndex: items.length,
         dateKey: toDateKey(cursor),
         label: `${sessionNumber}회차`,
         state: "active",
         stateLabel: getWithdrawalScheduleStateLabel("active"),
         sessionNumber,
         lessonHours: hoursByWeekday.get(cursor.getDay()) || 1,
+        billingId: "",
         billingLabel: getWithdrawalCalendarMonthLabel(toDateKey(cursor)),
         billingColor: "",
       })
@@ -4533,74 +4532,44 @@ function getFallbackWithdrawalClassScheduleItems(classItem?: OpsClassOption): Wi
 }
 
 function getWithdrawalClassScheduleItems(classItem?: OpsClassOption): WithdrawalClassScheduleItem[] {
-  const seen = new Set<string>()
-
-  const plannedItems = getSchedulePlanSessions(classItem).flatMap((entry, index) => {
-    const session = recordValue(entry)
-    if (!session) return []
-
-    const state = stringValue(session.scheduleState || session.schedule_state || session.state) || "active"
-
-    const dateKey = getWithdrawalSessionDateKey(session)
-    if (!dateKey) return []
-
-    const sessionNumber = Number(session.sessionNumber || session.session_number || index + 1)
-    const normalizedSessionNumber = Number.isFinite(sessionNumber) && sessionNumber > 0 ? sessionNumber : index + 1
-    const label = `${normalizedSessionNumber}회차`
-    const billingLabel = getWithdrawalSessionBillingLabel(session)
-    const uniqueKey = `${dateKey}:${label}:${state}`
-    if (seen.has(uniqueKey)) return []
-    seen.add(uniqueKey)
-
-    return [{
-      dateKey,
-      label,
-      state,
-      stateLabel: getWithdrawalScheduleStateLabel(state),
-      sessionNumber: normalizedSessionNumber,
-      lessonHours: getWithdrawalSessionHours(session, classItem, dateKey),
-      billingLabel,
-      billingColor: getWithdrawalSessionBillingColor(session),
-    }]
-  }).sort((left, right) => left.dateKey.localeCompare(right.dateKey) || left.sessionNumber - right.sessionNumber)
+  const schedulePlan = classItem?.schedulePlan || {}
+  const plannedItems = normalizeWithdrawalScheduleSessions({
+    ...schedulePlan,
+    sessions: getSchedulePlanSessions(classItem),
+  }).map((session) => ({
+    sessionId: session.sessionId,
+    sourceIndex: session.sourceIndex,
+    dateKey: session.dateKey,
+    label: session.label,
+    state: session.state,
+    stateLabel: getWithdrawalScheduleStateLabel(session.state),
+    sessionNumber: getWithdrawalSessionNumber(session.source),
+    lessonHours: getWithdrawalSessionHours(session.source, classItem, session.dateKey),
+    billingId: session.billingId,
+    billingLabel: session.billingLabel,
+    billingColor: session.billingColor,
+  }))
 
   return plannedItems.length > 0 ? plannedItems : getFallbackWithdrawalClassScheduleItems(classItem)
 }
 
-function getWithdrawalBillingCycleItems(items: WithdrawalClassScheduleItem[], selectedItem?: WithdrawalClassScheduleItem) {
-  if (!selectedItem) return []
+function getWithdrawalScheduleItemsByDate(items: WithdrawalClassScheduleItem[]) {
+  const groupedItems = new Map<string, WithdrawalClassScheduleItem[]>()
+  items.forEach((item) => {
+    groupedItems.set(item.dateKey, [...(groupedItems.get(item.dateKey) || []), item])
+  })
 
-  const selectableItems = items.filter((item) => isWithdrawalScheduleSelectable(item))
-  const selectedIndex = selectableItems.findIndex((item) => (
-    item.dateKey === selectedItem.dateKey &&
-    item.sessionNumber === selectedItem.sessionNumber &&
-    item.label === selectedItem.label
-  ))
-  if (selectedIndex < 0) return []
-
-  let cycleStartIndex = 0
-  for (let index = selectedIndex; index >= 0; index -= 1) {
-    const item = selectableItems[index]
-    const previous = selectableItems[index - 1]
-    if (item.sessionNumber === 1) {
-      cycleStartIndex = index
-      break
-    }
-    if (previous && previous.sessionNumber > item.sessionNumber) {
-      cycleStartIndex = index
-      break
-    }
-  }
-
-  return selectableItems.slice(cycleStartIndex, selectedIndex + 1)
+  return new Map(
+    [...groupedItems.entries()].flatMap(([dateKey, dateItems]) => {
+      const selectedItem = getWithdrawalDateSelectionItem(dateItems, dateKey)
+      return selectedItem ? [[dateKey, selectedItem] as const] : []
+    }),
+  )
 }
 
 function getWithdrawalScheduleMetrics(items: WithdrawalClassScheduleItem[], selectedDate: string, classItem?: OpsClassOption) {
   const selectedDateKey = toDateKey(selectedDate)
-  const selectedItem = selectedDateKey
-    ? items.find((item) => item.dateKey === selectedDateKey && isWithdrawalScheduleSelectable(item)) ||
-      items.find((item) => item.dateKey === selectedDateKey)
-    : undefined
+  const selectedItem = selectedDateKey ? getWithdrawalDateSelectionItem(items, selectedDateKey) : undefined
   const completedCycleItems = getWithdrawalBillingCycleItems(items, selectedItem)
   const completedMinutes = selectedItem && selectedDateKey
     ? completedCycleItems
@@ -5012,16 +4981,7 @@ function WithdrawalScheduleCalendarField({
   const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
   const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
-  const itemsByDate = useMemo(() => {
-    const items = new Map<string, WithdrawalClassScheduleItem>()
-    scheduleItems.forEach((item) => {
-      const current = items.get(item.dateKey)
-      if (!current || (!isWithdrawalScheduleSelectable(current) && isWithdrawalScheduleSelectable(item))) {
-        items.set(item.dateKey, item)
-      }
-    })
-    return items
-  }, [scheduleItems])
+  const itemsByDate = useMemo(() => getWithdrawalScheduleItemsByDate(scheduleItems), [scheduleItems])
   const metrics = getWithdrawalScheduleMetrics(scheduleItems, selectedDateKey, classItem)
   const progressLabel = metrics.fourWeekLessonHours
     ? `${metrics.progressPercent}%`
@@ -5049,7 +5009,7 @@ function WithdrawalScheduleCalendarField({
             : "billing-current"
       const badgeTone: ClassScheduleCalendarDay["badges"][number]["tone"] = state === "makeup"
         ? "makeup"
-        : ["exception", "canceled", "cancelled"].includes(state)
+        : ["exception", "canceled", "cancelled", "skipped"].includes(state)
           ? "holiday"
           : state === "completed"
             ? "completed"
@@ -5155,16 +5115,7 @@ function TransferScheduleCalendarField({
   const scheduleItems = useMemo(() => getWithdrawalClassScheduleItems(classItem), [classItem])
   const [calendarMonth, setCalendarMonth] = useState(() => getCalendarMonthDate(selectedDateKey))
   const calendarCells = useMemo(() => buildCalendarDateCells(calendarMonth), [calendarMonth])
-  const itemsByDate = useMemo(() => {
-    const items = new Map<string, WithdrawalClassScheduleItem>()
-    scheduleItems.forEach((item) => {
-      const current = items.get(item.dateKey)
-      if (!current || (!isWithdrawalScheduleSelectable(current) && isWithdrawalScheduleSelectable(item))) {
-        items.set(item.dateKey, item)
-      }
-    })
-    return items
-  }, [scheduleItems])
+  const itemsByDate = useMemo(() => getWithdrawalScheduleItemsByDate(scheduleItems), [scheduleItems])
 
   if (!classItem) {
     return (
