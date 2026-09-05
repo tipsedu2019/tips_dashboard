@@ -28,6 +28,10 @@ Use the default mattpocock/skills triage label vocabulary. See `docs/agents/tria
 
 This is a single-context repo. Read root `CONTEXT.md` and `docs/adr/` when they exist. See `docs/agents/domain.md`.
 
+### Quality guidance
+
+For non-trivial UI, React performance, Supabase/Postgres, or quality-guideline work, read `.agents/skills/tips-quality/SKILL.md`. It routes to `DESIGN.md`, the affected implementation, and the maintained source record in `docs/agents/quality-sources.md` only when relevant.
+
 ## Code Review Rules
 
 - Determine the final active PL/pgSQL definition from the ordered migration chain, not an earlier definition alone.
