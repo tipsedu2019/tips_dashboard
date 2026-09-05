@@ -135,6 +135,7 @@ type DashboardMetrics = {
 
 type ConflictActionState =
   | { status: "checking" }
+  | { status: "lookup-error" }
   | { status: "idle" }
   | { status: "saving" }
   | { status: "linked"; taskId: string; canOpen: boolean }
@@ -1099,6 +1100,7 @@ export function ConflictWarning({
 }) {
   const { role } = useAuth()
   const [showAllConflicts, setShowAllConflicts] = useState(false)
+  const [linkLookupRevision, setLinkLookupRevision] = useState(0)
   const [actionStateByKey, setActionStateByKey] = useState<Record<string, ConflictActionState>>({})
   const rows = useMemo(
     () => [...(metrics.conflictRows || [])].sort((left, right) => (
@@ -1136,6 +1138,9 @@ export function ConflictWarning({
     }
 
     let isCurrent = true
+    setActionStateByKey(Object.fromEntries(
+      currentRows.map((row) => [row.key, { status: "checking" } satisfies ConflictActionState]),
+    ))
 
     listDashboardConflictTaskLinks(
       currentRows.map(projectDashboardConflictRpcInput),
@@ -1149,18 +1154,17 @@ export function ConflictWarning({
           currentRows.map((row) => [row.key, getConflictActionState(linksByKey.get(row.key))]),
         ))
       })
-      .catch((error: unknown) => {
+      .catch(() => {
         if (!isCurrent) return
-        const message = getConflictActionError(error)
         setActionStateByKey(Object.fromEntries(
-          currentRows.map((row) => [row.key, { status: "error", message } satisfies ConflictActionState]),
+          currentRows.map((row) => [row.key, { status: "lookup-error" } satisfies ConflictActionState]),
         ))
       })
 
     return () => {
       isCurrent = false
     }
-  }, [conflictKeySignature])
+  }, [conflictKeySignature, linkLookupRevision])
 
   async function createConflictTask(row: DashboardConflictRow) {
     setActionStateByKey((current) => ({
@@ -1294,6 +1298,17 @@ export function ConflictWarning({
                       관리팀 등록 필요
                     </span>
                   ) : null}
+                  {actionState.status === "lookup-error" ? (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setLinkLookupRevision((current) => current + 1)}
+                      className="w-full border-destructive/40 bg-background text-destructive sm:w-auto"
+                    >
+                      상태 확인 다시 시도
+                    </Button>
+                  ) : null}
                   {actionState.status === "error" && canCreateTask ? (
                     <Button
                       type="button"
@@ -1309,6 +1324,7 @@ export function ConflictWarning({
                     <span className="text-xs font-medium text-destructive">상태 확인 실패</span>
                   ) : null}
                   <div aria-live="polite" className="min-h-4 max-w-56 text-xs text-destructive">
+                    {actionState.status === "lookup-error" ? "할 일 등록 상태를 확인하지 못했습니다." : null}
                     {actionState.status === "error" ? actionState.message : null}
                     <span className="sr-only">
                       {actionState.status === "saving" ? "할 일을 등록하고 있습니다." : null}

@@ -5,7 +5,7 @@ set local timezone = 'Asia/Seoul';
 set local statement_timeout = '45s';
 set local lock_timeout = '5s';
 
-select has_table('dashboard_private', 'dashboard_conflict_task_links');
+select has_table('dashboard_private', 'dashboard_conflict_task_links', 'conflict task link ledger exists');
 select has_function('public', 'list_dashboard_conflict_task_links_v1', array['jsonb']);
 select has_function('public', 'create_dashboard_conflict_task_v1', array['jsonb', 'uuid']);
 select has_function('public', 'arm_dashboard_conflict_checkpoint_v1', array['uuid', 'text', 'uuid[]']);
@@ -194,6 +194,12 @@ set role = excluded.role,
     email = excluded.email,
     updated_at = excluded.updated_at;
 
+-- Profile synchronization may already have created a catalog in the final schema.
+-- Release only this fixture profile's generated link before installing the fixed-ID catalog.
+update public.teacher_catalogs set profile_id = null
+where profile_id = '85000000-0000-4000-8000-000000000001'
+  and id <> '85000000-0000-4000-8000-000000000101';
+
 insert into public.teacher_catalogs(
   id, name, subjects, is_visible, sort_order, profile_id, account_email, dashboard_role
 )
@@ -237,7 +243,7 @@ insert into public.academic_schools(id, name, category)
 values (
   '85000000-0000-4000-8000-000000000601',
   '충돌검증고',
-  '고등학교'
+  'high'
 )
 on conflict (id) do update set
   name = excluded.name,

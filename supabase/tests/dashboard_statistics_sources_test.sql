@@ -782,5 +782,61 @@ select ok(
   'non-exam parent event detail keeps legacy no-type-filter date precedence'
 );
 
+-- Q-09: occupied classes must produce sources accepted by the task-link RPC.
+-- Earlier overlap fixtures had no students and missed this integration boundary.
+reset role;
+update public.classes
+set student_ids = '["86200000-0000-4000-8000-000000000001"]'::jsonb
+where id in ('86200000-0000-4000-8000-000000000303', '86200000-0000-4000-8000-000000000304');
+insert into auth.users(id, aud, role, email, raw_app_meta_data, raw_user_meta_data)
+values ('86200000-0000-4000-8000-000000000901', 'authenticated', 'authenticated',
+  'statistics-conflict-contract@runtime.invalid', '{}'::jsonb, '{}'::jsonb);
+insert into public.profiles(id, role, name, email)
+values ('86200000-0000-4000-8000-000000000901', 'admin', '통계 계약 검증',
+  'statistics-conflict-contract@runtime.invalid')
+on conflict (id) do update set role = excluded.role;
+select set_config('request.jwt.claim.sub', '86200000-0000-4000-8000-000000000901', true);
+select set_config('request.jwt.claims', '{"sub":"86200000-0000-4000-8000-000000000901","role":"authenticated"}', true);
+set local role authenticated;
+
+create temporary table quality_conflict_rows as
+with payload as (
+  select public.get_dashboard_statistics_sources_v1(
+    'schedule_conflicts', null, null, current_date, current_date + 90
+  ) as value
+)
+select conflict.value as row_value,
+  (conflict.value -> 'source') || jsonb_build_object(
+    'type', conflict.value ->> 'type',
+    'occurrenceKind', conflict.value ->> 'occurrenceKind'
+  ) as rpc_input
+from payload
+cross join lateral jsonb_array_elements(
+  (payload.value -> 'teacherConflicts') || (payload.value -> 'classroomConflicts')
+) conflict(value)
+where conflict.value -> 'classIds' ? '86200000-0000-4000-8000-000000000303'
+  and conflict.value -> 'classIds' ? '86200000-0000-4000-8000-000000000304';
+
+select is((select count(*) from quality_conflict_rows), 2::bigint,
+  'occupied classes produce teacher and classroom conflicts');
+select ok((select bool_and(row_value -> 'affectedStudentIds' ? '86200000-0000-4000-8000-000000000001')
+  from quality_conflict_rows), 'display data retains affected students');
+select ok((select bool_and(rpc_input -> 'studentIds' = '[]'::jsonb)
+  from quality_conflict_rows), 'resource conflict identity does not contain affected student IDs');
+select lives_ok(
+  $$select public.list_dashboard_conflict_task_links_v1(
+    (select jsonb_agg(rpc_input order by row_value ->> 'key') from quality_conflict_rows))$$,
+  'real statistics resource conflicts are accepted by the final task-link RPC'
+);
+
+reset role;
+select throws_ok(
+  $$select dashboard_private.normalize_dashboard_conflict_v1(
+    (select rpc_input || '{"studentIds":["86200000-0000-4000-8000-000000000001"]}'::jsonb
+      from quality_conflict_rows where rpc_input ->> 'type' = 'teacher'))$$,
+  '22023', 'dashboard_conflict_input_invalid',
+  'the final validator still rejects a malformed resource identity with exact SQLSTATE'
+);
+
 select * from finish();
 rollback;

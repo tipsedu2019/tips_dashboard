@@ -309,6 +309,16 @@
       "fileName": "20260905064919_ops_task_parameter_sensitive_plans.sql",
       "status": "final",
       "sha256": "95319e3d4c19a3ac84514f7615b22021270dbd56dc107fb526dee12cee7a83fb"
+    },
+    {
+      "fileName": "20260905123149_dashboard_statistics_conflict_identity.sql",
+      "status": "final",
+      "sha256": "e5d0c6271a06b1d9b6a0b0b412b2055d8728663336b974ec78c52ce38cc471c2"
+    },
+    {
+      "fileName": "20260905123831_dashboard_conflict_visibility_boolean.sql",
+      "status": "final",
+      "sha256": "ec60770fffff7b31c3ebd6e141a26a98c25e4b4754b7aed2dfec1df66d700afb"
     }
   ]
 }
