@@ -304,6 +304,11 @@
       "fileName": "20260901111200_registration_flat_fact_runtime_finalization.sql",
       "status": "final",
       "sha256": "860c2235c7ad170f41ca8b31911f6b432b8e848f1dd32165c5435840ef4ea891"
+    },
+    {
+      "fileName": "20260905064919_ops_task_parameter_sensitive_plans.sql",
+      "status": "final",
+      "sha256": "95319e3d4c19a3ac84514f7615b22021270dbd56dc107fb526dee12cee7a83fb"
     }
   ]
 }

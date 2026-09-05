@@ -39,6 +39,9 @@ jobs:
       - name: Test SQLSTATE and transaction contracts
         run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
 
+      - name: Test resource evidence comparisons
+        run: node --test tests/supabase-resource-evidence-comparator.test.mjs
+
       - name: Verify Supabase migration layout
         run: node scripts/verify-supabase-migration-layout.mjs
 
@@ -116,6 +119,9 @@ jobs:
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --postdeploy-contract \
+            --test supabase/tests/ops_task_page_reads_test.sql \
+            --test supabase/tests/ops_task_numbered_pages_test.sql \
+            --test supabase/tests/ops_task_source_plan_budget_test.sql \
             --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
             --test supabase/tests/registration_teacher_feedback_request_retirement_test.sql \
             --test supabase/tests/registration_observation_status_independence_test.sql \
