@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { ConflictWarning as DashboardConflictWarning } from "@/app/admin/dashboard/components/section-cards"
 import type { DashboardConflictRow } from "@/features/dashboard/conflict-contract"
 import { DASHBOARD_STATISTICS_RANGE_PRESETS, type DashboardStatisticsTab } from "@/features/dashboard/statistics-contract"
@@ -39,6 +40,7 @@ function PanelState({
   error,
   generatedAt,
   onRefresh,
+  controls,
   renderOnError = false,
   children,
 }: {
@@ -46,6 +48,7 @@ function PanelState({
   error: string | null
   generatedAt: string | null
   onRefresh: () => void
+  controls?: ReactNode
   renderOnError?: boolean
   children: ReactNode
 }) {
@@ -55,9 +58,12 @@ function PanelState({
       <span className="text-xs text-muted-foreground">마지막 갱신 {updated}</span>
       <Button type="button" size="sm" variant="outline" onClick={onRefresh}>새로고침</Button>
     </div>
-    {loading ? <Card><CardContent className="py-10 text-sm text-muted-foreground">통계를 불러오는 중입니다.</CardContent></Card> : null}
-    {error && !renderOnError ? <Card><CardContent className="flex items-center justify-between gap-3 py-6 text-sm"><span>{error}</span><Button type="button" size="sm" onClick={onRefresh}>다시 시도</Button></CardContent></Card> : null}
-    {!loading && (!error || renderOnError) ? children : null}
+    {controls ? <div className="min-w-0">{controls}</div> : null}
+    <div role="region" aria-label="통계 결과" aria-busy={loading} className="grid gap-4">
+      {loading ? <Card role="status"><CardContent className="py-10 text-sm text-muted-foreground">통계를 불러오는 중입니다.</CardContent></Card> : null}
+      {error && !renderOnError ? <Card role="alert"><CardContent className="flex items-center justify-between gap-3 py-6 text-sm"><span>{error}</span><Button type="button" size="sm" onClick={onRefresh}>다시 시도</Button></CardContent></Card> : null}
+      {!loading && (!error || renderOnError) ? children : null}
+    </div>
   </div>
 }
 
@@ -86,7 +92,7 @@ function OverviewPanel() {
 }
 
 function FilterButtons<T extends string>({ label, values, active, onChange }: { label: string; values: Array<{ key: T; label: string }>; active: T; onChange: (value: T) => void }) {
-  return <div className="flex flex-wrap items-center gap-1.5"><span className="mr-1 text-xs font-semibold text-muted-foreground">{label}</span>{values.map((value) => <Button key={value.key} type="button" size="sm" variant={active === value.key ? "default" : "outline"} onClick={() => onChange(value.key)}>{value.label}</Button>)}</div>
+  return <div role="group" aria-label={label} className="flex flex-wrap items-center gap-1.5"><span className="mr-1 text-xs font-semibold text-muted-foreground">{label}</span>{values.map((value) => <Button key={value.key} type="button" size="sm" aria-pressed={active === value.key} variant={active === value.key ? "default" : "outline"} onClick={() => onChange(value.key)}>{value.label}</Button>)}</div>
 }
 
 function StudentBreakdowns({ data, subject, division }: { data: Data; subject: Subject; division: Division }) {
@@ -126,8 +132,8 @@ function StudentsClassesPanel() {
   const [division, setDivision] = useState<Division>("all")
   const state = useStatisticsSnapshot({ tab: "students_classes", subject, division })
   const data = object(state.data)
-  return <PanelState {...state} onRefresh={state.refresh}>
-    <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={setSubject} /><FilterButtons label="부서" values={divisions} active={division} onChange={setDivision} /></div>
+  const controls = <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={setSubject} /><FilterButtons label="부서" values={divisions} active={division} onChange={setDivision} /></div>
+  return <PanelState {...state} onRefresh={state.refresh} controls={controls}>
     <SummaryCards summary={object(data.summary)} /><StudentBreakdowns data={data} subject={subject} division={division} /><ClassGroups data={data} subject={subject} division={division} />
   </PanelState>
 }
@@ -149,8 +155,8 @@ function ScheduleConflictsPanel() {
     },
     retryConflictSources: state.refresh,
   }
-  return <PanelState {...state} onRefresh={state.refresh} renderOnError>
-    <div className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.schedule_conflicts.map((preset) => <Button key={preset} type="button" size="sm" variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>앞으로 {preset}일</Button>)}</div>
+  const controls = <div role="group" aria-label="일정 기간" className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.schedule_conflicts.map((preset) => <Button key={preset} type="button" size="sm" aria-pressed={state.range === preset} variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>앞으로 {preset}일</Button>)}</div>
+  return <PanelState {...state} onRefresh={state.refresh} controls={controls} renderOnError>
     <DashboardConflictWarning metrics={conflictMetrics} />
   </PanelState>
 }
@@ -159,8 +165,8 @@ function TextbookStatisticsPanel() {
   const state = useStatisticsSnapshot({ tab: "textbooks" })
   const data = object(state.data)
   const progress = object(data.progressSessions)
-  return <PanelState {...state} onRefresh={state.refresh}>
-    <div className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.textbooks.map((preset) => <Button key={preset} type="button" size="sm" variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>{preset}일</Button>)}</div>
+  const controls = <div role="group" aria-label="교재 기간" className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.textbooks.map((preset) => <Button key={preset} type="button" size="sm" aria-pressed={state.range === preset} variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>{preset}일</Button>)}</div>
+  return <PanelState {...state} onRefresh={state.refresh} controls={controls}>
     <section aria-label="교재 통계" className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
       {[ ["사용 교재", data.activeTitles], ["교재 배정 수업", data.activeClassesWithTextbook], ["교재 미배정 수업", data.activeClassesWithoutTextbook], ["진도 기록", data.updatedProgressSessions], ["진도 완료", progress.done], ["진도 예정", progress.pending], ["진도 진행", progress.partial] ].map(([label, value]) => <Card key={String(label)}><CardContent className="py-5"><p className="text-sm text-muted-foreground">{String(label)}</p><p className="mt-1 text-2xl font-semibold tabular-nums">{format(value)}건</p></CardContent></Card>)}
     </section>
@@ -169,11 +175,13 @@ function TextbookStatisticsPanel() {
 
 export function StatisticsWorkspace() {
   const [activeTab, setActiveTab] = useState<DashboardStatisticsTab>("overview")
-  return <div className="grid min-w-0 gap-4 px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6">
-    <div className="flex flex-wrap gap-2" role="tablist" aria-label="통계 탭">{STATISTICS_TABS.map((tab) => <Button key={tab.key} type="button" role="tab" aria-selected={activeTab === tab.key} variant={activeTab === tab.key ? "default" : "outline"} onClick={() => setActiveTab(tab.key)}>{tab.label}</Button>)}</div>
-    {activeTab === "overview" ? <OverviewPanel /> : null}
-    {activeTab === "students_classes" ? <StudentsClassesPanel /> : null}
-    {activeTab === "schedule_conflicts" ? <ScheduleConflictsPanel /> : null}
-    {activeTab === "textbooks" ? <TextbookStatisticsPanel /> : null}
-  </div>
+  return <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DashboardStatisticsTab)} activationMode="manual" className="min-w-0 gap-4 px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6">
+    <TabsList aria-label="통계 탭" className="grid h-auto w-full grid-cols-4 gap-1 p-1">
+      {STATISTICS_TABS.map((tab) => <TabsTrigger key={tab.key} value={tab.key} className="min-w-0 px-1.5 text-xs sm:px-3 sm:text-sm">{tab.label}</TabsTrigger>)}
+    </TabsList>
+    <TabsContent value="overview"><OverviewPanel /></TabsContent>
+    <TabsContent value="students_classes"><StudentsClassesPanel /></TabsContent>
+    <TabsContent value="schedule_conflicts"><ScheduleConflictsPanel /></TabsContent>
+    <TabsContent value="textbooks"><TextbookStatisticsPanel /></TabsContent>
+  </Tabs>
 }
