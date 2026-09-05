@@ -71,7 +71,11 @@ export function projectDashboardConflictRpcInput(
     type: conflict.type,
     occurrenceKind: conflict.occurrenceKind,
     classIds: [...conflict.source.classIds],
-    studentIds: [...conflict.source.studentIds],
+    // Older statistics snapshots included affected students in resource conflicts.
+    // Only exam/student conflicts use student IDs as part of their RPC identity.
+    studentIds: conflict.type === "exam" || conflict.type === "student"
+      ? [...conflict.source.studentIds]
+      : [],
     examEventIds: [...conflict.source.examEventIds],
     examDetailIds: [...conflict.source.examDetailIds],
     teacherCatalogIds: [...conflict.source.teacherCatalogIds],

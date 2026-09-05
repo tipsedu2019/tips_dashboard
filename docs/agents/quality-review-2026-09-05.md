@@ -40,7 +40,8 @@ P2는 현재 업무를 불편하게 하거나 잘못된 화면으로 유도하�
 | Q-06 | 후속 · 검증 필요 | 등록·알림 관련 기존 최종 migration/상태 독립성/발송 통제 테스트 다수 | 최신 main에서 최종 SQL 정의와 실제 SQLSTATE·pgTAP부터 확인. 과거 사고를 현존 버그로 간주하지 않음 |
 | Q-07 | 후속 · 검증 필요 | 공통 dialog/form/table/모바일 흐름 | 저장·취소 후 focus return, 오류 시 입력 보존, 빈 상태 다음 행동, 좁은 화면 overflow 순서로 확대 |
 | Q-08 | 후속 · 기존 lint 경고 | 전체 lint: timetable-workspace useMemo 불필요 의존성 1, ops-task-service 미사용 함수 3, public-classes-cache-invalidation 미사용 인자 1, 공개 수업 integration test 미사용 import 1 | 이번 변경 파일 밖의 경고 6개. 각 업무 검토 시 사용 경로를 확인하고 정리. 파일 크기 500KB 초과 Babel 안내 2건은 런타임 성능 결함으로 단정하지 않음 |
-| Q-09 | P2 · 추가 발견, 미수정 | 실제 계정에서 일정 충돌 집계는 성공했으나 업무 연결 영역에 `dashboard_conflict_input_invalid` 표시. [section-cards.tsx](../../src/app/admin/dashboard/components/section-cards.tsx)의 조회 effect가 `listDashboardConflictTaskLinks(currentRows.map(projectDashboardConflictRpcInput))`를 호출하며 실패 상태를 표시 | 연결된 업무를 확인할 수 없음. 클라이언트 projection과 최종 RPC 입력 계약·SQLSTATE·pgTAP을 다음 묶음에서 대조해야 함. 업무 등록/재시도 버튼은 누르지 않았으며 실제 원인은 아직 확정하지 않음 |
+| Q-09 | 로컬 수정·검증 완료 / 운영 미반영 | 학생이 있는 충돌의 source 식별값 불일치(22023), 조회 재시도의 등록 실행, viewer canOpen NULL을 확인 | 입력·재시도·boolean 응답 수정. [회차별 근거](quality-conflict-contract-2026-09-05.md). 브라우저 실제 데이터 9건 정상 조회, DB 89개 통과 |
+| Q-10 | 후속 · 최종 DB 근거 확인 | 기존 업무 생성 함수의 dashboard_conflict_stale가 SQLSTATE 40001을 사용하는 구간 15곳 | 다음 회차에서 업무 충돌 코드와 실제 동시성 충돌을 분리하고 pgTAP·클라이언트 재시도 계약 검증 |
 
 ## 방법의 효과를 판단하는 파일럿
 
@@ -88,6 +89,6 @@ P2는 현재 업무를 불편하게 하거나 잘못된 화면으로 유도하�
 
 ## 다음 회차
 
-다음 묶음은 실제 계정 검증에서 발견한 일정 충돌 업무 연결 조회 Q-09의 입력 계약 확인이며, 이어 등록 상태 전이·동시성·no-send 경계를 검토한다. 실제 저장이 필요한 검증은 로컬 fixture/격리 DB의 해당 업무 시나리오부터 재현하고 운영 조작과 구분한다. 위 표를 갱신하며 한 번에 관련된 작은 변경만 수행한다.
+Q-09의 후속 구현·검증은 [별도 회차 기록](quality-conflict-contract-2026-09-05.md)에 정리했다. 다음 묶음은 Q-10의 업무 충돌 SQLSTATE 분리이며, 이어 등록 상태 전이·동시성·no-send 경계를 검토한다. 실제 저장이 필요한 검증은 로컬 fixture/격리 DB의 해당 업무 시나리오부터 재현하고 운영 조작과 구분한다. 위 표를 갱신하며 한 번에 관련된 작은 변경만 수행한다.
 
 매 회차 현재 문제에 도움이 되는 방법 1–3개만 비교한다. 같은 접근으로 두 번 실패하면 기존 가설·재현·로그를 다시 확인하고 관련 공식 문서·GitHub 이슈를 추가 조사한다. 채택한 기준이 결함 재발/검증 품질/유지보수 부담에 효과가 없으면 수정하거나 제거한다. 원인 확인→작은 구현→변경에 맞는 검증→diff 검토→로컬 커밋을 끝낸 뒤 다음 묶음으로 이동한다. main 반영·운영 배포·DB 적용·실제 발송은 해당 회차의 별도 지시를 따른다.

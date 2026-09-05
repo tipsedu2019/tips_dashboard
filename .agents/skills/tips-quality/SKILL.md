@@ -31,6 +31,7 @@ Use the smallest relevant route below. User instructions and `AGENTS.md` remain 
 
 - Use `supabase:supabase` for Supabase product and security behavior. Add `supabase:supabase-postgres-best-practices` for query, index, schema, RLS, locking, or performance work. If unavailable, use the revisioned canonical sources in [quality-sources.md](../../../docs/agents/quality-sources.md).
 - Determine the final active PL/pgSQL definition from the ordered migration chain. Preserve authentication, RLS/ACL, locks, idempotency, and no-send boundaries.
+- For RPC mappings, pass representative producer output into the real consumer contract; include non-empty data and nullable role/ownership fields. Keep display metadata separate from identity.
 - Require the exact SQLSTATE evidence and a meaningful pgTAP assertion against that final definition. Reserve `40001` for a real concurrency collision.
 - Keep local migration verification separate from production application and runtime evidence. External mutation still requires the authority established by the user's request.
 
