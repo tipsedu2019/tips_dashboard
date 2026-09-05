@@ -15,10 +15,35 @@ function validCapture(capture) {
   return [start, end, dbStart, dbEnd].every((value) => value !== null) && start <= dbStart && dbStart <= dbEnd && dbEnd <= end;
 }
 
+const DATABASE_COUNTERS = ["xact_commit", "xact_rollback", "temp_files", "temp_bytes", "deadlocks"];
+function databaseActivity(before, after) {
+  const first = before.sections?.database?.rows?.[0];
+  const last = after.sections?.database?.rows?.[0];
+  const unknown = (reason) => ({ status: "unknown", reason });
+  if (!before.sections?.database?.available || !after.sections?.database?.available
+    || validTime(first?.postmaster_started_at) === null || validTime(last?.postmaster_started_at) === null) return unknown("database_counters_missing");
+  if (first.postmaster_started_at !== last.postmaster_started_at) return unknown("postgres_restarted");
+  const start = validTime(first.captured_at); const end = validTime(last.captured_at);
+  if (start === null || end === null || end <= start
+    || start < validTime(before.bracket.startedAt) || start > validTime(before.bracket.endedAt)
+    || end < validTime(after.bracket.startedAt) || end > validTime(after.bracket.endedAt)) return unknown("database_sample_time_invalid");
+  const elapsedSeconds = (end - start) / 1000;
+  const deltas = {}; const perSecond = {};
+  for (const key of DATABASE_COUNTERS) {
+    const validCounter = (value) => (typeof value === "number" || (typeof value === "string" && /^\d+$/u.test(value)))
+      && Number.isSafeInteger(Number(value)) && Number(value) >= 0;
+    if (!validCounter(first[key]) || !validCounter(last[key])) return unknown("database_counter_missing_or_imprecise");
+    if (Number(last[key]) < Number(first[key])) return unknown("database_counter_decreased");
+    deltas[key] = Number(last[key]) - Number(first[key]);
+    perSecond[key] = deltas[key] / elapsedSeconds;
+  }
+  return { status: "available", elapsedSeconds, deltas, perSecond };
+}
+
 export function compareResourceEvidence(before, after) {
   if (!validCapture(before) || !validCapture(after) || validTime(before.clientEndedAt) > validTime(after.clientStartedAt)) return { status: "unknown", reason: "capture_interval_invalid" };
   if (!compatible(before, after)) return { status: "unknown", reason: "environment_or_counter_reset_drift" };
-  return { status: "comparable", observedFrom: before.clientEndedAt, observedTo: after.clientStartedAt };
+  return { status: "comparable", observedFrom: before.clientEndedAt, observedTo: after.clientStartedAt, databaseActivity: databaseActivity(before, after) };
 }
 
 export async function writeExclusiveJson(path, value) {

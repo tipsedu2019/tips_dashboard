@@ -91,6 +91,42 @@ test("comparator fails closed on malformed time ranges and reset or extension dr
   assert.equal(compareResourceEvidence(capture(), { ...after, environment: { ...after.environment, extensions: { ...after.environment.extensions, pg_cron: "1.7" } } }).status, "unknown");
 });
 
+function incidentPair() {
+  const before = capture();
+  const after = capture({ clientStartedAt: "2026-08-14T00:01:00.000Z", clientEndedAt: "2026-08-14T00:01:10.000Z", bracket: { startedAt: "2026-08-14T00:01:01.000Z", endedAt: "2026-08-14T00:01:09.000Z" } });
+  const counters = { captured_at: "2026-08-14T00:00:05.000Z", postmaster_started_at: "2026-08-13T00:00:00.000Z", xact_commit: 1200000, xact_rollback: 119481378, temp_files: 39496, temp_bytes: 108772811784, deadlocks: 8 };
+  before.sections.database.rows = [{ ...counters }];
+  after.sections.database.rows = [{ ...counters, captured_at: "2026-08-14T00:01:05.000Z", xact_commit: 1200120, temp_bytes: 108772812808 }];
+  return { before, after };
+}
+
+test("historic rollback totals are reported as zero current retries when unchanged", () => {
+  const { before, after } = incidentPair();
+  const result = compareResourceEvidence(before, after);
+  assert.equal(result.databaseActivity.status, "available");
+  assert.equal(result.databaseActivity.elapsedSeconds, 60);
+  assert.deepEqual(result.databaseActivity.deltas, { xact_commit: 120, xact_rollback: 0, temp_files: 0, temp_bytes: 1024, deadlocks: 0 });
+  assert.equal(result.databaseActivity.perSecond.xact_commit, 2);
+  assert.equal(result.databaseActivity.perSecond.xact_rollback, 0);
+});
+
+test("database activity never treats missing, reset, or imprecise counters as zero", () => {
+  for (const value of [null, undefined, -1, "", Number.MAX_SAFE_INTEGER + 1, 100]) {
+    const { before, after } = incidentPair();
+    after.sections.database.rows[0].xact_rollback = value;
+    assert.equal(compareResourceEvidence(before, after).databaseActivity.status, "unknown");
+  }
+});
+
+test("database activity rejects restart and samples outside capture brackets", () => {
+  const { before, after } = incidentPair();
+  after.sections.database.rows[0].postmaster_started_at = "2026-08-14T00:00:30.000Z";
+  assert.equal(compareResourceEvidence(before, after).databaseActivity.reason, "postgres_restarted");
+  after.sections.database.rows[0].postmaster_started_at = before.sections.database.rows[0].postmaster_started_at;
+  after.sections.database.rows[0].captured_at = "2026-08-14T00:02:00.000Z";
+  assert.equal(compareResourceEvidence(before, after).databaseActivity.reason, "database_sample_time_invalid");
+});
+
 test("exclusive evidence output uses owner-only permissions and never overwrites", async (t) => {
   const directory = await mkdtemp(join(tmpdir(), "resource-evidence-"));
   t.after(() => rm(directory, { recursive: true, force: true }));

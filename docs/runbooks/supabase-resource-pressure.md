@@ -64,8 +64,8 @@ limit 30;
 
 ```sql
 select
-  pg_catalog.octet_length(pg_catalog.coalesce(pg_catalog.jsonb_agg(c.*)::text, '[]')) as full_classes_bytes,
-  pg_catalog.octet_length(pg_catalog.coalesce(pg_catalog.jsonb_agg(
+  pg_catalog.octet_length(coalesce(pg_catalog.jsonb_agg(c.*)::text, '[]')) as full_classes_bytes,
+  pg_catalog.octet_length(coalesce(pg_catalog.jsonb_agg(
     pg_catalog.jsonb_build_object(
       'id', c.id,
       'name', c.name,
@@ -192,6 +192,18 @@ source release 전 10분 이내 baseline capture, deployment completed 뒤 30±5
 ```
 
 capture interval이 겹치거나 bracket/wall-clock ordering이 어긋나면 결과는 `unknown`이다. restart 직후의 단일 누적 counter만으로 index 제거 또는 리소스 회복을 결론 내리지 않는다.
+
+`database` section은 샘플 시각, Postgres 시작 시각, 연결 수, commit/rollback, 임시 파일·바이트, deadlock 누적값을 수집한다. 비교 결과의 `databaseActivity.status=available`일 때만 `deltas`와 `perSecond`를 현재 구간의 활동량으로 사용한다. 누적 rollback이 1억 건이어도 두 샘플 사이 변화가 없으면 해당 구간의 rollback 증가량은 0이다. Rollback은 사용자 취소와 진단용 `ROLLBACK`도 포함하므로 증가가 곧 재시도 폭주를 뜻하지 않는다.
+
+Postgres가 재시작됐거나 counter가 감소·누락됐거나 정수 정밀도를 보장할 수 없으면 `databaseActivity`는 `unknown`이다. 재시작 시각을 포함하지 않는 이전 capture도 현재 활동량을 0으로 추정하지 않는다. `activity_blockers`는 실제 차단 세션 수, 실행 중인 쿼리의 나이, 트랜잭션의 나이를 구분한다. `statements`의 임시 블록도 누적값이며, SQL 원문·고객 정보는 capture에 기록하지 않는다.
+
+## 7.1. 57014와 함수 실행 계획
+
+로그를 KST 발생 구간으로 좁히고 `parsed.sql_state_code`, RPC 이름, `parsed.context`의 최종 호출 함수를 함께 기록한다. 기본 최근 로그 조회의 반환 개수가 제한되어 있을 수 있으므로 반환된 일부 로그를 24시간 전체 건수로 보고하지 않는다. 재시작 중의 `57P01`/`57P03`, 권한 거절 `42501`, 입력 오류 `22023`은 쿼리 시간 초과 `57014`와 분리한다.
+
+2026-09-05 조사에서는 `ops_task_page_source_v1`와 `ops_task_numbered_keys_v1`의 SQL 함수 시작 단계에서 timeout이 확인됐다. 이처럼 업무 유형에 따라 필요한 테이블이 크게 달라지는 함수는 같은 권한·필터로 실행 계획을 비교한다. `SET search_path`를 제거해 인라인을 유도하거나 `SECURITY DEFINER`로 RLS 비용을 숨기지 않는다. 변경은 최종 migration chain의 본문을 보존하고 함수 범위 안에서 실행 계획만 조정한다.
+
+`ops_task_source_plan_budget_test.sql`은 실제 authenticated RLS 아래에서 일반/교재 업무 6건을 조회한다. 경과시간보다 환경 영향을 적게 받는 공유 버퍼 접근량을 제한한다. 목록·필터·권한 회귀 테스트와 함께 SQL review CI에서 실행한다. 로컬 synthetic 측정치를 운영 latency 개선률로 표시하지 않는다. 이번 조사와 운영 적용 순서는 `docs/operations/2026-09-05-supabase-stability.md`를 참조한다.
 
 ## 8. Audit archive는 preview만 허용
 
