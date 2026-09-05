@@ -14,11 +14,13 @@
 | Supabase agent skills | 일반 Supabase [`SKILL.md` @ `3a4f0ce`](https://github.com/supabase/agent-skills/blob/3a4f0ce0782e0cbdcf187c362e8d15d9e324462b/skills/supabase/SKILL.md), Postgres [`SKILL.md` @ `3291216`](https://github.com/supabase/agent-skills/blob/32912161e2732c3e5001c6811a76c1f8308ed0da/skills/supabase-postgres-best-practices/SKILL.md). 두 revision에서 저장소 [`LICENSE`](https://github.com/supabase/agent-skills/blob/3a4f0ce0782e0cbdcf187c362e8d15d9e324462b/LICENSE)는 MIT, Copyright 2026 Supabase. | `supabase/1.0.0/skills/supabase` metadata `0.1.2`, `supabase-postgres-best-practices` metadata `1.1.1`이 있고 둘 다 해당 upstream revision과 byte-identical하지 않다. `build-web-apps/0.1.2`에도 Postgres `1.1.0` 판본이 중복된다. | 세션에 제공된 `supabase:` 스킬을 우선 쓴다. upstream의 직접 SQL 반복·migration 생성 절차보다 이 저장소의 ordered migration, 최종 함수 정의, pgTAP, RLS/ACL, 정확한 SQLSTATE, no-send 규칙이 우선한다. 운영 DB 적용은 별도 증거와 권한이다. |
 | Anthropic frontend-design | [`SKILL.md` @ `41bbe19`](https://github.com/anthropics/skills/blob/41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f/skills/frontend-design/SKILL.md), 같은 revision의 [`LICENSE.txt`](https://github.com/anthropics/skills/blob/41bbe19d1a1a7eaab5e7bb9050a417e5c6cffc8f/skills/frontend-design/LICENSE.txt)는 Apache License 2.0. | 지정된 설치 캐시에 frontend-design skill은 없다. | 새 시각 방향이 필요한 화면에서 실제 주제에 맞는 계획, 구현 뒤 스크린샷 자기비평, 불필요한 장식 제거 방식을 참고한다. Pretendard, 기존 semantic token, 업무 밀도를 버리거나 모든 운영 화면을 마케팅 페이지처럼 만드는 근거로 쓰지 않는다. |
 
-## Vercel DESIGN.md 브랜드 보고서
+## Vercel 공식 design.md와 평가 방법
 
-[getdesign.md의 Vercel 분석](https://getdesign.md/vercel/design-md)은 Vercel의 공식 지침이 아니라 공개 화면을 바탕으로 한 독립 분석이라고 스스로 밝힌다. 페이지에서 revision 또는 재사용 license를 확인할 수 없으므로 원문, 색·폰트 수치, 로고·자산은 복제하지 않는다.
+Vercel은 2026-08-31 게시한 [공식 블로그](https://vercel.com/blog/how-our-agents-build-on-brand-pages-with-design-md)에서 [공개 `design.md`](https://vercel.com/design.md)를 Vercel 코드베이스 밖에서 만드는 보고서·제안서·brief 등에도 Vercel 저작물처럼 보이게 하는 단일 브랜드 지침으로 설명한다. 원문은 `official Vercel-authored report website`를 범위로 정하고, Vercel wordmark와 triangle logo, Geist, [`vercel-brand.css`](https://vercel.com/geist/vercel-brand.css)의 공개 API를 요구한다. 이는 TIPS 운영 제품의 디자인 권한이 아니다. TIPS에는 Vercel 로고·Geist·VBG class/token·브랜드 stylesheet를 적용하지 않고 기존 Pretendard, semantic token, 업무 컴포넌트를 유지한다.
 
-재사용하는 것은 평가 방식뿐이다. 제품의 실제 목적과 사용자를 먼저 적고, 현재 코드에서 색·타입·간격·컴포넌트·상태를 관찰하며, 유지할 것과 피할 것을 명시하고, 구현 뒤 실제 화면으로 문서와의 차이를 다시 확인한다. Vercel의 흑백 브랜드, Geist, 마케팅 리듬은 TIPS 디자인 기준이 아니다.
+공식 블로그에서 재사용하는 것은 개선 방법이다. 실제 독자와 입력으로 고정 시나리오를 만들고, prompt·data·model·viewport를 같게 둔 baseline과 변경본을 비교한다. 수용한 피드백은 판단이면 문서, 반복 mechanics면 컴포넌트·token, 기계적으로 검출 가능한 실패면 코드 검사·테스트의 가장 좁은 위치에 둔다. 변경 뒤 영향받은 시나리오를 다시 실행하고, 실제 사용에서 같은 지적이 줄어드는지 본다. 이 방법은 TIPS의 UI 구조나 브랜드 값을 Vercel처럼 바꾸라는 뜻이 아니다.
+
+공개 revision과 license에는 한계가 있다. 2026-09-05 조회 시 `design.md` 응답은 `text/markdown`, canonical `https://vercel.com/design`, 본문 SHA-256 `2b40b23712e548721ecae7d0672ae9318a83188b9fcd2fb4a7a1b7c147a39903`이었지만 commit/revision, `ETag`, `Last-Modified`, license 표시는 없었다. 블로그에는 게시일만 있고 content revision이나 별도 재사용 license가 없다. stylesheet는 `text/css`, `ETag: 7d92214615491e239384bbe5bb3501fc`, `Last-Modified: Sat, 05 Sep 2026 06:26:18 GMT`였지만 별도 license를 확인하지 못했다. 이 값들은 조회 snapshot의 식별자이지 영구 upstream revision이나 재사용 허가가 아니다. 따라서 원문과 브랜드 자산은 복제하지 않고 공식 URL을 범위에 맞을 때만 다시 읽는다.
 
 ## 중복과 충돌 해결
 
