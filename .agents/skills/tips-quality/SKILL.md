@@ -17,7 +17,8 @@ Use the smallest relevant route below. User instructions and `AGENTS.md` remain 
 
 - Start with the existing `components.json`, `src/app/globals.css`, `src/components/ui/`, and the feature's real states. Reuse or repair local components before adding another pattern.
 - When available, use the provided `vercel:shadcn` skill for component mechanics. Apply it to this repository's installed components and configuration; do not migrate or overwrite components merely to match newer examples.
-- For accessibility or UX review, use the official Vercel Web Interface Guidelines source pinned in [quality-sources.md](../../../docs/agents/quality-sources.md). Treat its Vercel brand section as vendor-specific.
+- For accessibility or UX review, use the official Vercel Web Interface Guidelines source pinned in [quality-sources.md](../../../docs/agents/quality-sources.md).
+- The separate official Vercel `design.md` applies to Vercel-authored reports and proposals. Reuse its evaluation and feedback-routing method only; do not apply its logo, Geist, stylesheet, or brand system to TIPS.
 - Verify the affected route at representative desktop and 390px mobile widths. Check the relevant keyboard, focus, loading, empty, error, dense-data, and long-content states.
 
 ## React performance work
