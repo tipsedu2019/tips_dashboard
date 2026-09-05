@@ -256,7 +256,7 @@ try {
     p_phase: phase,
   })
   await assert.rejects(createPromise, (error) => {
-    assert.equal(error.code, "40001")
+    assert.equal(error.code, "23514")
     assert.match(error.message, /dashboard_conflict_stale/)
     return true
   })

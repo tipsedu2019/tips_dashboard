@@ -501,7 +501,7 @@ select throws_ok(
     jsonb_set((select payload from dashboard_conflict_source), '{overlapEnd}', '"10:00"'::jsonb),
     '85000000-0000-4000-8000-000000000405'
   )$$,
-  '40001',
+  '23514',
   'dashboard_conflict_stale',
   'an arbitrary subrange of the genuine overlap is rejected'
 );
@@ -533,7 +533,7 @@ select throws_ok(
     ),
     '85000000-0000-4000-8000-000000000421'
   )$$,
-  '40001',
+  '23514',
   'dashboard_conflict_stale',
   'mixed next-day subjects including the class subject allow the previous-day class'
 );
@@ -558,7 +558,7 @@ select throws_ok(
     ),
     '85000000-0000-4000-8000-000000000423'
   )$$,
-  '40001',
+  '23514',
   'dashboard_conflict_stale',
   'past previous-day session is rejected even when the exam date is today'
 );
@@ -571,7 +571,7 @@ select throws_ok(
     ),
     '85000000-0000-4000-8000-000000000424'
   )$$,
-  '40001',
+  '23514',
   'dashboard_conflict_stale',
   'waitlist-only student cannot prove an exam conflict'
 );
@@ -651,7 +651,7 @@ select throws_ok(
     (select payload from dashboard_conflict_source),
     '85000000-0000-4000-8000-000000000403'
   )$$,
-  '40001',
+  '23514',
   'dashboard_conflict_stale',
   'a new request rejects a disappeared source conflict'
 );
@@ -709,6 +709,12 @@ select ok(
   and (select count(*) from dashboard_private.notification_event_fanout_jobs) = (select fanout_jobs from dashboard_conflict_notification_baseline)
   and (select count(*) from dashboard_private.notification_deliveries) = (select deliveries from dashboard_conflict_notification_baseline),
   'conflict task creation produces zero notification source, canonical event, fanout job, and delivery rows'
+);
+
+select is(
+  strpos(pg_get_functiondef('dashboard_private.create_dashboard_conflict_task_v1_impl(jsonb,uuid)'::regprocedure), '40001'),
+  0,
+  'the final active producer never fabricates a serialization failure for a domain check'
 );
 
 select * from finish();
