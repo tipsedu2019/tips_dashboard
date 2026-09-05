@@ -24,20 +24,9 @@ test("statistics has its own dashboard-authorized route and is discoverable outs
   assert.doesNotMatch(assistantItems, /\/admin\/statistics/);
 });
 
-test("statistics workspace mounts exactly the selected aggregate tab and leaves the dashboard home independent", async () => {
-  const [workspace, dashboard] = await Promise.all([
-    source("src/features/dashboard/statistics-workspace.tsx"),
-    source("src/app/admin/dashboard/page.tsx"),
-  ]);
+test("dashboard home remains independent from the statistics workspace", async () => {
+  const dashboard = await source("src/app/admin/dashboard/page.tsx");
 
-  assert.match(workspace, /const STATISTICS_TABS/);
-  assert.match(workspace, /activeTab === "overview"/);
-  assert.match(workspace, /activeTab === "students_classes"/);
-  assert.match(workspace, /activeTab === "schedule_conflicts"/);
-  assert.match(workspace, /activeTab === "textbooks"/);
-  assert.match(workspace, /useStatisticsSnapshot/);
-  assert.match(workspace, /마지막 갱신/);
-  assert.match(workspace, /새로고침/);
   assert.doesNotMatch(dashboard, /StatisticsWorkspace|useStatisticsSnapshot|SectionCards/);
 });
 

@@ -16,7 +16,7 @@ const shortcuts = [
   { href: "/admin/registration", label: "등록" },
   { href: "/admin/tasks", label: "업무" },
   { href: "/admin/academic-calendar", label: "학사" },
-  { href: "/admin/classes", label: "통계" },
+  { href: "/admin/statistics", label: "통계" },
 ]
 
 const timeFormatter = new Intl.DateTimeFormat("ko-KR", {
