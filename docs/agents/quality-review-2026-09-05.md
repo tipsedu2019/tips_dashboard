@@ -15,7 +15,7 @@
 | --- | --- | --- |
 | 인증·역할·관리자 진입 | 로그인/guard 기존 47개 기준 테스트 묶음에 포함; route 경계 코드 표본 | 역할별 실제 로그인, 세션 만료 중 저장, 각 API/RLS 전체 경로 |
 | 대시보드 | 바로가기 DOM·소스, daily brief service의 8초 timeout/retry 제한 확인 | 빈 업무/오류/기간 경계, KPI의 최종 DB 정의 및 운영 측정 |
-| 통계 | 네 탭 및 조회 hook/cache/cancellation 코드; 운영 재현과 로컬 desktop/mobile/keyboard; Q-09 운영 앱·DB 반영 | Q-09 배포 후 화면 재확인(Mac 잠금), 대규모 drilldown·다른 역할별 흐름 |
+| 통계 | 네 탭 및 조회 hook/cache/cancellation 코드; 운영 재현과 로컬 desktop/mobile/keyboard; Q-09 운영 앱·DB 및 9/6 브라우저 검증 | 대규모 drilldown·다른 역할별 흐름 |
 | 등록·전반·퇴원 | 최신 main의 안정화/receipt/퇴원 수정 보존; route·테스트 목록화 | 실제 상태 전이/수정 충돌/예약·알림 분리 전 과정, 최종 RPC/pgTAP |
 | 업무·결재·보강 | route·기능 디렉터리·테스트 목록화 | 생성→배정→완료/재시도, 중복 실행·역할·취소/저장 경쟁 |
 | 학생·수업·설정 목록 | 관리 목록 10/15/20행·10페이지 탐색·loading 경계 기준 테스트 | 각 목록 CRUD/필터/정렬/내보내기·상세 catalog 역할 검증 |
@@ -40,7 +40,7 @@ P2는 현재 업무를 불편하게 하거나 잘못된 화면으로 유도하�
 | Q-06 | 후속 · 검증 필요 | 등록·알림 관련 기존 최종 migration/상태 독립성/발송 통제 테스트 다수 | 최신 main에서 최종 SQL 정의와 실제 SQLSTATE·pgTAP부터 확인. 과거 사고를 현존 버그로 간주하지 않음 |
 | Q-07 | 후속 · 검증 필요 | 공통 dialog/form/table/모바일 흐름 | 저장·취소 후 focus return, 오류 시 입력 보존, 빈 상태 다음 행동, 좁은 화면 overflow 순서로 확대 |
 | Q-08 | 후속 · 기존 lint 경고 | 전체 lint: timetable-workspace useMemo 불필요 의존성 1, ops-task-service 미사용 함수 3, public-classes-cache-invalidation 미사용 인자 1, 공개 수업 integration test 미사용 import 1 | 이번 변경 파일 밖의 경고 6개. 각 업무 검토 시 사용 경로를 확인하고 정리. 파일 크기 500KB 초과 Babel 안내 2건은 런타임 성능 결함으로 단정하지 않음 |
-| Q-09 | 운영 앱·DB 반영 완료 / 운영 화면 재확인 대기 | 학생이 있는 충돌의 source 식별값 불일치(22023), 조회 재시도의 등록 실행, viewer canOpen NULL을 확인 | 입력·재시도·boolean 응답 수정. [회차별 근거](quality-conflict-contract-2026-09-05.md). 로컬 브라우저 9건·DB 89개 통과. 운영 잘못된 식별값 9→0, 학생 정보 보존. Mac 잠금으로 배포 후 UI 재확인 대기 |
+| Q-09 | 운영 앱·DB 및 화면 검증 완료 | 학생이 있는 충돌의 source 식별값 불일치(22023), 조회 재시도의 등록 실행, viewer canOpen NULL을 확인 | 입력·재시도·boolean 응답 수정. [회차별 근거](quality-conflict-contract-2026-09-05.md). 로컬 브라우저 9건·DB 89개 통과. 운영 잘못된 식별값 9→0, 학생 정보 보존. 9/6 운영 9건·기존 업무 상세·390px·키보드 확인, console 오류 0 |
 | Q-10 | 로컬 수정·검증 완료 / 운영 미반영 | 최종 업무 생성 함수의 확정 상태 오류 15곳을 23514로 분리 | DB 90개, Node 62개 통과. 실제 SDK POST 자동 재시도 없음도 확인. [회차별 근거](quality-conflict-sqlstate-2026-09-05.md) |
 
 ## 방법의 효과를 판단하는 파일럿

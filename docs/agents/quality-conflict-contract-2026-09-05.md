@@ -40,7 +40,7 @@
 
 ## 상태와 다음 우선순위
 
-후속 사용자 지시로 main과 운영 DB 반영을 완료했다. 운영 브라우저 최종 확인은 Mac 잠금으로 남아 있으며, 아래의 DB·배포 검증과 구분한다.
+후속 사용자 지시로 main과 운영 DB 반영을 완료했다. 운영 브라우저 최종 확인은 2026-09-06 잠금 해제 후 완료했으며, 아래의 DB·배포 검증과 구분한다.
 
 후속 Q-10: 기존 `create_dashboard_conflict_task_v1_impl`가 업무 상태 불일치 `dashboard_conflict_stale`에 `40001`을 사용하는 구간 15곳을 운영 최종 정의에서 확인했다. 이번 변경은 이 함수에 손대지 않았고 기존 pgTAP의 현재 동작 증거를 유지한다. 이를 정상 정책으로 채택하지 않는다. 다음 묶음에서 정확한 SQLSTATE 재현→비재시도 업무 충돌 코드→pgTAP/클라이언트 처리 검증 순서로 고친다. 동시성·발송을 포함한 전체 앱 검토는 여전히 별도 범위다.
 
@@ -53,5 +53,15 @@
 - 운영 read-only 전후 비교: resource conflict 9→9건, 잘못된 source student identity 9→0건, affected student 정보가 있는 행 9→9건. 실제 집계 9건을 앱과 같은 type/occurrenceKind/source 조합으로 최종 normalizer에 넘겨 9건 전부 수용됨을 확인했다. 최초 수동 probe는 occurrenceKind를 누락해 거부됐고 실제 projection과 맞춘 뒤 확인했다.
 - synthetic unrelated viewer 접근 판정 NULL→false. 합성 composite 레코드만 사용했으며 운영 업무를 생성하지 않았다. 집계 함수 security invoker/stable, visibility 함수 security definer/stable, 두 함수의 빈 search_path 및 ACL이 적용 전후 동일하다. 집계 MD5 `3f90e72e2ce4dd5717a48dcd37fb8cd4`→`ed4c30558895405099cea31589d11f57`, visibility `d52a9eccf83ca38949995175a74aa8b3`→`067f2f60794ed7863c66f6c940b74e81`.
 - Q-10의 업무 생성 함수 MD5는 `054e2782962b37b314295548f3e6a2d7`로 유지됐다. Q-10 migration은 운영 ledger에 없으며 로컬 수정과 별개다. 실제 알림 발송은 하지 않았다.
-- 운영 브라우저: Mac 잠금으로 CUA 접근이 불가능해 사용자에게 잠금 해제를 요청했다. 이번 배포 직후의 화면 검증을 완료로 표시하지 않는다. 앞선 로그인된 로컬 앱의 desktop/mobile/keyboard 및 운영 데이터 9건 검증은 별도 근거로 남긴다.
+- 운영 브라우저: 초기 확인은 Mac 잠금으로 보류했으며, 사용자 잠금 해제 후 2026-09-06 아래 시나리오를 완료했다. 앞선 로컬 검증과 구분한다.
 - 로그: `/tmp/tips-q09-main-ci.log`, `/tmp/tips-q09-production.json`, `/tmp/tips-q09-production-errors-final.jsonl`.
+
+
+## 운영 브라우저 후속 검증 — 2026-09-06
+
+- Chrome의 새 `https://tipsedu.co.kr/admin/statistics` 탭에서 로그인된 현재 관리자 계정으로 확인했다. 앱 alias를 다시 inspect해 Production `dpl_4GhgHcrWA5sAYDXGdh7ZA7e3o811` READY 유지도 확인했다.
+- 일정 충돌 9건: 전체 보기 후 등록 가능 버튼 8개, 기존 업무 연결 링크 1개. 원시 DB 오류·연결 조회 실패·등록 실패 표시 없음. 확인한 console error/warn 0개.
+- 데스크톱 1710px(문서 폭 1695px)과 모바일 390px(문서 폭 375px)에서 가로 넘침 없음. 두 크기의 실제 스크린샷을 확인했다. 모바일에서 기간 선택과 업무 버튼이 표시되고 내용은 세로로 배치된다.
+- 일정 충돌 탭에서 ArrowRight 후 교재에 포커스가 이동하고 선택은 일정 충돌에 유지된다. Enter 후 교재가 선택되며, 일정 충돌 탭으로 키보드 복귀도 정상이다.
+- `등록됨 · 할 일 보기`로 이동해 기존 업무 상세 dialog가 열리는 것을 확인했다. 390px에서 dialog 폭 358px, 문서 폭 390px로 넘침 없음. 상세 확인 후 닫고 viewport와 통계 화면을 복원했다.
+- 실제 업무 등록·수정·완료·알림 발송을 실행하지 않았다. 관리자 실브라우저 확인이며 viewer 로그인 및 강제 네트워크 장애는 앞선 자동 테스트/DB 근거로 유지한다. Q-10은 여전히 로컬 커밋 상태이며 이 화면 검증이 Q-10 운영 적용을 뜻하지 않는다.
