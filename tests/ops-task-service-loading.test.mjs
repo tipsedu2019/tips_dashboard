@@ -1681,3 +1681,38 @@ test("task facets emit filterable manual word-retest values and include secondar
   assert.match(taskPageMigrationSource, /p_filters ->> 'teacherId' like 'teacher_name:%'/);
   assert.match(taskPageMigrationSource, /p_filters ->> 'classId' like 'class_name:%'/);
 });
+
+for (const [code, message, reuseRequest] of [
+  ["23514", "dashboard_conflict_stale", false],
+  ["40001", "could not serialize access due to concurrent update", true],
+  ["", "Failed to fetch", true],
+]) {
+  test(`conflict producer ${code || "network failure"} preserves the correct request-id recovery contract`, async () => {
+    const requests = [];
+    const failure = { code, message };
+    const producer = transpileAndLoad(
+      sourceBetween("function createOpsTaskRequestId", "function withoutTaskId") +
+        sourceBetween("async function runOpsTaskProducerRpc", "function producerTaskId"),
+      ["runIdempotentOpsTaskProducerRpc"],
+      {
+        crypto: globalThis.crypto,
+        TextEncoder,
+        text: (value) => String(value || "").trim(),
+        supabase: {
+          async rpc(name, parameters) {
+            assert.equal(name, "create_dashboard_conflict_task_v1");
+            requests.push(parameters.p_request_id);
+            return requests.length === 1 ? { error: failure } : { data: { taskId: "task-1" } };
+          },
+        },
+      },
+    ).runIdempotentOpsTaskProducerRpc;
+    const input = { p_conflict: { type: "teacher", classIds: ["a", "b"] } };
+    await assert.rejects(producer("create_dashboard_conflict_task_v1", input), error => error === failure);
+    assert.equal(requests.length, 1, "failed mutation must not automatically issue another RPC");
+    await producer("create_dashboard_conflict_task_v1", input);
+    assert.equal(requests.length, 2);
+    assert.equal(requests[0] === requests[1], reuseRequest,
+      "definitive rejection clears the attempt; uncertain/retryable failure preserves it");
+  });
+}

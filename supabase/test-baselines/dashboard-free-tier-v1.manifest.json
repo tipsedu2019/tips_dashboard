@@ -319,6 +319,11 @@
       "fileName": "20260905123831_dashboard_conflict_visibility_boolean.sql",
       "status": "final",
       "sha256": "ec60770fffff7b31c3ebd6e141a26a98c25e4b4754b7aed2dfec1df66d700afb"
+    },
+    {
+      "fileName": "20260905143000_dashboard_conflict_business_sqlstate.sql",
+      "status": "final",
+      "sha256": "541b17f33d35cd711f971977cb161b60fd2b5bc46d5f258ea452766357b59826"
     }
   ]
 }
