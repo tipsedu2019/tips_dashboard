@@ -1,6 +1,8 @@
 -- Definitive source-state conflicts are check violations, not serialization failures.
 -- Preserve the final function's authentication, locks, idempotency, and no-send behavior.
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 
 create or replace function dashboard_private.create_dashboard_conflict_task_v1_impl(
   p_conflict jsonb,

@@ -6,7 +6,7 @@
 
 최종 active 정의는 `20260726035612_dashboard_conflict_task_producer.sql`의 `dashboard_private.create_dashboard_conflict_task_v1_impl(jsonb,uuid)`였다. 운영 함수에서도 `dashboard_conflict_stale`를 직접 `40001`로 발생시키는 15곳을 확인했다. 과거 일정, 사라진 수업/학생/시험, 실제 겹침 불일치, catalog/수강 상태 불일치 등의 확정된 업무 조건이며 데이터베이스의 serialization failure가 아니다.
 
-새 migration `20260905143000_dashboard_conflict_business_sqlstate.sql`은 최종 함수의 해당 오류 코드 15개만 `23514`로 변경한다. 이전 본문에 정확히 이 치환을 적용한 결과와 새 본문이 동일함을 비교했다. SECURITY DEFINER, 빈 search_path, 기존 ACL, advisory/행 잠금, 정렬된 잠금 순서, 권한, 완료 요청 replay, fingerprint, 알림 미생성 로직을 유지한다. CLI 2.115.0의 `migration new`로 만들고 manifest에 순서와 SHA-256을 추가했다.
+새 migration `20260905143000_dashboard_conflict_business_sqlstate.sql`은 최종 함수의 해당 오류 코드 15개만 `23514`로 변경한다. 이전 본문에 정확히 이 치환을 적용한 결과와 새 본문이 동일함을 비교했다. SECURITY DEFINER, 빈 search_path, 기존 ACL, advisory/행 잠금, 정렬된 잠금 순서, 권한, 완료 요청 replay, fingerprint, 알림 미생성 로직을 유지한다. CLI 2.115.0의 `migration new`로 만들고 manifest에 순서와 SHA-256을 추가했다. 배포 전 Squawk 검사에서 누락된 migration 실행 제한을 발견해 기존과 같은 `SET LOCAL lock_timeout=5s`, `statement_timeout=120s`를 추가했다. 함수 본문은 동일하며 아직 운영 미적용인 새 migration과 manifest만 갱신했다.
 
 ## 검증
 
