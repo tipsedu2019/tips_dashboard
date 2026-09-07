@@ -401,59 +401,34 @@ test("database errors remain unavailable and never expose provider details", asy
   }
 });
 
-test("confirmed not-found never reappears from snapshot while provider errors use only a fresh matching snapshot", async () => {
-  let snapshotReads = 0;
+test("confirmed absence remains not-found and cold provider errors remain unavailable", async () => {
   const confirmedMissing = createPublicClassDetailLoader({
     loadLive: async () => { throw new PublicClassNotFoundError(); },
-    readSnapshot: async () => {
-      snapshotReads += 1;
-      return fullPayload();
-    },
     cache: passthroughCache(),
   });
   assert.deepEqual(await confirmedMissing(CLASS_ID), { status: "not-found" });
-  assert.equal(snapshotReads, 0);
 
   const cachedCalls = [];
-  const freshFallback = createPublicClassDetailLoader({
+  const coldOutage = createPublicClassDetailLoader({
     loadLive: async () => { throw new PublicClassUnavailableError(); },
-    readSnapshot: async () => fullPayload(),
     now: () => Date.parse("2026-09-07T12:00:00.000Z"),
     cache: passthroughCache(cachedCalls),
   });
-  const fresh = await freshFallback(CLASS_ID);
-  assert.equal(fresh.status, "success");
-  assert.equal(fresh.detail.availability, "snapshot");
-  assert.equal(fresh.detail.classItem.id, CLASS_ID);
-  assert.deepEqual(fresh.detail.textbooks.map((book) => book.id), [BOOK_ID]);
-  assert.deepEqual(fresh.detail.progressLogs.map((log) => log.id), ["progress-1"]);
+  assert.deepEqual(await coldOutage(CLASS_ID), { status: "unavailable" });
   assert.deepEqual(cachedCalls, [{
-    keys: ["public-class-detail-v1"],
+    keys: ["public-class-detail-v2"],
     options: {
       revalidate: PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,
       tags: [PUBLIC_CLASSES_FULL_CACHE_TAG],
     },
   }]);
-
-  const expiredFallback = createPublicClassDetailLoader({
-    loadLive: async () => { throw new Error("provider down"); },
-    readSnapshot: async () => fullPayload("2026-09-06T11:59:59.999Z"),
-    now: () => Date.parse("2026-09-07T12:00:00.000Z"),
-    cache: passthroughCache(),
-  });
-  assert.deepEqual(await expiredFallback(CLASS_ID), { status: "unavailable" });
 });
 
-test("an aged cached detail is relabeled snapshot and cannot remain live through a failed refresh", async () => {
+test("an aged cached detail is relabeled snapshot", async () => {
   const agedDetail = normalizePublicClassDetail(fullPayload(), CLASS_ID, "live");
   assert.ok(agedDetail);
-  let snapshotReads = 0;
   const load = createPublicClassDetailLoader({
     loadLive: async () => agedDetail,
-    readSnapshot: async () => {
-      snapshotReads += 1;
-      return null;
-    },
     now: () => Date.parse("2026-09-07T12:00:00.000Z"),
     cache: passthroughCache(),
   });
@@ -462,7 +437,6 @@ test("an aged cached detail is relabeled snapshot and cannot remain live through
   assert.equal(result.status, "success");
   assert.equal(result.detail.availability, "snapshot");
   assert.equal(result.detail.generatedAt, "2026-09-07T00:00:00.000Z");
-  assert.equal(snapshotReads, 0);
 });
 
 test("detail failures are retried on later calls and HTTP responses separate 404, 503, and cacheable success", async () => {
@@ -472,7 +446,6 @@ test("detail failures are retried on later calls and HTTP responses separate 404
       attempts += 1;
       throw new PublicClassUnavailableError();
     },
-    readSnapshot: async () => null,
     cache: passthroughCache(),
   });
   assert.equal((await load(CLASS_ID)).status, "unavailable");
@@ -493,8 +466,7 @@ test("detail failures are retried on later calls and HTTP responses separate 404
   assert.equal(unavailableResponse.headers["Cache-Control"], "no-store");
 
   const snapshotLoader = createPublicClassDetailLoader({
-    loadLive: async () => { throw new PublicClassUnavailableError(); },
-    readSnapshot: async () => fullPayload(),
+    loadLive: async () => normalizePublicClassDetail(fullPayload(), CLASS_ID, "live"),
     now: () => Date.parse("2026-09-07T12:00:00.000Z"),
     cache: passthroughCache(),
   });

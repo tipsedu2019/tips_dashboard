@@ -8,7 +8,6 @@ import type {
   PublicProgressLog,
   PublicTextbook,
 } from "../components/public/classes/types.ts";
-import { readPublicClassesSnapshot } from "../lib/public-classes-server.js";
 import {
   PUBLIC_CLASSES_FULL_CACHE_TAG,
   PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,
@@ -25,7 +24,7 @@ import {
   PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION,
 } from "./public-classes-payload.js";
 
-const PUBLIC_CLASS_DETAIL_CACHE_KEY = "public-class-detail-v1";
+const PUBLIC_CLASS_DETAIL_CACHE_KEY = "public-class-detail-v2";
 const PUBLIC_CLASS_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
 
@@ -46,9 +45,12 @@ type PublicClassDetailLoadResult =
   | { status: "not-found" }
   | { status: "unavailable" };
 
+type PublicClassLookup =
+  | { status: "public"; detail: PublicClassDetail }
+  | { status: "absent" };
+
 type DetailLoaderOptions = {
   loadLive?: (classId: string) => Promise<PublicClassDetail>;
-  readSnapshot?: () => Promise<unknown>;
   now?: () => number;
   cache?: typeof unstable_cache;
 };
@@ -94,13 +96,6 @@ function rawGeneratedAt(payload: unknown): string | null {
   return isRecord(payload) && typeof payload.generatedAt === "string"
     ? payload.generatedAt
     : null;
-}
-
-function isFreshSnapshot(payload: unknown, now: () => number): boolean {
-  const timestamp = rawGeneratedAt(payload);
-  if (!timestamp) return false;
-  const age = now() - Date.parse(timestamp);
-  return Number.isFinite(age) && age >= 0 && age <= PUBLIC_CLASSES_SNAPSHOT_MAX_AGE_MS;
 }
 
 function classifyCachedDetail(
@@ -247,12 +242,21 @@ export async function queryPublicClassDetail(
 
 export function createPublicClassDetailLoader({
   loadLive = queryPublicClassDetail,
-  readSnapshot = readPublicClassesSnapshot,
   now = () => Date.now(),
   cache = unstable_cache,
 }: DetailLoaderOptions = {}) {
   const loadCached = cache(
-    loadLive,
+    async (classId: string): Promise<PublicClassLookup> => {
+      try {
+        return { status: "public", detail: await loadLive(classId) };
+      } catch (error) {
+        // Absence is a successful database lookup, not a provider failure.
+        // Returning it lets Next's background revalidation replace an old
+        // public detail. Throwing would preserve that obsolete success.
+        if (isNotFound(error)) return { status: "absent" };
+        throw error;
+      }
+    },
     [PUBLIC_CLASS_DETAIL_CACHE_KEY],
     {
       revalidate: PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,
@@ -263,19 +267,17 @@ export function createPublicClassDetailLoader({
   return async function loadDetail(classId: string): Promise<PublicClassDetailLoadResult> {
     if (!isPublicClassId(classId)) return { status: "not-found" };
     try {
-      const detail = classifyCachedDetail(await loadCached(classId), now);
+      const lookup = await loadCached(classId);
+      // Keep authoritative absence ahead of every snapshot fallback, including
+      // later requests where a transient refresh failure retains this entry.
+      // Only lookup data is cached; the HTTP 404 remains no-store below.
+      if (lookup.status === "absent") return { status: "not-found" };
+      const detail = classifyCachedDetail(lookup.detail, now);
       if (detail) return { status: "success", detail };
-    } catch (error) {
-      if (isNotFound(error)) return { status: "not-found" };
-    }
-    try {
-      const snapshot = await readSnapshot();
-      if (isFreshSnapshot(snapshot, now)) {
-        const detail = normalizePublicClassDetail(snapshot, classId, "snapshot");
-        if (detail) return { status: "success", detail };
-      }
     } catch {
-      // Missing and unreadable snapshots both produce unavailable below.
+      // Provider failures are never cached. Only an existing public lookup can
+      // serve a bounded snapshot above: after cache eviction, a static file
+      // could resurrect a class whose authoritative absence was discarded.
     }
     return { status: "unavailable" };
   };
