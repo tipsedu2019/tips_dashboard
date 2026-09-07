@@ -335,9 +335,7 @@ test("calendar accessible names contain every visible date and chip for regular,
       ["2026-09-09", "9 2회차 3회차 보강 휴강"],
     ]) {
       const button = document.querySelector(`button[aria-label^="${date}"]`);
-      const visible = [...button.children]
-        .map((child) => child.textContent.trim())
-        .join(" ");
+      const visible = button.textContent.replace(/\s+/g, " ").trim();
       assert.equal(
         visible,
         expectedVisible,
@@ -352,6 +350,44 @@ test("calendar accessible names contain every visible date and chip for regular,
       for (const session of sessions.filter((session) => session.date === date))
         assert.ok(accessibleName.includes(helpers.sessionState(session).label));
     }
+    const nextEslintRequire = createRequire(
+      require.resolve("eslint-config-next"),
+    );
+    const jsxA11yRequire = createRequire(
+      nextEslintRequire.resolve("eslint-plugin-jsx-a11y"),
+    );
+    const axe = jsxA11yRequire("axe-core");
+    axe.utils.getFlattenedTree(document.documentElement);
+    for (const button of document.querySelectorAll(".calendarCell")) {
+      const node = axe.utils.getNodeFromTree(button);
+      const visible = axe.commons.text
+        .subtreeText(node, { subtreeDescendant: true })
+        .replace(/\s+/g, " ")
+        .trim();
+      const name = axe.commons.text.accessibleText(button);
+      assert.ok(
+        name.includes(visible),
+        `axe subtree text ${visible} must be in ${name}`,
+      );
+    }
+    // Negative control reproduces the exact pre-fix DOM, not an invented label.
+    const oldMarkup = document
+      .querySelector('button[aria-label^="2026-09-02"]')
+      .cloneNode(true);
+    for (const node of [...oldMarkup.childNodes])
+      if (node.nodeType === 3 && !node.textContent.trim()) node.remove();
+    document.body.append(oldMarkup);
+    axe.utils.getFlattenedTree(document.documentElement);
+    const oldVisible = axe.commons.text.subtreeText(
+      axe.utils.getNodeFromTree(oldMarkup),
+      { subtreeDescendant: true },
+    );
+    assert.equal(oldVisible, "21회차");
+    assert.equal(
+      axe.commons.text.accessibleText(oldMarkup).includes(oldVisible),
+      false,
+    );
+    oldMarkup.remove();
   } finally {
     await act(async () => root.unmount());
     globalThis.fetch = originalFetch;

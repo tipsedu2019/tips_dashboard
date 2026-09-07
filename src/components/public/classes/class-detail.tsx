@@ -1,5 +1,5 @@
 "use client";
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { ChevronLeft, ChevronRight, Download, RefreshCw } from "lucide-react";
 import type {
   PublicClassDetail,
@@ -378,14 +378,16 @@ function SessionCalendar({ detail }: { detail: PublicClassDetail }) {
                   >
                     <span>{Number(date.slice(8))}</span>
                     {daySessions.map((s, i) => (
-                      <small
-                        className={
-                          sessionState(s).cancelled ? styles.cancelled : ""
-                        }
-                        key={s.id || i}
-                      >
-                        {sessionChipLabel(s)}
-                      </small>
+                      <Fragment key={s.id || i}>
+                        {" "}
+                        <small
+                          className={
+                            sessionState(s).cancelled ? styles.cancelled : ""
+                          }
+                        >
+                          {sessionChipLabel(s)}
+                        </small>
+                      </Fragment>
                     ))}
                   </button>
                 ) : (
