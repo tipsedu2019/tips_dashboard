@@ -1431,7 +1431,24 @@
     display: none !important;
   }
   .printSurface .fullGrid .week {
+    --print-hour-height: min(30px, calc(360px / var(--hours)));
     grid-template-columns: 43px repeat(7, minmax(0, 1fr)) !important;
+    break-inside: avoid;
+    page-break-inside: avoid;
+  }
+  .printSurface .fullGrid .hour,
+  .printSurface .fullGrid .gridLine {
+    height: var(--print-hour-height) !important;
+  }
+  .printSurface .fullGrid .dayBody {
+    height: calc(var(--hours) * var(--print-hour-height)) !important;
+  }
+  .printSurface .fullGrid .slot {
+    padding: 2px 3px !important;
+    line-height: 1.15;
+  }
+  .printSurface .fullGrid .slot span + span {
+    display: none;
   }
   .printSurface .fullGrid .dayColumn {
     display: block !important;

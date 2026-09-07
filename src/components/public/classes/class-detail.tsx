@@ -11,6 +11,7 @@ import {
   monthCells,
   seoulToday,
   sessionDisplay,
+  progressForSession,
   sessionState,
 } from "./helpers";
 import styles from "./public-classes.module.css";
@@ -27,11 +28,13 @@ export default function ClassDetail({
   saved,
   onSave,
   canSave,
+  selectionFull,
 }: {
   id: string;
   saved: boolean;
   onSave: () => void;
   canSave: boolean;
+  selectionFull: boolean;
 }) {
   const [result, setResult] = useState<{
     data?: PublicClassDetail;
@@ -111,8 +114,19 @@ export default function ClassDetail({
   return (
     <>
       <SessionCalendar detail={result.data} />
+      {selectionFull && (
+        <p id="detail-save-limit" className={styles.warning} role="status">
+          시간표에는 최대 6개 수업을 담을 수 있습니다. 담은 수업을 먼저 빼
+          주세요.
+        </p>
+      )}
       <div className={styles.detailFooter}>
-        <button className={styles.outline} onClick={onSave} disabled={!canSave}>
+        <button
+          className={styles.outline}
+          onClick={onSave}
+          disabled={!canSave || selectionFull}
+          aria-describedby={selectionFull ? "detail-save-limit" : undefined}
+        >
           {saved ? "시간표에서 빼기" : "시간표에 담기"}
         </button>
         <a
@@ -222,12 +236,7 @@ function SessionCalendar({ detail }: { detail: PublicClassDetail }) {
     const entries = session.textbookEntries?.length
       ? session.textbookEntries
       : detail.classItem.schedulePlan?.textbooks || [];
-    const logs = detail.progressLogs.filter(
-      (log) =>
-        log.sessionId === session.id ||
-        (session.sessionNumber != null &&
-          log.sessionOrder === session.sessionNumber),
-    );
+    const progress = progressForSession(detail.progressLogs, session, sessions);
     return (
       <section key={session.id || index} className={styles.sessionPanel}>
         <div className={styles.sessionTitle}>
@@ -257,9 +266,7 @@ function SessionCalendar({ detail }: { detail: PublicClassDetail }) {
         )}
         {entries.map((entry, i) => {
           const book = detail.textbooks.find((b) => b.id === entry.textbookId);
-          const actual = logs.find(
-            (log) => log.textbookId === entry.textbookId,
-          );
+          const actual = progress.get(entry.textbookId || "");
           return (
             <div className={styles.progress} key={`${entry.textbookId}-${i}`}>
               <strong>{entry.alias || book?.title || "교재"}</strong>

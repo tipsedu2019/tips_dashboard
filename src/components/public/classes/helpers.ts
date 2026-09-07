@@ -1,4 +1,8 @@
-import type { PublicClassItem, PublicClassSession } from "./types";
+import type {
+  PublicClassItem,
+  PublicClassSession,
+  PublicProgressLog,
+} from "./types";
 
 export const DAYS = ["월", "화", "수", "목", "금", "토", "일"];
 export const MAX_SAVED = 6;
@@ -229,4 +233,49 @@ export function layoutSlots(slots: Slot[]) {
     flush();
   }
   return result;
+}
+
+/** Canonical public keys are exact session.id/sessionKey values; never parse IDs. */
+export function progressForSession(
+  logs: PublicProgressLog[],
+  session: PublicClassSession,
+  sessions: PublicClassSession[],
+) {
+  const keys = new Set(
+    [session.id, session.sessionKey].filter((key): key is string =>
+      Boolean(key),
+    ),
+  );
+  const uniqueNumber =
+    Number.isInteger(session.sessionNumber) &&
+    Number(session.sessionNumber) > 0 &&
+    sessions.filter((item) => item.sessionNumber === session.sessionNumber)
+      .length === 1;
+  const selected = new Map<string, { log: PublicProgressLog; rank: number }>();
+  const timestamp = (log: PublicProgressLog) => {
+    const value = Date.parse(log.updatedAt || "");
+    return Number.isFinite(value) ? value : -Infinity;
+  };
+  for (const log of logs) {
+    // A conflicting nonempty ID is authoritative negative evidence, even if a
+    // weaker numeric field or progress key happens to match this session.
+    let rank = 0;
+    if (log.sessionId) rank = keys.has(log.sessionId) ? 3 : 0;
+    else if (log.progressKey) rank = keys.has(log.progressKey) ? 2 : 0;
+    else if (uniqueNumber && log.sessionOrder === session.sessionNumber)
+      rank = 1;
+    if (!rank) continue;
+    const previous = selected.get(log.textbookId);
+    if (
+      !previous ||
+      rank > previous.rank ||
+      (rank === previous.rank &&
+        (timestamp(log) > timestamp(previous.log) ||
+          (timestamp(log) === timestamp(previous.log) &&
+            log.id.localeCompare(previous.log.id) > 0)))
+    ) {
+      selected.set(log.textbookId, { log, rank });
+    }
+  }
+  return new Map([...selected].map(([book, entry]) => [book, entry.log]));
 }

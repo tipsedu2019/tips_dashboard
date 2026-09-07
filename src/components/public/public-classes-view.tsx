@@ -391,7 +391,7 @@ export function PublicClassesView({
                       onClick={() => save(item.id)}
                     >
                       {saved ? <Check /> : <Plus />}
-                      <span>{saved ? "담김" : "담기"}</span>
+                      <span>{saved ? "빼기" : "담기"}</span>
                     </button>
                   </article>
                 );
@@ -492,6 +492,9 @@ export function PublicClassesView({
             saved={selectedIds.includes(detailId)}
             onSave={() => save(detailId)}
             canSave={Boolean(detailItem)}
+            selectionFull={
+              !selectedIds.includes(detailId) && selectedIds.length >= MAX_SAVED
+            }
           />
         </PublicDialog>
       )}

@@ -35,7 +35,11 @@ export function WeekGrid({
   return (
     <div className={compact ? styles.compactGrid : styles.fullGrid}>
       {!compact && (
-        <div className={styles.daySelector} aria-label="시간표 요일">
+        <div
+          className={styles.daySelector}
+          role="group"
+          aria-label="시간표 요일"
+        >
           {DAYS.map((d, i) => (
             <button key={d} aria-pressed={day === i} onClick={() => setDay(i)}>
               {d}
@@ -78,6 +82,7 @@ export function WeekGrid({
                   return (
                     <div
                       key={`${slot.classId}-${index}`}
+                      role="group"
                       title={`${slot.name} · ${DAYS[slot.day]} ${clockLabel(slot.start)}–${clockLabel(slot.end)}`}
                       aria-label={`${slot.name} · ${DAYS[slot.day]} ${clockLabel(slot.start)}–${clockLabel(slot.end)}`}
                       className={`${styles.slot} ${styles[`color${classes.findIndex((c) => c.id === slot.classId) % 6}`]} ${collision ? styles.collision : ""}`}
