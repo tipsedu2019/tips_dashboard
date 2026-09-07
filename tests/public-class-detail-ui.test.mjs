@@ -258,3 +258,103 @@ test("detail renders each period's exact book progress rather than another perio
     dom.window.close();
   }
 });
+
+test("calendar accessible names contain every visible date and chip for regular, holiday and crowded days", async () => {
+  const dom = new JSDOM(
+    '<!doctype html><html><body><div id="root"></div></body></html>',
+    { url: "https://tipsedu.co.kr/classes" },
+  );
+  globalThis.window = dom.window;
+  globalThis.document = dom.window.document;
+  globalThis.HTMLElement = dom.window.HTMLElement;
+  const originalFetch = globalThis.fetch;
+  const id = "b6b5da5a-b000-4b46-bc7a-dabea5b53e14";
+  const sessions = [
+    {
+      id: "regular",
+      date: "2026-09-02",
+      scheduleState: "active",
+      sessionNumber: 1,
+    },
+    { id: "holiday", date: "2026-09-25", scheduleState: "exception" },
+    {
+      id: "crowded-1",
+      date: "2026-09-09",
+      scheduleState: "active",
+      sessionNumber: 2,
+    },
+    {
+      id: "crowded-2",
+      date: "2026-09-09",
+      scheduleState: "active",
+      sessionNumber: 3,
+    },
+    {
+      id: "crowded-3",
+      date: "2026-09-09",
+      scheduleState: "makeup",
+      sessionNumber: 4,
+    },
+    { id: "crowded-4", date: "2026-09-09", scheduleState: "exception" },
+  ];
+  globalThis.fetch = async () => ({
+    ok: true,
+    json: async () => ({
+      classItem: {
+        id,
+        name: "수학",
+        teacher: "선생님",
+        room: "본관",
+        tuition: 230000,
+        schedule: "수 15:30-17:00",
+        schedulePlan: { textbooks: [], sessions },
+      },
+      textbooks: [],
+      progressLogs: [],
+      availability: "live",
+      generatedAt: "2026-09-07T00:00:00Z",
+    }),
+  });
+  const Detail = await loadDetail();
+  const root = createRoot(document.getElementById("root"));
+  try {
+    await act(async () =>
+      root.render(
+        createElement(Detail, {
+          id,
+          saved: false,
+          onSave: () => {},
+          canSave: true,
+          selectionFull: false,
+        }),
+      ),
+    );
+    for (const [date, expectedVisible] of [
+      ["2026-09-02", "2 1회차"],
+      ["2026-09-25", "25 휴강"],
+      ["2026-09-09", "9 2회차 3회차 보강 휴강"],
+    ]) {
+      const button = document.querySelector(`button[aria-label^="${date}"]`);
+      const visible = [...button.children]
+        .map((child) => child.textContent.trim())
+        .join(" ");
+      assert.equal(
+        visible,
+        expectedVisible,
+        "calendar labels remain visually unchanged",
+      );
+      const accessibleName = button.getAttribute("aria-label");
+      assert.ok(
+        accessibleName.includes(visible),
+        "complete visible label must occur contiguously in the accessible name",
+      );
+      assert.ok(accessibleName.includes(date), "full date context is retained");
+      for (const session of sessions.filter((session) => session.date === date))
+        assert.ok(accessibleName.includes(helpers.sessionState(session).label));
+    }
+  } finally {
+    await act(async () => root.unmount());
+    globalThis.fetch = originalFetch;
+    dom.window.close();
+  }
+});

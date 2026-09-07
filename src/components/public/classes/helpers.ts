@@ -279,3 +279,26 @@ export function progressForSession(
   }
   return new Map([...selected].map(([book, entry]) => [book, entry.log]));
 }
+
+export function sessionChipLabel(session: PublicClassSession) {
+  const state = sessionState(session);
+  return state.label === "정규 수업" && session.sessionNumber != null
+    ? `${session.sessionNumber}회차`
+    : state.label;
+}
+
+export function calendarDayLabel(date: string, sessions: PublicClassSession[]) {
+  const visibleText = [
+    String(Number(date.slice(8))),
+    ...sessions.map(sessionChipLabel),
+  ].join(" ");
+  const context = sessions.length
+    ? sessions
+        .map(
+          (session) =>
+            `${sessionState(session).label}${session.sessionNumber != null ? ` ${session.sessionNumber}회차` : ""}`,
+        )
+        .join(", ")
+    : "등록된 수업 없음";
+  return `${date}, ${visibleText}, ${context}`;
+}

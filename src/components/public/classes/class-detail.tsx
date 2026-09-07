@@ -12,6 +12,8 @@ import {
   seoulToday,
   sessionDisplay,
   progressForSession,
+  calendarDayLabel,
+  sessionChipLabel,
   sessionState,
 } from "./helpers";
 import styles from "./public-classes.module.css";
@@ -370,7 +372,7 @@ function SessionCalendar({ detail }: { detail: PublicClassDetail }) {
                   <button
                     key={date}
                     className={`${styles.calendarCell} ${selected === date ? styles.selectedDate : ""} ${date === today ? styles.today : ""}`}
-                    aria-label={`${date}${daySessions.length ? ", " + daySessions.map((s) => `${sessionState(s).label}${s.sessionNumber != null ? ` ${s.sessionNumber}회차` : ""}`).join(", ") : ", 등록된 수업 없음"}`}
+                    aria-label={calendarDayLabel(date, daySessions)}
                     aria-pressed={selected === date}
                     onClick={() => setSelected(date)}
                   >
@@ -382,10 +384,7 @@ function SessionCalendar({ detail }: { detail: PublicClassDetail }) {
                         }
                         key={s.id || i}
                       >
-                        {sessionState(s).label === "정규 수업" &&
-                        s.sessionNumber != null
-                          ? `${s.sessionNumber}회차`
-                          : sessionState(s).label}
+                        {sessionChipLabel(s)}
                       </small>
                     ))}
                   </button>
