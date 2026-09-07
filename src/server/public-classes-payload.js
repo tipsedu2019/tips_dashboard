@@ -25,9 +25,12 @@ export const PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION =
 export const PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION =
   "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,updated_at,date";
 
-export function applyPublicClassesQuerySafety(query) {
+export function applyPublicClassesQuerySafety(
+  query,
+  signal = AbortSignal.timeout(PUBLIC_CLASSES_QUERY_TIMEOUT_MS),
+) {
   return query
-    .abortSignal(AbortSignal.timeout(PUBLIC_CLASSES_QUERY_TIMEOUT_MS))
+    .abortSignal(signal)
     .retry(false);
 }
 
