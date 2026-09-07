@@ -29,21 +29,15 @@ function textbook(value) {
   return fields(value, ["textbookId", "role", "alias", "area", "subSubject", "startSessionId", "endSessionId"], ["order"]);
 }
 
-function billingPeriod(value) {
+function billingPeriod(value, recordedSessionCounts) {
   const result = fields({
     id: value?.id ?? value?.period_id,
     label: value?.label ?? value?.period_label,
     startDate: value?.startDate ?? value?.start_date,
     endDate: value?.endDate ?? value?.end_date,
   }, ["id", "label", "startDate", "endDate"]);
-  const sessionCount = Number(
-    value?.sessionCount ??
-    value?.session_count ??
-    value?.totalSessions ??
-    value?.total_sessions,
-  );
-  if (Number.isFinite(sessionCount) && sessionCount >= 0) {
-    result.sessionCount = sessionCount;
+  if (result.id && recordedSessionCounts.has(result.id)) {
+    result.sessionCount = recordedSessionCounts.get(result.id);
   }
   return result;
 }
@@ -59,32 +53,46 @@ export function publicLessons(value, depth = 0) {
 
 export function publicClassSchedule(value) {
   if (!record(value)) return null;
+  const sessions = rows(value.sessions).map((session) => {
+    const result = fields(session, [
+      "id", "date", "scheduleState", "makeupDate", "originalDate",
+      "startTime", "endTime", "classroomName", "teacherName", "progressStatus", "publicNote",
+      "billingId", "billingLabel",
+    ], ["sessionNumber"]);
+    if (!result.scheduleState && typeof session.state === "string") result.scheduleState = session.state;
+    if (!result.billingId && typeof session.billing_id === "string") result.billingId = session.billing_id;
+    if (!result.billingLabel && typeof session.billing_label === "string") result.billingLabel = session.billing_label;
+    if (typeof session.sessionKey === "string" && session.sessionKey !== session.id) result.sessionKey = session.sessionKey;
+    const entries = rows(session.textbookEntries).map((entry) => {
+      const mapped = textbook(entry);
+      const plan = range(entry.plan);
+      const actual = range(entry.actual);
+      if (Object.keys(plan).length) mapped.plan = plan;
+      if (Object.keys(actual).length) mapped.actual = actual;
+      return mapped;
+    });
+    if (entries.length) result.textbookEntries = entries;
+    return result;
+  });
+  const recordedSessionCounts = new Map();
+  sessions.forEach((session) => {
+    if (
+      session.billingId &&
+      (session.scheduleState === "active" || session.scheduleState === "makeup")
+    ) {
+      recordedSessionCounts.set(
+        session.billingId,
+        (recordedSessionCounts.get(session.billingId) || 0) + 1,
+      );
+    }
+  });
   const result = {
     ...fields(value, ["generatedAt"], ["version"]),
     textbooks: rows(value.textbooks).map(textbook),
-    sessions: rows(value.sessions).map((session) => {
-      const result = fields(session, [
-        "id", "date", "scheduleState", "makeupDate", "originalDate",
-        "startTime", "endTime", "classroomName", "teacherName", "progressStatus", "publicNote",
-        "billingId", "billingLabel",
-      ], ["sessionNumber"]);
-      if (!result.scheduleState && typeof session.state === "string") result.scheduleState = session.state;
-      if (!result.billingId && typeof session.billing_id === "string") result.billingId = session.billing_id;
-      if (!result.billingLabel && typeof session.billing_label === "string") result.billingLabel = session.billing_label;
-      if (typeof session.sessionKey === "string" && session.sessionKey !== session.id) result.sessionKey = session.sessionKey;
-      const entries = rows(session.textbookEntries).map((entry) => {
-        const mapped = textbook(entry);
-        const plan = range(entry.plan);
-        const actual = range(entry.actual);
-        if (Object.keys(plan).length) mapped.plan = plan;
-        if (Object.keys(actual).length) mapped.actual = actual;
-        return mapped;
-      });
-      if (entries.length) result.textbookEntries = entries;
-      return result;
-    }),
+    sessions,
   };
-  const billingPeriods = rows(value.billingPeriods ?? value.billing_periods).map(billingPeriod);
+  const billingPeriods = rows(value.billingPeriods ?? value.billing_periods)
+    .map((period) => billingPeriod(period, recordedSessionCounts));
   if (billingPeriods.length) result.billingPeriods = billingPeriods;
   return result;
 }

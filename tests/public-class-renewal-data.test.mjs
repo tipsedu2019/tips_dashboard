@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { publicClassSchedule } from "../src/lib/public-class-schedule.js";
 import {
   createPublicClassCatalogLoader,
 } from "../src/server/public-class-catalog.ts";
@@ -71,6 +72,8 @@ function classRow(overrides = {}) {
           scheduleState: "makeup",
           makeupDate: "2026-09-26",
           originalDate: "2026-09-25",
+          billingId: "period-september",
+          billingLabel: "9월 수강 구간",
           sessionNumber: 8,
           textbookEntries: [{
             textbookId: BOOK_ID,
@@ -303,7 +306,7 @@ test("selected detail queries one public class and only its related rows with bo
     label: "9월 수강 구간",
     startDate: "2026-08-31",
     endDate: "2026-09-28",
-    sessionCount: 8,
+    sessionCount: 1,
   }]);
   const [cancelled, makeup] = detail.classItem.schedulePlan.sessions;
   assert.deepEqual(
@@ -317,6 +320,57 @@ test("selected detail queries one public class and only its related rows with bo
   assert.equal(makeup.textbookEntries[0].actual.publicNote, "47쪽까지");
   assert.equal(detail.progressLogs[0].rangeLabel, "42~47쪽");
   assert.equal(detail.progressLogs[0].publicNote, "47쪽까지");
+});
+
+test("planner auto-zero periods expose recorded active and makeup counts only", () => {
+  const expectedCounts = [11, 12, 12, 12, 10];
+  const billingPeriods = expectedCounts.map((_, index) => ({
+    id: `period-${index + 1}`,
+    label: `${index + 1}구간`,
+    startDate: `2026-${String(index + 8).padStart(2, "0")}-01`,
+    endDate: `2026-${String(index + 8).padStart(2, "0")}-28`,
+    totalSessions: 0,
+  }));
+  const sessions = billingPeriods.flatMap((period, periodIndex) => {
+    const count = expectedCounts[periodIndex];
+    return [
+      ...Array.from({ length: count - 1 }, (_, index) => ({
+        id: `${period.id}-active-${index}`,
+        date: `2026-09-${String(index + 1).padStart(2, "0")}`,
+        billingId: period.id,
+        scheduleState: "active",
+      })),
+      {
+        id: `${period.id}-makeup`,
+        date: "2026-09-20",
+        billingId: period.id,
+        scheduleState: "makeup",
+      },
+      ...["exception", "tbd", "skipped", "cancelled"].map((scheduleState) => ({
+        id: `${period.id}-${scheduleState}`,
+        date: "2026-09-21",
+        billingId: period.id,
+        scheduleState,
+      })),
+    ];
+  });
+
+  const normalized = publicClassSchedule({
+    version: 2,
+    billingPeriods,
+    sessions,
+  });
+
+  assert.deepEqual(
+    normalized.billingPeriods.map((period) => period.sessionCount),
+    expectedCounts,
+  );
+  assert.equal(
+    normalized.sessions.filter((session) =>
+      ["exception", "tbd", "skipped", "cancelled"].includes(session.scheduleState),
+    ).length,
+    expectedCounts.length * 4,
+  );
 });
 
 test("unknown and non-public classes return not-found without related reads", async () => {
