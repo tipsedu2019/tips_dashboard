@@ -1512,6 +1512,23 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [normalizedScheduleDefaults, setNormalizedScheduleDefaults] = useState<NormalizedClassScheduleDefaults | null>(null);
   const [scheduleDefaultsSaving, setScheduleDefaultsSaving] = useState(false);
   const [scheduleDefaultsRequestKey, setScheduleDefaultsRequestKey] = useState("");
+  const detailRequestRef = useRef(0);
+  const scheduleRequestRef = useRef(0);
+  const scheduleEditRevisionRef = useRef(0);
+  const beginDetailRequest = useCallback(() => {
+    const requestId = ++detailRequestRef.current;
+    return () => detailRequestRef.current === requestId;
+  }, []);
+  const beginScheduleRequest = () => {
+    const detailRequestId = detailRequestRef.current;
+    const requestId = ++scheduleRequestRef.current;
+    const editRevision = scheduleEditRevisionRef.current;
+    return {
+      isCurrent: () => detailRequestRef.current === detailRequestId && scheduleRequestRef.current === requestId,
+      canReplaceDraft: () => scheduleEditRevisionRef.current === editRevision,
+    };
+  };
+  useEffect(() => () => { detailRequestRef.current += 1; }, []);
   const [pendingClassScheduleInitialization, setPendingClassScheduleInitialization] = useState<PendingClassScheduleInitialization | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState("");
@@ -2152,6 +2169,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const handleEditableFieldChange = (fieldName: string, nextValue: string) => {
     const normalizedValue = nextValue === "__none__" ? "" : nextValue;
     if (kind === "classes" && fieldName === "subject") {
+      scheduleEditRevisionRef.current += 1;
+      setScheduleDefaultsRequestKey("");
       const nextSubject = parseAcademicSubject(normalizedValue) || normalizedValue;
       const rawRows = classResourceRows;
       const teacherOptions = getClassTeacherOptionsForSubject(rawRows, normalizedValue);
@@ -2220,7 +2239,17 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     ? classScheduleSlots
     : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom);
   const syncClassScheduleSlots = (slots: ClassScheduleSlot[]) => {
-    const nextSlots = slots.length > 0 ? slots : [createEmptyClassScheduleSlot()];
+    scheduleEditRevisionRef.current += 1;
+    setScheduleDefaultsRequestKey("");
+    const nextSlots = (slots.length > 0 ? slots : [createEmptyClassScheduleSlot()]).map((slot) => (
+      selectedRow && isNormalizedClassRow(selectedRow) && !normalizedScheduleDefaults
+        ? {
+          ...slot,
+          teacherCatalogId: getClassTeacherCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.teacher),
+          classroomCatalogId: getClassClassroomCatalogIdForSubject(classResourceRows, selectedClassSubject, slot.classroom),
+        }
+        : slot
+    ));
     const formatted = formatClassScheduleSlots(nextSlots);
     setClassScheduleSlots(nextSlots);
     setForm((current) => ({ ...current, ...formatted }));
@@ -2245,26 +2274,31 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   ) !== JSON.stringify(toContinuousClassScheduleSlots(normalizedScheduleDefaults?.slots || []));
   const reloadClassScheduleDefaults = async () => {
     if (!selectedRow || !normalizedScheduleDefaults) return;
+    const request = beginScheduleRequest();
     setOperationError(null);
     try {
       const defaults = readNormalizedClassScheduleDefaults(await service.getClassScheduleDefaults(selectedRow.id));
+      if (!request.isCurrent()) return;
       if (!defaults) {
         setNormalizedScheduleDefaults(null);
         setScheduleDefaultsRequestKey("");
         return;
       }
-      const formatted = formatClassScheduleSlots(defaults.slots);
-      setClassScheduleSlots(defaults.slots);
-      setForm((current) => ({ ...current, ...formatted }));
+      if (request.canReplaceDraft()) {
+        const formatted = formatClassScheduleSlots(defaults.slots);
+        setClassScheduleSlots(defaults.slots);
+        setForm((current) => ({ ...current, ...formatted }));
+      }
       setNormalizedScheduleDefaults(defaults);
       setScheduleDefaultsRequestKey("");
       setSaveNotice("최신 기본 시간표를 불러왔습니다.");
     } catch (error) {
-      setOperationError(getSaveErrorMessage(error));
+      if (request.isCurrent()) setOperationError(getSaveErrorMessage(error));
     }
   };
   const handleClassScheduleDefaultsSave = async () => {
     if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || !classScheduleDefaultsDirty) return;
+    const request = beginScheduleRequest();
     setScheduleDefaultsSaving(true);
     setOperationError(null);
     setSaveNotice("");
@@ -2277,6 +2311,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         slots: toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
         requestKey,
       });
+      if (!request.isCurrent()) return;
       const nextDefaults = readNormalizedClassScheduleDefaults({
         authoritativeSource: "normalized",
         scheduleRevision: (result as Record<string, unknown> | null)?.scheduleRevision,
@@ -2284,17 +2319,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         slots: (result as Record<string, unknown> | null)?.slots,
       });
       if (!nextDefaults) throw new Error("기본 시간표 저장 결과를 다시 확인해 주세요.");
-      const formatted = formatClassScheduleSlots(nextDefaults.slots);
-      setClassScheduleSlots(nextDefaults.slots);
-      setForm((current) => ({ ...current, ...formatted }));
+      if (request.canReplaceDraft()) {
+        const formatted = formatClassScheduleSlots(nextDefaults.slots);
+        setClassScheduleSlots(nextDefaults.slots);
+        setForm((current) => ({ ...current, ...formatted }));
+      }
       setNormalizedScheduleDefaults(nextDefaults);
       setScheduleDefaultsRequestKey("");
       setSaveNotice("기본 시간표 저장 완료");
     } catch (error) {
+      if (!request.isCurrent()) return;
       const message = getSaveErrorMessage(error);
       setOperationError(message.includes("class_schedule_stale") ? "다른 변경이 있습니다. 최신값을 불러온 뒤 다시 저장하세요." : message);
     } finally {
-      setScheduleDefaultsSaving(false);
+      if (request.isCurrent()) setScheduleDefaultsSaving(false);
     }
   };
 
@@ -2663,15 +2701,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
 
   const openRow = useCallback(async (
-    row: ManagementRow,
+    row: ManagementRow | string,
     options: {
       tab?: ClassDetailTab;
       syncRoute?: boolean;
-      detailLoaded?: boolean;
     } = {},
   ) => {
-    const detailRow = options.detailLoaded ? row : await loadDetail(row.id);
-    const activeRow = detailRow || row;
+    const isCurrent = beginDetailRequest();
+    const rowId = typeof row === "string" ? row : row.id;
+    const detailRow = await loadDetail(rowId);
+    if (!isCurrent()) return;
+    // A route lookup may finish after Back/Forward navigated away from this row.
+    if (options.syncRoute === false && new URLSearchParams(window.location.search).get(kind === "classes" ? "classId" : "studentId") !== rowId) return;
+    const activeRow = detailRow || (typeof row === "string" ? null : row);
+    if (!activeRow) return;
     const nextTab = kind === "classes" ? normalizeClassDetailTab(options.tab) : "basic";
     const nextForm = initialForm(kind, activeRow);
     const defaultsRequest = kind === "classes" && isNormalizedClassRow(activeRow)
@@ -2682,6 +2725,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
     setNormalizedScheduleDefaults(null);
     setScheduleDefaultsRequestKey("");
+    setScheduleDefaultsSaving(false);
+    const editRevision = scheduleEditRevisionRef.current;
     setTargetId("");
     setPendingRelationMode(null);
     setPendingClassStudentDetailId("");
@@ -2692,7 +2737,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setDetailRowQuery("");
     setRelationQuery("");
     setTextbookCandidateQuery("");
-    setTextbookCandidateFilters(getDefaultClassTextbookFilters(row.raw || {}));
+    setTextbookCandidateFilters(getDefaultClassTextbookFilters(activeRow.raw || {}));
     setRelationPageState({});
     setOperationError(null);
     setSaveNotice("");
@@ -2705,18 +2750,21 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     }
     if (kind === "classes") {
       const defaults = await defaultsRequest.catch((error) => {
-        setOperationError(getSaveErrorMessage(error));
+        if (isCurrent()) setOperationError(getSaveErrorMessage(error));
         return null;
       });
+      if (!isCurrent()) return;
       const normalizedDefaults = readNormalizedClassScheduleDefaults(defaults);
       if (normalizedDefaults) {
-        const formatted = formatClassScheduleSlots(normalizedDefaults.slots);
-        setClassScheduleSlots(normalizedDefaults.slots);
-        setForm((current) => ({ ...current, ...formatted }));
+        if (scheduleEditRevisionRef.current === editRevision) {
+          const formatted = formatClassScheduleSlots(normalizedDefaults.slots);
+          setClassScheduleSlots(normalizedDefaults.slots);
+          setForm((current) => ({ ...current, ...formatted }));
+        }
         setNormalizedScheduleDefaults(normalizedDefaults);
       }
     }
-  }, [kind, loadDetail, writeClassDetailRoute, writeStudentDetailRoute]);
+  }, [beginDetailRequest, kind, loadDetail, writeClassDetailRoute, writeStudentDetailRoute]);
 
   useEffect(() => {
     if (kind !== "classes" || loading || !requestedClassId) {
@@ -2738,9 +2786,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         syncRoute: false,
       });
     } else {
-      void loadDetail(requestedClassId).then((detailRow) => {
-        if (detailRow) void openRow(detailRow, { tab: requestedClassDetailTab, syncRoute: false, detailLoaded: true });
-      });
+      void openRow(requestedClassId, { tab: requestedClassDetailTab, syncRoute: false });
     }
   }, [
     dialogMode,
@@ -2771,9 +2817,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (targetRow) {
       void openRow(targetRow, { syncRoute: false });
     } else {
-      void loadDetail(requestedStudentId).then((detailRow) => {
-        if (detailRow) void openRow(detailRow, { syncRoute: false, detailLoaded: true });
-      });
+      void openRow(requestedStudentId, { syncRoute: false });
     }
   }, [
     dialogMode,
@@ -2888,7 +2932,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const actions = useMemo(() => {
     const base = {
       onCreate: canMutateRows ? () => {
+        beginDetailRequest();
         setSelectedRow(null);
+        setNormalizedScheduleDefaults(null);
+        setScheduleDefaultsRequestKey("");
+        setScheduleDefaultsSaving(false);
         const nextForm = initialForm(kind);
         if (kind === "classes" && defaultClassGroupIdsForCreate) {
           nextForm.classGroupIds = defaultClassGroupIdsForCreate;
@@ -2929,7 +2977,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, router]);
+  }, [beginDetailRequest, canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, router]);
 
   const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
@@ -3195,6 +3243,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
   const handleDialogOpenChange = (open: boolean) => {
     if (open) return;
+    beginDetailRequest();
     setDialogMode(null);
     setPendingClassScheduleInitialization(null);
     setPendingClassStudentDetailId("");

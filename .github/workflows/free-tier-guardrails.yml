@@ -23,6 +23,8 @@ jobs:
         run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/auth-guard-loading.test.mjs tests/auth-session-refresh.test.mjs
       - name: Verify atomic textbook inventory writes
         run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs
+      - name: Verify class detail and schedule request ownership
+        run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs
