@@ -161,6 +161,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     supabase ? null : supabaseConfigError,
   )
   const authResolutionRef = useRef(createAuthResolutionCoordinator())
+  const activeSessionUserIdRef = useRef<string | null>(null)
   const profileRequestRef = useRef<{
     key: string
     promise: Promise<DashboardProfileResult> | null
@@ -179,6 +180,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const resetAnonymousSession = (resolution: AuthResolutionToken) => {
       if (!authResolutionRef.current.markResolvedProfile(resolution)) return
+      activeSessionUserIdRef.current = null
       profileRequestRef.current = { key: "", promise: null }
       setSession(null)
       setUser(null)
@@ -281,6 +283,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
+      const isSameSessionUser = activeSessionUserIdRef.current === nextSession.user.id
+      activeSessionUserIdRef.current = nextSession.user.id
       setSession(nextSession)
 
       const shouldRefreshProfile = event === "USER_UPDATED"
@@ -290,7 +294,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return
       }
 
-      if (!canReuseResolvedProfile) {
+      // Renewed credentials still recheck the profile, but only an identity change
+      // should tear down the protected workspace and its unsaved form state.
+      if (!canReuseResolvedProfile && !isSameSessionUser) {
         setUser(null)
         setAuthError(null)
         setLoading(true)

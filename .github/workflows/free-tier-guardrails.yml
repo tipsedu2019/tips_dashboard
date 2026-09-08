@@ -20,7 +20,7 @@ jobs:
           cache: npm
       - run: npm ci --ignore-scripts
       - name: Verify safe login returns and authentication guards
-        run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/auth-guard.test.mjs
+        run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/auth-guard-loading.test.mjs tests/auth-session-refresh.test.mjs
       - name: Verify atomic textbook inventory writes
         run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
