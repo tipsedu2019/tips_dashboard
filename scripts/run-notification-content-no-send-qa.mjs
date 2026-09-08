@@ -175,6 +175,7 @@ export async function runNotificationContentNoSendQa() {
     const providerAttemptRows = []
     let renderedIdentityCount = 0
     let googleChatIdentityCount = 0
+    let retiredGoogleChatIdentityCount = 0
     let exactPayloadCount = 0
     let destinationIsolationChecks = 0
 
@@ -212,7 +213,6 @@ export async function runNotificationContentNoSendQa() {
       assert.equal(contract.destinationPolicy.allowedConnectionKeys.includes(expectedDestination), true)
       const perIdentityDestinations = Object.fromEntries(GOOGLE_CHAT_DESTINATIONS.map((key) => [key, 0]))
       perIdentityDestinations[expectedDestination] = 1
-      destinationCounts[expectedDestination] += 1
       assert.equal(Object.values(perIdentityDestinations).filter((count) => count === 1).length, 1)
       assert.equal(Object.values(perIdentityDestinations).filter((count) => count === 0).length, 4)
       destinationIsolationChecks += 1
@@ -236,10 +236,18 @@ export async function runNotificationContentNoSendQa() {
       assert.equal(expected.ok, true)
       const beforeCalls = fakeFormattingCalls.length
       const sent = await provider.send(context)
+      if (identity.workflowKey === "word_retests") {
+        assert.equal(sent.status, "failed")
+        assert.equal(sent.errorCode, "word_retest_google_chat_retired")
+        assert.equal(fakeFormattingCalls.length, beforeCalls)
+        retiredGoogleChatIdentityCount += 1
+        continue
+      }
       assert.equal(sent.status, "sent")
       assert.equal(fakeFormattingCalls.length, beforeCalls + 1)
       assert.deepEqual(fakeFormattingCalls.at(-1).payload, expected.payload)
       exactPayloadCount += 1
+      destinationCounts[expectedDestination] += 1
     }
 
     assert.equal(trap.attempts.length, 0)
@@ -248,6 +256,7 @@ export async function runNotificationContentNoSendQa() {
       goldenIdentityCount: fixture.ruleIdentities.length,
       renderedIdentityCount,
       googleChatIdentityCount,
+      retiredGoogleChatIdentityCount,
       fakeFormattingTransportCallCount: fakeFormattingCalls.length,
       exactPayloadCount,
       externalRequestCount: trap.attempts.length,

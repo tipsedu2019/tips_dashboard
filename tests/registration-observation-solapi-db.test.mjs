@@ -568,20 +568,19 @@ test("final reminder claim and backlog retain the post-evidence delivery gates",
   assert.match(sql, /registration_customer_reminder_sqlstate_patch_failed/);
 });
 
-test("final reminder claim pgTAP pins the active SQLSTATE, ACL, and provider-zero gates", async () => {
+test("final reminder claim pgTAP pins retirement SQLSTATE, ACL, and unchanged provider artifacts", async () => {
   const sql = await readFile(finalClaimGatePgTapUrl, "utf8");
-  assert.match(sql, /select plan\(22\);/);
-  assert.equal(
-    [...sql.matchAll(/^select (?:has_function|function_privs_are|ok|is|throws_ok)\(/gmu)].length,
-    22,
-  );
-  assert.match(sql, /resolve_registration_customer_message_source_v1_impl\(text,uuid\)/);
-  assert.match(sql, /read_registration_customer_reminder_source_v1\(uuid,uuid\)/);
-  assert.match(sql, /begin_registration_customer_reminder_dispatch_v1\(uuid,uuid,jsonb,jsonb\)/);
-  assert.match(sql, /registration_customer_reminder_booking_fact_changed/);
+  assert.match(sql, /select no_plan\(\);/);
+  assert.match(sql, /select \* from finish\(\);/);
+  assert.match(sql, /'55000',\s*'registration_customer_reminder_schedule_retired'/);
+  assert.match(sql, /'55000',\s*'registration_customer_reminder_automatic_delivery_retired'/);
+  assert.match(sql, /'42501', 'registration_customer_reminder_worker_unauthorized'/);
   assert.match(sql, /request\.jwt\.claim\.role/);
-  assert.match(sql, /final claim does not reintroduce the legacy heartbeat write/);
-  assert.match(sql, /final gate checks add no provider marker while disabled/);
+  assert.match(sql, /retired reminder entrypoints expose EXECUTE only to service_role/);
+  assert.match(sql, /public\.claim_registration_customer_reminder_job_v1\(\),\s*null::jsonb/);
+  assert.match(sql, /public\.has_registration_customer_reminder_backlog_v1\(\),\s*false/);
+  assert.match(sql, /pg_temp\.registration_customer_reminder_retirement_snapshot_v1\(\),\s*\(select baseline\.snapshot from retired_reminder_runtime_baseline baseline\)/);
+  assert.match(sql, /explicit preview and claim APIs remain available separately/);
 });
 
 test("final reminder claim gate is bounded and mandatory in isolated schema CI", async () => {

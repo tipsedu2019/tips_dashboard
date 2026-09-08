@@ -158,6 +158,7 @@ type RouteDependencies = Readonly<{
     messageId: string
     context: HandlerAuthContext
   }>): Promise<unknown>
+  readDeliveryContext?(input: Readonly<{ actorProfileId: string; messageId: string; context: HandlerAuthContext }>): Promise<unknown>
   lookupProvider(input: Readonly<{
     providerMessageId: string
     providerGroupId?: string
@@ -916,6 +917,36 @@ export function createRegistrationCustomerMessageRouteHandlers(dependencies: Rou
       }
     },
 
+    async delivery(request: Request) {
+      try {
+        const context = await dependencies.authenticate(request)
+        requireRole(context, OPERATOR_ROLES)
+        const params = new URL(request.url).searchParams
+        if (request.method !== "GET" || params.size !== 1 || !params.has("messageId")) {
+          httpError(400, "registration_customer_message_check_invalid")
+        }
+        const input = parseRegistrationCustomerMessageCheckInput({ messageId: params.get("messageId") })
+        if (!input) httpError(400, "registration_customer_message_check_invalid")
+        if (!dependencies.readDeliveryContext) httpError(503, "registration_customer_message_runtime_unavailable")
+        const lookup = checkContext(await dependencies.readDeliveryContext({
+          actorProfileId: context.actorProfileId, messageId: input.messageId, context,
+        }))
+        const provider = await dependencies.lookupProvider(lookup)
+        const deliveryStatus = !provider.evidence.requestKeyMatched
+          ? "unavailable"
+          : provider.outcome === "accepted" && provider.evidence.statusCode === "4000"
+            ? "delivered"
+            : provider.outcome === "failed_hold" ? "failed" : "pending"
+        // This endpoint only observes the provider receipt. It cannot change
+        // registration facts, outbox status, attempt markers, or resend locks.
+        return json(assertRegistrationCustomerMessagePublicPayload({
+          ok: true, deliveryStatus, checkedAt: (dependencies.now || (() => new Date()))().toISOString(),
+        }))
+      } catch (error) {
+        return errorResponse(error)
+      }
+    },
+
     async admin(request: Request) {
       try {
         const action = await adminInput(request)
@@ -1354,6 +1385,12 @@ export function createProductionRegistrationCustomerMessageRouteHandlers(
         p_result: input.outcome,
         p_provider_result: input.evidence,
         p_provider_payload_checksum: input.providerPayloadChecksum,
+      })
+    },
+    readDeliveryContext(input) {
+      return exactRpc(input.context, "read_registration_customer_message_delivery_context_v1", {
+        p_actor_profile_id: input.actorProfileId,
+        p_message_id: input.messageId,
       })
     },
     readCheckContext(input) {

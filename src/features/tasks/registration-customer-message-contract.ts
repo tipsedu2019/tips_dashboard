@@ -205,6 +205,12 @@ export type RegistrationCustomerMessageCheckInput = Readonly<{
   messageId: string
 }>
 
+export type RegistrationCustomerMessageDeliveryResult = Readonly<{
+  ok: true
+  deliveryStatus: "delivered" | "failed" | "pending" | "unavailable"
+  checkedAt: string
+}>
+
 export type RegistrationCustomerMessageProviderEvidenceInput = Readonly<{
   providerMessageId?: string
   providerGroupId?: string
@@ -289,6 +295,7 @@ export type RegistrationCustomerMessageClient = Readonly<{
     signal?: AbortSignal,
   ) => Promise<RegistrationCustomerMessageHistoryItem[]>
   check: (input: RegistrationCustomerMessageCheckInput) => Promise<RegistrationCustomerMessageSendResult>
+  checkDelivery?: (input: RegistrationCustomerMessageCheckInput, signal?: AbortSignal) => Promise<RegistrationCustomerMessageDeliveryResult>
   reconcile: (input: Readonly<{
     messageId: string
     resolution: "accepted" | "failed_hold"
@@ -337,6 +344,8 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "body",
   "buttons",
   "canCheck",
+  "deliveryStatus",
+  "checkedAt",
   "className",
   "classroomLabel",
   "confirmedByName",

@@ -832,7 +832,14 @@ test("규칙 재계산은 변경된 규칙의 delivery만 취소하고 같은 �
   )
 })
 
-test("fanout 권위 원본 일시 장애는 영구 실패시키지 않고 bounded retry로 돌려놓는다", async () => {
+test("fanout preserves known failure causes, retries transient failures, and masks unexpected errors", async () => {
+  for (const [cause, expectedCode, disposition] of [
+    [Object.assign(new Error("safe"), { code: "notification_source_unavailable" }), "notification_source_unavailable", "retry"],
+    [Object.assign(new Error("safe"), { code: "schedule_validation_failed" }), "schedule_validation_failed", "failed"],
+    [Object.assign(new Error("safe"), { code: "payload_schema_unsupported" }), "payload_schema_unsupported", "failed"],
+    [new Error("private customer information"), "notification_orchestration_failed", "failed"],
+    [Object.assign(new Error("safe"), { code: "private_customer_name" }), "notification_orchestration_failed", "failed"],
+  ]) {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
   const job = {
     job_id: "71000000-0000-4000-8000-000000000401",
@@ -871,7 +878,7 @@ test("fanout 권위 원본 일시 장애는 영구 실패시키지 않고 bounde
     getAdapter: () => createAdapter({
       workflowKey: "registration",
       async resolveTargets() {
-        throw Object.assign(new Error("safe"), { code: "notification_source_unavailable" })
+        throw cause
       },
     }),
     rpc: harness.rpc,
@@ -885,9 +892,10 @@ test("fanout 권위 원본 일시 장애는 영구 실패시키지 않고 bounde
     call.name === "finish_notification_orchestration_job_v1"
     && call.parameters.p_job_kind === "fanout"
   ))
-  assert.equal(finish.parameters.p_disposition, "retry")
-  assert.equal(finish.parameters.p_error_code, "notification_source_unavailable")
-  assert.equal(finish.parameters.p_next_attempt_at, "2026-07-17T01:00:10.000Z")
+  assert.equal(finish.parameters.p_disposition, disposition)
+  assert.equal(finish.parameters.p_error_code, expectedCode)
+  assert.equal(finish.parameters.p_next_attempt_at, disposition === "retry" ? "2026-07-17T01:00:10.000Z" : null)
+  }
 })
 
 test("reconciliation 영구 오류와 일시 오류는 각 job을 failed/retry로 닫고 뒤 단계 실행을 막지 않는다", async () => {
@@ -1818,7 +1826,7 @@ test("빈 대상 재계산 batch도 64자리 소문자 hash가 아니면 apply �
     && call.parameters.p_job_kind === "target_reconciliation"
   ))
   assert.equal(finish.parameters.p_disposition, "failed")
-  assert.equal(finish.parameters.p_error_code, "payload_schema_unsupported")
+  assert.equal(finish.parameters.p_error_code, "worker_envelope_invalid")
 })
 
 test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전달하고 finish에는 안전한 집계만 남긴다", async () => {

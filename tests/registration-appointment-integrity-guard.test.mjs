@@ -40,20 +40,17 @@ test("level-test result persistence follows the canonical registration row-lock 
     "dashboard_private.save_registration_level_test_result_impl",
   )
 
-  const task = definition.indexOf("-- level_test_result_task_lock")
-  const detail = definition.indexOf("-- level_test_result_detail_lock")
-  const tracks = definition.indexOf("-- level_test_result_track_locks")
-  const appointments = definition.indexOf("-- level_test_result_appointment_locks")
-  const attempts = definition.indexOf("-- level_test_result_attempt_locks")
-  const receipt = definition.indexOf("-- level_test_result_receipt_lookup")
+  // Read the active SQL statements; the final writer no longer carries the
+  // repair migration's comment markers.
+  const locks = [...definition.matchAll(/perform\s+1\s+from\s+public\.(\w+)\b[\s\S]*?for\s+update(?:\s+of\s+attempt)?;/gi)]
+  assert.deepEqual(locks.map((match) => match[1]), [
+    "ops_tasks", "ops_registration_details", "ops_registration_subject_tracks",
+    "ops_registration_appointments", "ops_registration_level_tests",
+  ])
+  const receipt = definition.indexOf("from dashboard_private.ops_registration_mutations mutation")
 
   assert.ok(
-    task !== -1
-      && task < detail
-      && detail < tracks
-      && tracks < appointments
-      && appointments < attempts
-      && attempts < receipt,
+    receipt > locks.at(-1).index,
     "result persistence must lock task, detail, tracks, appointments, and attempts before replay/mutation",
   )
   assert.doesNotMatch(definition, /for\s+update\s+of\s+attempt\s*,\s*track/i)

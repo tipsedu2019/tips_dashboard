@@ -566,7 +566,7 @@ test("알림 업무와 화면 섹션 선택은 반응형 1차·2차 제어로 �
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(source, /grid grid-cols-2 gap-1 rounded-lg border bg-muted\/35 p-1 sm:grid-cols-4 xl:grid-cols-7/)
+  assert.match(source, /grid grid-cols-2 gap-1 rounded-lg border bg-muted\/35 p-1 sm:grid-cols-3 xl:grid-cols-6/)
   assert.match(source, /variant=\{activeWorkflow === option\.key \? "default" : "ghost"\}/)
   assert.match(source, /\[scrollbar-width:none\] \[&::-webkit-scrollbar\]:hidden/)
   assert.match(source, /"grid h-auto w-full rounded-lg border bg-muted\/35 p-1"/)

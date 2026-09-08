@@ -23,7 +23,7 @@ async function createEntrypointFixture(t, overrides = {}) {
     "src/features/approvals/approval-workspace.tsx": "export function ApprovalWorkspace() {}",
     "src/app/admin/settings/notifications/page.tsx": "<NotificationSettingsWorkspace />",
     "src/features/notifications/notification-settings-workspace.tsx": '<NotificationControlPanel presentation="page" />',
-    "src/features/notifications/notification-control-panel.tsx": "NOTIFICATION_WORKFLOW_OPTIONS.map(() => data-notification-workflow={activeWorkflow})",
+    "src/features/notifications/notification-control-panel.tsx": "NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map(() => data-notification-workflow={activeWorkflow})",
     "src/features/notifications/notification-control-plane-types.ts": [
       "tasks",
       "word_retests",
@@ -32,7 +32,7 @@ async function createEntrypointFixture(t, overrides = {}) {
       "withdrawal",
       "makeup_requests",
       "approvals",
-    ].map((key) => `key: "${key}"`).join("\n"),
+    ].map((key) => `key: "${key}"`).join("\n") + '\nkey !== "word_retests"',
     "src/lib/navigation.ts": '{ title: "알림 설정", url: "/admin/settings/notifications" }',
     "src/app/api/google-chat/route.ts": "notification_payload_forbidden sourceEventId",
     "src/app/api/web-push/route.ts": "notification_payload_forbidden",

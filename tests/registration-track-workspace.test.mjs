@@ -1734,6 +1734,40 @@ test("two tracks at different statuses expose both current sections and actions 
   assert.doesNotMatch(source, /selectedStageEditor|현재 업무/)
 })
 
+test("inquiry subject conflicts keep independent facts and submit the opened subject snapshot", async () => {
+  const source = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8");
+  const body = sourceBetween(source, "async function saveInquiry", "function handleSubjectTabChange");
+  const compiled = ts.transpileModule(`async function saveInquiry${body}\nmodule.exports = saveInquiry`, {
+    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+  }).outputText;
+  const writes = [];
+  const runtime = { exports: {} };
+  vm.runInNewContext(compiled, {
+    module: runtime, canManageCase: true,
+    detail: { task: { id: "case-1" }, commonRevision: 7, tracks: [{ subject: "영어" }] },
+    updateRegistrationCaseCommon: async input => { writes.push(["facts", input]); return { commonRevision: 8 }; },
+    syncRegistrationCaseSubjects: async input => {
+      writes.push(["subjects", input]);
+      throw new Error("registration_subjects_conflict");
+    },
+    errorMessage: error => error.message,
+    onReload: () => assert.fail("the inquiry editor owns conflict refresh and draft comparison"),
+    onWarning: () => assert.fail("a stale subject save must use the conflict result"),
+  });
+  const result = await runtime.exports({
+    studentName: " 학생 ", schoolGrade: "중2", schoolName: "학교", parentPhone: "01000000000",
+    studentPhone: "", campus: "본관", inquiryAt: "2026-09-07T18:00", requestNote: "내 입력", priority: "normal",
+    subjects: ["영어", "과학"],
+  }, "same-request");
+  assert.equal(result, "conflict");
+  assert.equal(writes[0][0], "facts");
+  assert.equal(writes[0][1].requestNote, "내 입력");
+  assert.equal(writes[0][1].expectedCommonRevision, 7);
+  assert.deepEqual(JSON.parse(JSON.stringify(writes[1])), ["subjects", {
+    taskId: "case-1", subjects: ["영어", "과학"], expectedSubjects: ["영어"], requestKey: "same-request:subjects",
+  }]);
+});
+
 test("Notion-style inquiry facts and subjects save independently without history or capability locks", async () => {
   const [application, inquiry] = await Promise.all([
     readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8"),
@@ -1750,7 +1784,7 @@ test("Notion-style inquiry facts and subjects save independently without history
   assert.match(saveInquiry, /rejectedWrites\.some\([\s\S]*?registration_common_revision_conflict[\s\S]*?registration_subjects_conflict[\s\S]*?return "conflict"/)
   assert.match(saveInquiry, /rejectedWrites\.length === 2[\s\S]*?throw/)
   assert.match(saveInquiry, /onWarning\([\s\S]*?await onReload\(\)[\s\S]*?return "partial"/)
-  assert.doesNotMatch(saveInquiry, /saveRegistrationCaseInquiry|expectedSubjects/)
+  assert.doesNotMatch(saveInquiry, /saveRegistrationCaseInquiry/)
   assert.doesNotMatch(inquiry, /registrationTrackCanBeRemoved|getRegistrationSubjectPickerAvailability|disabledSubjects=|registration_subject_removal_blocked/)
   assert.match(inquiry, /disabled=\{!canEdit \|\| saving \|\| refreshPending \|\| Boolean\(conflictAttempt\)\}/)
   assert.match(inquiry, /\{canEdit \? \([\s\S]*?<RegistrationSaveButton/)

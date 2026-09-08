@@ -15,12 +15,13 @@ import {
 
 import type {
   RegistrationCustomerMessageClient,
+  RegistrationCustomerMessageDeliveryResult,
   RegistrationCustomerMessageHistoryItem,
   RegistrationCustomerMessagePreviewResponse,
   RegistrationCustomerMessageSendResult,
   RegistrationCustomerMessageTarget,
 } from "./registration-customer-message-contract"
-import { getRegistrationCustomerMessageErrorMessage } from "./registration-customer-message-errors"
+import { getRegistrationCustomerMessageErrorMessage, getRegistrationCustomerMessageReadinessMessage } from "./registration-customer-message-errors"
 
 type RegistrationAlimtalkPreviewDialogProps = Readonly<{
   open: boolean
@@ -106,6 +107,8 @@ export function RegistrationAlimtalkPreviewDialog({
   const [error, setError] = useState("")
   const [result, setResult] = useState<RegistrationCustomerMessageSendResult | null>(null)
   const [refreshWarning, setRefreshWarning] = useState("")
+  const [deliveryResult, setDeliveryResult] = useState<RegistrationCustomerMessageDeliveryResult | null>(null)
+  const deliveryAbortRef = useRef<AbortController | null>(null)
   const [clockTick, setClockTick] = useState(0)
   const [reason, setReason] = useState("")
   const [recoveryResolution, setRecoveryResolution] = useState<"accepted" | "failed_hold">("accepted")
@@ -126,6 +129,9 @@ export function RegistrationAlimtalkPreviewDialog({
     setError("")
     setResult(null)
     setRefreshWarning("")
+    setDeliveryResult(null)
+    deliveryAbortRef.current?.abort()
+    deliveryAbortRef.current = null
     setPreview(null)
     setLatestMessage(null)
     setReason("")
@@ -153,7 +159,7 @@ export function RegistrationAlimtalkPreviewDialog({
       .finally(() => {
         if (generation === generationRef.current) setLoading(false)
       })
-    return () => controller.abort()
+    return () => { controller.abort(); deliveryAbortRef.current?.abort() }
   }, [client, open, targetMessageKind, targetSourceId])
 
   const expiryTime = previewExpiryTime(preview)
@@ -297,6 +303,27 @@ export function RegistrationAlimtalkPreviewDialog({
         teacherLabel: string
       }>
     : null
+  async function checkDelivery() {
+    const messageId = result?.messageId || latestMessage?.messageId
+    if (!messageId || currentStatus !== "accepted" || !client.checkDelivery || deliveryAbortRef.current) return
+    const generation = generationRef.current
+    const controller = new AbortController()
+    deliveryAbortRef.current = controller
+    setSending(true)
+    setError("")
+    try {
+      const next = await client.checkDelivery({ messageId }, controller.signal)
+      if (generation === generationRef.current && !controller.signal.aborted) setDeliveryResult(next)
+    } catch (cause) {
+      if (generation === generationRef.current && !controller.signal.aborted) {
+        setError(getRegistrationCustomerMessageErrorMessage(cause, "전달 결과를 확인하지 못했습니다. 다시 확인해 주세요."))
+      }
+    } finally {
+      if (deliveryAbortRef.current === controller) deliveryAbortRef.current = null
+      if (generation === generationRef.current) setSending(false)
+    }
+  }
+
   const confirmLabel = sending
     ? "처리 중"
     : duplicateLocked || Boolean(currentStatus)
@@ -315,7 +342,9 @@ export function RegistrationAlimtalkPreviewDialog({
           <div className="flex items-start justify-between gap-3">
             <div>
               <DialogTitle>알림톡 미리보기</DialogTitle>
-              <DialogDescription>내용과 수신자 끝자리를 확인한 뒤 발송합니다.</DialogDescription>
+            <DialogDescription>{currentStatus === "accepted"
+              ? "접수한 알림톡의 전달 결과를 확인할 수 있습니다."
+              : "내용과 수신자 끝자리를 확인한 뒤 발송합니다."}</DialogDescription>
             </div>
             <DialogClose asChild>
               <Button type="button" className="min-h-11 min-w-11" variant="outline" aria-label="알림톡 미리보기 닫기">닫기</Button>
@@ -325,7 +354,14 @@ export function RegistrationAlimtalkPreviewDialog({
 
         {error ? <p role="alert" className="rounded-md border border-destructive/40 px-3 py-2 text-sm">{error}</p> : null}
         {refreshWarning ? <p role="status" className="rounded-md border border-amber-300 px-3 py-2 text-sm">{refreshWarning}</p> : null}
-        {currentStatus === "accepted" ? <p role="status" className="text-sm">SOLAPI 접수 완료 · 학부모 전화 끝 {last4}</p> : null}
+        {currentStatus === "accepted" ? <p role="status" className="text-sm">
+          {deliveryResult?.deliveryStatus === "delivered" ? "알림톡 전달 완료"
+            : deliveryResult?.deliveryStatus === "failed" ? "알림톡 전달 실패 · 재발송 전 수신 정보를 확인해 주세요"
+            : deliveryResult?.deliveryStatus === "pending" ? "SOLAPI 접수 완료 · 전달 처리 중"
+            : deliveryResult?.deliveryStatus === "unavailable" ? "SOLAPI 접수 완료 · 전달 결과 확인 불가"
+            : "SOLAPI 접수 완료"} · 학부모 전화 끝 {last4}
+          {deliveryResult ? <span className="block text-xs text-muted-foreground">조회 시각 · {formatAuditTimestamp(deliveryResult.checkedAt)}</span> : null}
+        </p> : null}
         {currentStatus === "unknown" ? <p role="alert" className="text-sm">발송 결과 확인 필요</p> : null}
         {currentStatus === "failed_hold" ? <p role="alert" className="text-sm">발송 실패 · 같은 내용 재발송 불가</p> : null}
 
@@ -369,7 +405,7 @@ export function RegistrationAlimtalkPreviewDialog({
             ))}
             <p className="whitespace-pre-wrap break-words rounded-md border bg-muted/30 p-3">{preview.body}</p>
             {preview.buttons.map((button) => <p key={`${button.name}:${button.host}`} className="break-words text-muted-foreground">카카오 버튼 · {button.name} ({button.host})</p>)}
-            <p className="text-muted-foreground">준비 상태 · {preview.readiness.sendAllowed ? "발송 가능" : preview.readiness.blockers.join(", ") || "발송 불가"}</p>
+            <p className="text-muted-foreground">준비 상태 · {preview.readiness.sendAllowed ? "발송 가능" : getRegistrationCustomerMessageReadinessMessage(preview.readiness.blockers)}</p>
             {latestMessage ? <p className="text-muted-foreground">최근 상태 · {statusLabel(latestMessage.currentStatus)}</p> : null}
             {auditMessage ? <p className="text-muted-foreground">{auditActorLabel(auditMessage.confirmedByName)} · {formatAuditTimestamp(auditMessage.confirmedAt)}</p> : null}
           </div>
@@ -397,7 +433,7 @@ export function RegistrationAlimtalkPreviewDialog({
 
         <DialogFooter>
           <Button type="button" className="min-h-11" variant="outline" onClick={() => handleOpenChange(false)}>돌아가기</Button>
-          {(currentStatus === "unknown" && canCheck) || canCheckPending ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void check()}>상태 확인</Button> : (
+          {currentStatus === "accepted" && client.checkDelivery && (viewerRole === "admin" || viewerRole === "staff") ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void checkDelivery()}>{sending ? "확인 중" : "전달 결과 확인"}</Button> : (currentStatus === "unknown" && canCheck) || canCheckPending ? <Button type="button" className="min-h-11" disabled={sending} onClick={() => void check()}>상태 확인</Button> : (
             <Button type="button" className="min-h-11" disabled={confirmDisabled} onClick={() => void confirm()}>{confirmLabel}</Button>
           )}
         </DialogFooter>

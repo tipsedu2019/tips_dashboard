@@ -1816,3 +1816,63 @@ test("admin observation readiness refresh is admin-only, parser-strict, and prov
   assert.equal(staff.calls.observationReadiness, 0)
   assert.equal(staff.calls.providerSend, 0)
 })
+
+test("accepted delivery lookup returns only a matched outcome and never claims, sends, finalizes, or changes enrollment", async () => {
+  for (const [outcome, matched, expected] of [["accepted", true, "delivered"], ["failed_hold", true, "failed"], ["unknown", true, "pending"], ["accepted", false, "unavailable"]]) {
+    const { deps, calls } = makeDeps({
+      async readDeliveryContext() { return { providerMessageId: "private-provider-id", requestKey: IDS.request } },
+      async lookupProvider() { return { outcome, evidence: { statusCode: outcome === "accepted" ? "4000" : "3000", requestKeyMatched: matched } } },
+    })
+    const response = await createRegistrationCustomerMessageRouteHandlers(deps).delivery(request(`/api/solapi/registration/delivery?messageId=${IDS.message}`))
+    assert.equal(response.status, 200)
+    assert.equal(response.headers.get("cache-control"), "no-store")
+    assert.deepEqual(await response.json(), { ok: true, deliveryStatus: expected, checkedAt: "2026-08-05T00:00:00.000Z" })
+    for (const key of ["claim", "marker", "providerSend", "finalize", "recordCheck", "admin"]) assert.equal(calls[key], 0, key)
+  }
+})
+
+test("delivery lookup checks role and stored authorization before any provider request", async () => {
+  for (const role of ["teacher", "assistant", "viewer"]) {
+    const { deps, calls } = makeDeps({ async authenticate() { return { actorProfileId: IDS.actor, role } } })
+    const response = await createRegistrationCustomerMessageRouteHandlers(deps).delivery(request(`/api/solapi/registration/delivery?messageId=${IDS.message}`))
+    assert.equal(response.status, 403)
+    assert.equal(calls.providerLookup, 0)
+  }
+  const { deps, calls } = makeDeps({ async readDeliveryContext() { throw new RegistrationCustomerMessageHttpError(403, "registration_customer_message_forbidden") } })
+  const response = await createRegistrationCustomerMessageRouteHandlers(deps).delivery(request(`/api/solapi/registration/delivery?messageId=${IDS.message}`))
+  assert.equal(response.status, 403)
+  assert.equal(calls.providerLookup, 0)
+  const invalid = await createRegistrationCustomerMessageRouteHandlers(deps).delivery(request(`/api/solapi/registration/delivery?messageId=${IDS.message}&providerMessageId=untrusted`))
+  assert.equal(invalid.status, 400)
+})
+
+test("production delivery wiring calls only the protected read RPC and the SOLAPI GET receipt endpoint", async () => {
+  const calls = []
+  const handlers = createProductionRegistrationCustomerMessageRouteHandlers({
+    environment: PRODUCTION_HISTORY_ENV,
+    auth: { async authenticate() { return { actorProfileId: IDS.actor, role: "staff", actorClient: {}, serviceClient: {
+      async rpc(name, input) {
+        calls.push(name)
+        assert.equal(name, "read_registration_customer_message_delivery_context_v1")
+        assert.deepEqual(input, { p_actor_profile_id: IDS.actor, p_message_id: IDS.message })
+        return { data: { providerMessageId: "fixture-message", providerGroupId: "fixture-group", requestKey: IDS.request }, error: null }
+      },
+    } } } },
+    async providerFetch(url, init) {
+      calls.push(init.method)
+      assert.equal(new URL(url).origin, "https://api.solapi.com")
+      assert.equal(new URL(url).pathname, "/messages/v4/list")
+      assert.equal(init.method, "GET")
+      return new Response(JSON.stringify({ messageList: { fixture: {
+        messageId: "fixture-message", groupId: "fixture-group", status: "COMPLETE", statusCode: "4000",
+        customFields: { registrationRequestKey: IDS.request },
+      } } }), { status: 200, headers: { "content-type": "application/json" } })
+    },
+  })
+  const response = await handlers.delivery(request(`/api/solapi/registration/delivery?messageId=${IDS.message}`))
+  assert.equal(response.status, 200)
+  const payload = await response.json()
+  assert.equal(payload.deliveryStatus, "delivered")
+  assert.deepEqual(Object.keys(payload).sort(), ["checkedAt", "deliveryStatus", "ok"])
+  assert.deepEqual(calls, ["read_registration_customer_message_delivery_context_v1", "GET"])
+})

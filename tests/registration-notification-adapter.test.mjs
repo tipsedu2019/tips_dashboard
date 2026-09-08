@@ -1218,6 +1218,59 @@ test("기본 export는 import만으로 DB·provider를 호출하지 않고 공�
   }
 })
 
+test("관리팀 이벤트의 DB workflow revision을 수신하고 발송 직전 원본 재검증을 유지한다", async () => {
+  const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
+  const calls = []
+  const fixture = createFixtureDependencies()
+  const adapter = createRegistrationNotificationAdapter(fixture.dependencies, {
+    async revalidateAuthoritativeSource(input) {
+      calls.push(input)
+      return { ok: false, status: "canceled", reason: "source_revision_changed" }
+    },
+  })
+  for (const [eventKey, schema] of [
+    ["registration.case_created", 1], ["registration.consultation_completed", 2],
+    ["registration.waiting_transitioned", 2], ["registration.admission_started", 2],
+  ]) {
+    const input = {
+      workflowKey: "registration", eventId: EVENT_A, eventKey,
+      sourceType: "ops_task_event", sourceId: EVENT_B, sourceRevision: "3",
+      payloadSchemaVersion: schema,
+      payload: { task_id: TASK_A, track_id: TRACK_ENGLISH,
+        student_name: "검증학생", grade: "중1", subject: "영어", subjects: ["영어", "수학"],
+        inquiry_at: "2026-09-01T00:00:00.000Z", status: "pending", workflow_status: "대기 신청",
+        current_status: "대기 신청", actor_name: "검증담당", actor_kind: "user",
+        occurred_at: "2026-09-05T12:06:52.000Z", source_event_id: EVENT_B,
+        progress_line: "[진행] 검증담당님이 상태를 변경했어요.", memo_line: "" },
+      scheduledFor: "2026-09-05T12:06:52.000Z",
+      rule: { ruleId: RULE_CHAT, ruleRevision: "1", templateId: TEMPLATE_A,
+        audienceKey: "management_team", channelKey: "google_chat",
+        connectionKey: "google_chat.management", ruleVariantKey: "immediate" },
+    }
+    const targets = await adapter.resolveTargets(input)
+    assert.equal(targets.targets[0].connectionKey, "google_chat.management")
+    const rendered = await adapter.buildRenderContext({ ...input, targetGeneration: "0",
+      target: targets.targets[0], requestedContextKeys: ["student_name", "subjects"] })
+    assert.equal(rendered.student_name, "검증학생")
+    assert.equal(rendered.subjects, "영어 · 수학")
+    assert.equal(await adapter.buildDeepLink({ ...input, targetGeneration: "0", target: targets.targets[0] }),
+      `/admin/registration?taskId=${TASK_A}&trackId=${TRACK_ENGLISH}`)
+    const revalidation = { ...input, deliveryId: APPOINTMENT_A, ruleId: RULE_CHAT,
+      ruleRevision: "1", targetGeneration: "0", target: targets.targets[0] }
+    assert.deepEqual(await adapter.revalidateBeforeSend(revalidation),
+      { ok: false, status: "canceled", reason: "source_revision_changed" })
+    assert.equal(calls.at(-1).sourceRevision, "3")
+    for (const revision of ["0", "-1", "3.1", "invalid"]) {
+      await assert.rejects(adapter.resolveTargets({ ...input, sourceRevision: revision }), /payload_schema_unsupported/)
+      assert.deepEqual(await adapter.revalidateBeforeSend({ ...revalidation, sourceRevision: revision }),
+        { ok: false, status: "failed", reason: "payload_schema_unsupported" })
+    }
+    await assert.rejects(adapter.resolveTargets({ ...input,
+      eventKey: "registration.phone_consultation_ready", payloadSchemaVersion: 2 }), /payload_schema_unsupported/)
+  }
+  assert.equal(calls.length, 4)
+})
+
 test("등록 adapter는 리마인더와 분리된 immediate core·phone·visit·SOLAPI 경계를 처리한다", async () => {
   const { createRegistrationNotificationAdapter } = await import(adapterModuleUrl)
   const fixture = createFixtureDependencies()
