@@ -49,7 +49,10 @@ from dashboard_private.notification_rules rule
 join dashboard_private.notification_rule_content_contracts contract on contract.rule_id = rule.id
 join dashboard_private.notification_templates template on template.id = rule.active_template_id
 join dashboard_private.notification_rule_mention_settings setting on setting.rule_id = rule.id
-where rule.workflow_key = 'tasks' and rule.channel_key = 'google_chat'
+where rule.id in (
+ '99480000-0000-4000-8000-000000000101',
+ '99480000-0000-4000-8000-000000000102'
+)
 order by rule.id limit 2;
 select is((select count(*) from atomic_fixture), 2::bigint, 'two seeded current rules exercise ordered mention mutations');
 create temporary table atomic_baseline on commit drop as select

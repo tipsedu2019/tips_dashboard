@@ -51,6 +51,9 @@ jobs:
       - name: Test legacy notification retry-storm regression
         run: node --test --experimental-strip-types tests/notification-legacy-retry-storm.test.mjs tests/notification-legacy-retry-storm-route.test.mjs tests/notification-word-retest-retirement.test.mjs tests/registration-notification-adapter.test.mjs
 
+      - name: Test notification fixture and isolated runner contracts
+        run: node --test --experimental-strip-types tests/notification-content-local-qa-fixture.test.mjs tests/notification-isolated-db-qa.test.mjs
+
       - name: Setup Squawk
         shell: bash
         run: |
@@ -149,7 +152,7 @@ jobs:
             --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql \
             --test supabase/tests/registration_customer_reminder_claim_final_gate_test.sql \
             --test supabase/tests/registration_customer_delivery_lookup_test.sql \
-            --test supabase/tests/notification_settings_atomic_registration_policy_test.sql \
+            --test supabase/tests/registration_notification_settings_atomic_policy_test.sql \
             --test supabase/tests/registration_visit_cancellation_explicit_test.sql \
             --test supabase/tests/registration_case_customer_message_history_test.sql \
             --test supabase/tests/registration_observation_explicit_chat_test.sql \
