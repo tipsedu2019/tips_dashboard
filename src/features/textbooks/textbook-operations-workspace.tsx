@@ -1115,6 +1115,7 @@ function TextbookOperationsWorkspaceContent() {
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
   const inventoryCountDraftRevisionsRef = useRef<Record<string, number>>({});
+  const inventoryCountRequestsRef = useRef<Record<string, { fingerprint: string; requestId: string; countedAt: string }>>({});
   const textbookSelectionRevisionsRef = useRef<Record<string, number>>({});
   const [saleForm, setSaleForm] = useState(emptySaleForm);
   const saleAutoDefaultsRef = useRef({ locationId: "" });
@@ -3995,6 +3996,7 @@ function TextbookOperationsWorkspaceContent() {
       return next;
     });
     delete inventoryCountDraftRevisionsRef.current[draftKey];
+    delete inventoryCountRequestsRef.current[draftKey];
   }
 
   function isCurrentInventoryAction(
@@ -4013,6 +4015,15 @@ function TextbookOperationsWorkspaceContent() {
       && normalizeStoredTextInput(current.memos[snapshot.key]) === snapshot.memo
       && (current.revisions[snapshot.key] || 0) === snapshot.revision
       && (current.selectionRevisions[snapshot.textbookId] || 0) === snapshot.selectionRevision);
+  }
+
+  function getInventoryCountRequest(key: string, quantity: string, memo: string, revision: number) {
+    const fingerprint = JSON.stringify([actorKey, quantity, memo, revision]);
+    const previous = inventoryCountRequestsRef.current[key];
+    if (previous?.fingerprint === fingerprint) return previous;
+    const request = { fingerprint, requestId: crypto.randomUUID(), countedAt: new Date().toISOString().slice(0, 10) };
+    inventoryCountRequestsRef.current[key] = request;
+    return request;
   }
 
   function submitInlineStockCount(row: InventoryCountRow, countedQuantity: string, memo = "") {
@@ -4038,6 +4049,7 @@ function TextbookOperationsWorkspaceContent() {
         const authoritative = balance.rows.find((item) => item.textbookId === row.id);
         if (!authoritative) throw new Error("재고 수량을 확인할 수 없습니다.");
         return textbookService.createStockCountAdjustment({
+          ...getInventoryCountRequest(draftKey, normalizedQuantity, normalizedMemo, submittedRevision),
           textbookId: row.id, locationId: row.locationId, countedQuantity: normalizedQuantity,
           expectedQuantity: authoritative.currentQuantity, sale_price: getTextbookSalePrice(row.source), memo: normalizedMemo, createdBy: currentUserId,
         });
@@ -4061,6 +4073,7 @@ function TextbookOperationsWorkspaceContent() {
           return next;
         });
         delete inventoryCountDraftRevisionsRef.current[draftKey];
+        delete inventoryCountRequestsRef.current[draftKey];
       }
     });
   }
@@ -4097,8 +4110,9 @@ function TextbookOperationsWorkspaceContent() {
         }
         if (!isCurrentBulkCountAction()) throw new Error("재고 작업 대상이 변경되었습니다.");
         for (const snapshot of snapshots) {
+          if (!isCurrentActionActor(expectedActorKey)) throw new Error("재고 작업 계정이 변경되었습니다.");
           const authoritative = balances.find((balance) => balance.locationId === snapshot.row.locationId)!.rows.find((item) => item.textbookId === snapshot.row.id)!;
-          await textbookService.createStockCountAdjustment({ textbookId: snapshot.row.id, locationId: snapshot.row.locationId, countedQuantity: snapshot.quantity,
+          await textbookService.createStockCountAdjustment({ ...getInventoryCountRequest(snapshot.key, snapshot.quantity, snapshot.memo, snapshot.revision), textbookId: snapshot.row.id, locationId: snapshot.row.locationId, countedQuantity: snapshot.quantity,
             expectedQuantity: authoritative.currentQuantity, sale_price: getTextbookSalePrice(snapshot.row.source), memo: snapshot.memo, createdBy: currentUserId });
           completedSnapshots.push(snapshot);
         }
@@ -4107,7 +4121,7 @@ function TextbookOperationsWorkspaceContent() {
       invalidateInventory,
       isCurrentBulkCountAction,
     ).then((ok) => {
-      const acknowledged = completedSnapshots.filter((snapshot) => (inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision
+      const acknowledged = completedSnapshots.filter((snapshot) => isCurrentActionActor(expectedActorKey) && (inventoryCountDraftRevisionsRef.current[snapshot.key] || 0) === snapshot.revision
         && (textbookSelectionRevisionsRef.current[snapshot.textbookId] || 0) === snapshot.selectionRevision);
       setInventoryCountDrafts((current) => {
         const next = { ...current };
@@ -4116,7 +4130,7 @@ function TextbookOperationsWorkspaceContent() {
       });
       setInventoryCountMemoDrafts((current) => {
         const next = { ...current };
-        acknowledged.forEach((snapshot) => { delete next[snapshot.key]; delete inventoryCountDraftRevisionsRef.current[snapshot.key]; });
+        acknowledged.forEach((snapshot) => { delete next[snapshot.key]; delete inventoryCountDraftRevisionsRef.current[snapshot.key]; delete inventoryCountRequestsRef.current[snapshot.key]; });
         return next;
       });
       const acknowledgedRowIds = new Set(acknowledged.map((snapshot) => snapshot.row.id));

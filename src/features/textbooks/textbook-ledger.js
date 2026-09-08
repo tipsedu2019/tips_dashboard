@@ -129,6 +129,12 @@ export function getTextbookActionErrorMessage(error) {
   const details = text(error?.details);
   const hint = text(error?.hint);
   const saleErrors = {
+    textbook_count_balance_changed: "재고 수량이 변경되었습니다. 확인 후 다시 반영하세요.",
+    textbook_count_request_conflict: "실사 입력이 이전 요청과 다릅니다. 수량과 메모를 확인하세요.",
+    textbook_count_request_deleted: "이미 삭제된 실사입니다. 새 실사 수량을 입력하세요.",
+    textbook_count_history_conflict: "실사와 재고 조정 이력이 일치하지 않습니다. 이력을 확인하세요.",
+    textbook_count_forbidden: "실사 처리 권한이 없습니다.",
+    textbook_count_input_invalid: "실사 대상과 수량을 확인하세요.",
     textbook_sale_state_conflict: "출고 상태가 변경되었습니다. 새로고침 후 현재 상태를 확인하세요.",
     textbook_sale_stock_conflict: "출고와 재고 이동 기록이 일치하지 않습니다. 재고 이동 이력을 확인하세요.",
     textbook_sale_quantity_invalid: "출고 수량이 올바르지 않습니다. 수량을 확인하세요.",

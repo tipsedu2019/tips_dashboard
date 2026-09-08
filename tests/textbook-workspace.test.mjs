@@ -1748,10 +1748,6 @@ test("inventory tab shows stock change audit history", async () => {
   assert.match(workspaceSource, /textbookHistoryDeleteAdminEmails\.has\(currentUserEmail\)/);
   assert.match(workspaceSource, /canManageAll \|\|[\s\S]*isAdmin \|\|[\s\S]*role === "admin"/);
   assert.match(serviceSource, /export async function deleteInventoryHistory/);
-  assert.match(serviceSource, /\.from\("textbook_stock_counts"\)[\s\S]*\.update\(\{ adjustment_move_id: null \}\)/);
-  assert.match(serviceSource, /\.from\("textbook_stock_moves"\)[\s\S]*\.delete\(\)/);
-  assert.match(serviceSource, /createStockCountAdjustment[\s\S]*created_by: createdBy/);
-  assert.match(serviceSource, /updateSaleLineStatus[\s\S]*created_by: createdBy/);
 });
 
 test("inventory stock count is inline and mobile-first with recommended targets", async () => {
