@@ -17,6 +17,11 @@ import {
   PUBLIC_CLASSES_FULL_CACHE_TAG,
   PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,
 } from "../src/server/public-classes-cache.js";
+import {
+  PUBLIC_CLASSES_FULL_CLASS_PROJECTION,
+  PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION,
+  PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION,
+} from "../src/server/public-classes-payload.js";
 
 const CLASS_ID = "b6b5da5a-b000-4b46-bc7a-dabea5b53e12";
 const PRIVATE_CLASS_ID = "c6b5da5a-b000-4b46-bc7a-dabea5b53e13";
@@ -171,6 +176,21 @@ class QueryBuilder {
     return this;
   }
 
+  gt(column, value) {
+    this.filters.push(["gt", column, value]);
+    return this;
+  }
+
+  order(column) {
+    this.call.order = column;
+    return this;
+  }
+
+  limit(value) {
+    this.call.limit = value;
+    return this;
+  }
+
   maybeSingle() {
     this.single = true;
     return this;
@@ -187,14 +207,20 @@ class QueryBuilder {
   }
 
   then(resolve, reject) {
-    if (this.errors[this.table]) {
-      return Promise.resolve({ data: null, error: this.errors[this.table] }).then(resolve, reject);
+    const configuredError = this.errors[this.table];
+    const error = typeof configuredError === "function" ? configuredError(this.call) : configuredError;
+    if (error) {
+      return Promise.resolve({ data: null, error }).then(resolve, reject);
     }
     let data = [...(this.rows[this.table] || [])];
     for (const [operator, column, value] of this.filters) {
       if (operator === "eq") data = data.filter((row) => row[column] === value);
       if (operator === "in") data = data.filter((row) => value.includes(row[column]));
+      if (operator === "gt") data = data.filter((row) => row[column] > value);
     }
+    if (this.call.order) data.sort((a, b) => a[this.call.order].localeCompare(b[this.call.order]));
+    // Model the provider's row cap so an unpaged query cannot pass by accident.
+    data = data.slice(0, this.call.limit ?? 1_000);
     return Promise.resolve({ data: this.single ? data[0] ?? null : data, error: null })
       .then(resolve, reject);
   }
@@ -294,8 +320,12 @@ test("selected detail queries one public class and only its related rows with bo
   assert.deepEqual(calls[1].filters, [["eq", "class_id", CLASS_ID]]);
   assert.deepEqual(calls[2].filters, [["in", "id", [BOOK_ID]]]);
   assert.ok(calls.every((call) => call.signal instanceof AbortSignal));
-  assert.equal(new Set(calls.map((call) => call.signal)).size, 1);
   assert.ok(calls.every((call) => call.retry === false));
+  assert.deepEqual(calls.map((call) => call.columns), [
+    PUBLIC_CLASSES_FULL_CLASS_PROJECTION,
+    PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION,
+    PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION,
+  ]);
 
   const json = JSON.stringify(detail);
   assert.doesNotMatch(json, /student_ids|waitlist_ids|teacher_note|history|PRIVATE_/);
@@ -320,6 +350,75 @@ test("selected detail queries one public class and only its related rows with bo
   assert.equal(makeup.textbookEntries[0].actual.publicNote, "47쪽까지");
   assert.equal(detail.progressLogs[0].rangeLabel, "42~47쪽");
   assert.equal(detail.progressLogs[0].publicNote, "47쪽까지");
+});
+
+test("selected detail reads all progress and textbook pages with stable bounded queries", async () => {
+  const logs = Array.from({ length: 1_005 }, (_, index) => progressRow({
+    id: `progress-${String(index).padStart(4, "0")}`,
+    textbook_id: `book-${String(index % 65).padStart(2, "0")}`,
+  }));
+  const books = Array.from({ length: 65 }, (_, index) =>
+    textbookRow(`book-${String(index).padStart(2, "0")}`, `교재 ${index}`));
+  const { client, calls } = createSupabase({
+    classes: [classRow({ textbook_ids: [], schedule_plan: null })],
+    progress_logs: [...logs].reverse(),
+    textbooks: [...books].reverse(),
+  });
+
+  const detail = await queryPublicClassDetail(CLASS_ID, { env: {}, supabaseClient: client });
+  assert.deepEqual(detail.progressLogs.map((log) => log.id), logs.map((log) => log.id));
+  assert.deepEqual(detail.textbooks.map((book) => book.id).sort(), books.map((book) => book.id));
+  const progressCalls = calls.filter((call) => call.table === "progress_logs");
+  assert.equal(progressCalls.length, 34);
+  assert.ok(calls.filter((call) => call.table !== "classes")
+    .every((call) => call.limit === 30 && call.order === "id" && call.retry === false));
+  assert.equal(calls.filter((call) => call.table === "textbooks").length, 3);
+  assert.deepEqual(progressCalls[1].filters, [["eq", "class_id", CLASS_ID], ["gt", "id", "progress-0029"]]);
+  assert.ok(calls.every((call) => call.columns === ({
+    classes: PUBLIC_CLASSES_FULL_CLASS_PROJECTION,
+    progress_logs: PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION,
+    textbooks: PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION,
+  })[call.table]));
+});
+
+test("a later progress or textbook page failure never returns a partial detail", async () => {
+  const logs = Array.from({ length: 65 }, (_, index) => progressRow({
+    id: `progress-${String(index).padStart(2, "0")}`,
+    textbook_id: `book-${String(index).padStart(2, "0")}`,
+  }));
+  for (const table of ["progress_logs", "textbooks"]) {
+    let page = 0;
+    const { client } = createSupabase({
+      classes: [classRow({ textbook_ids: [], schedule_plan: null })],
+      progress_logs: logs,
+      textbooks: logs.map((log) => textbookRow(log.textbook_id, log.textbook_id)),
+    }, { [table]: () => ++page === 2 ? new Error(PRIVATE_CANARY) : null });
+    await assert.rejects(
+      queryPublicClassDetail(CLASS_ID, { env: {}, supabaseClient: client }),
+      PublicClassUnavailableError,
+    );
+  }
+});
+
+test("the original operation deadline cancels later pages", async (t) => {
+  const operation = new AbortController();
+  const timeouts = [];
+  t.mock.method(AbortSignal, "timeout", (milliseconds) => {
+    assert.equal(milliseconds, 8_000);
+    const signal = timeouts.length === 0 ? operation.signal : new AbortController().signal;
+    timeouts.push(signal);
+    return signal;
+  });
+  const { client, calls } = createSupabase({
+    classes: [classRow()],
+    progress_logs: Array.from({ length: 65 }, (_, index) => progressRow({ id: `p-${index}` })),
+  }, { progress_logs: () => { operation.abort(); return null; } });
+  await assert.rejects(
+    queryPublicClassDetail(CLASS_ID, { env: {}, supabaseClient: client }),
+    PublicClassUnavailableError,
+  );
+  assert.equal(calls.filter((call) => call.table === "progress_logs").length, 1);
+  assert.ok(calls.every((call) => call.signal.aborted));
 });
 
 test("planner auto-zero periods expose recorded active and makeup counts only", () => {

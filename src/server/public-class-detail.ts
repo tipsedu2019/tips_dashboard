@@ -14,19 +14,15 @@ import {
   PUBLIC_CLASSES_SNAPSHOT_MAX_AGE_MS,
 } from "./public-classes-cache.js";
 import {
-  applyPublicClassesQuerySafety,
   createPublicClassesSupabaseClient,
   loadPublicClassesEnv,
   normalizePublicClassesFullPayload,
-  PUBLIC_CLASSES_QUERY_TIMEOUT_MS,
-  PUBLIC_CLASSES_FULL_CLASS_PROJECTION,
-  PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION,
-  PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION,
 } from "./public-classes-payload.js";
 
 const PUBLIC_CLASS_DETAIL_CACHE_KEY = "public-class-detail-v2";
 const PUBLIC_CLASS_ID_PATTERN =
   /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/iu;
+const RELATED_PAGE_SIZE = 30;
 
 type QueryResult = { data: unknown; error: unknown };
 type Query = PromiseLike<QueryResult> & {
@@ -34,6 +30,9 @@ type Query = PromiseLike<QueryResult> & {
   retry(value: boolean): Query;
   eq(column: string, value: string): Query;
   in(column: string, values: string[]): Query;
+  gt(column: string, value: string): Query;
+  order(column: string): Query;
+  limit(value: number): Query;
   maybeSingle(): Query;
 };
 type PublicClassesClient = {
@@ -156,8 +155,60 @@ export function normalizePublicClassDetail(
   return { classItem, textbooks, progressLogs, generatedAt, availability };
 }
 
-async function execute(query: Query, signal: AbortSignal): Promise<QueryResult> {
-  return applyPublicClassesQuerySafety(query, signal) as Promise<QueryResult>;
+function readClass(supabase: PublicClassesClient, classId: string, signal: AbortSignal) {
+  // Local projections and literal limits are visible to the query budget
+  // analyzer. Tests verify equality with the shared public payload projections.
+  const projection = "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date";
+  return supabase.from("classes")
+    .select(projection)
+    .eq("id", classId)
+    .maybeSingle()
+    .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)]))
+    .retry(false);
+}
+
+function readProgressPage(
+  supabase: PublicClassesClient,
+  classId: string,
+  afterId: string | null,
+  signal: AbortSignal,
+) {
+  const projection = "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,updated_at,date";
+  if (afterId === null) {
+    return supabase.from("progress_logs")
+      .select(projection)
+      .eq("class_id", classId)
+      .order("id")
+      .limit(30)
+      .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)]))
+      .retry(false);
+  }
+  return supabase.from("progress_logs")
+    .select(projection)
+    .eq("class_id", classId)
+    .gt("id", afterId)
+    .order("id")
+    .limit(30)
+    .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)]))
+    .retry(false);
+}
+
+function readTextbookPage(supabase: PublicClassesClient, ids: string[], signal: AbortSignal) {
+  const projection = "id,title,name,publisher,price,tags,lessons,updated_at";
+  return supabase.from("textbooks")
+    .select(projection)
+    .in("id", ids)
+    .order("id")
+    .limit(30)
+    .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)]))
+    .retry(false);
+}
+
+function relatedRows(result: QueryResult): unknown[] {
+  if (result.error || !Array.isArray(result.data) || result.data.length > RELATED_PAGE_SIZE) {
+    throw new PublicClassUnavailableError();
+  }
+  return result.data;
 }
 
 export async function queryPublicClassDetail(
@@ -173,15 +224,13 @@ export async function queryPublicClassDetail(
   const supabase = supabaseClient ||
     (createPublicClassesSupabaseClient(env) as unknown as PublicClassesClient | null);
   if (!supabase) throw new PublicClassUnavailableError();
-  const signal = AbortSignal.timeout(PUBLIC_CLASSES_QUERY_TIMEOUT_MS);
+  // Every page shares this deadline; pagination must not restart an eight-second
+  // budget or cache a partial result after a later page fails.
+  const signal = AbortSignal.timeout(8_000);
 
   try {
-    const classQuery = supabase
-      .from("classes")
-      .select(PUBLIC_CLASSES_FULL_CLASS_PROJECTION)
-      .eq("id", classId)
-      .maybeSingle();
-    const classResult = await execute(classQuery, signal);
+    const classResult = await readClass(supabase, classId, signal);
+    signal.throwIfAborted();
     if (classResult.error) throw new PublicClassUnavailableError();
     if (!isRecord(classResult.data)) throw new PublicClassNotFoundError();
 
@@ -195,18 +244,25 @@ export async function queryPublicClassDetail(
     const classOnlyDetail = normalizePublicClassDetail(classOnlyPayload, classId, "live");
     if (!classOnlyDetail) throw new PublicClassNotFoundError();
 
-    const progressQuery = supabase
-      .from("progress_logs")
-      .select(PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION)
-      .eq("class_id", classId);
-    const progressResult = await execute(progressQuery, signal);
-    if (progressResult.error || !Array.isArray(progressResult.data)) {
-      throw new PublicClassUnavailableError();
+    const progressRows: unknown[] = [];
+    let afterId: string | null = null;
+    while (true) {
+      signal.throwIfAborted();
+      const page = relatedRows(await readProgressPage(supabase, classId, afterId, signal));
+      signal.throwIfAborted();
+      progressRows.push(...page);
+      if (page.length < RELATED_PAGE_SIZE) break;
+      const last = page[page.length - 1];
+      if (!isRecord(last) || typeof last.id !== "string" || !last.id ||
+        (afterId !== null && last.id <= afterId)) {
+        throw new PublicClassUnavailableError();
+      }
+      afterId = last.id;
     }
 
     const progressPayload = {
       ...classOnlyPayload,
-      progressLogs: progressResult.data,
+      progressLogs: progressRows,
     };
     const progressDetail = normalizePublicClassDetail(progressPayload, classId, "live");
     if (!progressDetail) throw new PublicClassUnavailableError();
@@ -215,17 +271,13 @@ export async function queryPublicClassDetail(
       progressDetail.progressLogs,
     )];
 
-    let textbookRows: unknown[] = [];
-    if (textbookIds.length) {
-      const textbookQuery = supabase
-        .from("textbooks")
-        .select(PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION)
-        .in("id", textbookIds);
-      const textbookResult = await execute(textbookQuery, signal);
-      if (textbookResult.error || !Array.isArray(textbookResult.data)) {
-        throw new PublicClassUnavailableError();
-      }
-      textbookRows = textbookResult.data;
+    const textbookRows: unknown[] = [];
+    for (let offset = 0; offset < textbookIds.length; offset += RELATED_PAGE_SIZE) {
+      signal.throwIfAborted();
+      const ids = textbookIds.slice(offset, offset + RELATED_PAGE_SIZE);
+      const page = relatedRows(await readTextbookPage(supabase, ids, signal));
+      signal.throwIfAborted();
+      textbookRows.push(...page);
     }
 
     const detail = normalizePublicClassDetail({
