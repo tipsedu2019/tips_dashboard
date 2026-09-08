@@ -302,6 +302,12 @@ export function createGoogleChatProvider(input: {
 
   return {
     async send(context: GoogleChatProviderInput): Promise<NotificationProviderResult> {
+      if (context?.workflow_key === "word_retests") {
+        return result("failed", "render_validation_failed", {
+          errorCode: "word_retest_google_chat_retired",
+          errorSummary: "word retest Google Chat delivery is retired",
+        })
+      }
       const webhookUrl = safeWebhookUrl(context?.webhook_url)
       if (!webhookUrl || context?.status !== "sending" || context?.channel_key !== "google_chat") {
         return result("failed", "connection_missing", {

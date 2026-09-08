@@ -396,7 +396,7 @@ export async function POST(request: Request) {
   try {
     await authorizeRegistrationLegacyDispatch(actorClient, sourceEventId)
     const plan = await loadLegacyDispatchPlan(serverClient, sourceEventId, actor.user.id)
-    const items = parsePlan(plan)
+    const items = parsePlan(plan).filter((item) => !item.eventKey.startsWith("word_retest."))
     const outcomes: string[] = []
     for (const item of items) {
       try {

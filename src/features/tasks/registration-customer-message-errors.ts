@@ -42,3 +42,24 @@ export function getRegistrationCustomerMessageErrorMessage(
     message.includes(code)
   ))?.[1] ?? fallback
 }
+
+
+const READINESS_MESSAGES: Readonly<Record<string, string>> = Object.freeze({
+  runtime_not_ready: "알림톡 기능 준비가 필요합니다. 관리자에게 문의해 주세요.",
+  activation_off: "이 종류의 알림톡 발송이 꺼져 있습니다. 관리자에게 문의해 주세요.",
+  verification_scope_mismatch: "현재 수신자는 시험 발송 대상으로 지정되지 않았습니다.",
+  credentials_missing: "발송 서비스 연결을 확인해 주세요.",
+  pf_missing: "카카오 채널 연결을 확인해 주세요.",
+  template_missing: "이 안내에 사용할 알림톡 템플릿을 등록해 주세요.",
+  template_not_verified: "알림톡 템플릿 승인과 내용 확인이 필요합니다.",
+  template_drift: "승인된 템플릿과 현재 내용이 다릅니다. 템플릿을 확인해 주세요.",
+  source_invalid: "예약과 과목별 진행상태를 확인한 뒤 새 미리보기를 열어 주세요.",
+  source_dirty: "등록 정보가 변경되었습니다. 저장 후 새 미리보기를 열어 주세요.",
+  duplicate_locked: "같은 내용의 발송 요청이 있습니다. 최근 발송 상태를 확인해 주세요.",
+  role_not_authorized: "알림톡 발송은 원장·관리팀이 처리할 수 있습니다.",
+})
+
+export function getRegistrationCustomerMessageReadinessMessage(codes: readonly string[]) {
+  return [...new Set(codes.map((code) => READINESS_MESSAGES[code] || "발송 준비 상태를 확인해 주세요."))].join(" ")
+    || "발송 준비 상태를 확인해 주세요."
+}

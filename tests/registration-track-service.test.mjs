@@ -97,6 +97,28 @@ async function loadFactory(extraGlobals = {}) {
   return sandboxModule.exports;
 }
 
+test("subject saves send the opened snapshot and keep the same request after a lost response", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  let attempt = 0;
+  const harness = createClient({ rpcHandler() {
+    attempt += 1;
+    if (attempt === 1) return { data: null, error: new Error("response lost") };
+    return { data: { taskId: "task-1", subjects: ["영어", "수학"], tracks: [] }, error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const input = {
+    taskId: "task-1", expectedSubjects: ["영어"], subjects: ["수학", "영어"], requestKey: "subject-replay",
+  };
+  await assert.rejects(service.syncRegistrationCaseSubjects(input), /response lost/);
+  assert.equal(harness.rpcCalls.length, 1, "a failed save must not retry automatically");
+  const result = await service.syncRegistrationCaseSubjects(input);
+  assert.equal(result.taskId, "task-1");
+  assert.deepEqual(harness.rpcCalls.map(([name, args]) => [name, JSON.parse(JSON.stringify(args))]), [
+    ["sync_registration_case_subjects_v2", { p_task_id: "task-1", p_subjects: ["영어", "수학"], p_expected_subjects: ["영어"], p_request_key: "subject-replay" }],
+    ["sync_registration_case_subjects_v2", { p_task_id: "task-1", p_subjects: ["영어", "수학"], p_expected_subjects: ["영어"], p_request_key: "subject-replay" }],
+  ]);
+});
+
 test("track rows preserve science and fail closed for unsupported subjects", async () => {
   const { mapTrack } = await loadFactory();
 
@@ -3480,7 +3502,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   const key = "request-key";
 
   await service.createRegistrationCase({ studentName: "김다미", schoolGrade: "고1", schoolName: "중앙여고", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "2026-07-12T01:00:00Z", subjects: ["영어", "수학"], requestNote: "", priority: "normal", requestKey: key });
-  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: ["영어"], requestKey: key });
+  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: ["영어"], expectedSubjects: ["영어"], requestKey: key });
   await service.updateRegistrationCaseCommon({ taskId: "task-1", studentName: "김다미", schoolGrade: "고1", schoolName: "", parentPhone: "01012345678", studentPhone: "", campus: "본관", inquiryAt: "   ", requestNote: "", priority: "normal", expectedCommonRevision: 3, requestKey: key });
   await service.routeRegistrationInquiry({ trackId: "track-1", destination: "waiting", waitingKind: "current_term_opening", classId: "", requestKey: key });
   await service.assignRegistrationTrackDirector({ trackId: "track-1", directorProfileId: "", assignmentSource: "manual", ruleKey: "", expectedCommonRevision: 3, requestKey: key });
@@ -3508,7 +3530,7 @@ test("all authenticated Task 3 wrappers use exact RPC names, stable keys, and nu
   await service.setStudentClassRosterMode({ studentId: "student-1", classId: "class-1", nextMode: "enrolled", expectedMode: "removed", memo: "등록" });
 
   assert.deepEqual(harness.rpcCalls.map(([name]) => name), [
-    "create_registration_case", "sync_registration_case_subjects", "update_registration_case_common",
+    "create_registration_case", "sync_registration_case_subjects_v2", "update_registration_case_common",
     "route_registration_inquiry", "assign_registration_track_director",
     "save_registration_appointment_details_v1", "cancel_registration_appointment",
     "start_registration_level_test_attempt", "complete_registration_level_test_attempt",
@@ -4110,7 +4132,7 @@ test("Notion-style fact mutations bypass runtime readiness while process mutatio
     taskId: "task-1", studentName: "", schoolGrade: "", schoolName: "", parentPhone: "", studentPhone: "",
     campus: "", inquiryAt: "", requestNote: "", priority: "normal", expectedCommonRevision: 1, requestKey: "fact-common",
   });
-  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: [], requestKey: "fact-subjects" });
+  await service.syncRegistrationCaseSubjects({ taskId: "task-1", subjects: [], expectedSubjects: ["영어"], requestKey: "fact-subjects" });
   await service.setRegistrationWorkflowStatus({
     trackId: "track-1", workflowStatus: "inquiry", expectedWorkflowRevision: 1, requestKey: "fact-status",
   });
@@ -4119,7 +4141,7 @@ test("Notion-style fact mutations bypass runtime readiness while process mutatio
   assert.deepEqual(harness.rpcCalls.map(([name]) => name), [
     "create_registration_case",
     "update_registration_case_common",
-    "sync_registration_case_subjects",
+    "sync_registration_case_subjects_v2",
     "set_registration_workflow_status_v1",
   ]);
   assert.equal(harness.rpcCalls[0][1].p_inquiry_at, null, "blank create inquiryAt must be sent as SQL null");

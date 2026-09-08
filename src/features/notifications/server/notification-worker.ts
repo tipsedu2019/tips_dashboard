@@ -614,12 +614,10 @@ async function finishOrchestrationError(
     && Number.isInteger(attemptCount)
     && attemptCount >= 0
     && attemptCount < 5
-  const safeCode = normalizedCode === "render_validation_failed"
-    ? "render_validation_failed"
-    : normalizedCode === "notification_source_unavailable"
-        || normalizedCode === "notification_rpc_unavailable"
-      ? normalizedCode
-      : "payload_schema_unsupported"
+  const safeCode = [
+    "render_validation_failed", "payload_schema_unsupported", "schedule_validation_failed",
+    "notification_source_unavailable", "notification_rpc_unavailable", "worker_envelope_invalid",
+  ].includes(normalizedCode) ? normalizedCode : "notification_orchestration_failed"
   await input.rpc("finish_notification_orchestration_job_v1", finishParameters(
     kind,
     job,

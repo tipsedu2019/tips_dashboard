@@ -91,6 +91,7 @@ async function loadMountedDialog() {
     }],
     ["./registration-customer-message-errors", {
       getRegistrationCustomerMessageErrorMessage: (_error, fallback) => fallback,
+      getRegistrationCustomerMessageReadinessMessage: () => "발송 준비 상태를 확인해 주세요.",
     }],
   ])
   const runtimeRequire = (specifier) => {
@@ -159,6 +160,8 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
   const second = controlledPromise()
   const previewCalls = []
   let sendCalls = 0
+  let deliveryCalls = 0
+  const delivery = controlledPromise()
   const client = {
     preview(target) {
       previewCalls.push(target)
@@ -179,6 +182,7 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
         idempotent: false,
       }
     },
+    async checkDelivery() { deliveryCalls += 1; return delivery.promise },
     async check() { throw new Error("not used") },
     async reconcile() { throw new Error("not used") },
     async releasePreSend() { throw new Error("not used") },
@@ -233,6 +237,18 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
       { messageKind: "observation_booking", sourceId: "d6400000-0000-4000-8000-000000000003" },
     ])
     assert.match(dom.window.document.body.textContent, /발송 요청 · 김관리/)
+    const checkDelivery = [...dom.window.document.querySelectorAll("button")].find((button) => button.textContent === "전달 결과 확인")
+    assert.ok(checkDelivery, "accepted receipt must offer delivery lookup even when legacy canCheck is false")
+    await act(async () => { checkDelivery.click(); checkDelivery.click() })
+    assert.equal(deliveryCalls, 1)
+    await act(async () => {
+      delivery.resolve({ ok: true, deliveryStatus: "delivered", checkedAt: "2026-09-07T00:00:00.000Z" })
+      await delivery.promise
+    })
+    assert.match(dom.window.document.body.textContent, /알림톡 전달 완료/)
+    assert.equal(sendCalls, 1, "receipt checks must never resend")
+    await render("d6400000-0000-4000-8000-000000000002")
+    assert.doesNotMatch(dom.window.document.body.textContent, /알림톡 전달 완료/)
   } finally {
     if (root) await act(async () => root.unmount())
     dom.window.close()
@@ -359,7 +375,9 @@ test("preview dialog remains a controlled accessible presentation surface", asyn
   assert.match(source, /open:\s*boolean/)
   assert.match(source, /onOpenChange:\s*\(open:\s*boolean\)/)
   assert.match(source, /target:\s*RegistrationCustomerMessageTarget\s*\|\s*null/)
-  assert.match(source, /SOLAPI 접수 완료 · 학부모 전화 끝/)
+  assert.match(source, /SOLAPI 접수 완료/)
+  assert.match(source, /학부모 전화 끝/)
+  assert.match(source, /전달 결과 확인/)
   assert.match(source, /발송 요청 ·/)
   assert.match(source, /confirmedByName/)
   assert.match(source, /confirmedAt/)
@@ -434,7 +452,7 @@ test("미리보기의 모든 실패 경로는 내부 오류 코드를 운영자 
   const source = await sourceOrEmpty(dialogUrl)
 
   assert.match(source, /getRegistrationCustomerMessageErrorMessage/)
-  assert.equal((source.match(/setError\(getRegistrationCustomerMessageErrorMessage\(/g) || []).length, 5)
+  assert.equal((source.match(/setError\(getRegistrationCustomerMessageErrorMessage\(/g) || []).length, 6)
 })
 
 test("등록 fixture도 입학 수업정보와 모든 문의하기 버튼을 실제 미리보기처럼 제공한다", async () => {

@@ -1,5 +1,6 @@
 import type {
   RegistrationCustomerMessageCheckInput,
+  RegistrationCustomerMessageDeliveryResult,
   RegistrationCustomerMessageAdminClient,
   RegistrationCustomerMessageClient,
   RegistrationCustomerMessageHistoryItem,
@@ -134,6 +135,11 @@ export function createRegistrationCustomerMessageClient(
         method: "POST",
         body: JSON.stringify({ messageId: input.messageId }),
       })
+    },
+    checkDelivery(input: RegistrationCustomerMessageCheckInput, signal?: AbortSignal) {
+      const params = new URLSearchParams({ messageId: input.messageId })
+      return requestAdminJson<RegistrationCustomerMessageDeliveryResult>(options,
+        `/api/solapi/registration/delivery?${params}`, { method: "GET", signal, cache: "no-store" })
     },
     reconcile(input) {
       return requestJson<RegistrationCustomerMessageSendResult>(options, "/api/solapi/registration/admin", {

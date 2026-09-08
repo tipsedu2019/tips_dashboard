@@ -22,6 +22,8 @@ jobs:
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs
+      - name: Verify registration subject snapshots and inquiry recovery
+        run: node --test --experimental-strip-types tests/registration-track-service.test.mjs tests/registration-track-workspace.test.mjs
       - shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

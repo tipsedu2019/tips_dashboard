@@ -207,6 +207,23 @@ async function postWithHarness(t, harness, providerSend, actorOptions = {}) {
   }
 }
 
+test("retired word retest plans never reserve or send a Google Chat message", async (t) => {
+  const harness = serviceHarness({
+    eventKey: "word_retest.result_reported",
+    begun: { acquired: true, claim_id: IDS.claim, owner_generation: "0", dispatch_token: IDS.token, status: "dispatch_started" },
+  })
+  let providerCalls = 0
+  const result = await postWithHarness(t, harness, async () => {
+    providerCalls += 1
+    return { status: "sent", providerMessageId: "fixture-message" }
+  })
+  assert.equal(providerCalls, 0)
+  assert.equal(result.fetchCalls, 0)
+  assert.equal(result.body.sent, 0)
+  assert.equal(result.body.failed, 0)
+  assert.deepEqual(harness.calls.map(({ name }) => name), ["get_ops_task_legacy_dispatch_plan_v1"])
+})
+
 test("교사·정지 계정의 등록 알림 재시도는 plan과 provider 전에 403으로 끝난다", async (t) => {
   for (const actorState of ["teacher", "banned"]) {
     await t.test(actorState, async (subtest) => {
@@ -331,7 +348,6 @@ test("external attempt 거부 종결이 실패해도 finalize를 두 번 호출�
 test("정상 legacy provider 호출은 업무별 canonical workflow를 정확히 한 번 전달한다", async (t) => {
   const cases = [
     ["task.created", "tasks"],
-    ["word_retest.completed", "word_retests"],
     ["registration.case_created", "registration"],
     ["transfer.completed", "transfer"],
     ["withdrawal.completed", "withdrawal"],

@@ -1160,6 +1160,7 @@ export function RegistrationApplication({
       syncRegistrationCaseSubjects({
         taskId: detail.task.id,
         subjects: draft.subjects,
+        expectedSubjects: detail.tracks.map((track) => track.subject),
         requestKey: `${requestKey}:subjects`,
       }),
     ])

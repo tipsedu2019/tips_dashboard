@@ -136,6 +136,13 @@ const OBSERVATION_EVENTS = new Set<RegistrationObservationChatPayloadV3["event_k
   "registration.observation_feedback_submitted",
   "registration.observation_director_reassigned",
 ])
+// These final DB producers capture the registration track workflow revision.
+const IMMEDIATE_MANAGEMENT_EVENTS = new Set([
+  "registration.case_created",
+  "registration.consultation_completed",
+  "registration.waiting_transitioned",
+  "registration.admission_started",
+])
 const IMMEDIATE_CORE_EVENTS = new Set([
   "registration.case_created",
   "registration.inquiry_routed",
@@ -797,6 +804,12 @@ function immediateSourceType(eventKey: string) {
   return "ops_task_event"
 }
 
+function validImmediateEventRevision(eventKey: string, revision: string | null) {
+  return revision === null || (
+    IMMEDIATE_MANAGEMENT_EVENTS.has(eventKey) && POSITIVE_DECIMAL_PATTERN.test(revision)
+  )
+}
+
 function immediatePayload(input: NotificationResolveInput | NotificationRenderInput) {
   if (
     input.workflowKey !== "registration"
@@ -822,7 +835,7 @@ function immediatePayload(input: NotificationResolveInput | NotificationRenderIn
       requiredUuid(input.payload.appointment_id) !== input.sourceId.toLowerCase()
       || positiveDecimal(input.payload.notification_revision) !== sourceRevision
     ) adapterError("payload_schema_unsupported")
-  } else if (input.sourceRevision !== null) {
+  } else if (!validImmediateEventRevision(input.eventKey, input.sourceRevision)) {
     adapterError("payload_schema_unsupported")
   }
   if (IMMEDIATE_MESSAGE_EVENTS.has(input.eventKey)) {
@@ -1571,7 +1584,7 @@ export function createRegistrationNotificationAdapter(
           if (input.sourceRevision === null || !POSITIVE_DECIMAL_PATTERN.test(input.sourceRevision)) {
             return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
           }
-        } else if (input.sourceRevision !== null) {
+        } else if (!validImmediateEventRevision(input.eventKey, input.sourceRevision)) {
           return { ok: false, status: "failed", reason: "payload_schema_unsupported" }
         }
         return immediateDependencies.revalidateAuthoritativeSource({

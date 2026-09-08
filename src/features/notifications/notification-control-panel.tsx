@@ -45,6 +45,7 @@ import { NotificationMentionToggle } from "./notification-mention-settings"
 import type { NotificationMentionSettingDto } from "./notification-mention-settings-types"
 import {
   NOTIFICATION_CONNECTION_KEYS,
+  NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS,
   NOTIFICATION_WORKFLOW_OPTIONS,
   type NotificationConnectionDto,
   type NotificationConnectionKey,
@@ -1410,9 +1411,9 @@ export function NotificationControlPanel({
       {presentation === "page" ? (
         <nav
           aria-label="알림 업무 선택"
-          className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/35 p-1 sm:grid-cols-4 xl:grid-cols-7 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/35 p-1 sm:grid-cols-3 xl:grid-cols-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
         >
-          {NOTIFICATION_WORKFLOW_OPTIONS.map((option) => (
+          {NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map((option) => (
             <Button
               key={option.key}
               type="button"

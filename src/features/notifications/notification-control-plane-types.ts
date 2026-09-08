@@ -17,6 +17,11 @@ export const NOTIFICATION_WORKFLOW_OPTIONS = [
 
 export type NotificationWorkflowKey = (typeof NOTIFICATION_WORKFLOW_OPTIONS)[number]["key"]
 
+// Historical events keep their workflow identity; retired Chat workflows have no settings entry.
+export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(
+  ({ key }) => key !== "word_retests",
+)
+
 export const NOTIFICATION_EVENT_KEYS_BY_WORKFLOW = {
   tasks: [
     "task.created",

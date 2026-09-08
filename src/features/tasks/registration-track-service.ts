@@ -741,7 +741,9 @@ export type CreateRegistrationCaseInput = {
 }
 export type RegistrationCaseCreateWithInitialWorkflowInput =
   CreateRegistrationCaseInput & RegistrationInitialWorkflowPayload
-export type SyncRegistrationCaseSubjectsInput = { taskId: string; subjects: RegistrationSubject[]; requestKey: string }
+export type SyncRegistrationCaseSubjectsInput = {
+  taskId: string; subjects: RegistrationSubject[]; expectedSubjects: RegistrationSubject[]; requestKey: string
+}
 export type UpdateRegistrationCaseCommonInput = {
   taskId: string; studentName: string; schoolGrade: string; schoolName: string
   parentPhone: string; studentPhone: string; campus: string; inquiryAt: string
@@ -3084,13 +3086,15 @@ export function createRegistrationTrackService(
   async function syncRegistrationCaseSubjects(input: {
     taskId: string
     subjects: RegistrationSubject[]
+    expectedSubjects: RegistrationSubject[]
     requestKey: string
   }): Promise<RegistrationSubjectSyncResponse> {
     const result = await callRpc<RegistrationSubjectSyncResponse>(
-      "sync_registration_case_subjects",
+      "sync_registration_case_subjects_v2",
       {
         p_task_id: input.taskId,
-        p_subjects: input.subjects,
+        p_subjects: orderedRegistrationSubjects(input.subjects),
+        p_expected_subjects: orderedRegistrationSubjects(input.expectedSubjects),
         p_request_key: requireRequestKey(input.requestKey),
       },
       { runtimeChecked: true },
