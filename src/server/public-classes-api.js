@@ -1,11 +1,12 @@
 import { loadCachedPublicClassesFull } from "./public-classes-cache.js";
-import { isFallbackPublicClassesPayload } from "./public-classes-payload.js";
+import { buildFallbackPublicClassesPayload, normalizePublicClassesFailure, normalizePublicClassesFullPayload, isFallbackPublicClassesPayload } from "./public-classes-payload.js";
 
 export function createPublicClassesApiResponder(
   loadPayload = loadCachedPublicClassesFull,
 ) {
   return async function respond() {
-    const payload = await loadPayload();
+    const payload = normalizePublicClassesFullPayload(await loadPayload())
+      || buildFallbackPublicClassesPayload(normalizePublicClassesFailure());
     const isFallback = isFallbackPublicClassesPayload(payload);
 
     return {

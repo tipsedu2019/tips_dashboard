@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { createClient } from "@supabase/supabase-js";
+import { publicClassSchedule, publicLessons } from "../lib/public-class-schedule.js";
 
 import {
   ACTIVE_CLASS_STATUS,
@@ -18,15 +19,18 @@ export const PUBLIC_CLASSES_QUERY_TIMEOUT_MS = 8_000;
 export const PUBLIC_CLASSES_SUMMARY_PROJECTION =
   "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,start_date,end_date";
 export const PUBLIC_CLASSES_FULL_CLASS_PROJECTION =
-  "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date";
+  "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date";
 export const PUBLIC_CLASSES_FULL_TEXTBOOK_PROJECTION =
   "id,title,name,publisher,price,tags,lessons,updated_at";
 export const PUBLIC_CLASSES_FULL_PROGRESS_PROJECTION =
-  "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date";
+  "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,updated_at,date";
 
-export function applyPublicClassesQuerySafety(query) {
+export function applyPublicClassesQuerySafety(
+  query,
+  signal = AbortSignal.timeout(PUBLIC_CLASSES_QUERY_TIMEOUT_MS),
+) {
   return query
-    .abortSignal(AbortSignal.timeout(PUBLIC_CLASSES_QUERY_TIMEOUT_MS))
+    .abortSignal(signal)
     .retry(false);
 }
 
@@ -117,62 +121,67 @@ function getClassStatus(row) {
     normalizeClassStatus(row?.status) ||
     computeClassStatus({
       status: row?.status,
-      start_date: row?.start_date,
-      end_date: row?.end_date,
+      start_date: row?.start_date ?? row?.startDate,
+      end_date: row?.end_date ?? row?.endDate,
     })
   );
 }
 
-function mapPublicClass(row) {
-  const normalizedStatus = getClassStatus(row);
-  const fee = Number(row.fee || 0);
-  return {
-    id: row.id,
-    name: row.name || "",
-    className: row.name || "",
-    subject: row.subject || "",
-    grade: row.grade || "",
-    teacher: row.teacher || "",
-    room: row.room || "",
-    classroom: row.room || "",
-    schedule: row.schedule || "",
-    status: normalizedStatus,
-    fee,
-    tuition: fee,
-    capacity: Number(row.capacity || 0),
-    studentIds: Array.isArray(row.student_ids) ? row.student_ids : [],
-    waitlistIds: Array.isArray(row.waitlist_ids) ? row.waitlist_ids : [],
-    textbookIds: Array.isArray(row.textbook_ids) ? row.textbook_ids : [],
-    textbookInfo: row.textbook_info || null,
-    lessons: Array.isArray(row.lessons) ? row.lessons : [],
-    schedulePlan: row.schedule_plan || null,
-    schedule_plan: row.schedule_plan || null,
-    startDate: row.start_date || "",
-    endDate: row.end_date || "",
-    start_date: row.start_date || "",
-    end_date: row.end_date || "",
-  };
+function text(value) {
+  return typeof value === "string" ? value : "";
+}
+
+function strings(value) {
+  return Array.isArray(value) ? value.filter((item) => typeof item === "string") : [];
+}
+
+function records(value) {
+  return Array.isArray(value)
+    ? value.filter((row) => row !== null && typeof row === "object" && !Array.isArray(row))
+    : [];
+}
+
+function number(value) {
+  const result = typeof value === "number" || typeof value === "string" ? Number(value) : NaN;
+  return Number.isFinite(result) ? result : 0;
+}
+
+function count(row, field, camel, snake) {
+  if (Number.isSafeInteger(row[field]) && row[field] >= 0) return row[field];
+  return strings(row[snake] ?? row[camel]).length;
 }
 
 function mapPublicClassSummary(row) {
-  const normalizedStatus = getClassStatus(row);
-  const fee = Number(row.fee || 0);
+  const fee = number(row.fee ?? row.tuition);
+  const name = text(row.name) || text(row.className);
+  const room = text(row.room) || text(row.classroom);
   return {
-    id: row.id,
-    name: row.name || "",
-    className: row.name || "",
-    subject: row.subject || "",
-    grade: row.grade || "",
-    teacher: row.teacher || "",
-    room: row.room || "",
-    classroom: row.room || "",
-    schedule: row.schedule || "",
-    status: normalizedStatus,
+    id: text(row.id),
+    name,
+    className: name,
+    subject: text(row.subject),
+    grade: text(row.grade),
+    teacher: text(row.teacher),
+    room,
+    classroom: room,
+    schedule: text(row.schedule),
+    status: getClassStatus(row),
     fee,
     tuition: fee,
-    capacity: Number(row.capacity || 0),
-    studentIds: Array.isArray(row.student_ids) ? row.student_ids : [],
-    waitlistIds: Array.isArray(row.waitlist_ids) ? row.waitlist_ids : [],
+    capacity: number(row.capacity),
+    enrolledCount: count(row, "enrolledCount", "studentIds", "student_ids"),
+    waitlistCount: count(row, "waitlistCount", "waitlistIds", "waitlist_ids"),
+  };
+}
+
+function mapPublicClass(row) {
+  return {
+    ...mapPublicClassSummary(row),
+    textbookIds: strings(row.textbook_ids ?? row.textbookIds),
+    lessons: publicLessons(row.lessons),
+    schedulePlan: publicClassSchedule(row.schedule_plan ?? row.schedulePlan),
+    startDate: text(row.start_date ?? row.startDate),
+    endDate: text(row.end_date ?? row.endDate),
   };
 }
 
@@ -187,7 +196,7 @@ export function normalizePublicClassesSummaryPayload(payload) {
       ? payload.generatedAt
       : new Date().toISOString(),
     source: payload.source,
-    classes: payload.classes
+    classes: records(payload.classes)
       .map(mapPublicClassSummary)
       .filter((row) => row.status === ACTIVE_CLASS_STATUS),
     textbooks: [],
@@ -212,44 +221,39 @@ export function normalizePublicClassesFullPayload(payload) {
       ? payload.generatedAt
       : new Date().toISOString(),
     source: "supabase",
-    classes: payload.classes,
-    textbooks: payload.textbooks,
-    progressLogs: payload.progressLogs,
+    classes: records(payload.classes).map(mapPublicClass).filter((row) => row.status === ACTIVE_CLASS_STATUS),
+    textbooks: records(payload.textbooks).map(mapPublicTextbook),
+    progressLogs: records(payload.progressLogs).map(mapPublicProgressLog),
   };
 }
 
 function mapPublicTextbook(row) {
   return {
-    id: row.id,
-    title: row.title || row.name || "",
-    publisher: row.publisher || "",
-    price: Number(row.price || 0),
-    tags: Array.isArray(row.tags) ? row.tags : [],
-    lessons: Array.isArray(row.lessons) ? row.lessons : [],
-    updatedAt: row.updated_at || row.updatedAt || null,
+    id: text(row.id),
+    title: text(row.title) || text(row.name),
+    publisher: text(row.publisher),
+    price: number(row.price),
+    tags: strings(row.tags),
+    lessons: publicLessons(row.lessons),
+    updatedAt: text(row.updated_at ?? row.updatedAt) || null,
   };
 }
 
 function mapPublicProgressLog(row) {
-  const completedLessonIds = Array.isArray(row.completed_lesson_ids)
-    ? row.completed_lesson_ids
-    : [];
-
   return {
-    id: row.id,
-    classId: row.class_id || "",
-    textbookId: row.textbook_id || "",
-    progressKey: row.progress_key || "",
-    sessionId: row.session_id || "",
-    sessionOrder: Number(row.session_order || 0),
-    status: row.status || "pending",
-    rangeStart: row.range_start || "",
-    rangeEnd: row.range_end || "",
-    rangeLabel: row.range_label || "",
-    publicNote: row.public_note || "",
-    teacherNote: row.teacher_note || "",
-    updatedAt: row.updated_at || row.date || null,
-    completedLessonIds,
+    id: text(row.id),
+    classId: text(row.class_id ?? row.classId),
+    textbookId: text(row.textbook_id ?? row.textbookId),
+    progressKey: text(row.progress_key ?? row.progressKey),
+    sessionId: text(row.session_id ?? row.sessionId),
+    sessionOrder: number(row.session_order ?? row.sessionOrder),
+    status: text(row.status) || "pending",
+    rangeStart: text(row.range_start ?? row.rangeStart),
+    rangeEnd: text(row.range_end ?? row.rangeEnd),
+    rangeLabel: text(row.range_label ?? row.rangeLabel),
+    publicNote: text(row.public_note ?? row.publicNote),
+    updatedAt: text(row.updated_at ?? row.updatedAt ?? row.date) || null,
+    completedLessonIds: strings(row.completed_lesson_ids ?? row.completedLessonIds),
   };
 }
 
@@ -360,5 +364,5 @@ export async function writePublicClassesPayload(
   outputPath = publicClassesOutputPath,
 ) {
   await fs.mkdir(path.dirname(outputPath), { recursive: true });
-  await fs.writeFile(outputPath, `${JSON.stringify(payload, null, 2)}\n`, "utf8");
+  await fs.writeFile(outputPath, `${JSON.stringify(normalizePublicClassesFullPayload(payload) || buildFallbackPublicClassesPayload(normalizePublicClassesFailure()))}\n`, "utf8");
 }

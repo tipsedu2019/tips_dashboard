@@ -19,11 +19,11 @@ function validRequest(input) {
  * @param {{
  *   authenticate?: (request: Request) => Promise<{ role: string } | null>,
  *   revalidateTag: (tag: string, profile: string) => void,
- *   revalidatePath: (path: string) => void,
+ *   revalidatePath: (path: string, type?: "page" | "layout") => void,
  * }} options
  */
 export function createPublicClassesCacheInvalidationResponder({
-  authenticate = async (_request) => ({ role: "" }),
+  authenticate = async () => ({ role: "" }),
   revalidateTag,
   revalidatePath,
 } = {}) {
@@ -38,6 +38,7 @@ export function createPublicClassesCacheInvalidationResponder({
       revalidateTag(PUBLIC_CLASSES_SUMMARY_CACHE_TAG, "max");
       revalidateTag(PUBLIC_CLASSES_FULL_CACHE_TAG, "max");
       revalidatePath("/api/public-classes");
+      revalidatePath("/api/public-classes", "layout");
       return { status: 200, body: { ok: true, requestId: input.requestId } };
     } catch {
       return { status: 503, body: { ok: false, error: "public_classes_cache_refresh_pending", requestId: input.requestId } };

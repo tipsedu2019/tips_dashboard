@@ -83,12 +83,12 @@ test("public classes API preserves class plans and their supporting catalogs", a
     "public, max-age=0, s-maxage=600, stale-while-revalidate=3600",
   );
   assert.deepEqual(payload.classes[0].schedulePlan, {
+    textbooks: [],
     sessions: [{ id: "session-1" }],
   });
-  assert.deepEqual(payload.textbooks, [{ id: "textbook-1", title: "교재" }]);
-  assert.deepEqual(payload.progressLogs, [
-    { id: "progress-1", classId: "class-1" },
-  ]);
+  assert.equal(payload.textbooks[0].id, "textbook-1");
+  assert.equal(payload.textbooks[0].title, "교재");
+  assert.equal(payload.progressLogs[0].classId, "class-1");
   assert.deepEqual(calls, [[]]);
 });
 
@@ -193,8 +193,8 @@ test("public classes summary mode reads and returns only fields required by the 
         fee: 270000,
         tuition: 270000,
         capacity: 10,
-        studentIds: ["student-1", "student-2"],
-        waitlistIds: ["student-3"],
+        enrolledCount: 2,
+        waitlistCount: 1,
       },
     ],
     textbooks: [],
@@ -272,7 +272,7 @@ test("public classes full mode reads only production columns and keeps compatibi
     {
       table: "classes",
       columns:
-        "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,textbook_info,lessons,schedule_plan,start_date,end_date",
+        "id,name,subject,grade,teacher,room,schedule,status,fee,capacity,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan,start_date,end_date",
       abortSignalApplied: true,
       retry: false,
     },
@@ -285,7 +285,7 @@ test("public classes full mode reads only production columns and keeps compatibi
     {
       table: "progress_logs",
       columns:
-        "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,teacher_note,updated_at,date",
+        "id,class_id,textbook_id,progress_key,session_id,session_order,status,range_start,range_end,range_label,public_note,updated_at,date",
       abortSignalApplied: true,
       retry: false,
     },

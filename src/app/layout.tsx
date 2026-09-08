@@ -2,10 +2,8 @@ import type { Metadata } from "next"
 
 import "./globals.css"
 
-import { ThemeProvider } from "@/components/theme-provider"
-import { SidebarConfigProvider } from "@/contexts/sidebar-context"
+import { RouteProviders } from "@/components/public/route-providers"
 import { fontSansClassName } from "@/lib/fonts"
-import { AuthProvider } from "@/providers/auth-provider"
 
 export const metadata: Metadata = {
   title: "TIPS Dashboard",
@@ -26,11 +24,7 @@ export default function RootLayout({
   return (
     <html lang="ko" data-scroll-behavior="smooth" className="antialiased">
       <body className={fontSansClassName}>
-        <ThemeProvider defaultTheme="system" storageKey="tips-dashboard-v2-theme">
-          <AuthProvider>
-            <SidebarConfigProvider>{children}</SidebarConfigProvider>
-          </AuthProvider>
-        </ThemeProvider>
+        <RouteProviders>{children}</RouteProviders>
       </body>
     </html>
   )

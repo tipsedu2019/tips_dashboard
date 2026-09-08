@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 
+import { normalizePublicClassesFullPayload } from "../src/server/public-classes-payload.js";
 import * as publicClassesCache from "../src/server/public-classes-cache.js";
 import {
   PUBLIC_CLASSES_SUMMARY_CACHE_TAG,
@@ -90,7 +91,7 @@ function livePayload(call) {
 }
 
 function fullPayload(call) {
-  return {
+  return normalizePublicClassesFullPayload({
     generatedAt: `2026-08-14T00:01:0${call}.000Z`,
     source: "supabase",
     classes: [
@@ -103,7 +104,7 @@ function fullPayload(call) {
     ],
     textbooks: [{ id: `book-${call}`, title: "교재" }],
     progressLogs: [{ id: `progress-${call}`, classId: `class-${call}` }],
-  };
+  });
 }
 
 test("public class summary cache uses the 600-second tagged Next Data Cache contract and deduplicates concurrent cold loads", async () => {
@@ -190,8 +191,8 @@ test("a cold failure falls back to a normalized static summary and never caches 
     fee: 0,
     tuition: 0,
     capacity: 0,
-    studentIds: [],
-    waitlistIds: [],
+    enrolledCount: 0,
+    waitlistCount: 0,
   }]);
   assert.equal(JSON.stringify(fallback).includes("schedule_plan"), false);
 
