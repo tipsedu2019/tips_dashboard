@@ -66,6 +66,18 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_textbook_publisher_setting_detail_v1",
   "get_textbook_supplier_setting_detail_v1",
   "save_textbook_settings_draft_v1",
+  // Registration 20260908042842 / 044018 / 044502 / 062222: one selected
+  // case/observation/attempt, or the fixed five customer-guidance kinds. The
+  // action RPCs preserve their reviewed identity and return one receipt.
+  // Their pgTAP suites prove final ACL/source/idempotency bounds; these names
+  // never exempt transport deadlines, retries, or other registration RPCs.
+  "get_registration_management_notification_preview_v1",
+  "ensure_registration_workflow_notification_v4",
+  "get_registration_customer_guidance_settings_v1",
+  "get_registration_observation_explicit_chat_preview_v1",
+  "begin_registration_observation_explicit_chat_v1",
+  "register_registration_observation_explicit_chat_attempt_v1",
+  "finish_registration_observation_explicit_chat_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
 ])
@@ -99,9 +111,14 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
 // textbook_closing_work_context_reads_test.sql; local final-only proof 153/153.
 // textbook references: 20260831184952_textbook_reference_numbered_reads.sql (final),
 // textbook_reference_numbered_reads_test.sql; local final-only proof 215/215.
+// registration: 20260908042842_registration_case_customer_message_history.sql
+// and 20260908042546_registration_visit_cancellation_explicit.sql (final);
+// matching pgTAP files assert 22023 outside the 10/15/20 page-size allowlist.
 // textbook taxonomy: 20260901072345_textbook_taxonomy_numbered_drafts.sql (final),
 // textbook_taxonomy_numbered_drafts_test.sql; combined local final-only proof 255/255.
 const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
+  ["list_registration_case_customer_messages_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["list_registration_visit_cancellations_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["get_academic_curriculum_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
@@ -1257,9 +1274,16 @@ function isExactTimeoutAbortSignal(call) {
     && isProvablyBoundedAbortExpression(call.arguments[0])
 }
 
+// This non-ID key is a database primary key, not a source-file allowance:
+// 20260707170000_google_chat_webhook_settings.sql. Adding a non-ID detail key
+// requires the final ordered schema to retain that exact unique constraint.
+const EXACT_TABLE_DETAIL_KEYS = new Map([["google_chat_webhook_settings", "channel"]])
 function hasExactDetailPredicate(operations, constants, scope, surface) {
+  const table = callMethod(operations[0]) === "from" && operations[0].arguments[0]
+    ? argumentValue(operations[0].arguments[0], constants) : undefined
+  const tableKey = EXACT_TABLE_DETAIL_KEYS.get(table)
   return operations.some((operation) => callMethod(operation) === "eq" && operation.arguments.length === 2
-    && ["id", ...(surface === "tasks" ? ["task_id"] : [])].includes(argumentValue(operation.arguments[0], constants))
+    && ["id", ...(surface === "tasks" ? ["task_id"] : []), ...(tableKey ? [tableKey] : [])].includes(argumentValue(operation.arguments[0], constants))
     && isDefinedDetailValue(operation.arguments[1], constants, scope))
 }
 

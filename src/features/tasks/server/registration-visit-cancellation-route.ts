@@ -1,11 +1,23 @@
 import { createProductionRegistrationCustomerMessageAuth } from "./registration-customer-message-auth.ts"
 import { parseRegistrationVisitCancellationPage } from "../registration-visit-cancellation-service.ts"
 
+type RpcRequest = PromiseLike<{ data: unknown; error: unknown }> & {
+  abortSignal(signal: AbortSignal): RpcRequest
+  retry(enabled: false): RpcRequest
+}
+type RpcClient = { rpc(name: string, parameters: Record<string, unknown>): RpcRequest }
+
 type Dependencies = {
   authenticate(request: Request): Promise<{
     role: string
-    actorClient: { rpc(name: string, parameters: Record<string, unknown>): PromiseLike<{ data: unknown; error: unknown }> }
+    actorClient: RpcClient
   }>
+}
+
+function listVisitCancellations(client: RpcClient, taskId: string, page: number, pageSize: 10 | 15 | 20) {
+  return client.rpc("list_registration_visit_cancellations_v1", {
+    p_task_id: taskId, p_page: page, p_page_size: pageSize,
+  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
 }
 
 function response(body: Record<string, unknown>, status = 200) {
@@ -30,7 +42,7 @@ export function createRegistrationVisitCancellationGet(dependencies: Dependencie
         || !Number.isInteger(page) || page < 1 || page > 100000 || ![10,15,20].includes(pageSize)) {
         return response({ ok: false, error: "Invalid request" }, 400)
       }
-      const result = await context.actorClient.rpc("list_registration_visit_cancellations_v1", { p_task_id: taskId, p_page: page, p_page_size: pageSize })
+      const result = await listVisitCancellations(context.actorClient, taskId, page, pageSize as 10 | 15 | 20)
       if (result.error) throw result.error
       if (!result.data || typeof result.data !== "object" || Array.isArray(result.data)) throw new Error("invalid_list")
       return response({ ...parseRegistrationVisitCancellationPage(result.data, page, pageSize as 10 | 15 | 20), ok: true })

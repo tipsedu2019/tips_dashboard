@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
 import {
   parseRegistrationCaseCustomerMessageHistory,
   parseRegistrationCaseCustomerMessageHistoryInput,
@@ -35,18 +36,22 @@ export function createRegistrationCaseCustomerMessageHistoryHandler(dependencies
   }
 }
 
+function listCaseHistory(client: SupabaseClient, actorProfileId: string, input: RegistrationCaseCustomerMessageHistoryInput) {
+  return client.rpc("list_registration_case_customer_messages_v1", {
+    p_actor_profile_id: actorProfileId,
+    p_task_id: input.taskId,
+    p_page: input.page,
+    p_page_size: input.pageSize,
+  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+
 export function createProductionRegistrationCaseCustomerMessageHistoryHandler() {
   const auth = createProductionRegistrationCustomerMessageAuth()
   return createRegistrationCaseCustomerMessageHistoryHandler({
     authenticate: auth.authenticate,
     authorizeTask: auth.authorizeTask,
     async listHistory(context, input) {
-      const result = await context.serviceClient.rpc("list_registration_case_customer_messages_v1", {
-        p_actor_profile_id: context.actorProfileId,
-        p_task_id: input.taskId,
-        p_page: input.page,
-        p_page_size: input.pageSize,
-      })
+      const result = await listCaseHistory(context.serviceClient, context.actorProfileId, input)
       if (result.error) {
         const forbidden = ["42501", "P0002"].includes(result.error.code)
         throw new RegistrationCustomerMessageHttpError(forbidden ? 404 : 503,

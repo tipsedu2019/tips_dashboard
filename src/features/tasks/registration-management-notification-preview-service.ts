@@ -75,22 +75,20 @@ export function managementPreviewErrorMessage(code: string) {
 }
 
 type RpcResult = { data: unknown; error: { message?: string } | null }
-type RpcRequest = PromiseLike<RpcResult> & { abortSignal?: (signal: AbortSignal) => PromiseLike<RpcResult> }
+type RpcRequest = PromiseLike<RpcResult> & {
+  abortSignal(signal: AbortSignal): RpcRequest
+  retry(enabled: false): RpcRequest
+}
 type RpcClient = { rpc(name: string, parameters: Record<string, unknown>): RpcRequest }
 
 export function createRegistrationManagementPreviewService(client: RpcClient | null, timeoutMs = 15_000) {
-  function request(name: string, parameters: Record<string, unknown>): Promise<RpcResult> {
-    if (!client) return Promise.reject(new Error("알림 연결을 확인한 뒤 다시 시도해 주세요."))
-    const controller = new AbortController()
+  function request(operation: RpcRequest): Promise<RpcResult> {
     return new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
-        controller.abort()
         reject(new Error("응답 시간이 초과되었습니다. 발송 상태와 미리보기를 다시 확인해 주세요."))
       }, timeoutMs)
       try {
-        const operation = client.rpc(name, parameters)
-        const pending = operation.abortSignal ? operation.abortSignal(controller.signal) : operation
-        Promise.resolve(pending).then(resolve, reject).finally(() => clearTimeout(timer))
+        Promise.resolve(operation).then(resolve, reject).finally(() => clearTimeout(timer))
       } catch (error) {
         clearTimeout(timer)
         reject(error)
@@ -100,7 +98,9 @@ export function createRegistrationManagementPreviewService(client: RpcClient | n
   return {
     async preview(trackId: string, workflowRevision: number) {
       if (!client) throw new Error("알림 연결을 확인한 뒤 다시 시도해 주세요.")
-      const result = await request("get_registration_management_notification_preview_v1", { p_track_id: trackId, p_workflow_revision: workflowRevision })
+      const result = await request(client.rpc("get_registration_management_notification_preview_v1", {
+        p_track_id: trackId, p_workflow_revision: workflowRevision,
+      }).abortSignal(AbortSignal.timeout(8_000)).retry(false))
       if (result.error) throw new Error(managementPreviewErrorMessage(result.error.message || ""))
       const preview = parseRegistrationManagementPreview(result.data)
       if (preview.trackId !== trackId || preview.workflowRevision !== workflowRevision) throw new Error("현재 등록건의 미리보기가 아닙니다. 다시 확인해 주세요.")
@@ -110,12 +110,12 @@ export function createRegistrationManagementPreviewService(client: RpcClient | n
       if (!client) throw new Error("알림 연결을 확인한 뒤 다시 시도해 주세요.")
       const checked = parseRegistrationManagementPreview(preview)
       if (!checked.canSend) throw new Error("현재 알림을 보낼 수 없습니다. 미리보기를 다시 확인해 주세요.")
-      const result = await request("ensure_registration_workflow_notification_v4", {
+      const result = await request(client.rpc("ensure_registration_workflow_notification_v4", {
         p_track_id: preview.trackId, p_workflow_revision: preview.workflowRevision,
         p_request_key: requestKey, p_intent: "send_registration_management_notification",
         p_expected_preview_checksum: preview.previewChecksum,
         p_expected_recovery_source_event_id: checked.recoverySourceEventId,
-      })
+      }).abortSignal(AbortSignal.timeout(8_000)).retry(false))
       if (result.error) throw new Error(managementPreviewErrorMessage(result.error.message || ""))
       const data = result.data as Record<string, unknown> | null
       const ids = data?.sourceEventIds

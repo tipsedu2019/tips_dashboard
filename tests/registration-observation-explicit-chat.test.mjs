@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createRegistrationObservationChatHandlers } from '../src/features/tasks/server/registration-observation-chat-route.ts'
 import { createRegistrationObservationChatService } from '../src/features/tasks/registration-observation-chat-service.ts'
+import { fluentRpcClient, assertSingleNonRetryingRpc } from './helpers/notification-fluent-rpc.mjs'
 const id = '99480000-0000-4000-8000-000000000101'
 const requestId = '99480000-0000-4000-8000-000000000102'
 const checksum = 'a'.repeat(64)
@@ -11,8 +12,9 @@ const context = { observationId: id, intent: 'handoff', previewChecksum: checksu
   href: `/admin/registration?taskId=${id}`, teacherInternal: 'must-not-escape-preview' }
 const body = { observationId: id, intent: 'handoff', previewChecksum: checksum, requestId, confirmed: true }
 function harness(options={}) {
- const calls=[]; const external=[]
- const client = { async rpc(name, parameters) {
+ const calls=[]; const external=[];const rpcTrace=[]
+ const client = fluentRpcClient({ async rpc(name, parameters) {
+   assertSingleNonRetryingRpc(rpcTrace.at(-1))
    calls.push({name,parameters})
    if(options.rpc) { const override=await options.rpc(name,parameters); if(override) return override }
    if(name==='get_registration_observation_explicit_chat_preview_v1') return {data:{...context,canSend:true,status:'ready'},error:null}
@@ -20,15 +22,26 @@ function harness(options={}) {
    if(name==='register_registration_observation_explicit_chat_attempt_v1') return {data:true,error:null}
    if(name==='finish_registration_observation_explicit_chat_v1') return {data:null,error:null}
    throw new Error(`unexpected RPC ${name}`)
- } }
+ } },rpcTrace)
  const handlers=createRegistrationObservationChatHandlers({
    authenticate:async()=>({actorProfileId:id,role:options.role||'admin',actorClient:client,serviceClient:client}),
    readWebhook:async()=> 'https://chat.googleapis.com/v1/spaces/test/messages?key=fixture&token=fixture',
    fetch:async(url,init)=> {external.push({url,init}); if(options.transportError) throw new Error('connection lost');
      return new Response(JSON.stringify({name:'spaces/test/messages/sent'}),{status:options.httpStatus || 200})},
  })
- return {calls,external,handlers, post:(payload=body)=>handlers.POST(new Request('http://localhost/api/registration/observation-chat',{method:'POST',body:JSON.stringify(payload)}))}
+ return {calls,external,rpcTrace,handlers, post:(payload=body)=>handlers.POST(new Request('http://localhost/api/registration/observation-chat',{method:'POST',body:JSON.stringify(payload)}))}
 }
+test('observation read and send lifecycle use a single non-retrying 8s RPC at each boundary',async(t)=>{
+ const deadlines=[]
+ t.mock.method(AbortSignal,'timeout',(ms)=>{deadlines.push(ms);return new AbortController().signal})
+ const h=harness()
+ assert.equal((await h.handlers.GET(new Request(`http://localhost/api/registration/observation-chat?observationId=${id}&intent=handoff`))).status,200)
+ assert.equal((await h.post()).status,200)
+ assert.equal(h.rpcTrace.length,4)
+ h.rpcTrace.forEach(assertSingleNonRetryingRpc)
+ assert.deepEqual(deadlines.filter(ms=>ms===8000),[8000,8000,8000,8000])
+ assert.equal(h.external.length,1)
+})
 test('preview performs one read RPC and returns only the reviewable DTO',async()=>{
  const h=harness(); const response=await h.handlers.GET(new Request(`http://localhost/api/registration/observation-chat?observationId=${id}&intent=handoff`))
  assert.equal(response.status,200); assert.equal(response.headers.get('cache-control'),'no-store')

@@ -1,5 +1,8 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { readFile } from "node:fs/promises"
+import ts from "typescript"
+import { fluentRpcClient, assertSingleNonRetryingRpc } from "./helpers/notification-fluent-rpc.mjs"
 import { parseRegistrationCaseCustomerMessageHistory, parseRegistrationCaseCustomerMessageHistoryInput } from "../src/features/tasks/registration-customer-message-case-history-contract.ts"
 import { createRegistrationCaseCustomerMessageHistoryHandler } from "../src/features/tasks/server/registration-customer-message-case-history-route.ts"
 import { RegistrationCustomerMessageHttpError } from "../src/features/tasks/server/registration-customer-message-auth.ts"
@@ -17,6 +20,42 @@ const historyItem = {
 const payload = { ok: true, page: 1, pageSize: 10, totalCount: 1, history: [historyItem] }
 const settings = REGISTRATION_CUSTOMER_GUIDANCE.map(({ messageKind }) => ({ messageKind, mode: "off", templateVerifiedAt: null }))
 const historyUrl = `https://local.invalid/api/solapi/registration/case-history?taskId=${taskId}&page=1&pageSize=10`
+
+async function loadProductionHandler(kind, auth) {
+  const file = kind === "history" ? "registration-customer-message-case-history-route" : "registration-customer-message-settings-route"
+  const source = await readFile(new URL(`../src/features/tasks/server/${file}.ts`, import.meta.url), "utf8")
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText
+  const dependencies = {
+    "../registration-customer-message-case-history-contract.ts": await import("../src/features/tasks/registration-customer-message-case-history-contract.ts"),
+    "../registration-customer-message-settings-contract.ts": await import("../src/features/tasks/registration-customer-message-settings-contract.ts"),
+    "./registration-customer-message-auth.ts": { RegistrationCustomerMessageHttpError, createProductionRegistrationCustomerMessageAuth: () => auth },
+  }
+  const loaded = { exports: {} }
+  new Function("require", "module", "exports", compiled)((name) => {
+    assert.ok(dependencies[name], `unexpected production dependency ${name}`)
+    return dependencies[name]
+  }, loaded, loaded.exports)
+  return loaded.exports[kind === "history" ? "createProductionRegistrationCaseCustomerMessageHistoryHandler" : "createProductionRegistrationCustomerGuidanceSettingsHandler"]()
+}
+
+test("production history and settings reads attach an 8s signal and retry(false) to exactly one RPC", async (t) => {
+  const deadlines = []
+  t.mock.method(AbortSignal, "timeout", (ms) => { deadlines.push(ms); return new AbortController().signal })
+  const provider = t.mock.method(globalThis, "fetch", async () => { throw new Error("Unexpected provider call") })
+  for (const kind of ["history", "settings"]) {
+    const trace = []
+    const serviceClient = fluentRpcClient({ async rpc() { return { data: kind === "history" ? payload : settings, error: null } } }, trace)
+    const handler = await loadProductionHandler(kind, { authenticate: async () => ({ ...context, serviceClient }), authorizeTask: async () => true })
+    const response = await handler(new Request(kind === "history" ? historyUrl : "https://local.invalid/api/solapi/registration/settings"))
+    assert.equal(response.status, 200)
+    assert.equal(trace.length, 1)
+    assertSingleNonRetryingRpc(trace[0])
+    assert.equal(trace[0].name, kind === "history" ? "list_registration_case_customer_messages_v1" : "get_registration_customer_guidance_settings_v1")
+    assert.deepEqual(trace[0].args, kind === "history" ? { p_actor_profile_id: context.actorProfileId, p_task_id: taskId, p_page: 1, p_page_size: 10 } : { p_actor_profile_id: context.actorProfileId })
+  }
+  assert.deepEqual(deadlines, [8000, 8000])
+  assert.equal(provider.mock.callCount(), 0)
+})
 
 test("history input accepts only exact bounded numbered pagination", () => {
   for (const pageSize of [10, 15, 20]) {

@@ -55,6 +55,10 @@ select 'booking', public.save_registration_appointment_details_v1(null, (data ->
 from cancel_fixture where key = 'case';
 
 select is((public.list_registration_visit_cancellations_v1((select (data ->> 'taskId')::uuid from cancel_fixture where key = 'case'), 1) -> 'items'), '[]'::jsonb, 'scheduled visits are not cancellation candidates');
+select throws_ok($q$
+  select public.list_registration_visit_cancellations_v1(
+    (select (data ->> 'taskId')::uuid from cancel_fixture where key = 'case'), 1, 30)
+$q$, '22023', 'registration_visit_cancellation_page_invalid', 'cancellation history rejects a page size outside 10, 15, and 20');
 
 set local role postgres;
 -- Ordered migrations do not imply that an installation has seeded settings.

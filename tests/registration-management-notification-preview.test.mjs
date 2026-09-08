@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createRegistrationManagementPreviewService, parseRegistrationManagementPreview } from '../src/features/tasks/registration-management-notification-preview-service.ts'
+import { createRegistrationManagementPreviewService as createService, parseRegistrationManagementPreview } from '../src/features/tasks/registration-management-notification-preview-service.ts'
+import { fluentRpcClient, assertSingleNonRetryingRpc } from './helpers/notification-fluent-rpc.mjs'
+const createRegistrationManagementPreviewService=(client,timeoutMs)=>createService(client?fluentRpcClient(client):null,timeoutMs)
 const preview = {
  trackId:'10000000-0000-4000-8000-000000000001',workflowRevision:7,previewChecksum:'a'.repeat(64),
  eventKey:'registration.case_created',stepLabel:'상담 신청',canSend:true,status:'ready',reason:'',
@@ -11,6 +13,17 @@ const oldSourceId='20000000-0000-4000-8000-000000000001'
 const newSourceId='20000000-0000-4000-8000-000000000002'
 const oldEventId='40000000-0000-4000-8000-000000000001'
 const recoveryPreview={...preview,recoveryAvailable:true,recoverySourceEventId:oldSourceId,existingEventId:oldEventId,existingRuleEnabled:false}
+test('management read and confirm each attach an 8s deadline and disable SDK retry before one execution',async(t)=>{
+ const deadlines=[]
+ t.mock.method(AbortSignal,'timeout',(ms)=>{deadlines.push(ms);return new AbortController().signal})
+ const trace=[]
+ const service=createService(fluentRpcClient({async rpc(name){return {data:name.startsWith('get_')?preview:{sourceEventIds:[newSourceId],recovered:false},error:null}}},trace))
+ const shown=await service.preview(preview.trackId,7)
+ await service.confirm(shown,'30000000-0000-4000-8000-000000000001')
+ assert.deepEqual(deadlines,[8000,8000])
+ assert.deepEqual(trace.map(call=>call.name),['get_registration_management_notification_preview_v1','ensure_registration_workflow_notification_v4'])
+ trace.forEach(assertSingleNonRetryingRpc)
+})
 test('preview whitelist removes server metadata and rejects invalid operation identities',()=>{
  assert.deepEqual(parseRegistrationManagementPreview({...preview,privateSecret:'must-not-propagate'}),preview)
  for (const override of [{trackId:'bad'},{workflowRevision:0},{workflowRevision:1.1},{status:'unknown'},{canSend:false},{eventKey:'registration.observation_scheduled'},{stepLabel:3},{renderedBody:''}]) {

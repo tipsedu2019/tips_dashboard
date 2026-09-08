@@ -8,6 +8,7 @@ import { createRegistrationVisitCancellationGet } from "../src/features/tasks/se
 import { buildGoogleChatCardPayload, createGoogleChatProvider } from "../src/features/notifications/server/providers/google-chat-provider.ts"
 import { requireRegisteredNotificationExternalAttempt } from "../src/features/notifications/server/external-attempt-gate.js"
 import { recordLegacyNotificationDeliveryIntent } from "../src/features/notifications/server/legacy-delivery-intent.js"
+import { fluentRpcClient, assertSingleNonRetryingRpc } from "./helpers/notification-fluent-rpc.mjs"
 
 const taskId = "9ac10000-0000-4000-8000-000000000001"
 const sourceId = "9ac10000-0000-4000-8000-000000000002"
@@ -19,19 +20,24 @@ const item = {
   renderedTitle: "방문상담 취소", renderedBody: "이전에 안내한 영어 방문상담이 취소됐습니다.",
 }
 
-test("cancellation list is authenticated, bounded, read-only, and never cached", async () => {
+test("cancellation list is authenticated, bounded, read-only, and never cached", async (t) => {
   const calls = []
+  const trace = [], deadlines = []
+  t.mock.method(AbortSignal, "timeout", (ms) => { deadlines.push(ms); return new AbortController().signal })
   const handler = createRegistrationVisitCancellationGet({ authenticate: async () => ({
-    role: "staff", actorClient: { rpc: async (name, args) => {
+    role: "staff", actorClient: fluentRpcClient({ rpc: async (name, args) => {
       calls.push({ name, args })
       return { data: { items: [item], page: 2, pageSize: 10, totalCount: 11 }, error: null }
-    } },
+    } }, trace),
   }) })
   const response = await handler(new Request(`https://local.invalid/?taskId=${taskId}&page=2`))
   assert.equal(response.status, 200)
   assert.equal(response.headers.get("cache-control"), "no-store")
   assert.equal((await response.json()).items[0].sourceDeliveryId, sourceId)
   assert.deepEqual(calls, [{ name: "list_registration_visit_cancellations_v1", args: { p_task_id: taskId, p_page: 2, p_page_size: 10 } }])
+  assert.deepEqual(deadlines, [8000])
+  assert.equal(trace.length, 1)
+  assertSingleNonRetryingRpc(trace[0])
 })
 
 test("non-managers and malformed/duplicate selectors cannot reach the read RPC", async () => {
@@ -45,7 +51,7 @@ test("non-managers and malformed/duplicate selectors cannot reach the read RPC",
   ]) {
     let calls = 0
     const handler = createRegistrationVisitCancellationGet({ authenticate: async () => ({ role,
-      actorClient: { rpc: async () => { calls++; return { data: null, error: null } } },
+      actorClient: fluentRpcClient({ rpc: async () => { calls++; return { data: null, error: null } } }),
     }) })
     assert.equal((await handler(new Request(`https://local.invalid/?${query}`))).status, expected)
     assert.equal(calls, 0)
@@ -66,7 +72,7 @@ test("cancellation response contract rejects provider/private fields and inconsi
 
 test("read failures do not become an empty successful cancellation list", async () => {
   const handler = createRegistrationVisitCancellationGet({ authenticate: async () => ({
-    role: "admin", actorClient: { rpc: async () => ({ data: null, error: new Error("database_offline") }) },
+    role: "admin", actorClient: fluentRpcClient({ rpc: async () => ({ data: null, error: new Error("database_offline") }) }),
   }) })
   const response = await handler(new Request(`https://local.invalid/?taskId=${taskId}`))
   assert.equal(response.status, 503)

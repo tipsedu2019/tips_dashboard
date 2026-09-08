@@ -1,3 +1,4 @@
+import type { SupabaseClient } from "@supabase/supabase-js"
 import { parseRegistrationCustomerGuidanceSettings } from "../registration-customer-message-settings-contract.ts"
 import {
   createProductionRegistrationCustomerMessageAuth,
@@ -26,12 +27,18 @@ export function createRegistrationCustomerGuidanceSettingsHandler(dependencies: 
   }
 }
 
+function getGuidanceSettings(client: SupabaseClient, actorProfileId: string) {
+  return client.rpc("get_registration_customer_guidance_settings_v1", {
+    p_actor_profile_id: actorProfileId,
+  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+}
+
 export function createProductionRegistrationCustomerGuidanceSettingsHandler() {
   const auth = createProductionRegistrationCustomerMessageAuth()
   return createRegistrationCustomerGuidanceSettingsHandler({
     authenticate: auth.authenticate,
     async listSettings(context) {
-      const result = await context.serviceClient.rpc("get_registration_customer_guidance_settings_v1", { p_actor_profile_id: context.actorProfileId })
+      const result = await getGuidanceSettings(context.serviceClient, context.actorProfileId)
       if (result.error) throw new RegistrationCustomerMessageHttpError(result.error.code === "42501" ? 403 : 503, "registration_customer_message_settings_unavailable")
       return result.data
     },

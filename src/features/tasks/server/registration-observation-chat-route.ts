@@ -5,7 +5,7 @@ import { decodeNotificationConnectionEncryptionKey, decryptNotificationConnectio
 import type { SupabaseClient } from "@supabase/supabase-js"
 
 type RecordValue = Record<string, unknown>
-type Client = { rpc(name: string, input: RecordValue): PromiseLike<{ data: unknown; error: unknown }> }
+type Client = Pick<SupabaseClient, "rpc">
 type Context = { actorProfileId: string; role: string; actorClient: Client; serviceClient: Client }
 type Dependencies = {
   authenticate(request: Request): Promise<Context>
@@ -15,7 +15,36 @@ type Dependencies = {
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 function record(value: unknown): value is RecordValue { return !!value && typeof value === "object" && !Array.isArray(value) }
 function response(body: unknown, status = 200) { return Response.json(body, { status, headers: { "Cache-Control": "no-store" } }) }
-async function rpc(client: Client, name: string, input: RecordValue) { const result = await client.rpc(name, input); if (result.error) throw result.error; return result.data }
+async function rpcResult(operation: PromiseLike<{ data: unknown; error: unknown }>) {
+  const result = await operation
+  if (result.error) throw result.error
+  return result.data
+}
+// These four operations each address one reviewed observation/attempt. Keep the
+// literal RPC and transport controls at the callsite so neither retry nor an
+// unbounded generic RPC can hide behind the shared result parser.
+function readObservationPreview(client: Client, input: RecordValue) {
+  return rpcResult(client.rpc("get_registration_observation_explicit_chat_preview_v1", input)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false))
+}
+function beginObservationChat(client: Client, input: RecordValue) {
+  return rpcResult(client.rpc("begin_registration_observation_explicit_chat_v1", input)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false))
+}
+function registerObservationAttempt(client: Client, input: RecordValue) {
+  return rpcResult(client.rpc("register_registration_observation_explicit_chat_attempt_v1", input)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false))
+}
+function finishObservationChat(client: Client, input: RecordValue) {
+  return rpcResult(client.rpc("finish_registration_observation_explicit_chat_v1", input)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false))
+}
+function readObservationChatConnection(client: SupabaseClient, channel: string) {
+  // channel is the table primary key, so this is one selected connection.
+  return client.from("google_chat_webhook_settings")
+    .select("revision,connection_state,webhook_url,webhook_url_ciphertext").eq("channel", channel)
+    .abortSignal(AbortSignal.timeout(8_000)).maybeSingle().retry(false)
+}
 function parseTarget(row: RecordValue) {
   if (typeof row.observationId !== "string" || !UUID.test(row.observationId)
     || !["handoff", "feedback_request"].includes(String(row.intent))) throw Object.assign(new Error("invalid"), { status: 400 })
@@ -64,7 +93,7 @@ export function createRegistrationObservationChatHandlers(dependencies: Dependen
         const parameters = new URL(request.url).searchParams
         if ([...parameters.keys()].length !== 2 || parameters.getAll("observationId").length !== 1 || parameters.getAll("intent").length !== 1) return response({ ok: false }, 400)
         const target = parseTarget(Object.fromEntries(parameters))
-        const raw = await rpc(context.actorClient, "get_registration_observation_explicit_chat_preview_v1", target)
+        const raw = await readObservationPreview(context.actorClient, target)
         return response({ ok: true, preview: parseRegistrationObservationChatPreview(raw) })
       } catch (error) { return errorResponse(error) }
     },
@@ -76,14 +105,14 @@ export function createRegistrationObservationChatHandlers(dependencies: Dependen
           || body.confirmed !== true || typeof body.requestId !== "string" || !UUID.test(body.requestId)
           || typeof body.previewChecksum !== "string" || !/^[a-f0-9]{64}$/.test(body.previewChecksum)) return response({ ok: false }, 400)
         const target = parseTarget(body)
-        const begun = parseBegun(await rpc(context.serviceClient, "begin_registration_observation_explicit_chat_v1", {
+        const begun = parseBegun(await beginObservationChat(context.serviceClient, {
           ...target, p_actor: context.actorProfileId, p_request_id: body.requestId, p_preview_checksum: body.previewChecksum,
         }))
         if (!begun.acquired) return response({ ok: true, status: begun.status })
         const claim = { p_attempt_id: begun.attemptId, p_claim_token: begun.claimToken }
         let registered = false
         let attemptRequested = false
-        const finish = (status: string, reference: string) => rpc(context.serviceClient, "finish_registration_observation_explicit_chat_v1", {
+        const finish = (status: string, reference: string) => finishObservationChat(context.serviceClient, {
           ...claim, p_status: status, p_provider_reference: reference,
         })
         try {
@@ -96,7 +125,7 @@ export function createRegistrationObservationChatHandlers(dependencies: Dependen
           if (!buildGoogleChatCardPayload(providerContext, { includeAppLink: false }).ok) throw new Error("unsafe render")
           // The fixed-purpose external-attempt gate revalidates the source and recipient immediately before HTTP.
           attemptRequested = true
-          const allowed = await rpc(context.serviceClient, "register_registration_observation_explicit_chat_attempt_v1", claim)
+          const allowed = await registerObservationAttempt(context.serviceClient, claim)
           if (allowed !== true) { await finish("unknown", "external_attempt_not_acquired"); return response({ ok: true, status: "unknown" }) }
           registered = true
           const result = await createGoogleChatProvider({
@@ -126,8 +155,7 @@ export function createProductionRegistrationObservationChatHandlers() {
     fetch: (...args) => fetch(...args),
     async readWebhook(client, connectionKey, revision) {
       const channel = connectionKey.slice("google_chat.".length)
-      const { data, error } = await (client as SupabaseClient).from("google_chat_webhook_settings")
-        .select("revision,connection_state,webhook_url,webhook_url_ciphertext").eq("channel", channel).maybeSingle()
+      const { data, error } = await readObservationChatConnection(client as SupabaseClient, channel)
       if (error || !data || String(data.revision) !== revision || !["legacy_active", "encrypted_active"].includes(data.connection_state)) throw new Error("connection changed")
       return data.connection_state === "encrypted_active"
         ? decryptNotificationConnectionSecret(data.webhook_url_ciphertext, decodeNotificationConnectionEncryptionKey(process.env.NOTIFICATION_CONNECTION_ENCRYPTION_KEY || ""))
