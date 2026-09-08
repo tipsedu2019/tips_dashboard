@@ -2244,6 +2244,7 @@ test("read-only metadata shape와 schema-only artifact identity를 엄격히 검
       scenario === "not-read-only" || scenario === "object-only"
         ? /notification_local_db_remote_metadata_invalid/u
         : /notification_local_db_remote_schema_dump_refused/u,
+      scenario,
     )
     assert.equal(
       executeCallCount,
