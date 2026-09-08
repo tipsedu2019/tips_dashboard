@@ -7,6 +7,8 @@ import vm from "node:vm"
 import { createElement, forwardRef } from "react"
 import { renderToStaticMarkup } from "react-dom/server"
 import ts from "typescript"
+import { withPromiseTimeout } from "../src/lib/promise-timeout.ts"
+import { createRegistrationObservationChatService } from "../src/features/tasks/registration-observation-chat-service.ts"
 
 const root = new URL("../", import.meta.url)
 const require = createRequire(import.meta.url)
@@ -118,6 +120,8 @@ async function loadMountedObservationEditor() {
     ["@/components/ui/input", { Input }],
     ["@/components/ui/label", { Label }],
     ["./registration-select", { RegistrationSelect }],
+    ["@/lib/promise-timeout", { withPromiseTimeout }],
+    ["./registration-observation-chat-service", { createRegistrationObservationChatService }],
   ])
   const runtimeRequire = (specifier) => {
     if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
@@ -125,6 +129,22 @@ async function loadMountedObservationEditor() {
     if (local) return local
     throw new Error(`unhandled observation editor runtime import: ${specifier}`)
   }
+  const chatFileName = new URL("src/features/tasks/registration-observation-chat-actions.tsx", root)
+  const chatOutput = ts.transpileModule(await readFile(chatFileName, "utf8"), {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: chatFileName.pathname,
+  }).outputText
+  const chatModule = { exports: {} }
+  const chatFactory = vm.runInThisContext(`(function(require, module, exports) {${chatOutput}\n})`, {
+    filename: chatFileName.pathname,
+  })
+  chatFactory(runtimeRequire, chatModule, chatModule.exports)
+  localModules.set("./registration-observation-chat-actions", chatModule.exports)
   const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
     filename: fileName.pathname,
   })
@@ -248,7 +268,8 @@ test("calendar deep-linked attempt prepends beyond the recent limit and deduplic
   }), null)
 })
 
-test("mounted historical observation uses its exact attempt status and exposes no workflow actions", async () => {
+test("mounted historical observation uses its exact attempt status and exposes no workflow actions", async (t) => {
+  const transport = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected observation transport") })
   const RegistrationObservationEditor = await loadMountedObservationEditor()
   const currentAttempt = observationAttempt(
     "31000000-0000-4000-8000-000000000001",
@@ -305,7 +326,9 @@ test("mounted historical observation uses its exact attempt status and exposes n
     }))
     assert.match(markup, new RegExp(`role="status"[^>]*>${expectedLabel}<`), status)
     assert.doesNotMatch(markup, />청강 진행<|>저장<|>예약 취소<|>청강 철회</, status)
+    assert.doesNotMatch(markup, />청강 담당 전달<|>청강 피드백 요청</, 'historical attempts must not offer current-attempt notifications')
   }
+  assert.equal(transport.mock.callCount(), 0, 'rendering historical attempts must not request or send notifications')
 })
 
 test("a successful observation mutation clears stale appointment warnings", async () => {
@@ -325,7 +348,8 @@ test("observation fact save only exposes a later explicit single-source message 
   assert.match(source, /disabled=\{saving \|\| !customerMessageTarget\}/)
 })
 
-test("mounted saved observation exposes one booking AlimTalk action with the canonical observation ID", async () => {
+test("mounted saved observation exposes one booking AlimTalk action with the canonical observation ID", async (t) => {
+  const transport = t.mock.method(globalThis, "fetch", () => { throw new Error("unexpected observation transport") })
   const RegistrationObservationEditor = await loadMountedObservationEditor()
   const scheduled = observationAttempt(
     "34000000-0000-4000-8000-000000000001",
@@ -366,7 +390,10 @@ test("mounted saved observation exposes one booking AlimTalk action with the can
 
   assert.match(markup, />청강 예약 안내 알림톡</)
   assert.doesNotMatch(markup, /disabled=""[^>]*>청강 예약 안내 알림톡</)
+  assert.match(markup, />청강 담당 전달</)
+  assert.match(markup, />청강 피드백 요청</)
   assert.deepEqual(targets, [], "rendering alone must not dispatch the customer-message action")
+  assert.equal(transport.mock.callCount(), 0, 'rendering the actual chat actions must not request or send notifications')
 })
 
 test("historical attempt status outranks a receipt retained by the same track editor", async () => {

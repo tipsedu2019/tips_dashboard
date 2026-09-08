@@ -52,6 +52,13 @@ jobs:
             tests/registration-case-customer-history-ui.test.mjs \
             tests/registration-observation-explicit-chat.test.mjs \
             tests/registration-visit-cancellation.test.mjs
+      - name: Verify customer preview and observation safety contracts
+        run: |
+          node --test --experimental-strip-types \
+            tests/registration-alimtalk-preview-dialog.test.mjs \
+            tests/registration-observation-customer-message-ui.test.mjs \
+            tests/registration-observation-workspace.test.mjs \
+            tests/registration-customer-message-service.test.mjs
       - shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
