@@ -42,6 +42,29 @@ async function readRegistrationApplicationSource() {
   return `${actions}\n${application}\n${subjectTabs}\n${inquiry}`
 }
 
+function findRegistrationJsxElements(root, tagName) {
+  const matches = []
+  function visit(node) {
+    if ((ts.isJsxOpeningElement(node) || ts.isJsxSelfClosingElement(node)) && node.tagName.getText() === tagName) matches.push(node)
+    ts.forEachChild(node, visit)
+  }
+  visit(root)
+  return matches
+}
+
+function registrationJsxAttribute(element, name) {
+  return element.attributes.properties.find((property) => ts.isJsxAttribute(property) && property.name.getText() === name)
+}
+
+function registrationDetailHeaderSlot(source) {
+  const file = ts.createSourceFile("registration-detail.tsx", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const shells = findRegistrationJsxElements(file, "RegistrationApplicationShell").filter((element) => registrationJsxAttribute(element, "mode")?.initializer?.text === "detail")
+  assert.equal(shells.length, 1, "saved registration has exactly one detail application shell")
+  const history = registrationJsxAttribute(shells[0], "historyAction")?.initializer
+  assert.ok(history && ts.isJsxExpression(history), "saved history actions belong to the shell header slot")
+  return { file, history }
+}
+
 async function readRegistrationAppointmentEditorSource() {
   return readFile(new URL("../src/features/tasks/registration-appointment-editor.tsx", import.meta.url), "utf8")
 }
@@ -289,6 +312,8 @@ async function loadMountedRegistrationApplication({
   workflowStatusOptions = () => [],
   canStartObservation = () => false,
   consultationMode = "phone",
+  notificationReadiness = { ready: false, eventKey: null, missingFields: [] },
+  notificationCalls = [],
 }) {
   const fileName = new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url)
   const source = await readFile(fileName, "utf8")
@@ -327,6 +352,17 @@ async function loadMountedRegistrationApplication({
       "data-mounted-customer-message-dialog": String(props.open),
     })
   }
+  // Notification actions are separately exercised with their real preview/confirm
+  // consumers. Distinct types here preserve parent role, identity, and placement checks.
+  const RegistrationManagementNotificationActions = function MountedManagementNotificationActions() {
+    return createElement("button", { "data-mounted-management-notification": "" }, "관리팀 알림 미리보기")
+  }
+  const RegistrationCustomerMessageCaseHistory = function MountedCustomerMessageCaseHistory() {
+    return createElement("button", { "data-mounted-customer-message-history": "" }, "알림톡 이력")
+  }
+  const RegistrationVisitCancellationActions = function MountedVisitCancellationActions() {
+    return createElement("button", { "data-mounted-visit-cancellation": "" }, "방문 취소 안내")
+  }
   const sectionStates = Object.fromEntries([
     "inquiry",
     "level_test",
@@ -357,6 +393,9 @@ async function loadMountedRegistrationApplication({
     ["@/lib/supabase", { supabase: {} }],
     ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
     ["./registration-alimtalk-preview-dialog", { RegistrationAlimtalkPreviewDialog }],
+    ["./registration-management-notification-actions", { RegistrationManagementNotificationActions }],
+    ["./registration-customer-message-case-history", { RegistrationCustomerMessageCaseHistory }],
+    ["./registration-visit-cancellation-actions", { RegistrationVisitCancellationActions }],
     ["./registration-application-consultation-section", { RegistrationApplicationConsultationSection: Passthrough }],
     ["./registration-application-inquiry-section", {
       RegistrationApplicationInquirySection: Passthrough,
@@ -477,7 +516,7 @@ async function loadMountedRegistrationApplication({
       getRegistrationCurrentClassWaitClassId: () => null,
     }],
     ["./registration-track-service", {
-      ensureRegistrationWorkflowNotificationSourceIds: async () => [],
+      ensureRegistrationWorkflowNotificationSourceIds: async (...args) => { notificationCalls.push({ kind: "ensure", args }); return [] },
       saveRegistrationCaseInquiry: async () => undefined,
       saveRegistrationPhoneConsultation: async () => undefined,
       setRegistrationWorkflowStatus: setWorkflowStatus,
@@ -485,12 +524,8 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-workspace-route", { createRegistrationObservationAsyncOwnership }],
     ["./registration-consultation-notification.js", {
-      dispatchRegistrationManagementNotificationSources: async () => ({ failedSourceEventIds: [], googleChatEventIds: [] }),
-      getRegistrationManagementNotificationReadiness: () => ({
-        ready: false,
-        eventKey: null,
-        missingFields: [],
-      }),
+      dispatchRegistrationManagementNotificationSources: async (...args) => { notificationCalls.push({ kind: "dispatch", args }); return { failedSourceEventIds: [], googleChatEventIds: [] } },
+      getRegistrationManagementNotificationReadiness: () => notificationReadiness,
       isRegistrationManagementNotificationWorkflowStatus: () => false,
       sendRegistrationVisitNotificationTarget: async () => ({ ok: true }),
     }],
@@ -517,6 +552,9 @@ async function loadMountedRegistrationApplication({
     RegistrationApplication: runtimeModule.exports.RegistrationApplication,
     RegistrationApplicationShell,
     RegistrationAlimtalkPreviewDialog,
+    RegistrationManagementNotificationActions,
+    RegistrationCustomerMessageCaseHistory,
+    RegistrationVisitCancellationActions,
     RegistrationAppointmentEditor,
     Button,
     RegistrationObservationEditor,
@@ -789,7 +827,15 @@ test("saved detail exposes automatic history from a header clock popover only", 
   assert.match(action, /<RegistrationHistoryTimeline[\s\S]*?embedded/)
   assert.doesNotMatch(action, /<Sheet|<Dialog/)
   assert.match(detail, /const genericDetail = useMemo<OpsRegistrationCaseDetail>/)
-  assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction detail=\{genericDetail\} profiles=\{profiles\} \/>\}/)
+  const { file, history } = registrationDetailHeaderSlot(detail)
+  const automaticHistory = findRegistrationJsxElements(history, "RegistrationApplicationHistoryAction")
+  assert.equal(automaticHistory.length, 1, "the clock popover remains in the header even when another history action shares its slot")
+  assert.equal(findRegistrationJsxElements(file, "RegistrationApplicationHistoryAction").length, 1, "automatic history is not duplicated in the detail body")
+  assert.equal(registrationJsxAttribute(automaticHistory[0], "detail")?.initializer?.getText(), "{genericDetail}")
+  assert.equal(registrationJsxAttribute(automaticHistory[0], "profiles")?.initializer?.getText(), "{profiles}")
+  assert.equal(findRegistrationJsxElements(history, "RegistrationCustomerMessageCaseHistory").length, 1, "customer delivery history shares the header instead of adding a detail section")
+  assert.match(history.getText(), /canManageCase && customerMessageClient \? <RegistrationCustomerMessageCaseHistory/)
+  assert.equal(findRegistrationJsxElements(history, "RegistrationVisitCancellationActions").length, 0, "explicit cancellation stays separate from history")
   assert.doesNotMatch(detail, /history=\{|<RegistrationHistoryTimeline/)
   assert.doesNotMatch(create, /historyAction=|history=\{/)
   assert.match(timeline, /embedded\?: boolean/)
@@ -1660,7 +1706,8 @@ test("canonical detail uses one progressively filled registration application", 
   assert.match(source, /waiting=\{/)
   assert.match(source, /registration=\{/)
   assert.match(source, /admission=\{/)
-  assert.match(source, /historyAction=\{<RegistrationApplicationHistoryAction/)
+  const { history } = registrationDetailHeaderSlot(source)
+  assert.equal(findRegistrationJsxElements(history, "RegistrationApplicationHistoryAction").length, 1, "the single application includes its automatic history in the header")
   assert.doesNotMatch(source, /history=\{<RegistrationHistoryTimeline/)
   assert.match(source, /role="tablist"/)
   assert.match(source, /aria-label="과목별 등록 진행"/)
@@ -1821,7 +1868,7 @@ test("saved and create applications share the intake shell while saved detail ow
   assert.match(detail, /RegistrationApplicationAdmissionSection/)
   assert.doesNotMatch(create, /RegistrationApplicationPlacementSection|RegistrationApplicationAdmissionSection/)
   assert.match(detail, /closeAction=\{closeAction\}/)
-  assert.match(detail, /historyAction=\{<RegistrationApplicationHistoryAction/)
+  assert.equal(findRegistrationJsxElements(registrationDetailHeaderSlot(detail).history, "RegistrationApplicationHistoryAction").length, 1)
   assert.doesNotMatch(create, /historyAction=/)
   assert.match(workspace, /showCloseButton=\{!canonicalRegistrationApplicationRendered\}/)
   assert.match(workspace, /closeAction=\{registrationDetailCloseAction\}/)
@@ -2210,6 +2257,7 @@ test("mounted consultation status selector never starts an observation process",
   const enterCalls = []
   const genericStatusCalls = []
   const reloadCalls = []
+  const notificationCalls = []
   const managerDetail = {
     track: {
       trackId,
@@ -2241,6 +2289,8 @@ test("mounted consultation status selector never starts an observation process",
       { value: "waiting_next_opening", label: "다음 개강 알림" },
     ],
     canStartObservation: (track) => track.workflowStatus === "consultation_completed",
+    notificationReadiness: { ready: true, eventKey: "registration.consultation_completed", missingFields: [] },
+    notificationCalls,
   })
   const props = {
     task: { id: taskId, title: "수학 등록", studentName: "김학생", type: "registration" },
@@ -2280,6 +2330,7 @@ test("mounted consultation status selector never starts an observation process",
     subjectCapabilities: [],
     customerMessageClient: {},
     observationRuntime: { available: true, runtimeVersion: 1 },
+    notificationToken: "fixture-admin-token",
     closeAction: null,
   }
   const originalWindow = globalThis.window
@@ -2319,6 +2370,12 @@ test("mounted consultation status selector never starts an observation process",
     })
     assert.match(genericStatusCalls[0].requestKey, new RegExp(`^registration-workflow-status:${trackId}:`))
     assert.deepEqual(reloadCalls, [trackId])
+    assert.deepEqual(notificationCalls, [], "saving only a workflow status neither prepares nor dispatches an alert")
+    const management = findMountedRegistrationElement(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions, "explicit management preview action")
+    assert.equal(management.props.trackId, trackId)
+    assert.equal(management.props.workflowRevision, 6)
+    assert.equal(management.props.viewerId, directorId)
+    assert.equal(management.props.sessionToken, props.notificationToken)
   } finally {
     hookHarness.cleanup()
     globalThis.window = originalWindow
@@ -2337,6 +2394,7 @@ test("mounted teacher registration detail keeps every mutation surface read-only
   const mounted = await loadMountedRegistrationApplication({
     hookHarness,
     setWorkflowStatus: async (input) => statusCalls.push(input),
+    notificationReadiness: { ready: true, eventKey: "registration.case_created", missingFields: [] },
     workflowStatusOptions: () => [
       { value: "consultation_requested", label: "상담 신청" },
       { value: "waiting_next_opening", label: "다음 개강 알림 요청" },
@@ -2412,7 +2470,9 @@ test("mounted teacher registration detail keeps every mutation surface read-only
     for (const section of ["inquiry", "level_test", "consultation", "waiting", "observation", "registration", "admission"]) {
       assert.equal(shell.props.sectionStates[section].editable, false, `${section} must be read-only`)
     }
-    assert.doesNotMatch(renderToStaticMarkup(shell.props.subjectNavigation), /관리팀 알림 보내기/u)
+    assert.equal(findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions).length, 0)
+    assert.equal(findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationVisitCancellationActions).length, 0)
+    assert.equal(findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationCustomerMessageCaseHistory).length, 0)
 
     statusSelect.props.onChange({ target: { value: "waiting_next_opening" } })
     await flushMountedRegistrationWork()
@@ -3033,13 +3093,26 @@ test("common information conflicts retain the attempted draft when latest-data r
 })
 
 test("canonical registration mutation closures fail closed outside management roles", async () => {
-  const application = await readRegistrationApplicationSource()
-  const workflowStatus = sourceBetween(application, "async function changeWorkflowStatus", "async function sendRegistrationManagementNotification")
-  const managementNotification = sourceBetween(application, "async function sendRegistrationManagementNotification", "async function saveInquiry")
+  const [application, managementActions] = await Promise.all([
+    readRegistrationApplicationSource(),
+    readFile(new URL("../src/features/tasks/registration-management-notification-actions.tsx", import.meta.url), "utf8"),
+  ])
+  const workflowStatus = sourceBetween(application, "async function changeWorkflowStatus", "const subjectPanelIdsByTrackId")
+  const managementNotification = sourceBetween(managementActions, "async function send()", "  return <div")
+  const managementPreview = sourceBetween(managementActions, "async function loadPreview()", "async function send()")
   const saveInquiry = sourceBetween(application, "async function saveInquiry", "function handleSubjectTabChange")
 
   assert.match(workflowStatus, /if \(!canManageCase\) return/)
-  assert.match(managementNotification, /if \([\s\S]*?!canManageCase/)
+  assert.doesNotMatch(workflowStatus, /ensureRegistrationWorkflowNotification|dispatchRegistrationManagement|previewService\.confirm|\bsend\(/)
+  assert.doesNotMatch(saveInquiry, /ensureRegistrationWorkflowNotification|dispatchRegistrationManagement|previewService\.confirm|\bsend\(/)
+  assert.match(application, /canManageCase && notificationReadiness\.eventKey \? \([\s\S]*?<RegistrationManagementNotificationActions/)
+  assert.match(managementNotification, /if \(!preview\?\.canSend \|\| inFlight\.current \|\| currentGuards\.current\.disabled\) return/)
+  assert.match(managementNotification, /currentGuards\.current\.hasUnsavedChanges\(\)[\s\S]*?return[\s\S]*?inFlight\.current = true/)
+  assert.match(managementNotification, /requestKeys\.current\.get\(preview\.previewChecksum\)[\s\S]*?requestKeys\.current\.set/)
+  assert.match(managementNotification, /await previewService\.confirm\(preview, requestKey\)[\s\S]*?if \(!mounted\.current\) return[\s\S]*?currentGuards\.current\.disabled \|\| currentGuards\.current\.hasUnsavedChanges\(\)[\s\S]*?return[\s\S]*?await dispatch\(sourceEventIds, sessionToken\)/)
+  assert.match(managementActions, /key=\{`\$\{props\.trackId\}:\$\{props\.workflowRevision\}:\$\{props\.viewerId\}:\$\{props\.sessionToken\}`\}/)
+  assert.match(managementActions, /onClick=\{\(\) => void send\(\)\}/)
+  assert.doesNotMatch(managementPreview, /previewService\.confirm|\bdispatch\(/)
   assert.match(saveInquiry, /if \(!canManageCase\) throw new Error\("등록 정보를 수정할 권한이 없습니다\."\)/)
 })
 
@@ -3219,11 +3292,13 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
 
   for (const roleCase of roleCases) {
     const hookHarness = createRegistrationEditorHookHarness()
+    const customerMessageClient = {}
     const mounted = await loadMountedRegistrationApplication({
       hookHarness,
       loadManagerDetail: async () => null,
       loadFeedback: async () => null,
       consultationMode: "visit",
+      notificationReadiness: { ready: true, eventKey: "registration.case_created", missingFields: [] },
     })
     try {
       const view = hookHarness.render(mounted.RegistrationApplication, {
@@ -3236,7 +3311,8 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
         onReload: async () => undefined,
         onWarning: () => undefined,
         subjectCapabilities: [],
-        customerMessageClient: {},
+        customerMessageClient,
+        notificationToken: `fixture-token-${roleCase.role}`,
         closeAction: null,
       })
       const shell = findMountedRegistrationElement(
@@ -3259,6 +3335,24 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
       ))
       assert.equal(modeButtons.length, 2, roleCase.role)
       assert.deepEqual(modeButtons.map((button) => button.props.disabled), [roleCase.readOnly, roleCase.readOnly], roleCase.role)
+      const managementActions = findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions)
+      const cancellationActions = findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationVisitCancellationActions)
+      const customerHistory = findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationCustomerMessageCaseHistory)
+      for (const [name, nodes] of [["management preview", managementActions], ["visit cancellation", cancellationActions], ["customer history", customerHistory]]) {
+        assert.equal(nodes.length, roleCase.readOnly ? 0 : 1, `${roleCase.role}: ${name} requires management access even with ready data`)
+      }
+      if (!roleCase.readOnly) {
+        assert.equal(managementActions[0].props.trackId, trackId)
+        assert.equal(managementActions[0].props.workflowRevision, baseDetail.tracks[0].workflowRevision)
+        assert.equal(managementActions[0].props.viewerId, `viewer-${roleCase.role}`)
+        assert.equal(managementActions[0].props.sessionToken, `fixture-token-${roleCase.role}`)
+        assert.equal(typeof managementActions[0].props.hasUnsavedChanges, "function")
+        assert.equal(cancellationActions[0].props.taskId, taskId)
+        assert.equal(cancellationActions[0].props.sessionToken, `fixture-token-${roleCase.role}`)
+        assert.equal(customerHistory[0].props.taskId, taskId)
+        assert.equal(customerHistory[0].props.client, customerMessageClient)
+        assert.equal(customerHistory[0].props.viewerKey, `viewer-${roleCase.role}:${roleCase.role}`)
+      }
     } finally {
       hookHarness.cleanup()
     }
