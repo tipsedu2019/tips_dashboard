@@ -58,12 +58,25 @@ import { GOOGLE_CHAT_CONNECTION_LABELS } from "./notification-google-chat-catalo
 import { selectEditableGoogleChatRules } from "./notification-google-chat-settings"
 import { buildNotificationTemplatePreview } from "./notification-template-preview"
 import { useNotificationNavigationGuard } from "./use-notification-navigation-guard"
+import {
+  buildMentionDraftPatch,
+  createMentionDraft,
+  createTemplateEditorDraft,
+  notificationSettingsLocationUrl,
+  registrationNotificationDisplayRule,
+  readNotificationSettingsLocation,
+  rebaseMentionDraft,
+  type NotificationSettingsSection,
+  type RegistrationSettingsGroup,
+} from "./notification-settings-editor-state"
+import { RegistrationNotificationSettingsGroups } from "./registration-notification-settings-groups"
+import { getRegistrationNotificationRulePolicy } from "./notification-registration-settings-policy"
 
 export type NotificationControlPlaneAvailability = {
   status: "loading" | "enabled" | "disabled" | "unavailable"
 }
 
-type NotificationControlPanelSection = "rules" | "connections"
+type NotificationControlPanelSection = NotificationSettingsSection
 
 export type NotificationControlPanelProps = {
   workflowKey: NotificationWorkflowKey
@@ -71,6 +84,8 @@ export type NotificationControlPanelProps = {
   open?: boolean
   onOpenChange?: (open: boolean) => void
   initialSection?: NotificationControlPanelSection
+  initialGroup?: RegistrationSettingsGroup | null
+  customerGuidance?: React.ReactNode
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -112,12 +127,6 @@ type ConflictState = {
 type ConflictOverrideState = {
   requestId: string
   conflictingFields: string[]
-}
-
-type MentionMutationAttempt = {
-  signature: string
-  requestId: string
-  scopeGeneration: number
 }
 
 type EventRuleGroup = {
@@ -203,10 +212,6 @@ function errorMessage(error: unknown) {
     }
   }
   return "알림 설정을 불러오지 못했습니다. 잠시 후 다시 시도해 주세요."
-}
-
-function isDefinitiveMentionMutationError(error: unknown) {
-  return error instanceof NotificationMentionSettingsHttpError && error.status < 500
 }
 
 function revisionsForPatch(
@@ -348,6 +353,7 @@ type RuleToggleProps = {
   saving: boolean
   surfaceKey: "desktop" | "mobile"
   compact?: boolean
+  showRecipient?: boolean
   onChange: (ruleId: string, patch: NotificationRulePatch) => void
   onMentionChange: (setting: NotificationMentionSettingDto, mentionEnabled: boolean) => void
   onEditTemplate: (ruleId: string) => void
@@ -363,6 +369,7 @@ function RuleToggle({
   saving,
   surfaceKey,
   compact = false,
+  showRecipient = true,
   onChange,
   onMentionChange,
   onEditTemplate,
@@ -400,13 +407,10 @@ function RuleToggle({
       compact ? "space-y-2 rounded-lg border bg-background p-3" :
         "flex min-w-[11rem] items-center justify-end gap-2",
     )}>
-      {compact ? (
+      {compact && showRecipient ? (
         <div className="min-w-0 space-y-1">
           <p className="truncate text-sm font-medium">
             {rule.audienceLabel ?? rule.audienceKey}
-          </p>
-          <p className="text-xs text-muted-foreground">
-            {rule.channelLabel ?? rule.channelKey}
           </p>
           {connectionMessage ? (
             <p className="text-xs font-medium text-amber-700">{connectionMessage}</p>
@@ -431,11 +435,11 @@ function RuleToggle({
           <SwitchPrimitive.Root
             id={`notification-rule-switch-${surfaceKey}-${rule.id}`}
             data-notification-rule-switch={rule.id}
-            aria-label={`${rule.audienceLabel ?? rule.audienceKey} ${rule.channelLabel ?? rule.channelKey}`}
+            aria-label={`${rule.eventLabel ?? rule.eventKey} · ${rule.audienceLabel ?? rule.audienceKey} ${rule.channelLabel ?? rule.channelKey}`}
             checked={value.enabled}
             disabled={saving}
             onCheckedChange={(enabled) => onChange(rule.id, { enabled })}
-            className="data-[state=checked]:bg-primary relative h-6 w-11 shrink-0 rounded-full bg-input transition-colors disabled:opacity-50"
+            className="data-[state=checked]:bg-primary relative h-6 w-11 shrink-0 rounded-full bg-input transition-colors focus-visible:outline-2 focus-visible:outline-offset-4 focus-visible:outline-ring disabled:opacity-50"
           >
             <SwitchPrimitive.Thumb className="data-[state=checked]:translate-x-5 block size-5 translate-x-0.5 rounded-full bg-background shadow transition-transform" />
           </SwitchPrimitive.Root>
@@ -446,6 +450,7 @@ function RuleToggle({
           size="sm"
           className="min-h-11"
           disabled={saving}
+          aria-label={`${rule.eventLabel ?? rule.eventKey} · 내용 수정`}
           onClick={() => onEditTemplate(rule.id)}
         >
           내용 수정
@@ -453,6 +458,7 @@ function RuleToggle({
       </div>
       <NotificationMentionToggle
         setting={mentionSetting}
+        contextLabel={rule.eventLabel ?? rule.eventKey}
         saving={mentionSaving}
         surfaceKey={surfaceKey}
         error={mentionError}
@@ -506,9 +512,8 @@ function RulesView({
         <table className="w-full min-w-[760px] table-fixed border-collapse text-left text-sm">
           <thead>
             <tr className="h-9 border-b bg-muted/40 text-xs text-muted-foreground">
-              <th scope="col" className="w-[24%] px-4 py-2 font-medium">이벤트</th>
-              <th scope="col" className="w-[16%] px-3 py-2 font-medium">대상</th>
-              <th scope="col" className="w-[15%] px-3 py-2 font-medium">채널</th>
+              <th scope="col" className="w-[32%] px-4 py-2 font-medium">상황</th>
+              <th scope="col" className="w-[20%] px-3 py-2 font-medium">받는 곳</th>
               <th scope="col" className="px-3 py-2 font-medium">설정</th>
             </tr>
           </thead>
@@ -532,9 +537,6 @@ function RulesView({
                 ) : null}
                 <td className="px-3 py-3 font-medium">
                   {rule.audienceLabel ?? rule.audienceKey}
-                </td>
-                <td className="px-3 py-3 text-muted-foreground">
-                  {rule.channelLabel ?? rule.channelKey}
                 </td>
                 <td className="px-3 py-2">
                   <RuleToggle
@@ -601,12 +603,20 @@ type TemplateEditorProps = {
   onChange: (ruleId: string, patch: NotificationRulePatch) => void
 }
 
-function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange }: TemplateEditorProps) {
-  if (!snapshot || !rule || !draft) return null
-  const value = draft.rules[rule.id]
-  if (!value) return null
+function TemplateEditor({ snapshot, rule, draft, ...props }: TemplateEditorProps) {
+  if (!snapshot || !rule || !draft || !draft.rules[rule.id]) return null
+  return <TemplateEditorFields key={rule.id} snapshot={snapshot} rule={rule} draft={draft} {...props} />
+}
+
+function TemplateEditorFields({ snapshot, rule, draft, saving, onOpenChange, onChange }: Omit<TemplateEditorProps, "snapshot" | "rule" | "draft"> & {
+  snapshot: NotificationControlPlaneSnapshot
+  rule: NotificationRuleDto
+  draft: NotificationDraft
+}) {
+  const [value, setValue] = React.useState(() => createTemplateEditorDraft(draft.rules[rule.id]))
+  const updateEditor = (patch: NotificationRulePatch) => setValue((current) => ({ ...current, ...patch }))
   const schedule = value.scheduleConfig
-  const evaluation = evaluateNotificationDraft(snapshot, draft)
+  const evaluation = evaluateNotificationDraft(snapshot, { ...draft, rules: { ...draft.rules, [rule.id]: value } })
   const blockingIssues = evaluation.validation.ok
     ? []
     : evaluation.validation.issues.filter(({ path }) => path.startsWith(`rules.${rule.id}.`))
@@ -637,7 +647,7 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
               id={`notification-title-${rule.id}`}
               value={value.titleTemplate}
               disabled={saving}
-              onChange={(event) => onChange(rule.id, { titleTemplate: event.target.value })}
+              onChange={(event) => updateEditor({ titleTemplate: event.target.value })}
             />
           </div>
           {blockingIssues.length > 0 ? (
@@ -667,7 +677,7 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
               value={value.bodyTemplate}
               disabled={saving}
               rows={7}
-              onChange={(event) => onChange(rule.id, { bodyTemplate: event.target.value })}
+              onChange={(event) => updateEditor({ bodyTemplate: event.target.value })}
             />
           </div>
           <div aria-label="알림 내용 미리보기" className="space-y-2">
@@ -691,7 +701,7 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
                 max={10080}
                 value={schedule.leadMinutes}
                 disabled={saving}
-                onChange={(event) => onChange(rule.id, {
+                onChange={(event) => updateEditor({
                   scheduleConfig: {
                     ...schedule,
                     leadMinutes: Number.parseInt(event.target.value || "0", 10),
@@ -711,7 +721,7 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
                 type="time"
                 value={schedule.localTime}
                 disabled={saving}
-                onChange={(event) => onChange(rule.id, {
+                onChange={(event) => updateEditor({
                   scheduleConfig: { ...schedule, localTime: event.target.value },
                 })}
               />
@@ -745,7 +755,11 @@ function TemplateEditor({ snapshot, rule, draft, saving, onOpenChange, onChange 
           ) : null}
         </div>
         <DialogFooter>
-          <Button type="button" onClick={() => onOpenChange(false)}>편집 완료</Button>
+          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>취소</Button>
+          <Button type="button" disabled={saving || blockingIssues.length > 0} onClick={() => {
+            onChange(rule.id, { titleTemplate: value.titleTemplate, bodyTemplate: value.bodyTemplate, scheduleConfig: value.scheduleConfig })
+            onOpenChange(false)
+          }}>변경사항에 반영</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -779,9 +793,8 @@ function ConnectionsView({
   return (
     <div className="space-y-3">
       <div>
-        <h2 className="text-base font-semibold">연결</h2>
         <p className="text-sm text-muted-foreground">
-          저장된 주소는 마스킹해서 표시합니다. 주소 저장만으로 테스트 메시지를 보내지 않습니다.
+          주소 변경은 모든 관련 업무에 즉시 적용됩니다. 저장된 주소는 마스킹해서 표시합니다.
         </p>
       </div>
       {error ? <p className="text-sm text-destructive">{error}</p> : null}
@@ -925,6 +938,8 @@ export function NotificationControlPanel({
   open,
   onOpenChange,
   initialSection = "rules",
+  initialGroup = null,
+  customerGuidance,
 }: NotificationControlPanelProps) {
   const service = React.useMemo(createBrowserControlPlaneService, [])
   const mentionService = React.useMemo(createBrowserMentionSettingsService, [])
@@ -943,6 +958,7 @@ export function NotificationControlPanel({
   const [activeSection, setActiveSection] = React.useState<NotificationControlPanelSection>(
     presentation === "page" ? initialSection : "rules",
   )
+  const [activeGroup, setActiveGroup] = React.useState<RegistrationSettingsGroup | null>(initialGroup)
   const [conflict, setConflict] = React.useState<ConflictState | null>(null)
   const [conflictOverride, setConflictOverride] = React.useState<ConflictOverrideState | null>(null)
   const [latestSnapshotConfirmationOpen, setLatestSnapshotConfirmationOpen] = React.useState(false)
@@ -951,9 +967,9 @@ export function NotificationControlPanel({
   const [mentionSettings, setMentionSettings] = React.useState<ReadonlyMap<string, NotificationMentionSettingDto>>(
     () => new Map(),
   )
-  const [mentionSavingRuleIds, setMentionSavingRuleIds] = React.useState<ReadonlySet<string>>(
-    () => new Set(),
-  )
+  const [mentionDraft, setMentionDraft] = React.useState<ReadonlyMap<string, boolean>>(() => new Map())
+  const [mentionConflict, setMentionConflict] = React.useState<ReadonlyMap<string, NotificationMentionSettingDto> | null>(null)
+  const [mentionLoading, setMentionLoading] = React.useState(true)
   const [mentionErrors, setMentionErrors] = React.useState<Readonly<Record<string, string>>>({})
   const [pendingConnectionAction, setPendingConnectionAction] = React.useState<{
     connection: NotificationConnectionDto
@@ -964,8 +980,6 @@ export function NotificationControlPanel({
   const reconciliationPollGenerationRef = React.useRef(0)
   const saveRequestRef = React.useRef<{ signature: string; requestId: string } | null>(null)
   const mentionLoadGenerationRef = React.useRef(0)
-  const mentionMutationGenerationRef = React.useRef(new Map<string, number>())
-  const mentionMutationRequestRef = React.useRef(new Map<string, MentionMutationAttempt>())
 
   React.useEffect(() => {
     if (!visible) return
@@ -981,10 +995,10 @@ export function NotificationControlPanel({
     const mentionController = new AbortController()
     const mentionLoadGeneration = mentionLoadGenerationRef.current + 1
     mentionLoadGenerationRef.current = mentionLoadGeneration
-    mentionMutationGenerationRef.current.clear()
-    mentionMutationRequestRef.current.clear()
     setMentionSettings(new Map())
-    setMentionSavingRuleIds(new Set())
+    setMentionDraft(new Map())
+    setMentionConflict(null)
+    setMentionLoading(true)
     setMentionErrors({})
     void service.getControlPlane({ workflowKey: activeWorkflow }).then((nextSnapshot) => {
       if (!active) return
@@ -1008,7 +1022,9 @@ export function NotificationControlPanel({
       signal: mentionController.signal,
     }).then((settings) => {
       if (!active || mentionLoadGenerationRef.current !== mentionLoadGeneration) return
-      setMentionSettings(new Map(settings.map((setting) => [setting.ruleId, setting])))
+      const nextSettings = new Map(settings.map((setting) => [setting.ruleId, setting]))
+      setMentionSettings(nextSettings)
+      setMentionDraft(createMentionDraft(nextSettings))
     }).catch((error: unknown) => {
       if (!active || mentionController.signal.aborted || mentionLoadGenerationRef.current !== mentionLoadGeneration) return
       setMentionErrors({
@@ -1016,6 +1032,8 @@ export function NotificationControlPanel({
           ? "담당자 멘션 설정 권한이 없습니다."
           : "담당자 멘션 설정을 불러오지 못했습니다.",
       })
+    }).finally(() => {
+      if (active && mentionLoadGenerationRef.current === mentionLoadGeneration) setMentionLoading(false)
     })
     return () => {
       active = false
@@ -1023,10 +1041,13 @@ export function NotificationControlPanel({
     }
   }, [activeWorkflow, loadAttempt, mentionService, service, visible])
 
+  const mentionChanges = React.useMemo(() => buildMentionDraftPatch(mentionSettings, mentionDraft), [mentionSettings, mentionDraft])
   const dirty = React.useMemo(() => (
-    baseDraft !== null && draft !== null && isNotificationDraftDirty(baseDraft, draft)
-  ), [baseDraft, draft])
+    (baseDraft !== null && draft !== null && isNotificationDraftDirty(baseDraft, draft)) || Object.keys(mentionChanges.mentionPatch).length > 0
+  ), [baseDraft, draft, mentionChanges])
   const saving = savePhase === "saving"
+  const displayedMentionSettings = React.useMemo(() => new Map(Array.from(mentionSettings, ([ruleId, setting]) => [ruleId, { ...setting, mentionEnabled: mentionDraft.get(ruleId) ?? setting.mentionEnabled }])), [mentionSettings, mentionDraft])
+  const mentionSavingRuleIds = React.useMemo(() => saving ? new Set(mentionSettings.keys()) : new Set<string>(), [saving, mentionSettings])
 
   const updateRule = React.useCallback((ruleId: string, patch: NotificationRulePatch) => {
     reconciliationPollGenerationRef.current += 1
@@ -1055,75 +1076,13 @@ export function NotificationControlPanel({
     setSavePhase("idle")
   }, [conflictOverride, snapshot])
 
-  const updateMentionSetting = React.useCallback(async (
-    setting: NotificationMentionSettingDto,
-    mentionEnabled: boolean,
-  ) => {
-    const scopeGeneration = mentionLoadGenerationRef.current
-    const generation = (mentionMutationGenerationRef.current.get(setting.ruleId) ?? 0) + 1
-    mentionMutationGenerationRef.current.set(setting.ruleId, generation)
-    const signature = `${setting.revision}:${mentionEnabled}`
-    const previousAttempt = mentionMutationRequestRef.current.get(setting.ruleId)
-    const requestId = previousAttempt?.scopeGeneration === scopeGeneration
-      && previousAttempt.signature === signature
-      ? previousAttempt.requestId
-      : crypto.randomUUID()
-    mentionMutationRequestRef.current.set(setting.ruleId, {
-      signature,
-      requestId,
-      scopeGeneration,
-    })
-    setMentionSavingRuleIds((current) => new Set(current).add(setting.ruleId))
-    setMentionErrors((current) => {
-      const next = { ...current }
-      delete next[setting.ruleId]
-      return next
-    })
-    try {
-      const saved = await mentionService.saveMentionSetting({
-        ruleId: setting.ruleId,
-        mentionEnabled,
-        expectedRevision: setting.revision,
-        requestId,
-      })
-      if (
-        mentionLoadGenerationRef.current !== scopeGeneration ||
-        mentionMutationGenerationRef.current.get(setting.ruleId) !== generation
-      ) return
-      setMentionSettings((current) => {
-        const next = new Map(current)
-        next.set(saved.ruleId, saved)
-        return next
-      })
-      mentionMutationRequestRef.current.delete(setting.ruleId)
-    } catch (error) {
-      if (
-        mentionLoadGenerationRef.current !== scopeGeneration ||
-        mentionMutationGenerationRef.current.get(setting.ruleId) !== generation
-      ) return
-      if (isDefinitiveMentionMutationError(error)) {
-        mentionMutationRequestRef.current.delete(setting.ruleId)
-      }
-      setMentionErrors((current) => ({
-        ...current,
-        [setting.ruleId]: error instanceof NotificationMentionSettingsHttpError
-          && error.code === "notification_mention_setting_revision_conflict"
-          ? "다른 사용자가 담당자 멘션을 먼저 변경했습니다. 다시 확인해 주세요."
-          : "담당자 멘션을 저장하지 못했습니다.",
-      }))
-    } finally {
-      if (
-        mentionLoadGenerationRef.current === scopeGeneration &&
-        mentionMutationGenerationRef.current.get(setting.ruleId) === generation
-      ) {
-        setMentionSavingRuleIds((current) => {
-          const next = new Set(current)
-          next.delete(setting.ruleId)
-          return next
-        })
-      }
-    }
-  }, [mentionService])
+  const updateMentionSetting = React.useCallback((setting: NotificationMentionSettingDto, mentionEnabled: boolean) => {
+    if (!setting.editable || saving) return
+    saveRequestRef.current = null
+    setMentionDraft((current) => new Map(current).set(setting.ruleId, mentionEnabled))
+    setMessage(null)
+    setSavePhase("idle")
+  }, [saving])
 
   const pollReconciliation = React.useCallback(async (initialJob: ReconciliationJobState) => {
     const generation = reconciliationPollGenerationRef.current + 1
@@ -1167,8 +1126,9 @@ export function NotificationControlPanel({
 
   const handleSave = React.useCallback(async () => {
     if (!snapshot || !baseDraft || !draft) return false
-    if (!isNotificationDraftDirty(baseDraft, draft)) return true
-    if (conflict) {
+    if (saving || mentionLoading) return false
+    if (!dirty) return true
+    if (conflict || mentionConflict) {
       setMessage("먼저 설정 충돌을 해결해 주세요.")
       return false
     }
@@ -1183,7 +1143,7 @@ export function NotificationControlPanel({
       return false
     }
     const patch = buildNotificationPatch(baseDraft, validation.value)
-    if (Object.keys(patch.rules).length === 0) return true
+    if (Object.keys(patch.rules).length === 0 && Object.keys(mentionChanges.mentionPatch).length === 0) return true
     const expectedRuleRevisions = revisionsForPatch(snapshot, patch)
     const expectedContractVersions = contractVersionsForPatch(snapshot, patch)
     const saveSignature = JSON.stringify({
@@ -1191,6 +1151,7 @@ export function NotificationControlPanel({
       expectedRuleRevisions,
       expectedContractVersions,
       patch,
+      ...mentionChanges,
       conflictOverride,
     })
     const requestId = saveRequestRef.current?.signature === saveSignature
@@ -1206,6 +1167,7 @@ export function NotificationControlPanel({
         expectedRuleRevisions,
         expectedContractVersions,
         patch,
+        ...mentionChanges,
         requestId,
         ...(conflictOverride ? { conflictOverride } : {}),
       })
@@ -1213,6 +1175,12 @@ export function NotificationControlPanel({
       setSnapshot(result)
       setBaseDraft(nextDraft)
       setDraft(nextDraft)
+      if (result.mentionSettings) {
+        const nextMentions = new Map(result.mentionSettings.map((setting) => [setting.ruleId, setting]))
+        setMentionSettings(nextMentions)
+        setMentionDraft(createMentionDraft(nextMentions))
+      }
+      setMentionConflict(null)
       setSavedAt(new Date().toISOString())
       setConflict(null)
       setConflictOverride(null)
@@ -1232,6 +1200,15 @@ export function NotificationControlPanel({
       }
       return true
     } catch (error) {
+      if (error instanceof NotificationControlPlaneHttpError && error.currentMentionSettings) {
+        const remoteMentions = new Map(error.currentMentionSettings.map((setting) => [setting.ruleId, setting]))
+        const hasMentionConflict = Object.keys(mentionChanges.mentionPatch).some((ruleId) => mentionSettings.get(ruleId)?.revision !== remoteMentions.get(ruleId)?.revision)
+        if (hasMentionConflict) setMentionConflict(remoteMentions)
+        else {
+          setMentionDraft(rebaseMentionDraft(mentionSettings, mentionDraft, remoteMentions))
+          setMentionSettings(remoteMentions)
+        }
+      }
       if (
         error instanceof NotificationControlPlaneHttpError &&
         error.code === "notification_revision_conflict" &&
@@ -1245,13 +1222,16 @@ export function NotificationControlPanel({
           overwriteConfirmationRequired: false,
         })
         setMessage("다른 사용자가 같은 설정을 먼저 저장했습니다. 내 초안은 그대로 유지했습니다.")
+      } else if (error instanceof NotificationControlPlaneHttpError && error.code === "notification_mention_setting_revision_conflict") {
+        saveRequestRef.current = null
+        setMessage("다른 사용자가 담당자 멘션을 먼저 변경했습니다. 내 초안은 그대로 유지했습니다.")
       } else {
-        setMessage(errorMessage(error))
+        setMessage("설정을 저장하지 못했습니다. 입력한 내용은 유지했습니다. 다시 시도해 주세요.")
       }
       setSavePhase("idle")
       return false
     }
-  }, [activeWorkflow, baseDraft, conflict, conflictOverride, draft, pollReconciliation, service, snapshot])
+  }, [activeWorkflow, baseDraft, conflict, conflictOverride, dirty, draft, mentionChanges, mentionConflict, mentionDraft, mentionLoading, mentionSettings, pollReconciliation, saving, service, snapshot])
 
   const handleRetryReconciliation = React.useCallback(async () => {
     if (!reconciliationJob || reconciliationRetrying) return
@@ -1281,6 +1261,45 @@ export function NotificationControlPanel({
     saving,
     onSave: handleSave,
   })
+
+  const changeSection = (section: NotificationSettingsSection) => {
+    if (section === activeSection) return
+    navigationGuard.requestNavigation(() => {
+      setActiveSection(section)
+      setActiveGroup(null)
+    })
+  }
+
+  const discardDraftAndContinue = () => {
+    if (saving) return
+    setDraft(baseDraft)
+    setMentionDraft(createMentionDraft(mentionSettings))
+    setMentionConflict(null)
+    setConflict(null)
+    setConflictOverride(null)
+    navigationGuard.discardAndContinue()
+  }
+
+  React.useEffect(() => {
+    if (presentation !== "page") return
+    const nextUrl = notificationSettingsLocationUrl(window.location.href, { workflow: activeWorkflow, section: activeSection, group: activeGroup })
+    window.history.replaceState(window.history.state, "", nextUrl)
+  }, [activeGroup, activeSection, activeWorkflow, presentation])
+
+  React.useEffect(() => {
+    if (presentation !== "page") return
+    const onPopState = () => {
+      if (dirty) return
+      queueMicrotask(() => {
+        const location = readNotificationSettingsLocation(new URLSearchParams(window.location.search))
+        setPageWorkflow(location.workflow)
+        setActiveSection(location.section)
+        setActiveGroup(location.group)
+      })
+    }
+    window.addEventListener("popstate", onPopState)
+    return () => window.removeEventListener("popstate", onPopState)
+  }, [dirty, presentation])
 
   const requestClose = React.useCallback(() => {
     navigationGuard.requestNavigation(() => onOpenChange?.(false))
@@ -1385,14 +1404,52 @@ export function NotificationControlPanel({
   }, [])
 
   const editableRules = React.useMemo(
-    () => selectEditableGoogleChatRules(snapshot?.rules ?? []),
+    () => selectEditableGoogleChatRules(snapshot?.rules ?? []).map(registrationNotificationDisplayRule),
     [snapshot?.rules],
   )
-  const editingRule = editableRules.find(({ id }) => id === editingRuleId) ?? null
+  const editingRule = editableRules.find((rule) => rule.id === editingRuleId && getRegistrationNotificationRulePolicy(rule)?.editable !== false) ?? null
   const statusText = saveStatusLabel(savePhase, savedAt)
   const connectionsEditable = snapshot
     ? snapshot.connections.some((connection) => connection.editable)
     : false
+
+  const pageNavigation = presentation === "page" ? (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <h1 className="text-xl font-semibold tracking-tight">{activeSection === "customer" ? "등록 고객 안내" : `${getWorkflowLabel(activeWorkflow)} 알림`}</h1>
+        {activeSection !== "customer" ? <Button type="button" variant="outline" className="min-h-10" disabled={saving} onClick={() => changeSection("connections")}><MessageSquareText aria-hidden="true" />수신 채팅방</Button> : null}
+      </div>
+      <TabsList className="h-auto w-full justify-start gap-2 rounded-none border-b bg-transparent p-0" aria-label="알림 채널">
+        <TabsTrigger value="rules" className="min-h-11 rounded-none border-0 border-b-2 border-transparent px-3 data-[state=active]:border-primary data-[state=active]:shadow-none">직원 알림 · Google Chat</TabsTrigger>
+        {customerGuidance ? <TabsTrigger value="customer" className="min-h-11 rounded-none border-0 border-b-2 border-transparent px-3 data-[state=active]:border-primary data-[state=active]:shadow-none">고객 안내 · 알림톡</TabsTrigger> : null}
+      </TabsList>
+      {presentation === "page" && activeSection !== "customer" ? (
+        <nav
+          aria-label="알림 업무 선택"
+          className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/35 p-1 sm:grid-cols-3 xl:grid-cols-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+        >
+          {NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map((option) => (
+            <Button
+              key={option.key}
+              type="button"
+              size="sm"
+              variant={activeWorkflow === option.key ? "default" : "ghost"}
+              className="h-10 w-full px-3"
+              disabled={saving}
+              aria-pressed={activeWorkflow === option.key}
+              onClick={() => {
+                if (activeWorkflow === option.key) return
+                navigationGuard.requestNavigation(() => { setPageWorkflow(option.key); setActiveGroup(null) })
+              }}
+            >
+              {option.label}
+            </Button>
+          ))}
+        </nav>
+      ) : null}
+
+    </div>
+  ) : null
 
   const panelBody = loading ? (
     <div className="flex min-h-56 items-center justify-center gap-2 text-sm text-muted-foreground">
@@ -1408,29 +1465,6 @@ export function NotificationControlPanel({
     </div>
   ) : (
     <div className="space-y-4">
-      {presentation === "page" ? (
-        <nav
-          aria-label="알림 업무 선택"
-          className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/35 p-1 sm:grid-cols-3 xl:grid-cols-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-        >
-          {NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map((option) => (
-            <Button
-              key={option.key}
-              type="button"
-              size="sm"
-              variant={activeWorkflow === option.key ? "default" : "ghost"}
-              className="h-9 w-full px-3"
-              aria-pressed={activeWorkflow === option.key}
-              onClick={() => {
-                if (activeWorkflow === option.key) return
-                navigationGuard.requestNavigation(() => setPageWorkflow(option.key))
-              }}
-            >
-              {option.label}
-            </Button>
-          ))}
-        </nav>
-      ) : null}
 
       {message ? (
         <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
@@ -1438,8 +1472,32 @@ export function NotificationControlPanel({
         </div>
       ) : null}
       {mentionErrors._load ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900">
+        <div role="alert" className="rounded-lg border border-border bg-muted px-3 py-2 text-sm">
           {mentionErrors._load}
+        </div>
+      ) : null}
+
+      {mentionConflict ? (
+        <div role="alert" className="space-y-3 rounded-lg border bg-muted/40 p-4">
+          <p className="text-sm font-semibold">담당자 멘션 변경을 확인해 주세요.</p>
+          <ul className="space-y-1 text-xs text-muted-foreground">
+            {Object.keys(mentionChanges.mentionPatch).map((ruleId) => <li key={ruleId}>{editableRules.find((rule) => rule.id === ruleId)?.eventLabel ?? "알림"} · 최신 {mentionConflict.get(ruleId)?.mentionEnabled ? "켜짐" : "꺼짐"} / 내 변경 {mentionDraft.get(ruleId) ? "켜짐" : "꺼짐"}</li>)}
+          </ul>
+          <div className="flex flex-wrap gap-2">
+            <Button type="button" size="sm" variant="outline" onClick={() => {
+              setMentionSettings(mentionConflict)
+              setMentionDraft(createMentionDraft(mentionConflict))
+              setMentionConflict(null)
+              saveRequestRef.current = null
+            }}>최신 멘션 적용</Button>
+            <Button type="button" size="sm" onClick={() => {
+              setMentionDraft(rebaseMentionDraft(mentionSettings, mentionDraft, mentionConflict))
+              setMentionSettings(mentionConflict)
+              setMentionConflict(null)
+              saveRequestRef.current = null
+              setMessage("내 멘션 변경을 최신 설정에 다시 적용했습니다. 확인 후 저장해 주세요.")
+            }}>내 멘션 변경 유지</Button>
+          </div>
         </div>
       ) : null}
 
@@ -1478,49 +1536,28 @@ export function NotificationControlPanel({
         </div>
       ) : null}
 
-      <Tabs
-        value={activeSection}
-        onValueChange={(value) => setActiveSection(value as NotificationControlPanelSection)}
-      >
-        <TabsList
-          className={cn(
-            "grid h-auto w-full rounded-lg border bg-muted/35 p-1",
-            presentation === "page" ? "grid-cols-2" : "grid-cols-1",
-          )}
-        >
-          <TabsTrigger value="rules" className="h-9">Google Chat 규칙</TabsTrigger>
-          {presentation === "page" ? (
-            <TabsTrigger value="connections" className="h-9">연결</TabsTrigger>
-          ) : null}
-        </TabsList>
-        <TabsContent value="rules" className="mt-3">
-          <RulesView
-            rules={editableRules}
-            draft={draft}
-            connections={snapshot.connections}
-            mentionSettings={mentionSettings}
-            mentionSavingRuleIds={mentionSavingRuleIds}
-            mentionErrors={mentionErrors}
-            saving={saving}
-            onChange={updateRule}
-            onMentionChange={updateMentionSetting}
-            onEditTemplate={setEditingRuleId}
-          />
-        </TabsContent>
-        {presentation === "page" ? (
-          <TabsContent value="connections" className="mt-3">
-            <ConnectionsView
-              connections={snapshot.connections}
-              busyKey={connectionBusyKey}
-              error={connectionError}
-              onMutate={mutateConnection}
-              onRequestConfirmation={(connection, action) => {
-                setPendingConnectionAction({ connection, action })
-              }}
-            />
-          </TabsContent>
-        ) : null}
-      </Tabs>
+      {activeWorkflow === "registration" ? (
+        <RegistrationNotificationSettingsGroups
+          rules={editableRules}
+          draft={draft}
+          group={activeGroup}
+          onGroupChange={setActiveGroup}
+          renderControl={(rule) => <RuleToggle rule={rule} draft={draft} connections={snapshot.connections} mentionSetting={displayedMentionSettings.get(rule.id)} mentionSaving={saving || mentionLoading} mentionError={mentionErrors[rule.id] ?? null} saving={saving} surfaceKey="mobile" compact showRecipient={false} onChange={updateRule} onMentionChange={updateMentionSetting} onEditTemplate={setEditingRuleId} />}
+        />
+      ) : (
+        <RulesView
+          rules={editableRules}
+          draft={draft}
+          connections={snapshot.connections}
+          mentionSettings={displayedMentionSettings}
+          mentionSavingRuleIds={mentionSavingRuleIds}
+          mentionErrors={mentionErrors}
+          saving={saving}
+          onChange={updateRule}
+          onMentionChange={updateMentionSetting}
+          onEditTemplate={setEditingRuleId}
+        />
+      )}
 
       {presentation === "dialog" && snapshot.connections.length > 0 ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border bg-muted/30 p-3 text-sm">
@@ -1577,7 +1614,7 @@ export function NotificationControlPanel({
         <Button
           type="button"
           className="h-9 w-full sm:w-auto"
-          disabled={!dirty || saving || conflict !== null}
+          disabled={!dirty || saving || mentionLoading || conflict !== null || mentionConflict !== null}
           onClick={() => void handleSave()}
         >
           {saving ? "저장 중" : "변경사항 저장"}
@@ -1598,6 +1635,12 @@ export function NotificationControlPanel({
         }}
         onChange={updateRule}
       />
+      <Dialog open={presentation === "page" && activeSection === "connections"} onOpenChange={(nextOpen) => { if (!nextOpen && connectionBusyKey === null) setActiveSection("rules") }}>
+        <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" closeButtonLabel="수신 채팅방 닫기" showCloseButton={connectionBusyKey === null} onEscapeKeyDown={(event) => { if (connectionBusyKey !== null) event.preventDefault() }} onPointerDownOutside={(event) => { if (connectionBusyKey !== null) event.preventDefault() }}>
+          <DialogHeader><DialogTitle>수신 채팅방</DialogTitle><DialogDescription>여러 업무에서 함께 사용하는 Google Chat 연결입니다.</DialogDescription></DialogHeader>
+          {snapshot ? <ConnectionsView connections={snapshot.connections} busyKey={connectionBusyKey} error={connectionError} onMutate={mutateConnection} onRequestConfirmation={(connection, action) => setPendingConnectionAction({ connection, action })} /> : <p role="status" className="py-8 text-center text-sm text-muted-foreground">{loading ? "수신 채팅방을 불러오는 중입니다." : "수신 채팅방을 불러오지 못했습니다."}</p>}
+        </DialogContent>
+      </Dialog>
       <Dialog
         open={navigationGuard.confirmationOpen}
         onOpenChange={(nextOpen) => {
@@ -1628,7 +1671,7 @@ export function NotificationControlPanel({
               type="button"
               variant="outline"
               disabled={saving}
-              onClick={navigationGuard.discardAndContinue}
+              onClick={discardDraftAndContinue}
             >
               저장하지 않고 이동
             </Button>
@@ -1773,7 +1816,11 @@ export function NotificationControlPanel({
 
   return (
     <section data-notification-workflow={activeWorkflow} className="space-y-4">
-      {panelBody}
+      <Tabs value={activeSection === "customer" ? "customer" : "rules"} activationMode="manual" onValueChange={(value) => changeSection(value as NotificationSettingsSection)}>
+        {pageNavigation}
+        <TabsContent value="rules" className="mt-2">{panelBody}</TabsContent>
+        {customerGuidance ? <TabsContent value="customer" className="mt-2">{customerGuidance}</TabsContent> : null}
+      </Tabs>
       {auxiliaryDialogs}
     </section>
   )

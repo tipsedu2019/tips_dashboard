@@ -421,6 +421,7 @@ function fixtureObservationCustomerMessageSource(
 }
 
 type FixtureCustomerMessageClientOptions = Readonly<{
+  resolveTaskId?: (target: RegistrationCustomerMessageTarget) => string | null
   resolveObservationSource?: (
     messageKind: "observation_booking" | "observation_reminder",
     sourceId: string,
@@ -434,6 +435,7 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(
   const previewSources = new Map<string, FixtureCustomerMessageSource>()
   const results = new Map<string, RegistrationCustomerMessageSendResult>()
   const resultTargets = new Map<string, RegistrationCustomerMessageTarget>()
+  const resultTaskIds = new Map<string, string>()
   const replayResultKeys = new Map<string, string>()
   const requestKeyBindings = new Map<string, string>()
   const lockedTargets = new Set<string>()
@@ -535,6 +537,8 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(
       replayResultKeys.set(replayKey, sendKey)
       results.set(sendKey, next)
       resultTargets.set(sendKey, target)
+      const taskId = options.resolveTaskId?.(target)
+      if (taskId) resultTaskIds.set(sendKey, taskId)
       lockedTargets.add(targetKey(target))
       return next
     },
@@ -552,6 +556,23 @@ export function createRegistrationSubjectTrackFixtureCustomerMessageClient(
         recipientLast4: item.recipientLast4,
         canCheck: item.canCheck,
       }))
+    },
+    async listCaseHistory(input, signal) {
+      if (signal?.aborted) throw new Error("registration_customer_message_admin_aborted")
+      const history = [...results.entries()].filter(([key]) => resultTaskIds.get(key) === input.taskId)
+        .map(([, item]) => ({
+          messageId: item.messageId, messageKind: item.messageKind, currentStatus: item.currentStatus,
+          confirmedByName: item.confirmedByName, confirmedAt: item.confirmedAt, updatedAt: item.updatedAt,
+          recipientLast4: item.recipientLast4, canCheck: item.canCheck, canCheckDelivery: item.currentStatus === "accepted",
+        })).reverse()
+      return { ok: true, page: input.page, pageSize: input.pageSize, totalCount: history.length,
+        history: history.slice((input.page - 1) * input.pageSize, input.page * input.pageSize) }
+    },
+    async checkDelivery(input, signal) {
+      if (signal?.aborted) throw new Error("registration_customer_message_admin_aborted")
+      const current = [...results.values()].find((item) => item.messageId === input.messageId)
+      if (!current || current.currentStatus !== "accepted") throw new Error("registration_customer_message_check_not_allowed")
+      return { ok: true, deliveryStatus: "delivered", checkedAt: FIXTURE_NOW }
     },
     async check(input) {
       const entry = [...results.entries()].find(([, item]) => item.messageId === input.messageId)
@@ -1437,6 +1458,14 @@ export function createRegistrationSubjectTrackFixtureAdapter(
   let nextActionBehavior: Required<RegistrationSubjectTrackFixtureDebugActionBehavior> | null = null
   let nextFault: RegistrationSubjectTrackFixtureDebugFault | null = null
   const customerMessageClient = createRegistrationSubjectTrackFixtureCustomerMessageClient({
+    resolveTaskId: (target) => {
+      const state = runtime.getState()
+      const detail = Object.values(state.caseDetails).find((item) => item.task.id === target.sourceId
+        || item.tracks.some((track) => track.id === target.sourceId)
+        || item.appointments.some((appointment) => appointment.id === target.sourceId))
+      return detail?.task.id || Object.values(state.observation.managerDetails).flatMap((item) => item.attempts)
+        .find((item) => item.observationId === target.sourceId)?.taskId || null
+    },
     resolveObservationSource: (messageKind, sourceId) => fixtureObservationCustomerMessageSource(
       runtime.getState(),
       messageKind,

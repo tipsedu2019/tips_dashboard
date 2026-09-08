@@ -63,22 +63,16 @@ test("status save and explicit management notification are separate UI actions",
     "src/features/tasks/registration-track-editor.tsx",
     root,
   ), "utf8")
-  const statusSave = editor.slice(
-    editor.indexOf("async function changeWorkflowStatus"),
-    editor.indexOf("async function sendRegistrationManagementNotification"),
-  )
-  const notificationSend = editor.slice(
-    editor.indexOf("async function sendRegistrationManagementNotification"),
-    editor.indexOf("const migrationReviewPanelId"),
-  )
-
+  const statusSave = editor.slice(editor.indexOf("async function changeWorkflowStatus"), editor.indexOf("const subjectPanelIdsByTrackId"))
+  const actions = await readFile(new URL("src/features/tasks/registration-management-notification-actions.tsx", root), "utf8")
+  const service = await readFile(new URL("src/features/tasks/registration-management-notification-preview-service.ts", root), "utf8")
   assert.match(statusSave, /await setRegistrationWorkflowStatus/u)
-  assert.doesNotMatch(statusSave, /ensureRegistrationWorkflowNotificationSourceIds/u)
-  assert.doesNotMatch(statusSave, /dispatchRegistrationManagementNotificationSources/u)
-  assert.match(notificationSend, /ensureRegistrationWorkflowNotificationSourceIds/u)
-  assert.match(notificationSend, /dispatchRegistrationManagementNotificationSources/u)
-  assert.match(notificationSend, /requestKey: crypto\.randomUUID\(\)/u)
-  assert.match(editor, /관리팀 알림 보내기/u)
+  assert.doesNotMatch(statusSave, /ensureRegistrationWorkflowNotificationSourceIds|dispatchRegistrationManagementNotificationSources/u)
+  assert.match(actions, /previewService.confirm/u)
+  assert.match(actions, /dispatchRegistrationManagementNotificationSources/u)
+  assert.match(actions, /hasUnsavedChanges/u)
+  assert.match(service, /ensure_registration_workflow_notification_v4/u)
+  assert.match(actions, /관리팀 알림 보내기/u)
   assert.match(editor, /canManageCase && notificationReadiness\.eventKey/u)
   assert.match(editor, /studentName: detail\.task\.studentName,/u)
   assert.doesNotMatch(editor, /studentName: detail\.task\.studentName \|\| detail\.task\.title/u)

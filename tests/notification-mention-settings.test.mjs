@@ -93,7 +93,7 @@ function panelSnapshot(workflowKey, ruleId, eventKey) {
       id,
       workflow_key: workflowKey,
       event_key: index === 0 ? eventKey : workflowKey === "registration"
-        ? "registration.inquiry_routed"
+        ? "registration.consultation_completed"
         : "transfer.processing_started",
       event_label: index === 0 ? "신청 생성" : "신청 변경",
       group_label: "알림",
@@ -367,7 +367,7 @@ test("an unadopted workflow returns an empty closed setting list without a save 
   assert.deepEqual(calls, [["get", "registration"]])
 })
 
-test("real panel keeps the draft isolated while retrying, scoping, and applying per-rule mention saves", async () => {
+test("real panel cancels local template edits and atomically saves mention and rule drafts with retry and conflict recovery", async () => {
   const fixtureRoot = await mkdtemp(join(tmpdir(), "tips-notification-mention-"))
   let server
   let browser
@@ -429,124 +429,116 @@ export default function Page() {
     const registrationSnapshot = panelSnapshot("registration", RULE_ID, "registration.case_created")
     const transferSnapshot = panelSnapshot("transfer", RULE_ID, "transfer.submitted")
     const mentionRows = [
-      wireSetting({ mention_enabled: false }),
-      wireSetting({
-        rule_id: OTHER_RULE_ID,
-        event_key: "registration.inquiry_routed",
-        mention_enabled: false,
-      }),
+      wireSetting({ event_key: "registration.case_created", mention_enabled: false }),
+      wireSetting({ rule_id: OTHER_RULE_ID, event_key: "registration.consultation_completed", mention_enabled: false }),
     ]
-    await page.addInitScript(({ registrationSnapshot: initialRegistration, transferSnapshot: initialTransfer, initialMentions }) => {
-      const fixture = { requests: [], patches: [], pending: [], pendingLists: [], delayNextList: false };
+    await page.addInitScript(({ registrationSnapshot: registration, transferSnapshot: transfer, mentionRows: mentions }) => {
+      const fixture = { registration, transfer, mentions, requests: [], patches: [], pending: [], standaloneMentionPatches: 0, pendingLists: [], delayNextList: false };
       window.__notificationMentionFixture = fixture;
       window.fetch = (input, init = {}) => {
         const url = new URL(String(input), window.location.origin);
+        const method = init.method || "GET";
+        fixture.requests.push({ path: url.pathname, method });
         if (url.pathname === "/api/notifications/control-plane") {
-          const workflow = url.searchParams.get("workflow_key");
-          fixture.requests.push({ path: url.pathname, workflow, method: init.method || "GET" });
-          return Promise.resolve(new Response(JSON.stringify(workflow === "transfer" ? initialTransfer : initialRegistration), { status: 200 }));
+          if (method === "PATCH") {
+            const body = JSON.parse(init.body);
+            fixture.patches.push(body);
+            return new Promise((resolve, reject) => fixture.pending.push({ body, resolve, reject }));
+          }
+          return Promise.resolve(new Response(JSON.stringify(url.searchParams.get("workflow_key") === "transfer" ? fixture.transfer : fixture.registration), { status: 200 }));
         }
-        if (url.pathname === "/api/notifications/mention-settings" && (init.method || "GET") === "GET") {
-          const workflow = url.searchParams.get("workflow_key");
-          fixture.requests.push({ path: url.pathname, workflow, method: "GET" });
-          const settings = workflow === "transfer"
-            ? initialMentions.map((row) => ({ ...row, workflow_key: "transfer", event_key: "transfer.submitted" }))
-            : initialMentions;
+        if (url.pathname === "/api/notifications/mention-settings" && method === "GET") {
+          const isTransfer = url.searchParams.get("workflow_key") === "transfer";
+          const settings = isTransfer ? fixture.mentions.map((row, index) => ({ ...row, workflow_key: "transfer", event_key: index ? "transfer.processing_started" : "transfer.submitted" })) : fixture.mentions;
           if (fixture.delayNextList) {
             fixture.delayNextList = false;
             return new Promise((resolve) => fixture.pendingLists.push({ resolve, settings }));
           }
           return Promise.resolve(new Response(JSON.stringify({ settings }), { status: 200 }));
         }
-        if (url.pathname === "/api/notifications/mention-settings") {
-          const body = JSON.parse(init.body);
-          fixture.patches.push(body);
-          return new Promise((resolve, reject) => fixture.pending.push({ resolve, reject }));
-        }
-        return Promise.resolve(new Response(JSON.stringify({}), { status: 200 }));
+        if (url.pathname === "/api/notifications/mention-settings") fixture.standaloneMentionPatches += 1;
+        return Promise.resolve(new Response(JSON.stringify({}), { status: 400 }));
       };
-    }, { registrationSnapshot, transferSnapshot, initialMentions: mentionRows })
+    }, { registrationSnapshot, transferSnapshot, mentionRows })
     await page.goto(fixtureUrl)
-    await page.waitForTimeout(1000)
-    const initialBody = await page.locator("body").innerText()
-    if (!initialBody.includes("확인된 Google Chat 계정만 멘션합니다.")) {
-      const requests = await page.evaluate(() => window.__notificationMentionFixture?.requests ?? [])
-      throw new Error(`panel_fixture_bootstrap:${JSON.stringify({ output, browserErrors, initialBody, requests })}`)
-    }
-    await page.getByRole("switch", { name: "관리팀 Google Chat" }).first().click()
-    await page.getByRole("button", { name: "내용 수정" }).first().click()
-    await page.getByLabel("제목").fill("새 {업무} 수정")
-    await page.getByLabel("본문").fill("{업무} {현재상태} {현재담당} 수정")
+    await page.getByRole("button", { name: /관리팀 진행 공유.*상세 설정/ }).click()
+    const ruleSwitch = () => page.getByRole("switch", { name: "상담 신청 · 관리팀 Google Chat", exact: true })
+    const mentionSwitch = () => page.getByRole("switch", { name: "상담 신청 · 담당자 멘션", exact: true })
+    const openEditor = () => page.getByRole("button", { name: "상담 신청 · 내용 수정", exact: true }).click()
+    const closeGroup = () => page.getByRole("button", { name: "등록 알림 상세 닫기", exact: true }).click()
+    const save = () => page.getByRole("button", { name: "변경사항 저장", exact: true }).click()
+    await ruleSwitch().click()
+    await mentionSwitch().click()
+    assert.equal(await page.evaluate(() => window.__notificationMentionFixture.patches.length), 0, "switches only change local drafts")
+    await openEditor()
+    await page.getByLabel("제목", { exact: true }).fill("취소할 제목")
     await page.keyboard.press("Escape")
+    await openEditor()
+    assert.equal(await page.getByLabel("제목", { exact: true }).inputValue(), "새 {업무}")
+    await page.getByLabel("제목", { exact: true }).fill("새 {업무} 수정")
+    await page.getByLabel("본문", { exact: true }).fill("{업무} {현재상태} {현재담당} 수정")
+    await page.getByRole("button", { name: "변경사항에 반영", exact: true }).click()
+    await closeGroup()
     await page.getByText("저장하지 않은 변경사항이 있습니다.", { exact: true }).waitFor()
-
-    const firstMention = page.getByRole("switch", { name: "담당자 멘션" }).first()
-    await firstMention.click()
+    await save()
     await page.waitForFunction(() => window.__notificationMentionFixture.patches.length === 1)
+    const firstPatch = await page.evaluate(() => window.__notificationMentionFixture.patches[0])
+    assert.equal(firstPatch.patch.rules[RULE_ID].enabled, true)
+    assert.equal(firstPatch.patch.rules[RULE_ID].title_template, "새 {업무} 수정")
+    assert.deepEqual(firstPatch.mention_patch, { [RULE_ID]: true })
+    assert.deepEqual(firstPatch.expected_mention_revisions, { [RULE_ID]: REVISION })
     await page.evaluate(() => window.__notificationMentionFixture.pending[0].reject(new Error("ambiguous transport failure")))
-    await page.getByText("담당자 멘션을 저장하지 못했습니다.", { exact: true }).first().waitFor()
-    await firstMention.click()
+    await page.getByText("설정을 저장하지 못했습니다. 입력한 내용은 유지했습니다. 다시 시도해 주세요.", { exact: true }).waitFor()
+    await save()
     await page.waitForFunction(() => window.__notificationMentionFixture.patches.length === 2)
-    const replayIds = await page.evaluate(() => window.__notificationMentionFixture.patches.slice(0, 2).map((body) => body.request_id))
-    assert.equal(replayIds[0], replayIds[1], "ambiguous retry must keep its idempotency key")
-    await page.evaluate((ruleId) => window.__notificationMentionFixture.pending[1].resolve(new Response(JSON.stringify({ setting: {
-      rule_id: ruleId, workflow_key: "registration", event_key: "registration.case_created", channel_key: "google_chat",
-      mention_enabled: true, revision: "9007199254740998", updated_at: "2026-08-11T00:01:00.000Z", editable: true,
-    } }), { status: 200 })), RULE_ID)
-    await page.waitForFunction(() => document.querySelectorAll('[role="switch"][aria-label="담당자 멘션"]')[0]?.getAttribute("data-state") === "checked")
-    await page.getByText("저장하지 않은 변경사항이 있습니다.", { exact: true }).waitFor()
-
-    await firstMention.click()
+    assert.equal(await page.evaluate(() => window.__notificationMentionFixture.patches[1].request_id), firstPatch.request_id)
+    const resolveSave = async (index) => page.evaluate((pendingIndex) => {
+      const fixture = window.__notificationMentionFixture;
+      const pending = fixture.pending[pendingIndex];
+      fixture.registration.rules = fixture.registration.rules.map((rule) => {
+        const patch = pending.body.patch.rules[rule.id];
+        if (!patch) return rule;
+        return { ...rule, enabled: patch.enabled ?? rule.enabled, revision: String(BigInt(rule.revision) + 1n), template: { ...rule.template, title_template: patch.title_template ?? rule.template.title_template, body_template: patch.body_template ?? rule.template.body_template } };
+      });
+      fixture.mentions = fixture.mentions.map((setting) => pending.body.mention_patch[setting.rule_id] === undefined ? setting : { ...setting, mention_enabled: pending.body.mention_patch[setting.rule_id], revision: String(BigInt(setting.revision) + 1n) });
+      pending.resolve(new Response(JSON.stringify({ ...fixture.registration, mention_settings: fixture.mentions }), { status: 200 }));
+    }, index)
+    await resolveSave(1)
+    await page.waitForFunction(() => document.querySelector('[aria-label="알림 설정 저장"]')?.textContent.includes("저장됨"))
+    assert.equal(await page.getByRole("button", { name: "변경사항 저장", exact: true }).isDisabled(), true)
+    await page.getByRole("button", { name: /관리팀 진행 공유.*상세 설정/ }).click()
+    assert.equal(await mentionSwitch().isChecked(), true)
+    await mentionSwitch().click()
+    await closeGroup()
+    await save()
     await page.waitForFunction(() => window.__notificationMentionFixture.patches.length === 3)
-    const freshId = await page.evaluate(() => window.__notificationMentionFixture.patches[2].request_id)
-    assert.notEqual(freshId, replayIds[1], "new intent after a definitive result needs a fresh id")
-    await page.evaluate(() => window.__notificationMentionFixture.pending[2].resolve(new Response(JSON.stringify({
-      ok: false,
-      code: "notification_mention_setting_revision_conflict",
-    }), { status: 409 })))
-    await page.getByText("다른 사용자가 담당자 멘션을 먼저 변경했습니다. 다시 확인해 주세요.", { exact: true }).first().waitFor()
-    assert.equal(await page.getByRole("switch", { name: "관리팀 Google Chat" }).first().isChecked(), true)
-    await page.getByRole("button", { name: "내용 수정" }).first().click()
-    assert.equal(await page.getByLabel("제목").inputValue(), "새 {업무} 수정")
-    assert.equal(await page.getByLabel("본문").inputValue(), "{업무} {현재상태} {현재담당} 수정")
-    await page.keyboard.press("Escape")
-    await firstMention.click()
-    await page.waitForFunction(() => window.__notificationMentionFixture.patches.length === 4)
-    const afterConflictId = await page.evaluate(() => window.__notificationMentionFixture.patches[3].request_id)
-    assert.notEqual(afterConflictId, freshId, "a definitive conflict clears the retry key")
-    await page.evaluate(() => window.__notificationMentionSetWorkflow("transfer"))
-    await page.getByText("전반 알림 설정", { exact: true }).waitFor()
-    await page.evaluate((ruleId) => window.__notificationMentionFixture.pending[3].resolve(new Response(JSON.stringify({ setting: {
-      rule_id: ruleId, workflow_key: "registration", event_key: "registration.case_created", channel_key: "google_chat",
-      mention_enabled: true, revision: "9007199254740999", updated_at: "2026-08-11T00:02:00.000Z", editable: true,
-    } }), { status: 200 })), RULE_ID)
-    await page.waitForTimeout(50)
-    const activeMentions = await page.evaluate(() => Array.from(document.querySelectorAll('[data-notification-mention-setting]')).map((node) => node.getAttribute("data-notification-mention-setting")))
-    assert.deepEqual([...new Set(activeMentions)], [RULE_ID, OTHER_RULE_ID])
-    assert.equal(await page.getByRole("switch", { name: "담당자 멘션" }).first().isChecked(), false)
-    assert.equal(await page.getByText("담당자 멘션을 저장하지 못했습니다.", { exact: true }).count(), 0)
-    await page.getByRole("switch", { name: "담당자 멘션" }).first().click()
-    await page.waitForFunction(() => window.__notificationMentionFixture.patches.length === 5)
-    await page.evaluate(() => window.__notificationMentionSetWorkflow("registration"))
-    await page.getByText("등록 알림 설정", { exact: true }).waitFor()
-    await page.evaluate(() => window.__notificationMentionFixture.pending[4].reject(new Error("old scope error")))
-    await page.waitForTimeout(50)
-    assert.equal(await page.getByText("담당자 멘션을 저장하지 못했습니다.", { exact: true }).count(), 0)
+    assert.deepEqual(await page.evaluate(() => window.__notificationMentionFixture.patches[2].patch.rules), {}, "mention-only intent still reaches atomic save")
     await page.evaluate(() => {
-      window.__notificationMentionFixture.delayNextList = true
-      window.__notificationMentionSetWorkflow("transfer")
+      const fixture = window.__notificationMentionFixture;
+      fixture.mentions[0] = { ...fixture.mentions[0], revision: String(BigInt(fixture.mentions[0].revision) + 1n) };
+      fixture.pending[2].resolve(new Response(JSON.stringify({ code: "notification_mention_setting_revision_conflict", current_snapshot: fixture.registration, current_mention_settings: fixture.mentions }), { status: 409 }));
     })
-    await page.getByText("전반 알림 설정", { exact: true }).waitFor()
+    await page.getByRole("button", { name: "내 멘션 변경 유지", exact: true }).click()
+    await save()
+    await page.waitForFunction(() => window.__notificationMentionFixture.patches.length === 4)
+    assert.equal(await page.evaluate((id) => window.__notificationMentionFixture.patches[3].expected_mention_revisions[id], RULE_ID), String(BigInt(REVISION) + 2n))
+    await resolveSave(3)
+    await page.waitForFunction(() => document.querySelector('[aria-label="알림 설정 저장"]')?.textContent.includes("저장됨"))
+    await page.evaluate(() => {
+      window.__notificationMentionFixture.delayNextList = true;
+      window.__notificationMentionSetWorkflow("transfer");
+    })
     await page.waitForFunction(() => window.__notificationMentionFixture.pendingLists.length === 1)
     await page.evaluate(() => window.__notificationMentionSetWorkflow("registration"))
-    await page.getByText("등록 알림 설정", { exact: true }).waitFor()
-    await page.evaluate(() => window.__notificationMentionFixture.pendingLists[0].resolve(new Response(JSON.stringify({
-      settings: window.__notificationMentionFixture.pendingLists[0].settings,
-    }), { status: 200 })))
-    await page.waitForTimeout(50)
-    assert.equal(await page.getByRole("switch", { name: "담당자 멘션" }).first().isChecked(), false, "a stale list completion cannot replace the active scope")
-    const controlPlanePatches = await page.evaluate(() => window.__notificationMentionFixture.requests.filter((item) => item.path === "/api/notifications/control-plane" && item.method === "PATCH"))
-    assert.deepEqual(controlPlanePatches, [], "mention saves must not serialize the existing draft")
+    await page.getByRole("button", { name: /관리팀 진행 공유.*상세 설정/ }).waitFor()
+    await page.evaluate(() => {
+      const pending = window.__notificationMentionFixture.pendingLists[0];
+      pending.resolve(new Response(JSON.stringify({ settings: pending.settings }), { status: 200 }));
+    })
+    await page.getByRole("button", { name: /관리팀 진행 공유.*상세 설정/ }).click()
+    assert.equal(await mentionSwitch().isChecked(), false, "stale list response cannot replace the active workflow")
+    assert.equal(await page.evaluate(() => window.__notificationMentionFixture.standaloneMentionPatches), 0)
+    assert.deepEqual(browserErrors, [])
   } finally {
     await browser?.close()
     server?.kill("SIGTERM")

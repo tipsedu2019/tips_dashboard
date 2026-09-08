@@ -215,15 +215,32 @@ select ok(
 
 select ok(
   (
-    select definition like '%registration_management_notification_source_current_v2%'
-      and definition like '%''items'', ''[]''::jsonb%'
+    -- The preview wrapper can only decorate items from the guarded delegate.
+    -- Follow the recovery wrapper too: its prior source validator still owns
+    -- the archived-track check rather than duplicating it in the new wrapper.
+    select pg_catalog.regexp_replace(wrapper, '[[:space:]]+', '', 'g') like
+        '%beginv_plan:=public.get_registration_core_legacy_dispatch_plan_before_preview_v1(p_source_event_id,p_actor_profile_id);%'
+      and wrapper like '%jsonb_array_elements(v_plan->''items'')%'
+      and delegate like '%and not dashboard_private.registration_management_notification_source_current_v2(%'
+      and delegate like '%''items'', ''[]''::jsonb%'
+      and source_wrapper like '%return dashboard_private.registration_management_source_current_before_recovery_v2(p_source_event_id,p_expected_actor_profile_id)%'
+      and source_delegate like '%v_snapshot ->> ''archivedat'' is not null%return false%'
     from (
       select pg_catalog.lower(pg_catalog.pg_get_functiondef(
         'public.get_registration_core_legacy_dispatch_plan_v1(uuid,uuid)'::regprocedure
-      )) as definition
+      )) as wrapper,
+      pg_catalog.lower(pg_catalog.pg_get_functiondef(
+        'public.get_registration_core_legacy_dispatch_plan_before_preview_v1(uuid,uuid)'::regprocedure
+      )) as delegate,
+      pg_catalog.lower(pg_catalog.pg_get_functiondef(
+        'dashboard_private.registration_management_notification_source_current_v2(uuid,uuid)'::regprocedure
+      )) as source_wrapper,
+      pg_catalog.lower(pg_catalog.pg_get_functiondef(
+        'dashboard_private.registration_management_source_current_before_recovery_v2(uuid,uuid)'::regprocedure
+      )) as source_delegate
     ) source
   ),
-  'the explicit legacy provider plan fails closed after its source track is archived'
+  'the final preview and recovery wrappers preserve the archived-source empty provider plan'
 );
 
 insert into auth.users(

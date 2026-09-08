@@ -2504,3 +2504,157 @@ test("content contract v2 RPCs keep v1 compatibility and expose only role-checke
   assert.doesNotMatch(migration, /grant\s+execute[\s\S]+?save_notification_control_plane_v2[\s\S]+?to\s+(?:anon|service_role)/i)
   assert.match(migration, /security\s+definer[\s\S]+?set\s+search_path\s*=\s*''/i)
 })
+
+function atomicWireMention(overrides = {}) {
+  return { rule_id: RULE_ID, workflow_key: 'tasks', event_key: 'task.created', channel_key: 'google_chat',
+    mention_enabled: false, revision: BIG_REVISION, updated_at: null, editable: true, ...overrides }
+}
+function atomicRpcMention(overrides = {}) {
+  return { ruleId: RULE_ID, workflowKey: 'tasks', eventKey: 'task.created', channelKey: 'google_chat',
+    mentionEnabled: false, revision: BIG_REVISION, updatedAt: null, editable: true, ...overrides }
+}
+function atomicServiceInput(overrides = {}) {
+  return { workflowKey: 'tasks', expectedRuleRevisions: {}, expectedContractVersions: {}, patch: { rules: {} },
+    expectedMentionRevisions: { [RULE_ID]: BIG_REVISION }, mentionPatch: { [RULE_ID]: false }, requestId: REQUEST_ID, ...overrides }
+}
+
+test('atomic service saves mention-only edits once and consumes the committed mention revisions', async () => {
+  const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
+  const calls = []
+  const service = createNotificationControlPlaneService({ baseUrl: 'http://localhost', getAccessToken: async () => 'token',
+    fetch: async (url, init) => { calls.push({ url: String(url), body: JSON.parse(init.body) });
+      return jsonResponse({ ...createWireSnapshot(), mention_settings: [atomicWireMention()] }) }
+  })
+  const result = await service.saveControlPlane(atomicServiceInput())
+  assert.equal(calls.length, 1)
+  assert.deepEqual(calls[0].body.mention_patch, { [RULE_ID]: false })
+  assert.deepEqual(calls[0].body.expected_mention_revisions, { [RULE_ID]: BIG_REVISION })
+  assert.deepEqual(calls[0].body.patch, { rules: {} })
+  assert.equal(result.mentionSettings[0].revision, BIG_REVISION)
+  assert.equal(result.mentionSettings[0].mentionEnabled, false)
+})
+
+test('atomic service rejects partial, unrelated, and unacknowledged mention saves', async () => {
+  const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
+  let calls = 0
+  const service = createNotificationControlPlaneService({ baseUrl: 'http://localhost', getAccessToken: async () => 'token',
+    fetch: async () => { calls++; return jsonResponse(createWireSnapshot()) } })
+  for (const input of [atomicServiceInput({ mentionPatch: undefined }), atomicServiceInput({ expectedMentionRevisions: {} })]) {
+    await assert.rejects(service.saveControlPlane(input), { code: 'notification_invalid_request' })
+  }
+  assert.equal(calls, 0)
+  await assert.rejects(service.saveControlPlane(atomicServiceInput()), { code: 'notification_unsafe_response' })
+  assert.equal(calls, 1)
+})
+
+test('atomic route selects one RPC with both revision domains and the existing override receipt', async () => {
+  const { saveNotificationControlPlaneViaRpc } = await import(controlPlaneRouteUrl)
+  const calls = []
+  const result = await saveNotificationControlPlaneViaRpc({ ...atomicServiceInput(),
+    conflictOverride: { requestId: OVERRIDE_REQUEST_ID, conflictingFields: [`rules.${RULE_ID}.bodyTemplate`] },
+    client: { rpc: async (name, parameters) => { calls.push({ name, parameters }); return { data: { marker: 'atomic' }, error: null } } }
+  })
+  assert.deepEqual(result, { marker: 'atomic' })
+  assert.equal(calls.length, 1)
+  assert.equal(calls[0].name, 'save_notification_settings_v1')
+  assert.deepEqual(calls[0].parameters.p_mention_patch, { [RULE_ID]: false })
+  assert.equal(calls[0].parameters.p_conflict_override.request_id, OVERRIDE_REQUEST_ID)
+})
+
+test('atomic handler preserves archived read-only mentions and blocks malformed paired input', async () => {
+  const { createNotificationControlPlaneRouteHandlers } = await import(controlPlaneRouteUrl)
+  const calls = []
+  const handlers = createNotificationControlPlaneRouteHandlers({
+    authenticate: async () => ({ userId: ADMIN_ID, role: 'admin', client: {} }),
+    getControlPlane: async () => createWireSnapshot(),
+    saveControlPlane: async (input) => { calls.push(input); return { ...createWireSnapshot(), mention_settings: [atomicRpcMention({ editable: false })] } },
+  })
+  const body = { workflow_key: 'tasks', expected_rule_revisions: {}, expected_contract_versions: {}, patch: { rules: {} },
+    expected_mention_revisions: { [RULE_ID]: BIG_REVISION }, mention_patch: { [RULE_ID]: false }, request_id: REQUEST_ID }
+  const invoke = (payload) => handlers.patch(new Request('http://localhost/api/notifications/control-plane', { method: 'PATCH', body: JSON.stringify(payload) }))
+  const response = await invoke(body)
+  assert.equal(response.status, 200)
+  assert.equal(response.headers.get('cache-control'), 'no-store')
+  assert.equal((await response.json()).mention_settings[0].editable, false)
+  const incomplete = { ...body }; delete incomplete.mention_patch
+  assert.equal((await invoke(incomplete)).status, 400)
+  assert.equal(calls.length, 1)
+})
+
+test('mention conflicts preserve typed current settings alongside the unsaved rule conflict snapshot', async () => {
+  const { createNotificationControlPlaneRouteHandlers } = await import(controlPlaneRouteUrl)
+  const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
+  const handlers = createNotificationControlPlaneRouteHandlers({
+    authenticate: async () => ({ userId: ADMIN_ID, role: 'admin', client: {} }), getControlPlane: async () => createWireSnapshot(),
+    saveControlPlane: async () => { throw Object.assign(new Error('stale'), {
+      code: 'notification_mention_setting_revision_conflict', currentSnapshot: createWireSnapshot(),
+      currentRevisions: { [RULE_ID]: BIG_REVISION }, currentMentionSettings: [atomicRpcMention()],
+    }) },
+  })
+  const service = createNotificationControlPlaneService({ baseUrl: 'http://localhost', getAccessToken: async () => 'token',
+    fetch: (url, init) => handlers.patch(new Request(url, init)) })
+  await assert.rejects(service.saveControlPlane(atomicServiceInput()), (error) => {
+    assert.equal(error.status, 409)
+    assert.equal(error.code, 'notification_mention_setting_revision_conflict')
+    assert.equal(error.currentSnapshot.rules[0].revision, BIG_REVISION)
+    assert.equal(error.currentMentionSettings[0].ruleId, RULE_ID)
+    return true
+  })
+})
+
+test('control-plane timeout covers late authentication and never sends after the deadline', async () => {
+  const { createNotificationControlPlaneService, NotificationControlPlaneHttpError } = await import(serviceModuleUrl)
+  for (const operation of ['read', 'save']) {
+    let finishToken, calls = 0
+    const service = createNotificationControlPlaneService({ baseUrl: 'http://localhost', timeoutMs: 5,
+      getAccessToken: () => new Promise((resolve) => { finishToken = resolve }),
+      fetch: async () => { calls++; return jsonResponse(createWireSnapshot()) },
+    })
+    const pending = operation === 'read' ? service.getControlPlane({ workflowKey: 'tasks' }) : service.saveControlPlane(atomicServiceInput())
+    await assert.rejects(pending, (error) => error instanceof NotificationControlPlaneHttpError && error.code === 'notification_request_timeout' && error.status === 504)
+    finishToken('late-token')
+    await new Promise((resolve) => setTimeout(resolve, 0))
+    assert.equal(calls, 0)
+  }
+})
+
+test('control-plane timeout covers both fetch and body consumption and aborts the transport', async () => {
+  const { createNotificationControlPlaneService, NotificationControlPlaneHttpError } = await import(serviceModuleUrl)
+  for (const phase of ['fetch', 'body']) {
+    for (const operation of ['read', 'save']) {
+      let signal
+      const service = createNotificationControlPlaneService({ baseUrl: 'http://localhost', timeoutMs: 5, getAccessToken: async () => 'token',
+        fetch: async (_url, init) => {
+          signal = init.signal
+          return phase === 'fetch' ? new Promise(() => {}) : { ok: true, json: () => new Promise(() => {}) }
+        },
+      })
+      const pending = operation === 'read' ? service.getControlPlane({ workflowKey: 'tasks' }) : service.saveControlPlane(atomicServiceInput())
+      await assert.rejects(pending, (error) => error instanceof NotificationControlPlaneHttpError && error.code === 'notification_request_timeout')
+      assert.equal(signal.aborted, true)
+    }
+  }
+})
+
+test('timed-out atomic saves keep the caller draft and request identity while ignoring a late body', async () => {
+  const { createNotificationControlPlaneService } = await import(serviceModuleUrl)
+  const input = atomicServiceInput(), original = structuredClone(input), calls = []
+  let finishBody
+  const payload = { ...createWireSnapshot(), mention_settings: [atomicWireMention()] }
+  const service = createNotificationControlPlaneService({ baseUrl: 'http://localhost', timeoutMs: 5, getAccessToken: async () => 'token',
+    fetch: async (_url, init) => {
+      calls.push(JSON.parse(init.body))
+      return calls.length === 1 ? { ok: true, json: () => new Promise((resolve) => { finishBody = resolve }) } : jsonResponse(payload)
+    },
+  })
+  let accepted = false
+  await assert.rejects(service.saveControlPlane(input).then(() => { accepted = true }), { code: 'notification_request_timeout' })
+  finishBody(payload)
+  await new Promise((resolve) => setTimeout(resolve, 0))
+  assert.equal(accepted, false)
+  assert.deepEqual(input, original)
+  const result = await service.saveControlPlane(input)
+  assert.equal(result.mentionSettings[0].ruleId, RULE_ID)
+  assert.equal(calls.length, 2)
+  assert.deepEqual(calls[0], calls[1])
+})

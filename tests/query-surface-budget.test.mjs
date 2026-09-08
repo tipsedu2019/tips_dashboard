@@ -2807,3 +2807,79 @@ test("occurrence identity distinguishes structurally identical standalone block 
     assert.ok((switchMoved.violations ?? []).some((violation) => violation.reason === "list_select_star"))
   }
 })
+
+test("registration exact-purpose RPCs retain transport controls and do not allow arbitrary RPC names", () => {
+  const names = [
+    "get_registration_management_notification_preview_v1", "ensure_registration_workflow_notification_v4",
+    "get_registration_customer_guidance_settings_v1", "get_registration_observation_explicit_chat_preview_v1",
+    "begin_registration_observation_explicit_chat_v1", "register_registration_observation_explicit_chat_attempt_v1",
+    "finish_registration_observation_explicit_chat_v1",
+  ]
+  const inspect = (name, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/registration-bounded-fixture.ts",
+    source: `function read(client, input) { return client.rpc(${JSON.stringify(name)}, input)${suffix} }`,
+  }).map((entry) => entry.reason)
+  for (const name of names) {
+    assert.deepEqual(inspect(name), [])
+    assert.deepEqual(inspect(`${name}_other`), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+    assert.ok(inspect(name, ".abortSignal(AbortSignal.timeout(15000)).retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, ".abortSignal(AbortSignal.timeout(8000)).retry(true)").includes("list_retry_false_missing"))
+  }
+  const dynamic = inspectQuerySurfaceSource({ surface: "tasks", file: "src/features/tasks/registration-bounded-fixture.ts",
+    source: 'function request(client, name, input) { return client.rpc(name, input).abortSignal(AbortSignal.timeout(8000)).retry(false) }' })
+  assert.ok(dynamic.some((entry) => entry.reason === "rpc_page_limit_missing"))
+})
+
+test("registration history and cancellations are numbered pages with strict server-proven sizes", () => {
+  const inspect = (name, input, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/registration-bounded-fixture.ts",
+    source: `function read(client, request) { return client.rpc(${JSON.stringify(name)}, ${input})${suffix} }`,
+  }).map((entry) => entry.reason)
+  for (const name of ["list_registration_case_customer_messages_v1", "list_registration_visit_cancellations_v1"]) {
+    for (const size of ["10", "15", "20", "request.pageSize"]) assert.deepEqual(inspect(name, `{p_task_id:request.id,p_page:3,p_page_size:${size}}`), [])
+    for (const size of ["0", "30", "null", "-1"]) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
+    assert.deepEqual(inspect(name, "{p_limit:20}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
+    assert.deepEqual(inspect(`${name}_other`, "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
+  }
+})
+
+test("a selected Google Chat connection uses only its exact channel primary key", () => {
+  const inspect = ({table = "google_chat_webhook_settings", column = '"channel"', value = "channel", single = ".maybeSingle()", suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)", projection = "revision,connection_state,webhook_url,webhook_url_ciphertext"} = {}) => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/tasks/connection-fixture.ts",
+    source: `function read(client, channel, key) { return client.from(${JSON.stringify(table)}).select(${JSON.stringify(projection)}).eq(${column}, ${value})${single}${suffix} }`,
+  }).map((entry) => entry.reason)
+  assert.deepEqual(inspect(), [])
+  for (const change of [{table: "other_settings"}, {column: '"connection_state"'}, {column: "key"}, {value: "undefined"}, {value: "null"}]) {
+    assert.ok(inspect(change).includes("list_detail_predicate_missing"), JSON.stringify(change))
+  }
+  assert.ok(inspect({single: ""}).includes("list_limit_missing"))
+  assert.ok(inspect({projection: "*"}).includes("list_select_star"))
+  assert.ok(inspect({suffix: ".retry(false)"}).includes("list_abort_signal_missing"))
+  assert.ok(inspect({suffix: ".abortSignal(AbortSignal.timeout(8000))"}).includes("list_retry_false_missing"))
+})
+
+test("actual registration adapters expose bounded literal queries without source-wide exceptions", async () => {
+  const files = [
+    "src/features/tasks/registration-management-notification-preview-service.ts",
+    "src/features/tasks/server/registration-customer-message-case-history-route.ts",
+    "src/features/tasks/server/registration-customer-message-settings-route.ts",
+    "src/features/tasks/server/registration-observation-chat-route.ts",
+    "src/features/tasks/server/registration-visit-cancellation-route.ts",
+  ]
+  for (const file of files) {
+    const source = await readFile(file, "utf8")
+    assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source }), [], file)
+    const withoutTimeout = source.replaceAll(/\.abortSignal\(AbortSignal\.timeout\(8_000\)\)/gu, "")
+    assert.notEqual(withoutTimeout, source, `${file} exposes its deadline`)
+    assert.ok(inspectQuerySurfaceSource({ surface: "tasks", file, source: withoutTimeout })
+      .some((entry) => entry.reason === "list_abort_signal_missing"), file)
+    const withoutRetry = source.replaceAll(".retry(false)", "")
+    assert.ok(inspectQuerySurfaceSource({ surface: "tasks", file, source: withoutRetry })
+      .some((entry) => entry.reason === "list_retry_false_missing"), file)
+  }
+})

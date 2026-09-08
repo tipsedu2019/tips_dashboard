@@ -4,6 +4,7 @@ import {
   authenticateNotificationRequest,
   requireNotificationRole,
 } from "./notification-auth.ts"
+import { parseRpcSetting, settingToWire } from "./notification-mention-settings-route.ts"
 import {
   NOTIFICATION_WORKFLOW_OPTIONS,
   NOTIFICATION_CONNECTION_RESULT_CODE_PATTERN,
@@ -50,6 +51,8 @@ type HandlerDependencies = Readonly<{
     patch: { rules: Record<string, Record<string, unknown>> }
     requestId: string
     conflictOverride?: ConflictOverride
+    expectedMentionRevisions?: NotificationRevisionMap
+    mentionPatch?: Record<string, boolean>
     client: unknown
   }) => Promise<unknown>
 }>
@@ -59,6 +62,7 @@ type StructuredError = Error & {
   code?: string
   currentSnapshot?: unknown
   currentRevisions?: unknown
+  currentMentionSettings?: unknown
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -68,7 +72,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 function json(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { "Content-Type": "application/json; charset=utf-8" },
+    headers: { "Content-Type": "application/json; charset=utf-8", "Cache-Control": "no-store" },
   })
 }
 
@@ -235,26 +239,23 @@ function validScheduleConfig(input: unknown) {
 }
 
 function parsePatchBody(input: unknown) {
-  if (
-    !isRecord(input) ||
-    (
-      !exactKeys(input, [
-        "workflow_key",
-        "expected_rule_revisions",
-        "expected_contract_versions",
-        "patch",
-        "request_id",
-      ]) &&
-      !exactKeys(input, [
-        "workflow_key",
-        "expected_rule_revisions",
-        "expected_contract_versions",
-        "patch",
-        "request_id",
-        "conflict_override",
-      ])
-    )
-  ) return null
+  if (!isRecord(input)) return null
+  const atomic = "expected_mention_revisions" in input || "mention_patch" in input
+  if (!exactKeys(input, [
+    "workflow_key", "expected_rule_revisions", "expected_contract_versions", "patch", "request_id",
+    ...("conflict_override" in input ? ["conflict_override"] : []),
+    ...(atomic ? ["expected_mention_revisions", "mention_patch"] : []),
+  ])) return null
+  const expectedMentionRevisions = atomic ? safeRevisionMap(input.expected_mention_revisions) : undefined
+  const mentionPatch: Record<string, boolean> = {}
+  if (atomic) {
+    if (!expectedMentionRevisions || !isRecord(input.mention_patch)) return null
+    if (Object.keys(expectedMentionRevisions).sort().join() !== Object.keys(input.mention_patch).sort().join()) return null
+    for (const [id, value] of Object.entries(input.mention_patch)) {
+      if (!UUID.test(id) || typeof value !== "boolean") return null
+      mentionPatch[id] = value
+    }
+  }
   const selectedWorkflow = workflowKey(input.workflow_key)
   const expectedRuleRevisions = safeRevisionMap(input.expected_rule_revisions)
   const expectedContractVersions = safeRevisionMap(input.expected_contract_versions)
@@ -310,6 +311,7 @@ function parsePatchBody(input: unknown) {
     patch: { rules },
     requestId: input.request_id,
     ...(conflictOverride ? { conflictOverride } : {}),
+    ...(atomic ? { expectedMentionRevisions: expectedMentionRevisions!, mentionPatch } : {}),
   }
 }
 
@@ -332,7 +334,9 @@ function parseReconciliationJob(input: unknown) {
 
 function safeSuccessPayload(input: unknown) {
   const snapshot = safeSnapshotWire(input)
-  if (!isRecord(input) || input.reconciliation_job === undefined) return snapshot
+  const mentions = isRecord(input) && input.mention_settings !== undefined
+    ? { mention_settings: safeMentionSettings(input.mention_settings, snapshot.workflow_key) } : {}
+  if (!isRecord(input) || input.reconciliation_job === undefined) return { ...snapshot, ...mentions }
   const reconciliationJob = parseReconciliationJob(input.reconciliation_job)
   if (!reconciliationJob) {
     const error = new Error("unsafe reconciliation job") as StructuredError
@@ -340,7 +344,17 @@ function safeSuccessPayload(input: unknown) {
     error.code = "notification_unsafe_response"
     throw error
   }
-  return { ...snapshot, reconciliation_job: reconciliationJob }
+  return { ...snapshot, ...mentions, reconciliation_job: reconciliationJob }
+}
+
+function safeMentionSettings(input: unknown, expectedWorkflow?: string) {
+  if (!Array.isArray(input)) throw Object.assign(new Error("unsafe mentions"), { status: 502, code: "notification_unsafe_response" })
+  const settings = input.map(parseRpcSetting)
+  if (new Set(settings.map((setting) => setting.ruleId)).size !== settings.length ||
+    (expectedWorkflow !== undefined && settings.some((setting) => setting.workflowKey !== expectedWorkflow))) {
+    throw Object.assign(new Error("duplicate mentions"), { status: 502, code: "notification_unsafe_response" })
+  }
+  return settings.map(settingToWire)
 }
 
 function errorResponse(error: unknown) {
@@ -348,18 +362,22 @@ function errorResponse(error: unknown) {
   const code = typeof structured?.code === "string"
     ? structured.code
     : "notification_request_failed"
-  const status = code === "notification_revision_conflict"
+  const conflict = code === "notification_revision_conflict" || code === "notification_mention_setting_revision_conflict"
+  const status = conflict
     ? 409
     : Number.isInteger(structured?.status)
       ? structured.status as number
       : 500
   const payload: Record<string, unknown> = { ok: false, code }
-  if (code === "notification_revision_conflict") {
+  if (conflict) {
     try {
       payload.current_snapshot = safeSnapshotWire(structured.currentSnapshot)
       const revisions = safeRevisionMap(structured.currentRevisions)
       if (!revisions) throw new Error("unsafe revisions")
       payload.current_revisions = revisions
+      if (structured.currentMentionSettings !== undefined) {
+        payload.current_mention_settings = safeMentionSettings(structured.currentMentionSettings, (payload.current_snapshot as { workflow_key: string }).workflow_key)
+      }
     } catch {
       return json({ ok: false, code: "notification_unsafe_response" }, 502)
     }
@@ -441,7 +459,13 @@ async function rpc(client: unknown, name: string, parameters: Record<string, unk
   if (error) {
     const failure = new Error("notification RPC failed") as StructuredError
     const message = isRecord(error) && typeof error.message === "string" ? error.message : ""
-    if (message.includes("notification_revision_conflict")) {
+    if (message.includes("notification_mention_setting_revision_conflict")) {
+      failure.status = 409
+      failure.code = "notification_mention_setting_revision_conflict"
+    } else if (message.includes("notification_setting_archived")) {
+      failure.status = 409
+      failure.code = "notification_setting_archived"
+    } else if (message.includes("notification_revision_conflict") || message.includes("notification_contract_version_conflict")) {
       failure.status = 409
       failure.code = "notification_revision_conflict"
     } else if (message.includes("idempotency_key_reused")) {
@@ -488,6 +512,8 @@ export async function saveNotificationControlPlaneViaRpc({
   patch,
   requestId,
   conflictOverride,
+  expectedMentionRevisions,
+  mentionPatch,
   client,
 }: {
   workflowKey: NotificationWorkflowKey
@@ -496,8 +522,28 @@ export async function saveNotificationControlPlaneViaRpc({
   patch: { rules: Record<string, Record<string, unknown>> }
   requestId: string
   conflictOverride?: ConflictOverride
+  expectedMentionRevisions?: NotificationRevisionMap
+  mentionPatch?: Record<string, boolean>
   client: unknown
 }) {
+  if ((expectedMentionRevisions === undefined) !== (mentionPatch === undefined)) {
+    throw Object.assign(new Error("incomplete atomic save"), { status: 400, code: "notification_invalid_request" })
+  }
+  if (expectedMentionRevisions !== undefined && mentionPatch !== undefined) {
+    return rpc(client, "save_notification_settings_v1", {
+      p_workflow_key: workflowKey,
+      p_expected_rule_revisions: expectedRuleRevisions,
+      p_expected_contract_versions: expectedContractVersions,
+      p_patch: patch,
+      p_expected_mention_revisions: expectedMentionRevisions,
+      p_mention_patch: mentionPatch,
+      p_request_id: requestId,
+      p_conflict_override: conflictOverride ? {
+        request_id: conflictOverride.requestId,
+        conflicting_fields: conflictOverride.conflictingFields,
+      } : null,
+    })
+  }
   if (conflictOverride) {
     return rpc(
       client,
@@ -541,6 +587,8 @@ export function createProductionNotificationControlPlaneRouteHandlers() {
       patch,
       requestId,
       conflictOverride,
+      expectedMentionRevisions,
+      mentionPatch,
       client,
     }) {
       try {
@@ -551,11 +599,13 @@ export function createProductionNotificationControlPlaneRouteHandlers() {
           patch,
           requestId,
           conflictOverride,
+          expectedMentionRevisions,
+          mentionPatch,
           client,
         })
       } catch (error) {
         const structured = error as StructuredError
-        if (structured.code !== "notification_revision_conflict") throw error
+        if (structured.code !== "notification_revision_conflict" && structured.code !== "notification_mention_setting_revision_conflict") throw error
         const currentSnapshot = await rpc(
           client,
           "get_notification_control_plane_v1",
@@ -585,6 +635,11 @@ export function createProductionNotificationControlPlaneRouteHandlers() {
         }
         structured.currentSnapshot = currentSnapshot
         structured.currentRevisions = currentRevisions
+        if (expectedMentionRevisions !== undefined) {
+          structured.currentMentionSettings = await rpc(client, "list_notification_rule_mention_settings_v1", {
+            p_workflow_key: workflowKey,
+          })
+        }
         throw structured
       }
     },

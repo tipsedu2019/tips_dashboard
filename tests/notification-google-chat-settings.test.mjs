@@ -43,6 +43,6 @@ test("Google Chat settings do not expose the SOLAPI editor route or reminder edi
   ])
 
   assert.doesNotMatch(panelSource, /RegistrationCustomerReminderSettings/)
-  assert.match(panelSource, /Google Chat 규칙/)
+  assert.match(panelSource, /직원 알림 · Google Chat/)
   assert.equal(solapiRouteExists, false)
 })

@@ -6,6 +6,9 @@ import {
   type NotificationScheduleConfig,
   type NotificationWorkflowKey,
 } from "./notification-control-plane-types.ts"
+import { parseSetting } from "./notification-mention-settings-service.ts"
+import type { NotificationMentionSettingDto } from "./notification-mention-settings-types.ts"
+import { OperationTimeoutError, withPromiseTimeout } from "../../lib/promise-timeout.ts"
 
 const WORKFLOW_KEYS = new Set<string>(
   NOTIFICATION_WORKFLOW_OPTIONS.map(({ key }) => key),
@@ -47,6 +50,7 @@ type ReconciliationJob = Readonly<{
 
 export type NotificationControlPlaneSaveResult = NotificationControlPlaneSnapshot & Readonly<{
   reconciliationJob: ReconciliationJob | null
+  mentionSettings?: ReadonlyArray<NotificationMentionSettingDto>
 }>
 
 export class NotificationControlPlaneHttpError extends Error {
@@ -54,6 +58,7 @@ export class NotificationControlPlaneHttpError extends Error {
   readonly status: number
   readonly currentSnapshot?: NotificationControlPlaneSnapshot
   readonly currentRevisions?: NotificationRevisionMap
+  readonly currentMentionSettings?: ReadonlyArray<NotificationMentionSettingDto>
 
   constructor(
     code: string,
@@ -61,6 +66,7 @@ export class NotificationControlPlaneHttpError extends Error {
     options: {
       currentSnapshot?: NotificationControlPlaneSnapshot
       currentRevisions?: NotificationRevisionMap
+      currentMentionSettings?: ReadonlyArray<NotificationMentionSettingDto>
     } = {},
   ) {
     super("알림 설정 요청을 처리하지 못했습니다.")
@@ -69,6 +75,7 @@ export class NotificationControlPlaneHttpError extends Error {
     this.status = status
     this.currentSnapshot = options.currentSnapshot
     this.currentRevisions = options.currentRevisions
+    this.currentMentionSettings = options.currentMentionSettings
   }
 }
 
@@ -173,6 +180,30 @@ function validateExpectedRevisions(input: NotificationRevisionMap) {
   }
 }
 
+function parseMentionSettings(input: unknown): ReadonlyArray<NotificationMentionSettingDto> | undefined {
+  if (input === undefined) return undefined
+  if (!Array.isArray(input)) throw new NotificationControlPlaneHttpError("notification_unsafe_response", 502)
+  try {
+    const settings = input.map(parseSetting)
+    if (new Set(settings.map((setting) => setting.ruleId)).size !== settings.length) throw new Error("duplicate mention")
+    return settings
+  } catch {
+    throw new NotificationControlPlaneHttpError("notification_unsafe_response", 502)
+  }
+}
+
+function validateMentionPatch(expected: NotificationRevisionMap, patch: Readonly<Record<string, boolean>>) {
+  validateExpectedRevisions(expected)
+  if (!isRecord(patch) || Object.keys(expected).sort().join() !== Object.keys(patch).sort().join()) {
+    throw new NotificationControlPlaneHttpError("notification_invalid_request", 400)
+  }
+  for (const [ruleId, enabled] of Object.entries(patch)) {
+    if (!UUID.test(ruleId) || typeof enabled !== "boolean") {
+      throw new NotificationControlPlaneHttpError("notification_invalid_request", 400)
+    }
+  }
+}
+
 function toWireConflictOverride(input: ConflictOverride) {
   if (
     !isRecord(input) ||
@@ -204,23 +235,41 @@ export function createNotificationControlPlaneService(dependencies: {
   baseUrl: string
   getAccessToken: () => Promise<string | null>
   fetch?: FetchLike
+  timeoutMs?: number
 }) {
   const request = dependencies.fetch ?? globalThis.fetch
 
   async function authorizedFetch(url: URL, init: RequestInit = {}) {
-    const token = await dependencies.getAccessToken()
-    if (!token) {
-      throw new NotificationControlPlaneHttpError("notification_unauthorized", 401)
+    const controller = new AbortController()
+    try {
+      return await withPromiseTimeout((async () => {
+        const token = await dependencies.getAccessToken()
+        controller.signal.throwIfAborted()
+        if (!token) throw new NotificationControlPlaneHttpError("notification_unauthorized", 401)
+        const response = await request(url, {
+          ...init,
+          signal: controller.signal,
+          headers: {
+            Accept: "application/json",
+            Authorization: `Bearer ${token}`,
+            ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
+            ...init.headers,
+          },
+        })
+        controller.signal.throwIfAborted()
+        const payload = await readJson(response)
+        controller.signal.throwIfAborted()
+        return { response, payload }
+      })(), {
+        timeoutMs: dependencies.timeoutMs ?? 15_000,
+        code: "notification_request_timeout", message: "알림 설정 요청 시간이 초과되었습니다.",
+      })
+    } catch (error) {
+      if (error instanceof OperationTimeoutError) throw new NotificationControlPlaneHttpError("notification_request_timeout", 504)
+      throw error
+    } finally {
+      controller.abort()
     }
-    return request(url, {
-      ...init,
-      headers: {
-        Accept: "application/json",
-        Authorization: `Bearer ${token}`,
-        ...(init.body === undefined ? {} : { "Content-Type": "application/json" }),
-        ...init.headers,
-      },
-    })
   }
 
   async function throwResponseError(response: Response, payload: unknown): Promise<never> {
@@ -233,6 +282,7 @@ export function createNotificationControlPlaneService(dependencies: {
     throw new NotificationControlPlaneHttpError(code, response.status, {
       currentSnapshot,
       currentRevisions,
+      currentMentionSettings: parseMentionSettings(body.current_mention_settings),
     })
   }
 
@@ -243,8 +293,7 @@ export function createNotificationControlPlaneService(dependencies: {
       const workflowKey = requireWorkflowKey(input.workflowKey)
       const url = new URL("/api/notifications/control-plane", dependencies.baseUrl)
       url.searchParams.set("workflow_key", workflowKey)
-      const response = await authorizedFetch(url)
-      const payload = await readJson(response)
+      const { response, payload } = await authorizedFetch(url)
       if (!response.ok) await throwResponseError(response, payload)
       return parseSafeSnapshot(payload)
     },
@@ -256,17 +305,21 @@ export function createNotificationControlPlaneService(dependencies: {
       patch: SavePatch
       requestId: string
       conflictOverride?: ConflictOverride
+      expectedMentionRevisions?: NotificationRevisionMap
+      mentionPatch?: Readonly<Record<string, boolean>>
     }): Promise<NotificationControlPlaneSaveResult> {
       const workflowKey = requireWorkflowKey(input.workflowKey)
       validateExpectedRevisions(input.expectedRuleRevisions)
       validateExpectedRevisions(input.expectedContractVersions)
+      const atomic = input.expectedMentionRevisions !== undefined || input.mentionPatch !== undefined
+      if (atomic) validateMentionPatch(input.expectedMentionRevisions!, input.mentionPatch!)
       if (!UUID.test(input.requestId)) {
         throw new NotificationControlPlaneHttpError("notification_invalid_request", 400)
       }
       const conflictOverride = input.conflictOverride
         ? toWireConflictOverride(input.conflictOverride)
         : undefined
-      const response = await authorizedFetch(
+      const { response, payload } = await authorizedFetch(
         new URL("/api/notifications/control-plane", dependencies.baseUrl),
         {
           method: "PATCH",
@@ -277,16 +330,23 @@ export function createNotificationControlPlaneService(dependencies: {
             patch: toWirePatch(input.patch),
             request_id: input.requestId,
             ...(conflictOverride ? { conflict_override: conflictOverride } : {}),
+            ...(atomic ? {
+              expected_mention_revisions: input.expectedMentionRevisions,
+              mention_patch: input.mentionPatch,
+            } : {}),
           }),
         },
       )
-      const payload = await readJson(response)
       if (!response.ok) await throwResponseError(response, payload)
       const snapshot = parseSafeSnapshot(payload)
       const reconciliationJob = parseReconciliationJob(
         isRecord(payload) ? payload.reconciliation_job : undefined,
       )
-      return { ...snapshot, reconciliationJob }
+      const mentionSettings = parseMentionSettings(isRecord(payload) ? payload.mention_settings : undefined)
+      if ((atomic && mentionSettings === undefined) || mentionSettings?.some((setting) => setting.workflowKey !== workflowKey)) {
+        throw new NotificationControlPlaneHttpError("notification_unsafe_response", 502)
+      }
+      return { ...snapshot, reconciliationJob, ...(mentionSettings ? { mentionSettings } : {}) }
     },
   }
 }

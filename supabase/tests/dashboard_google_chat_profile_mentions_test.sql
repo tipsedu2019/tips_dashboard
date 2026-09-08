@@ -6,6 +6,10 @@ set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
 set local lock_timeout = '5s';
 
+-- Captured local baselines omit DML; preserve the original inert singleton fixture.
+insert into dashboard_private.registration_observation_runtime_settings(singleton, activation_version)
+values (true, 0) on conflict(singleton) do nothing;
+
 create temporary table chat_existing_notification_rule_state_baseline
 on commit drop
 as
@@ -228,9 +232,10 @@ select is(
   (
     select pg_catalog.count(*)
     from dashboard_private.notification_rule_mention_settings
+    where rule_id::text like '99450000-%'
   ),
   0::bigint,
-  'foundation migration adopts zero existing workflow rules'
+  'unadopted synthetic rules start without mention settings'
 );
 
 select is(
@@ -556,7 +561,7 @@ set search_path = ''
 as $$
 begin
   update dashboard_private.notification_rules rule
-  set channel_key = 'in_app'
+  set channel_key = 'in_app', enabled = false
   where rule.id = '99450000-0000-4000-8000-000000000401';
   raise exception 'notification_mention_rule_drift_unexpected_success'
     using errcode = 'P0001';
@@ -586,7 +591,7 @@ values
   (
     '99450000-0000-4000-8000-000000000403', 'global', 'registration',
     'registration.observation.internal', 'in_app', 'track_director',
-    'immediate', 'immediate', true,
+    'immediate', 'immediate', false,
     '99450000-0000-4000-8000-000000000503', 2,
     null, 'system', null, 'system'
   );
@@ -1201,7 +1206,7 @@ select throws_ok(
     '99450000-0000-4000-8000-000000000401', false, 1,
     '99450000-0000-4000-8000-000000000914'
   )$$,
-  '40001', 'notification_mention_setting_revision_conflict',
+  '23514', 'notification_mention_setting_revision_conflict',
   'stale mention setting revision is rejected'
 );
 
@@ -1241,28 +1246,11 @@ set teacher_profile_id = '99450000-0000-4000-8000-000000000102',
     teacher_name_snapshot = '담당 교사 B'
 where id = '99450000-0000-4000-8000-000000000304';
 
+-- 20260901111200 retires automatic assignment projection triggers.
 select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'kind', fact.role_key,
-      'sourceId', fact.source_id,
-      'sourceRevision', fact.source_revision,
-      'contextId', fact.context_entity_id,
-      'previous', fact.previous_profile_ids,
-      'current', fact.current_profile_ids
-    )
-    from dashboard_private.notification_assignment_change_facts fact
-    where fact.source_id = '99450000-0000-4000-8000-000000000304'
-  ),
-  pg_catalog.jsonb_build_object(
-    'kind', 'subject_teacher',
-    'sourceId', '99450000-0000-4000-8000-000000000304',
-    'sourceRevision', 5,
-    'contextId', '99450000-0000-4000-8000-000000000302',
-    'previous', array['99450000-0000-4000-8000-000000000101'::uuid],
-    'current', array['99450000-0000-4000-8000-000000000102'::uuid]
-  ),
-  'teacher reassignment fact uses the already-incremented appointment revision'
+  (select count(*) from dashboard_private.notification_assignment_change_facts where source_id='99450000-0000-4000-8000-000000000304'),
+  0::bigint,
+  'teacher fact editing does not prepare an automatic notification projection'
 );
 
 update public.ops_registration_observations
@@ -1271,8 +1259,8 @@ where id = '99450000-0000-4000-8000-000000000304';
 
 select is(
   (select pg_catalog.count(*) from dashboard_private.notification_assignment_change_facts where source_id = '99450000-0000-4000-8000-000000000304'),
-  1::bigint,
-  'non-assignment observation update writes no duplicate teacher fact'
+  0::bigint,
+  'non-assignment observation update keeps automatic teacher projections absent'
 );
 
 insert into public.ops_task_events(
@@ -1310,30 +1298,14 @@ values
   );
 
 select is(
-  (
-    select pg_catalog.jsonb_build_object(
-      'kind', fact.role_key,
-      'sourceId', fact.source_id,
-      'contextId', fact.context_entity_id,
-      'previous', fact.previous_profile_ids,
-      'current', fact.current_profile_ids
-    )
-    from dashboard_private.notification_assignment_change_facts fact
-    where fact.source_id = '99450000-0000-4000-8000-000000000620'
-  ),
-  pg_catalog.jsonb_build_object(
-    'kind', 'track_director',
-    'sourceId', '99450000-0000-4000-8000-000000000620',
-    'contextId', '99450000-0000-4000-8000-000000000302',
-    'previous', array['99450000-0000-4000-8000-000000000101'::uuid],
-    'current', array['99450000-0000-4000-8000-000000000102'::uuid]
-  ),
-  'canonical v2 director event writes one exact director assignment fact'
+  (select count(*) from dashboard_private.notification_assignment_change_facts where source_id='99450000-0000-4000-8000-000000000620'),
+  0::bigint,
+  'director fact editing does not prepare an automatic notification projection'
 );
 
 select is(
   (select pg_catalog.count(*) from dashboard_private.notification_assignment_change_facts where role_key = 'track_director'),
-  1::bigint,
+  0::bigint,
   'malformed, version-20 and non-track events write no director fact'
 );
 

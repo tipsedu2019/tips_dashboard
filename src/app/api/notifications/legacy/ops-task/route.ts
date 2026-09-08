@@ -31,6 +31,9 @@ type LegacyDispatchItem = Readonly<{
   renderedBody: string
   href: string
   scheduledFor: string
+  previewChecksum?: string
+  previewSourceEventId?: string
+  mentionUserNames?: ReadonlyArray<string>
 }>
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -126,6 +129,11 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
       renderedBody: text(raw.renderedBody),
       href: text(raw.href),
       scheduledFor: text(raw.scheduledFor),
+      ...(raw.previewChecksum !== undefined ? {
+        previewChecksum: text(raw.previewChecksum),
+        previewSourceEventId: text(raw.previewSourceEventId),
+        mentionUserNames: raw.mentionUserNames,
+      } : {}),
     }
     if (
       !UUID.test(item.eventId)
@@ -144,6 +152,13 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
       || !item.renderedBody
       || !item.href.startsWith("/admin/")
     ) throw new Error("ops_task_legacy_dispatch_plan_invalid")
+    if (item.previewChecksum !== undefined && (
+      !/^[a-f0-9]{64}$/.test(item.previewChecksum)
+      || !UUID.test(item.previewSourceEventId || "")
+      || !Array.isArray(item.mentionUserNames)
+      || item.mentionUserNames.some((name) => typeof name !== "string" || !/^users\/[1-9][0-9]{0,31}$/.test(name))
+      || !["registration.case_created", "registration.consultation_completed", "registration.waiting_transitioned", "registration.admission_started"].includes(item.eventKey)
+    )) throw new Error("ops_task_legacy_dispatch_plan_invalid")
     return item as LegacyDispatchItem
   })
 }
@@ -284,6 +299,15 @@ async function readWebhook(client: SupabaseClient) {
 }
 
 async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchItem) {
+  async function validatePreview() {
+    if (item.previewChecksum === undefined) return
+    const valid = await rpc(client, "validate_registration_management_notification_preview_v1", {
+      p_source_event_id: item.previewSourceEventId,
+      p_expected_preview_checksum: item.previewChecksum,
+    })
+    if (valid !== true) throw new Error("registration_management_notification_preview_changed")
+  }
+  await validatePreview()
   const begun = await beginLegacyDispatch(client, item)
   if (!begun.acquired) {
     if (isInterruptedDispatchReplay(begun)) {
@@ -301,6 +325,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
   let webhookUrl: string
   try {
     webhookUrl = await readWebhook(client)
+    await validatePreview()
   } catch (error) {
     const providerReference = text((error as { code?: unknown })?.code) || "webhook_configuration_error"
     await finalizeLegacyDispatch(client, begun, "failed", providerReference)
@@ -310,6 +335,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
   let provider: ReturnType<typeof createGoogleChatProvider>
   try {
     provider = createGoogleChatProvider({
+      http408Disposition: "delivery_unknown",
       fetch(input, init) {
         return fetch(input, { ...init, signal: AbortSignal.timeout(10_000) })
       },
@@ -350,6 +376,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
       rendered_title: item.renderedTitle,
       rendered_body: item.renderedBody,
       href: item.href,
+      ...(item.mentionUserNames !== undefined ? { mention_user_names: item.mentionUserNames } : {}),
     })
     const outcome = result.status === "sent"
       ? "sent"

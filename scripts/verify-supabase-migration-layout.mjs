@@ -26,7 +26,7 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "421a842c2a62feceb9e56e803034bddfa298b35d49829f652a0967c1519c6d43"
+  "bb23eaecc007c7ce8aaa21c2ac6ce3a9dbc3bc95af7f6667c69758e4a687bf00"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
 const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
@@ -40,11 +40,11 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "7f8593eb54b4e17cb7a3975ecd540a59c1bec6fc8c259b89ec528f02528f1562"
+  "5b06e45b9410385f24707f40c0d6ee7bc7b5a440030beddc4218201fc8808ec8"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "1346c4abf8b280409487604ab5cf749e63c954185445c812c15a3fd3375d43f7"],
+  ["free-tier-guardrails.yml", "333237946154b5d66c5e89ec1e1bfa6d381bf507adc1d66644b1d0a507ed3060"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
 ])
@@ -667,6 +667,38 @@ export function normalizedSqlSha256(source) {
   return normalizedSqlSha256FromTokens(tokenizeSql(source))
 }
 
+// This supplements the exact file hash and transaction envelope below; it is
+// not a general SQL sandbox. Catalog predicates legitimately contain mutation
+// keywords as data (privilege lists and pg_get_functiondef comparisons).
+export function hasForbiddenPostdeploySqlExecution(source) {
+  let tokens
+  try {
+    tokens = tokenizeSql(source)
+  } catch {
+    return true
+  }
+  const forbiddenWords = new Set([
+    "insert", "update", "delete", "merge", "truncate", "alter", "drop",
+    "create", "grant", "revoke", "do", "call", "copy", "execute", "refresh",
+  ])
+  return tokens.some((token, index) => {
+    if (token.type === "word" && !token.quoted && forbiddenWords.has(token.value)) {
+      return true
+    }
+    // The pinned query reads cron.job to verify disabled schedules. Preserve
+    // that catalog relation, never a function call or another cron/net object.
+    const schemaReference = (token.type === "word" || token.type === "quoted_identifier")
+      && ["net", "cron"].includes(token.value.toLowerCase())
+      && tokens[index + 1]?.type === "symbol"
+      && tokens[index + 1]?.value === "."
+    if (!schemaReference) return false
+    return !(token.value === "cron"
+      && tokens[index + 2]?.type === "word"
+      && tokens[index + 2]?.value === "job"
+      && tokens[index + 3]?.value !== "(")
+  })
+}
+
 function containsTokenSequence(tokens, sequence) {
   if (sequence.length === 0 || sequence.length > tokens.length) return false
   for (let start = 0; start <= tokens.length - sequence.length; start += 1) {
@@ -1070,7 +1102,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       !/^begin transaction read only;\s*set local statement_timeout = '5s';\s*set local lock_timeout = '1s';/isu.test(postdeploySql) ||
       (postdeploySql.match(/\bas contract_ok\b/giu) ?? []).length !== 1 ||
       !/\) as contract_ok;\s*rollback;\s*$/isu.test(postdeploySql) ||
-      /\b(?:insert|update|delete|merge|truncate|alter|drop|create|grant|revoke|cron\.|net\.)\b/iu.test(postdeploySql)
+      hasForbiddenPostdeploySqlExecution(postdeploySql)
     ) {
       addError(errors, "postdeploy_contract_sql_policy_mismatch", relative(resolvedRoot, postdeploySqlPath))
     }

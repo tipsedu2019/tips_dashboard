@@ -1,6 +1,7 @@
 "use client"
 
 import { BellRing, Loader2 } from "lucide-react"
+import type { ReactNode } from "react"
 
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 
@@ -8,20 +9,28 @@ import {
   NotificationControlPanel,
   useNotificationControlPlaneAvailability,
 } from "./notification-control-panel"
+import type { NotificationWorkflowKey } from "./notification-control-plane-types"
+import type { NotificationSettingsSection, RegistrationSettingsGroup } from "./notification-settings-editor-state"
 
 const WORKFLOW_ORDER_TEXT =
   "할 일 · 등록 · 전반 · 퇴원 · 휴보강 · 전자결재"
 
 type NotificationSettingsWorkspaceProps = {
-  initialSection?: "rules" | "connections"
+  initialSection?: NotificationSettingsSection
+  initialWorkflow?: NotificationWorkflowKey
+  initialGroup?: RegistrationSettingsGroup | null
+  customerGuidance?: ReactNode
 }
 
 export function NotificationSettingsWorkspace({
   initialSection = "rules",
+  initialWorkflow = "tasks",
+  initialGroup = null,
+  customerGuidance,
 }: NotificationSettingsWorkspaceProps) {
   const availability = useNotificationControlPlaneAvailability()
 
-  if (availability.status === "loading") {
+  if (availability.status === "loading" && initialSection !== "customer") {
     return (
       <div className="flex min-h-[40vh] items-center justify-center gap-2 text-sm text-muted-foreground">
         <Loader2 className="animate-spin" /> Google Chat 설정 준비 상태를 확인하는 중입니다.
@@ -29,7 +38,7 @@ export function NotificationSettingsWorkspace({
     )
   }
 
-  if (availability.status === "disabled") {
+  if (availability.status === "disabled" && initialSection !== "customer") {
     return (
       <Card className="mx-auto w-full max-w-2xl">
         <CardHeader>
@@ -48,7 +57,7 @@ export function NotificationSettingsWorkspace({
     )
   }
 
-  if (availability.status === "unavailable") {
+  if (availability.status === "unavailable" && initialSection !== "customer") {
     return (
       <Card className="mx-auto w-full max-w-2xl">
         <CardHeader>
@@ -66,9 +75,11 @@ export function NotificationSettingsWorkspace({
 
   return (
     <NotificationControlPanel
-      workflowKey="tasks"
+      workflowKey={initialWorkflow}
       presentation="page"
       initialSection={initialSection}
+      initialGroup={initialGroup}
+      customerGuidance={customerGuidance}
     />
   )
 }

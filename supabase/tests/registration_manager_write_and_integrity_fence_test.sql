@@ -111,19 +111,38 @@ select ok(
 
 select ok(
   (
-    select pg_catalog.strpos(definition, 'assert_registration_actor_is_active_manager_v1') > 0
-      and pg_catalog.strpos(definition, 'assert_registration_actor_is_active_manager_v1')
+    -- Authorization is the first operation of the preserved delegate, which
+    -- the final preview wrapper must call before reading any preview binding.
+    select pg_catalog.regexp_replace(wrapper, '[[:space:]]+', '', 'g') like
+        '%beginv_plan:=public.get_registration_core_legacy_dispatch_plan_before_preview_v1(p_source_event_id,p_actor_profile_id);%'
+      and pg_catalog.strpos(delegate, 'assert_registration_actor_is_active_manager_v1') > 0
+      and pg_catalog.strpos(delegate, 'assert_registration_actor_is_active_manager_v1')
         < pg_catalog.strpos(
-          definition,
+          delegate,
           'get_registration_core_legacy_dispatch_plan_v1_base'
         )
+      and pg_catalog.strpos(delegate, 'assert_registration_actor_is_active_manager_v1')
+        < pg_catalog.strpos(delegate, 'from dashboard_private.notification_events')
+      and pg_catalog.has_function_privilege('service_role', wrapper_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('public', wrapper_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('anon', wrapper_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('authenticated', wrapper_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('public', delegate_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('anon', delegate_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('authenticated', delegate_oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('service_role', delegate_oid, 'EXECUTE')
     from (
       select pg_catalog.pg_get_functiondef(
         'public.get_registration_core_legacy_dispatch_plan_v1(uuid,uuid)'::regprocedure
-      ) as definition
+      ) as wrapper,
+      pg_catalog.pg_get_functiondef(
+        'public.get_registration_core_legacy_dispatch_plan_before_preview_v1(uuid,uuid)'::regprocedure
+      ) as delegate,
+      'public.get_registration_core_legacy_dispatch_plan_v1(uuid,uuid)'::regprocedure as wrapper_oid,
+      'public.get_registration_core_legacy_dispatch_plan_before_preview_v1(uuid,uuid)'::regprocedure as delegate_oid
     ) source
   ),
-  'the service-role registration plan authorizes an active manager before reading the base plan'
+  'the service-only final plan enters its private active-manager guard before reading the base plan'
 );
 
 select ok(

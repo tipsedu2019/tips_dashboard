@@ -17,6 +17,7 @@ import {
   isRegistrationCustomerMessageBundleKind,
   parseRegistrationObservationSolapiReadiness,
 } from "./registration-customer-message-contract.ts"
+import { parseRegistrationCaseCustomerMessageHistory } from "./registration-customer-message-case-history-contract.ts"
 
 type RegistrationCustomerMessageServiceOptions = Readonly<{
   getAccessToken: () => Promise<string | null>
@@ -33,6 +34,7 @@ async function requestJson<T>(
 ) {
   const accessToken = await options.getAccessToken()
   if (!accessToken) throw new Error("registration_customer_message_auth_required")
+  init.signal?.throwIfAborted()
   const response = await (options.fetch || globalThis.fetch)(url, {
     ...init,
     headers: {
@@ -130,16 +132,23 @@ export function createRegistrationCustomerMessageClient(
         { method: "GET", signal },
       ).then((payload) => [...payload.history] as RegistrationCustomerMessageHistoryItem[])
     },
-    check(input: RegistrationCustomerMessageCheckInput) {
-      return requestJson<RegistrationCustomerMessageSendResult>(options, "/api/solapi/registration/check", {
+    check(input: RegistrationCustomerMessageCheckInput, signal?: AbortSignal) {
+      return requestAdminJson<RegistrationCustomerMessageSendResult>(options, "/api/solapi/registration/check", {
         method: "POST",
         body: JSON.stringify({ messageId: input.messageId }),
+        signal,
       })
     },
     checkDelivery(input: RegistrationCustomerMessageCheckInput, signal?: AbortSignal) {
       const params = new URLSearchParams({ messageId: input.messageId })
       return requestAdminJson<RegistrationCustomerMessageDeliveryResult>(options,
         `/api/solapi/registration/delivery?${params}`, { method: "GET", signal, cache: "no-store" })
+    },
+    async listCaseHistory(input, signal) {
+      const params = new URLSearchParams({ taskId: input.taskId, page: String(input.page), pageSize: String(input.pageSize) })
+      const payload = await requestAdminJson<unknown>(options,
+        `/api/solapi/registration/case-history?${params}`, { method: "GET", signal, cache: "no-store" })
+      return parseRegistrationCaseCustomerMessageHistory(payload, input)
     },
     reconcile(input) {
       return requestJson<RegistrationCustomerMessageSendResult>(options, "/api/solapi/registration/admin", {

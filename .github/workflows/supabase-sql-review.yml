@@ -145,5 +145,15 @@ jobs:
             --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql \
             --test supabase/tests/registration_customer_reminder_claim_final_gate_test.sql \
             --test supabase/tests/registration_customer_delivery_lookup_test.sql \
+            --test supabase/tests/notification_settings_atomic_registration_policy_test.sql \
+            --test supabase/tests/registration_visit_cancellation_explicit_test.sql \
+            --test supabase/tests/registration_case_customer_message_history_test.sql \
+            --test supabase/tests/registration_observation_explicit_chat_test.sql \
+            --test supabase/tests/registration_management_notification_preview_test.sql \
+            --test supabase/tests/registration_management_notification_source_recovery_test.sql \
+            --test supabase/tests/dashboard_google_chat_profile_mentions_test.sql \
+            --test supabase/tests/registration_manual_workflow_status_test.sql \
+            --probe tests/probe-registration-management-recovery-concurrency.mjs \
+            --probe tests/probe-registration-visit-cancellation-dto.mjs \
             --test supabase/tests/word_retest_google_chat_retirement_test.sql \
             --test supabase/tests/legacy_notification_retry_storm_test.sql

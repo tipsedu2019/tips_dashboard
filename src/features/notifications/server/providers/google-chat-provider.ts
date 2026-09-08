@@ -172,7 +172,7 @@ function canonicalGoogleChatMentionUserNames(value: unknown) {
 export function buildGoogleChatCardPayload(input: Pick<
   GoogleChatBegunDeliveryContext,
   "rendered_title" | "rendered_body" | "href" | "workflow_key"
->): GoogleChatCardPayloadResult {
+>, options: Readonly<{ includeAppLink?: boolean }> = {}): GoogleChatCardPayloadResult {
   const title = flattenGoogleChatText(input?.rendered_title)
   const body = flattenGoogleChatText(input?.rendered_body)
   if (
@@ -199,7 +199,7 @@ export function buildGoogleChatCardPayload(input: Pick<
                 text: escapeGoogleChatCardText(input.rendered_body),
               }),
             }),
-            Object.freeze({
+            ...(options.includeAppLink === false ? [] : [Object.freeze({
               buttonList: Object.freeze({
                 buttons: Object.freeze([Object.freeze({
                   text: appLink.buttonText,
@@ -208,7 +208,7 @@ export function buildGoogleChatCardPayload(input: Pick<
                   }),
                 })]),
               }),
-            }),
+            })]),
           ]),
         })]),
       }),
@@ -221,11 +221,11 @@ export function buildGoogleChatCardPayload(input: Pick<
   return { ok: true, payload, absoluteUrl: appLink.absoluteUrl, byteLength }
 }
 
-function buildGoogleChatMessagePayload(context: GoogleChatProviderInput):
+function buildGoogleChatMessagePayload(context: GoogleChatProviderInput, options: Readonly<{ includeAppLink?: boolean }>):
   | Readonly<{ ok: true; payload: GoogleChatMessagePayload }>
   | Readonly<{ ok: false }> {
   if (!hasGoogleChatWorkflowKey(context)) return { ok: false }
-  const builtCard = buildGoogleChatCardPayload(context)
+  const builtCard = buildGoogleChatCardPayload(context, options)
   if (!builtCard.ok) return { ok: false }
   if (!Object.prototype.hasOwnProperty.call(context, "mention_user_names")) {
     return { ok: true, payload: builtCard.payload }
@@ -296,6 +296,8 @@ function classifyTransportError(error: unknown): NotificationProviderResult {
 export function createGoogleChatProvider(input: {
   fetch: FetchTransport
   http408Disposition?: Http408Disposition
+  // Server-owned presentation policy; never read this from a delivery payload.
+  includeAppLink?: boolean
 }) {
   const transport = input.fetch
   const http408Disposition = normalizeHttp408Disposition(input.http408Disposition)
@@ -315,7 +317,7 @@ export function createGoogleChatProvider(input: {
           errorSummary: "provider connection unavailable",
         })
       }
-      const built = buildGoogleChatMessagePayload(context)
+      const built = buildGoogleChatMessagePayload(context, { includeAppLink: input.includeAppLink })
       if (!built.ok) {
         return result("failed", "render_validation_failed", {
           errorCode: "render_validation_failed",

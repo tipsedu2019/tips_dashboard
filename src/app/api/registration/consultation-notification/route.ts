@@ -188,7 +188,7 @@ function parsePlan(value: unknown): VisitDispatchPlan {
 
 function parseEnsureReceipt(
   value: unknown,
-  expected: { appointmentId: string; requestKey: string },
+  expected: { appointmentId: string; requestKey: string; intent?: string },
 ): VisitNotificationEnsureReceipt {
   if (!isRecord(value)) throw new Error("registration_visit_notification_ensure_invalid")
   const receipt = {
@@ -204,7 +204,7 @@ function parseEnsureReceipt(
     || receipt.notificationRevision < 1
     || !UUID.test(receipt.sourceEventId)
     || value.ready !== true
-    || text(value.intent) !== "send_registration_visit_notification"
+    || text(value.intent) !== (expected.intent ?? "send_registration_visit_notification")
   ) throw new Error("registration_visit_notification_ensure_invalid")
   return receipt
 }
@@ -350,6 +350,7 @@ async function dispatchGoogleChat(
 
   try {
     const provider = createGoogleChatProvider({
+      http408Disposition: "delivery_unknown",
       fetch(input, init) {
         return fetch(input, { ...init, signal: AbortSignal.timeout(10_000) })
       },
@@ -393,6 +394,7 @@ async function dispatchGoogleChat(
       claim_token: text(begun.claim_id),
       dispatch_token: text(begun.dispatch_token),
       status: "sending",
+      workflow_key: "registration",
       channel_key: "google_chat",
       connection_key: "google_chat.management",
       webhook_url: webhookUrl,
@@ -442,7 +444,11 @@ export async function POST(request: Request) {
   }
 
   const body = await request.json().catch(() => null)
-  if (!isRecord(body) || Object.keys(body).sort().join(",") !== "appointmentId,notificationRevision,requestKey") {
+  const isCancellation = isRecord(body) && body.intent === "send_registration_visit_cancellation"
+  const expectedKeys = isCancellation
+    ? "appointmentId,intent,notificationRevision,previewChecksum,requestKey,sourceDeliveryId"
+    : "appointmentId,notificationRevision,requestKey"
+  if (!isRecord(body) || Object.keys(body).sort().join(",") !== expectedKeys) {
     return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 })
   }
   const appointmentId = text(body.appointmentId)
@@ -453,17 +459,24 @@ export async function POST(request: Request) {
     || !Number.isInteger(notificationRevision)
     || notificationRevision < 1
     || !UUID.test(requestKey)
+    || (isCancellation && (!UUID.test(text(body.sourceDeliveryId)) || !/^[a-f0-9]{64}$/.test(text(body.previewChecksum))))
   ) {
     return NextResponse.json({ ok: false, error: "Invalid request" }, { status: 400 })
   }
 
   try {
-    parseEnsureReceipt(await rpc(client, "ensure_registration_visit_notification_v1", {
+    const intent = isCancellation ? "send_registration_visit_cancellation" : "send_registration_visit_notification"
+    parseEnsureReceipt(await rpc(client, isCancellation
+      ? "ensure_registration_visit_cancellation_v1"
+      : "ensure_registration_visit_notification_v1", {
       p_appointment_id: appointmentId,
       p_expected_notification_revision: notificationRevision,
       p_request_key: requestKey,
-      p_intent: "send_registration_visit_notification",
-    }), { appointmentId, requestKey })
+      ...(isCancellation ? {
+        p_source_delivery_id: text(body.sourceDeliveryId),
+        p_preview_checksum: text(body.previewChecksum),
+      } : { p_intent: intent }),
+    }), { appointmentId, requestKey, intent })
     const plan = parsePlan(await rpc(client, "get_registration_visit_legacy_dispatch_plan_v1", {
       p_appointment_id: appointmentId,
       p_actor_profile_id: userId,

@@ -42,7 +42,7 @@ function requireWorkflowKey(value: string): NotificationWorkflowKey {
   return value as NotificationWorkflowKey
 }
 
-function parseSetting(input: unknown): NotificationMentionSettingDto {
+export function parseSetting(input: unknown): NotificationMentionSettingDto {
   if (
     !isRecord(input) ||
     !exactKeys(input, [

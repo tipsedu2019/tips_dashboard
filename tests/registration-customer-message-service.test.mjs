@@ -208,6 +208,54 @@ test("customer message client preserves the server error code", async () => {
   )
 })
 
+test("receipt check stops a stalled request without retrying or sending", async () => {
+  let calls = 0
+  let aborted = false
+  const client = createRegistrationCustomerMessageClient({
+    adminTimeoutMs: 5,
+    getAccessToken: async () => "test-session-token",
+    fetch: async (url, init) => {
+      calls += 1
+      assert.equal(url, "/api/solapi/registration/check")
+      assert.deepEqual(JSON.parse(init.body), { messageId: MESSAGE_ID })
+      init.signal.addEventListener("abort", () => { aborted = true }, { once: true })
+      return new Promise(() => {})
+    },
+  })
+  await assert.rejects(withinTestDeadline(client.check({ messageId: MESSAGE_ID })), /registration_customer_message_admin_timeout/)
+  assert.equal(calls, 1)
+  assert.equal(aborted, true)
+})
+
+test("receipt check does not start after timed-out authentication resolves", async () => {
+  let resolveToken
+  let calls = 0
+  const client = createRegistrationCustomerMessageClient({
+    adminTimeoutMs: 5,
+    getAccessToken: () => new Promise((resolve) => { resolveToken = resolve }),
+    fetch: async () => { calls += 1; return response({}) },
+  })
+  await assert.rejects(withinTestDeadline(client.check({ messageId: MESSAGE_ID })), /registration_customer_message_admin_timeout/)
+  resolveToken("late-session-token")
+  await Promise.resolve()
+  await Promise.resolve()
+  assert.equal(calls, 0)
+})
+
+test("receipt check releases its wait when the case scope closes", async () => {
+  let transportSignal
+  const client = createRegistrationCustomerMessageClient({
+    getAccessToken: async () => "test-session-token",
+    fetch: async (_url, init) => { transportSignal = init.signal; return new Promise(() => {}) },
+  })
+  const controller = new AbortController()
+  const result = client.check({ messageId: MESSAGE_ID }, controller.signal)
+  await Promise.resolve()
+  controller.abort(new Error("case_closed"))
+  await assert.rejects(withinTestDeadline(result), /case_closed/)
+  assert.equal(transportSignal.aborted, true)
+})
+
 test("customer message client requests the bundle preview endpoint for task-scoped reservations", async () => {
   const requests = []
   const client = createRegistrationCustomerMessageClient({

@@ -20,7 +20,7 @@ import test, { after } from "node:test"
 
 import * as migrationLayoutVerifier from "../scripts/verify-supabase-migration-layout.mjs"
 
-const { validateSupabaseMigrationLayout } = migrationLayoutVerifier
+const { validateSupabaseMigrationLayout, hasForbiddenPostdeploySqlExecution } = migrationLayoutVerifier
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const isolatedRunnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", import.meta.url)
@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "421a842c2a62feceb9e56e803034bddfa298b35d49829f652a0967c1519c6d43"
+  "bb23eaecc007c7ce8aaa21c2ac6ce3a9dbc3bc95af7f6667c69758e4a687bf00"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -475,7 +475,7 @@ test("admission-order patch is immutable, runs in PR schema CI, and is covered b
   assert.ok(expectedFunctionsBlock, "postdeploy expected_functions must stay statically readable")
   assert.equal(
     (expectedFunctionsBlock.match(/'::text,\s*(?:true|false),\s*(?:true|false),\s*(?:true|false)\s*\)/gu) ?? []).length,
-    59,
+    71,
     "postdeploy must pin every active registration function contract",
   )
   assert.doesNotMatch(
@@ -2226,7 +2226,58 @@ test("post-push receipt는 고정 read-only SQL과 fresh ledger·query·verifier
   assert.match(sql, /^set local statement_timeout = '5s';$/imu)
   assert.match(sql, /^set local lock_timeout = '1s';$/imu)
   assert.match(sql, /\) as contract_ok;\s*rollback;\s*$/isu)
-  assert.doesNotMatch(sql, /\b(?:insert|update|delete|merge|truncate|alter|drop|create|grant|revoke|cron\.|net\.)\b/iu)
+  assert.equal(hasForbiddenPostdeploySqlExecution(sql), false)
+})
+
+test("read-only execution guard treats quoted predicates and comments as data", () => {
+  for (const sql of [
+    "select has_table_privilege('authenticated', 'public.profiles', 'SELECT,INSERT,UPDATE,DELETE');",
+    "select pg_get_functiondef('public.example()'::regprocedure) like '%UPDATE public.profiles%';",
+    "select E'UPDATE\\nnet.http_post', U&'\\0063ron.schedule', $value$DO DELETE FROM t; net.http_post()$value$;",
+    'select "update", "grant", "delete", "net.http_post" from public.profiles;',
+    'select active from "cron" /* catalog gap */ . job;',
+    "select 1; -- UPDATE t; net.http_post()\n/* DROP t; /* CALL p(); */ cron.schedule() */",
+  ]) assert.equal(hasForbiddenPostdeploySqlExecution(sql), false, sql)
+})
+
+test("read-only execution guard rejects actual writes and external calls despite quoting or comments", () => {
+  for (const sql of [
+    "UPDATE public.profiles SET name = 'literal';",
+    "WITH changed AS (DELETE FROM public.profiles RETURNING id) SELECT * FROM changed;",
+    "WITH changed AS (INSERT INTO public.profiles(id) VALUES (null) RETURNING id) SELECT * FROM changed;",
+    "DO $body$ BEGIN UPDATE public.profiles SET name = 'x'; END $body$;",
+    "CALL public.send_notice();",
+    "COPY (SELECT 1) TO PROGRAM 'provider-command';",
+    "EXECUTE prepared_mutation;",
+    "REFRESH MATERIALIZED VIEW public.snapshot;",
+    "select net.http_post('https://fixture.invalid');",
+    'select "net" /* schema gap */ . "http_post"(\'https://fixture.invalid\');',
+    'select "cron" . schedule(\'fixture\', \'* * * * *\', \'select 1\');',
+    'select "cron" . "job"(\'not a catalog read\');',
+    'select U&"n\\0065t".http_post(\'https://fixture.invalid\');',
+    "select 'unterminated",
+    "select 1; /* unterminated",
+  ]) assert.equal(hasForbiddenPostdeploySqlExecution(sql), true, sql)
+})
+
+test("catalog literal changes still fail the pinned hash while executable changes also fail read-only policy", async () => {
+  const sqlPath = join("supabase", "tests", "active_registration_workflow_postdeploy_readonly.sql")
+  const source = await readFile(join(repoRoot, sqlPath), "utf8")
+  for (const [name, sql, policyError] of [
+    ["catalog privilege literal", source.replace(
+      ") as contract_ok;", "and has_table_privilege('postgres', 'public.profiles', 'SELECT,INSERT,UPDATE,DELETE')\n) as contract_ok;",
+    ), false],
+    ["write statement", source.replace("with expected_functions(", "UPDATE public.profiles SET name = 'x';\nwith expected_functions("), true],
+    ["external call", source.replace("with expected_functions(", 'SELECT "net"."http_post"(\'https://fixture.invalid\');\nwith expected_functions('), true],
+    ["missing read-only transaction", source.replace("begin transaction read only;", "begin;"), true],
+    ["commit instead of rollback", source.replace(/rollback;\s*$/u, "commit;\n"), true],
+  ]) {
+    const fixtureRoot = await createRepoFixture()
+    await writeFile(join(fixtureRoot, sqlPath), sql)
+    const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+    assertIncludesErrorCode(errors, "postdeploy_contract_sql_hash_mismatch")
+    assert.equal(errors.some(error => error.includes("postdeploy_contract_sql_policy_mismatch")), policyError, name)
+  }
 })
 
 test("postdeploy search_path predicate treats NULL proconfig as a contract failure", async () => {
@@ -2259,7 +2310,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   const requiredPredicates = [
     ["public signature", "public.set_registration_workflow_status_v1(uuid,text,integer,text)"],
     ["private signature", "dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)"],
-    ["expanded final function count", "(select count(*) from functions where oid is not null) = 59"],
+    ["expanded final function count", "(select count(*) from functions where oid is not null) = 71"],
     ["delegation", "dashboard_private.set_registration_workflow_status_v1_impl%"],
     ["security definer modes", "security_definer_required and not prosecdef"],
     ["security invoker modes", "not security_definer_required and prosecdef"],
