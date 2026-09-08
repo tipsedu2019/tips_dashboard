@@ -37,14 +37,16 @@ jobs:
             tests/notification-settings-editor-state.test.mjs \
             tests/notification-control-plane-api.test.mjs \
             tests/notification-control-plane-model.test.mjs \
-            tests/notification-control-plane-ui.test.mjs
+            tests/notification-control-plane-ui.test.mjs \
+            tests/notification-dashboard-ui-retirement.test.mjs
       - name: Verify management notification previews and recovery actions
         run: |
           node --test --experimental-strip-types \
             tests/registration-management-notification-readiness.test.mjs \
             tests/registration-management-notification-preview.test.mjs \
             tests/registration-management-notification-actions.test.mjs \
-            tests/registration-management-source-recovery-race.test.mjs
+            tests/registration-management-source-recovery-race.test.mjs \
+            tests/notification-delivery-control.test.mjs
       - name: Verify customer history, observation handoff and visit cancellation
         run: |
           node --test --experimental-strip-types \
