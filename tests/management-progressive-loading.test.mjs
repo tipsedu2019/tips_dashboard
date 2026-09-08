@@ -673,9 +673,10 @@ test("management hook and UI keep list reads bounded while details and relation 
   assert.match(activeHook, /readService\.loadDetail\(\{ kind, id \}\)/);
   assert.doesNotMatch(activeHook, /readOptionalTable|enrichManagementRows|\.select\("\*"\)/);
 
-  assert.match(pageSource, /const detailRow = options\.detailLoaded \? row : await loadDetail\(row\.id\)/);
-  assert.match(pageSource, /loadDetail\(requestedClassId\)/);
-  assert.match(pageSource, /loadDetail\(requestedStudentId\)/);
+  // Row clicks and off-page links share the same guarded detail request.
+  assert.match(pageSource, /const detailRow = await loadDetail\(rowId\)/);
+  assert.match(pageSource, /openRow\(requestedClassId,/);
+  assert.match(pageSource, /openRow\(requestedStudentId,/);
   assert.match(pageSource, /service\.searchRelationPicker\(\{ kind, search: relationQuery \}\)/);
   assert.match(pageSource, /다음 30건/);
   assert.match(pageSource, /const reconcileManagementPage = useCallback\(async[\s\S]*?await refresh\(\)/);

@@ -10,8 +10,6 @@ import ts from "typescript"
 
 import {
   REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS,
-  assertRegistrationCustomerMessagePublicPayload,
-  parseRegistrationObservationSolapiReadiness,
 } from "../src/features/tasks/registration-customer-message-contract.ts"
 import { runRegistrationCustomerMessageRolloutAction } from "../src/features/tasks/registration-customer-message-rollout.ts"
 import { createRegistrationCustomerMessageAdminClient } from "../src/features/tasks/registration-customer-message-service.ts"
@@ -525,28 +523,8 @@ test("rollout panel renders every customer message kind including both observati
 })
 
 test("readiness client sends only the exact read-only inspection action and rejects private output", async () => {
-  const source = await (await import("node:fs/promises")).readFile(
-    new URL("../src/features/tasks/registration-customer-message-service.ts", import.meta.url),
-    "utf8",
-  )
-  const output = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText
   const requests = []
-  const runtimeModule = { exports: {} }
-  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
-    filename: "registration-customer-message-service.ts",
-  })
-  factory((specifier) => {
-    if (specifier === "./registration-customer-message-contract" || specifier === "./registration-customer-message-contract.ts") {
-      return {
-        assertRegistrationCustomerMessagePublicPayload,
-        parseRegistrationObservationSolapiReadiness,
-      }
-    }
-    throw new Error(`unexpected service import: ${specifier}`)
-  }, runtimeModule, runtimeModule.exports)
-  const client = runtimeModule.exports.createRegistrationCustomerMessageAdminClient({
+  const client = createRegistrationCustomerMessageAdminClient({
     getAccessToken: async () => "access-token",
     fetch: async (_url, init) => {
       requests.push(init)
@@ -560,7 +538,7 @@ test("readiness client sends only the exact read-only inspection action and reje
   assert.equal(requests[0].body.includes("templateId"), false)
   assert.equal(requests[0].body.includes("pfId"), false)
 
-  const privateClient = runtimeModule.exports.createRegistrationCustomerMessageAdminClient({
+  const privateClient = createRegistrationCustomerMessageAdminClient({
     getAccessToken: async () => "access-token",
     fetch: async () => Response.json({ ...READINESS, templateId: "private-template" }),
   })
@@ -576,27 +554,7 @@ test("readiness client forwards panel cancellation to its one read-only request"
   let resolveStarted
   const started = new Promise((resolve) => { resolveStarted = resolve })
   const controller = new AbortController()
-  const source = await (await import("node:fs/promises")).readFile(
-    new URL("../src/features/tasks/registration-customer-message-service.ts", import.meta.url),
-    "utf8",
-  )
-  const output = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText
-  const runtimeModule = { exports: {} }
-  const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
-    filename: "registration-customer-message-service.ts",
-  })
-  factory((specifier) => {
-    if (specifier === "./registration-customer-message-contract" || specifier === "./registration-customer-message-contract.ts") {
-      return {
-        assertRegistrationCustomerMessagePublicPayload,
-        parseRegistrationObservationSolapiReadiness,
-      }
-    }
-    throw new Error(`unexpected service import: ${specifier}`)
-  }, runtimeModule, runtimeModule.exports)
-  const client = runtimeModule.exports.createRegistrationCustomerMessageAdminClient({
+  const client = createRegistrationCustomerMessageAdminClient({
     getAccessToken: async () => "access-token",
     fetch: async (_url, init) => {
       requestSignal = init.signal

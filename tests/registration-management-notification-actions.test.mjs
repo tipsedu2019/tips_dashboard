@@ -9,10 +9,11 @@ import ts from "typescript"
 import * as timeout from "../src/lib/promise-timeout.ts"
 import * as observationService from "../src/features/tasks/registration-observation-chat-service.ts"
 import * as cancellationService from "../src/features/tasks/registration-visit-cancellation-service.ts"
+import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
 const require = createRequire(import.meta.url)
 
-async function loadActions(kind = "management") {
+async function loadActions(kind = "management", deliveryService = null) {
   const DialogContext = React.createContext(null)
   const dialog = {
     Dialog: ({ children, ...value }) => React.createElement(DialogContext.Provider, { value }, children),
@@ -42,6 +43,12 @@ async function loadActions(kind = "management") {
     "./registration-visit-cancellation-service": cancellationService,
     "./registration-consultation-notification.js": { dispatchRegistrationManagementNotificationSources: () => { throw new Error("Unexpected real dispatcher") } },
     "./registration-management-notification-preview-service": { createRegistrationManagementPreviewService: () => null },
+  }
+  if (deliveryService) {
+    modules["@/features/notifications/notification-delivery-control"] = loadNotificationComponent(
+      "src/features/notifications/notification-delivery-control.tsx",
+      new Map([["./notification-delivery-service", deliveryService]]),
+    )
   }
   const file = kind === "observation" ? "registration-observation-chat-actions" : kind === "cancellation" ? "registration-visit-cancellation-actions" : "registration-management-notification-actions"
   const source = await readFile(new URL(`../src/features/tasks/${file}.tsx`, import.meta.url), "utf8")
@@ -78,6 +85,73 @@ async function withDom(run) {
     }
   }
 }
+
+test("management delivery history stays read-only and only confirmed preview dispatches the latest canonical event", async () => withDom(async ({ root, dom, button, click }) => {
+  const archivedId = "30000000-0000-4000-8000-000000000001"
+  const existingId = "30000000-0000-4000-8000-000000000002"
+  const latestId = "30000000-0000-4000-8000-000000000003"
+  const earlierId = "30000000-0000-4000-8000-000000000004"
+  const sourceId = "20000000-0000-4000-8000-000000000001"
+  const reads = [], confirmations = [], dispatches = [], retries = [], warnings = []
+  const Actions = await loadActions("management", {
+    readGoogleChatDeliveryStatus: async (eventId) => {
+      reads.push(eventId)
+      return { eventId, status: eventId === latestId ? "unknown" : "failed", retryAllowed: true, confirmationRequired: eventId === latestId }
+    },
+    retryGoogleChatDelivery: async (...args) => { retries.push(args); throw new Error("Unexpected generic retry") },
+  })
+  let preview = {
+    trackId: "10000000-0000-4000-8000-000000000001", workflowRevision: 1,
+    previewChecksum: "a".repeat(64), eventKey: "registration.case_created", stepLabel: "상담 신청",
+    status: "existing_source_changed", canSend: false, recoveryAvailable: false, recoverySourceEventId: null,
+    recoveredFromEventId: archivedId, existingEventId: existingId,
+    targetLabel: "합성 관리팀", mentionLabel: "멘션 없음", renderedTitle: "상담 신청", renderedBody: "가상 학생",
+    reason: "기존 알림의 내용과 현재 설정이 다릅니다.",
+  }
+  await React.act(async () => root.render(React.createElement(Actions, {
+    trackId: preview.trackId, workflowRevision: 1, viewerId: "fixture-viewer", sessionToken: "fixture-only",
+    disabled: false, hasUnsavedChanges: () => false, onWarning: (message) => warnings.push(message),
+    previewService: {
+      preview: async () => preview,
+      confirm: async (checked, requestKey) => {
+        confirmations.push({ checked, requestKey })
+        return { sourceEventIds: [sourceId], recovered: true, previousEventId: existingId }
+      },
+    },
+    dispatch: async (...args) => {
+      dispatches.push(args)
+      return { failedSourceEventIds: [], googleChatEventIds: [earlierId, latestId] }
+    },
+  })))
+  assert.deepEqual(reads, [])
+  assert.deepEqual(dispatches, [])
+  await click("관리팀 알림 미리보기")
+  assert.deepEqual(new Set(reads), new Set([archivedId, existingId]))
+  assert.equal(button("이 내용으로 관리팀에 전달").disabled, true)
+  assert.equal(Boolean(button("Google Chat 재발송")), false, "archived and existing records cannot bypass preview confirmation")
+  assert.deepEqual(confirmations, [])
+  assert.deepEqual(dispatches, [])
+
+  await click("취소")
+  preview = { ...preview, status: "ready", canSend: true, recoveryAvailable: true,
+    recoverySourceEventId: sourceId, recoveredFromEventId: undefined, reason: "" }
+  await click("관리팀 알림 미리보기")
+  assert.deepEqual(confirmations, [])
+  assert.deepEqual(dispatches, [], "reading the ready preview is still read-only")
+  await click("이 내용으로 관리팀에 전달")
+  assert.equal(confirmations.length, 1)
+  assert.equal(confirmations[0].checked, preview)
+  assert.match(confirmations[0].requestKey, /^[0-9a-f-]{36}$/)
+  assert.deepEqual(dispatches, [[[sourceId], "fixture-only"]])
+  assert.equal(reads.includes(latestId), true)
+  assert.equal(reads.includes(earlierId), false, "the latest returned canonical event drives delivery status")
+  assert.match(dom.window.document.body.textContent, /새 안내 전달 상태/)
+  assert.match(dom.window.document.body.textContent, /Google Chat 결과 확인 필요/)
+  assert.doesNotMatch(dom.window.document.body.textContent, /Google Chat 방에 메시지가 없음을 확인했습니다/)
+  assert.equal(Boolean(button("Google Chat 재발송")), false, "recovered and current records also keep generic retry disabled")
+  assert.deepEqual(retries, [])
+  assert.deepEqual(warnings.filter(Boolean), [])
+}))
 
 test("a reviewed timeout retry clears its warning before confirmation and reuses the same key", async () => {
   const dom = new JSDOM("<!doctype html><div id='root'></div>")

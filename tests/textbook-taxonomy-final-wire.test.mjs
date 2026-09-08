@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
 import { registerHooks } from "node:module";
+import { assertTextbookWireManifest } from "./helpers/textbook-wire-manifest.mjs";
 
 const feature = new URL("../src/features/textbooks/", import.meta.url);
 const pageServiceUrl = new URL("../src/features/textbooks/textbook-subsubject-service.ts", import.meta.url);
@@ -54,13 +55,12 @@ function wire(data) {
 test("Task6b immutable final artifacts bind the six original wire payloads", () => {
   assert.equal(sha256(readFileSync(migrationUrl)), "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26");
   assert.equal(sha256(readFileSync(tapUrl)), "2423547bea88e72e6668834b8286302d214dcdde0b5df6c1ba3048bdc17bbf9e");
-  assert.equal(sha256(readFileSync(manifestUrl)), "9fb706b1d920449dffee1ca4703fb2dc38a8431ef782cb432606aac74439bf3e");
   const manifest = JSON.parse(readFileSync(manifestUrl, "utf8"));
-  assert.deepEqual(manifest.orderedNewMigrations.find(entry => entry.fileName === "20260901072345_textbook_taxonomy_numbered_drafts.sql"), {
+  assertTextbookWireManifest(manifest, [{
     fileName: "20260901072345_textbook_taxonomy_numbered_drafts.sql",
     status: "final",
     sha256: "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26",
-  });
+  }]);
   assert.equal(finalTaxonomySqlWirePayloads.length, 6);
   assert.equal(sha256(finalTaxonomySqlWirePayloads.join("\n")), "d4da0264b87a2edb14513e7cf8dbac1e0e8cebe5114c26c5598f1143dfdeadcf");
 

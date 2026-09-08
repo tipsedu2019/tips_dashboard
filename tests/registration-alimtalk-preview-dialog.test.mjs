@@ -7,15 +7,12 @@ import vm from "node:vm"
 import { act, createElement, forwardRef } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
-import {
-  assertRegistrationCustomerMessagePublicPayload,
-  isRegistrationCustomerMessageBundleKind,
-} from "../src/features/tasks/registration-customer-message-contract.ts"
+import { createRegistrationCustomerMessageClient } from "../src/features/tasks/registration-customer-message-service.ts"
+import { formatRegistrationMessageTimestamp } from "../src/features/tasks/registration-customer-message-labels.ts"
 
 const require = createRequire(import.meta.url)
 const { JSDOM } = require("jsdom")
 
-const serviceUrl = new URL("../src/features/tasks/registration-customer-message-service.ts", import.meta.url)
 const dialogUrl = new URL("../src/features/tasks/registration-alimtalk-preview-dialog.tsx", import.meta.url)
 const sharedDialogUrl = new URL("../src/components/ui/dialog.tsx", import.meta.url)
 const fixturesUrl = new URL("../src/features/tasks/registration-track-fixtures.ts", import.meta.url)
@@ -27,33 +24,6 @@ async function sourceOrEmpty(url) {
     if (error?.code === "ENOENT") return ""
     throw error
   }
-}
-
-async function loadService(fetch) {
-  const source = await sourceOrEmpty(serviceUrl)
-  const compiled = ts.transpileModule(source, {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText
-  const sandboxModule = { exports: {} }
-  vm.runInNewContext(compiled, {
-    module: sandboxModule,
-    exports: sandboxModule.exports,
-    fetch,
-    URLSearchParams,
-    require(specifier) {
-      if (
-        specifier === "./registration-customer-message-contract"
-        || specifier === "./registration-customer-message-contract.ts"
-      ) {
-        return {
-          assertRegistrationCustomerMessagePublicPayload,
-          isRegistrationCustomerMessageBundleKind,
-        }
-      }
-      throw new Error(`unexpected require: ${specifier}`)
-    },
-  })
-  return sandboxModule.exports
 }
 
 async function loadMountedDialog() {
@@ -93,6 +63,7 @@ async function loadMountedDialog() {
       getRegistrationCustomerMessageErrorMessage: (_error, fallback) => fallback,
       getRegistrationCustomerMessageReadinessMessage: () => "발송 준비 상태를 확인해 주세요.",
     }],
+    ["./registration-customer-message-labels", { formatRegistrationMessageTimestamp }],
   ])
   const runtimeRequire = (specifier) => {
     if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
@@ -267,17 +238,17 @@ test("mounted observation dialog ignores a stale preview and one confirmation ge
 
 test("registration customer message client sends only strict target and confirmation DTOs", async () => {
   const calls = []
-  const service = await loadService(async (url, init) => {
-    calls.push({ url, init: { ...init, headers: { ...init.headers } } })
-    return {
-      ok: true,
-      json: async () => url.includes("/messages?")
-        ? ({ ok: true, messageKind: "waiting_notice", readiness: { sendAllowed: false }, history: [{ messageId: "history-message" }] })
-        : ({ ok: true, messageId: "message" }),
-    }
-  })
-  const client = service.createRegistrationCustomerMessageClient({
+  const client = createRegistrationCustomerMessageClient({
     getAccessToken: async () => "fixture-token",
+    fetch: async (url, init) => {
+      calls.push({ url, init: { ...init, headers: { ...init.headers } } })
+      return {
+        ok: true,
+        json: async () => url.includes("/messages?")
+          ? ({ ok: true, messageKind: "waiting_notice", readiness: { sendAllowed: false }, history: [{ messageId: "history-message" }] })
+          : ({ ok: true, messageId: "message" }),
+      }
+    },
   })
 
   await client.preview({ messageKind: "level_test_booking", sourceId: "source-id" })
@@ -335,14 +306,14 @@ test("registration customer message client sends only strict target and confirma
 
 test("registration customer message client whitelists DTO fields and rejects private response fields", async () => {
   const calls = []
-  const service = await loadService(async (url, init) => {
+  const fetch = async (url, init) => {
     calls.push({ url, body: init.body })
     return {
       ok: true,
       json: async () => ({ ok: true, messageId: "message", parentPhone: "01012345678" }),
     }
-  })
-  const client = service.createRegistrationCustomerMessageClient({ getAccessToken: async () => "fixture-token" })
+  }
+  const client = createRegistrationCustomerMessageClient({ getAccessToken: async () => "fixture-token", fetch })
 
   await assert.rejects(
     client.preview({ messageKind: "level_test_booking", sourceId: "source-id", phone: "01012345678" }),
@@ -350,7 +321,7 @@ test("registration customer message client whitelists DTO fields and rejects pri
   )
   assert.equal(calls[0].body, JSON.stringify({ messageKind: "level_test_booking", sourceId: "source-id" }))
 
-  const reconciler = service.createRegistrationCustomerMessageClient({ getAccessToken: async () => "fixture-token" })
+  const reconciler = createRegistrationCustomerMessageClient({ getAccessToken: async () => "fixture-token", fetch })
   await assert.rejects(reconciler.reconcile({
     action: "release_pre_send",
     messageId: "message-id",

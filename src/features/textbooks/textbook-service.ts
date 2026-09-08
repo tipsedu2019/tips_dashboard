@@ -3,7 +3,6 @@ import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-
 
 import {
   buildPurchaseLifecycleDraft,
-  buildSaleLineStatusTransition,
   buildTeacherTextbookIssueDraft,
   buildTextbookInventorySnapshot,
   buildTextbookMonthlyClosing,
@@ -966,16 +965,11 @@ export async function createTeacherTextbookIssue(record: Row, data: Row, clientI
   return { sale: sale as Row, lines: (lines || []) as Row[], draft };
 }
 
-export async function updateSaleLineStatus(record: Row, data: Row, clientInput?: SupabaseClientLike | null) {
+export async function updateSaleLineStatus(record: Row, _data: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
-  const saleLineId = text(record.saleLineId || record.sale_line_id || record.id);
+  const saleLineId = normalizeOptionalUuid(record.saleLineId || record.sale_line_id || record.id)?.toLowerCase();
   const targetStatus = text(record.status || record.targetStatus || record.target_status);
-  const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
-  const saleLines = (data.saleLines || []) as Row[];
-  const inventory = (data.inventory || []) as Row[];
-  const line = saleLines.find((item) => getRecordId(item) === saleLineId);
-
-  if (!line || !targetStatus) {
+  if (!saleLineId || !targetStatus) {
     throw new Error("출고 라인과 상태를 확인하세요.");
   }
 
@@ -983,47 +977,14 @@ export async function updateSaleLineStatus(record: Row, data: Row, clientInput?:
     throw new Error("지원하지 않는 출고 상태입니다.");
   }
 
-  const locationId = normalizeOptionalUuid(line.location_id || line.locationId || data.defaultLocationId);
-  const inventoryRow = inventory.find((item) => getRecordId(item) === text(line.textbook_id || line.textbookId));
-  const transition = buildSaleLineStatusTransition({
-    line,
-    targetStatus,
-    availableQuantity: getInventoryQuantity(inventoryRow, locationId || ""),
+  const { data: updated, error } = await client.rpc("transition_textbook_sale_line_v1", {
+    p_sale_line_id: saleLineId,
+    p_target_status: targetStatus,
   });
-
-  if (transition.shouldCreateStockMove && transition.stockMove) {
-    const moveType = text(transition.stockMove.move_type || transition.stockMove.moveType);
-    const { data: existingMoves, error: existingMoveError } = await client
-      .from("textbook_stock_moves")
-      .select("*")
-      .eq("sale_line_id", saleLineId)
-      .eq("move_type", moveType);
-    if (existingMoveError) throw existingMoveError;
-
-    const existingMove = ((existingMoves || []) as Row[])[0];
-    const stockMove = {
-      ...transition.stockMove,
-      created_by: createdBy,
-    };
-    if (existingMove) {
-      const { error: moveError } = await client
-        .from("textbook_stock_moves")
-        .update(stockMove)
-        .eq("id", existingMove.id);
-      if (moveError) throw moveError;
-    } else {
-      const { error: moveError } = await client.from("textbook_stock_moves").insert(stockMove);
-      if (moveError) throw moveError;
-    }
-  }
-
-  const { data: updated, error } = await client
-    .from("textbook_sale_lines")
-    .update({ status: transition.targetStatus })
-    .eq("id", saleLineId)
-    .select()
-    .single();
   if (error) throw error;
+  if (!updated || updated.id !== saleLineId || updated.status !== targetStatus) {
+    throw new Error("출고 처리 결과를 확인할 수 없습니다. 새로고침 후 상태를 확인하세요.");
+  }
 
   return updated as Row;
 }
@@ -1072,115 +1033,52 @@ export async function deleteSaleLineLifecycle(record: Row, clientInput?: Supabas
 
 export async function createStockCountAdjustment(record: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
-  const expectedQuantity = numberValue(record.expectedQuantity || record.expected_quantity);
-  const countedQuantity = numberValue(record.countedQuantity || record.counted_quantity);
-  const difference = countedQuantity - expectedQuantity;
-  const textbookId = text(record.textbookId || record.textbook_id);
-  const locationId = normalizeOptionalUuid(record.locationId || record.location_id);
-  const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
-
-  if (!textbookId) {
-    throw new Error("교재와 위치를 선택하세요.");
+  const requestId = normalizeOptionalUuid(record.requestId || record.request_id)?.toLowerCase();
+  const textbookId = normalizeOptionalUuid(record.textbookId || record.textbook_id)?.toLowerCase();
+  const locationId = normalizeOptionalUuid(record.locationId || record.location_id)?.toLowerCase() || null;
+  const expected = record.expectedQuantity ?? record.expected_quantity;
+  const counted = record.countedQuantity ?? record.counted_quantity;
+  const expectedQuantity = Number(expected);
+  const countedQuantity = Number(counted);
+  if (!requestId || !textbookId || expected == null || counted == null || String(counted).trim() === "" || String(expected).trim() === ""
+    || !Number.isInteger(expectedQuantity) || !Number.isInteger(countedQuantity) || countedQuantity < 0
+    || Math.abs(expectedQuantity) > 2147483647 || countedQuantity > 2147483647) {
+    throw new Error("실사 대상과 수량을 확인하고 다시 시도하세요.");
   }
-
-  const { data: count, error: countError } = await client
-    .from("textbook_stock_counts")
-    .insert({
-      counted_at: text(record.countedAt || record.counted_at) || new Date().toISOString().slice(0, 10),
-      textbook_id: textbookId,
-      location_id: locationId,
-      expected_quantity: expectedQuantity,
-      counted_quantity: countedQuantity,
-      memo: text(record.memo),
-      created_by: createdBy,
-    })
-    .select()
-    .single();
-  if (countError) throw countError;
-
-  if (difference !== 0) {
-    const { data: move, error: moveError } = await client
-      .from("textbook_stock_moves")
-      .insert({
-        textbook_id: textbookId,
-        location_id: locationId,
-        move_type: "stock_adjustment",
-        quantity: difference,
-        unit_amount: getTextbookSalePrice(record),
-        amount: difference * getTextbookSalePrice(record),
-        memo: text(record.memo),
-        created_by: createdBy,
-      })
-      .select()
-      .single();
-    if (moveError) throw moveError;
-
-    await client
-      .from("textbook_stock_counts")
-      .update({ adjustment_move_id: move.id })
-      .eq("id", count.id);
+  const { data, error } = await client.rpc("create_textbook_stock_count_v1", {
+    p_request_id: requestId,
+    p_textbook_id: textbookId,
+    p_location_id: locationId,
+    p_expected_quantity: expectedQuantity,
+    p_counted_quantity: countedQuantity,
+    p_counted_at: text(record.countedAt || record.counted_at) || new Date().toISOString().slice(0, 10),
+    p_unit_amount: getTextbookSalePrice(record),
+    p_memo: text(record.memo),
+  });
+  if (error) throw error;
+  const count = data as Row | null;
+  if (!count || count.id !== requestId || count.textbook_id !== textbookId || count.location_id !== locationId
+    || count.counted_quantity !== countedQuantity || !Number.isInteger(count.expected_quantity)
+    || (count.counted_quantity !== count.expected_quantity && !normalizeOptionalUuid(count.adjustment_move_id))) {
+    throw new Error("실사 저장 결과를 확인할 수 없습니다. 같은 입력으로 다시 시도하세요.");
   }
-
-  return count as Row;
+  return count;
 }
 
 export async function deleteInventoryHistory(record: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
   const kind = text(record.kind || record.type);
-  const id = text(record.id || record.historyId || record.history_id);
-  const linkedMoveId = text(record.linkedMoveId || record.linked_move_id || record.adjustmentMoveId || record.adjustment_move_id);
-
-  if (!id) {
+  const id = normalizeOptionalUuid(record.id || record.historyId || record.history_id)?.toLowerCase();
+  if (!id || (kind !== "count" && kind !== "move")) {
     throw new Error("삭제할 재고 이력을 선택하세요.");
   }
-
-  if (kind === "count") {
-    const { data: count, error: countReadError } = await client
-      .from("textbook_stock_counts")
-      .select("id,adjustment_move_id")
-      .eq("id", id)
-      .maybeSingle();
-    if (countReadError) throw countReadError;
-
-    const adjustmentMoveId = text(count?.adjustment_move_id || linkedMoveId);
-    if (adjustmentMoveId) {
-      const { error: detachError } = await client
-        .from("textbook_stock_counts")
-        .update({ adjustment_move_id: null })
-        .eq("id", id);
-      if (detachError) throw detachError;
-    }
-
-    const { error: countDeleteError } = await client
-      .from("textbook_stock_counts")
-      .delete()
-      .eq("id", id);
-    if (countDeleteError) throw countDeleteError;
-
-    if (adjustmentMoveId) {
-      const { error: moveDeleteError } = await client
-        .from("textbook_stock_moves")
-        .delete()
-        .eq("id", adjustmentMoveId);
-      if (moveDeleteError) throw moveDeleteError;
-    }
-
-    return { kind: "count", id, linkedMoveId: adjustmentMoveId };
+  const { data, error } = await client.rpc("delete_textbook_inventory_history_v1", { p_kind: kind, p_id: id });
+  if (error) throw error;
+  const result = data as Row | null;
+  if (!result || result.kind !== kind || result.id !== id || typeof result.deleted !== "boolean") {
+    throw new Error("재고 이력 삭제 결과를 확인할 수 없습니다. 다시 시도하세요.");
   }
-
-  const { error: detachError } = await client
-    .from("textbook_stock_counts")
-    .update({ adjustment_move_id: null })
-    .eq("adjustment_move_id", id);
-  if (detachError) throw detachError;
-
-  const { error: moveDeleteError } = await client
-    .from("textbook_stock_moves")
-    .delete()
-    .eq("id", id);
-  if (moveDeleteError) throw moveDeleteError;
-
-  return { kind: "move", id };
+  return result;
 }
 
 export async function upsertMonthlyClosing(record: Row, data: Row, clientInput?: SupabaseClientLike | null) {

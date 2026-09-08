@@ -21,6 +21,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { useAuth } from "@/providers/auth-provider";
 import { getAuthErrorMessage } from "@/lib/auth-error-messages";
+import { getAuthReturnPath } from "@/lib/auth-return-path";
 
 const loginFormSchema = z.object({
   loginId: z.string().trim().min(1, "Google 이메일 또는 아이디를 입력해 주세요."),
@@ -36,7 +37,7 @@ export function LoginForm1({
   const router = useRouter();
   const searchParams = useSearchParams();
   const { login, authError, user, loading } = useAuth();
-  const redirectTarget = searchParams.get("next") || "/admin/dashboard";
+  const redirectTarget = getAuthReturnPath(searchParams.get("next"));
   const didRegister = searchParams.get("registered") === "1";
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);

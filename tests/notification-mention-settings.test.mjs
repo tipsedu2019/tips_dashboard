@@ -1,6 +1,6 @@
 import assert from "node:assert/strict"
 import { spawn } from "node:child_process"
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
+import { copyFile, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join, resolve } from "node:path"
 import test from "node:test"
@@ -375,6 +375,8 @@ test("real panel cancels local template edits and atomically saves mention and r
   try {
     await symlink(join(root, "node_modules"), join(fixtureRoot, "node_modules"))
     await mkdir(join(fixtureRoot, "app"))
+    await mkdir(join(fixtureRoot, "public"))
+    await copyFile(join(root, "public", "favicon.ico"), join(fixtureRoot, "public", "favicon.ico"))
     await mkdir(join(fixtureRoot, "src", "lib"), { recursive: true })
     await symlink(join(root, "src", "components"), join(fixtureRoot, "src", "components"))
     await symlink(join(root, "src", "features"), join(fixtureRoot, "src", "features"))
@@ -423,7 +425,9 @@ export default function Page() {
     const page = await browser.newPage()
     const browserErrors = []
     page.on("console", (message) => {
-      if (message.type() === "error") browserErrors.push(message.text())
+      if (message.type() === "error") {
+        browserErrors.push({ message: message.text(), location: message.location() })
+      }
     })
     page.on("pageerror", (error) => browserErrors.push(error.message))
     const registrationSnapshot = panelSnapshot("registration", RULE_ID, "registration.case_created")

@@ -10,7 +10,6 @@ const getRouteUrl = new URL("../src/app/api/notifications/events/[eventId]/route
 const retryRouteUrl = new URL("../src/app/api/notifications/events/[eventId]/retry/route.ts", import.meta.url)
 const legacyRouteUrl = new URL("../src/app/api/notifications/legacy/ops-task/route.ts", import.meta.url)
 const registrationNotificationUrl = new URL("../src/features/tasks/registration-consultation-notification.js", import.meta.url)
-const registrationEditorUrl = new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
 
 test("event status and manual retry keep sent targets immutable and unknown explicit", async () => {
@@ -55,18 +54,14 @@ test("workflow-local control reads only immediately, after 2s, and after 5s", as
   assert.match(control, /setConfirmedAbsent\(false\)/)
 })
 
-test("registration workflow returns canonical event ids and shows delivery control beside status", async () => {
-  const [route, dispatcher, editor] = await Promise.all([
+test("legacy registration adapters return canonical event ids for workflow-local delivery status", async () => {
+  const [route, dispatcher] = await Promise.all([
     readFile(legacyRouteUrl, "utf8"),
     readFile(registrationNotificationUrl, "utf8"),
-    readFile(registrationEditorUrl, "utf8"),
   ])
   assert.match(route, /eventIds:\s*items\.map\(\(item\) => item\.eventId\)/)
   assert.match(dispatcher, /googleChatEventIds/)
   assert.match(dispatcher, /payload\?\.eventIds/)
-  assert.match(editor, /GoogleChatDeliveryControl/)
-  assert.match(editor, /setLatestGoogleChatEventId/)
-  assert.match(editor, /data-registration-workflow-status[\s\S]*GoogleChatDeliveryControl/)
 })
 
 test("task workflow tracks canonical event ids and shows delivery control beside actions", async () => {

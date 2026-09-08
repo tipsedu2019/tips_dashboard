@@ -814,7 +814,6 @@ test("textbook workspace follows request order receipt and issue process", async
   assert.doesNotMatch(workspaceSource, /납부/);
   assert.doesNotMatch(workspaceSource, /SelectItem value="issued">/);
   assert.match(serviceSource, /buildPurchaseLifecycleDraft/);
-  assert.match(serviceSource, /buildSaleLineStatusTransition/);
   assert.match(serviceSource, /updateSaleLineStatus/);
 });
 
@@ -1749,10 +1748,6 @@ test("inventory tab shows stock change audit history", async () => {
   assert.match(workspaceSource, /textbookHistoryDeleteAdminEmails\.has\(currentUserEmail\)/);
   assert.match(workspaceSource, /canManageAll \|\|[\s\S]*isAdmin \|\|[\s\S]*role === "admin"/);
   assert.match(serviceSource, /export async function deleteInventoryHistory/);
-  assert.match(serviceSource, /\.from\("textbook_stock_counts"\)[\s\S]*\.update\(\{ adjustment_move_id: null \}\)/);
-  assert.match(serviceSource, /\.from\("textbook_stock_moves"\)[\s\S]*\.delete\(\)/);
-  assert.match(serviceSource, /createStockCountAdjustment[\s\S]*created_by: createdBy/);
-  assert.match(serviceSource, /updateSaleLineStatus[\s\S]*created_by: createdBy/);
 });
 
 test("inventory stock count is inline and mobile-first with recommended targets", async () => {
@@ -1837,7 +1832,6 @@ test("textbook workspace surfaces real Supabase write errors during testing", as
   assert.doesNotMatch(workspaceSource, /actionError instanceof Error \? actionError\.message : "처리 중 오류가 발생했습니다\."/);
   assert.match(serviceSource, /normalizeOptionalUuid/);
   assert.match(serviceSource, /normalizeOptionalUuid\(record\.locationId/);
-  assert.match(serviceSource, /normalizeOptionalUuid\(line\.location_id/);
 });
 
 test("textbook workspace blocks writes when operation tables are not migrated", async () => {

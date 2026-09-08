@@ -379,6 +379,16 @@
       "fileName": "20260908090400_registration_management_dispatch_owner.sql",
       "status": "final",
       "sha256": "dd4de3c455ae3ebac51f333d475974f8cb7dee3810fb90df7b35036e9c3ca3f9"
+    },
+    {
+      "fileName": "20260908105302_textbook_sale_transition_atomic.sql",
+      "status": "final",
+      "sha256": "134e8f6fbb37d3ad746c6cd2578a205575cad29b8738c1732586f739cc53f016"
+    },
+    {
+      "fileName": "20260908112155_textbook_stock_count_atomic.sql",
+      "status": "final",
+      "sha256": "516c1cefb2f038c034005135cf28da167831739d1e6c71ec2fadedfc0f33562b"
     }
   ]
 }

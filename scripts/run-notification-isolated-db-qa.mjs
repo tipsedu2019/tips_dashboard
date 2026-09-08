@@ -1564,19 +1564,31 @@ export async function writeNotificationDatabasePasswordPrompt(childStdin, secret
   }
 }
 
-async function writePrivateFile(filePath, contents) {
-  await writeFile(filePath, contents, { flag: "wx", mode: 0o600 })
-  await chmod(filePath, 0o600)
-  const fileStat = await lstat(filePath, { bigint: true })
-  if (!fileStat.isFile() || fileStat.isSymbolicLink() || (fileStat.mode & 0o777n) !== 0o600n) {
-    throw new Error("notification_local_db_remote_artifact_refused")
+async function writePrivateFile(filePath, contents, retainedHandles) {
+  let fileHandle = await open(filePath, "wx", 0o600)
+  try {
+    await fileHandle.writeFile(contents)
+    await fileHandle.chmod(0o600)
+    const fileStat = await fileHandle.stat({ bigint: true })
+    if (!fileStat.isFile() || (fileStat.mode & 0o777n) !== 0o600n) {
+      throw new Error("notification_local_db_remote_artifact_refused")
+    }
+    const identity = Object.freeze({
+      dev: fileStat.dev,
+      ino: fileStat.ino,
+      uid: fileStat.uid,
+      gid: fileStat.gid,
+    })
+    if (retainedHandles) {
+      // Keep the original inode allocated until the collector finishes, even if
+      // another process unlinks the path and the filesystem would reuse it.
+      retainedHandles.push(fileHandle)
+      fileHandle = undefined
+    }
+    return identity
+  } finally {
+    await fileHandle?.close().catch(() => {})
   }
-  return Object.freeze({
-    dev: fileStat.dev,
-    ino: fileStat.ino,
-    uid: fileStat.uid,
-    gid: fileStat.gid,
-  })
 }
 
 async function inspectQueryContract(queryPath, expectedIdentity) {
@@ -1798,10 +1810,11 @@ export async function collectRemoteSchemaMetadata(context, execute, { collectorR
     projectRef: REMOTE_POOLER_ROUTE.projectRef,
     region: REMOTE_POOLER_ROUTE.region,
   })
+  const retainedHandles = []
 
   try {
-    const queryIdentity = await writePrivateFile(queryPath, REMOTE_METADATA_SQL)
-    const schemaDumpIdentity = await writePrivateFile(schemaDumpPath, "")
+    const queryIdentity = await writePrivateFile(queryPath, REMOTE_METADATA_SQL, retainedHandles)
+    const schemaDumpIdentity = await writePrivateFile(schemaDumpPath, "", retainedHandles)
 
     const imageInspect = await executeRemoteStep(
       buildNotificationRemoteDockerInvocation("image-inspect", dockerOptions),
@@ -1897,6 +1910,8 @@ export async function collectRemoteSchemaMetadata(context, execute, { collectorR
       cleanupCode = "notification_local_db_cleanup_failed"
     }
     throw new NotificationLocalDbQaError(primaryCode, cleanupCode)
+  } finally {
+    await Promise.all(retainedHandles.map((fileHandle) => fileHandle.close().catch(() => {})))
   }
 }
 

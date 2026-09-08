@@ -1,4 +1,5 @@
 import test from 'node:test';
+import { assertTextbookWireManifest } from './helpers/textbook-wire-manifest.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { stripTypeScriptTypes } from 'node:module';
@@ -221,14 +222,14 @@ test('final closing SQL provenance binds all14 untouched wires and exactly nine 
   assert.equal(hash(readFileSync(new URL(`../supabase/migrations/${fileName}`, import.meta.url))), sqlHash);
   assert.equal(hash(readFileSync(new URL('../supabase/tests/textbook_closing_work_context_reads_test.sql', import.meta.url))), 'f929210e61f66fa34f6afadbdf69c790dcc4090e9636becdb80250463707ab78');
   const manifest = JSON.parse(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url), 'utf8'));
-  assert.deepEqual(manifest.orderedNewMigrations.find((entry) => entry.fileName === fileName), { fileName, status: 'final', sha256: sqlHash });
   const task5b2FileName = '20260831234634_textbook_class_sale_roster_school.sql';
   const task5b2SqlHash = '458b951d33356be1f8544c1d1b7c80e4023031dedb78ce7029bef9ea10aa301b';
   assert.equal(hash(readFileSync(new URL(`../supabase/migrations/${task5b2FileName}`, import.meta.url))), task5b2SqlHash);
   assert.equal(hash(readFileSync(new URL('../supabase/tests/textbook_class_sale_roster_context_test.sql', import.meta.url))), '754d4358d17cffc2c2ae81c40857d7eda79cf39935824a57411cb4c97d39c4f2');
-  // Later reviewed settings migrations are append-only additions to this same final manifest.
-  assert.equal(hash(readFileSync(new URL('../supabase/test-baselines/dashboard-free-tier-v1.manifest.json', import.meta.url))), '9fb706b1d920449dffee1ca4703fb2dc38a8431ef782cb432606aac74439bf3e');
-  assert.deepEqual(manifest.orderedNewMigrations.filter((entry) => entry.fileName === task5b2FileName), [{ fileName: task5b2FileName, status: 'final', sha256: task5b2SqlHash }]);
+  assertTextbookWireManifest(manifest, [
+    { fileName, status: 'final', sha256: sqlHash },
+    { fileName: task5b2FileName, status: 'final', sha256: task5b2SqlHash },
+  ]);
   assert.equal(hash(finalTask5b2WirePayload), finalTask5b2Evidence.wirePayloadSha256);
   assert.equal(finalTask5b2Evidence.finalSqlLogSha256, '6d04858c363db8090a24037eb8c836dac07473b0ca5471b191577a12d6115dc8');
   const finalTask5b2Capture = JSON.parse(finalTask5b2WirePayload);

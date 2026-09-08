@@ -9,6 +9,13 @@ import {
   button, closingDetailEnvelope, closingMovementRow, closingRow, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistoryRow, saleHistorySummary, saleRow, saleSummary, setup,
 } from "./helpers/textbook-numbered-harness.mjs"
 
+const stockCountResult = (request) => ({
+  id: request.args.p_request_id, textbook_id: request.args.p_textbook_id, location_id: request.args.p_location_id,
+  expected_quantity: request.args.p_expected_quantity, counted_quantity: request.args.p_counted_quantity,
+  adjustment_move_id: request.args.p_expected_quantity === request.args.p_counted_quantity ? null : id(2999),
+  counted_at: request.args.p_counted_at, memo: request.args.p_memo,
+})
+
 const preparedRowIds = (surface) => [...document.querySelectorAll(`[data-prepared-surface="${surface}"]`)]
   .map((node) => node.getAttribute("data-prepared-row-id"))
 
@@ -467,12 +474,12 @@ test("inventory page changes clear current-page selection while retaining page-o
   const balance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
   assert.ok(balance, "bulk count freezes selected displayed rows and reads their actual location balance")
   assert.deepEqual(balance.args.p_input, { textbookIds: [source.id], locationId })
-  assert.equal(h.requests.some((request) => request.table), false, "no writer starts before every balance is complete")
+  assert.equal(h.requests.some((request) => request.table || request.name === "create_textbook_stock_count_v1"), false, "no writer starts before every balance is complete")
   await h.resolve(balance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 9,
     locationQuantities: { [locationId]: 9 }, studentLocationQuantities: { [locationId]: 9 }, teacherLocationQuantities: {},
     totalQuantity: 9, studentQuantity: 9, teacherQuantity: 0, stockValue: 90000 }] })
-  const countWrite = h.requests.find((request) => request.table === "textbook_stock_counts" && request.steps.some((step) => step.method === "insert"))
-  assert.equal(countWrite.steps.find((step) => step.method === "insert").args[0].expected_quantity, 9, "fresh balance owns expectedQuantity")
+  const countWrite = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
+  assert.equal(countWrite.args.p_expected_quantity, 9, "fresh balance owns expectedQuantity")
   const restoredInput = document.querySelector('[aria-label="교재 311 본관 실사 수량"]')
   await h.act(() => {
     const reactProps = restoredInput[Object.keys(restoredInput).find((key) => key.startsWith("__reactProps$"))]
@@ -483,16 +490,12 @@ test("inventory page changes clear current-page selection while retaining page-o
     const reactProps = restoredMemoInput[Object.keys(restoredMemoInput).find((key) => key.startsWith("__reactProps$"))]
     reactProps.onChange({ target: { value: "나중에 고친 메모" } })
   })
-  await h.resolve(countWrite, { id: id(990) })
-  const moveWrite = h.requests.find((request) => request.table === "textbook_stock_moves" && request.steps.some((step) => step.method === "insert"))
-  await h.resolve(moveWrite, { id: id(991) })
-  const linkWrite = h.requests.findLast((request) => request.table === "textbook_stock_counts" && request.steps.some((step) => step.method === "update"))
-  await h.resolve(linkWrite, null)
-  const refreshRequests = h.requests.slice(h.requests.indexOf(linkWrite) + 1).filter((request) => request.name)
+  await h.resolve(countWrite, stockCountResult(countWrite))
+  const refreshRequests = h.requests.slice(h.requests.indexOf(countWrite) + 1).filter((request) => request.name)
   assert.deepEqual(refreshRequests, [], "a newer post-writer draft suppresses stale invalidation for the obsolete action")
   assert.equal(document.querySelector('[aria-label="교재 311 본관 실사 수량"]')?.value, "8", "newer quantity revision survives an older completed action")
   assert.equal(document.querySelector('[aria-label="교재 311 본관 실사 메모"]')?.value, "나중에 고친 메모", "newer memo revision survives an older completed action")
-  assert.deepEqual([...new Set(h.requests.filter((request) => request.table).map((request) => request.table))].sort(), ["textbook_stock_counts", "textbook_stock_moves"], "action completion starts no legacy read table")
+  assert.deepEqual([...new Set(h.requests.filter((request) => request.table).map((request) => request.table))].sort(), [], "action completion performs no direct table writes or legacy reads")
 })
 
 test("inventory bulk freezes selected displayed IDs and completes every actual-location balance batch before writing", async (t) => {
@@ -526,9 +529,9 @@ test("inventory bulk freezes selected displayed IDs and completes every actual-l
   await h.act(() => changedDraft[Object.keys(changedDraft).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: "70" } }))
   await h.act(() => document.querySelector('[aria-label="교재 322 별관 재고 선택"]').click())
   await h.resolve(balances[0], { locationId: balances[0].args.p_input.locationId, rows: [{ textbookId: balances[0].args.p_input.textbookIds[0], currentQuantity: 11, locationQuantities: { [balances[0].args.p_input.locationId]: 11 }, studentLocationQuantities: { [balances[0].args.p_input.locationId]: 11 }, teacherLocationQuantities: { [balances[0].args.p_input.locationId]: 0 }, totalQuantity: 11, studentQuantity: 11, teacherQuantity: 0, stockValue: 110000 }] })
-  assert.equal(h.requests.some((request) => request.table), false)
+  assert.equal(h.requests.some((request) => request.table || request.name === "create_textbook_stock_count_v1"), false)
   await h.resolve(balances[1], { locationId: balances[1].args.p_input.locationId, rows: [{ textbookId: balances[1].args.p_input.textbookIds[0], currentQuantity: 12, locationQuantities: { [balances[1].args.p_input.locationId]: 12 }, studentLocationQuantities: { [balances[1].args.p_input.locationId]: 12 }, teacherLocationQuantities: { [balances[1].args.p_input.locationId]: 0 }, totalQuantity: 12, studentQuantity: 12, teacherQuantity: 0, stockValue: 120000 }] })
-  assert.equal(h.requests.some((request) => request.table), false, "bulk draft or selection changes while balances are pending keep every writer closed")
+  assert.equal(h.requests.some((request) => request.table || request.name === "create_textbook_stock_count_v1"), false, "bulk draft or selection changes while balances are pending keep every writer closed")
 
   await h.act(() => changedDraft[Object.keys(changedDraft).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: "7" } }))
   await h.act(() => document.querySelector('[aria-label="교재 322 별관 재고 선택"]').click())
@@ -539,10 +542,10 @@ test("inventory bulk freezes selected displayed IDs and completes every actual-l
     const textbookId = request.args.p_input.textbookIds[0]
     await h.resolve(request, { locationId: request.args.p_input.locationId, rows: [{ textbookId, currentQuantity: 20 + index, locationQuantities: { [request.args.p_input.locationId]: 20 + index }, studentLocationQuantities: { [request.args.p_input.locationId]: 20 + index }, teacherLocationQuantities: { [request.args.p_input.locationId]: 0 }, totalQuantity: 20 + index, studentQuantity: 20 + index, teacherQuantity: 0, stockValue: (20 + index) * 10000 }] })
   }
-  const firstWriter = h.requests.find((request) => request.table === "textbook_stock_counts")
-  const firstPayload = firstWriter.steps.find((step) => step.method === "insert").args[0]
-  assert.equal(firstPayload.textbook_id, balances[0].args.p_input.textbookIds[0])
-  assert.equal(firstPayload.expected_quantity, 20, "the changed fresh balance owns the first grouped writer expectation")
+  const firstWriter = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
+  const firstPayload = firstWriter.args
+  assert.equal(firstPayload.p_textbook_id, balances[0].args.p_input.textbookIds[0])
+  assert.equal(firstPayload.p_expected_quantity, 20, "the changed fresh balance owns the first grouped writer expectation")
 })
 
 test("bulk inventory acknowledges each completed row before a later row fails and retries only retained work", async (t) => {
@@ -572,11 +575,9 @@ test("bulk inventory acknowledges each completed row before a later row fails an
   const balance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
   await h.resolve(balance, { locationId, rows: rows.map((row, index) => ({ textbookId: row.id, currentQuantity: 10 + index, locationQuantities: { [locationId]: 10 + index }, studentLocationQuantities: { [locationId]: 10 + index }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10 + index, studentQuantity: 10 + index, teacherQuantity: 0, stockValue: (10 + index) * 10000 })) })
 
-  const firstCount = h.requests.find((request) => request.table === "textbook_stock_counts")
-  await h.resolve(firstCount, { id: id(2101) })
-  await h.resolve(h.requests.find((request) => request.table === "textbook_stock_moves"), { id: id(2102) })
-  await h.resolve(h.requests.findLast((request) => request.table === "textbook_stock_counts"), null)
-  const secondCount = h.requests.findLast((request) => request.table === "textbook_stock_counts")
+  const firstCount = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
+  await h.resolve(firstCount, stockCountResult(firstCount))
+  const secondCount = h.requests.findLast((request) => request.name === "create_textbook_stock_count_v1")
   assert.notEqual(secondCount, firstCount)
   await h.reject(secondCount, { code: "23514", message: "__second_count_failed__" })
 
@@ -590,6 +591,11 @@ test("bulk inventory acknowledges each completed row before a later row fails an
   await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
   const retryBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
   assert.deepEqual(retryBalance.args.p_input, { textbookIds: [rows[1].id], locationId }, "retry excludes already committed A")
+  await h.resolve(retryBalance, { locationId, rows: [{ textbookId: rows[1].id, currentQuantity: 8, locationQuantities: { [locationId]: 8 }, studentLocationQuantities: { [locationId]: 8 }, teacherLocationQuantities: {}, totalQuantity: 8, studentQuantity: 8, teacherQuantity: 0, stockValue: 80000 }] })
+  const retriedCount = h.requests.findLast((request) => request.name === "create_textbook_stock_count_v1")
+  assert.equal(retriedCount.args.p_request_id, secondCount.args.p_request_id, "the failed row keeps its request identity across refreshed balances")
+  assert.equal(retriedCount.args.p_counted_at, secondCount.args.p_counted_at)
+  assert.notEqual(retriedCount.args.p_request_id, firstCount.args.p_request_id, "each bulk row owns its own transaction identity")
 })
 
 test("bulk inventory preserves a newer A draft made after A writer starts even when B later fails", async (t) => {
@@ -618,13 +624,11 @@ test("bulk inventory preserves a newer A draft made after A writer starts even w
   }
   await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1"), { locationId, rows: rows.map((row) => ({ textbookId: row.id, currentQuantity: 10, locationQuantities: { [locationId]: 10 }, studentLocationQuantities: { [locationId]: 10 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10, studentQuantity: 10, teacherQuantity: 0, stockValue: 100000 })) })
-  const firstCount = h.requests.find((request) => request.table === "textbook_stock_counts")
+  const firstCount = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
   await edit("교재 361 본관 실사 수량", "9")
   await edit("교재 361 본관 실사 메모", "A 신규 의도")
-  await h.resolve(firstCount, { id: id(2201) })
-  await h.resolve(h.requests.find((request) => request.table === "textbook_stock_moves"), { id: id(2202) })
-  await h.resolve(h.requests.findLast((request) => request.table === "textbook_stock_counts"), null)
-  await h.reject(h.requests.findLast((request) => request.table === "textbook_stock_counts"), { code: "23514", message: "__later_B_failed__" })
+  await h.resolve(firstCount, stockCountResult(firstCount))
+  await h.reject(h.requests.findLast((request) => request.name === "create_textbook_stock_count_v1"), { code: "23514", message: "__later_B_failed__" })
   assert.equal(document.querySelector('[aria-label="교재 361 본관 실사 수량"]')?.value, "9")
   assert.equal(document.querySelector('[aria-label="교재 361 본관 실사 메모"]')?.value, "A 신규 의도")
   assert.equal(document.querySelector('[aria-label="교재 361 본관 재고 선택"]').getAttribute("data-state"), "checked")
@@ -654,15 +658,13 @@ test("bulk inventory preserves a deselected and reselected A intent after A comp
   }
   await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1"), { locationId, rows: rows.map((row) => ({ textbookId: row.id, currentQuantity: 10, locationQuantities: { [locationId]: 10 }, studentLocationQuantities: { [locationId]: 10 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10, studentQuantity: 10, teacherQuantity: 0, stockValue: 100000 })) })
-  const firstCount = h.requests.find((request) => request.table === "textbook_stock_counts")
-  await h.resolve(firstCount, { id: id(2301) })
-  await h.resolve(h.requests.find((request) => request.table === "textbook_stock_moves"), { id: id(2302) })
-  await h.resolve(h.requests.findLast((request) => request.table === "textbook_stock_counts"), null)
+  const firstCount = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
+  await h.resolve(firstCount, stockCountResult(firstCount))
   const aSelection = document.querySelector('[aria-label="교재 371 본관 재고 선택"]')
   await h.act(() => aSelection.click())
   await h.act(() => aSelection.click())
   const rpcCountAfterA = h.requests.filter((request) => request.name).length
-  await h.reject(h.requests.findLast((request) => request.table === "textbook_stock_counts"), { code: "23514", message: "__selection_only_B_failed__" })
+  await h.reject(h.requests.findLast((request) => request.name === "create_textbook_stock_count_v1"), { code: "23514", message: "__selection_only_B_failed__" })
 
   assert.equal(document.querySelector('[aria-label="교재 371 본관 실사 수량"]')?.value, "7", "A draft remains for the newer selection-only intent")
   assert.equal(document.querySelector('[aria-label="교재 371 본관 실사 메모"]')?.value, "A 선택 의도")
@@ -696,7 +698,7 @@ test("prepared schema errors disable actionable inventory writes and expose the 
   assert.ok(retry)
   await h.act(() => retry.click())
   assert.equal(h.requests.filter((request) => request.name === "get_textbook_inventory_summary_v1").length, 2)
-  assert.equal(h.requests.some((request) => request.table), false)
+  assert.equal(h.requests.some((request) => request.table || request.name === "create_textbook_stock_count_v1"), false)
   assert.equal(h.requests.some((request) => request.name === "get_textbook_inventory_balance_v1"), false)
 })
 
@@ -723,7 +725,7 @@ test("a prepared summary becoming PGRST205 while balance is pending closes the f
   await h.reject(failedSummary, { code: "PGRST205", message: "__prepared_inventory_table_missing__" })
   await h.resolve(balance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 9, locationQuantities: { [locationId]: 9 }, studentLocationQuantities: { [locationId]: 9 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 9, studentQuantity: 9, teacherQuantity: 0, stockValue: 90000 }] })
 
-  assert.equal(h.requests.some((request) => request.table), false, "newly accepted schema owner closes the pending action before its first writer")
+  assert.equal(h.requests.some((request) => request.table || request.name === "create_textbook_stock_count_v1"), false, "newly accepted schema owner closes the pending action before its first writer")
   const retry = document.querySelector('[aria-label="교재 운영 API 다시 시도"]')
   assert.ok(retry, document.body.textContent)
   await h.act(() => retry.click())
@@ -756,20 +758,17 @@ test("inventory single count preserves newer quantity and memo through an older 
   const balance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
   await edit("교재 331 본관 실사 메모", "컨텍스트 대기 중 변경")
   await h.resolve(balance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 9, locationQuantities: { [locationId]: 9 }, studentLocationQuantities: { [locationId]: 9 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 9, studentQuantity: 9, teacherQuantity: 0, stockValue: 90000 }] })
-  assert.equal(h.requests.some((request) => request.table), false, "editing a single count while its balance is pending starts zero writers")
+  assert.equal(h.requests.some((request) => request.table || request.name === "create_textbook_stock_count_v1"), false, "editing a single count while its balance is pending starts zero writers")
 
   await h.act(() => document.querySelector('[aria-label="교재 331 본관 7권 반영"]').click())
   const retryBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
   await h.resolve(retryBalance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 9, locationQuantities: { [locationId]: 9 }, studentLocationQuantities: { [locationId]: 9 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 9, studentQuantity: 9, teacherQuantity: 0, stockValue: 90000 }] })
-  const countWrite = h.requests.find((request) => request.table === "textbook_stock_counts")
-  assert.equal(countWrite.steps.find((step) => step.method === "insert").args[0].expected_quantity, 9)
+  const countWrite = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
+  assert.equal(countWrite.args.p_expected_quantity, 9)
   await edit("교재 331 본관 실사 수량", "8")
   await edit("교재 331 본관 실사 메모", "나중에 고친 메모")
-  await h.resolve(countWrite, { id: id(1990) })
-  await h.resolve(h.requests.find((request) => request.table === "textbook_stock_moves"), { id: id(1991) })
-  const linkWrite = h.requests.findLast((request) => request.table === "textbook_stock_counts")
-  await h.resolve(linkWrite, null)
-  const refreshRequests = h.requests.slice(h.requests.indexOf(linkWrite) + 1).filter((request) => request.name)
+  await h.resolve(countWrite, stockCountResult(countWrite))
+  const refreshRequests = h.requests.slice(h.requests.indexOf(countWrite) + 1).filter((request) => request.name)
   for (const request of refreshRequests) {
     if (request.name === "list_textbook_inventory_page_v1") await h.resolve(request, pagePayload)
     else if (request.name === "list_textbook_inventory_history_page_v1") await h.resolve(request, { rows: [], page: 1, pageSize: 10, totalCount: 0 })
@@ -782,12 +781,10 @@ test("inventory single count preserves newer quantity and memo through an older 
   await h.act(() => document.querySelector('[aria-label="교재 331 본관 8권 반영"]').click())
   const nextBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
   await h.resolve(nextBalance, { locationId, rows: [{ textbookId: source.id, currentQuantity: 10, locationQuantities: { [locationId]: 10 }, studentLocationQuantities: { [locationId]: 10 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10, studentQuantity: 10, teacherQuantity: 0, stockValue: 100000 }] })
-  const nextCountWrite = h.requests.findLast((request) => request.table === "textbook_stock_counts")
-  await h.resolve(nextCountWrite, { id: id(1992) })
-  await h.resolve(h.requests.findLast((request) => request.table === "textbook_stock_moves"), { id: id(1993) })
-  const nextLinkWrite = h.requests.findLast((request) => request.table === "textbook_stock_counts")
-  await h.resolve(nextLinkWrite, null)
-  const nextRefreshes = h.requests.slice(h.requests.indexOf(nextLinkWrite) + 1).filter((request) => request.name)
+  const nextCountWrite = h.requests.findLast((request) => request.name === "create_textbook_stock_count_v1")
+  assert.notEqual(nextCountWrite.args.p_request_id, countWrite.args.p_request_id, "a changed quantity or memo starts a new count intent")
+  await h.resolve(nextCountWrite, stockCountResult(nextCountWrite))
+  const nextRefreshes = h.requests.slice(h.requests.indexOf(nextCountWrite) + 1).filter((request) => request.name)
   for (const request of nextRefreshes) {
     if (request.name === "list_textbook_inventory_page_v1") await h.resolve(request, pagePayload)
     else if (request.name === "list_textbook_inventory_history_page_v1") await h.resolve(request, { rows: [], page: 1, pageSize: 10, totalCount: 0 })
@@ -1082,3 +1079,83 @@ for (const [boundary, leaveActor] of [
     if (boundary === "logout") assert.equal(document.body.textContent.includes("복사됨"), false)
   })
 }
+
+test("single inventory response-loss retry reuses the original request and accepts its committed balance", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find((r) => r.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  const source = masterRow(381, { locationQuantities: { [locationId]: 10 }, studentLocationQuantities: { [locationId]: 10 }, teacherLocationQuantities: {}, totalQuantity: 10, studentQuantity: 10, teacherQuantity: 0, stockValue: 100000,
+    locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 10 }] })
+  const row = { source, id: source.id, title: source.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 10, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }
+  const page = { rows: [row], page: 1, pageSize: 10, totalCount: 1 }
+  const summary = masterSummary(1, { auditCounts: { all: 1, recommended: 1, pending: 0, done: 0 }, locations: [{ id: locationId, code: "main", name: "본관", sortOrder: 1 }] })
+  await h.resolve(h.requests.find((r) => r.name === "list_textbook_inventory_page_v1"), page)
+  await h.resolve(h.requests.find((r) => r.name === "list_textbook_inventory_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((r) => r.name === "get_textbook_inventory_summary_v1"), summary)
+  const input = document.querySelector('[aria-label="교재 381 본관 실사 수량"]')
+  await h.act(() => input[Object.keys(input).find((k) => k.startsWith("__reactProps$"))].onChange({ target: { value: "7" } }))
+  const balance = (quantity) => ({ locationId, rows: [{ textbookId: source.id, currentQuantity: quantity, locationQuantities: { [locationId]: quantity }, studentLocationQuantities: { [locationId]: quantity }, teacherLocationQuantities: {}, totalQuantity: quantity, studentQuantity: quantity, teacherQuantity: 0, stockValue: quantity * 10000 }] })
+  await h.act(() => document.querySelector('[aria-label="교재 381 본관 7권 반영"]').click())
+  await h.resolve(h.requests.findLast((r) => r.name === "get_textbook_inventory_balance_v1"), balance(10))
+  const first = h.requests.findLast((r) => r.name === "create_textbook_stock_count_v1")
+  const committed = stockCountResult(first)
+  await h.reject(first, { code: "", message: "TypeError: Failed to fetch" })
+  assert.equal(input.value, "7", "unknown outcome keeps the user's draft for replay")
+  await h.act(() => document.querySelector('[aria-label="교재 381 본관 7권 반영"]').click())
+  await h.resolve(h.requests.findLast((r) => r.name === "get_textbook_inventory_balance_v1"), balance(7))
+  const retry = h.requests.findLast((r) => r.name === "create_textbook_stock_count_v1")
+  assert.equal(retry.args.p_request_id, first.args.p_request_id)
+  assert.equal(retry.args.p_counted_at, first.args.p_counted_at)
+  assert.equal(retry.args.p_expected_quantity, 7)
+  await h.resolve(retry, committed)
+  const settleReads = async (requests) => {
+    for (const request of requests) {
+      if (request.name === "list_textbook_inventory_page_v1") await h.resolve(request, page)
+      else if (request.name === "list_textbook_inventory_history_page_v1") await h.resolve(request, { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+      else if (request.name === "get_textbook_inventory_summary_v1") await h.resolve(request, summary)
+      else await h.resolve(request, { requestCount: 0, unregisteredRequestCount: 0, orderNeededCount: 0, receivingBacklogCount: 0, partialReceiptCount: 0, issueWaitingCount: 0, stockRiskCount: 0 })
+    }
+  }
+  const refreshes = h.requests.slice(h.requests.indexOf(retry) + 1)
+  await settleReads(refreshes)
+  await settleReads(h.requests.slice(h.requests.indexOf(refreshes.at(-1)) + 1))
+  assert.equal(document.querySelector('[aria-label="교재 381 본관 실사 수량"]')?.value, "", "confirmed replay acknowledges the original draft")
+  assert.equal(h.requests.some((r) => r.table), false, "save and retry each remain one atomic RPC")
+})
+
+test("bulk inventory stops remaining writes when the actor leaves during the first transaction", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
+  const locationId = id(900)
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1"), {
+    rows: [{ value: locationId, label: "본관", searchText: "본관 main" }], page: 1, pageSize: 20, totalCount: 1,
+    defaultLocation: { id: locationId, code: "main", name: "본관" },
+  })
+  const makeRow = (n) => {
+    const source = masterRow(n, { locationQuantities: { [locationId]: 3 }, studentLocationQuantities: { [locationId]: 3 }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 3, studentQuantity: 3, teacherQuantity: 0, stockValue: 30000,
+      locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 3 }] })
+    return { source, id: source.id, title: source.title, publisher: "출판사", locationId, locationName: "본관", currentQuantity: 3, latestCountAt: "", daysSinceLatestCount: null, isCountedThisCycle: false, isRecommended: true, status: "recommended", reason: "실사 필요", dueLabel: "지금" }
+  }
+  const rows = [makeRow(341), makeRow(342)]
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_page_v1"), { rows, page: 1, pageSize: 10, totalCount: 2 })
+  await h.resolve(h.requests.find((request) => request.name === "list_textbook_inventory_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find((request) => request.name === "get_textbook_inventory_summary_v1"), masterSummary(2, { auditCounts: { all: 2, recommended: 2, pending: 0, done: 0 }, locations: [{ id: locationId, code: "main", name: "본관", sortOrder: 1 }] }))
+  for (const [row, quantity, memo] of [[rows[0], "7", "A 메모"], [rows[1], "8", "B 메모"]]) {
+    const quantityInput = document.querySelector(`[aria-label="${row.title} 본관 실사 수량"]`)
+    const memoInput = document.querySelector(`[aria-label="${row.title} 본관 실사 메모"]`)
+    await h.act(() => quantityInput[Object.keys(quantityInput).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: quantity } }))
+    await h.act(() => memoInput[Object.keys(memoInput).find((key) => key.startsWith("__reactProps$"))].onChange({ target: { value: memo } }))
+    await h.act(() => document.querySelector(`[aria-label="${row.title} 본관 재고 선택"]`).click())
+  }
+  await h.act(() => document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').click())
+  const balance = h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1")
+  await h.resolve(balance, { locationId, rows: rows.map((row, index) => ({ textbookId: row.id, currentQuantity: 10 + index, locationQuantities: { [locationId]: 10 + index }, studentLocationQuantities: { [locationId]: 10 + index }, teacherLocationQuantities: { [locationId]: 0 }, totalQuantity: 10 + index, studentQuantity: 10 + index, teacherQuantity: 0, stockValue: (10 + index) * 10000 })) })
+
+  const firstCount = h.requests.find((request) => request.name === "create_textbook_stock_count_v1")
+  await h.auth({ user: null, role: null, isAdmin: false, isStaff: false, canManageAll: false })
+  await h.resolve(firstCount, stockCountResult(firstCount))
+  assert.equal(h.requests.filter((request) => request.name === "create_textbook_stock_count_v1").length, 1,
+    "an old batch cannot submit its remaining rows under a different authenticated session")
+})

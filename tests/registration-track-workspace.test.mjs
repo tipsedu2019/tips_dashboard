@@ -360,6 +360,9 @@ async function loadMountedRegistrationApplication({
   const RegistrationCustomerMessageCaseHistory = function MountedCustomerMessageCaseHistory() {
     return createElement("button", { "data-mounted-customer-message-history": "" }, "알림톡 이력")
   }
+  const RegistrationApplicationHistoryAction = function MountedApplicationHistoryAction() {
+    return createElement("button", { "aria-label": "자동 이력 보기" })
+  }
   const RegistrationVisitCancellationActions = function MountedVisitCancellationActions() {
     return createElement("button", { "data-mounted-visit-cancellation": "" }, "방문 취소 안내")
   }
@@ -429,7 +432,7 @@ async function loadMountedRegistrationApplication({
       updateRegistrationApplicationDirtyKeys: (current) => current,
     }],
     ["./registration-application-placement-section", { RegistrationApplicationPlacementSection: Passthrough }],
-    ["./registration-application-history-action", { RegistrationApplicationHistoryAction: Passthrough }],
+    ["./registration-application-history-action", { RegistrationApplicationHistoryAction }],
     ["./registration-application-shell", { RegistrationApplicationShell }],
     ["./registration-application-subject-tabs", { RegistrationApplicationSubjectTabs: Passthrough }],
     ["./registration-observation-editor", {
@@ -554,6 +557,7 @@ async function loadMountedRegistrationApplication({
     RegistrationAlimtalkPreviewDialog,
     RegistrationManagementNotificationActions,
     RegistrationCustomerMessageCaseHistory,
+    RegistrationApplicationHistoryAction,
     RegistrationVisitCancellationActions,
     RegistrationAppointmentEditor,
     Button,
@@ -3260,6 +3264,11 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
   const baseDetail = {
     task: { id: taskId, title: "김학생 등록", studentName: "김학생", registration: null },
     commonRevision: 1,
+    events: [{
+      id: "history-event", trackId, eventType: "case_created", subject: "영어",
+      actorId: "history-actor", actorKind: "user", payloadVersion: 2,
+      occurredAt: "2026-09-09T03:00:00Z", metadata: {},
+    }],
     tracks: [{
       id: trackId,
       taskId,
@@ -3289,6 +3298,7 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
     { role: "teacher", readOnly: true },
     { role: "assistant", readOnly: true },
   ]
+  const profiles = [{ id: "history-actor", label: "이력 담당자" }]
 
   for (const roleCase of roleCases) {
     const hookHarness = createRegistrationEditorHookHarness()
@@ -3311,6 +3321,7 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
         onReload: async () => undefined,
         onWarning: () => undefined,
         subjectCapabilities: [],
+        profiles,
         customerMessageClient,
         notificationToken: `fixture-token-${roleCase.role}`,
         closeAction: null,
@@ -3338,6 +3349,10 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
       const managementActions = findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions)
       const cancellationActions = findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationVisitCancellationActions)
       const customerHistory = findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationCustomerMessageCaseHistory)
+      const automaticHistory = findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationApplicationHistoryAction)
+      assert.equal(automaticHistory.length, 1, `${roleCase.role}: automatic history remains available exactly once`)
+      assert.equal(automaticHistory[0].props.profiles, profiles)
+      assert.deepEqual(automaticHistory[0].props.detail, baseDetail, "history receives the complete canonical case, independent of customer-message access")
       for (const [name, nodes] of [["management preview", managementActions], ["visit cancellation", cancellationActions], ["customer history", customerHistory]]) {
         assert.equal(nodes.length, roleCase.readOnly ? 0 : 1, `${roleCase.role}: ${name} requires management access even with ready data`)
       }

@@ -19,6 +19,28 @@ jobs:
           node-version: 22.18.0
           cache: npm
       - run: npm ci --ignore-scripts
+      - name: Verify safe login returns and authentication guards
+        run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/auth-guard-loading.test.mjs tests/auth-session-refresh.test.mjs
+      - name: Verify atomic textbook inventory writes
+        run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-pagination.test.mjs
+      - name: Verify textbook SQL wire provenance and consumer parity
+        run: |
+          node --test --experimental-strip-types \
+            tests/textbook-taxonomy-final-wire.test.mjs \
+            tests/textbook-work-context.test.mjs \
+            tests/textbook-owner-settings-final-wire.test.mjs \
+            tests/textbook-reference-read-service.test.mjs \
+            tests/textbook-numbered-read-service.test.mjs
+      - name: Verify class detail and schedule request ownership
+        run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
+      - name: Verify public class schedule parity and privacy
+        run: |
+          node --test --experimental-strip-types \
+            tests/continuous-class-schedule-consumer-parity.test.mjs \
+            tests/public-classes-privacy.test.mjs \
+            tests/public-classes-summary-loading.test.mjs \
+            tests/public-class-renewal-data.test.mjs \
+            tests/public-class-detail-ui.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs
@@ -31,21 +53,33 @@ jobs:
             tests/notification-settings-editor-state.test.mjs \
             tests/notification-control-plane-api.test.mjs \
             tests/notification-control-plane-model.test.mjs \
-            tests/notification-control-plane-ui.test.mjs
+            tests/notification-control-plane-ui.test.mjs \
+            tests/notification-dashboard-ui-retirement.test.mjs
       - name: Verify management notification previews and recovery actions
         run: |
           node --test --experimental-strip-types \
             tests/registration-management-notification-readiness.test.mjs \
             tests/registration-management-notification-preview.test.mjs \
             tests/registration-management-notification-actions.test.mjs \
-            tests/registration-management-source-recovery-race.test.mjs
-      - name: Verify customer history, observation handoff and visit cancellation
+            tests/registration-management-source-recovery-race.test.mjs \
+            tests/notification-delivery-control.test.mjs
+      - name: Verify registration history, observation handoff and visit cancellation
         run: |
           node --test --experimental-strip-types \
+            tests/ops-task-workspace.test.mjs \
+            tests/registration-track-history.test.mjs \
+            tests/registration-automatic-history-ui.test.mjs \
             tests/registration-case-customer-history.test.mjs \
             tests/registration-case-customer-history-ui.test.mjs \
             tests/registration-observation-explicit-chat.test.mjs \
             tests/registration-visit-cancellation.test.mjs
+      - name: Verify customer preview and observation safety contracts
+        run: |
+          node --test --experimental-strip-types \
+            tests/registration-alimtalk-preview-dialog.test.mjs \
+            tests/registration-observation-customer-message-ui.test.mjs \
+            tests/registration-observation-workspace.test.mjs \
+            tests/registration-customer-message-service.test.mjs
       - shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
