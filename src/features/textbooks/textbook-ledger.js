@@ -128,6 +128,15 @@ export function getTextbookActionErrorMessage(error) {
   const message = text(error?.message);
   const details = text(error?.details);
   const hint = text(error?.hint);
+  const saleErrors = {
+    textbook_sale_state_conflict: "출고 상태가 변경되었습니다. 새로고침 후 현재 상태를 확인하세요.",
+    textbook_sale_stock_conflict: "출고와 재고 이동 기록이 일치하지 않습니다. 재고 이동 이력을 확인하세요.",
+    textbook_sale_quantity_invalid: "출고 수량이 올바르지 않습니다. 수량을 확인하세요.",
+    textbook_sale_not_found: "출고 작업 대상을 찾을 수 없습니다. 새로고침 후 다시 확인하세요.",
+    textbook_sale_forbidden: "출고와 반품을 처리할 권한이 없습니다.",
+    textbook_sale_target_invalid: "지원하지 않는 출고 상태입니다.",
+  };
+  if (Object.hasOwn(saleErrors, message)) return saleErrors[message];
   const combined = [message, details, hint].filter(Boolean).join(" ");
   const lowerCombined = combined.toLowerCase();
   const missingColumnMatch =

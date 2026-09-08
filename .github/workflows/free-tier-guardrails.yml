@@ -21,6 +21,8 @@ jobs:
       - run: npm ci --ignore-scripts
       - name: Verify safe login returns and authentication guards
         run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/auth-guard.test.mjs
+      - name: Verify atomic textbook sale transitions
+        run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs

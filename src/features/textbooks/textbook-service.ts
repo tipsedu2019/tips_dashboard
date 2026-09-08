@@ -3,7 +3,6 @@ import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-
 
 import {
   buildPurchaseLifecycleDraft,
-  buildSaleLineStatusTransition,
   buildTeacherTextbookIssueDraft,
   buildTextbookInventorySnapshot,
   buildTextbookMonthlyClosing,
@@ -966,16 +965,11 @@ export async function createTeacherTextbookIssue(record: Row, data: Row, clientI
   return { sale: sale as Row, lines: (lines || []) as Row[], draft };
 }
 
-export async function updateSaleLineStatus(record: Row, data: Row, clientInput?: SupabaseClientLike | null) {
+export async function updateSaleLineStatus(record: Row, _data: Row, clientInput?: SupabaseClientLike | null) {
   const client = ensureClient(clientInput);
-  const saleLineId = text(record.saleLineId || record.sale_line_id || record.id);
+  const saleLineId = normalizeOptionalUuid(record.saleLineId || record.sale_line_id || record.id)?.toLowerCase();
   const targetStatus = text(record.status || record.targetStatus || record.target_status);
-  const createdBy = normalizeOptionalUuid(record.createdBy || record.created_by);
-  const saleLines = (data.saleLines || []) as Row[];
-  const inventory = (data.inventory || []) as Row[];
-  const line = saleLines.find((item) => getRecordId(item) === saleLineId);
-
-  if (!line || !targetStatus) {
+  if (!saleLineId || !targetStatus) {
     throw new Error("출고 라인과 상태를 확인하세요.");
   }
 
@@ -983,47 +977,14 @@ export async function updateSaleLineStatus(record: Row, data: Row, clientInput?:
     throw new Error("지원하지 않는 출고 상태입니다.");
   }
 
-  const locationId = normalizeOptionalUuid(line.location_id || line.locationId || data.defaultLocationId);
-  const inventoryRow = inventory.find((item) => getRecordId(item) === text(line.textbook_id || line.textbookId));
-  const transition = buildSaleLineStatusTransition({
-    line,
-    targetStatus,
-    availableQuantity: getInventoryQuantity(inventoryRow, locationId || ""),
+  const { data: updated, error } = await client.rpc("transition_textbook_sale_line_v1", {
+    p_sale_line_id: saleLineId,
+    p_target_status: targetStatus,
   });
-
-  if (transition.shouldCreateStockMove && transition.stockMove) {
-    const moveType = text(transition.stockMove.move_type || transition.stockMove.moveType);
-    const { data: existingMoves, error: existingMoveError } = await client
-      .from("textbook_stock_moves")
-      .select("*")
-      .eq("sale_line_id", saleLineId)
-      .eq("move_type", moveType);
-    if (existingMoveError) throw existingMoveError;
-
-    const existingMove = ((existingMoves || []) as Row[])[0];
-    const stockMove = {
-      ...transition.stockMove,
-      created_by: createdBy,
-    };
-    if (existingMove) {
-      const { error: moveError } = await client
-        .from("textbook_stock_moves")
-        .update(stockMove)
-        .eq("id", existingMove.id);
-      if (moveError) throw moveError;
-    } else {
-      const { error: moveError } = await client.from("textbook_stock_moves").insert(stockMove);
-      if (moveError) throw moveError;
-    }
-  }
-
-  const { data: updated, error } = await client
-    .from("textbook_sale_lines")
-    .update({ status: transition.targetStatus })
-    .eq("id", saleLineId)
-    .select()
-    .single();
   if (error) throw error;
+  if (!updated || updated.id !== saleLineId || updated.status !== targetStatus) {
+    throw new Error("출고 처리 결과를 확인할 수 없습니다. 새로고침 후 상태를 확인하세요.");
+  }
 
   return updated as Row;
 }
