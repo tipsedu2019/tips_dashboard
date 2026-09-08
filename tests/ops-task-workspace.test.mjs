@@ -1956,14 +1956,10 @@ test("canonical registration application opens one honest read-only timeline fro
     "const genericDetail = useMemo<OpsRegistrationCaseDetail>(() => ({",
     "tracks: genericTracks,",
     "trackContexts: TrackContext[] = genericTracks.map",
-    "historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}",
   ]);
   assert.doesNotMatch(editorSource, /if \(!workflowStatus\) return \[\]/);
-  assert.equal(
-    editorSource.split("historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}").length - 1,
-    1,
-    "the detail header should expose exactly one canonical history action",
-  );
+  // Header placement, uniqueness, and role-scoped sibling actions are covered by
+  // the JSX and mounted contracts in registration-track-workspace.test.mjs.
   assert.equal(editorSource.split("detail={detail}").length - 1, 0);
   assert.equal(editorSource.split("eligibleTracks={genericTracks}").length - 1, 2);
   assert.doesNotMatch(editorSource, /history=\{<RegistrationHistoryTimeline/);

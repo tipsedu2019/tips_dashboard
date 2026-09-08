@@ -55,9 +55,12 @@ jobs:
             tests/registration-management-notification-actions.test.mjs \
             tests/registration-management-source-recovery-race.test.mjs \
             tests/notification-delivery-control.test.mjs
-      - name: Verify customer history, observation handoff and visit cancellation
+      - name: Verify registration history, observation handoff and visit cancellation
         run: |
           node --test --experimental-strip-types \
+            tests/ops-task-workspace.test.mjs \
+            tests/registration-track-history.test.mjs \
+            tests/registration-automatic-history-ui.test.mjs \
             tests/registration-case-customer-history.test.mjs \
             tests/registration-case-customer-history-ui.test.mjs \
             tests/registration-observation-explicit-chat.test.mjs \
