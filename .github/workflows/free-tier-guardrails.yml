@@ -25,6 +25,14 @@ jobs:
         run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-pagination.test.mjs
       - name: Verify class detail and schedule request ownership
         run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
+      - name: Verify public class schedule parity and privacy
+        run: |
+          node --test --experimental-strip-types \
+            tests/continuous-class-schedule-consumer-parity.test.mjs \
+            tests/public-classes-privacy.test.mjs \
+            tests/public-classes-summary-loading.test.mjs \
+            tests/public-class-renewal-data.test.mjs \
+            tests/public-class-detail-ui.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs
