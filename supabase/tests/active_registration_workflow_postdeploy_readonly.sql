@@ -206,6 +206,9 @@ with expected_functions(
       false,
       true
     ),
+    ('notification_dispatch_owner_private', 'dashboard_private.registration_management_notification_owner_v1()'::text, true, false, true),
+    ('notification_dispatch_effective_private', 'dashboard_private.notification_dispatch_enabled_v1(text,text)'::text, true, false, true),
+    ('notification_dispatch_prior_private', 'dashboard_private.notification_dispatch_before_registration_owner_v1(text,text)'::text, true, false, true),
     ('notification_source_current_before_recovery_private', 'dashboard_private.registration_management_source_current_before_recovery_v2(uuid,uuid)'::text, true, false, true),
     ('notification_recovery_v4_public', 'public.ensure_registration_workflow_notification_v4(uuid,integer,text,text,text,uuid)'::text, true, true, true),
     ('notification_recovery_allowed_private', 'dashboard_private.registration_management_notification_recovery_allowed_v1(uuid)'::text, true, false, true),
@@ -466,7 +469,7 @@ functions as (
     on procedure.oid = pg_catalog.to_regprocedure(expected_functions.function_name)
 )
 select (
-  (select count(*) from functions where oid is not null) = 71
+  (select count(*) from functions where oid is not null) = 74
   and not exists (
     select 1
     from functions
@@ -726,6 +729,17 @@ select (
       ))
       or (function_key = 'notification_checksum_v2_private' and (
         definition not like '%dashboard_private.notification_sha256_hex_v1(p_snapshot::text)%'
+      ))
+      or (function_key = 'notification_dispatch_owner_private' and (
+        definition not like '%notification_cutover_owners%scope_key=''registration''%'
+      ))
+      or (function_key = 'notification_dispatch_effective_private' and (
+        definition not like '%registration_management_notification_owner_v1()%''canonical''%'
+        or definition not like '%notification_dispatch_before_registration_owner_v1%'
+      ))
+      or (function_key = 'notification_recovery_content_private' and (
+        definition not like '%registration_management_notification_owner_v1() is distinct from ''legacy''%'
+        or definition not like '%''dispatchOwner'',dashboard_private.registration_management_notification_owner_v1()%'
       ))
       or (function_key = 'notification_source_current_v2_private' and (
         definition not like '%registration_management_notification_superseded_sources%return false%'

@@ -374,6 +374,11 @@
       "fileName": "20260908062222_registration_management_notification_source_recovery.sql",
       "status": "final",
       "sha256": "89ef4c52e56f943823675a314b02764f8568fb9a73fc153bfafd02daf13d9c4a"
+    },
+    {
+      "fileName": "20260908090400_registration_management_dispatch_owner.sql",
+      "status": "final",
+      "sha256": "dd4de3c455ae3ebac51f333d475974f8cb7dee3810fb90df7b35036e9c3ca3f9"
     }
   ]
 }
