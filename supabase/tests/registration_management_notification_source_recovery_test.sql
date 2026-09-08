@@ -1,6 +1,14 @@
 begin;
 select plan(52);
 set local statement_timeout='120s';
+
+-- Explicit scope ownership matches the installed production contract.
+insert into dashboard_private.notification_runtime_flags(flag_key,enabled)
+values('notification_control_plane_dispatch_registration_enabled',false) on conflict(flag_key) do nothing;
+insert into dashboard_private.notification_cutover_owners(scope_key,workflow_key,dispatch_flag_key,owner_kind)
+values('registration','registration','notification_control_plane_dispatch_registration_enabled','legacy')
+on conflict(scope_key) do update set owner_kind='legacy';
+
 insert into auth.users(
   id, instance_id, aud, role, email, encrypted_password, email_confirmed_at,
   raw_app_meta_data, raw_user_meta_data, banned_until, created_at, updated_at

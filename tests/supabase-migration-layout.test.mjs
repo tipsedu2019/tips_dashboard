@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "bb23eaecc007c7ce8aaa21c2ac6ce3a9dbc3bc95af7f6667c69758e4a687bf00"
+  "2ce231fbff51e9fc73e2698c74654d6838ee1282841df600137b52f0cad5fad6"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -475,7 +475,7 @@ test("admission-order patch is immutable, runs in PR schema CI, and is covered b
   assert.ok(expectedFunctionsBlock, "postdeploy expected_functions must stay statically readable")
   assert.equal(
     (expectedFunctionsBlock.match(/'::text,\s*(?:true|false),\s*(?:true|false),\s*(?:true|false)\s*\)/gu) ?? []).length,
-    71,
+    74,
     "postdeploy must pin every active registration function contract",
   )
   assert.doesNotMatch(
@@ -2310,7 +2310,11 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   const requiredPredicates = [
     ["public signature", "public.set_registration_workflow_status_v1(uuid,text,integer,text)"],
     ["private signature", "dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)"],
-    ["expanded final function count", "(select count(*) from functions where oid is not null) = 71"],
+    ["expanded final function count", "(select count(*) from functions where oid is not null) = 74"],
+    ["registration dispatch owner signature", "dashboard_private.registration_management_notification_owner_v1()'::text"],
+    ["registration direct owner gate", "registration_management_notification_owner_v1() is distinct from ''legacy''"],
+    ["registration canonical owner gate", "registration_management_notification_owner_v1()%''canonical''%"],
+    ["registration owner checksum", "''dispatchOwner'',dashboard_private.registration_management_notification_owner_v1()"],
     ["delegation", "dashboard_private.set_registration_workflow_status_v1_impl%"],
     ["security definer modes", "security_definer_required and not prosecdef"],
     ["security invoker modes", "not security_definer_required and prosecdef"],
@@ -2515,6 +2519,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   ]
 
   for (const [name, predicate] of requiredPredicates) {
+    assert.ok(source.includes(predicate), `missing source predicate: ${name}`)
     const fixtureRoot = await createRepoFixture()
     const fixturePath = join(
       fixtureRoot,

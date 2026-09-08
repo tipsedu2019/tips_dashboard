@@ -88,6 +88,14 @@ async function race(firstSql, secondSql, label) {
 const fixtures = [];
 try {
   await query(`
+
+-- Explicit scope ownership matches the installed production contract.
+insert into dashboard_private.notification_runtime_flags(flag_key,enabled)
+values('notification_control_plane_dispatch_registration_enabled',false) on conflict(flag_key) do nothing;
+insert into dashboard_private.notification_cutover_owners(scope_key,workflow_key,dispatch_flag_key,owner_kind)
+values('registration','registration','notification_control_plane_dispatch_registration_enabled','legacy')
+on conflict(scope_key) do update set owner_kind='legacy';
+
     insert into auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data)
     values('${admin}','authenticated','authenticated','recovery-admin@example.invalid','{}','{}'),
       ('${staff}','authenticated','authenticated','recovery-staff@example.invalid','{}','{}');

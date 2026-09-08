@@ -150,6 +150,7 @@ jobs:
             --test supabase/tests/registration_case_customer_message_history_test.sql \
             --test supabase/tests/registration_observation_explicit_chat_test.sql \
             --test supabase/tests/registration_management_notification_preview_test.sql \
+            --test supabase/tests/registration_management_notification_owner_test.sql \
             --test supabase/tests/registration_management_notification_source_recovery_test.sql \
             --test supabase/tests/dashboard_google_chat_profile_mentions_test.sql \
             --test supabase/tests/registration_manual_workflow_status_test.sql \
