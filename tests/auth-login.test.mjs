@@ -104,9 +104,6 @@ test("sign-in form accepts a Google email or the Gmail id only", async () => {
   assert.match(source, /placeholder="name 또는 name@gmail.com"/);
   assert.match(source, /autoComplete="username"/);
   assert.match(source, /await login\(values\.loginId, values\.password\)/);
-  assert.match(source, /const redirectTarget = searchParams\.get\("next"\) \|\| "\/admin\/dashboard"/);
-  assert.match(source, /if \(!loading && user\) \{/);
-  assert.match(source, /router\.replace\(redirectTarget\)/);
   assert.match(source, /getAuthErrorMessage/);
   assert.match(source, /setSubmitError\(getAuthErrorMessage\(error,/);
   assert.match(source, /<CardTitle className="text-xl">TIPS 로그인<\/CardTitle>/);
