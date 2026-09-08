@@ -133,16 +133,21 @@ test('bulk sale selection change after the first writer lets writers finish but 
   for (const [index, request] of details.entries()) await h.resolve(request, { row: rows[index] });
   const balance = h.requests.find(request => request.name === 'get_textbook_inventory_balance_v1');
   await h.resolve(balance, { locationId: id(900), rows: rows.map((row, index) => ({ textbookId: row.textbook.id, currentQuantity: 20 + index, locationQuantities: { [id(900)]: 20 + index }, studentLocationQuantities: {}, teacherLocationQuantities: { [id(900)]: 20 + index }, totalQuantity: 20 + index, studentQuantity: 0, teacherQuantity: 20 + index, stockValue: (20 + index) * 10000 })) });
-  assert.equal(h.requests.filter(request => request.table).length, 1);
-  const rpcCountAtWriter = h.requests.filter(request => request.name).length;
+  const transitions = () => h.requests.filter(request => request.name === 'transition_textbook_sale_line_v1');
+  const reads = () => h.requests.filter(request => request.name && request.name !== 'transition_textbook_sale_line_v1');
+  assert.equal(transitions().length, 1, 'the first frozen sale starts one atomic transition');
+  assert.equal(h.requests.some(request => request.table), false);
+  const readCountAtWriter = reads().length;
   await h.act(() => document.querySelector(`[aria-label="${rows[1].recipientName} ${rows[1].textbook.title} 출고 선택"]`).click());
-  for (let index = 0; index < 6; index += 1) {
-    const request = h.requests.filter(item => item.table)[index];
-    assert.ok(request, `sale lifecycle writer ${index + 1}`);
-    if (request.table === 'textbook_stock_moves' && request.steps.some(step => step.method === 'select')) await h.resolve(request, []);
-    else await h.resolve(request, null);
+  for (const [index, row] of rows.entries()) {
+    const request = transitions()[index];
+    assert.ok(request, `atomic sale transition ${index + 1}`);
+    assert.deepEqual(request.args, { p_sale_line_id: row.id, p_target_status: 'issued' });
+    await h.resolve(request, { ...row.line, status: 'issued' });
   }
-  assert.equal(h.requests.filter(request => request.name).length, rpcCountAtWriter, 'changed sale selection suppresses stale targeted invalidation');
+  assert.equal(transitions().length, 2, 'the original frozen batch finishes after selection changes');
+  assert.equal(h.requests.some(request => request.table), false, 'sale transitions never fall back to separate table writes');
+  assert.equal(reads().length, readCountAtWriter, 'changed sale selection suppresses stale targeted invalidation');
   assert.equal(document.body.textContent.includes('건을 출고 완료했습니다.'), false);
 });
 
@@ -204,26 +209,24 @@ test('sale status reads the actual sale member and its exact balance before the 
   await h.act(() => document.querySelector(`[aria-label="${row.recipientName} ${row.textbook.title} 출고 완료 처리"]`).click());
   const detail = h.requests.find(request => request.name === 'get_textbook_sale_detail_v1');
   assert.deepEqual(detail.args, { p_id: row.id });
+  assert.equal(h.requests.some(request => request.name === 'transition_textbook_sale_line_v1'), false, 'atomic transition waits for the fresh actual member');
   assert.equal(h.requests.some(request => request.table), false, 'sale writer waits for the fresh actual member');
   await h.resolve(detail, { row });
 
   const balance = h.requests.find(request => request.name === 'get_textbook_inventory_balance_v1');
   assert.deepEqual(balance.args.p_input, { textbookIds: [row.textbook.id], locationId: row.location.id });
+  assert.equal(h.requests.some(request => request.name === 'transition_textbook_sale_line_v1'), false, 'atomic transition waits for the exact member balance');
   assert.equal(h.requests.some(request => request.table), false, 'sale writer waits for the exact member balance');
   await h.resolve(balance, {
     locationId: row.location.id,
     rows: [{ textbookId: row.textbook.id, currentQuantity: 9, locationQuantities: { [row.location.id]: 9 }, studentLocationQuantities: {}, teacherLocationQuantities: { [row.location.id]: 9 }, totalQuantity: 9, studentQuantity: 0, teacherQuantity: 9, stockValue: 90000 }],
   });
 
-  const moveLookup = h.requests.find(request => request.table);
-  assert.equal(moveLookup.table, 'textbook_stock_moves');
-  assert.deepEqual(moveLookup.steps.find(step => step.method === 'eq').args, ['sale_line_id', row.id]);
-  await h.resolve(moveLookup, []);
-  const moveInsert = h.requests.findLast(request => request.table);
-  assert.equal(moveInsert.table, 'textbook_stock_moves');
-  assert.equal(moveInsert.steps.find(step => step.method === 'insert').args[0].sale_line_id, row.id);
-  await h.resolve(moveInsert, null);
-  const lineUpdate = h.requests.findLast(request => request.table);
-  assert.equal(lineUpdate.table, 'textbook_sale_lines');
-  assert.deepEqual(lineUpdate.steps.find(step => step.method === 'eq').args, ['id', row.id]);
+  const transitions = h.requests.filter(request => request.name === 'transition_textbook_sale_line_v1');
+  assert.equal(transitions.length, 1);
+  assert.deepEqual(transitions[0].args, { p_sale_line_id: row.id, p_target_status: 'issued' });
+  assert.equal(document.body.textContent.includes('출고가 반영되었습니다.'), false, 'success waits for the atomic commit');
+  await h.resolve(transitions[0], { ...row.line, status: 'issued' });
+  assert.equal(h.requests.some(request => request.table), false, 'stock movement and line status are committed together by the database');
+  assert.equal(h.requests.filter(request => request.name === 'list_textbook_sale_page_v1').length, 2, 'the completed transition refreshes the sale page');
 });
