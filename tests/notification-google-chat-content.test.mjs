@@ -178,6 +178,29 @@ test("Google Chat 최종 payload는 URL 없는 카드 본문과 대시보드 버
   assert.deepEqual(JSON.parse(calls[0].init.body), expectedPayload)
 })
 
+test("서버가 Chat 회신 전용을 선택하면 앱 버튼만 생략하고 내용·멘션·링크 검증은 유지한다", async () => {
+  const { buildGoogleChatCardPayload, createGoogleChatProvider } = await import(providerUrl.href)
+  const source = context({ mention_user_names: ["users/12345"] })
+  const built = buildGoogleChatCardPayload(source, { includeAppLink: false })
+  assert.equal(built.ok, true)
+  assert.equal(built.payload.cardsV2[0].card.sections[0].widgets.length, 1)
+  assert.doesNotMatch(JSON.stringify(built.payload), /buttonList|openLink|https:\/\/tipsedu\.co\.kr/u)
+  assert.equal(buildGoogleChatCardPayload({ ...source, href: "https://evil.example/" }, { includeAppLink: false }).ok, false)
+  assert.equal(buildGoogleChatCardPayload({ ...source, workflow_key: undefined }, { includeAppLink: false }).ok, false)
+  assert.equal(buildGoogleChatCardPayload({ ...source, includeAppLink: false }).payload.cardsV2[0].card.sections[0].widgets.length, 2)
+
+  const messages = []
+  const provider = createGoogleChatProvider({ includeAppLink: false,
+    async fetch(_url, init) { messages.push(JSON.parse(init.body)); return Response.json({ name: "spaces/fixture/messages/no-app-link" }) },
+  })
+  assert.equal((await provider.send(source)).status, "sent")
+  assert.equal(messages.length, 1)
+  assert.match(messages[0].text, /<users\/12345>/u)
+  assert.doesNotMatch(JSON.stringify(messages[0]), /buttonList|openLink|https:\/\/tipsedu\.co\.kr/u)
+  assert.equal((await provider.send({ ...source, href: "https://evil.example/" })).status, "failed")
+  assert.equal(messages.length, 1, "a hidden app link still cannot bypass source link validation")
+})
+
 test("Google Chat 카드 본문은 markup-like text를 escape 대상이 아니라 unsafe input으로 거절한다", async () => {
   const { buildGoogleChatCardPayload } = await import(providerUrl.href)
   const built = buildGoogleChatCardPayload(context({

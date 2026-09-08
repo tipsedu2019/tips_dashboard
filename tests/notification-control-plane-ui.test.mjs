@@ -93,7 +93,7 @@ test("공통 패널은 page와 dialog가 동일한 서버 스냅샷, 초안, 저
   assert.doesNotMatch(source, /autoSave|autosave/i)
 })
 
-test("멘션 토글은 기존 초안 저장과 별도 행 상태를 사용하고 응답 없는 규칙에는 렌더하지 않는다", async () => {
+test("멘션 토글은 규칙과 같은 저장 초안에 포함하고 응답 없는 규칙에는 렌더하지 않는다", async () => {
   const [panelSource, mentionSource, modelSource, serviceSource] = await Promise.all([
     readOptionalSource("src/features/notifications/notification-control-panel.tsx"),
     readOptionalSource("src/features/notifications/notification-mention-settings.tsx"),
@@ -103,13 +103,16 @@ test("멘션 토글은 기존 초안 저장과 별도 행 상태를 사용하고
 
   assert.match(mentionSource, /담당자 멘션/)
   assert.match(mentionSource, /확인된 Google Chat 계정만 멘션합니다\./)
-  assert.match(panelSource, /mentionSettings\.get\(rule\.id\)/)
+  assert.match(panelSource, /displayedMentionSettings\.get\(rule\.id\)/)
   assert.match(panelSource, /new AbortController\(\)/)
   assert.match(panelSource, /mentionController\.abort\(\)/)
   assert.match(panelSource, /mentionLoadGenerationRef\.current !== mentionLoadGeneration/)
-  assert.match(panelSource, /mentionMutationGenerationRef\.current\.get\(setting\.ruleId\) !== generation/)
+  assert.match(panelSource, /buildMentionDraftPatch/)
+  assert.doesNotMatch(panelSource, /mentionService\.saveMentionSetting/)
+  assert.match(panelSource, /setMentionDraft\(\(current\) => new Map\(current\)\.set/)
   assert.doesNotMatch(modelSource, /mentionEnabled|mention_enabled/)
-  assert.doesNotMatch(serviceSource, /mentionEnabled|mention_enabled/)
+  assert.match(serviceSource, /expectedMentionRevisions/)
+  assert.match(serviceSource, /mentionPatch/)
 })
 
 test("공통 패널은 Google Chat 규칙만 데스크톱 표와 모바일 카드에 렌더한다", async () => {
@@ -126,7 +129,7 @@ test("공통 패널은 Google Chat 규칙만 데스크톱 표와 모바일 카�
   assert.match(source, /group\.rules\.map/)
   assert.match(source, /data-notification-draft-source="shared"/)
   assert.match(source, /selectEditableGoogleChatRules/)
-  assert.match(source, /Google Chat 규칙/)
+  assert.match(source, /직원 알림 · Google Chat/)
   assert.match(source, /내용 수정/)
   assert.doesNotMatch(source, /NOTIFICATION_EVENT_KEYS_BY_WORKFLOW/)
   assert.doesNotMatch(source, /NOTIFICATION_AUDIENCES_BY_WORKFLOW/)
@@ -390,7 +393,8 @@ test("dirty navigation guard는 닫기, 링크, 뒤로 가기, 새로고침을 �
   assert.match(panelSource, /저장하지 않고 이동/)
   assert.match(panelSource, /계속 편집/)
   assert.match(panelSource, /variant="ghost"[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{navigationGuard\.continueEditing\}/)
-  assert.match(panelSource, /variant="outline"[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{navigationGuard\.discardAndContinue\}/)
+  assert.match(panelSource, /variant="outline"[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{discardDraftAndContinue\}/)
+  assert.match(panelSource, /setDraft\(baseDraft\)[\s\S]*setMentionDraft\(createMentionDraft\(mentionSettings\)\)[\s\S]*navigationGuard\.discardAndContinue/)
 })
 
 test("저장 중에는 dirty navigation 결정을 코드 수준에서도 실행하지 않는다", async () => {
@@ -528,7 +532,9 @@ test("전역 페이지는 redirect 없이 쿼리 탭과 한글 비활성·확인
   assert.match(workspaceSource, /Google Chat 설정 준비 상태를 확인할 수 없습니다/)
   assert.match(panelSource, /알림 업무 선택/)
   assert.match(pageSource, /searchParams/)
-  assert.match(pageSource, /section\s*===\s*"connections"/)
+  assert.match(pageSource, /readNotificationSettingsLocation/)
+  assert.match(pageSource, /initialWorkflow=\{location\.workflow\}/)
+  assert.match(pageSource, /initialGroup=\{location\.group\}/)
   assert.match(pageSource, /initialSection/)
   assert.match(workspaceSource, /initialSection/)
 })
@@ -569,8 +575,9 @@ test("알림 업무와 화면 섹션 선택은 반응형 1차·2차 제어로 �
   assert.match(source, /grid grid-cols-2 gap-1 rounded-lg border bg-muted\/35 p-1 sm:grid-cols-3 xl:grid-cols-6/)
   assert.match(source, /variant=\{activeWorkflow === option\.key \? "default" : "ghost"\}/)
   assert.match(source, /\[scrollbar-width:none\] \[&::-webkit-scrollbar\]:hidden/)
-  assert.match(source, /"grid h-auto w-full rounded-lg border bg-muted\/35 p-1"/)
-  assert.match(source, /<TabsTrigger value="connections"[^>]*>연결<\/TabsTrigger>/)
+  assert.match(source, /aria-label="알림 채널"/)
+  assert.match(source, /changeSection\("connections"\)/)
+  assert.match(source, /<DialogTitle>수신 채팅방<\/DialogTitle>/)
   assert.doesNotMatch(source, /연결 \(Connections\)/)
 })
 
@@ -579,10 +586,9 @@ test("공유 알림 다이얼로그는 규칙만, 환경 설정 페이지는 규
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(
-    source,
-    /presentation === "page" \? "grid-cols-2" : "grid-cols-1"/,
-  )
+  assert.match(source, /open=\{presentation === "page" && activeSection === "connections"\}/)
+  assert.match(source, /activationMode="manual"/)
+  assert.match(source, /customerGuidance/)
 })
 
 test("알림 규칙 표와 저장바는 조밀한 표 및 화면 안쪽 고정 작업 영역을 사용한다", async () => {

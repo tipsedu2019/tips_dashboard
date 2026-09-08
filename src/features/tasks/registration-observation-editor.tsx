@@ -15,6 +15,7 @@ import {
 import { Label } from "@/components/ui/label"
 
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationObservationChatActions } from "./registration-observation-chat-actions"
 import type {
   RegistrationObservationAttempt,
   RegistrationObservationManagerDetail,
@@ -910,6 +911,10 @@ export function RegistrationObservationEditor({
       ) : null}
 
       {readOnly ? <p className="text-sm text-muted-foreground">현재 상태는 이 화면에서 변경할 수 없습니다.</p> : null}
+      {!deepLinkedAttempt && current && ["scheduled", "attended_feedback_pending"].includes(current.status) ? (
+        <RegistrationObservationChatActions observationId={current.observationId} disabled={saving || bookingDirty || mutationCommitted}
+          feedbackAvailable={Date.parse(current.endsAt) <= Date.now()} />
+      ) : null}
       {feedbackPanel}
       {receipt === "예약 저장됨" ? (
         <div role="status" className="grid gap-1 text-sm">

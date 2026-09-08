@@ -206,6 +206,16 @@ with expected_functions(
       false,
       true
     ),
+    ('notification_source_current_before_recovery_private', 'dashboard_private.registration_management_source_current_before_recovery_v2(uuid,uuid)'::text, true, false, true),
+    ('notification_recovery_v4_public', 'public.ensure_registration_workflow_notification_v4(uuid,integer,text,text,text,uuid)'::text, true, true, true),
+    ('notification_recovery_allowed_private', 'dashboard_private.registration_management_notification_recovery_allowed_v1(uuid)'::text, true, false, true),
+    ('notification_recovery_content_private', 'dashboard_private.registration_management_notification_preview_content_v2(uuid,uuid,uuid)'::text, true, false, true),
+    ('notification_recovery_context_private', 'dashboard_private.registration_management_notification_preview_context_v1(uuid,uuid)'::text, true, false, true),
+    ('notification_recovery_preview_public', 'public.get_registration_management_notification_preview_v1(uuid,integer)'::text, true, true, true),
+    ('notification_recovery_preview_delegate_private', 'public.get_registration_management_preview_before_recovery_v1(uuid,integer)'::text, true, false, true),
+    ('notification_recovery_source_fence_private', 'dashboard_private.registration_management_notification_source_fence_v1(uuid,text,text,boolean)'::text, true, false, true),
+    ('notification_recovery_history_fence_private', 'dashboard_private.registration_management_notification_history_insert_fence_v1()'::text, true, false, true),
+    ('notification_recovery_queue_fence_private', 'dashboard_private.registration_management_notification_queue_fence_v1()'::text, true, false, true),
     (
       'notification_source_current_v2_private',
       'dashboard_private.registration_management_notification_source_current_v2(uuid,uuid)'::text,
@@ -417,6 +427,20 @@ with expected_functions(
       true
     ),
     (
+      'visit_cancellation_preview_private',
+      'dashboard_private.registration_visit_cancellation_preview_v1(uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
+      'visit_cancellation_source_current_private',
+      'dashboard_private.registration_visit_cancellation_source_current_v1(uuid)'::text,
+      true,
+      false,
+      true
+    ),
+    (
       'visit_notification_plan_public',
       'public.get_registration_visit_legacy_dispatch_plan_v1(uuid,uuid)'::text,
       true,
@@ -442,7 +466,7 @@ functions as (
     on procedure.oid = pg_catalog.to_regprocedure(expected_functions.function_name)
 )
 select (
-  (select count(*) from functions where oid is not null) = 59
+  (select count(*) from functions where oid is not null) = 71
   and not exists (
     select 1
     from functions
@@ -704,6 +728,45 @@ select (
         definition not like '%dashboard_private.notification_sha256_hex_v1(p_snapshot::text)%'
       ))
       or (function_key = 'notification_source_current_v2_private' and (
+        definition not like '%registration_management_notification_superseded_sources%return false%'
+        or definition not like '%return dashboard_private.registration_management_source_current_before_recovery_v2(p_source_event_id,p_expected_actor_profile_id)%'
+      ))
+      or (function_key = 'notification_recovery_v4_public' and (
+        definition not like '%assert_registration_actor_is_active_manager_v1(v_actor)%'
+        or definition not like '%registration-management-notification-v2:%'
+        or definition not like '%notification-request:%'
+        or definition not like '%v_ledger.request_fingerprint<>v_fingerprint%return v_ledger.response_payload%'
+        or definition not like '%registration_management_notification_recovery_allowed_v1(p_expected_recovery_source_event_id)%'
+        or definition not like '%registration_management_notification_recovery_changed%23514%'
+        or definition not like '%registration_management_notification_superseded_sources%'
+        or definition not like '%public.ensure_registration_workflow_notification_v2%'
+        or definition not like '%registration_management_notification_recoveries%'
+        or definition not like '%registration_management_notification_previews%'
+      ))
+      or (function_key = 'notification_recovery_allowed_private' and (
+        definition not like '%notification_dispatch_ownership_claims%claim.workflow_key=v_event.workflow_key and claim.occurrence_key=v_event.occurrence_key%'
+        or definition not like '%notification_deliveries where event_id=v_event.id%'
+        or definition not like '%notification_external_attempt%'
+        or definition not like '%job.status<>''pending'' or job.attempt_count<>0%'
+      ))
+      or (function_key = 'notification_recovery_source_fence_private' and (
+        definition not like '%pg_catalog.pg_advisory_xact_lock%registration-management-notification-v2:%'
+        or definition not like '%registration_management_notification_superseded_sources%'
+        or definition not like '%registration_management_notification_source_current_v2%'
+        or definition not like '%registration_management_notification_snapshot_stale%23514%'
+      ))
+      or (function_key = 'notification_recovery_history_fence_private' and (
+        definition not like '%notification_dispatch_ownership_claims%'
+        or definition not like '%source_fence_v1(null,new.workflow_key,new.occurrence_key,true)%'
+        or definition not like '%source_fence_v1(new.event_id,null,null,true)%'
+      ))
+      or (function_key = 'notification_recovery_queue_fence_private' and (
+        definition not like '%if v_duplicate then%'
+        or definition not like '%registration_management_notification_superseded_sources%'
+        or definition not like '%new.status in (''pending'',''claimed'')%'
+        or definition not like '%source_fence_v1(v_event_id,v_workflow,v_occurrence,tg_op=''UPDATE'')%'
+      ))
+      or (function_key = 'notification_source_current_before_recovery_private' and (
         definition not like '%registration_management_notification_requested%'
         or definition not like '%''send_registration_management_notification''%'
         or definition not like '%v_metadata ->> ''contractVersion'' <> ''2''%'
@@ -999,13 +1062,41 @@ select (
         or definition not like '%dashboard_private.notification_events%'
       ))
       or (function_key = 'visit_notification_plan_public' and (
-        definition not like '%v_actor_id uuid := (select auth.uid())%'
-        or definition not like '%p_actor_profile_id is distinct from v_actor_id%'
+        -- The HTTP route reads this plan as its authenticated user. The
+        -- service JWT exception is exercised only inside postgres-owned
+        -- SECURITY DEFINER dispatch wrappers; direct service EXECUTE stays off.
+        definition not like '%coalesce((select auth.role()), '''') <> ''service_role''%'
+        or definition not like '%and ((select auth.uid()) is null or p_actor_profile_id is distinct from (select auth.uid()))%'
         or definition not like '%registration_access_denied%using errcode = ''42501''%'
-        or definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1%v_actor_id%'
+        or definition not like '%dashboard_private.assert_registration_actor_is_active_manager_v1(p_actor_profile_id)%'
         or definition not like '%dashboard_private.registration_visit_notification_source_current_v1%'
         or definition not like '%public.get_registration_visit_legacy_dispatch_plan_v1_base%'
         or definition not like '%registration_visit_notification_refresh_required%using errcode = ''23514''%'
+        or definition not like '%where id = p_appointment_id and kind = ''visit_consultation'' and status = ''canceled''%'
+        or definition not like '%event_row.source_type = ''registration_visit_cancellation''%'
+        or definition not like '%event_row.source_revision = appointment.notification_revision%'
+        or definition not like '%not dashboard_private.registration_visit_cancellation_source_current_v1(v_event.id)%'
+        or definition not like '%registration_visit_cancellation_refresh_required%using errcode = ''23514''%'
+      ))
+      or (function_key = 'visit_cancellation_preview_private' and (
+        definition not like '%kind = ''visit_consultation''%'
+        or definition not like '%v_appointment.status <> ''canceled''%'
+        or definition not like '%event_row.source_type = ''registration_appointment''%'
+        or definition not like '%v_previous.effective_status <> ''sent''%'
+        or definition not like '%source_type = ''registration_visit_cancellation''%'
+        or definition not like '%''targetSnapshot'', v_previous.target_snapshot%'
+        or definition not like '%''sourcePayload'', v_previous.source_payload%'
+        or definition not like '%notification_sha256_hex_v1%'
+        or definition like ('%net' || '.http_%')
+      ))
+      or (function_key = 'visit_cancellation_source_current_private' and (
+        definition not like '%source_type = ''registration_visit_cancellation''%'
+        or definition not like '%dashboard_private.registration_visit_cancellation_preview_v1(v_event.source_id::uuid)%'
+        or definition not like '%return coalesce(%'
+        or definition not like '%''notificationRevision'' = v_event.source_revision::text%'
+        or definition not like '%''sourceDeliveryId'' = v_event.payload%'
+        or definition not like '%''previewChecksum'' = v_event.payload%'
+        or definition not like '%false);%'
       ))
       or (function_key = 'notification_record_private' and (
         definition not like '%track.archived_at is null%'
@@ -1113,6 +1204,26 @@ select (
   and pg_catalog.to_regprocedure(
     'dashboard_private.registration_management_notification_fact_snapshot_v2(uuid)'
   ) is null
+  and not exists (
+    -- Service clients use these narrow dispatch RPCs. Their postgres definer
+    -- identity can call the plan without expanding the plan's public ACL.
+    select 1 from (values
+      ('public.materialize_registration_visit_legacy_google_chat_v1(uuid,uuid,bigint,uuid)'::text),
+      ('public.begin_registration_visit_legacy_google_chat_v1(uuid,uuid,bigint,uuid,uuid)'::text)
+    ) expected(signature)
+    left join pg_catalog.pg_proc procedure on procedure.oid=pg_catalog.to_regprocedure(expected.signature)
+    where procedure.oid is null
+      or not procedure.prosecdef
+      or pg_catalog.pg_get_userbyid(procedure.proowner)<>'postgres'
+      or (pg_catalog.cardinality(procedure.proconfig)=1
+        and procedure.proconfig[1] in ('search_path=','search_path=""')) is distinct from true
+      or pg_catalog.pg_get_functiondef(procedure.oid) not like
+        '%public.get_registration_visit_legacy_dispatch_plan_v1(%p_appointment_id,%p_actor_profile_id%'
+      or pg_catalog.has_function_privilege('public',procedure.oid,'EXECUTE')
+      or pg_catalog.has_function_privilege('anon',procedure.oid,'EXECUTE')
+      or pg_catalog.has_function_privilege('authenticated',procedure.oid,'EXECUTE')
+      or not pg_catalog.has_function_privilege('service_role',procedure.oid,'EXECUTE')
+  )
   and exists (
     select 1
     from pg_catalog.pg_class ledger
@@ -1529,16 +1640,46 @@ select (
   and exists (
     select 1
     from pg_catalog.pg_proc procedure
+    join pg_catalog.pg_proc prior_final
+      on prior_final.oid = pg_catalog.to_regprocedure(
+        'public.get_registration_core_legacy_dispatch_plan_before_preview_v1(uuid,uuid)'
+      )
     where procedure.oid = pg_catalog.to_regprocedure(
         'public.get_registration_core_legacy_dispatch_plan_v1(uuid,uuid)'
       )
+      and pg_catalog.pg_get_userbyid(procedure.proowner) = 'postgres'
+      and procedure.prosecdef and procedure.provolatile = 's'
+      and procedure.proconfig[1] = any(array['search_path=', 'search_path=""']::text[])
+      and pg_catalog.has_function_privilege('service_role', procedure.oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('public', procedure.oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('anon', procedure.oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('authenticated', procedure.oid, 'EXECUTE')
       and pg_catalog.pg_get_functiondef(procedure.oid)
-        like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+        like '%public.get_registration_core_legacy_dispatch_plan_before_preview_v1%'
       and pg_catalog.pg_get_functiondef(procedure.oid)
         like '%dashboard_private.registration_management_notification_source_current_v2%'
       and pg_catalog.pg_get_functiondef(procedure.oid)
-        like '%public.get_registration_core_legacy_dispatch_plan_v1_base%'
+        like '%dashboard_private.registration_management_notification_preview_context_v1%'
       and pg_catalog.pg_get_functiondef(procedure.oid)
+        like '%previewChecksum%is distinct from%preview_checksum%'
+      and pg_catalog.pg_get_functiondef(procedure.oid)
+        like '%registration_management_notification_preview_changed%using errcode=''23514''%'
+      -- Follow the final delegate instead of dropping the original active-actor,
+      -- exact source and empty-items checks when an additional fence wraps it.
+      and pg_catalog.pg_get_userbyid(prior_final.proowner) = 'postgres'
+      and prior_final.prosecdef and prior_final.provolatile = 's'
+      and prior_final.proconfig[1] = any(array['search_path=', 'search_path=""']::text[])
+      and not pg_catalog.has_function_privilege('public', prior_final.oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('anon', prior_final.oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('authenticated', prior_final.oid, 'EXECUTE')
+      and not pg_catalog.has_function_privilege('service_role', prior_final.oid, 'EXECUTE')
+      and pg_catalog.pg_get_functiondef(prior_final.oid)
+        like '%dashboard_private.assert_registration_actor_is_active_manager_v1%'
+      and pg_catalog.pg_get_functiondef(prior_final.oid)
+        like '%dashboard_private.registration_management_notification_source_current_v2%'
+      and pg_catalog.pg_get_functiondef(prior_final.oid)
+        like '%public.get_registration_core_legacy_dispatch_plan_v1_base%'
+      and pg_catalog.pg_get_functiondef(prior_final.oid)
         like '%''items'', ''[]''::jsonb%'
   )
   and not exists (
@@ -1948,5 +2089,25 @@ select (
       and not attribute.attisdropped
       and not attribute.attnotnull
   )
+  and (
+    select count(*)=2 and bool_and(relation.relrowsecurity)
+    from pg_catalog.pg_class relation join pg_catalog.pg_namespace namespace on namespace.oid=relation.relnamespace
+    where namespace.nspname='dashboard_private'
+      and relation.relname in ('registration_management_notification_recoveries','registration_management_notification_superseded_sources')
+      and not has_table_privilege('anon',relation.oid,'SELECT,INSERT,UPDATE,DELETE')
+      and not has_table_privilege('authenticated',relation.oid,'SELECT,INSERT,UPDATE,DELETE')
+      and not has_table_privilege('service_role',relation.oid,'SELECT,INSERT,UPDATE,DELETE')
+  )
+  and (
+    select count(*)=4 from pg_catalog.pg_trigger trigger
+    where trigger.tgenabled='O' and not trigger.tgisinternal
+      and (trigger.tgname,trigger.tgrelid) in (
+        ('registration_management_recovery_claim_fence','dashboard_private.notification_dispatch_ownership_claims'::regclass),
+        ('registration_management_recovery_delivery_fence','dashboard_private.notification_deliveries'::regclass),
+        ('registration_management_recovery_fanout_fence','dashboard_private.notification_event_fanout_jobs'::regclass),
+        ('registration_management_recovery_target_fence','dashboard_private.notification_target_reconciliation_jobs'::regclass)
+      )
+  )
+
 ) as contract_ok;
 rollback;

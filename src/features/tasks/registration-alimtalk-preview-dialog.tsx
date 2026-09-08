@@ -22,6 +22,7 @@ import type {
   RegistrationCustomerMessageTarget,
 } from "./registration-customer-message-contract"
 import { getRegistrationCustomerMessageErrorMessage, getRegistrationCustomerMessageReadinessMessage } from "./registration-customer-message-errors"
+import { formatRegistrationMessageTimestamp } from "./registration-customer-message-labels"
 
 type RegistrationAlimtalkPreviewDialogProps = Readonly<{
   open: boolean
@@ -73,12 +74,7 @@ function normalizedTimestamp(value: string) {
 }
 
 function formatAuditTimestamp(value: string) {
-  const timestamp = Date.parse(value)
-  if (!Number.isFinite(timestamp)) return value
-  return new Intl.DateTimeFormat("ko-KR", {
-    dateStyle: "medium",
-    timeStyle: "short",
-  }).format(new Date(timestamp))
+  return formatRegistrationMessageTimestamp(value)
 }
 
 function auditActorLabel(confirmedByName: string) {

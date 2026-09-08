@@ -3,11 +3,13 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
-import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
+import { RegistrationManagementNotificationActions } from "./registration-management-notification-actions"
 import { supabase } from "@/lib/supabase"
 
 import { RegistrationApplicationAdmissionSection } from "./registration-application-admission-section"
 import { RegistrationAlimtalkPreviewDialog } from "./registration-alimtalk-preview-dialog"
+import { RegistrationCustomerMessageCaseHistory } from "./registration-customer-message-case-history"
+import { RegistrationVisitCancellationActions } from "./registration-visit-cancellation-actions"
 import { RegistrationApplicationConsultationSection } from "./registration-application-consultation-section"
 import {
   RegistrationApplicationInquirySection,
@@ -110,7 +112,6 @@ import {
 } from "./registration-track-model.js"
 import {
   cancelRegistrationAppointment,
-  ensureRegistrationWorkflowNotificationSourceIds,
   saveRegistrationConsultationDetails,
   saveRegistrationPhoneConsultation,
   syncRegistrationCaseSubjects,
@@ -126,7 +127,6 @@ import {
 } from "./registration-track-service"
 import { createRegistrationObservationAsyncOwnership } from "./registration-workspace-route"
 import {
-  dispatchRegistrationManagementNotificationSources,
   getRegistrationManagementNotificationReadiness,
 } from "./registration-consultation-notification.js"
 import {
@@ -327,8 +327,6 @@ export function RegistrationApplication({
   const [migrationDirectorResetVersion, setMigrationDirectorResetVersion] = useState(0)
   const [migrationReviewResetVersion, setMigrationReviewResetVersion] = useState(0)
   const [workflowStatusSaving, setWorkflowStatusSaving] = useState(false)
-  const [managementNotificationSending, setManagementNotificationSending] = useState(false)
-  const [latestGoogleChatEventId, setLatestGoogleChatEventId] = useState<string | null>(null)
   const [observationDetail, setObservationDetail] = useState<RegistrationObservationManagerDetail | null>(null)
   const [observationDetailLoading, setObservationDetailLoading] = useState(false)
   const [observationDetailError, setObservationDetailError] = useState("")
@@ -1052,43 +1050,6 @@ export function RegistrationApplication({
       setWorkflowStatusSaving(false)
     }
   }
-  async function sendRegistrationManagementNotification() {
-    if (
-      !canManageCase
-      || !activeGenericTrack
-      || !notificationReadiness.ready
-      || !notificationToken
-      || managementNotificationSending
-    ) return
-    setManagementNotificationSending(true)
-    try {
-      const sourceEventIds = await ensureRegistrationWorkflowNotificationSourceIds({
-        trackId: activeGenericTrack.id,
-        workflowRevision: activeGenericTrack.workflowRevision,
-        requestKey: crypto.randomUUID(),
-      })
-      if (sourceEventIds.length === 0) {
-        throw new Error("registration_management_notification_source_missing")
-      }
-      const result = await dispatchRegistrationManagementNotificationSources(
-        sourceEventIds,
-        notificationToken,
-      )
-      if (result.failedSourceEventIds.length > 0 || result.googleChatEventIds.length === 0) {
-        throw new Error("registration_management_notification_dispatch_failed")
-      }
-      setLatestGoogleChatEventId(
-        result.googleChatEventIds[result.googleChatEventIds.length - 1] || null,
-      )
-    } catch (error) {
-      const message = errorMessage(error, "")
-      onWarning(message.includes("registration_management_notification_not_ready")
-        ? `알림에 필요한 내용을 먼저 입력하세요: ${notificationReadiness.missingFields.join(", ")}`
-        : "관리팀 구글챗 알림을 보내지 못했습니다. 발송 상태를 확인해 주세요.")
-    } finally {
-      setManagementNotificationSending(false)
-    }
-  }
   const subjectPanelIdsByTrackId = Object.fromEntries(orderedTracks.map((track) => {
     const context = trackContexts.find((candidate) => candidate.track.id === track.id)
     if (!context) return [track.id, ["registration-application-observation"]] as const
@@ -1546,7 +1507,12 @@ export function RegistrationApplication({
       mode="detail"
       studentName={detail.task.studentName || detail.task.title}
       closeAction={closeAction}
-      historyAction={<RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />}
+      historyAction={<>
+        {canManageCase && customerMessageClient ? <RegistrationCustomerMessageCaseHistory
+          taskId={detail.task.id} client={customerMessageClient} viewerKey={`${viewerId || ""}:${viewerRole}`}
+          refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}`} /> : null}
+        <RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />
+      </>}
       subjectNavigation={(
         <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_18rem] md:items-end">
           <RegistrationApplicationSubjectTabs
@@ -1577,19 +1543,15 @@ export function RegistrationApplication({
               </select>
               {canManageCase && notificationReadiness.eventKey ? (
                 <div className="grid gap-1.5">
-                  <Button
-                    type="button"
-                    variant="outline"
-                    disabled={
-                      workflowStatusSaving
-                      || managementNotificationSending
-                      || !notificationToken
-                      || !notificationReadiness.ready
-                    }
-                    onClick={() => void sendRegistrationManagementNotification()}
-                  >
-                    {managementNotificationSending ? "알림 보내는 중" : "관리팀 알림 보내기"}
-                  </Button>
+                  <RegistrationManagementNotificationActions
+                    trackId={activeGenericTrack.id}
+                    workflowRevision={activeGenericTrack.workflowRevision}
+                    viewerId={viewerId}
+                    sessionToken={notificationToken}
+                    disabled={workflowStatusSaving || !notificationReadiness.ready}
+                    hasUnsavedChanges={() => dirtyKeysRef.current.size > 0}
+                    onWarning={onWarning}
+                  />
                   {!notificationReadiness.ready ? (
                     <p className="text-xs text-muted-foreground">
                       알림에 필요한 내용: {notificationReadiness.missingFields.join(", ")}
@@ -1597,7 +1559,6 @@ export function RegistrationApplication({
                   ) : !notificationToken ? (
                     <p className="text-xs text-muted-foreground">알림 연결을 확인한 뒤 보낼 수 있습니다.</p>
                   ) : null}
-                  <GoogleChatDeliveryControl eventId={latestGoogleChatEventId} onWarning={onWarning} />
                 </div>
               ) : null}
             </div>
@@ -1607,6 +1568,11 @@ export function RegistrationApplication({
               일부 예약 또는 등록 실행 이력이 조회 범위를 넘었습니다. 해당 실행 영역만 잠기며 기본정보와 진행상태는 계속 수정할 수 있습니다.
             </p>
           ) : null}
+          {canManageCase ? <div className="md:col-span-2"><RegistrationVisitCancellationActions
+            taskId={detail.task.id} sessionToken={notificationToken}
+            refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}:${detail.appointments.map((item) => `${item.id}:${item.status}:${item.notificationRevision}`).join("|")}`}
+            onWarning={onWarning} />
+          </div> : null}
         </div>
       )}
       progress={null}

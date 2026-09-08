@@ -1,3 +1,5 @@
+import type { RegistrationCaseCustomerMessageHistory, RegistrationCaseCustomerMessageHistoryInput } from "./registration-customer-message-case-history-contract.ts"
+
 export const REGISTRATION_CUSTOMER_MESSAGE_SINGLE_SOURCE_KINDS = Object.freeze([
   "level_test_booking",
   "visit_consultation_booking",
@@ -294,8 +296,9 @@ export type RegistrationCustomerMessageClient = Readonly<{
     target: RegistrationCustomerMessageTarget,
     signal?: AbortSignal,
   ) => Promise<RegistrationCustomerMessageHistoryItem[]>
-  check: (input: RegistrationCustomerMessageCheckInput) => Promise<RegistrationCustomerMessageSendResult>
+  check: (input: RegistrationCustomerMessageCheckInput, signal?: AbortSignal) => Promise<RegistrationCustomerMessageSendResult>
   checkDelivery?: (input: RegistrationCustomerMessageCheckInput, signal?: AbortSignal) => Promise<RegistrationCustomerMessageDeliveryResult>
+  listCaseHistory?: (input: RegistrationCaseCustomerMessageHistoryInput, signal?: AbortSignal) => Promise<RegistrationCaseCustomerMessageHistory>
   reconcile: (input: Readonly<{
     messageId: string
     resolution: "accepted" | "failed_hold"
@@ -344,6 +347,10 @@ const REGISTRATION_CUSTOMER_MESSAGE_PUBLIC_RESPONSE_KEYS = new Set([
   "body",
   "buttons",
   "canCheck",
+  "canCheckDelivery",
+  "page",
+  "pageSize",
+  "totalCount",
   "deliveryStatus",
   "checkedAt",
   "className",

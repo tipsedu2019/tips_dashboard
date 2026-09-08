@@ -26,7 +26,16 @@ const ISOLATED_SCHEMA_REPAIR_PATH = "scripts/fixtures/dashboard-free-tier-isolat
 const ISOLATED_SCHEMA_REPAIR_SHA256 = "00c1a584269816060933bb6d728494aef085592d6c6b08dbc8a715cf6ee2794b";
 const ISOLATED_MIGRATION_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql";
 const ISOLATED_MIGRATION_PREREQUISITE_SHA256 = "051f9a7f82ab02abfb3437c6064782651032e4eded02aa89d8986dc9cf94c5f1";
+const NOTIFICATION_SETTINGS_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql";
+const NOTIFICATION_SETTINGS_PREREQUISITE_SHA256 = "d9f4f54d3705b804e01b57230e9cbce152cd7d89ccf66c4d0d6ba05c2c68fe0b";
 const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_postdeploy_readonly.sql";
+// Only this audited consumer and its timeout helper are needed by the DTO probe.
+// Do not copy the app, dependency tree, or environment into the isolated DB.
+const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-registration-visit-cancellation-dto.mjs": [
+    "src/features/tasks/registration-visit-cancellation-service.ts", "src/lib/promise-timeout.ts",
+  ],
+});
 const REVIEWED_MANIFEST_BOOTSTRAP = Object.freeze({
   baseSha: "c7ea76b3dcd94101503305feadc95ce591f68050",
   baseManifestSha256: "0b55a4b7629dc8105fb9df45828db7fa1122651601096e529c8c79c5e801eef1",
@@ -62,6 +71,14 @@ export function sanitizeChildDiagnostic(value) {
     .replace(/\beyJ[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\.[a-z0-9_-]{10,}\b/giu, "[redacted]")
     .replace(/\b(?:sbp|sb_secret|sb_publishable)_[a-z0-9._-]+\b/giu, "[redacted]")
     .slice(-8000);
+}
+export function summarizeLintErrors(value) {
+  try {
+    const rows = JSON.parse(value);
+    if (!Array.isArray(rows)) return value;
+    const errors = rows.flatMap((row) => (row.issues ?? []).filter((issue) => issue.level === "error").map((issue) => ({ function: row.function, ...issue })));
+    return errors.length ? JSON.stringify(errors) : value;
+  } catch { return value; }
 }
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -525,11 +542,16 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let migrationPrerequisite;
   try { migrationPrerequisite = await readFile(safeRepoPath(root, ISOLATED_MIGRATION_PREREQUISITE_PATH)); } catch { fail("isolated_supabase_db_prerequisite_drift"); }
   if (sha256(migrationPrerequisite) !== ISOLATED_MIGRATION_PREREQUISITE_SHA256) fail("isolated_supabase_db_prerequisite_drift");
+  let notificationSettingsPrerequisite;
+  try { notificationSettingsPrerequisite = await readFile(safeRepoPath(root, NOTIFICATION_SETTINGS_PREREQUISITE_PATH)); } catch { fail("isolated_supabase_db_notification_settings_prerequisite_drift"); }
+  if (sha256(notificationSettingsPrerequisite) !== NOTIFICATION_SETTINGS_PREREQUISITE_SHA256) fail("isolated_supabase_db_notification_settings_prerequisite_drift");
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const postdeployContract = args.postdeployContract
     ? (await snapshotRequestedFiles(root, [POSTDEPLOY_CONTRACT_PATH]))[0]
     : null;
   const probes = await snapshotRequestedFiles(root, args.probes);
+  const probeDependencies = await snapshotRequestedFiles(root,
+    [...new Set(args.probes.flatMap((path) => PROBE_DEPENDENCIES[path] ?? []))]);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
@@ -541,7 +563,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         event: "isolated_supabase_db_child_failed",
         step,
         exitCode: Number.isInteger(result.code) ? result.code : null,
-        stdout: sanitizeChildDiagnostic(result.stdout),
+        stdout: sanitizeChildDiagnostic(step === "db lint" ? summarizeLintErrors(result.stdout) : result.stdout),
         stderr: sanitizeChildDiagnostic(result.stderr),
       }));
       fail("isolated_supabase_db_child_failed");
@@ -567,6 +589,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     startAttempted = true;
     await invoke(["db", "start", "--workdir", runtime.tempRoot, "--yes"]);
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
+    await stageContents(notificationSettingsPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000003_dashboard_free_tier_notification_settings_prerequisites.sql"));
     for (const migration of migrations) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
     if (args.lint) await invoke(["db", "lint", "--local", "--workdir", runtime.tempRoot, "--fail-on", "error"]);
@@ -598,6 +621,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
     const status = await invoke(["status", "--workdir", runtime.tempRoot, "--output", "json"]);
     const localDbUrl = parseLocalDbUrl(status.stdout, runtime.ports.db);
+    for (const dependency of probeDependencies) await stageContents(dependency.contents, join(runtime.tempRoot, dependency.path));
     for (const probe of probes) {
       const nonce = secureRandomBytes(16).toString("hex");
       const stagedProbe = join(runtime.tempRoot, probe.path);

@@ -308,9 +308,12 @@ test("the explicit visit command is readiness-fenced, source-current, and replay
     "public.get_registration_visit_legacy_dispatch_plan_v1(",
   );
   const normalizedPlan = normalizeSql(dispatchPlan.definition);
-  assert.match(normalizedPlan, /v_actor_id uuid := \(select auth\.uid\(\)\)/u);
-  assert.match(normalizedPlan, /p_actor_profile_id is distinct from v_actor_id/u);
+  assert.match(normalizedPlan, /coalesce\(\(select auth\.role\(\)\), ''\) <> 'service_role'/u);
+  assert.match(normalizedPlan, /and \(\(select auth\.uid\(\)\) is null or p_actor_profile_id is distinct from \(select auth\.uid\(\)\)\)/u);
   assert.match(normalizedPlan, /registration_access_denied[^;]*42501/u);
+  assert.match(normalizedPlan, /assert_registration_actor_is_active_manager_v1\(p_actor_profile_id\)/u);
+  assert.match(normalizedPlan, /registration_visit_cancellation_source_current_v1\(v_event\.id\)/u);
+  assert.match(normalizedPlan, /registration_visit_notification_source_current_v1\(p_appointment_id\)/u);
 });
 
 test("the production payload-v3 compatibility migration is conditional, exact, and non-retryable", async () => {

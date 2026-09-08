@@ -19,7 +19,8 @@ const connectionStubUrl = moduleUrl(`
   }
 `)
 const providerStubUrl = moduleUrl(`
-  export function createGoogleChatProvider() {
+  export function createGoogleChatProvider(options) {
+    globalThis.__notificationLegacyRouteProviderOptions = options
     return {
       send(input) {
         return globalThis.__notificationLegacyRouteProviderSend(input)
@@ -126,6 +127,8 @@ function serviceHarness({
   begun,
   registerResult = { allowed: true, attempt_id: IDS.attempt },
   finalizeError = null,
+  planOverrides = {},
+  previewValid = true,
 }) {
   const calls = []
   return {
@@ -134,8 +137,9 @@ function serviceHarness({
       async rpc(name, parameters) {
         calls.push({ name, parameters })
         if (name === "get_ops_task_legacy_dispatch_plan_v1") {
-          return { data: { items: [planItem(eventKey)] }, error: null }
+          return { data: { items: [{...planItem(eventKey),...planOverrides}] }, error: null }
         }
+        if (name === "validate_registration_management_notification_preview_v1") return { data: previewValid, error: null }
         if (name === "record_legacy_notification_intent_v1") {
           return { data: { recorded: true }, error: null }
         }
@@ -183,6 +187,7 @@ async function postWithHarness(t, harness, providerSend, actorOptions = {}) {
     globalThis.fetch = originalFetch
     delete globalThis.__notificationLegacyRouteCreateClient
     delete globalThis.__notificationLegacyRouteProviderSend
+    delete globalThis.__notificationLegacyRouteProviderOptions
     for (const [key, value] of [
       ["NEXT_PUBLIC_SUPABASE_URL", previousUrl],
       ["NEXT_PUBLIC_SUPABASE_ANON_KEY", previousAnon],
@@ -382,4 +387,47 @@ test("정상 legacy provider 호출은 업무별 canonical workflow를 정확히
       )
     })
   }
+})
+
+test('confirmed management preview reaches real provider with verified mention; HTTP 408 is never retried', async (t) => {
+  const { createGoogleChatProvider } = await import('../src/features/notifications/server/providers/google-chat-provider.ts')
+  for (const httpStatus of [200,408]) {
+    await t.test(String(httpStatus),async(subtest)=>{
+      const overrides={href:`/admin/registration?taskId=${IDS.source}`,previewChecksum:'b'.repeat(64),previewSourceEventId:IDS.source,mentionUserNames:['users/1234567']}
+      const harness=serviceHarness({eventKey:'registration.case_created',planOverrides:overrides,begun:{acquired:true,claim_id:IDS.claim,owner_generation:'0',dispatch_token:IDS.token,status:'dispatch_started'}})
+      const requests=[]
+      const result=await postWithHarness(subtest,harness,(input)=>{
+        assert.equal(input.workflow_key,'registration')
+        assert.deepEqual(input.mention_user_names,['users/1234567'])
+        return createGoogleChatProvider({...globalThis.__notificationLegacyRouteProviderOptions,fetch:async(url,init)=>{
+          requests.push(JSON.parse(init.body))
+          return new Response(httpStatus===200?JSON.stringify({name:'spaces/fixture/messages/ok'}):'timeout',{status:httpStatus})
+        }}).send(input)
+      })
+      assert.equal(requests.length,1,'real consumer accepted the producer payload without network')
+      assert.match(requests[0].text,/<users\/1234567>/)
+      const terminal=harness.calls.find(c=>c.name==='finalize_legacy_notification_dispatch_v1')
+      assert.equal(terminal.parameters.p_outcome,httpStatus===200?'sent':'delivery_unknown')
+      assert.equal(result.fetchCalls,0)
+      assert.equal(harness.calls.filter(c=>c.name==='validate_registration_management_notification_preview_v1').length,2)
+      if(httpStatus===408){
+        const replay=serviceHarness({eventKey:'registration.case_created',planOverrides:overrides,begun:{acquired:false,claim_id:IDS.claim,owner_generation:'0',status:'delivery_unknown',reason:'idempotent_dispatch_replay'}})
+        let repeat=0
+        await postWithHarness(subtest,replay,async()=>{repeat++;return {status:'sent'}})
+        assert.equal(repeat,0,'uncertain receipt never calls the provider again')
+      }
+    })
+  }
+})
+
+test('changed preview is blocked before claim or real provider transport',async(t)=>{
+ const harness=serviceHarness({eventKey:'registration.case_created',previewValid:false,
+  planOverrides:{href:'/admin/registration',previewChecksum:'b'.repeat(64),previewSourceEventId:IDS.source,mentionUserNames:[]},
+  begun:{acquired:true,claim_id:IDS.claim,owner_generation:'0',dispatch_token:IDS.token,status:'dispatch_started'}})
+ let sends=0
+ const warn=console.warn;console.warn=()=>{};t.after(()=>{console.warn=warn})
+ const result=await postWithHarness(t,harness,async()=>{sends++;return {status:'sent'}})
+ assert.equal(sends,0)
+ assert.equal(result.body.failed,1)
+ assert.equal(harness.calls.filter(c=>c.name==='begin_legacy_notification_dispatch_v1').length,0)
 })

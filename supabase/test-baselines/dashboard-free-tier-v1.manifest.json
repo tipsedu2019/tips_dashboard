@@ -344,6 +344,36 @@
       "fileName": "20260907112516_registration_customer_delivery_lookup.sql",
       "status": "final",
       "sha256": "164f6980461722528a1a6c1c35f8a20aeab627d7d507fc3bc0c5c889738c1045"
+    },
+    {
+      "fileName": "20260908042503_notification_settings_atomic_registration_policy.sql",
+      "status": "final",
+      "sha256": "972d7d082a85980d35b7e974f2b88addd2b87f2318a467bcb239663cb2ae9c2f"
+    },
+    {
+      "fileName": "20260908042546_registration_visit_cancellation_explicit.sql",
+      "status": "final",
+      "sha256": "0d305e78476f74a9ab8e1fa3c7dd476dfb9ae10c4bce02c0e826b106045edbf2"
+    },
+    {
+      "fileName": "20260908042842_registration_case_customer_message_history.sql",
+      "status": "final",
+      "sha256": "0d1f4052715eff2c3bfeedfb7309daad54985b0b91c579f7ff8d3dd946144f7d"
+    },
+    {
+      "fileName": "20260908044018_registration_observation_explicit_chat.sql",
+      "status": "final",
+      "sha256": "b13b9e00934165b6974e7ce6a952133f088ab6093ad29b8bc3d413bb49496295"
+    },
+    {
+      "fileName": "20260908044502_registration_management_notification_preview.sql",
+      "status": "final",
+      "sha256": "ec34efa4af5382a5a0c3dc0aae2a8cd70f478775fcbecb1da3a62a3edc6fe544"
+    },
+    {
+      "fileName": "20260908062222_registration_management_notification_source_recovery.sql",
+      "status": "final",
+      "sha256": "89ef4c52e56f943823675a314b02764f8568fb9a73fc153bfafd02daf13d9c4a"
     }
   ]
 }

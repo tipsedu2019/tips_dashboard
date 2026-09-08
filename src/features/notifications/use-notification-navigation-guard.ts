@@ -29,17 +29,26 @@ export function useNotificationNavigationGuard({
   const bypassRef = React.useRef(false)
   const guardEntryActiveRef = React.useRef(false)
   const suppressNextPopRef = React.useRef(false)
+  const historyCleanupRef = React.useRef<{ url: string; after?: NavigationIntent } | null>(null)
   const dirtyRef = React.useRef(dirty)
 
   React.useEffect(() => {
     dirtyRef.current = dirty
   }, [dirty])
 
-  const removeGuardHistoryEntry = React.useCallback(() => {
-    if (!guardEntryActiveRef.current || typeof window === "undefined") return
+  const removeGuardHistoryEntry = React.useCallback((after?: NavigationIntent) => {
+    if (historyCleanupRef.current) {
+      if (after) historyCleanupRef.current.after = after
+      return
+    }
+    if (!guardEntryActiveRef.current || typeof window === "undefined") {
+      after?.()
+      return
+    }
     guardEntryActiveRef.current = false
     suppressNextPopRef.current = true
     bypassRef.current = true
+    historyCleanupRef.current = { url: window.location.href, after }
     window.history.back()
   }, [])
 
@@ -51,9 +60,10 @@ export function useNotificationNavigationGuard({
     setConfirmationOpen(false)
     if (!intent) return
     bypassRef.current = true
-    if (managesHistory) guardEntryActiveRef.current = false
-    else removeGuardHistoryEntry()
-    intent()
+    if (managesHistory) {
+      guardEntryActiveRef.current = false
+      intent()
+    } else removeGuardHistoryEntry(intent)
   }, [removeGuardHistoryEntry])
 
   const requestNavigation = React.useCallback((
@@ -90,7 +100,7 @@ export function useNotificationNavigationGuard({
 
   React.useEffect(() => {
     if (dirty && !guardEntryActiveRef.current) {
-      window.history.pushState({ notificationSettingsGuard: true }, "", window.location.href)
+      window.history.pushState({ ...window.history.state, notificationSettingsGuard: true }, "", window.location.href)
       guardEntryActiveRef.current = true
     }
     if (!dirty) {
@@ -137,7 +147,11 @@ export function useNotificationNavigationGuard({
     const handlePopState = () => {
       if (suppressNextPopRef.current) {
         suppressNextPopRef.current = false
+        const cleanup = historyCleanupRef.current
+        historyCleanupRef.current = null
+        if (cleanup) window.history.replaceState(window.history.state, "", cleanup.url)
         bypassRef.current = false
+        cleanup?.after?.()
         return
       }
       if (!dirtyRef.current) return

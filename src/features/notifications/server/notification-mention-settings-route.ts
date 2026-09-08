@@ -64,7 +64,7 @@ function workflowKey(value: unknown): NotificationWorkflowKey | null {
     : null
 }
 
-function parseRpcSetting(input: unknown): NotificationMentionSettingDto {
+export function parseRpcSetting(input: unknown): NotificationMentionSettingDto {
   if (
     !isRecord(input) ||
     !exactKeys(input, [
@@ -88,7 +88,7 @@ function parseRpcSetting(input: unknown): NotificationMentionSettingDto {
     typeof input.revision !== "string" ||
     !DECIMAL_REVISION.test(input.revision) ||
     (input.updatedAt !== null && typeof input.updatedAt !== "string") ||
-    input.editable !== true
+    typeof input.editable !== "boolean"
   ) {
     throw unsafeResponse("unsafe mention setting")
   }
@@ -100,11 +100,11 @@ function parseRpcSetting(input: unknown): NotificationMentionSettingDto {
     mentionEnabled: input.mentionEnabled,
     revision: input.revision,
     updatedAt: input.updatedAt,
-    editable: true,
+    editable: input.editable,
   }
 }
 
-function settingToWire(setting: NotificationMentionSettingDto) {
+export function settingToWire(setting: NotificationMentionSettingDto) {
   return {
     rule_id: setting.ruleId,
     workflow_key: setting.workflowKey,
@@ -227,9 +227,12 @@ async function mentionRpc(client: unknown, name: string, parameters: Record<stri
   const failure = new Error("notification mention setting RPC failed") as StructuredError
   const code = isRecord(error) && typeof error.code === "string" ? error.code : ""
   const message = isRecord(error) && typeof error.message === "string" ? error.message : ""
-  if (code === "40001" || message.includes("notification_mention_setting_revision_conflict")) {
+  if (message.includes("notification_mention_setting_revision_conflict")) {
     failure.status = 409
     failure.code = "notification_mention_setting_revision_conflict"
+  } else if (message.includes("notification_setting_archived")) {
+    failure.status = 409
+    failure.code = "notification_setting_archived"
   } else if (code === "42501" || message.includes("notification_access_denied")) {
     failure.status = 403
     failure.code = "notification_forbidden"

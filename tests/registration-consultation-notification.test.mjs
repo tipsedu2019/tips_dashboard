@@ -357,8 +357,8 @@ test("notification route accepts only canonical identity fields and explicitly s
   assert.match(routeSource, /p_appointment_id: appointmentId/)
   assert.match(routeSource, /p_expected_notification_revision: notificationRevision/)
   assert.match(routeSource, /p_request_key: requestKey/)
-  assert.match(routeSource, /p_intent: "send_registration_visit_notification"/)
-  assert.doesNotMatch(routeSource, /body\.intent/)
+  assert.match(routeSource, /const intent = isCancellation \? "send_registration_visit_cancellation" : "send_registration_visit_notification"/)
+  assert.doesNotMatch(routeSource, /p_intent: (?:body|text\(body)/)
   const post = routeSource.slice(routeSource.indexOf("export async function POST"))
   assert.ok(post.indexOf("ensure_registration_visit_notification_v1") < post.indexOf("get_registration_visit_legacy_dispatch_plan_v1"))
   assert.match(routeSource, /notificationRevision/)
@@ -566,7 +566,7 @@ test("consultation notification route uses server-rendered delivery content for 
   assert.doesNotMatch(routeSource, /body\.(?:title|message|target|href|recipient)/);
 });
 
-test("consultation notification route accepts only appointment identity and revision without client-controlled intent", () => {
+test("consultation notification route accepts two exact schemas and derives the RPC intent itself", () => {
   assert.match(routeSource, /const appointmentId = text\(body\.appointmentId\)/);
   assert.match(routeSource, /const notificationRevision = numberValue\(body\.notificationRevision\)/);
   assert.match(routeSource, /const requestKey = text\(body\.requestKey\)/);
@@ -575,8 +575,10 @@ test("consultation notification route accepts only appointment identity and revi
     ...routeSource.matchAll(/\bbody(?:\?\.)?\.([A-Za-z_][A-Za-z0-9_]*)/g),
   ].map((match) => match[1]);
 
-  assert.deepEqual([...new Set(clientBodyFields)], ["appointmentId", "notificationRevision", "requestKey"]);
-  assert.doesNotMatch(routeSource, /body\.intent/);
+  assert.deepEqual([...new Set(clientBodyFields)], ["intent", "appointmentId", "notificationRevision", "requestKey", "sourceDeliveryId", "previewChecksum"]);
+  assert.match(routeSource, /body\.intent === "send_registration_visit_cancellation"/);
+  assert.match(routeSource, /Object\.keys\(body\)\.sort\(\)\.join\(","\) !== expectedKeys/);
+  assert.doesNotMatch(routeSource, /p_intent: (?:body|text\(body)/);
   assert.doesNotMatch(routeSource, /JSON\.stringify\(body\)/);
 });
 
@@ -736,18 +738,21 @@ test("registration status saves never dispatch; management Chat uses a separate 
   ), "utf8")
   const editorStatus = editor.slice(
     editor.indexOf("async function changeWorkflowStatus"),
-    editor.indexOf("async function sendRegistrationManagementNotification"),
+    editor.indexOf("const subjectPanelIdsByTrackId"),
   )
   assert.match(editorStatus, /await setRegistrationWorkflowStatus/)
   assert.doesNotMatch(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
   assert.doesNotMatch(editorStatus, /dispatchRegistrationManagementNotificationSources/)
 
-  const explicitNotification = editor.slice(
-    editor.indexOf("async function sendRegistrationManagementNotification"),
-    editor.indexOf("const migrationReviewPanelId"),
-  )
-  assert.match(explicitNotification, /ensureRegistrationWorkflowNotificationSourceIds/)
-  assert.match(explicitNotification, /dispatchRegistrationManagementNotificationSources/)
+  assert.match(editor, /<RegistrationManagementNotificationActions/)
+  const explicitNotification = await readFile(new URL(
+    "../src/features/tasks/registration-management-notification-actions.tsx",
+    import.meta.url,
+  ), "utf8")
+  const confirmAt = explicitNotification.indexOf("await previewService.confirm(preview, requestKey)")
+  const dispatchAt = explicitNotification.indexOf("await dispatch(sourceEventIds, sessionToken)")
+  assert.ok(confirmAt >= 0 && dispatchAt > confirmAt, "only the reviewed explicit action may create and dispatch a source")
+  assert.match(explicitNotification, /dispatch = dispatchRegistrationManagementNotificationSources/)
 
   const workspaceStatus = workspaceSource.slice(
     workspaceSource.indexOf("const handleRegistrationWorkflowStatusChange"),

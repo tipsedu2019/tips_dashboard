@@ -58,13 +58,27 @@ select ok(
   'semantic dedupe filters task and field columns before parsing bounded JSON candidates'
 );
 select ok(
-  pg_get_functiondef(
-    'dashboard_private.registration_management_notification_source_current_v2(uuid,uuid)'::regprocedure
-  ) like '%notification_request_ledger%'
-  and pg_get_functiondef(
-    'dashboard_private.registration_management_notification_source_current_v2(uuid,uuid)'::regprocedure
-  ) like '%v_ledger.request_fingerprint = pg_catalog.md5%',
-  'provider source validation requires the indexed v2 ledger operation and actor fingerprint'
+  (
+    select wrapper like '%registration_management_notification_superseded_sources%return false%'
+      and wrapper like '%return dashboard_private.registration_management_source_current_before_recovery_v2(p_source_event_id,p_expected_actor_profile_id)%'
+      and wrapper not like '%return true%'
+      and pg_catalog.strpos(wrapper, 'registration_management_notification_superseded_sources')
+        < pg_catalog.strpos(wrapper, 'return dashboard_private.registration_management_source_current_before_recovery_v2')
+      and delegate like '%from dashboard_private.notification_request_ledger ledger%where ledger.request_id = v_request_id%'
+      and delegate like '%v_ledger.request_kind = ''registration_management_notification_v2''%'
+      and delegate like '%v_ledger.request_fingerprint = pg_catalog.md5%''actorProfileId'', v_source.actor_id%'
+      and delegate like '%v_ledger.response_payload ->> ''sourceEventId'' = v_source.id::text%'
+      and delegate like '%v_ledger.response_payload ->> ''factsChecksum'' = v_facts_checksum%'
+    from (
+      select pg_catalog.pg_get_functiondef(
+        'dashboard_private.registration_management_notification_source_current_v2(uuid,uuid)'::regprocedure
+      ) as wrapper,
+      pg_catalog.pg_get_functiondef(
+        'dashboard_private.registration_management_source_current_before_recovery_v2(uuid,uuid)'::regprocedure
+      ) as delegate
+    ) source
+  ),
+  'the final recovery fence delegates to the indexed v2 ledger operation and actor fingerprint'
 );
 select ok(
   pg_get_functiondef(pg_catalog.to_regprocedure(
