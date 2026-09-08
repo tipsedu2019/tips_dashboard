@@ -27,7 +27,8 @@ export async function loadPublicClassesPagePayload(
     ? await buildPayload()
     : await loadCachedPublicClassesSummary();
   if (livePayload && !isFallbackPublicClassesPayload(livePayload)) {
-    return livePayload;
+    const normalized = normalizePublicClassesSummaryPayload(livePayload);
+    if (normalized) return normalized;
   }
 
   const snapshotPayload = await readSnapshot();

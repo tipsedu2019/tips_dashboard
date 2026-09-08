@@ -27,7 +27,7 @@ test("public classes cache invalidation accepts only authorized reason-only requ
   assert.deepEqual(response, { status: 200, body: { ok: true, requestId: REQUEST_ID } });
   assert.deepEqual(calls, [
     ["tag", PUBLIC_CLASSES_SUMMARY_CACHE_TAG, "max"],
-    ["tag", "public-classes-full-v1", "max"],
+    ["tag", "public-classes-full-v2", "max"],
     ["path", "/api/public-classes"],
   ]);
 });
