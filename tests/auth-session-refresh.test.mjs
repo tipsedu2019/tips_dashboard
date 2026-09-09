@@ -249,7 +249,7 @@ test("USER_UPDATED still refreshes password and role rules and applies the assis
   assert.equal(h.context.mustChangePassword, true);
   assert.equal(h.context.canManageAll, false);
   assert.equal(h.input(), null);
-  assert.equal(h.destinations.at(-1), "/admin/tasks");
+  assert.equal(h.destinations.at(-1), "/admin/word-retests");
 });
 
 test("a failed profile recheck retains the existing fallback policy instead of preserving old write privileges", async t => {
