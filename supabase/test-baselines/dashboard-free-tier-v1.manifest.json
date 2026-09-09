@@ -413,7 +413,12 @@
     {
       "fileName": "20260909050943_operations_subject_completion_chat.sql",
       "status": "final",
-      "sha256": "3b513c91edb173b6faad0e248e3799e82b9faa96ee8167f11937f03e95fcc969"
+      "sha256": "de23eea15bf0dafd2dbebef7650019738779c74838aa777ba441a037c5e28f75"
+    },
+    {
+      "fileName": "20260909063900_operations_subject_completion_constraints_validate.sql",
+      "status": "final",
+      "sha256": "d50707caabc9e5684d5ff0526d091aee5dab089cb5771ebeade3ee33cdb894a1"
     }
   ]
 }

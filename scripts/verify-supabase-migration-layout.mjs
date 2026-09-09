@@ -57,7 +57,7 @@ const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc0
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
 const SUBJECT_COMPLETION_MIGRATION_FILE = "20260909050943_operations_subject_completion_chat.sql"
-const SUBJECT_COMPLETION_MIGRATION_SHA256 = "3b513c91edb173b6faad0e248e3799e82b9faa96ee8167f11937f03e95fcc969"
+const SUBJECT_COMPLETION_MIGRATION_SHA256 = "de23eea15bf0dafd2dbebef7650019738779c74838aa777ba441a037c5e28f75"
 const PREPARE_FUNCTION_SIGNATURE =
   "public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)"
 const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"

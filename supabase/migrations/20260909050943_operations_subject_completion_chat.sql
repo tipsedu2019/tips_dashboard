@@ -19,14 +19,14 @@ alter table dashboard_private.notification_rules
       or (workflow_key='withdrawal' and event_key='withdrawal.completed')
       or (workflow_key='word_retests' and event_key='word_retest.result_reported')
     ))
-  );
+  ) not valid;
 alter table dashboard_private.notification_rules
   drop constraint notification_rules_word_retest_chat_retired_check;
 alter table dashboard_private.notification_rules
   add constraint notification_rules_word_retest_chat_retired_check check (
     not (workflow_key='word_retests' and channel_key='google_chat' and enabled)
     or (event_key='word_retest.result_reported' and audience_key='subject_team')
-  );
+  ) not valid;
 
 -- Each new audience receives the current system template and content contract;
 -- no existing custom template or enabled preference is reused or overwritten.

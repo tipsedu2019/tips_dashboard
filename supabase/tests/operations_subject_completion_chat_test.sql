@@ -4,6 +4,12 @@ set local statement_timeout='120s';
 set local lock_timeout='5s';
 select no_plan();
 
+select is((select count(*)::integer from pg_constraint
+  where conrelid='dashboard_private.notification_rules'::regclass
+    and conname in ('notification_rules_workflow_audience_check',
+      'notification_rules_word_retest_chat_retired_check')
+    and convalidated),2,'Both subject notification constraints are validated in the final migration chain');
+
 select ok(strpos(pg_get_functiondef('public.revalidate_immediate_notification_delivery_v1(text,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)'::regprocedure),
   'when ''google_chat.science'' then ''science''')>0,
   'Final revalidator preserves the existing Science connection mapping');
