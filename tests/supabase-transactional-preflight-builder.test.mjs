@@ -130,6 +130,33 @@ test("linked ledger 이후의 forward migrations만 순서대로 넣고 하나�
   assert.match(result.sql.trimEnd(), /rollback;$/i)
 })
 
+test("emoji in SQL literals, identifiers, comments and dollar bodies preserves UTF-16 statement offsets", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const body = [
+    "-- 📝 안내",
+    "/* 🧑‍🏫 nested /* 🎓 */ comment */",
+    "select '📝 안내', E'📝\\n안내' as \"📝 결과\";",
+    "do $body$ begin perform '📝 완료'; end; $body$;",
+    "select 'tail_marker';",
+  ].join("\n")
+  const fixture = await createFixture({ pendingSource: `begin;\n${body}\ncommit;\n` })
+  const result = await buildTransactionalPreflightSql({
+    repoRoot: fixture.root, migrationLedger: fixture.ledger,
+    forwardMigrationsPath: "supabase/migrations", focusedTestPath: "supabase/tests/focused.sql",
+  })
+  assert.ok(result.sql.includes(body))
+  assert.equal((result.sql.match(/^commit;$/gim) ?? []).length, 0)
+  assert.equal((result.sql.match(/^rollback;$/gim) ?? []).length, 1)
+
+  for (const escape of ["commit; select 1;", "select 1 \\gexec\n;"]) {
+    const unsafe = await createFixture({ pendingSource: `begin;\n${body}\n${escape}\ncommit;\n` })
+    await assert.rejects(buildTransactionalPreflightSql({
+      repoRoot: unsafe.root, migrationLedger: unsafe.ledger,
+      forwardMigrationsPath: "supabase/migrations", focusedTestPath: "supabase/tests/focused.sql",
+    }), { message: "transactional_preflight_migration_escape_forbidden" })
+  }
+})
+
 test("각 forward migration 경계에서 deferred constraint events를 commit처럼 검증한다", async () => {
   const { buildTransactionalPreflightSql } = await import(builderUrl)
   const { root, ledger } = await createFixture()
