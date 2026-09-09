@@ -103,6 +103,44 @@ after(async () => {
   await Promise.all(fixtureRoots.map((root) => rm(root, { force: true, recursive: true })))
 })
 
+test("공유 DB의 학습지 이력 누락은 거부하고 정확한 원격 버전 정렬 후 SQL 재실행은 0건이다", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const { root } = await createFixture()
+  const version = "20260909091156"
+  const ledgerRows = ["20260820150057", "20260820152710", "20260820160000"]
+    .map((value) => ({ local: value, remote: value, time: "now" }))
+  ledgerRows.push({ local: "", remote: version, time: "2026-09-09 09:11:56" })
+  const options = {
+    repoRoot: root,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  }
+  const ledger = () => JSON.stringify({ message: "Migrations listed", migrations: ledgerRows })
+  await assert.rejects(
+    buildTransactionalPreflightSql({ ...options, migrationLedger: ledger() }),
+    { message: "transactional_preflight_remote_history_drift" },
+  )
+
+  const file = `${version}_worksheet_history_summaries.sql`
+  await writeFile(
+    join(root, "supabase/migrations", file),
+    await readFile(join(repoRoot, "supabase/migrations", file)),
+  )
+  ledgerRows.at(-1).local = version
+  const result = await buildTransactionalPreflightSql({ ...options, migrationLedger: ledger() })
+  assert.deepEqual(result.pendingVersions, [])
+  assert.deepEqual(result.pendingFiles, [])
+  assert.equal(result.remoteMaxVersion, version)
+  assert.doesNotMatch(result.sql, /worksheet_history_summaries|transactional preflight migration/)
+  assert.match(result.sql, /rollback;/i)
+
+  ledgerRows.push({ local: "", remote: "20260909091157", time: "now" })
+  await assert.rejects(
+    buildTransactionalPreflightSql({ ...options, migrationLedger: ledger() }),
+    { message: "transactional_preflight_remote_history_drift" },
+  )
+})
+
 test("linked ledger 이후의 forward migrations만 순서대로 넣고 하나의 rollback envelope를 보존한다", async () => {
   const { buildTransactionalPreflightSql } = await import(builderUrl)
   const { root, ledger } = await createFixture()
