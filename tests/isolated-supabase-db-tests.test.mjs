@@ -1086,6 +1086,30 @@ test("isolated DB runner excludes only the exact-byte externally applied migrati
   );
 });
 
+test("worksheet summary history is excluded only at its applied version and exact hash", async (t) => {
+  const { validateManifestMigrations } = await import(runnerUrl.href);
+  const root = await mkdtemp(join(tmpdir(), "tips-worksheet-summary-history-"));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const directory = join(root, "supabase/migrations");
+  await mkdir(directory, { recursive: true });
+  const file = "20260909091156_worksheet_history_summaries.sql";
+  const source = await readFile(new URL(`../supabase/migrations/${file}`, import.meta.url));
+  assert.equal(createHash("sha256").update(source).digest("hex"),
+    "92106ceb036738069cc999da847fc022b5c8dc42bbcc2791ca9d390eadb1d196");
+  const options = {
+    root,
+    manifest: { baselineVersion: "dashboard-free-tier-v1", orderedNewMigrations: [] },
+    baselineVersions: ["20260816000000"],
+  };
+  await writeFile(join(directory, file), source);
+  await assert.doesNotReject(validateManifestMigrations(options));
+  await writeFile(join(directory, file), `${source}\n`);
+  await assert.rejects(validateManifestMigrations(options), /remote_history_hash_drift/);
+  await rm(join(directory, file));
+  await writeFile(join(directory, "20260909071003_worksheet_history_summaries.sql"), source);
+  await assert.rejects(validateManifestMigrations(options), /pending|manifest/);
+});
+
 test("reviewed catalog capture activates an immutable set and publishes canonical copies", async (t) => {
   const { captureDashboardFreeTierCatalog } = await import(captureUrl.href);
   const root = await makeRepo(t);

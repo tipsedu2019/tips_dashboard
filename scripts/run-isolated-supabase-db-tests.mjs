@@ -16,6 +16,7 @@ const EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS = Object.freeze([
   ["20260827140002_record_worksheet_output_projection.sql", "49b805b839e1a5fb567d704a6527bc1de1384d24b0ecabe6968b96ed5a637fd9"],
   ["20260828160941_secure_worksheet_history_ownership.sql", "1251d6e51e32e0085f212d2f874b6b5eadb65c9c34f2c30fb5cba5a44e269723"],
   ["20260831151654_record_worksheet_ox_output_projection.sql", "951576acef6b2533f81b8d0241ac4a48ba57639400451589cd39e608465ad188"],
+  ["20260909091156_worksheet_history_summaries.sql", "92106ceb036738069cc999da847fc022b5c8dc42bbcc2791ca9d390eadb1d196"],
 ]);
 // The reviewed baseline retained these ledger entries but omitted their final
 // payload writers. Replay their exact existing SQL after baseline parity and
