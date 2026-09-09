@@ -243,6 +243,13 @@ test("manifest and the actual rule seeds match bidirectionally without a hardcod
     await readFile(registrationManagementSeedUrl, "utf8"),
     await readFile(registrationObservationSeedUrl, "utf8"),
   )
+  const subjectCompletionSeed = await readFile(new URL("../supabase/migrations/20260909050943_operations_subject_completion_chat.sql", import.meta.url), "utf8")
+  const subjectRuleRows = subjectCompletionSeed.slice(subjectCompletionSeed.indexOf("for v_item in select * from (values"), subjectCompletionSeed.indexOf(") x(workflow,event_key"))
+  const newIdentities = [...subjectRuleRows.matchAll(/\('(registration|transfer|withdrawal|word_retests)','([^']+)'/gu)]
+    .map(([, workflowKey, eventKey]) => `${workflowKey}|${eventKey}|subject_team|google_chat|immediate`)
+  assert.equal(newIdentities.length, 4)
+  actualRuleKeys.push(...newIdentities)
+  actualRuleKeys.sort()
 
   assert.deepEqual(actualRuleKeys, expectedRuleKeys)
 })

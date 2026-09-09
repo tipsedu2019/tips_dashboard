@@ -21,6 +21,7 @@ export const wordRetestsNotificationAdapter = createImmediateNotificationAdapter
     "word_retest.canceled": "취소",
   },
   audienceProfileFields: {
+    subject_team: [],
     requesting_teacher: ["requesting_teacher_profile_id"],
     assigned_assistant: ["assigned_assistant_profile_id"],
     secondary_assignee: ["secondary_assignee_profile_id", "secondary_assignee_profile_ids"],

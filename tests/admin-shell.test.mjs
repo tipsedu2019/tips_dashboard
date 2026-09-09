@@ -555,26 +555,14 @@ test("dashboard renders academy-wide actionable conflict state before filters an
   assert.match(conflictWarningBlock, /rows\.slice\(0, 3\)/);
   assert.match(conflictWarningBlock, /aria-expanded=\{showAllConflicts\}/);
   assert.match(conflictWarningBlock, /CONFLICT_TYPE_ORDER/);
-  assert.match(conflictWarningBlock, /useAuth\(\)/);
-  assert.match(conflictWarningBlock, /new Set\(\["admin", "staff", "teacher"\]\)/);
-  assert.match(conflictWarningBlock, /관리팀 등록 필요/);
-  assert.match(conflictWarningBlock, /등록됨 · 담당자가 처리 중/);
-  assert.match(conflictWarningBlock, /actionStateByKey/);
-  assert.match(conflictWarningBlock, /listDashboardConflictTaskLinks/);
-  assert.match(conflictWarningBlock, /createDashboardConflictTask/);
-  assert.match(conflictWarningBlock, /aria-live="polite"/);
+  assert.doesNotMatch(conflictWarningBlock, /useAuth|actionStateByKey|listDashboardConflictTaskLinks|createDashboardConflictTask|할 일 등록|관리팀 등록 필요/);
   assert.match(filterBlock, /retryCoreSources/);
   assert.match(filterBlock, /다시 시도/);
   assert.doesNotMatch(filterBlock, /rounded-xl border bg-background/);
   assert.match(segmentedControlBlock, /rounded-md border bg-muted\/30/);
   assert.match(segmentedControlBlock, /focus-visible:ring-2 focus-visible:ring-ring/);
   assert.match(contractSource, /export type DashboardConflictRow/);
-  assert.match(contractSource, /export type DashboardConflictRpcInput/);
-  assert.match(contractSource, /export function projectDashboardConflictRpcInput/);
-  assert.doesNotMatch(
-    contractSource.slice(contractSource.indexOf("export function projectDashboardConflictRpcInput")),
-    /title:|ownerLabel:|resolution:|key:/,
-  );
+  assert.doesNotMatch(contractSource, /DashboardConflictRpcInput|projectDashboardConflictRpcInput|DashboardConflictTaskLink/);
 });
 
 test("dashboard keeps dense cards readable on mobile widths", async () => {

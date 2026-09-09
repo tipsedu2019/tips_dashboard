@@ -75,6 +75,9 @@ async function makeRepo(t) {
     "scripts/fixtures/dashboard-free-tier-isolated-schema-repair.sql",
     "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql",
     "scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql",
+    "supabase/migrations/20260803142000_notification_word_retest_content_payload.sql",
+    "supabase/migrations/20260803144000_notification_transfer_content_payload.sql",
+    "supabase/migrations/20260803145000_notification_withdrawal_content_payload.sql",
     "scripts/fixtures/supabase-management-read-only-query-contract.json",
     "supabase/test-baselines/dashboard-free-tier-v1.manifest.json",
     "supabase/test-baselines/dashboard-free-tier-v1.sql",
@@ -1215,6 +1218,12 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   const originalPrerequisite = await readFile(prerequisitePath);
   const notificationSettingsPath = join(root, "scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql");
   const originalNotificationSettings = await readFile(notificationSettingsPath);
+  const originalContentPrerequisites = await Promise.all([
+    "20260803142000_notification_word_retest_content_payload.sql",
+    "20260803144000_notification_transfer_content_payload.sql",
+    "20260803145000_notification_withdrawal_content_payload.sql",
+  ].map(async fileName => ({ fileName, contents: await readFile(join(root, "supabase/migrations", fileName)) })));
+
   const calls = [];
   const staged = { baseline: false, schemaRepair: false, prerequisite: false, parity: false, smoke: false, migration: false, postdeploy: false, probe: false };
   const result = await runIsolatedSupabaseDbTests({
@@ -1238,6 +1247,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
         await writeFile(schemaRepairPath, "-- mutated after verification\n");
         await writeFile(prerequisitePath, "-- mutated after verification\n");
         await writeFile(notificationSettingsPath, "-- mutated after verification\n");
+        for (const prerequisite of originalContentPrerequisites) await writeFile(join(root, "supabase/migrations", prerequisite.fileName), "-- mutated after verification\n");
       }
       if (invocation.args[0] === "db") {
         staged.baseline = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"))).equals(baseline);
@@ -1251,6 +1261,10 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
       if (invocation.args[0] === "migration") {
         staged.migration = (await readFile(join(invocation.cwd, "supabase/migrations/20260814000000_candidate.sql"), "utf8")) === "select 1;\n";
         assert.equal((await readFile(join(invocation.cwd, "supabase/migrations/00000000000003_dashboard_free_tier_notification_settings_prerequisites.sql"))).equals(originalNotificationSettings), true);
+        for (const [index, prerequisite] of originalContentPrerequisites.entries()) {
+          const stagedVersion = String(index + 4).padStart(14, "0");
+          assert.equal((await readFile(join(invocation.cwd, "supabase/migrations", `${stagedVersion}_${prerequisite.fileName.slice(15)}`))).equals(prerequisite.contents), true);
+        }
         assert.equal(staged.parity, true, "historical prerequisites are staged only after baseline parity");
       }
       if (invocation.command === "docker") {
@@ -1293,6 +1307,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await writeFile(schemaRepairPath, originalSchemaRepair);
   await writeFile(prerequisitePath, originalPrerequisite);
   await writeFile(notificationSettingsPath, originalNotificationSettings);
+  for (const prerequisite of originalContentPrerequisites) await writeFile(join(root, "supabase/migrations", prerequisite.fileName), prerequisite.contents);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
   const falseContractCalls = [];
   await assert.rejects(
@@ -1318,6 +1333,10 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await writeFile(prerequisitePath, "-- drift\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_prerequisite_drift/);
   await writeFile(prerequisitePath, originalPrerequisite);
+  const contentPath = join(root, "supabase/migrations", originalContentPrerequisites[0].fileName);
+  await writeFile(contentPath, "-- drift\n");
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "content-prerequisite-drift-20260909"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_remote_history_hash_drift/);
+  await writeFile(contentPath, originalContentPrerequisites[0].contents);
   await writeFile(notificationSettingsPath, "-- drift\n");
   await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "registration-prerequisite-drift-20260908"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_notification_settings_prerequisite_drift/);
 });
@@ -2580,8 +2599,10 @@ function completeCatalogFixture(functionIdentity = "get_dashboard_summary_source
 test("notification settings prerequisite restores exact historical function bodies and contract seed", async () => {
   const fixture = await readFile(new URL("../scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql", import.meta.url), "utf8");
   for (const [path, names] of [
-    ["20260803140000_notification_content_contracts.sql", ["dashboard_private.notification_content_event_spec_v1", "dashboard_private.notification_content_variable_v1", "dashboard_private.notification_content_contract_for_identity_v1", "dashboard_private.notification_content_contract_for_rule_v1", "dashboard_private.notification_template_compliance_v1", "public.save_notification_control_plane_v2", "public.save_notification_control_plane_with_override_v2"]],
+    ["20260803140000_notification_content_contracts.sql", ["dashboard_private.notification_content_event_spec_v1", "dashboard_private.notification_content_variable_v1", "dashboard_private.notification_content_contract_for_identity_v1", "dashboard_private.notification_content_contract_for_rule_v1", "dashboard_private.notification_template_compliance_v1", "dashboard_private.notification_control_plane_snapshot_v1", "public.save_notification_control_plane_v2", "public.save_notification_control_plane_with_override_v2"]],
     ["20260803150000_notification_makeup_content_single_writer.sql", ["dashboard_private.mirror_makeup_notification_template_v1", "public.save_notification_control_plane_v2"]],
+    ["20260805101000_notification_control_plane_template_variable_wire_contract.sql", ["dashboard_private.notification_control_plane_snapshot_v1"]],
+    ["20260806123000_notification_korean_template_tokens.sql", ["dashboard_private.notification_template_contract_violations_v1"]],
   ]) {
     const source = await readFile(new URL(`../supabase/migrations/${path}`, import.meta.url), "utf8");
     assert.ok(fixture.includes(`-- source-sha256: ${createHash("sha256").update(source).digest("hex")}`));

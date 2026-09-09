@@ -1,3 +1,5 @@
+import { withPromiseTimeout } from "../../lib/promise-timeout.ts"
+
 export const REGISTRATION_ADMIN_CHAT_CLAIM_TYPE =
   "registration_consultation_admin_chat"
 
@@ -108,10 +110,18 @@ export async function dispatchRegistrationVisitNotificationTargets(targets = [],
   return partitionRegistrationVisitNotificationResults(normalizedTargets, results)
 }
 
-export async function dispatchRegistrationManagementNotificationSources(
-  sourceEventIds = [],
-  sessionToken = "",
-) {
+export function dispatchRegistrationManagementNotificationSources(sourceEventIds = [], sessionToken = "") {
+  return dispatchRegistrationNotificationSources(sourceEventIds, sessionToken, false)
+}
+
+export function dispatchRegistrationSubjectNotificationSources(sourceEventIds = [], sessionToken = "", options = {}) {
+  const timeoutMs = Number.isFinite(options.timeoutMs) && options.timeoutMs > 0
+    ? options.timeoutMs
+    : 20_000
+  return dispatchRegistrationNotificationSources(sourceEventIds, sessionToken, true, timeoutMs)
+}
+
+async function dispatchRegistrationNotificationSources(sourceEventIds, sessionToken, allowEmptyPlan, timeoutMs = null) {
   const normalizedSourceEventIds = Array.from(new Set(
     (Array.isArray(sourceEventIds) ? sourceEventIds : []).map(text).filter(Boolean),
   ))
@@ -119,32 +129,47 @@ export async function dispatchRegistrationManagementNotificationSources(
   if (!token) return { failedSourceEventIds: normalizedSourceEventIds, googleChatEventIds: [] }
 
   const results = await Promise.allSettled(normalizedSourceEventIds.map(async (sourceEventId) => {
-    const response = await fetch("/api/notifications/legacy/ops-task", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${token}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ sourceEventId }),
-    })
-    const payload = await response.json().catch(() => null)
-    const sent = Number(payload?.sent)
-    const deduped = Number(payload?.deduped)
-    const failed = Number(payload?.failed)
-    const eventIds = Array.isArray(payload?.eventIds)
-      ? payload.eventIds.map(text).filter(Boolean)
-      : []
-    if (
-      !response.ok
-      || payload?.ok !== true
-      || !Number.isInteger(sent)
-      || !Number.isInteger(deduped)
-      || !Number.isInteger(failed)
-      || sent + deduped < 1
-    ) {
-      throw new Error("registration_management_notification_dispatch_failed")
+    const controller = timeoutMs === null ? null : new AbortController()
+    const dispatch = async () => {
+      const response = await fetch("/api/notifications/legacy/ops-task", {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ sourceEventId }),
+        ...(controller ? { signal: controller.signal } : {}),
+      })
+      const payload = await response.json().catch(() => null)
+      const sent = Number(payload?.sent)
+      const deduped = Number(payload?.deduped)
+      const failed = Number(payload?.failed)
+      const eventIds = Array.isArray(payload?.eventIds)
+        ? payload.eventIds.map(text).filter(Boolean)
+        : []
+      if (
+        !response.ok
+        || payload?.ok !== true
+        || !Number.isInteger(sent)
+        || !Number.isInteger(deduped)
+        || !Number.isInteger(failed)
+        || sent < 0 || deduped < 0 || failed < 0
+        || (!allowEmptyPlan && sent + deduped < 1)
+      ) {
+        throw new Error("registration_management_notification_dispatch_failed")
+      }
+      return { eventIds, failed: failed > 0 }
     }
-    return { eventIds, failed: failed > 0 }
+    if (timeoutMs === null) return dispatch()
+    try {
+      return await withPromiseTimeout(dispatch(), {
+        timeoutMs,
+        code: "registration_subject_notification_timeout",
+        message: "과목팀 알림 전달 결과를 확인해 주세요.",
+      })
+    } finally {
+      controller.abort()
+    }
   }))
 
   return {

@@ -875,7 +875,7 @@ function expectedGoogleChatDestination(identity) {
   if (identity.channelKey !== "google_chat") return null
   if (identity.audienceKey === "management_team") return "google_chat.management"
   if (identity.audienceKey === "executive_team") return "google_chat.executive"
-  if (identity.audienceKey === "subject_team") return "google_chat.math"
+  if (identity.audienceKey === "subject_team") return identity.workflowKey === "word_retests" ? "google_chat.english" : "google_chat.math"
   throw new Error(`notification_shadow_preview_destination_missing:${contentIdentityKey(identity)}`)
 }
 

@@ -61,7 +61,8 @@ test("settings links preserve workflow, channel and group while rejecting retire
   assert.deepEqual(location, { workflow: "registration", section: "rules", group: "visit" })
   assert.equal(notificationSettingsLocationUrl("https://example.test/admin/settings/notifications?keep=1#top", location), "/admin/settings/notifications?keep=1&workflow=registration&section=rules&group=visit#top")
   assert.equal(notificationSettingsLocationUrl("https://example.test/admin/settings/notifications?group=visit", { ...location, section: "customer" }), "/admin/settings/notifications?workflow=registration&section=customer")
-  assert.deepEqual(readNotificationSettingsLocation(new URLSearchParams("workflow=word_retests&section=unknown&group=unknown")), { workflow: "tasks", section: "rules", group: null })
+  assert.deepEqual(readNotificationSettingsLocation(new URLSearchParams("workflow=word_retests&section=unknown&group=unknown")), { workflow: "word_retests", section: "rules", group: null })
+  assert.deepEqual(readNotificationSettingsLocation(new URLSearchParams("workflow=registration&group=subject")), { workflow: "registration", section: "rules", group: "subject" })
 })
 
 test("settings UI stages mentions, gives template cancel an isolated draft, and keeps historical rules read-only", async () => {

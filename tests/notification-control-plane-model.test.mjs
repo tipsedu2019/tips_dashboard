@@ -208,6 +208,7 @@ test("locks the complete event, audience, and channel vocabularies", () => {
       "registration.admission_advanced",
       "registration.admission_canceled",
       "registration.registration_completed",
+      "registration.subject_registration_completed",
       "registration.case_closed",
       "registration.track_reopened",
       "registration.admission_message_requested",

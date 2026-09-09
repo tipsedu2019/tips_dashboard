@@ -18,6 +18,7 @@ import type {
 import { renderObservationDestinationTeam } from "../../notification-google-chat-catalog.ts"
 import type { NotificationConnectionKey } from "../../notification-google-chat-catalog.ts"
 import type { ImmediateNotificationAdapterDependencies } from "./immediate-notification-adapter.ts"
+import { createRegistrationSubjectCompletionNotificationAdapter, REGISTRATION_SUBJECT_COMPLETED_EVENT } from "./registration-subject-completion-notification-adapter.ts"
 import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
 import { buildRegistrationNotificationPresentation } from "../presentation/registration-notification-presentation.ts"
 import {
@@ -1488,10 +1489,12 @@ export function createRegistrationNotificationAdapter(
     adapterError("payload_schema_unsupported")
   }
 
+  const subjectCompletionAdapter = createRegistrationSubjectCompletionNotificationAdapter(immediateDependencies)
   const adapter: NotificationWorkflowAdapter = {
     workflowKey: "registration",
 
     async resolveTargets(input) {
+      if (input.eventKey === REGISTRATION_SUBJECT_COMPLETED_EVENT) return subjectCompletionAdapter.resolveTargets(input)
       if (isObservationEvent(input.eventKey)) {
         return observationTargetSet(observationPayload(input), input.rule)
       }
@@ -1506,6 +1509,7 @@ export function createRegistrationNotificationAdapter(
     },
 
     async buildRenderContext(input): Promise<NotificationRenderContext> {
+      if (input.eventKey === REGISTRATION_SUBJECT_COMPLETED_EVENT) return subjectCompletionAdapter.buildRenderContext(input)
       if (isObservationEvent(input.eventKey)) {
         const payload = observationPayload(input)
         return buildRegistrationNotificationPresentation(observationPresentationInput(input, payload))
@@ -1539,6 +1543,7 @@ export function createRegistrationNotificationAdapter(
     },
 
     async buildDeepLink(input) {
+      if (input.eventKey === REGISTRATION_SUBJECT_COMPLETED_EVENT) return subjectCompletionAdapter.buildDeepLink(input)
       if (isObservationEvent(input.eventKey)) {
         const payload = observationPayload(input)
         observationPresentationInput(input, payload)
@@ -1567,6 +1572,7 @@ export function createRegistrationNotificationAdapter(
     },
 
     async revalidateBeforeSend(input): Promise<NotificationRevalidationResult> {
+      if (input.eventKey === REGISTRATION_SUBJECT_COMPLETED_EVENT) return subjectCompletionAdapter.revalidateBeforeSend(input)
       if (isObservationEvent(input.eventKey)) {
         return revalidateObservationBeforeSend(input, dependencies)
       }

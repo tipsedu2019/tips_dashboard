@@ -524,11 +524,6 @@ const ADMISSION_FIRST_LESSON_KEYS = Object.freeze([
   "revision",
   "updatedAt",
 ])
-const ADMISSION_ELIGIBLE_PIPELINE_STATUSES = new Set([
-  "enrollment_decided",
-  "enrollment_processing",
-])
-
 function admissionSlot(value: unknown, authority: "normalized" | "legacy") {
   const code = "registration_customer_message_admission_schedule_incomplete"
   if (!isRecord(value) || !hasExactKeys(value, ADMISSION_SLOT_KEYS)) sourceError(code)
@@ -602,7 +597,6 @@ function admissionFacts(
     }
     const workflowStatus = requiredText(value.workflowStatus, code)
     const pipelineStatus = requiredText(value.pipelineStatus, code)
-    if (!ADMISSION_ELIGIBLE_PIPELINE_STATUSES.has(pipelineStatus)) sourceError(code)
     return Object.freeze({
       trackId: requiredUuid(value.trackId, code),
       subject: subject as RegistrationCustomerMessageSubject,

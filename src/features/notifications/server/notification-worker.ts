@@ -1435,11 +1435,19 @@ function validateGoogleChatMentionUserNames(context: JsonRecord) {
 
 function googleChatProviderContext(
   begun: JsonRecord,
-  workflowKey: unknown,
+  claim: JsonRecord,
 ): NotificationBegunDeliveryContext {
+  const workflowKey = requiredWorkflowKey(claim.workflow_key)
+  if (workflowKey === "word_retests" && (
+    begun.event_key !== claim.event_key
+    || begun.audience_key !== "subject_team"
+    || begun.channel_key !== claim.channel_key
+    || begun.connection_key !== targetFromClaim(claim.target).connectionKey
+  )) workerEnvelopeError()
   return Object.freeze({
     ...begun,
-    workflow_key: requiredWorkflowKey(workflowKey),
+    workflow_key: workflowKey,
+    event_key: requiredString(claim.event_key),
   }) as unknown as NotificationBegunDeliveryContext
 }
 
@@ -1771,6 +1779,7 @@ async function processDelivery(
     requiredUuid(begun.claim_token) !== claim.claim_token ||
     !requiredUuid(begun.dispatch_token) ||
     !["google_chat", "web_push"].includes(requiredString(begun.channel_key)) ||
+    begun.channel_key !== claim.channel_key ||
     typeof begun.rendered_title !== "string" ||
     typeof begun.rendered_body !== "string"
   ) {
@@ -1780,7 +1789,7 @@ async function processDelivery(
   const begunChannel = asString(begun.channel_key)
   if (begunChannel === "google_chat") validateGoogleChatMentionUserNames(begun)
   const providerContext = begunChannel === "google_chat"
-    ? googleChatProviderContext(begun, claim.workflow_key)
+    ? googleChatProviderContext(begun, claim)
     : begun as NotificationBegunDeliveryContext
   const provider = input.getProvider(begunChannel)
   if (!provider) {

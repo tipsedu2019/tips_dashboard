@@ -74,6 +74,21 @@ with expected_functions(
       true
     ),
     (
+      'first_consultation_sync_private',
+      'dashboard_private.sync_registration_first_consultation_task_v1()'::text,
+      true, false, true
+    ),
+    (
+      'first_consultation_cancel_private',
+      'dashboard_private.cancel_registration_followup_task_v1()'::text,
+      true, false, true
+    ),
+    (
+      'followup_retirement_private',
+      'dashboard_private.retire_registration_followup_tasks_v1()'::text,
+      false, false, true
+    ),
+    (
       'observation_enter_public',
       'public.enter_registration_observation_v1(uuid,integer,text)'::text,
       false,
@@ -469,7 +484,7 @@ functions as (
     on procedure.oid = pg_catalog.to_regprocedure(expected_functions.function_name)
 )
 select (
-  (select count(*) from functions where oid is not null) = 74
+  (select count(*) from functions where oid is not null) = 77
   and not exists (
     select 1
     from functions
@@ -625,10 +640,19 @@ select (
       or (function_key = 'roster_projection_private' and (
         definition not like '%23514%'
       ))
-      or (function_key = 'first_consultation_private' and (
-        definition not like '%registration_observation_effective_legacy_slots_v1%'
-        or definition not like '%schedule_storage_mode in (''legacy'', ''shadow'')%'
-        or definition not like '%registration_first_consultation_assignee_required%'
+      or (function_key in ('first_consultation_private', 'first_consultation_sync_private', 'first_consultation_cancel_private') and (
+        definition not like '%return new;%'
+        or definition ~* ('in' || 'sert[[:space:]]+into')
+        or definition ~* ('up' || 'date[[:space:]]+public[.]')
+        or definition ~* ('de' || 'lete[[:space:]]+from')
+      ))
+      or (function_key = 'followup_retirement_private' and (
+        definition not like '%task.type = ''general''%'
+        or definition not like '%task.status not in (''done'', ''canceled'')%'
+        or definition not like '%registration_first_consultation_task_links%'
+        or definition not like '%run.task_id = task.id%'
+        or definition not like '%registration_followup_task_retired%'
+        or definition not like '%for update of task%'
       ))
       or (function_key = 'observation_enter_public' and (
         definition not like '%dashboard_private.enter_registration_observation_v1_impl%'
@@ -1512,7 +1536,15 @@ select (
         delivery_guard.function_key = 'waiting_admission_source'
         and (
           delivery_guard.definition not like '%track.id = p_source_id%track.archived_at is null%'
-          or delivery_guard.definition not like '%pipeline_status in (%'
+          or delivery_guard.definition like
+            '%track.pipeline_status in (''enrollment_decided'', ''enrollment_processing'')%'
+          or pg_catalog.regexp_count(
+            delivery_guard.definition,
+            'not track[.]migration_review_required'
+          ) <> 2
+          or delivery_guard.definition not like '%enrollment.status = ''planned''%'
+          or delivery_guard.definition not like '%enrollment.admission_batch_id is null%'
+          or delivery_guard.definition not like '%registration_customer_message_admission_already_sent%'
           or delivery_guard.definition not like '%ops_registration_enrollments%'
           or pg_catalog.regexp_count(
             delivery_guard.definition,
@@ -2074,25 +2106,29 @@ select (
         '%' || 'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'
       and pg_catalog.pg_get_triggerdef(trigger.oid) not like '%admission_checklist%'
   )
-  and (
-    select pg_catalog.count(*) = 1
-    from pg_catalog.pg_trigger trigger
-    join pg_catalog.pg_attribute status_attribute
-      on status_attribute.attrelid = trigger.tgrelid
-      and status_attribute.attname = 'status'
-      and not status_attribute.attisdropped
-    where trigger.tgrelid =
-        'public.ops_registration_enrollments'::pg_catalog.regclass
-      and trigger.tgname = 'create_registration_first_consultation_task_v1'
-      and not trigger.tgisinternal
-      and trigger.tgenabled = 'O'
-      and trigger.tgtype = 17
-      and pg_catalog.cardinality(trigger.tgattr::smallint[]) = 1
-      and status_attribute.attnum = any(trigger.tgattr::smallint[])
-      and trigger.tgqual is null
-      and trigger.tgnargs = 0
-      and trigger.tgfoid =
-        'dashboard_private.create_registration_first_consultation_task_v1()'::pg_catalog.regprocedure
+  and not exists (
+    select 1 from pg_catalog.pg_trigger trigger
+    where not trigger.tgisinternal
+      and (trigger.tgrelid, trigger.tgname) in (
+        ('public.ops_registration_enrollments'::pg_catalog.regclass, 'create_registration_first_consultation_task_v1'),
+        ('public.ops_registration_enrollments'::pg_catalog.regclass, 'cancel_registration_followup_task_v1'),
+        ('public.class_lesson_sessions'::pg_catalog.regclass, 'sync_registration_first_consultation_task_v1')
+      )
+  )
+  and exists (
+    select 1 from pg_catalog.pg_constraint constraint_row
+    where constraint_row.conrelid = 'public.ops_task_automation_rules'::pg_catalog.regclass
+      and constraint_row.conname = 'ops_task_automation_retired_followup_disabled'
+      and constraint_row.convalidated
+  )
+  and not exists (
+    select 1 from public.ops_task_automation_rules rule
+    where rule.enabled and rule.kind = 'trigger'
+      and rule.action ->> 'type' = 'create_follow_up_task'
+      and (rule.target, rule.trigger_key) in (
+        ('registration', 'registration.completed'), ('transfer', 'transfer.completed'),
+        ('withdrawal', 'withdrawal.completed'), ('word_retest', 'word_retest.completed')
+      )
   )
   and exists (
     select 1

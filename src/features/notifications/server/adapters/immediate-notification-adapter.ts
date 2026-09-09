@@ -19,6 +19,7 @@ import type {
 } from "../notification-workflow-adapter.ts"
 import type { NotificationPresentationBuilder } from "../presentation/notification-presentation.ts"
 import { immediateNotificationProductionDependencies } from "./immediate-notification-source-reader.ts"
+import { isOperationalSubjectCompletion, operationalSubjectConnections } from "./operational-subject-notification-routing.ts"
 
 type ImmediateNotificationAdapterConfig = Readonly<{
   workflowKey: NotificationWorkflowKey
@@ -143,17 +144,25 @@ function resolveImmediateTargets(
 
   let targets: NotificationTarget[] = []
   if (input.rule.channelKey === "google_chat") {
-    const connectionKey = connectionKeyFor(input)
-    if (connectionKey) {
-      targets = [{
+    const subjectCompletion = input.rule.audienceKey === "subject_team" && isOperationalSubjectCompletion(input.eventKey)
+    const connections = subjectCompletion
+      ? operationalSubjectConnections(input.eventKey, input.payload)
+      : [connectionKeyFor(input)].filter((key): key is NotificationConnectionKey => key !== null)
+    const configured = input.rule.connectionKey
+    if (subjectCompletion && configured && !connections.some((key) => key === configured)) {
+      throw new Error("notification_payload_schema_unsupported")
+    }
+    targets = connections.filter((key) => !configured || key === configured).map((connectionKey) => ({
         targetKind: "connection",
         targetKey: `connection:${connectionKey}`,
         targetProfileId: null,
         connectionKey,
         targetSnapshot: Object.freeze({ connection_key: connectionKey }),
-      }]
-    }
+      }))
   } else if (input.rule.channelKey === "in_app" || input.rule.channelKey === "web_push") {
+    if (input.rule.audienceKey === "subject_team" && isOperationalSubjectCompletion(input.eventKey)) {
+      throw new Error("notification_payload_schema_unsupported")
+    }
     const fields = config.audienceProfileFields[input.rule.audienceKey] || []
     targets = collectProfileIds(input.payload, fields).map((profileId) => ({
       targetKind: "profile",

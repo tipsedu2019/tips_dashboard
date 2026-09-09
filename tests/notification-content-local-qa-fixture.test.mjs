@@ -160,10 +160,11 @@ test("pgTAP 계약은 review된 14개 파일의 순서와 실제 SHA-256만 허�
 })
 
 test("fixture SQL은 schema-only DB에 합성 설정만 설치하고 operational row와 secret을 거부한다", async () => {
-  const [{ assertNotificationContentLocalQaFixtureSql }, sql, coverageManifest] = await Promise.all([
+  const [{ assertNotificationContentLocalQaFixtureSql }, sql, coverageManifest, subjectSource] = await Promise.all([
     loadSubject(),
     readFile(fixtureSqlUrl, "utf8"),
     readFile(coverageManifestUrl, "utf8").then(JSON.parse),
+    readFile(new URL("../supabase/migrations/20260909050943_operations_subject_completion_chat.sql", import.meta.url), "utf8"),
   ])
 
   assert.doesNotThrow(() => assertNotificationContentLocalQaFixtureSql(sql))
@@ -177,7 +178,18 @@ test("fixture SQL은 schema-only DB에 합성 설정만 설치하고 operational
     /-- notification_content_local_qa_rule_groups_json_begin\n\$notification_content_local_qa_rule_groups\$\n(?<json>\{[\s\S]*?\})\n\$notification_content_local_qa_rule_groups\$::jsonb\n-- notification_content_local_qa_rule_groups_json_end/u,
   )
   assert.ok(embeddedCoverage?.groups?.json)
-  assert.deepEqual(JSON.parse(embeddedCoverage.groups.json), coverageManifest)
+  const historicalCoverage = JSON.parse(embeddedCoverage.groups.json)
+  const forwardGroups = coverageManifest.ruleGroups.filter((group) => (
+    group.cells.length === 1 && group.cells[0].audienceKey === "subject_team"
+      && ["registration.subject_registration_completed", "transfer.completed", "withdrawal.completed", "word_retest.result_reported"].includes(group.eventKeys[0])
+  ))
+  assert.equal(forwardGroups.length, 4)
+  assert.deepEqual(historicalCoverage, { ...coverageManifest, ruleGroups: coverageManifest.ruleGroups.filter((group) => !forwardGroups.includes(group)) })
+  for (const group of forwardGroups) {
+    assert.deepEqual(group.cells, [{ audienceKey: "subject_team", channelKey: "google_chat", ruleVariantKeys: ["immediate"] }])
+    assert.ok(subjectSource.includes(`('${group.workflowKey}','${group.eventKeys[0]}'`))
+  }
+  assert.match(subjectSource, /insert into dashboard_private\.notification_rule_content_contracts/i)
   assert.match(sql, /notification_system_template_vnext_payload_v1/u)
   assert.match(sql, /install_notification_system_templates_vnext_v1/u)
   assert.match(sql, /notification_template_compliance_v1/u)

@@ -916,10 +916,11 @@ test("manual workflow status uses only its dedicated revisioned RPC", async () =
   assert.equal(result.workflowRevision, 4);
   assert.equal(result.workflowStatusEnteredAt, "2026-08-01T03:00:00.000Z");
   assert.equal(result.enrollmentFinalization, null);
+  assert.deepEqual(Array.from(result.sourceEventIds), []);
   assert.equal(invalidations, 1);
 });
 
-test("registered workflow remains a status-only response without enrollment finalization", async () => {
+test("registered workflow preserves completion source receipts without enrollment finalization", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const harness = createClient({
     rpcHandler(name) {
@@ -930,6 +931,7 @@ test("registered workflow remains a status-only response without enrollment fina
           workflowStatus: "registered",
           workflowRevision: 2,
           workflowStatusEnteredAt: "2026-08-26T03:00:00.000Z",
+          sourceEventIds: ["source-registration", "source-registration"],
           enrollmentFinalization: null,
         },
         error: null,
@@ -946,6 +948,7 @@ test("registered workflow remains a status-only response without enrollment fina
   });
 
   assert.equal(result.enrollmentFinalization, null);
+  assert.deepEqual(Array.from(result.sourceEventIds), ["source-registration"]);
 });
 
 test("admission checklist saves one independent item through its dedicated RPC", async () => {

@@ -26,7 +26,7 @@ const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "2ce231fbff51e9fc73e2698c74654d6838ee1282841df600137b52f0cad5fad6"
+  "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
 const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
 const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
@@ -56,6 +56,8 @@ const SCIENCE_MIGRATION_FILE = "20260722120000_science_notification_connection.s
 const SCIENCE_MIGRATION_SHA256 = "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
+const SUBJECT_COMPLETION_MIGRATION_FILE = "20260909050943_operations_subject_completion_chat.sql"
+const SUBJECT_COMPLETION_MIGRATION_SHA256 = "3b513c91edb173b6faad0e248e3799e82b9faa96ee8167f11937f03e95fcc969"
 const PREPARE_FUNCTION_SIGNATURE =
   "public.prepare_notification_immediate_delivery_v1(text,uuid,uuid,uuid,text,text,text,bigint,uuid,bigint,bigint,timestamptz,jsonb)"
 const QUARANTINE_README_SHA256 = "62e387da1575982f154427f5f3ed001ffdb8c9c832744cdb79a45fd3f0ee905f"
@@ -1378,11 +1380,19 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
     const isExactPrepareAclMigration = entry === PREPARE_ACL_MIGRATION_FILE
       && sourceHash === PREPARE_ACL_MIGRATION_SHA256
       && prepareAclMigrationContractValid(sourceText)
+    const isExactSubjectCompletionMigration = entry === SUBJECT_COMPLETION_MIGRATION_FILE
+      && sourceHash === SUBJECT_COMPLETION_MIGRATION_SHA256
+    if (entry === SUBJECT_COMPLETION_MIGRATION_FILE && !isExactSubjectCompletionMigration) {
+      addError(errors, "notification_subject_completion_migration_hash_mismatch", relative(resolvedRoot, entryPath))
+    }
     const isExactScienceMigration = entry === SCIENCE_MIGRATION_FILE
       && sourceHash === SCIENCE_MIGRATION_SHA256
     if (!isExactScienceMigration && !isExactPrepareAclMigration) {
       const normalizedSource = sourceText.toLowerCase()
       for (const contract of SCIENCE_SUPERSEDING_CONTRACTS) {
+        // This reviewed forward patch adds source/target checks in place. It does
+        // not replace the science implementation or touch the prepare function.
+        if (isExactSubjectCompletionMigration && contract.function === "public.revalidate_immediate_notification_delivery_v1") continue
         const bareFunctionName = contract.function.split(".").at(-1).toLowerCase()
         if (normalizedSource.includes(bareFunctionName)) {
           addError(

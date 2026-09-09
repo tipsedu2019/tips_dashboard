@@ -1,5 +1,6 @@
 import type { NotificationRenderContext } from "../notification-workflow-adapter.ts"
 import type { NotificationPresentationInput } from "./notification-presentation.ts"
+import { isOperationalSubjectDestination } from "../adapters/operational-subject-notification-routing.ts"
 import {
   buildOptionalNotificationLine,
   formatNotificationKstDateTime,
@@ -247,6 +248,13 @@ export function buildWordRetestNotificationPresentation(
     || input.contractIdentity.audienceKey !== input.audienceKey
     || input.contractIdentity.ruleVariantKey !== input.ruleVariantKey
   ) {
+    presentationError("notification_payload_schema_unsupported")
+  }
+
+  if (input.audienceKey === "subject_team" && (
+    input.eventKey !== "word_retest.result_reported"
+    || !isOperationalSubjectDestination(input)
+  )) {
     presentationError("notification_payload_schema_unsupported")
   }
 

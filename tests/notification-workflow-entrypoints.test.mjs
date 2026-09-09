@@ -24,7 +24,7 @@ async function createEntrypointFixture(t, overrides = {}) {
     "src/app/admin/settings/notifications/page.tsx": "<NotificationSettingsWorkspace />",
     "src/features/notifications/notification-settings-workspace.tsx": '<NotificationControlPanel presentation="page" />',
     "src/features/notifications/notification-control-panel.tsx": "NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map(() => data-notification-workflow={activeWorkflow})",
-    "src/features/notifications/notification-control-plane-types.ts": [
+    "src/features/notifications/notification-control-plane-types.ts": 'export const NOTIFICATION_WORKFLOW_OPTIONS = [\n' + [
       "tasks",
       "word_retests",
       "registration",
@@ -32,7 +32,7 @@ async function createEntrypointFixture(t, overrides = {}) {
       "withdrawal",
       "makeup_requests",
       "approvals",
-    ].map((key) => `key: "${key}"`).join("\n") + '\nkey !== "word_retests"',
+    ].map((key) => `{ key: "${key}" },`).join("\n") + '\n] as const\nexport const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS\n',
     "src/lib/navigation.ts": '{ title: "알림 설정", url: "/admin/settings/notifications" }',
     "src/app/api/google-chat/route.ts": "notification_payload_forbidden sourceEventId",
     "src/app/api/web-push/route.ts": "notification_payload_forbidden",
@@ -212,4 +212,29 @@ test("settings open/save evidence는 관측 provider와 legacy bridge가 모두 
     passed: true,
     blockers: [],
   })
+})
+
+test("공통 Chat 메뉴는 실제 workflow 배열 alias에서 일곱 업무를 읽는다", async (t) => {
+  const verifier = await import(verifierUrl.href)
+  const rootUrl = await createEntrypointFixture(t)
+  const result = await verifier.scanNotificationWorkflowEntrypoints(rootUrl)
+  assert.deepEqual(result.blockers, [])
+})
+
+test("workflow alias가 다른 목록을 참조하면 공통 메뉴 검증을 통과하지 않는다", async (t) => {
+  const verifier = await import(verifierUrl.href)
+  const rootUrl = await createEntrypointFixture(t)
+  const file = new URL("src/features/notifications/notification-control-plane-types.ts", rootUrl)
+  await writeFile(file, (await readFile(file, "utf8")).replace("= NOTIFICATION_WORKFLOW_OPTIONS\n", "= UNRELATED_OPTIONS\n"))
+  const result = await verifier.scanNotificationWorkflowEntrypoints(rootUrl)
+  assert.deepEqual(result.blockers, verifier.NOTIFICATION_WORKFLOW_ENTRYPOINTS.map(entry => `common_panel_missing:${entry.workflowKey}`))
+})
+
+test("실제 workflow 배열에서 빠진 업무는 다른 선언에 이름이 있어도 실패한다", async (t) => {
+  const verifier = await import(verifierUrl.href)
+  const rootUrl = await createEntrypointFixture(t)
+  const file = new URL("src/features/notifications/notification-control-plane-types.ts", rootUrl)
+  await writeFile(file, (await readFile(file, "utf8")).replace('{ key: "word_retests" },', '') + '\nconst unrelated = { key: "word_retests" }\n')
+  const result = await verifier.scanNotificationWorkflowEntrypoints(rootUrl)
+  assert.deepEqual(result.blockers, ["common_panel_missing:word_retests"])
 })

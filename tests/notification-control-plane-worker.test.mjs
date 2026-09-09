@@ -2189,6 +2189,7 @@ test("worker는 begun payload의 위조 workflow를 덮고 claim workflow contex
   assert.deepEqual(providerInput, {
     ...begunContext,
     workflow_key: "tasks",
+    event_key: "task.created",
   })
   const prepare = harness.calls.find((call) => (
     call.name === "prepare_notification_immediate_delivery_v1"
@@ -2236,6 +2237,45 @@ test("worker는 begun payload의 위조 workflow를 덮고 claim workflow contex
     1,
   )
   assertNoSensitiveValue(finalize.parameters)
+})
+
+test("word result worker binds the begun audience and destination to the claimed event before any external attempt", async () => {
+  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+  const claim = createDeliveryClaim({
+    workflow_key: "word_retests", event_key: "word_retest.result_reported",
+    source_type: "ops_task_event", source_revision: null,
+    target: { target_kind: "connection", target_key: "connection:google_chat.english", target_profile_id: null,
+      connection_key: "google_chat.english", target_snapshot: { connection_key: "google_chat.english" } },
+  })
+  const begun = createBegunGoogleChatContext({
+    workflow_key: "tasks", event_key: "word_retest.result_reported", audience_key: "subject_team", connection_key: "google_chat.english",
+  })
+  for (const invalid of [
+    { event_key: undefined }, { event_key: "word_retest.completed" },
+    { audience_key: undefined }, { audience_key: "management_team" },
+    { connection_key: "google_chat.math" }, { channel_key: "web_push" },
+  ]) {
+    let providerCalls = 0
+    const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim], prepare_notification_immediate_delivery_v1: { ...begun, ...invalid } })
+    const worker = createNotificationWorkerRuntime({ rpc: harness.rpc, getAdapter: () => createAdapter(),
+      getProvider: () => ({ async send() { providerCalls += 1 } }), createRunId: () => RUN_ID })
+    await assert.rejects(worker.runBatch({ workerId: "word-result-fixture", batchSize: 1, leaseSeconds: 30 }),
+      (error) => error?.code === "worker_envelope_invalid")
+    assert.equal(providerCalls, 0)
+    assert.equal(harness.calls.some((call) => call.name === "register_notification_external_attempt_v1"), false)
+  }
+  let delivered = null
+  const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim], prepare_notification_immediate_delivery_v1: begun })
+  const worker = createNotificationWorkerRuntime({ rpc: harness.rpc, getAdapter: () => createAdapter(),
+    getProvider: () => ({ async send(context) {
+      delivered = context
+      return { status: "sent", statusReason: null, providerMessageId: "spaces/test/messages/test", providerResponseCode: "200", errorCode: null, errorSummary: null, nextAttemptAt: null }
+    } }), createRunId: () => RUN_ID })
+  await worker.runBatch({ workerId: "word-result-fixture", batchSize: 1, leaseSeconds: 30 })
+  assert.equal(delivered.workflow_key, "word_retests")
+  assert.equal(delivered.event_key, claim.event_key)
+  assert.equal(delivered.audience_key, "subject_team")
+  assert.equal(delivered.connection_key, "google_chat.english")
 })
 
 test("worker retires in-app before the former atomic projection RPC", async () => {

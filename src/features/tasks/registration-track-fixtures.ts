@@ -3699,6 +3699,7 @@ export function reduceRegistrationSubjectTrackFixture(
         workflowStatus: selected.workflowStatus,
         workflowRevision: selected.workflowRevision,
         workflowStatusEnteredAt: selected.workflowStatusEnteredAt,
+        sourceEventIds: [],
         enrollmentFinalization,
       }
       break

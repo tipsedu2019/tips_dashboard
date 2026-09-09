@@ -127,6 +127,7 @@ import {
 } from "./registration-track-service"
 import { createRegistrationObservationAsyncOwnership } from "./registration-workspace-route"
 import {
+  dispatchRegistrationSubjectNotificationSources,
   getRegistrationManagementNotificationReadiness,
 } from "./registration-consultation-notification.js"
 import {
@@ -1037,12 +1038,16 @@ export function RegistrationApplication({
     if (!nextOption) return
     setWorkflowStatusSaving(true)
     try {
-      await setRegistrationWorkflowStatus({
+      const receipt = await setRegistrationWorkflowStatus({
         trackId: activeGenericTrack.id,
         workflowStatus: nextOption.value as OpsRegistrationWorkflowStatus,
         expectedWorkflowRevision: activeGenericTrack.workflowRevision,
         requestKey: `registration-workflow-status:${activeGenericTrack.id}:${crypto.randomUUID()}`,
       })
+      if (nextOption.value === "registered" && receipt.sourceEventIds.length > 0) {
+        const delivery = await dispatchRegistrationSubjectNotificationSources(receipt.sourceEventIds, notificationToken)
+        if (delivery.failedSourceEventIds.length > 0) onWarning("등록 상태를 저장했습니다. 과목팀 알림 전달 결과를 확인해 주세요.")
+      }
       await onReload(activeGenericTrack.id)
     } catch (error) {
       onWarning(errorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
@@ -1790,6 +1795,7 @@ export function RegistrationApplication({
               taskId={detail.task.id}
               checklist={detail.admissionChecklist}
               permissions={{ canManage: admissionEditable, readOnly: !admissionEditable }}
+              onOpenCustomerMessage={admissionEditable ? openCustomerMessage : undefined}
               onWarning={onWarning}
             />
           )}

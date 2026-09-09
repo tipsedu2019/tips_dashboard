@@ -87,12 +87,16 @@ export async function scanNotificationWorkflowEntrypoints(rootUrl) {
   const controlPanel = await sourceAt(rootUrl, "src/features/notifications/notification-control-panel.tsx")
   const controlPlaneTypes = await sourceAt(rootUrl, "src/features/notifications/notification-control-plane-types.ts")
   const navigation = await sourceAt(rootUrl, "src/lib/navigation.ts")
+  const workflowOptions = controlPlaneTypes.match(
+    /export const NOTIFICATION_WORKFLOW_OPTIONS\s*=\s*(\[[\s\S]*?\])\s*as const/u,
+  )?.[1] || ""
+  const hasGoogleChatWorkflowAlias = /export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS[ \t]*=[ \t]*NOTIFICATION_WORKFLOW_OPTIONS[ \t]*(?:;|\n(?![ \t]*[.(\[])|$)/u.test(controlPlaneTypes)
   const centralPanelReady = (
     settingsPage.includes("<NotificationSettingsWorkspace")
     && settingsWorkspace.includes("<NotificationControlPanel")
     && settingsWorkspace.includes('presentation="page"')
     && controlPanel.includes("NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map")
-    && controlPlaneTypes.includes('key !== "word_retests"')
+    && hasGoogleChatWorkflowAlias
     && controlPanel.includes("data-notification-workflow={activeWorkflow}")
     && navigation.includes('{ title: "알림 설정", url: "/admin/settings/notifications" }')
   )
@@ -117,7 +121,7 @@ export async function scanNotificationWorkflowEntrypoints(rootUrl) {
     if (entry.workspace && !page.includes(`workspace="${entry.workspace}"`)) {
       blockers.push(`page_workspace_mismatch:${entry.workflowKey}`)
     }
-    const hasKey = new RegExp(`key:\\s*["']${entry.workflowKey}["']`).test(controlPlaneTypes)
+    const hasKey = new RegExp(`key:\\s*["']${entry.workflowKey}["']`).test(workflowOptions)
     if (!centralPanelReady || !hasKey) {
       blockers.push(`common_panel_missing:${entry.workflowKey}`)
     }

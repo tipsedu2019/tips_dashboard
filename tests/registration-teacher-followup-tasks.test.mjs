@@ -1,11 +1,49 @@
 import assert from "node:assert/strict"
-import { readFile } from "node:fs/promises"
+import { readFile, readdir } from "node:fs/promises"
 import test from "node:test"
 
 const migrationUrl = new URL("../supabase/migrations/20260815121000_registration_teacher_followup_tasks.sql", import.meta.url)
 const legacyFinalizationMigrationUrl = new URL("../supabase/migrations/20260826101200_registration_legacy_first_consultation.sql", import.meta.url)
 const retirementMigrationUrl = new URL("../supabase/migrations/20260901110100_registration_teacher_feedback_request_retirement.sql", import.meta.url)
 const workspaceUrl = new URL("../src/features/tasks/ops-task-workspace.tsx", import.meta.url)
+
+async function readTaskRetirementMigration() {
+  const directory = new URL("../supabase/migrations/", import.meta.url)
+  const filename = (await readdir(directory)).find((name) => name.endsWith("_registration_followup_task_retirement.sql"))
+  return filename ? readFile(new URL(filename, directory), "utf8") : ""
+}
+
+test("first consultation task retirement removes all three producers and preserves task history", async () => {
+  const sql = await readTaskRetirementMigration()
+  for (const [name, table] of [
+    ["create_registration_first_consultation_task_v1", "ops_registration_enrollments"],
+    ["sync_registration_first_consultation_task_v1", "class_lesson_sessions"],
+    ["cancel_registration_followup_task_v1", "ops_registration_enrollments"],
+  ]) {
+    assert.match(sql, new RegExp(`drop trigger if exists ${name}\\s+on public\\.${table}`, "i"))
+    assert.match(sql, new RegExp(`create or replace function dashboard_private\\.${name}\\(\\)[\\s\\S]*?return new`, "i"))
+    assert.match(sql, new RegExp(`revoke all on function dashboard_private\\.${name}\\(\\)\\s+from public, anon, authenticated, service_role`, "i"))
+  }
+  assert.doesNotMatch(sql, /delete from\s+(?:public\.ops_tasks|public\.ops_task_events|dashboard_private\.registration_first_consultation_task_links)/i)
+  assert.match(sql, /task\.type = 'general'/i)
+  assert.match(sql, /task\.status not in \('done', 'canceled'\)/i)
+  assert.match(sql, /registration_followup_task_retired/i)
+  assert.match(sql, /run\.task_id = task\.id/i)
+  assert.match(sql, /revoke all on function dashboard_private\.retire_registration_followup_tasks_v1\(\)\s+from public, anon, authenticated, service_role/i)
+})
+
+test("only the four retired completion follow-up task rules are disabled and fenced", async () => {
+  const sql = await readTaskRetirementMigration()
+  assert.match(sql, /update public\.ops_task_automation_rules[\s\S]*enabled = false/i)
+  assert.match(sql, /ops_task_automation_retired_followup_disabled/i)
+  assert.match(sql, /kind = 'trigger'/i)
+  assert.match(sql, /action ->> 'type' = 'create_follow_up_task'/i)
+  for (const [target, event] of [["registration", "registration.completed"], ["transfer", "transfer.completed"], ["withdrawal", "withdrawal.completed"], ["word_retest", "word_retest.completed"]]) {
+    assert.ok(sql.includes(`('${target}', '${event}')`))
+  }
+  assert.doesNotMatch(sql, /delete from public\.ops_task_automation_(?:rules|runs|source_bindings)/i)
+  assert.doesNotMatch(sql, /curriculum\.plan_saved/)
+})
 
 async function readOptional(url) {
   try {
@@ -37,7 +75,7 @@ test("feedback submit and correction RPCs are fail-closed while management decis
   assert.match(sql, /if v_actor_role not in \('admin', 'staff'\) then[\s\S]*registration_observation_not_found/i)
 })
 
-test("enrollment creates an ordinary first-parent-consultation task for the first-session teacher", async () => {
+test("historical enrollment migration created an ordinary first-parent-consultation task", async () => {
   const [originalSql, legacySql] = await Promise.all([
     readFile(migrationUrl, "utf8"),
     readFile(legacyFinalizationMigrationUrl, "utf8"),
@@ -53,7 +91,7 @@ test("enrollment creates an ordinary first-parent-consultation task for the firs
   assert.match(sql, /new\.status = 'enrolled'[\s\S]*old\.status is distinct from 'enrolled'/i)
 })
 
-test("legacy enrollment resolves one effective weekday slot without inventing a lesson session", async () => {
+test("historical legacy enrollment migration resolved one effective weekday slot", async () => {
   const sql = await readFile(legacyFinalizationMigrationUrl, "utf8")
   assert.match(sql, /trigger\.tgrelid = 'public\.ops_registration_enrollments'/i)
   assert.match(sql, /trigger\.tgname = 'create_registration_first_consultation_task_v1'/i)
@@ -75,7 +113,7 @@ test("legacy enrollment resolves one effective weekday slot without inventing a 
   assert.doesNotMatch(sql, /on conflict \(enrollment_id\) do nothing/i)
 })
 
-test("first-parent-consultation task follows first-session schedule and teacher changes", async () => {
+test("historical first-consultation migration followed first-session schedule changes", async () => {
   const sql = await readFile(migrationUrl, "utf8")
   assert.match(sql, /create or replace function dashboard_private\.sync_registration_first_consultation_task_v1/i)
   assert.match(sql, /after update of session_date, end_time, teacher_catalog_id on public\.class_lesson_sessions/i)

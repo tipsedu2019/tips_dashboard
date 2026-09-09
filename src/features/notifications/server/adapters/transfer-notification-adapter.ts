@@ -39,6 +39,7 @@ export const transferNotificationAdapter = createImmediateNotificationAdapter({
     "transfer.completed": "완료",
   },
   audienceProfileFields: {
+    subject_team: [],
     requester_profile: ["requester_profile_id"],
     management_team: ["management_profile_ids"],
   },

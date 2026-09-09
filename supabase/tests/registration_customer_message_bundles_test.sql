@@ -30,6 +30,9 @@ select is_empty(
   'private bundle manifests expose no RLS policy'
 );
 
+-- A blank PostgreSQL test session has auth.role() = NULL. Set the real
+-- authenticated caller claim so this assertion exercises the intended guard.
+select set_config('request.jwt.claim.role', 'authenticated', true);
 select throws_ok(
   $$ select public.resolve_registration_customer_message_bundle_source_v1('level_test_booking_bundle', gen_random_uuid(), null) $$,
   '42501',

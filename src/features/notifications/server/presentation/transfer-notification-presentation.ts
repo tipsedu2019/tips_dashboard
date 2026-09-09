@@ -1,5 +1,6 @@
 import type { NotificationRenderContext } from "../notification-workflow-adapter.ts"
 import type { NotificationPresentationInput } from "./notification-presentation.ts"
+import { isOperationalSubjectDestination } from "../adapters/operational-subject-notification-routing.ts"
 import {
   buildOptionalNotificationLine,
   formatNotificationKstDate,
@@ -98,7 +99,7 @@ function isLegacyInbox(input: NotificationPresentationInput) {
 }
 
 function validateDestination(input: NotificationPresentationInput, legacy: boolean) {
-  if (!isManagementChat(input) && !(legacy && isLegacyInbox(input))) {
+  if (!isManagementChat(input) && !isOperationalSubjectDestination(input) && !(legacy && isLegacyInbox(input))) {
     presentationError("notification_transfer_destination_unsupported")
   }
 }

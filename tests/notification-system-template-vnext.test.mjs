@@ -98,7 +98,7 @@ test("system-template golden fixture resolves an exact self-contained message fo
 
   assert.equal(fixture.schemaVersion, 1)
   assert.equal(fixture.contractVersion, "1")
-  assert.equal(fixture.eventGoldens.length, 51)
+  assert.equal(fixture.eventGoldens.length, 52)
   assert.equal(fixture.ruleIdentities.length, contracts.length)
   assert.equal(actualIdentities.size, fixture.ruleIdentities.length)
   assert.deepEqual([...actualIdentities].sort(), [...expectedIdentities].sort())
@@ -150,7 +150,12 @@ test("migrations install deterministic append-only system templates from the lat
   ])
   const embedded = embeddedEventTemplates(migration)
   const extension = embeddedEventTemplateExtension(extensionMigration)
-  const expected = fixture.eventGoldens.map(({ workflowKey, eventKey, titleTemplate, bodyTemplate }) => ({
+  // These immutable August migrations precede the new subject completion event.
+  // The forward migration and its four identities are covered by the manifest
+  // and operational-subject tests; keep the historic templates byte-exact here.
+  const expected = fixture.eventGoldens
+    .filter(({ eventKey }) => eventKey !== "registration.subject_registration_completed")
+    .map(({ workflowKey, eventKey, titleTemplate, bodyTemplate }) => ({
       workflowKey,
       eventKey,
       titleTemplate,

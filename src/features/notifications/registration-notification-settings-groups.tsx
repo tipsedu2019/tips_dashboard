@@ -19,6 +19,7 @@ import { buildNotificationTemplatePreview } from "./notification-template-previe
 const GROUPS = [
   { key: "visit", title: "방문상담 인계", description: "예약 · 일정 변경 · 취소", fixed: true },
   { key: "progress", title: "관리팀 진행 공유", description: "상담 신청 · 상담 완료 · 대기 신청 · 등록 신청", fixed: false },
+  { key: "subject", title: "과목팀 등록 공유", description: "등록 완료", fixed: false },
 ] as const
 
 function archiveCategory(eventKey: string) {
@@ -42,7 +43,7 @@ export function RegistrationNotificationSettingsGroups({
 }) {
   const [selectedRuleId, setSelectedRuleId] = React.useState<string | null>(null)
   const grouped = React.useMemo(() => {
-    const result: Record<RegistrationSettingsGroup, NotificationRuleDto[]> = { visit: [], progress: [], archive: [] }
+    const result: Record<RegistrationSettingsGroup, NotificationRuleDto[]> = { visit: [], progress: [], subject: [], archive: [] }
     for (const rule of rules) {
       const policy = getRegistrationNotificationRulePolicy(rule)
       result[policy?.group ?? "archive"].push(rule)
@@ -58,6 +59,7 @@ export function RegistrationNotificationSettingsGroups({
     titleTemplate: value.titleTemplate,
     bodyTemplate: value.bodyTemplate,
     availableVariables: selectedRule.contentContract.availableVariables,
+    sampleValues: policy?.group === "subject" ? { subjects: "영어", current_status: "등록 완료" } : undefined,
   }) : null
 
   return (
@@ -66,7 +68,7 @@ export function RegistrationNotificationSettingsGroups({
         <div className="hidden grid-cols-[minmax(0,1fr)_7rem_10rem_4rem] gap-4 border-b bg-muted/25 px-5 py-2.5 text-xs text-muted-foreground md:grid" aria-hidden="true">
           <span>업무</span><span>받는 곳</span><span>설정</span><span />
         </div>
-        {GROUPS.map((item) => {
+        {GROUPS.filter((item) => item.key !== "subject" || grouped.subject.length > 0).map((item) => {
           const groupRules = grouped[item.key]
           const enabled = groupRules.filter((rule) => draft.rules[rule.id]?.enabled).length
           const status = groupRules.length === 0 ? "설정 없음" : enabled === 0 ? `${groupRules.length}개 꺼짐` : enabled === groupRules.length ? `${enabled}개 켜짐` : `${enabled}/${groupRules.length}개 켜짐`
@@ -80,7 +82,7 @@ export function RegistrationNotificationSettingsGroups({
               onClick={() => { setSelectedRuleId(null); onGroupChange(item.key) }}
             >
               <span className="col-span-2 min-w-0 md:col-span-1"><span className="block text-base font-semibold">{item.title}</span><span className="mt-1 block text-xs font-normal text-muted-foreground">{item.description}</span></span>
-              <span className="text-xs font-normal md:text-sm">관리팀</span>
+              <span className="text-xs font-normal md:text-sm">{item.key === "subject" ? "과목팀" : "관리팀"}</span>
               <span className="row-start-3 flex items-center gap-2 md:row-auto"><Badge variant="secondary">{status}{item.fixed ? " · 고정" : ""}</Badge></span>
               <span className="col-start-2 row-start-3 flex items-center justify-end gap-1 text-xs text-muted-foreground md:col-auto md:row-auto">상세<ChevronRight aria-hidden="true" className="size-3.5" /></span>
             </Button>
@@ -104,7 +106,7 @@ export function RegistrationNotificationSettingsGroups({
           ) : selectedRule && value ? (
             <div className="space-y-5">
               <div className="space-y-2"><Label htmlFor="registration-notification-scenario">상황</Label><Select value={selectedRule.id} onValueChange={setSelectedRuleId}><SelectTrigger id="registration-notification-scenario" className="w-full"><SelectValue /></SelectTrigger><SelectContent>{selectedRules.map((rule) => <SelectItem key={rule.id} value={rule.id}>{rule.eventLabel ?? rule.eventKey}</SelectItem>)}</SelectContent></Select></div>
-              <dl className="grid grid-cols-2 gap-4 text-sm"><div><dt className="text-xs text-muted-foreground">받는 곳</dt><dd className="mt-1">{selectedRule.audienceLabel ?? "관리팀"} Google Chat</dd></div><div><dt className="text-xs text-muted-foreground">전달 방식</dt><dd className="mt-1">{policy?.mode === "compatibility" ? "이전 기록 호환" : "내용 확인 후 직접 전달"}</dd></div></dl>
+              <dl className="grid grid-cols-2 gap-4 text-sm"><div><dt className="text-xs text-muted-foreground">받는 곳</dt><dd className="mt-1">{selectedRule.audienceLabel ?? "관리팀"} Google Chat</dd></div><div><dt className="text-xs text-muted-foreground">전달 방식</dt><dd className="mt-1">{policy?.mode === "automatic" ? "등록 완료 시 자동 전달" : policy?.mode === "compatibility" ? "이전 기록 호환" : "내용 확인 후 직접 전달"}</dd></div></dl>
               {policy?.mode === "compatibility" ? <p className="rounded-md bg-muted px-3 py-2 text-xs text-muted-foreground">이전 흐름의 원본 기록과 연결된 설정입니다. 현행 화면의 직접 전달과 구분해 유지합니다.</p> : null}
               {policy?.editable ? renderControl(selectedRule) : <p className="text-xs text-muted-foreground">현재 업무에서 수정하지 않는 설정입니다.</p>}
               {preview ? <div className="space-y-2"><div className="flex items-center justify-between"><h3 className="text-sm font-medium">내용 미리보기</h3><span className="text-xs text-muted-foreground">변수는 예시 값으로 표시</span></div><div className="rounded-lg border bg-muted/20 p-4"><p className="text-sm font-semibold">{preview.title}</p><p className="mt-2 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{preview.body}</p></div></div> : null}

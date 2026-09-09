@@ -190,6 +190,15 @@
   ],
   "eventGoldens": [
     {
+      "workflowKey": "registration",
+      "eventKey": "registration.subject_registration_completed",
+      "titleTemplate": "✅ [등록] {student_name}의 {subjects} 등록이 완료됐어요",
+      "bodyTemplate": "[학생] {student_name}\n[과목] {subjects}\n[상태] {current_status}",
+      "representativePayload": { "student_name": "김도윤 학생", "subjects": "수학", "current_status": "등록 완료" },
+      "expectedTitle": "✅ [등록] 김도윤 학생의 수학 등록이 완료됐어요",
+      "expectedBody": "[학생] 김도윤 학생\n[과목] 수학\n[상태] 등록 완료"
+    },
+    {
       "workflowKey": "tasks",
       "eventKey": "task.created",
       "titleTemplate": "📥 [할 일] 할 일이 등록됐어요 · {task_title}",
@@ -961,6 +970,10 @@
     }
   ],
   "ruleIdentities": [
+    { "workflowKey": "registration", "eventKey": "registration.subject_registration_completed", "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKey": "immediate", "goldenEventKey": "registration.subject_registration_completed" },
+    { "workflowKey": "transfer", "eventKey": "transfer.completed", "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKey": "immediate", "goldenEventKey": "transfer.completed" },
+    { "workflowKey": "withdrawal", "eventKey": "withdrawal.completed", "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKey": "immediate", "goldenEventKey": "withdrawal.completed" },
+    { "workflowKey": "word_retests", "eventKey": "word_retest.result_reported", "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKey": "immediate", "goldenEventKey": "word_retest.result_reported" },
     {
       "workflowKey": "approvals",
       "eventKey": "approval.approved",

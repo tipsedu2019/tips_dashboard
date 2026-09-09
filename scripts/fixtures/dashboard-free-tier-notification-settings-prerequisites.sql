@@ -323,6 +323,225 @@ as $$
   where contract_row.rule_id = p_rule_id;
 $$;
 
+-- Final pre-cutoff validator: accept the Korean tokens used by current templates.
+-- source: supabase/migrations/20260806123000_notification_korean_template_tokens.sql
+-- source-sha256: 5a178ed20d449b8a6c32f92fc14426435334578faf1d505df9707dc0b66df163
+create or replace function dashboard_private.notification_template_contract_violations_v1(
+  p_rule_id uuid,
+  p_title_template text,
+  p_body_template text
+)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = ''
+as $$
+declare
+  v_contract jsonb;
+  v_combined text := coalesce(p_title_template, '') || chr(10)
+    || coalesce(p_body_template, '');
+  v_without_valid_tokens text;
+  v_variable record;
+  v_token_match text[];
+  v_violations jsonb := '[]'::jsonb;
+begin
+  select contract_row.contract_json
+  into v_contract
+  from dashboard_private.notification_rule_content_contracts contract_row
+  where contract_row.rule_id = p_rule_id;
+  if not found then
+    raise exception 'notification_content_contract_not_found'
+      using errcode = 'P0002';
+  end if;
+
+  if nullif(pg_catalog.btrim(coalesce(p_title_template, '')), '') is null
+    or nullif(pg_catalog.btrim(coalesce(p_body_template, '')), '') is null
+  then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_content_empty',
+        'severity', 'error',
+        'message', '제목과 본문을 모두 입력해 주세요.'
+      )
+    );
+  end if;
+  if pg_catalog.char_length(coalesce(p_title_template, '')) > 200 then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_title_too_long',
+        'severity', 'error',
+        'message', '제목은 200자 이내로 입력해 주세요.'
+      )
+    );
+  end if;
+  if pg_catalog.char_length(coalesce(p_body_template, '')) > 4000 then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_body_too_long',
+        'severity', 'error',
+        'message', '본문은 4,000자 이내로 입력해 주세요.'
+      )
+    );
+  end if;
+  if v_combined ~ '<[^>]*>' then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_html_forbidden',
+        'severity', 'error',
+        'message', 'HTML 태그는 사용할 수 없어요.'
+      )
+    );
+  end if;
+  if v_combined ~* '(https?://|javascript:|(^|[[:space:]])//)' then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_external_url_forbidden',
+        'severity', 'error',
+        'message', '알림 내용에서 링크를 제거해 주세요.'
+      )
+    );
+  end if;
+  if v_combined ~* '(@all|@everyone|@channel|@here|@전체)' then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_broadcast_mention_forbidden',
+        'severity', 'error',
+        'message', '전체 호출 멘션은 사용할 수 없어요.'
+      )
+    );
+  end if;
+
+  v_without_valid_tokens := pg_catalog.regexp_replace(
+    v_combined,
+    '[{][^{}]+[}]',
+    '',
+    'g'
+  );
+  if v_without_valid_tokens ~ '[{}]' then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_braces_malformed',
+        'severity', 'error',
+        'message', '변수 괄호 형식을 다시 확인해 주세요.'
+      )
+    );
+  end if;
+
+  for v_token_match in
+    select matched.value
+    from pg_catalog.regexp_matches(
+      v_combined,
+      '[{]([^{}]+)[}]',
+      'g'
+    ) matched(value)
+  loop
+    if not exists (
+      select 1
+      from pg_catalog.jsonb_array_elements(
+        v_contract -> 'availableVariables'
+      ) variable(item)
+      where variable.item ->> 'key' = v_token_match[1]
+        or variable.item ->> 'token' = v_token_match[1]
+    ) then
+      v_violations := v_violations || pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'code', 'notification_template_variable_unknown',
+          'severity', 'error',
+          'variable', v_token_match[1],
+          'message', case
+            when v_token_match[1] = 'deep_link'
+              then 'deep_link 변수는 새 템플릿에서 사용할 수 없어요. 링크를 제거해 주세요.'
+            else '계약에 없는 변수를 제거해 주세요.'
+          end
+        )
+      );
+    end if;
+  end loop;
+
+  for v_variable in
+    select
+      available.item ->> 'key' as key,
+      required.token as token
+    from pg_catalog.jsonb_array_elements(
+      v_contract -> 'availableVariables'
+    ) available(item)
+    join pg_catalog.jsonb_array_elements_text(
+      v_contract -> 'requiredTokens'
+    ) required(token)
+      on required.token = available.item ->> 'token'
+  loop
+    if pg_catalog.strpos(v_combined, '{' || v_variable.key || '}') = 0
+      and pg_catalog.strpos(v_combined, '{' || v_variable.token || '}') = 0
+    then
+      v_violations := v_violations || pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'code', 'notification_template_required_token_missing',
+          'severity', 'error',
+          'variable', v_variable.token,
+          'message', '필수 정보를 알림 내용에 포함해 주세요.'
+        )
+      );
+    end if;
+  end loop;
+
+  for v_variable in
+    select
+      available.item ->> 'key' as key,
+      optional.token as token
+    from pg_catalog.jsonb_array_elements(
+      v_contract -> 'availableVariables'
+    ) available(item)
+    join pg_catalog.jsonb_array_elements_text(
+      v_contract -> 'optionalLineTokens'
+    ) optional(token)
+      on optional.token = available.item ->> 'token'
+  loop
+    if (
+      pg_catalog.strpos(v_combined, '{' || v_variable.key || '}') > 0
+      or pg_catalog.strpos(v_combined, '{' || v_variable.token || '}') > 0
+    ) and (
+      pg_catalog.strpos(coalesce(p_title_template, ''), '{' || v_variable.key || '}') > 0
+      or pg_catalog.strpos(coalesce(p_title_template, ''), '{' || v_variable.token || '}') > 0
+      or not exists (
+        select 1
+        from pg_catalog.regexp_split_to_table(
+          coalesce(p_body_template, ''),
+          chr(10)
+        ) line(value)
+        where pg_catalog.btrim(line.value) in (
+          '{' || v_variable.key || '}',
+          '{' || v_variable.token || '}'
+        )
+      )
+    ) then
+      v_violations := v_violations || pg_catalog.jsonb_build_array(
+        pg_catalog.jsonb_build_object(
+          'code', 'notification_template_optional_line_invalid',
+          'severity', 'error',
+          'variable', v_variable.token,
+          'message', '선택 정보는 별도 줄에 배치해 주세요.'
+        )
+      );
+    end if;
+  end loop;
+
+  if pg_catalog.strpos(v_combined, '[다음]') > 0
+    or v_combined ~ '(확인하세요|처리하세요|입력하세요|연락하세요|해주세요|바랍니다)[.! ]*$'
+  then
+    v_violations := v_violations || pg_catalog.jsonb_build_array(
+      pg_catalog.jsonb_build_object(
+        'code', 'notification_template_direct_imperative',
+        'severity', 'warning',
+        'message', '단체방에서는 특정인을 지시하지 않는 진행 상태 문장을 권장해요.'
+      )
+    );
+  end if;
+
+  return v_violations;
+end;
+$$;
+
 create or replace function dashboard_private.notification_template_compliance_v1(
   p_rule_id uuid,
   p_template_id uuid
@@ -1406,5 +1625,344 @@ alter function public.save_notification_control_plane_v2(text,jsonb,jsonb,jsonb,
 revoke all on function public.save_notification_control_plane_v2(text,jsonb,jsonb,jsonb,uuid) from public, anon, authenticated, service_role;
 grant execute on function public.save_notification_control_plane_with_override_v2(text,jsonb,jsonb,jsonb,uuid,uuid,jsonb) to authenticated;
 grant execute on function public.save_notification_control_plane_v2(text,jsonb,jsonb,jsonb,uuid) to authenticated;
+
+select dashboard_private.notification_template_compliance_v1(
+  template_row.rule_id,
+  template_row.id
+)
+from dashboard_private.notification_templates template_row
+join dashboard_private.notification_rule_content_contracts contract_row
+  on contract_row.rule_id = template_row.rule_id
+order by template_row.rule_id, template_row.version;
+
+alter function dashboard_private.notification_template_contract_violations_v1(uuid,text,text) owner to postgres;
+revoke all on function dashboard_private.notification_template_contract_violations_v1(uuid,text,text) from public, anon, authenticated, service_role;
+
+-- Restore the final pre-cutoff read path as well as the settings write path.
+-- The baseline ledger includes these migrations but omits their snapshot bodies.
+create or replace function dashboard_private.notification_control_plane_snapshot_v1(
+  p_workflow_key text,
+  p_editable boolean
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_build_object(
+    'scope_key', 'global',
+    'workflow_key', p_workflow_key,
+    'rules', coalesce(
+      (
+        select pg_catalog.jsonb_agg(
+          pg_catalog.jsonb_build_object(
+            'id', rule_row.id,
+            'workflow_key', rule_row.workflow_key,
+            'event_key', rule_row.event_key,
+            'event_label', registry_row.event_label,
+            'group_label', registry_row.group_label,
+            'trigger_description', registry_row.trigger_description,
+            'sort_order', registry_row.event_sort * 100 + registry_row.cell_sort,
+            'audience_key', rule_row.audience_key,
+            'audience_label', registry_row.audience_label,
+            'channel_key', rule_row.channel_key,
+            'channel_label', registry_row.channel_label,
+            'connection_key', case
+              when rule_row.channel_key <> 'google_chat' then null
+              when rule_row.audience_key = 'management_team'
+                then 'google_chat.management'
+              when rule_row.audience_key = 'executive_team'
+                then 'google_chat.executive'
+              else null
+            end,
+            'rule_variant_key', rule_row.rule_variant_key,
+            'delivery_mode', rule_row.delivery_mode,
+            'schedule_key', rule_row.schedule_key,
+            'schedule_config', rule_row.schedule_config,
+            'enabled', rule_row.enabled,
+            'active_template_id', rule_row.active_template_id,
+            'revision', rule_row.revision::text,
+            'updated_at', rule_row.updated_at,
+            'configuration_kind', registry_row.configuration_kind,
+            'activation_locked', registry_row.activation_locked,
+            'content_contract', contract_row.contract_json,
+            'template_compliance', pg_catalog.jsonb_build_object(
+              'contract_version', contract_row.contract_version,
+              'compliance', compliance_row.compliance,
+              'violations', coalesce(compliance_row.violations, '[]'::jsonb)
+            ),
+            'template', pg_catalog.jsonb_build_object(
+              'id', template_row.id,
+              'rule_id', template_row.rule_id,
+              'version', template_row.version::text,
+              'title_template', template_row.title_template,
+              'body_template', template_row.body_template,
+              'allowed_variables', template_row.allowed_variables,
+              'payload_schema_version', template_row.payload_schema_version,
+              'content_contract_version', template_row.content_contract_version,
+              'checksum', template_row.checksum
+            )
+          )
+          order by
+            registry_row.event_sort,
+            registry_row.cell_sort,
+            rule_row.id
+        )
+        from dashboard_private.notification_settings_ui_registry registry_row
+        join dashboard_private.notification_rules rule_row
+          on rule_row.id = registry_row.rule_id
+         and rule_row.scope_key = 'global'
+         and rule_row.workflow_key = registry_row.workflow_key
+         and rule_row.event_key = registry_row.event_key
+         and rule_row.audience_key = registry_row.audience_key
+         and rule_row.channel_key = registry_row.channel_key
+         and rule_row.rule_variant_key = registry_row.rule_variant_key
+        join dashboard_private.notification_templates template_row
+          on template_row.rule_id = rule_row.id
+         and template_row.id = rule_row.active_template_id
+        join dashboard_private.notification_rule_content_contracts contract_row
+          on contract_row.rule_id = rule_row.id
+         and contract_row.workflow_key = registry_row.workflow_key
+         and contract_row.event_key = registry_row.event_key
+         and contract_row.audience_key = registry_row.audience_key
+         and contract_row.channel_key = registry_row.channel_key
+         and contract_row.rule_variant_key = registry_row.rule_variant_key
+        left join dashboard_private.notification_template_compliance_audits compliance_row
+          on compliance_row.template_id = template_row.id
+         and compliance_row.contract_version = contract_row.contract_version
+        where registry_row.workflow_key = p_workflow_key
+      ),
+      '[]'::jsonb
+    ),
+    'connections', (
+      with connection_catalog(sort_order, channel, connection_key) as (
+        values
+          (1, 'admin'::text, 'google_chat.management'::text),
+          (2, 'executive'::text, 'google_chat.executive'::text),
+          (3, 'english'::text, 'google_chat.english'::text),
+          (4, 'math'::text, 'google_chat.math'::text),
+          (5, 'science'::text, 'google_chat.science'::text)
+      )
+      select pg_catalog.jsonb_agg(
+        case
+          when connection_row.channel is not null then
+            dashboard_private.notification_connection_safe_json_v1(
+              connection_row,
+              p_editable
+            )
+          else pg_catalog.jsonb_build_object(
+            'connection_key', catalog_row.connection_key,
+            'connection_state', 'disconnected',
+            'revision', '0',
+            'configured', false,
+            'webhook_url_mask', null,
+            'last_verified_at', null,
+            'last_error_code', null,
+            'editable', coalesce(p_editable, false)
+          )
+        end
+        order by catalog_row.sort_order
+      )
+      from connection_catalog catalog_row
+      left join public.google_chat_webhook_settings connection_row
+        on connection_row.channel = catalog_row.channel
+    ),
+    'delivery_summary', (
+      with canonical_ranked as (
+        select
+          event_row.workflow_key,
+          event_row.occurrence_key,
+          delivery_row.rule_id,
+          delivery_row.channel_key,
+          delivery_row.target_key,
+          delivery_row.target_generation,
+          delivery_row.status as projected_status,
+          delivery_row.updated_at as evidence_updated_at,
+          pg_catalog.row_number() over (
+            partition by
+              event_row.workflow_key,
+              event_row.occurrence_key,
+              delivery_row.rule_id,
+              delivery_row.channel_key,
+              delivery_row.target_key,
+              delivery_row.target_generation
+            order by delivery_row.updated_at desc, delivery_row.id desc
+          ) as identity_rank
+        from dashboard_private.notification_deliveries delivery_row
+        join dashboard_private.notification_events event_row
+          on event_row.id = delivery_row.event_id
+        left join dashboard_private.notification_dispatch_ownership_claims ownership_row
+          on ownership_row.workflow_key = event_row.workflow_key
+         and ownership_row.occurrence_key = event_row.occurrence_key
+         and ownership_row.rule_id = delivery_row.rule_id
+         and ownership_row.channel_key = delivery_row.channel_key
+         and ownership_row.target_key = delivery_row.target_key
+         and ownership_row.target_generation = delivery_row.target_generation
+        where event_row.scope_key = 'global'
+          and event_row.workflow_key = p_workflow_key
+          and ownership_row.owner_kind is distinct from 'legacy'
+      ),
+      projected_evidence as (
+        select
+          canonical_row.projected_status,
+          canonical_row.evidence_updated_at
+        from canonical_ranked canonical_row
+        where canonical_row.identity_rank = 1
+
+        union all
+
+        select
+          case
+            when ownership_row.terminal_outcome = 'sent' then 'sent'
+            when ownership_row.terminal_outcome = 'failed' then 'failed'
+            when ownership_row.terminal_outcome = 'delivery_unknown'
+              then 'delivery_unknown'
+            when ownership_row.state = 'reserved' then 'pending'
+            else 'delivery_unknown'
+          end as projected_status,
+          ownership_row.updated_at as evidence_updated_at
+        from dashboard_private.notification_dispatch_ownership_claims ownership_row
+        where ownership_row.workflow_key = p_workflow_key
+          and ownership_row.owner_kind = 'legacy'
+      )
+      select pg_catalog.jsonb_build_object(
+        'pending_count', pg_catalog.count(*) filter (
+          where evidence_row.projected_status in (
+            'pending', 'claimed', 'sending', 'retry_wait'
+          )
+        ),
+        'sent_count', pg_catalog.count(*) filter (
+          where evidence_row.projected_status = 'sent'
+        ),
+        'failed_count', pg_catalog.count(*) filter (
+          where evidence_row.projected_status = 'failed'
+        ),
+        'unknown_count', pg_catalog.count(*) filter (
+          where evidence_row.projected_status = 'delivery_unknown'
+        ),
+        'latest_delivery_at', pg_catalog.max(evidence_row.evidence_updated_at)
+      )
+      from projected_evidence evidence_row
+    ),
+    'loaded_at', pg_catalog.statement_timestamp()
+  );
+$$;
+
+-- source: supabase/migrations/20260805101000_notification_control_plane_template_variable_wire_contract.sql
+-- source-sha256: 5d51c99a7f17a188b1eb7c96da986f6338b6774790f7101e23020f8bed086a4c
+-- Keep the canonical template contract in its existing camelCase form for
+-- persistence and checksum comparisons, but expose the historical API wire
+-- shape (pii_class) that the settings client parses.
+do $$
+declare
+  v_snapshot_definition text;
+  v_raw_definition text;
+begin
+  select pg_catalog.pg_get_functiondef(
+    'dashboard_private.notification_control_plane_snapshot_v1(text,boolean)'::pg_catalog.regprocedure
+  )
+  into v_snapshot_definition;
+
+  if v_snapshot_definition is null then
+    raise exception 'notification_control_plane_snapshot_missing'
+      using errcode = '55000';
+  end if;
+
+  v_raw_definition := pg_catalog.regexp_replace(
+    v_snapshot_definition,
+    'FUNCTION[[:space:]]+dashboard_private[.]notification_control_plane_snapshot_v1[[:space:]]*[(]',
+    'FUNCTION dashboard_private.notification_control_plane_snapshot_raw_v1(',
+    'i'
+  );
+
+  if v_raw_definition = v_snapshot_definition
+    or pg_catalog.strpos(
+      v_raw_definition,
+      'notification_control_plane_snapshot_raw_v1'
+    ) = 0
+  then
+    raise exception 'notification_control_plane_snapshot_clone_failed'
+      using errcode = '55000';
+  end if;
+
+  execute v_raw_definition;
+end;
+$$;
+
+create or replace function dashboard_private.notification_control_plane_snapshot_v1(
+  p_workflow_key text,
+  p_editable boolean
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  with raw_snapshot as (
+    select dashboard_private.notification_control_plane_snapshot_raw_v1(
+      p_workflow_key,
+      p_editable
+    ) as payload
+  ),
+  normalized_rules as (
+    select coalesce(
+      pg_catalog.jsonb_agg(
+        pg_catalog.jsonb_set(
+          rule_row.item,
+          '{template,allowed_variables}'::text[],
+          (
+            select coalesce(
+              pg_catalog.jsonb_agg(
+                pg_catalog.jsonb_build_object(
+                  'key', variable_row.item ->> 'key',
+                  'token', variable_row.item ->> 'token',
+                  'pii_class', coalesce(
+                    variable_row.item ->> 'piiClass',
+                    variable_row.item ->> 'pii_class'
+                  )
+                )
+                order by variable_row.ordinality
+              ),
+              '[]'::jsonb
+            )
+            from pg_catalog.jsonb_array_elements(
+              coalesce(
+                rule_row.item #> '{template,allowed_variables}'::text[],
+                '[]'::jsonb
+              )
+            ) with ordinality variable_row(item, ordinality)
+          ),
+          true
+        )
+        order by rule_row.ordinality
+      ),
+      '[]'::jsonb
+    ) as rules
+    from raw_snapshot
+    cross join lateral pg_catalog.jsonb_array_elements(
+      coalesce(raw_snapshot.payload -> 'rules', '[]'::jsonb)
+    ) with ordinality rule_row(item, ordinality)
+  )
+  select pg_catalog.jsonb_set(
+    raw_snapshot.payload,
+    '{rules}'::text[],
+    normalized_rules.rules,
+    true
+  )
+  from raw_snapshot
+  cross join normalized_rules;
+$$;
+
+alter function dashboard_private.notification_control_plane_snapshot_raw_v1(text, boolean)
+  owner to postgres;
+alter function dashboard_private.notification_control_plane_snapshot_v1(text, boolean)
+  owner to postgres;
+
+revoke all on function dashboard_private.notification_control_plane_snapshot_raw_v1(text, boolean)
+  from public, anon, authenticated, service_role;
+revoke all on function dashboard_private.notification_control_plane_snapshot_v1(text, boolean)
+  from public, anon, authenticated, service_role;
 
 commit;

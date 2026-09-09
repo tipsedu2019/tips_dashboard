@@ -33,13 +33,14 @@ export const REGISTRATION_NOTIFICATION_ARCHIVED_EVENTS = [
 export const REGISTRATION_NOTIFICATION_GROUP_LABELS = {
   visit: "방문상담 인계",
   progress: "관리팀 진행 공유",
+  subject: "과목팀 등록 공유",
   archive: "이전 설정",
 } as const
 
 export type RegistrationNotificationRulePolicy = Readonly<{
   group: keyof typeof REGISTRATION_NOTIFICATION_GROUP_LABELS
   label: string
-  mode: "manual" | "compatibility" | "archived"
+  mode: "manual" | "automatic" | "compatibility" | "archived"
   editable: boolean
 }>
 
@@ -49,6 +50,9 @@ export function getRegistrationNotificationRulePolicy(
   rule: RuleIdentity,
 ): RegistrationNotificationRulePolicy | null {
   if (rule.workflowKey !== "registration" || rule.channelKey !== "google_chat") return null
+  if (rule.eventKey === "registration.subject_registration_completed") {
+    return { group: "subject", label: REGISTRATION_NOTIFICATION_GROUP_LABELS.subject, mode: "automatic", editable: true }
+  }
   if ((REGISTRATION_NOTIFICATION_ARCHIVED_EVENTS as readonly string[]).includes(rule.eventKey)) {
     return { group: "archive", label: REGISTRATION_NOTIFICATION_GROUP_LABELS.archive, mode: "archived", editable: false }
   }

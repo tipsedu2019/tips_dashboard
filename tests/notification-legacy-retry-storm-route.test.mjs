@@ -14,7 +14,8 @@ const supabaseStubUrl = moduleUrl(`
   }
 `)
 const connectionStubUrl = moduleUrl(`
-  export async function readLegacyGoogleChatWebhookUrl() {
+  export async function readLegacyGoogleChatWebhookUrl(reader) {
+    if (globalThis.__notificationLegacyRouteReadWebhook) return globalThis.__notificationLegacyRouteReadWebhook(reader)
     return "https://chat.googleapis.com/v1/spaces/test/messages?key=test&token=test"
   }
 `)
@@ -188,6 +189,7 @@ async function postWithHarness(t, harness, providerSend, actorOptions = {}) {
     delete globalThis.__notificationLegacyRouteCreateClient
     delete globalThis.__notificationLegacyRouteProviderSend
     delete globalThis.__notificationLegacyRouteProviderOptions
+    delete globalThis.__notificationLegacyRouteReadWebhook
     for (const [key, value] of [
       ["NEXT_PUBLIC_SUPABASE_URL", previousUrl],
       ["NEXT_PUBLIC_SUPABASE_ANON_KEY", previousAnon],
@@ -430,4 +432,86 @@ test('changed preview is blocked before claim or real provider transport',async(
  assert.equal(sends,0)
  assert.equal(result.body.failed,1)
  assert.equal(harness.calls.filter(c=>c.name==='begin_legacy_notification_dispatch_v1').length,0)
+})
+
+for (const [eventKey, subject] of [
+  ["registration.subject_registration_completed", "english"],
+  ["transfer.completed", "math"],
+  ["withdrawal.completed", "science"],
+  ["word_retest.result_reported", "english"],
+]) {
+  test(`${eventKey} dispatches only to its trusted ${subject} subject connection`, async (t) => {
+    const connectionKey = `google_chat.${subject}`
+    const harness = serviceHarness({
+      eventKey,
+      begun: { acquired: true, claim_id: IDS.claim, owner_generation: "0", dispatch_token: IDS.token },
+      planOverrides: {
+        audienceKey: "subject_team", connectionKey, targetKey: `connection:${connectionKey}`,
+        targetSnapshot: { connection_key: connectionKey },
+      },
+    })
+    const channels = []
+    harness.client.from = (table) => {
+      assert.equal(table, "google_chat_webhook_settings")
+      return { select() { return this }, eq(column, channel) {
+        assert.equal(column, "channel"); channels.push(channel); return this
+      }, async maybeSingle() {
+        return { data: { webhook_url: `https://fixture.invalid/${subject}`, connection_state: "legacy_active" }, error: null }
+      } }
+    }
+    globalThis.__notificationLegacyRouteReadWebhook = async (reader) => (await reader.loadRow()).webhookUrl
+    const sends = []
+    const result = await postWithHarness(t, harness, async (input) => {
+      sends.push(input); return { status: "sent", providerMessageId: "mock-message" }
+    })
+    assert.equal(result.status, 200)
+    assert.deepEqual(channels, [subject])
+    assert.equal(sends.length, 1)
+    assert.equal(sends[0].webhook_url, `https://fixture.invalid/${subject}`)
+    assert.equal(sends[0].connection_key, connectionKey)
+    assert.equal(sends[0].event_key, eventKey)
+    assert.equal(sends[0].audience_key, "subject_team")
+    assert.equal(result.body.sent, 1)
+    assert.equal(result.fetchCalls, 0)
+  })
+}
+
+for (const planOverrides of [
+  { audienceKey: "management_team", connectionKey: "google_chat.management", targetKey: "connection:google_chat.management", targetSnapshot: { connection_key: "google_chat.management" } },
+  { eventKey: "registration.case_created" },
+  { targetKey: "connection:google_chat.math" },
+  { targetSnapshot: { connection_key: "google_chat.math" } },
+  { targetSnapshot: {} },
+  { eventKey: "word_retest.result_reported", connectionKey: "google_chat.math", targetKey: "connection:google_chat.math", targetSnapshot: { connection_key: "google_chat.math" } },
+]) {
+  test(`invalid subject plan is rejected before ownership or provider: ${JSON.stringify(planOverrides)}`, async (t) => {
+    const harness = serviceHarness({
+      eventKey: "registration.subject_registration_completed",
+      begun: { acquired: true },
+      planOverrides: {
+        audienceKey: "subject_team", connectionKey: "google_chat.english", targetKey: "connection:google_chat.english",
+        targetSnapshot: { connection_key: "google_chat.english" }, ...planOverrides,
+      },
+    })
+    let sends = 0
+    const result = await postWithHarness(t, harness, async () => { sends++; return { status: "sent" } })
+    assert.equal(result.status, 503)
+    assert.equal(sends, 0)
+    assert.equal(result.fetchCalls, 0)
+    assert.deepEqual(harness.calls.map(({ name }) => name), ["get_ops_task_legacy_dispatch_plan_v1"])
+  })
+}
+
+test("subject completion replay does not repeat a provider call or register an external attempt", async (t) => {
+  const harness = serviceHarness({
+    eventKey: "registration.subject_registration_completed",
+    begun: { acquired: false, status: "sent", reason: "idempotent_dispatch_replay" },
+    planOverrides: { audienceKey: "subject_team", connectionKey: "google_chat.math", targetKey: "connection:google_chat.math", targetSnapshot: { connection_key: "google_chat.math" } },
+  })
+  let sends = 0
+  const result = await postWithHarness(t, harness, async () => { sends++; return { status: "sent" } })
+  assert.equal(sends, 0)
+  assert.equal(result.fetchCalls, 0)
+  assert.equal(result.body.deduped, 1)
+  assert.equal(harness.calls.some(({ name }) => name === "register_notification_external_attempt_v1"), false)
 })
