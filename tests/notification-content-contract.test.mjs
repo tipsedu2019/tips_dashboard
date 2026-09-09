@@ -86,14 +86,14 @@ function renderGoldenTemplate(template, values) {
   })
 }
 
-test("58 approved event meanings resolve one consistent semantic contract across every rule identity", async () => {
+test("59 event meanings resolve one consistent semantic contract across every rule identity", async () => {
   const [registry, fixture] = await Promise.all([loadRegistry(), readFixture()])
   const expectedByEvent = eventContractMap(fixture.eventContracts)
   const entries = registry.listNotificationContentContracts()
   const actualEvents = new Set(entries.map((entry) => entry.eventKey))
 
-  assert.equal(expectedByEvent.size, 58)
-  assert.equal(actualEvents.size, 58)
+  assert.equal(expectedByEvent.size, 59)
+  assert.equal(actualEvents.size, 59)
   assert.deepEqual([...actualEvents].sort(), [...expectedByEvent.keys()].sort())
 
   for (const entry of entries) {

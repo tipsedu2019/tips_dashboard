@@ -1,6 +1,6 @@
 begin;
 
-select plan(36);
+select plan(38);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -790,16 +790,23 @@ select ok(
       and (result.payload ->> 'workflowRevision')::integer = 2
       and result.payload ? 'enrollmentFinalization'
       and result.payload -> 'enrollmentFinalization' = 'null'::jsonb
-      and before.state = pg_temp.registration_admission_status_side_effect_snapshot(
+      and (before.state - array['canonical','fanout']::text[]) = (pg_temp.registration_admission_status_side_effect_snapshot(
         '00000000-0000-4000-8000-00000000b411',
         '00000000-0000-4000-8000-00000000b405',
         '00000000-0000-4000-8000-00000000b202',
         '00000000-0000-4000-8000-00000000b305'
-      )
+      ) - array['canonical','fanout']::text[])
+      and (select count(*) from dashboard_private.notification_events) = (before.state->>'canonical')::bigint + 1
+      and (select count(*) from dashboard_private.notification_event_fanout_jobs) = (before.state->>'fanout')::bigint + 1
+      and jsonb_array_length(result.payload->'sourceEventIds') = 1
+      and exists(select 1 from dashboard_private.notification_events event_row
+        where event_row.source_id = result.payload#>>'{sourceEventIds,0}'
+          and event_row.event_key = 'registration.subject_registration_completed'
+          and event_row.payload->>'track_id' = '00000000-0000-4000-8000-00000000b405')
     from registration_isolated_batch_result result
     cross join registration_isolated_status_before before
   ),
-  'status changes only the manual status and revision without finalization side effects'
+  'registered status records one subject Chat source while leaving enrollment and delivery state unchanged'
 );
 
 create temporary table registration_isolated_finalization_result on commit drop as
@@ -828,157 +835,53 @@ select ok(
   'the explicit finalizer gives an unbatched subject its own terminal compatibility batch'
 );
 
-select ok(
-  (
-    select pg_catalog.count(*) = 1
-    from dashboard_private.registration_first_consultation_task_links link
-    join public.ops_tasks task on task.id = link.task_id
-    where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
-      and link.class_lesson_session_id is null
-      and task.assignee_id = '00000000-0000-4000-8000-00000000b102'
-      and task.student_id = '00000000-0000-4000-8000-00000000b202'
-      and task.class_id = '00000000-0000-4000-8000-00000000b305'
-      and task.start_at = '2026-09-02 20:00+09'::timestamptz
-      and task.due_at = '2026-09-03 20:00+09'::timestamptz
-  )
-  and (
-    select pg_catalog.count(*) = 1
-    from public.ops_tasks task
-    where task.student_id = '00000000-0000-4000-8000-00000000b202'
-      and task.class_id = '00000000-0000-4000-8000-00000000b305'
-      and task.title like '신규 등록 학부모 첫 상담 · %'
-  ),
-  'a legacy enrollment creates one first-consultation task from its effective class slot'
+select is(
+  (select count(*) from dashboard_private.registration_first_consultation_task_links
+    where enrollment_id = '00000000-0000-4000-8000-00000000b406'),
+  0::bigint,
+  'explicit enrollment finalization no longer creates a first-consultation task'
 );
 
+-- A historical link is retained without turning future enrollment edits into
+-- changes to the old task. New links are never created by these transitions.
+insert into public.ops_tasks(id, title, type, status, priority, requested_by, student_id, class_id)
+values ('00000000-0000-4000-8000-00000000b490', 'Historical first consultation', 'general', 'requested', 'normal',
+  '00000000-0000-4000-8000-00000000b101', '00000000-0000-4000-8000-00000000b202', '00000000-0000-4000-8000-00000000b305');
+insert into dashboard_private.registration_first_consultation_task_links(enrollment_id, task_id, class_lesson_session_id)
+values ('00000000-0000-4000-8000-00000000b406', '00000000-0000-4000-8000-00000000b490', null);
+create temporary table registration_retired_consultation_before on commit drop as
+select pg_catalog.to_jsonb(task) as task_row, pg_catalog.to_jsonb(link) as link_row
+from public.ops_tasks task
+join dashboard_private.registration_first_consultation_task_links link on link.task_id = task.id
+where task.id = '00000000-0000-4000-8000-00000000b490';
+
 update public.ops_registration_enrollments
-set status = 'canceled',
-    roster_active = false
+set status = 'canceled', roster_active = false
 where id = '00000000-0000-4000-8000-00000000b406';
+select ok((select before.task_row = pg_catalog.to_jsonb(task) and before.link_row = pg_catalog.to_jsonb(link)
+  from registration_retired_consultation_before before
+  cross join public.ops_tasks task
+  join dashboard_private.registration_first_consultation_task_links link on link.task_id = task.id
+  where task.id = '00000000-0000-4000-8000-00000000b490'),
+  'enrollment cancellation preserves a historical consultation task and its link');
 
-create temporary table registration_legacy_failure_before on commit drop as
-select
-  pg_catalog.to_jsonb(enrollment) as enrollment_row,
-  link.task_id,
-  pg_catalog.to_jsonb(task) as task_row,
-  coalesce(student.class_ids, '[]'::jsonb) as student_class_ids,
-  coalesce(pg_catalog.to_jsonb(class.student_ids), '[]'::jsonb) as class_student_ids,
-  (
-    select pg_catalog.count(*)
-    from dashboard_private.registration_first_consultation_task_links all_links
-    where all_links.enrollment_id = enrollment.id
-  ) as link_count,
-  (
-    select pg_catalog.count(*)
-    from public.ops_tasks matching_task
-    where matching_task.student_id = enrollment.student_id
-      and matching_task.class_id = enrollment.class_id
-      and matching_task.title like '신규 등록 학부모 첫 상담 · %'
-  ) as task_count,
-  (select pg_catalog.count(*) from public.ops_registration_messages) as message_count,
-  (select pg_catalog.count(*) from dashboard_private.notification_deliveries) as delivery_count
-from public.ops_registration_enrollments enrollment
-join dashboard_private.registration_first_consultation_task_links link
-  on link.enrollment_id = enrollment.id
-join public.ops_tasks task on task.id = link.task_id
-join public.students student on student.id = enrollment.student_id
-join public.classes class on class.id = enrollment.class_id
-where enrollment.id = '00000000-0000-4000-8000-00000000b406';
-
-update public.classes
-set schedule = E'수 18:00-20:00\n수 20:00-22:00'
+update public.classes set schedule = E'수 18:00-20:00\n수 20:00-22:00'
 where id = '00000000-0000-4000-8000-00000000b305';
-
-select throws_ok(
-  $$update public.ops_registration_enrollments
-    set status = 'enrolled',
-        roster_active = true
+select lives_ok(
+  $$update public.ops_registration_enrollments set status = 'enrolled', roster_active = true
     where id = '00000000-0000-4000-8000-00000000b406'$$,
-  '55000',
-  'registration_first_consultation_assignee_required',
-  'ambiguous legacy weekday slots fail closed with the exact operational SQLSTATE'
+  'retired consultation assignment no longer blocks enrollment on an ambiguous legacy slot'
 );
-
-select ok(
-  (
-    select before.enrollment_row = (
-        select pg_catalog.to_jsonb(enrollment)
-        from public.ops_registration_enrollments enrollment
-        where enrollment.id = '00000000-0000-4000-8000-00000000b406'
-      )
-      and before.task_row = (
-        select pg_catalog.to_jsonb(task)
-        from public.ops_tasks task
-        where task.id = before.task_id
-      )
-      and before.task_id = (
-        select link.task_id
-        from dashboard_private.registration_first_consultation_task_links link
-        where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
-      )
-      and before.link_count = (
-        select pg_catalog.count(*)
-        from dashboard_private.registration_first_consultation_task_links link
-        where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
-      )
-      and before.task_count = (
-        select pg_catalog.count(*)
-        from public.ops_tasks task
-        where task.student_id = '00000000-0000-4000-8000-00000000b202'
-          and task.class_id = '00000000-0000-4000-8000-00000000b305'
-          and task.title like '신규 등록 학부모 첫 상담 · %'
-      )
-      and before.student_class_ids = (
-        select coalesce(student.class_ids, '[]'::jsonb)
-        from public.students student
-        where student.id = '00000000-0000-4000-8000-00000000b202'
-      )
-      and before.class_student_ids = (
-        select coalesce(pg_catalog.to_jsonb(class.student_ids), '[]'::jsonb)
-        from public.classes class
-        where class.id = '00000000-0000-4000-8000-00000000b305'
-      )
-      and before.message_count = (
-        select pg_catalog.count(*) from public.ops_registration_messages
-      )
-      and before.delivery_count = (
-        select pg_catalog.count(*) from dashboard_private.notification_deliveries
-      )
-    from registration_legacy_failure_before before
-  ),
-  'ambiguous legacy finalization rolls back enrollment, rosters, task, link, and delivery state atomically'
-);
-
-update public.classes
-set schedule = '수 18:00-20:00'
+select ok((select before.task_row = pg_catalog.to_jsonb(task) and before.link_row = pg_catalog.to_jsonb(link)
+  from registration_retired_consultation_before before
+  cross join public.ops_tasks task
+  join dashboard_private.registration_first_consultation_task_links link on link.task_id = task.id
+  where task.id = '00000000-0000-4000-8000-00000000b490')
+  and (select count(*) = 1 from dashboard_private.registration_first_consultation_task_links
+    where enrollment_id = '00000000-0000-4000-8000-00000000b406'),
+  'reenrollment does not reactivate, modify, or duplicate the historical task');
+update public.classes set schedule = '수 18:00-20:00'
 where id = '00000000-0000-4000-8000-00000000b305';
-
-update public.ops_registration_enrollments
-set status = 'enrolled',
-    roster_active = true
-where id = '00000000-0000-4000-8000-00000000b406';
-
-select ok(
-  (
-    select pg_catalog.count(*) = 1
-    from public.ops_tasks task
-    where task.student_id = '00000000-0000-4000-8000-00000000b202'
-      and task.class_id = '00000000-0000-4000-8000-00000000b305'
-      and task.title like '신규 등록 학부모 첫 상담 · %'
-  )
-  and exists (
-    select 1
-    from registration_legacy_failure_before before
-    join dashboard_private.registration_first_consultation_task_links link
-      on link.task_id = before.task_id
-    join public.ops_tasks task on task.id = link.task_id
-    where link.enrollment_id = '00000000-0000-4000-8000-00000000b406'
-      and link.class_lesson_session_id is null
-      and task.status = 'requested'
-      and task.completed_at is null
-  ),
-  'legacy reenrollment reactivates its one linked consultation task without an orphan'
-);
 
 select ok(
   (
@@ -1095,16 +998,23 @@ select ok(
       and (result.payload ->> 'workflowRevision')::integer = 2
       and result.payload ? 'enrollmentFinalization'
       and result.payload -> 'enrollmentFinalization' = 'null'::jsonb
-      and before.state = pg_temp.registration_admission_status_side_effect_snapshot(
+      and (before.state - array['canonical','fanout']::text[]) = (pg_temp.registration_admission_status_side_effect_snapshot(
         '00000000-0000-4000-8000-00000000b401',
         '00000000-0000-4000-8000-00000000b402',
         '00000000-0000-4000-8000-00000000b201',
         '00000000-0000-4000-8000-00000000b301'
-      )
+      ) - array['canonical','fanout']::text[])
+      and (select count(*) from dashboard_private.notification_events) = (before.state->>'canonical')::bigint + 1
+      and (select count(*) from dashboard_private.notification_event_fanout_jobs) = (before.state->>'fanout')::bigint + 1
+      and jsonb_array_length(result.payload->'sourceEventIds') = 1
+      and exists(select 1 from dashboard_private.notification_events event_row
+        where event_row.source_id = result.payload#>>'{sourceEventIds,0}'
+          and event_row.event_key = 'registration.subject_registration_completed'
+          and event_row.payload->>'track_id' = '00000000-0000-4000-8000-00000000b402')
     from registration_admission_registered_result result
     cross join registration_admission_status_before before
   ),
-  'registered status changes only status and revision and returns null enrollmentFinalization'
+  'registered status returns a subject Chat source receipt with null enrollmentFinalization and unchanged roster'
 );
 
 update dashboard_private.ops_registration_mutations mutation
@@ -1298,6 +1208,15 @@ select ok(
   ) = 0,
   'final active roster functions use non-retryable SQLSTATE 23514 for domain conflicts'
 );
+
+select is(dashboard_private.retire_registration_followup_tasks_v1(), 1,
+  'retirement maintenance finds only the explicitly linked open first-consultation task');
+select ok((select status = 'canceled' from public.ops_tasks where id = '00000000-0000-4000-8000-00000000b490')
+  and (select count(*) = 1 from dashboard_private.registration_first_consultation_task_links
+    where enrollment_id = '00000000-0000-4000-8000-00000000b406')
+  and (select count(*) = 1 from public.ops_task_events where task_id = '00000000-0000-4000-8000-00000000b490'
+    and event_type = 'registration_followup_task_retired'),
+  'the historical first-consultation task is canceled with its link and audit history intact');
 
 select * from finish();
 rollback;

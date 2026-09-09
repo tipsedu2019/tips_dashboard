@@ -19,14 +19,15 @@ values
  ('99700000-0000-4000-8000-000000000302','99700000-0000-4000-8000-000000000202',1,'검증','검증','[]',1,repeat('b',64),'system');
 
 select is((select count(*)::integer from dashboard_private.notification_rules
-  where workflow_key='word_retests' and channel_key='google_chat' and enabled), 0,
-  'word retest Google Chat rules are disabled');
+  where workflow_key='word_retests' and channel_key='google_chat' and enabled
+    and not (event_key='word_retest.result_reported' and audience_key='subject_team')), 0,
+  'all word retest Google Chat rules except the subject result rule remain disabled');
 select ok(exists(select 1 from dashboard_private.notification_rules
   where workflow_key='word_retests' and channel_key='google_chat'),
   'historical rules remain available for delivery audit foreign keys');
 select throws_ok($$update dashboard_private.notification_rules set enabled=true
   where id='99700000-0000-4000-8000-000000000201'$$,
-  '23514',null,'even a stale settings client cannot re-enable word retest Google Chat');
+  '23514',null,'a stale settings client cannot re-enable retired management-team word retest Chat');
 
 insert into dashboard_private.notification_dispatch_ownership_claims(
   id,workflow_key,occurrence_key,rule_id,channel_key,target_key,target_generation,
@@ -34,8 +35,7 @@ insert into dashboard_private.notification_dispatch_ownership_claims(
 select '99700000-0000-4000-8000-000000000001','word_retests','q12-retired-chat',id,
   'google_chat','connection:google_chat.management',0,'legacy',0,'dispatch_started',now(),
   '99700000-0000-4000-8000-000000000101'
-from dashboard_private.notification_rules where workflow_key='word_retests' and channel_key='google_chat'
-order by id limit 1;
+from dashboard_private.notification_rules where id='99700000-0000-4000-8000-000000000201';
 insert into dashboard_private.notification_dispatch_ownership_claims(
   id,workflow_key,occurrence_key,rule_id,channel_key,target_key,target_generation,
   owner_kind,owner_generation,state,dispatch_started_at,dispatch_token)

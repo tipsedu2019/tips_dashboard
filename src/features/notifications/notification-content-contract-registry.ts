@@ -152,6 +152,7 @@ const DISPLAY_APPROVER_PENDING: NotificationFieldPresenceRule = Object.freeze({
 })
 
 const EVENT_SPECS = Object.freeze({
+  "registration.subject_registration_completed": spec(["학생", "과목", "현재상태"], { mustHaveFacts: ["target", "event", "current_state"] }),
   "task.created": spec(["업무", "현재상태", "현재담당"], {
     optionalLineTokens: ["메모정보", "진행정보"],
     mustHaveFacts: ["target", "event", "current_state"],
@@ -252,6 +253,9 @@ function allowedConnectionsFor(identity: NotificationContentContractIdentity) {
   if (identity.audienceKey === "management_team") return ["google_chat.management"] as const
   if (identity.audienceKey === "executive_team") return ["google_chat.executive"] as const
   if (identity.audienceKey === "subject_team") {
+    if (identity.workflowKey === "word_retests" && identity.eventKey === "word_retest.result_reported") {
+      return ["google_chat.english"] as const
+    }
     return ["google_chat.english", "google_chat.math", "google_chat.science"] as const
   }
   throw new Error("notification_content_google_chat_audience_unsupported")

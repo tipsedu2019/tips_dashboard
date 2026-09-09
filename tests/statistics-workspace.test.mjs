@@ -30,7 +30,7 @@ test("dashboard home remains independent from the statistics workspace", async (
   assert.doesNotMatch(dashboard, /StatisticsWorkspace|useStatisticsSnapshot|SectionCards/);
 });
 
-test("only the schedule-conflict panel mounts conflict actions and the textbook panel keeps its bounded presets", async () => {
+test("only the schedule-conflict panel mounts conflict monitoring and the textbook panel keeps its bounded presets", async () => {
   const workspace = await source("src/features/dashboard/statistics-workspace.tsx");
   const conflicts = workspace.slice(
     workspace.indexOf("function ScheduleConflictsPanel"),
@@ -48,7 +48,7 @@ test("only the schedule-conflict panel mounts conflict actions and the textbook 
   assert.match(textbooks, /updatedProgressSessions/);
 });
 
-test("statistics keeps the legacy class-average KPI and full conflict task workflow", async () => {
+test("statistics keeps the legacy class-average KPI and conflict monitoring", async () => {
   const [workspace, sectionCards] = await Promise.all([
     source("src/features/dashboard/statistics-workspace.tsx"),
     source("src/app/admin/dashboard/components/section-cards.tsx"),
@@ -64,8 +64,7 @@ test("statistics keeps the legacy class-average KPI and full conflict task workf
   assert.match(summary, /activeClassesCount/);
   assert.match(conflicts, /DashboardConflictWarning/);
   assert.match(sectionCards, /export function ConflictWarning/);
-  assert.match(sectionCards, /createDashboardConflictTask/);
-  assert.match(sectionCards, /listDashboardConflictTaskLinks/);
+  assert.doesNotMatch(sectionCards, /createDashboardConflictTask|listDashboardConflictTaskLinks|할 일 등록/);
 });
 
 test("only schedule conflicts renders its contextual error and retry workflow", async () => {

@@ -527,6 +527,7 @@ export type RegistrationWaitingDetailsSaveResponse = {
 }
 
 export type RegistrationWorkflowStatusMutationResponse = {
+  sourceEventIds: string[]
   trackId: string
   workflowStatus: OpsRegistrationWorkflowStatus
   workflowRevision: number
@@ -3488,6 +3489,7 @@ export function createRegistrationTrackService(
     const rawEnrollmentIds = rawFinalization?.enrollmentIds
     return {
       trackId: text(value(result, "track_id", "trackId")),
+      sourceEventIds: Array.from(new Set(stringList(value(result, "source_event_ids", "sourceEventIds")))),
       workflowStatus: status,
       workflowRevision: numberValue(value(result, "workflow_revision", "workflowRevision")),
       workflowStatusEnteredAt: text(value(result, "workflow_status_entered_at", "workflowStatusEnteredAt")),

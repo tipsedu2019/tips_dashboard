@@ -316,3 +316,30 @@ test("word-retests adapter는 확정된 단체방 목적지에서 새 presentati
   assert.equal(context.after_test_date, "8월 7일(금) 17:00")
   assert.equal(context.progress_line, "[진행] 김철수님의 변경 일정 확인을 기다리고 있어요.")
 })
+
+test("result reports resolve and render only the authoritative English subject destination", async () => {
+  const { buildWordRetestNotificationPresentation } = await import(presentationUrl)
+  const { wordRetestsNotificationAdapter } = await import(adapterUrl)
+  const resultInput = input("word_retest.result_reported", { notification_subjects: ["영어"] }, ["student_name", "score", "pass_threshold", "result"])
+  Object.assign(resultInput, { audienceKey: "subject_team", connectionKey: "google_chat.english", destinationTeam: "english" })
+  Object.assign(resultInput.contractIdentity, { audienceKey: "subject_team" })
+  const context = buildWordRetestNotificationPresentation(resultInput)
+  assert.equal(context.result, "통과")
+  for (const invalid of [
+    { connectionKey: "google_chat.math", destinationTeam: "math" },
+    { connectionKey: "google_chat.management", destinationTeam: "management" },
+    { channelKey: "in_app" },
+    { payload: { ...resultInput.payload, notification_subjects: ["수학"] } },
+    { eventKey: "word_retest.completed", contractIdentity: { ...resultInput.contractIdentity, eventKey: "word_retest.completed" } },
+  ]) assert.throws(() => buildWordRetestNotificationPresentation({ ...resultInput, ...invalid }), /notification_payload_schema_unsupported/)
+  const resolveInput = {
+    eventId: UUID, workflowKey: "word_retests", eventKey: "word_retest.result_reported",
+    sourceType: "ops_task_event", sourceId: UUID, sourceRevision: null,
+    payloadSchemaVersion: 1, payload: resultInput.payload,
+    rule: { ruleId: UUID, ruleRevision: "1", templateId: UUID, audienceKey: "subject_team", channelKey: "google_chat", connectionKey: "google_chat.english", ruleVariantKey: "immediate" },
+    scheduledFor: OCCURRED_AT,
+  }
+  const targets = await wordRetestsNotificationAdapter.resolveTargets(resolveInput)
+  assert.deepEqual(targets.targets.map((target) => target.connectionKey), ["google_chat.english"])
+  await assert.rejects(async () => wordRetestsNotificationAdapter.resolveTargets({ ...resolveInput, payload: { ...resultInput.payload, notification_subjects: ["수학"] } }), /notification_payload_schema_unsupported/)
+})

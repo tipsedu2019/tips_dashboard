@@ -152,18 +152,6 @@ function loadWithdrawalStudentStatusPolicy() {
   ).getWithdrawalStudentStatusAfterClassRemoval;
 }
 
-function loadDashboardConflictTaskLinkReader(mocks) {
-  const source = sourceBetween(
-    "const DASHBOARD_CONFLICT_TASK_LINK_TIMEOUT_MS",
-    "export async function createDashboardConflictTask",
-  );
-  return transpileAndLoad(
-    source,
-    ["listDashboardConflictTaskLinks"],
-    mocks,
-  ).listDashboardConflictTaskLinks;
-}
-
 function loadOpsTaskPageWithMocks(mocks) {
   const source = sourceBetween(
     "export async function loadOpsTaskPage",
@@ -424,63 +412,6 @@ test("task stats supplement combines caller cancellation with the exact bounded 
     kind: "combined",
     signals: [callerSignal, { kind: "timeout", milliseconds: 8_000 }],
   });
-});
-
-test("dashboard conflict task link lookup aborts after eight seconds without automatic retry", async () => {
-  const calls = [];
-  const signal = { kind: "dashboard-conflict-timeout" };
-  const builder = {
-    data: [{}],
-    error: null,
-    abortSignal(value) {
-      calls.push(["abortSignal", value]);
-      return builder;
-    },
-    retry(value) {
-      calls.push(["retry", value]);
-      return builder;
-    },
-  };
-  const listDashboardConflictTaskLinks = loadDashboardConflictTaskLinkReader({
-    AbortSignal: {
-      timeout(value) {
-        calls.push(["timeout", value]);
-        return signal;
-      },
-    },
-    supabase: {
-      rpc(name, args) {
-        calls.push(["rpc", name, args]);
-        return builder;
-      },
-    },
-    normalizeDashboardConflictInput: (value) => value,
-    dashboardConflictKey: () => "teacher:one",
-    normalizeDashboardConflictTaskLink: (_value, expectedKey) => ({
-      conflictKey: expectedKey,
-      linked: false,
-      taskId: "",
-      canOpen: false,
-      alreadyExists: false,
-    }),
-  });
-
-  assert.deepEqual(
-    await listDashboardConflictTaskLinks([{ type: "teacher" }]),
-    [{
-      conflictKey: "teacher:one",
-      linked: false,
-      taskId: "",
-      canOpen: false,
-      alreadyExists: false,
-    }],
-  );
-  assert.deepEqual(JSON.parse(JSON.stringify(calls)), [
-    ["rpc", "list_dashboard_conflict_task_links_v1", { p_conflicts: [{ type: "teacher" }] }],
-    ["timeout", 8_000],
-    ["abortSignal", signal],
-    ["retry", false],
-  ]);
 });
 
 test("withdrawal status changes only after the selected class is the student's final live roster", () => {

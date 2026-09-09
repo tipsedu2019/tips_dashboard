@@ -239,6 +239,7 @@ import {
   type RegistrationInitialWorkflowDraft,
 } from "./registration-intake-workflow"
 import {
+  dispatchRegistrationSubjectNotificationSources,
   isRegistrationSubmissionOwnershipCurrent,
 } from "./registration-consultation-notification.js"
 import {
@@ -10583,12 +10584,17 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setSaving(true)
     setMessage("")
     try {
-      await setRegistrationWorkflowStatus({
+      const receipt = await setRegistrationWorkflowStatus({
         trackId: track.trackId,
         workflowStatus,
         expectedWorkflowRevision: track.workflowRevision,
         requestKey: createRegistrationMutationRequestKey("registration-workflow-status", track.trackId),
       })
+      if (workflowStatus === "registered" && receipt.sourceEventIds.length > 0) {
+        const delivery = await dispatchRegistrationSubjectNotificationSources(receipt.sourceEventIds, notificationSessionToken)
+        setLatestGoogleChatEventId(delivery.googleChatEventIds[delivery.googleChatEventIds.length - 1] || null)
+        if (delivery.failedSourceEventIds.length > 0) setMessage("등록 상태를 저장했습니다. 과목팀 알림 전달 결과를 확인해 주세요.")
+      }
       await reload(true, false)
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 변경하지 못했습니다. 최신 정보를 확인해 주세요."))
@@ -10596,7 +10602,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     } finally {
       setSaving(false)
     }
-  }, [canManageRegistrationWorkflow, reload, saving])
+  }, [canManageRegistrationWorkflow, notificationSessionToken, reload, saving])
 
   const closeRegistrationApplicationHost = useCallback(() => {
     registrationObservationLoadOwnershipRef.current.invalidate()

@@ -22,6 +22,10 @@ const fixtureUrl = new URL(
   "./fixtures/notification-content-contracts.json",
   import.meta.url,
 )
+const subjectCompletionMigrationUrl = new URL(
+  "../supabase/migrations/20260909050943_operations_subject_completion_chat.sql",
+  import.meta.url,
+)
 
 async function readMigration() {
   const source = await readFile(migrationUrl, "utf8").catch(() => "")
@@ -115,12 +119,13 @@ test("migration creates private five-part contracts and immutable compliance evi
 })
 
 test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript contract inputs", async () => {
-  const [migration, extensionMigration, observationMigration, fixture, registry] = await Promise.all([
+  const [migration, extensionMigration, observationMigration, fixture, registry, subjectMigration] = await Promise.all([
     readMigration(),
     readFile(registrationManagementMigrationUrl, "utf8"),
     readFile(registrationObservationMigrationUrl, "utf8"),
     readFile(fixtureUrl, "utf8").then(JSON.parse),
     import(registryUrl.href),
+    readFile(subjectCompletionMigrationUrl, "utf8"),
   ])
   const extensionEventKeys = new Set([
     "registration.consultation_completed",
@@ -140,16 +145,25 @@ test("embedded SQL contract fixtures stay byte-for-byte equivalent to TypeScript
     ...fixture,
     eventContracts: fixture.eventContracts.filter(({ eventKey }) => (
       !extensionEventKeys.has(eventKey) && !observationEventKeys.has(eventKey)
+        && eventKey !== "registration.subject_registration_completed"
     )),
   }
   const extensionFixture = fixture.eventContracts.filter(({ eventKey }) => extensionEventKeys.has(eventKey))
-  assert.equal(fixture.eventContracts.length, 58)
+  assert.equal(fixture.eventContracts.length, 59)
   assert.equal(
     new Set(registry.listNotificationContentContracts().map(({ eventKey }) => eventKey)).size,
-    58,
+    59,
   )
   assert.deepEqual(embeddedContractFixture(migration), baseFixture)
   assert.deepEqual(embeddedContractExtension(extensionMigration), extensionFixture)
+  const subjectContract = fixture.eventContracts.find(({ eventKey }) => eventKey === "registration.subject_registration_completed")
+  assert.ok(subjectContract, "the current fixture includes the forward registration subject event")
+  assert.ok(subjectMigration.includes("('registration','registration.subject_registration_completed'"))
+  for (const token of subjectContract.requiredTokens) assert.ok(subjectMigration.includes(`'${token}'`))
+  assert.match(subjectMigration, /insert into dashboard_private\.notification_rule_content_contracts/i)
+  const subjectVariables = JSON.parse(subjectMigration.match(/if v_item\.workflow='registration' then\s+v_vars:='([^']+)'::jsonb/u)[1])
+  const currentSubjectContract = registry.getNotificationContentContract({ workflowKey: "registration", eventKey: "registration.subject_registration_completed", audienceKey: "subject_team", channelKey: "google_chat", ruleVariantKey: "immediate" })
+  assert.deepEqual(subjectVariables, currentSubjectContract.availableVariables)
 
   const variableBlock = functionBlock(
     migration,

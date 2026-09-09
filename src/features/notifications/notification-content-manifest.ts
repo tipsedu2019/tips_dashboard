@@ -55,6 +55,20 @@ const APPROVAL_CELLS = [
 ] as const satisfies ReadonlyArray<NotificationContentRuleCell>
 
 const RULE_GROUPS = [
+  ...([
+    ["registration", "registration.subject_registration_completed"],
+    ["transfer", "transfer.completed"],
+    ["withdrawal", "withdrawal.completed"],
+    ["word_retests", "word_retest.result_reported"],
+  ] as const).map(([workflowKey, eventKey]) => ({
+    workflowKey,
+    eventKeys: [eventKey],
+    cells: [{ audienceKey: "subject_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE }],
+    scopeState: "in_scope",
+    configurationKind: "editable_rule",
+    enabledState: "enabled",
+    dispatchOwner: "legacy",
+  } as const)),
   {
     workflowKey: "tasks",
     eventKeys: NOTIFICATION_EVENT_KEYS_BY_WORKFLOW.tasks,

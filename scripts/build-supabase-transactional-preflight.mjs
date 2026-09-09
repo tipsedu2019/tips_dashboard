@@ -112,7 +112,8 @@ function migrationLedgerState(ledger) {
 }
 
 function maskSqlOpaqueRegions(source) {
-  const masked = [...String(source)]
+  // Keep UTF-16 code-unit offsets aligned with source[index] and String.slice.
+  const masked = String(source).split("")
   const blank = (start, end) => {
     for (let cursor = start; cursor < end; cursor += 1) {
       if (masked[cursor] !== "\n" && masked[cursor] !== "\r") masked[cursor] = " "

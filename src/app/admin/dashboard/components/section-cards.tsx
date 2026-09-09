@@ -1,19 +1,15 @@
 "use client"
 
-import Link from "next/link"
 import {
   type ReactElement,
   type ReactNode,
-  useEffect,
   useMemo,
-  useRef,
   useState,
 } from "react"
 import {
   AlertTriangle,
   ChevronDown,
 } from "lucide-react"
-import { toast } from "sonner"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
 import { Badge } from "@/components/ui/badge"
@@ -27,18 +23,10 @@ import {
 } from "@/components/ui/card"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
-  projectDashboardConflictRpcInput,
   type DashboardConflictRow,
-  type DashboardConflictTaskLink,
   type DashboardConflictType,
 } from "@/features/dashboard/conflict-contract"
-import { getDashboardSourceError } from "@/features/dashboard/snapshot-sources.js"
-import {
-  createDashboardConflictTask,
-  listDashboardConflictTaskLinks,
-} from "@/features/tasks/ops-task-service"
 import { cn } from "@/lib/utils"
-import { useAuth } from "@/providers/auth-provider"
 
 type DashboardSubjectKey = "all" | "english" | "math" | "science"
 type DashboardDivisionKey = "all" | "middle" | "high"
@@ -132,14 +120,6 @@ type DashboardMetrics = {
   isConnected: boolean
   error: string | null
 }
-
-type ConflictActionState =
-  | { status: "checking" }
-  | { status: "lookup-error" }
-  | { status: "idle" }
-  | { status: "saving" }
-  | { status: "linked"; taskId: string; canOpen: boolean }
-  | { status: "error"; message: string }
 
 const SUBJECT_TABS: Array<{ key: DashboardSubjectKey; label: string }> = [
   { key: "all", label: "전체" },
@@ -1080,28 +1060,12 @@ function formatConflictOccurrence(row: DashboardConflictRow) {
   ].filter(Boolean).join(" ") || row.source.examDate || "일정 미정"
 }
 
-function getConflictActionState(link: DashboardConflictTaskLink | undefined): ConflictActionState {
-  if (!link?.linked) return { status: "idle" }
-  return {
-    status: "linked",
-    taskId: link.canOpen ? link.taskId : "",
-    canOpen: link.canOpen,
-  }
-}
-
-function getConflictActionError(error: unknown) {
-  return getDashboardSourceError(error, "할 일을 등록하지 못했습니다.")
-}
-
 export function ConflictWarning({
   metrics,
 }: {
   metrics: Pick<DashboardMetrics, "conflictRows" | "conflictSources" | "retryConflictSources">
 }) {
-  const { role } = useAuth()
   const [showAllConflicts, setShowAllConflicts] = useState(false)
-  const [linkLookupRevision, setLinkLookupRevision] = useState(0)
-  const [actionStateByKey, setActionStateByKey] = useState<Record<string, ConflictActionState>>({})
   const rows = useMemo(
     () => [...(metrics.conflictRows || [])].sort((left, right) => (
       left.nextOccurrenceAt.localeCompare(right.nextOccurrenceAt) ||
@@ -1110,12 +1074,6 @@ export function ConflictWarning({
     )),
     [metrics.conflictRows],
   )
-  const conflictKeySignature = useMemo(
-    () => rows.map((row) => row.key).sort().join("|"),
-    [rows],
-  )
-  const rowsRef = useRef(rows)
-  const canCreateTask = new Set(["admin", "staff", "teacher"]).has(role)
   const sourcesReady =
     metrics.conflictSources.schedule.status === "ready" &&
     metrics.conflictSources.exam.status === "ready"
@@ -1126,69 +1084,6 @@ export function ConflictWarning({
     metrics.conflictSources.schedule.status === "error" ||
     metrics.conflictSources.exam.status === "error"
   const visibleRows = showAllConflicts ? rows : rows.slice(0, 3)
-
-  useEffect(() => {
-    rowsRef.current = rows
-  }, [rows])
-
-  useEffect(() => {
-    const currentRows = rowsRef.current
-    if (currentRows.length === 0) {
-      return
-    }
-
-    let isCurrent = true
-    setActionStateByKey(Object.fromEntries(
-      currentRows.map((row) => [row.key, { status: "checking" } satisfies ConflictActionState]),
-    ))
-
-    listDashboardConflictTaskLinks(
-      currentRows.map(projectDashboardConflictRpcInput),
-    )
-      .then((links: DashboardConflictTaskLink[]) => {
-        if (!isCurrent) return
-        const linksByKey = new Map<string, DashboardConflictTaskLink>(
-          links.map((link: DashboardConflictTaskLink) => [link.conflictKey, link]),
-        )
-        setActionStateByKey(Object.fromEntries(
-          currentRows.map((row) => [row.key, getConflictActionState(linksByKey.get(row.key))]),
-        ))
-      })
-      .catch(() => {
-        if (!isCurrent) return
-        setActionStateByKey(Object.fromEntries(
-          currentRows.map((row) => [row.key, { status: "lookup-error" } satisfies ConflictActionState]),
-        ))
-      })
-
-    return () => {
-      isCurrent = false
-    }
-  }, [conflictKeySignature, linkLookupRevision])
-
-  async function createConflictTask(row: DashboardConflictRow) {
-    setActionStateByKey((current) => ({
-      ...current,
-      [row.key]: { status: "saving" },
-    }))
-
-    try {
-      const link = await createDashboardConflictTask(
-        projectDashboardConflictRpcInput(row),
-      )
-      setActionStateByKey((current) => ({
-        ...current,
-        [row.key]: getConflictActionState(link),
-      }))
-    } catch (error) {
-      const message = getConflictActionError(error)
-      setActionStateByKey((current) => ({
-        ...current,
-        [row.key]: { status: "error", message },
-      }))
-      toast.error(message)
-    }
-  }
 
   if (rows.length === 0 && sourcesReady) {
     return null
@@ -1237,104 +1132,24 @@ export function ConflictWarning({
           </div>
         ) : null}
         <div id="dashboard-conflict-rows" className="grid w-full min-w-0 divide-y divide-amber-200/80 border-t border-amber-200/80 dark:divide-amber-900 dark:border-amber-900">
-          {visibleRows.map((row) => {
-            const actionState = actionStateByKey[row.key] || { status: "checking" }
-            const canOpenTask =
-              actionState.status === "linked" &&
-              actionState.canOpen &&
-              Boolean(actionState.taskId)
-
-            return (
-              <div
-                key={row.key}
-                className="grid min-w-0 gap-3 py-3 lg:grid-cols-[minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(9rem,1fr)_minmax(0,1.6fr)_auto] lg:items-start"
-              >
-                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                  <Badge variant="outline" className="border-amber-300 bg-background/80 text-amber-950 dark:text-amber-100">
-                    {CONFLICT_TYPE_LABELS[row.type]}
-                  </Badge>
-                  <span className="text-xs font-semibold tabular-nums">
-                    {formatConflictOccurrence(row)}
-                  </span>
-                </div>
-                <ProcessRow label="문제" value={row.problem} />
-                <ProcessRow label="담당" value={row.ownerLabel} />
-                <ProcessRow label="처리" value={row.resolution} />
-                <div className="grid min-w-0 gap-1 lg:justify-items-end">
-                  {actionState.status === "checking" ? (
-                    <Button type="button" variant="outline" size="sm" disabled className="w-full sm:w-auto">
-                      확인 중
-                    </Button>
-                  ) : null}
-                  {actionState.status === "saving" ? (
-                    <Button type="button" variant="outline" size="sm" disabled className="w-full sm:w-auto">
-                      등록 중
-                    </Button>
-                  ) : null}
-                  {canOpenTask ? (
-                    <Button asChild variant="outline" size="sm" className="w-full bg-background sm:w-auto">
-                      <Link href={`/admin/tasks?taskId=${encodeURIComponent(actionState.taskId)}`}>
-                        등록됨 · 할 일 보기
-                      </Link>
-                    </Button>
-                  ) : null}
-                  {actionState.status === "linked" && !canOpenTask ? (
-                    <Button type="button" variant="outline" size="sm" disabled className="w-full sm:w-auto">
-                      등록됨 · 담당자가 처리 중
-                    </Button>
-                  ) : null}
-                  {actionState.status === "idle" && canCreateTask ? (
-                    <Button
-                      type="button"
-                      size="sm"
-                      onClick={() => createConflictTask(row)}
-                      className="w-full sm:w-auto"
-                    >
-                      할 일 등록
-                    </Button>
-                  ) : null}
-                  {actionState.status === "idle" && !canCreateTask ? (
-                    <span className="rounded-md border border-amber-300 bg-background/70 px-2.5 py-1.5 text-center text-xs font-medium">
-                      관리팀 등록 필요
-                    </span>
-                  ) : null}
-                  {actionState.status === "lookup-error" ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => setLinkLookupRevision((current) => current + 1)}
-                      className="w-full border-destructive/40 bg-background text-destructive sm:w-auto"
-                    >
-                      상태 확인 다시 시도
-                    </Button>
-                  ) : null}
-                  {actionState.status === "error" && canCreateTask ? (
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      onClick={() => createConflictTask(row)}
-                      className="w-full border-destructive/40 bg-background text-destructive sm:w-auto"
-                    >
-                      등록 실패 · 다시 시도
-                    </Button>
-                  ) : null}
-                  {actionState.status === "error" && !canCreateTask ? (
-                    <span className="text-xs font-medium text-destructive">상태 확인 실패</span>
-                  ) : null}
-                  <div aria-live="polite" className="min-h-4 max-w-56 text-xs text-destructive">
-                    {actionState.status === "lookup-error" ? "할 일 등록 상태를 확인하지 못했습니다." : null}
-                    {actionState.status === "error" ? actionState.message : null}
-                    <span className="sr-only">
-                      {actionState.status === "saving" ? "할 일을 등록하고 있습니다." : null}
-                      {actionState.status === "linked" ? "할 일이 등록되었습니다." : null}
-                    </span>
-                  </div>
-                </div>
+          {visibleRows.map((row) => (
+            <div
+              key={row.key}
+              className="grid min-w-0 gap-3 py-3 lg:grid-cols-[minmax(8rem,0.7fr)_minmax(0,2fr)_minmax(9rem,1fr)_minmax(0,1.6fr)] lg:items-start"
+            >
+              <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                <Badge variant="outline" className="border-amber-300 bg-background/80 text-amber-950 dark:text-amber-100">
+                  {CONFLICT_TYPE_LABELS[row.type]}
+                </Badge>
+                <span className="text-xs font-semibold tabular-nums">
+                  {formatConflictOccurrence(row)}
+                </span>
               </div>
-            )
-          })}
+              <ProcessRow label="문제" value={row.problem} />
+              <ProcessRow label="담당" value={row.ownerLabel} />
+              <ProcessRow label="처리" value={row.resolution} />
+            </div>
+          ))}
         </div>
       </AlertDescription>
     </Alert>

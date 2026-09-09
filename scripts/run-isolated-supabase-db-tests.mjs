@@ -17,6 +17,14 @@ const EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS = Object.freeze([
   ["20260828160941_secure_worksheet_history_ownership.sql", "1251d6e51e32e0085f212d2f874b6b5eadb65c9c34f2c30fb5cba5a44e269723"],
   ["20260831151654_record_worksheet_ox_output_projection.sql", "951576acef6b2533f81b8d0241ac4a48ba57639400451589cd39e608465ad188"],
 ]);
+// The reviewed baseline retained these ledger entries but omitted their final
+// payload writers. Replay their exact existing SQL after baseline parity and
+// before newer migrations; never add a production migration to repair a fixture.
+const NOTIFICATION_CONTENT_PREREQUISITE_MIGRATIONS = Object.freeze([
+  ["20260803142000_notification_word_retest_content_payload.sql", "cf4342833bf32a86c6e8bff6f04428d68871f02a4c1819d713ff72bb5fdcfeb8"],
+  ["20260803144000_notification_transfer_content_payload.sql", "80ed588ae512fa0ffbd318c49b6f1f928cb09a3181fc1199b2ec86e80ba5ed2f"],
+  ["20260803145000_notification_withdrawal_content_payload.sql", "6bc943b720a564847baff2240d4a90756ce46c6e776968a39a799683de083bd7"],
+]);
 const REQUEST_ID = /^[a-z0-9][a-z0-9-]{7,127}$/u;
 const SQL_TEST = /^supabase\/tests\/[a-z0-9_]+\.sql$/u;
 const PROBE = /^(?:tests\/[a-z0-9_./-]+\.mjs|scripts\/probe-dashboard-audit-chain-concurrency\.mjs)$/u;
@@ -27,7 +35,7 @@ const ISOLATED_SCHEMA_REPAIR_SHA256 = "00c1a584269816060933bb6d728494aef085592d6
 const ISOLATED_MIGRATION_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-migration-prerequisites.sql";
 const ISOLATED_MIGRATION_PREREQUISITE_SHA256 = "051f9a7f82ab02abfb3437c6064782651032e4eded02aa89d8986dc9cf94c5f1";
 const NOTIFICATION_SETTINGS_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql";
-const NOTIFICATION_SETTINGS_PREREQUISITE_SHA256 = "d9f4f54d3705b804e01b57230e9cbce152cd7d89ccf66c4d0d6ba05c2c68fe0b";
+const NOTIFICATION_SETTINGS_PREREQUISITE_SHA256 = "41277cc9025e33e8ade8b134ee5f7b4836fb2fb828ecca9f28eb910d8a5edf48";
 const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_postdeploy_readonly.sql";
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
@@ -283,7 +291,7 @@ export async function validateManifestMigrations({ root = ROOT, manifest, baseli
   if (!Array.isArray(baselineVersions) || !baselineVersions.every((version) => /^\d{14}$/u.test(version)) || new Set(baselineVersions).size !== baselineVersions.length) fail("isolated_supabase_db_manifest_invalid");
   const appliedVersions = new Set(baselineVersions);
   if (manifest?.baselineVersion === "dashboard-free-tier-v1") {
-    for (const [fileName, expectedHash] of EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS) {
+    for (const [fileName, expectedHash] of [...EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS, ...NOTIFICATION_CONTENT_PREREQUISITE_MIGRATIONS]) {
       let contents;
       try {
         contents = await readFile(join(root, "supabase/migrations", fileName));
@@ -545,6 +553,14 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let notificationSettingsPrerequisite;
   try { notificationSettingsPrerequisite = await readFile(safeRepoPath(root, NOTIFICATION_SETTINGS_PREREQUISITE_PATH)); } catch { fail("isolated_supabase_db_notification_settings_prerequisite_drift"); }
   if (sha256(notificationSettingsPrerequisite) !== NOTIFICATION_SETTINGS_PREREQUISITE_SHA256) fail("isolated_supabase_db_notification_settings_prerequisite_drift");
+  const notificationContentPrerequisites = [];
+  for (const [fileName, expectedHash] of NOTIFICATION_CONTENT_PREREQUISITE_MIGRATIONS) {
+    let contents;
+    try { contents = await readFile(safeRepoPath(root, `supabase/migrations/${fileName}`)); }
+    catch { fail("isolated_supabase_db_notification_content_prerequisite_drift"); }
+    if (sha256(contents) !== expectedHash) fail("isolated_supabase_db_notification_content_prerequisite_drift");
+    notificationContentPrerequisites.push({ fileName, contents });
+  }
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const postdeployContract = args.postdeployContract
     ? (await snapshotRequestedFiles(root, [POSTDEPLOY_CONTRACT_PATH]))[0]
@@ -590,6 +606,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     await invoke(["db", "start", "--workdir", runtime.tempRoot, "--yes"]);
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
     await stageContents(notificationSettingsPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000003_dashboard_free_tier_notification_settings_prerequisites.sql"));
+    for (const [index, prerequisite] of notificationContentPrerequisites.entries()) {
+      const stagedVersion = String(index + 4).padStart(14, "0");
+      await stageContents(prerequisite.contents, join(runtime.tempRoot, "supabase/migrations", `${stagedVersion}_${prerequisite.fileName.slice(15)}`));
+    }
     for (const migration of migrations) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
     if (args.lint) await invoke(["db", "lint", "--local", "--workdir", runtime.tempRoot, "--fail-on", "error"]);

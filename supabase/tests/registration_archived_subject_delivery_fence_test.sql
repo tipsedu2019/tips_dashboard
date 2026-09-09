@@ -99,7 +99,11 @@ select ok(
 select ok(
   (
     select definition like '%track.id = p_source_id%track.archived_at is null%'
-      and definition like '%pipeline_status in (%'
+      and definition not like '%track.pipeline_status in (''enrollment_decided'', ''enrollment_processing'')%'
+      and pg_catalog.regexp_count(definition, 'not track[.]migration_review_required') = 2
+      and definition like '%enrollment.status = ''planned''%'
+      and definition like '%enrollment.admission_batch_id is null%'
+      and definition like '%registration_customer_message_admission_already_sent%'
       and definition like '%ops_registration_enrollments%'
       and pg_catalog.regexp_count(
         definition,

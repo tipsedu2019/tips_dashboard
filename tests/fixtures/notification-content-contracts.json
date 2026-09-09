@@ -1,6 +1,7 @@
 {
   "contractVersion": "1",
   "eventContracts": [
+    { "eventKey": "registration.subject_registration_completed", "requiredTokens": ["학생", "과목", "현재상태"], "mustHaveFacts": ["target", "event", "current_state"] },
     {
       "eventKey": "task.created",
       "requiredTokens": ["업무", "현재상태", "현재담당"],

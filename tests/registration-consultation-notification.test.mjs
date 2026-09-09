@@ -69,6 +69,39 @@ const initialPlanSource = await readOptionalSource(initialPlanUrl);
 const dashboardNotificationServiceSource = await readOptionalSource(dashboardNotificationServiceUrl);
 const notificationModel = await importOptionalModule(notificationModelUrl);
 
+test("automatic subject delivery times out hanging fetch and body reads, aborts once, and ignores a late response", async () => {
+  const previousFetch = globalThis.fetch
+  try {
+    for (const phase of ["fetch", "body"]) {
+      let finishLate
+      let requestCount = 0
+      let requestSignal
+      const late = new Promise(resolve => { finishLate = resolve })
+      globalThis.fetch = async (_url, options) => {
+        requestCount += 1
+        requestSignal = options.signal
+        return phase === "fetch" ? late : { ok: true, json: () => late }
+      }
+      let watchdog
+      try {
+        const outcome = await Promise.race([
+          notificationModel.dispatchRegistrationSubjectNotificationSources(["saved-source"], "session", { timeoutMs: 5 }),
+          new Promise((_, reject) => { watchdog = setTimeout(() => reject(new Error("ancillary notification blocked the saved status")), 150) }),
+        ])
+        assert.deepEqual(outcome, { failedSourceEventIds: ["saved-source"], googleChatEventIds: [] })
+        assert.equal(requestSignal.aborted, true)
+        assert.equal(requestCount, 1)
+        const receipt = { ok: true, sent: 1, deduped: 0, failed: 0, eventIds: ["late-delivery"] }
+        finishLate(phase === "fetch" ? { ok: true, json: async () => receipt } : receipt)
+        await Promise.resolve()
+        await Promise.resolve()
+        assert.deepEqual(outcome, { failedSourceEventIds: ["saved-source"], googleChatEventIds: [] })
+        assert.equal(requestCount, 1, "timeout does not retry a possibly sent notification")
+      } finally { clearTimeout(watchdog) }
+    }
+  } finally { globalThis.fetch = previousFetch }
+})
+
 async function loadRegistrationServiceFactory() {
   const source = await readFile(registrationServiceUrl, "utf8");
   const startMarker = "// registration-track-service-factory:start";
@@ -169,6 +202,7 @@ test("registration management dispatch deduplicates opaque sources and reports e
       googleChatEventIds: [],
     })
     assert.equal(calls.length, 3)
+    assert.ok(calls.every(([, init]) => !Object.hasOwn(init, "signal")), "explicit management delivery keeps its existing request lifecycle")
     assert.deepEqual(calls.map(([url, init]) => ({
       url,
       method: init.method,
@@ -731,7 +765,7 @@ test("registration no longer has a generic browser Google Chat sender", () => {
   assert.match(workspaceSource, /if \(payload\.type !== "registration"\) \{[\s\S]*?dispatchLegacyOpsTaskSources/);
 });
 
-test("registration status saves never dispatch; management Chat uses a separate explicit action", async () => {
+test("registered completion uses its receipt; management Chat keeps a separate explicit action", async () => {
   const editor = await readFile(new URL(
     "../src/features/tasks/registration-track-editor.tsx",
     import.meta.url,
@@ -743,6 +777,8 @@ test("registration status saves never dispatch; management Chat uses a separate 
   assert.match(editorStatus, /await setRegistrationWorkflowStatus/)
   assert.doesNotMatch(editorStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
   assert.doesNotMatch(editorStatus, /dispatchRegistrationManagementNotificationSources/)
+  assert.match(editorStatus, /nextOption.value === "registered" && receipt.sourceEventIds.length > 0/)
+  assert.match(editorStatus, /dispatchRegistrationSubjectNotificationSources\(receipt.sourceEventIds, notificationToken\)/)
 
   assert.match(editor, /<RegistrationManagementNotificationActions/)
   const explicitNotification = await readFile(new URL(
@@ -761,6 +797,8 @@ test("registration status saves never dispatch; management Chat uses a separate 
   assert.match(workspaceStatus, /await setRegistrationWorkflowStatus/)
   assert.doesNotMatch(workspaceStatus, /ensureRegistrationWorkflowNotificationSourceIds/)
   assert.doesNotMatch(workspaceStatus, /dispatchRegistrationManagementNotificationSources/)
+  assert.match(workspaceStatus, /workflowStatus === "registered" && receipt.sourceEventIds.length > 0/)
+  assert.match(workspaceStatus, /dispatchRegistrationSubjectNotificationSources\(receipt.sourceEventIds, notificationSessionToken\)/)
 
   const atomicCreate = workspaceSource.slice(
     workspaceSource.indexOf('if (createAttempt.writer === "atomic")'),
@@ -1070,3 +1108,22 @@ test("processing readiness is loaded from the fixed authenticated operations vie
   assert.match(source, /registrationRuntimeMarker:\s*"registration_appointment_reminders_runtime_version"/);
   assert.match(source, /adaptersRuntimeMarker:\s*"notification_workflow_adapters_runtime_version"/);
 });
+
+test("automatic subject sharing treats disabled or stale plans as skipped and preserves delivery failures", async () => {
+  const originalFetch = globalThis.fetch
+  const calls = []
+  globalThis.fetch = async (_url, init) => {
+    const id = JSON.parse(init.body).sourceEventId
+    calls.push(id)
+    return { ok: true, json: async () => ({ ok: true, sent: 0, deduped: 0, failed: id === "failed" ? 1 : 0, eventIds: [] }) }
+  }
+  try {
+    assert.deepEqual(await notificationModel.dispatchRegistrationSubjectNotificationSources(["disabled", "disabled", "failed"], "session"), {
+      failedSourceEventIds: ["failed"], googleChatEventIds: [],
+    })
+    assert.deepEqual(calls, ["disabled", "failed"])
+    assert.deepEqual(await notificationModel.dispatchRegistrationManagementNotificationSources(["disabled"], "session"), {
+      failedSourceEventIds: ["disabled"], googleChatEventIds: [],
+    })
+  } finally { globalThis.fetch = originalFetch }
+})

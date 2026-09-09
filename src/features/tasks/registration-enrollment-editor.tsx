@@ -61,6 +61,7 @@ import {
   type RegistrationWaitingKind,
 } from "./registration-track-service"
 import type { RegistrationObservationFeedbackDetail } from "./registration-observation-model.ts"
+import type { RegistrationCustomerMessageTarget } from "./registration-customer-message-contract"
 
 type RegistrationManagementPermissions = {
   canManage: boolean
@@ -1018,6 +1019,7 @@ export type RegistrationAdmissionPanelProps = {
   taskId: string
   checklist: RegistrationAdmissionChecklistState
   permissions: RegistrationManagementPermissions
+  onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
   onWarning: (message: string) => void
 }
 
@@ -1025,6 +1027,7 @@ export function RegistrationAdmissionPanel({
   taskId,
   checklist,
   permissions,
+  onOpenCustomerMessage,
   onWarning,
 }: RegistrationAdmissionPanelProps) {
   const submissionKeys = useSubmissionKeys()
@@ -1075,7 +1078,20 @@ export function RegistrationAdmissionPanel({
 
   return (
     <section className="grid gap-3" aria-label="입학 처리">
-      <h3 className="text-sm font-semibold">입학 처리</h3>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h3 className="text-sm font-semibold">입학 처리</h3>
+        {permissions.canManage && !permissions.readOnly && onOpenCustomerMessage ? (
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="min-h-11 min-w-11"
+            onClick={() => onOpenCustomerMessage({ messageKind: "admission_application", sourceId: taskId })}
+          >
+            입학신청서 알림톡
+          </Button>
+        ) : null}
+      </div>
       <RegistrationAdmissionChecklist
         checklist={currentChecklist}
         editable={permissions.canManage}

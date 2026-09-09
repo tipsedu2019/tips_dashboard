@@ -1,6 +1,26 @@
 {
   "ruleGroups": [
     {
+      "workflowKey": "registration", "eventKeys": ["registration.subject_registration_completed"],
+      "cells": [{ "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }],
+      "scopeState": "in_scope", "configurationKind": "editable_rule", "enabledState": "enabled", "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "transfer", "eventKeys": ["transfer.completed"],
+      "cells": [{ "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }],
+      "scopeState": "in_scope", "configurationKind": "editable_rule", "enabledState": "enabled", "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "withdrawal", "eventKeys": ["withdrawal.completed"],
+      "cells": [{ "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }],
+      "scopeState": "in_scope", "configurationKind": "editable_rule", "enabledState": "enabled", "dispatchOwner": "legacy"
+    },
+    {
+      "workflowKey": "word_retests", "eventKeys": ["word_retest.result_reported"],
+      "cells": [{ "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }],
+      "scopeState": "in_scope", "configurationKind": "editable_rule", "enabledState": "enabled", "dispatchOwner": "legacy"
+    },
+    {
       "workflowKey": "tasks",
       "eventKeys": [
         "task.created",

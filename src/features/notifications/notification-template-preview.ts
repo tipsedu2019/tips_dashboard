@@ -67,9 +67,13 @@ export function buildNotificationTemplatePreview(input: Readonly<{
   titleTemplate: string
   bodyTemplate: string
   availableVariables: ReadonlyArray<NotificationTemplateVariableDto>
+  sampleValues?: Readonly<Record<string, string>>
 }>) {
   const sampleByToken = new Map(
-    input.availableVariables.map((variable) => [variable.token, sampleValue(variable)]),
+    input.availableVariables.map((variable) => [
+      variable.token,
+      input.sampleValues?.[variable.key] ?? sampleValue(variable),
+    ]),
   )
   const render = (template: string) => template.replace(/\{([^{}]+)\}/gu, (match, token: string) => (
     sampleByToken.get(token) ?? match

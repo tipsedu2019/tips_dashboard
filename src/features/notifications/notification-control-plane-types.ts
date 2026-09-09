@@ -17,10 +17,8 @@ export const NOTIFICATION_WORKFLOW_OPTIONS = [
 
 export type NotificationWorkflowKey = (typeof NOTIFICATION_WORKFLOW_OPTIONS)[number]["key"]
 
-// Historical events keep their workflow identity; retired Chat workflows have no settings entry.
-export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(
-  ({ key }) => key !== "word_retests",
-)
+// Only the result-sharing rule is available for word retests; other Chat rules stay retired.
+export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS
 
 export const NOTIFICATION_EVENT_KEYS_BY_WORKFLOW = {
   tasks: [
@@ -68,6 +66,7 @@ export const NOTIFICATION_EVENT_KEYS_BY_WORKFLOW = {
     "registration.admission_advanced",
     "registration.admission_canceled",
     "registration.registration_completed",
+    "registration.subject_registration_completed",
     "registration.case_closed",
     "registration.track_reopened",
     "registration.admission_message_requested",
@@ -450,6 +449,7 @@ export const NOTIFICATION_AUDIENCES_BY_WORKFLOW = {
     "assigned_assistant",
     "secondary_assignee",
     "management_team",
+    "subject_team",
   ],
   registration: [
     "registration_requester",
@@ -458,8 +458,8 @@ export const NOTIFICATION_AUDIENCES_BY_WORKFLOW = {
     "subject_team",
     "applicant_guardian",
   ],
-  transfer: ["requester_profile", "management_team"],
-  withdrawal: ["requester_profile", "management_team"],
+  transfer: ["requester_profile", "management_team", "subject_team"],
+  withdrawal: ["requester_profile", "management_team", "subject_team"],
   makeup_requests: [
     "requester_profile",
     "approver_profile",

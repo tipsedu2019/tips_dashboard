@@ -231,12 +231,17 @@ export async function runNotificationContentNoSendQa() {
         rendered_body: renderedBody,
         href,
         workflow_key: identity.workflowKey,
+        event_key: identity.eventKey,
+        audience_key: identity.audienceKey,
       }
       const expected = buildGoogleChatCardPayload(context)
       assert.equal(expected.ok, true)
       const beforeCalls = fakeFormattingCalls.length
       const sent = await provider.send(context)
-      if (identity.workflowKey === "word_retests") {
+      const isSubjectRetestResult = identity.eventKey === "word_retest.result_reported"
+        && identity.audienceKey === "subject_team"
+        && expectedDestination === "google_chat.english"
+      if (identity.workflowKey === "word_retests" && !isSubjectRetestResult) {
         assert.equal(sent.status, "failed")
         assert.equal(sent.errorCode, "word_retest_google_chat_retired")
         assert.equal(fakeFormattingCalls.length, beforeCalls)

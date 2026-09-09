@@ -30,7 +30,7 @@ const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db
 const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
-  "2ce231fbff51e9fc73e2698c74654d6838ee1282841df600137b52f0cad5fad6"
+  "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
   "20260824182043_registration_admission_order_independence.sql"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION_SHA256 =
@@ -69,6 +69,8 @@ const SQUAWK_IMMUTABLE_FINAL_EXCEPTIONS = Object.freeze([
 ])
 const PREPARE_ACL_MIGRATION_FILE = "20260722130000_notification_prepare_acl_hardening.sql"
 const PREPARE_ACL_MIGRATION_SHA256 = "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
+const SUBJECT_COMPLETION_MIGRATION_FILE = "20260909050943_operations_subject_completion_chat.sql"
+const SUBJECT_COMPLETION_MIGRATION_SHA256 = "de23eea15bf0dafd2dbebef7650019738779c74838aa777ba441a037c5e28f75"
 const CLAIM_RECONCILE_BASELINE_FILE = "20260716112000_notification_control_plane_worker_rpc.sql"
 const CLAIM_RECONCILE_BASELINE_SHA256 = "4ab9c5f48f018d655c000e1898057df8d13883eaeeee00974cb4760bdb615250"
 const PROCESSING_READINESS_PROBE_FILE =
@@ -475,7 +477,7 @@ test("admission-order patch is immutable, runs in PR schema CI, and is covered b
   assert.ok(expectedFunctionsBlock, "postdeploy expected_functions must stay statically readable")
   assert.equal(
     (expectedFunctionsBlock.match(/'::text,\s*(?:true|false),\s*(?:true|false),\s*(?:true|false)\s*\)/gu) ?? []).length,
-    74,
+    77,
     "postdeploy must pin every active registration function contract",
   )
   assert.doesNotMatch(
@@ -2310,7 +2312,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   const requiredPredicates = [
     ["public signature", "public.set_registration_workflow_status_v1(uuid,text,integer,text)"],
     ["private signature", "dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)"],
-    ["expanded final function count", "(select count(*) from functions where oid is not null) = 74"],
+    ["expanded final function count", "(select count(*) from functions where oid is not null) = 77"],
     ["registration dispatch owner signature", "dashboard_private.registration_management_notification_owner_v1()'::text"],
     ["registration direct owner gate", "registration_management_notification_owner_v1() is distinct from ''legacy''"],
     ["registration canonical owner gate", "registration_management_notification_owner_v1()%''canonical''%"],
@@ -2442,6 +2444,11 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["archive observation source guard", "delivery_guard.function_key in (\n          'observation_chat_source'"],
     ["archive appointment source guard", "delivery_guard.function_key = 'appointment_source'"],
     ["archive waiting-admission source guard", "delivery_guard.function_key = 'waiting_admission_source'"],
+    ["admission ignores manual workflow label", "'%track.pipeline_status in (''enrollment_decided'', ''enrollment_processing'')%'"],
+    ["admission excludes migration review", "'not track[.]migration_review_required'"],
+    ["admission planned enrollment guard", "delivery_guard.definition not like '%enrollment.status = ''planned''%'"],
+    ["admission unbatched enrollment guard", "delivery_guard.definition not like '%enrollment.admission_batch_id is null%'"],
+    ["admission duplicate message guard", "delivery_guard.definition not like '%registration_customer_message_admission_already_sent%'"],
     ["archive provider marker current-source assertion", "dashboard_private.registration_customer_message_assert_current_v1%"],
     ["archive lifetime identity count", "select pg_catalog.count(*) = 8"],
     ["archive bundle lifetime identity", "registration_customer_message_booking_bundle_revision_idx"],
@@ -2461,9 +2468,6 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["enrolled status projection", "status = ''enrolled''%"],
     ["active roster projection", "roster_active = true%"],
     ["roster invariant", "registration_roster_projection_invalid%"],
-    ["legacy consultation resolver", "registration_observation_effective_legacy_slots_v1%"],
-    ["legacy consultation mode", "schedule_storage_mode in (''legacy'', ''shadow'')%"],
-    ["legacy consultation failure", "registration_first_consultation_assignee_required%"],
     ["unbatched membership count", "definition not like '%v_unbatched_count%'"],
     ["mixed membership rejection", "v_batch_count > 1 or (v_batch_count = 1 and v_unbatched_count > 0)%"],
     ["dedicated compatibility batch", "Status-driven registration owns a dedicated compatibility batch%"],
@@ -2507,14 +2511,22 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
     ["function-specific ACL", "authenticated_execute_required::integer"],
     ["compatibility trigger scope", "prevent_registration_compatibility_override"],
     ["compatibility trigger columns", "'BEFORE ' || 'UP' || 'DATE OF pipeline_status, counselor, makeedu_registered, makeedu_invoice_sent, payment_checked%'"],
-    ["first consultation trigger scope", "trigger.tgname = 'create_registration_first_consultation_task_v1'"],
-    ["first consultation trigger enabled", "and trigger.tgenabled = 'O'"],
-    ["first consultation trigger target", "'dashboard_private.create_registration_first_consultation_task_v1()'::pg_catalog.regprocedure"],
-    ["first consultation trigger timing and event", "and trigger.tgtype = 17"],
-    ["first consultation trigger column count", "pg_catalog.cardinality(trigger.tgattr::smallint[]) = 1"],
-    ["first consultation trigger status column", "status_attribute.attnum = any(trigger.tgattr::smallint[])"],
-    ["first consultation trigger no condition", "and trigger.tgqual is null"],
-    ["first consultation trigger no arguments", "and trigger.tgnargs = 0"],
+    ["retired consultation sync signature", "dashboard_private.sync_registration_first_consultation_task_v1()"],
+    ["retired consultation cancel signature", "dashboard_private.cancel_registration_followup_task_v1()"],
+    ["retired consultation no-op", "definition not like '%return new;%'"],
+    ["retirement maintenance signature", "dashboard_private.retire_registration_followup_tasks_v1()"],
+    ["retirement general task fence", "definition not like '%task.type = ''general''%'"],
+    ["retirement terminal task fence", "definition not like '%task.status not in (''done'', ''canceled'')%'"],
+    ["retirement automation provenance", "definition not like '%run.task_id = task.id%'"],
+    ["retirement audit", "definition not like '%registration_followup_task_retired%'"],
+    ["retirement task lock", "definition not like '%for update of task%'"],
+    ["retired trigger absence", "and (trigger.tgrelid, trigger.tgname) in ("],
+    ["retired first consultation trigger", "'public.ops_registration_enrollments'::pg_catalog.regclass, 'create_registration_first_consultation_task_v1'"],
+    ["retired consultation cancel trigger", "'public.ops_registration_enrollments'::pg_catalog.regclass, 'cancel_registration_followup_task_v1'"],
+    ["retired consultation sync trigger", "'public.class_lesson_sessions'::pg_catalog.regclass, 'sync_registration_first_consultation_task_v1'"],
+    ["retired rule fence", "constraint_row.conname = 'ops_task_automation_retired_followup_disabled'"],
+    ["retired rule fence validated", "and constraint_row.convalidated"],
+    ["retired rule action scope", "rule.action ->> 'type' = 'create_follow_up_task'"],
     ["nullable legacy lesson authority", "and not attribute.attnotnull"],
   ]
 
@@ -2611,4 +2623,25 @@ test("layout verifier는 post-push 영수증 누락·순서·시크릿 scope·�
     await validateSupabaseMigrationLayout({ repoRoot: artifactFixture }),
     "postdeploy_contract_artifact_unapproved",
   )
+})
+
+test("subject completion forward patch is allowed only at the reviewed path and exact bytes", async () => {
+  assert.equal(await sha256(join(activeDir, SUBJECT_COMPLETION_MIGRATION_FILE)), SUBJECT_COMPLETION_MIGRATION_SHA256)
+  const originalSource = await readFile(join(activeDir, SUBJECT_COMPLETION_MIGRATION_FILE), "utf8")
+  const mutationFixture = await createRepoFixture()
+  await appendFile(join(mutationFixture, "supabase", "migrations", SUBJECT_COMPLETION_MIGRATION_FILE), "\n-- changed\n")
+  const mutationErrors = await validateSupabaseMigrationLayout({ repoRoot: mutationFixture })
+  assertIncludesErrorCode(mutationErrors, "notification_subject_completion_migration_hash_mismatch")
+  assertIncludesErrorCode(mutationErrors, "science_final_definition_mismatch")
+
+  const copiedFixture = await createRepoFixture()
+  const copiedPath = "20990109235959_copied_subject_completion.sql"
+  await writeFile(join(copiedFixture, "supabase", "migrations", copiedPath), originalSource)
+  assertIncludesErrorForFile(await validateSupabaseMigrationLayout({ repoRoot: copiedFixture }), "science_final_definition_mismatch", copiedPath)
+
+  const prepareFixture = await createRepoFixture()
+  await appendFile(join(prepareFixture, "supabase", "migrations", SUBJECT_COMPLETION_MIGRATION_FILE), "\ndrop function public.prepare_notification_immediate_delivery_v1;\n")
+  const prepareErrors = await validateSupabaseMigrationLayout({ repoRoot: prepareFixture })
+  assertIncludesErrorCode(prepareErrors, "notification_subject_completion_migration_hash_mismatch")
+  assert.ok(prepareErrors.some(error => error.includes("science_final_definition_mismatch") && error.endsWith("#public.prepare_notification_immediate_delivery_v1")))
 })

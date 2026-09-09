@@ -16,7 +16,7 @@ export function registrationNotificationDisplayRule(rule: NotificationRuleDto): 
 }
 
 export type NotificationSettingsSection = "rules" | "connections" | "customer"
-export type RegistrationSettingsGroup = "visit" | "progress" | "archive"
+export type RegistrationSettingsGroup = "visit" | "progress" | "subject" | "archive"
 export type NotificationSettingsLocation = {
   workflow: NotificationWorkflowKey
   section: NotificationSettingsSection
@@ -32,7 +32,7 @@ export function readNotificationSettingsLocation(params: URLSearchParams): Notif
       ? workflow as NotificationWorkflowKey
       : "tasks",
     section: section === "connections" || section === "customer" ? section : "rules",
-    group: group === "visit" || group === "progress" || group === "archive" ? group : null,
+    group: group === "visit" || group === "progress" || group === "subject" || group === "archive" ? group : null,
   }
 }
 

@@ -432,10 +432,11 @@ test("UTF-8 최종 payload는 정확히 32,000바이트까지 허용한다", asy
   assert.equal(result.byteLength, 32_000)
 })
 
-test("legacy content projection은 매니페스트의 legacy 59개 identity만 rich context renderer로 허용한다", async () => {
-  const [source, coverage] = await Promise.all([
+test("historical legacy 59 identities plus four forward subject identities match the current manifest", async () => {
+  const [source, coverage, subjectSource] = await Promise.all([
     readFile(legacyProjectionUrl, "utf8"),
     readFile(coverageManifestUrl, "utf8").then(JSON.parse),
+    readFile(new URL("../supabase/migrations/20260909050943_operations_subject_completion_chat.sql", import.meta.url), "utf8"),
   ])
   const embedded = source.match(
     /notification_legacy_content_identity_fixture_begin\s*\$legacy_identities\$([\s\S]*?)\$legacy_identities\$::jsonb\s*-- notification_legacy_content_identity_fixture_end/u,
@@ -456,7 +457,19 @@ test("legacy content projection은 매니페스트의 legacy 59개 identity만 r
     .sort()
 
   assert.equal(actual.length, 59)
-  assert.deepEqual(actual, expected)
+  const forwardIdentities = [
+    ["registration", "registration.subject_registration_completed"],
+    ["transfer", "transfer.completed"],
+    ["withdrawal", "withdrawal.completed"],
+    ["word_retests", "word_retest.result_reported"],
+  ].map(([workflow, event]) => {
+    assert.ok(subjectSource.includes(`('${workflow}','${event}'`))
+    return `${workflow}|${event}|subject_team|google_chat|immediate`
+  })
+  assert.equal(expected.length, 63)
+  assert.deepEqual([...actual, ...forwardIdentities].sort(), expected)
+  assert.match(subjectSource, /get_subject_completion_legacy_plan_v1/i)
+  assert.match(subjectSource, /render_subject_completion_template_v1/i)
   assert.equal(actual.some((identity) => identity.startsWith("approvals|")), false)
   assert.match(source, /notification_rule_content_contracts/)
   assert.match(source, /availableVariables/)

@@ -229,6 +229,8 @@ async function loadMountedRegistrationEnrollmentEditor({
   loadObservation,
   loadClassDetails,
   saveEnrollmentDetails = async () => undefined,
+  setAdmissionChecklist = async () => undefined,
+  componentName = "RegistrationEnrollmentEditor",
 }) {
   const fileName = new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url)
   const source = await readFile(fileName, "utf8")
@@ -264,7 +266,7 @@ async function loadMountedRegistrationEnrollmentEditor({
     },
     loadRegistrationEnrollmentStartObservation: loadObservation,
     saveRegistrationEnrollmentDetails: saveEnrollmentDetails,
-    setRegistrationAdmissionChecklistItem: async () => undefined,
+    setRegistrationAdmissionChecklistItem: setAdmissionChecklist,
     setRegistrationEnrollmentMakeedu: async () => undefined,
     startRegistrationAdmissionBatch: async () => undefined,
   }
@@ -298,7 +300,7 @@ async function loadMountedRegistrationEnrollmentEditor({
     filename: fileName.pathname,
   })
   factory(runtimeRequire, runtimeModule, runtimeModule.exports)
-  return runtimeModule.exports.RegistrationEnrollmentEditor
+  return runtimeModule.exports[componentName]
 }
 
 async function loadMountedRegistrationApplication({
@@ -527,7 +529,7 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-workspace-route", { createRegistrationObservationAsyncOwnership }],
     ["./registration-consultation-notification.js", {
-      dispatchRegistrationManagementNotificationSources: async (...args) => { notificationCalls.push({ kind: "dispatch", args }); return { failedSourceEventIds: [], googleChatEventIds: [] } },
+      dispatchRegistrationSubjectNotificationSources: async (...args) => { notificationCalls.push({ kind: "dispatch", args }); return { failedSourceEventIds: [], googleChatEventIds: [] } },
       getRegistrationManagementNotificationReadiness: () => notificationReadiness,
       isRegistrationManagementNotificationWorkflowStatus: () => false,
       sendRegistrationVisitNotificationTarget: async () => ({ ok: true }),
@@ -1906,7 +1908,8 @@ test("saved application keeps exception actions in their owning sections", async
   assert.match(source, /section === "placement"[\s\S]*?<RegistrationEnrollmentTrackEditor/)
   assert.match(admission, /RegistrationAdmissionPanel/)
   assert.match(admission, /checklist=\{detail\.admissionChecklist\}/)
-  assert.doesNotMatch(admission, /cancelRegistrationAdmissionBatch|onOpenCustomerMessage/)
+  assert.doesNotMatch(admission, /cancelRegistrationAdmissionBatch|onSendAdmissionMessage/)
+  assert.match(admission, /onOpenCustomerMessage=\{admissionEditable \? openCustomerMessage : undefined\}/)
 })
 
 test("registration application threads the exact deep-linked attempt into the real observation editor mount", async () => {
@@ -4343,7 +4346,7 @@ test("appointment editor keeps an unchanged or empty reservation quiet until a f
   assert.match(source, /<RegistrationSaveButton[\s\S]*?dirty=\{appointmentDirty \|\| externalDirty\}[\s\S]*?cleanLabel=\{appointment \? "저장됨" : "예약 정보를 입력하세요"\}/)
 })
 
-test("admission processing is only five freely editable checklist rows", async () => {
+test("admission processing keeps five freely editable checklist rows beside an explicit message action", async () => {
   const [progress, enrollment] = await Promise.all([
     readAdmissionProgressSource(),
     readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8"),
@@ -4376,11 +4379,59 @@ test("admission processing is only five freely editable checklist rows", async (
     "completeRegistrationAdmissionBatch",
     "cancelRegistrationAdmissionBatch",
     "RegistrationAdmissionProgress",
-    "onOpenCustomerMessage",
     "입학 처리 취소",
     "이전 입학 처리",
   ]) assert.doesNotMatch(panel, new RegExp(removedAction))
   assert.doesNotMatch(panel, /checklist\.(?:applicationSent|makeeduRegistered|invoiceSent|paymentConfirmed|registrationCompleted)[\s\S]{0,160}disabled/)
+})
+
+test("admission preview is independent of checklist edits and unavailable to read-only viewers", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const saves = []
+  const previews = []
+  const Panel = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness,
+    componentName: "RegistrationAdmissionPanel",
+    setAdmissionChecklist: async (input) => {
+      saves.push(input)
+      return { checklist: { ...props.checklist, [input.item]: input.checked } }
+    },
+  })
+  const props = {
+    taskId: "fixture-task-multiple-classes",
+    checklist: { applicationSent: false, makeeduRegistered: false, invoiceSent: false, paymentConfirmed: false, registrationCompleted: false },
+    permissions: { canManage: true, readOnly: false },
+    onOpenCustomerMessage: (target) => previews.push(target),
+    onWarning: (message) => assert.fail(message),
+  }
+  const render = (nextProps = props) => {
+    const tree = hookHarness.render(Panel, nextProps)
+    hookHarness.flushEffects()
+    return tree
+  }
+  const isPreview = (node) => collectMountedRegistrationText(node).join("") === "입학신청서 알림톡" && typeof node.props.onClick === "function"
+  try {
+    let tree = render()
+    const action = findMountedRegistrationElement(tree, isPreview, "admission preview action")
+    action.props.onClick()
+    assert.deepEqual(previews, [{ messageKind: "admission_application", sourceId: props.taskId }])
+    assert.equal(saves.length, 0, "opening preview must not check or send anything")
+    const checklist = findMountedRegistrationElement(tree, (node) => typeof node.props.onCheckedChange === "function", "independent checklist")
+    checklist.props.onCheckedChange("applicationSent", true)
+    await flushMountedRegistrationWork()
+    tree = render()
+    assert.equal(saves.length, 1)
+    assert.equal(saves[0].item, "applicationSent")
+    assert.equal(saves[0].checked, true)
+    assert.equal(previews.length, 1, "checking applicationSent must not open or send a message")
+    findMountedRegistrationElement(tree, isPreview, "admission preview after manual checkbox")
+    for (const permissions of [{ canManage: false, readOnly: true }, { canManage: true, readOnly: true }]) {
+      assert.equal(findMountedRegistrationElements(render({ ...props, permissions }), isPreview).length, 0)
+    }
+    assert.equal(findMountedRegistrationElements(render({ ...props, onOpenCustomerMessage: undefined }), isPreview).length, 0)
+  } finally {
+    hookHarness.cleanup()
+  }
 })
 
 test("registration-completed may be checked while every earlier checklist item is unchecked", async () => {
@@ -4504,7 +4555,10 @@ test("canonical registration editors keep messaging outside the admission checkl
   const admission = enrollment.slice(enrollment.indexOf("export function RegistrationAdmissionPanel"))
   assert.match(admission, /permissions\.canManage/)
   assert.match(admission, /<RegistrationAdmissionChecklist/)
-  assert.doesNotMatch(admission, /알림톡|messageKind|onOpenCustomerMessage|onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
+  assert.match(admission, /입학신청서 알림톡/)
+  assert.match(admission, /messageKind: "admission_application", sourceId: taskId/)
+  assert.doesNotMatch(admission, /onSendAdmissionMessage|onReconcileAdmissionMessage|onReleaseAdmissionMessageRetry|제공사 확인 증빙|재발송 허용/)
+  assert.match(application, /onOpenCustomerMessage=\{admissionEditable \? openCustomerMessage : undefined\}/)
 
   assert.equal((application.match(/onOpenCustomerMessage=\{openCustomerMessage\}/g) || []).length, 3)
   assert.match(application, /onOpenCustomerMessage=\{canManageCase \? openCustomerMessage : undefined\}/)

@@ -22,6 +22,9 @@ test('registration settings expose nine current identities and keep the twelve p
   assert.equal(getRegistrationNotificationRulePolicy(rule('registration.visit_replaced')).mode, 'compatibility')
   assert.equal(getRegistrationNotificationRulePolicy(rule('registration.case_created')).group, 'progress')
   assert.equal(getRegistrationNotificationRulePolicy(rule('registration.case_closed', 'customer_message')), null)
+  assert.deepEqual(getRegistrationNotificationRulePolicy(rule('registration.subject_registration_completed')), {
+    group: 'subject', label: '과목팀 등록 공유', mode: 'automatic', editable: true,
+  })
 })
 test('SQL archive policy has exactly the same event identities as the UI and server policy', async () => {
   const sql = await readFile(new URL('../supabase/migrations/20260908042503_notification_settings_atomic_registration_policy.sql', import.meta.url), 'utf8')

@@ -370,6 +370,18 @@ test("an admission preview stays eligible after the track advances to payment", 
   assert.match(resolved.body, /첫 수업/u)
 })
 
+test("admission previews use saved class facts independently of manual workflow and legacy pipeline status", async () => {
+  for (const [workflowStatus, pipelineStatus] of [["inquiry", "inquiry"], ["registered", "inquiry"], ["payment_in_progress", "consultation_waiting"], ["registered", "registered"]]) {
+    const source = admissionSource()
+    source.tracks[0].workflowStatus = workflowStatus
+    source.tracks[0].pipelineStatus = pipelineStatus
+    source.enrollmentPlans[0].workflowStatus = workflowStatus
+    const preview = await resolveSource(source)
+    assert.match(preview.body, /입학신청서 작성 안내/u)
+    assert.match(preview.body, /중2 영어 A반/u)
+  }
+})
+
 test("invalid source variants fail closed with stable source codes", async () => {
   const appointmentSubjectMismatch = appointmentSource({ subjects: ["영어", "수학", "과학"] })
   const appointmentParticipantExtraKey = appointmentSource()

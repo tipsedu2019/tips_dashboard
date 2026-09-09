@@ -389,6 +389,36 @@
       "fileName": "20260908112155_textbook_stock_count_atomic.sql",
       "status": "final",
       "sha256": "516c1cefb2f038c034005135cf28da167831739d1e6c71ec2fadedfc0f33562b"
+    },
+    {
+      "fileName": "20260909045433_dashboard_conflict_monitoring_only.sql",
+      "status": "final",
+      "sha256": "e68e00ed8d68e9fe4aad0d88f4e7ece8f7ae01fc146e778d1881b2a52df9e203"
+    },
+    {
+      "fileName": "20260909045454_registration_admission_preview_saved_facts.sql",
+      "status": "final",
+      "sha256": "56afc8314ac4d4e1638f38d4da07ea8e4f6e78e37c22cd5f419c9ac193bcd1fa"
+    },
+    {
+      "fileName": "20260909050634_registration_followup_task_retirement.sql",
+      "status": "final",
+      "sha256": "0141bda9b6f2180dc9d719e9fca96098fadc648f5f5de7e82f119e331274f999"
+    },
+    {
+      "fileName": "20260909050822_registration_followup_task_retirement_validate.sql",
+      "status": "final",
+      "sha256": "4bb680eadef0cdf6c174027f3dac29ba030204e2410f671211f0a50d5fdb1c5f"
+    },
+    {
+      "fileName": "20260909050943_operations_subject_completion_chat.sql",
+      "status": "final",
+      "sha256": "de23eea15bf0dafd2dbebef7650019738779c74838aa777ba441a037c5e28f75"
+    },
+    {
+      "fileName": "20260909063900_operations_subject_completion_constraints_validate.sql",
+      "status": "final",
+      "sha256": "d50707caabc9e5684d5ff0526d091aee5dab089cb5771ebeade3ee33cdb894a1"
     }
   ]
 }

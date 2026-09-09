@@ -21,11 +21,11 @@ type LegacyDispatchItem = Readonly<{
   templateId: string
   templateChecksum: string
   channelKey: "google_chat"
-  audienceKey: "management_team"
+  audienceKey: "management_team" | "subject_team"
   targetGeneration: "0"
   targetKind: "connection"
   targetKey: string
-  connectionKey: "google_chat.management"
+  connectionKey: keyof typeof CONNECTION_CHANNEL
   targetSnapshot: JsonRecord
   renderedTitle: string
   renderedBody: string
@@ -35,6 +35,25 @@ type LegacyDispatchItem = Readonly<{
   previewSourceEventId?: string
   mentionUserNames?: ReadonlyArray<string>
 }>
+
+const CONNECTION_CHANNEL = {
+  "google_chat.management": "admin",
+  "google_chat.english": "english",
+  "google_chat.math": "math",
+  "google_chat.science": "science",
+} as const
+const CONNECTION_ENV = {
+  "google_chat.management": "GOOGLE_CHAT_WEBHOOK_ADMIN",
+  "google_chat.english": "GOOGLE_CHAT_WEBHOOK_ENGLISH",
+  "google_chat.math": "GOOGLE_CHAT_WEBHOOK_MATH",
+  "google_chat.science": "GOOGLE_CHAT_WEBHOOK_SCIENCE",
+} as const
+const SUBJECT_COMPLETION_EVENTS = new Set([
+  "registration.subject_registration_completed",
+  "transfer.completed",
+  "withdrawal.completed",
+  "word_retest.result_reported",
+])
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 // 기존 설정 RPC가 만든 MD5 checksum과 신규 SHA-256 checksum을 모두 읽는다.
@@ -135,6 +154,14 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
         mentionUserNames: raw.mentionUserNames,
       } : {}),
     }
+    const managementTarget = item.audienceKey === "management_team"
+      && item.connectionKey === "google_chat.management"
+      && item.eventKey !== "registration.subject_registration_completed"
+    const subjectTarget = item.audienceKey === "subject_team"
+      && SUBJECT_COMPLETION_EVENTS.has(item.eventKey)
+      && ["google_chat.english", "google_chat.math", "google_chat.science"].includes(item.connectionKey)
+      && text(item.targetSnapshot.connection_key) === item.connectionKey
+      && (item.eventKey !== "word_retest.result_reported" || item.connectionKey === "google_chat.english")
     if (
       !UUID.test(item.eventId)
       || !UUID.test(item.ruleId)
@@ -143,11 +170,10 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
       || !["task", "word_retest", "registration", "transfer", "withdrawal"].includes(item.eventKey.split(".")[0] || "")
       || !item.occurrenceKey
       || item.channelKey !== "google_chat"
-      || item.audienceKey !== "management_team"
+      || !(managementTarget || subjectTarget)
       || item.targetGeneration !== "0"
       || item.targetKind !== "connection"
-      || item.targetKey !== "connection:google_chat.management"
-      || item.connectionKey !== "google_chat.management"
+      || item.targetKey !== `connection:${item.connectionKey}`
       || !item.renderedTitle
       || !item.renderedBody
       || !item.href.startsWith("/admin/")
@@ -278,14 +304,14 @@ function isInterruptedDispatchReplay(value: JsonRecord) {
     && UUID.test(text(value.dispatch_token))
 }
 
-async function readWebhook(client: SupabaseClient) {
+async function readWebhook(client: SupabaseClient, connectionKey: LegacyDispatchItem["connectionKey"]) {
   return readLegacyGoogleChatWebhookUrl({
-    legacyEnvironmentUrl: text(process.env.GOOGLE_CHAT_WEBHOOK_ADMIN),
+    legacyEnvironmentUrl: text(process.env[CONNECTION_ENV[connectionKey]]),
     async loadRow() {
       const { data, error } = await client
         .from("google_chat_webhook_settings")
         .select("webhook_url,connection_state")
-        .eq("channel", "admin")
+        .eq("channel", CONNECTION_CHANNEL[connectionKey])
         .maybeSingle()
       if (error) throw error
       const row = data as { webhook_url?: unknown; connection_state?: unknown } | null
@@ -324,7 +350,7 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
 
   let webhookUrl: string
   try {
-    webhookUrl = await readWebhook(client)
+    webhookUrl = await readWebhook(client, item.connectionKey)
     await validatePreview()
   } catch (error) {
     const providerReference = text((error as { code?: unknown })?.code) || "webhook_configuration_error"
@@ -371,6 +397,8 @@ async function dispatchGoogleChat(client: SupabaseClient, item: LegacyDispatchIt
       status: "sending",
       channel_key: "google_chat",
       workflow_key: legacyNotificationWorkflowKey(item.eventKey),
+      event_key: item.eventKey,
+      audience_key: item.audienceKey,
       connection_key: item.connectionKey,
       webhook_url: webhookUrl,
       rendered_title: item.renderedTitle,
@@ -423,7 +451,11 @@ export async function POST(request: Request) {
   try {
     await authorizeRegistrationLegacyDispatch(actorClient, sourceEventId)
     const plan = await loadLegacyDispatchPlan(serverClient, sourceEventId, actor.user.id)
-    const items = parsePlan(plan).filter((item) => !item.eventKey.startsWith("word_retest."))
+    const items = parsePlan(plan).filter((item) => !item.eventKey.startsWith("word_retest.") || (
+      item.eventKey === "word_retest.result_reported"
+      && item.audienceKey === "subject_team"
+      && item.connectionKey === "google_chat.english"
+    ))
     const outcomes: string[] = []
     for (const item of items) {
       try {

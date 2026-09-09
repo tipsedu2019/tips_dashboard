@@ -36,7 +36,7 @@ const EXPECTED_IDENTITIES = coverageFixture.ruleGroups
   .sort((left, right) => identityKey(left).localeCompare(identityKey(right)))
 
 const EXPECTED_IDENTITY_KEYS = EXPECTED_IDENTITIES.map(identityKey)
-const EXPECTED_IDENTITY_COUNT = 196
+const EXPECTED_IDENTITY_COUNT = 200
 
 test("preview fixture runner는 전체 in-scope identity를 exact content와 단일 destination으로 독립 비교한다", async () => {
   const originalFetch = globalThis.fetch

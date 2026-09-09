@@ -823,10 +823,11 @@ select ok((select bool_and(row_value -> 'affectedStudentIds' ? '86200000-0000-40
   from quality_conflict_rows), 'display data retains affected students');
 select ok((select bool_and(rpc_input -> 'studentIds' = '[]'::jsonb)
   from quality_conflict_rows), 'resource conflict identity does not contain affected student IDs');
-select lives_ok(
+select throws_ok(
   $$select public.list_dashboard_conflict_task_links_v1(
     (select jsonb_agg(rpc_input order by row_value ->> 'key') from quality_conflict_rows))$$,
-  'real statistics resource conflicts are accepted by the final task-link RPC'
+  '42501', null,
+  'statistics monitoring does not reopen the retired task-link RPC'
 );
 
 reset role;

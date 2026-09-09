@@ -2512,8 +2512,8 @@ async function verifyDashboardReadOnlyInteraction(page) {
       .or(conflictWarning.getByRole("button", { name: "등록됨 · 담당자가 처리 중" }))
       .or(conflictWarning.getByText("관리팀 등록 필요", { exact: true }))
       .first()
-    if (!(await taskAction.count().catch(() => 0))) {
-      throw new Error("dashboard conflict warning does not expose a non-mutating task action state.")
+    if (await taskAction.count()) {
+      throw new Error("dashboard conflict monitoring still exposes a retired task action.")
     }
   }
 

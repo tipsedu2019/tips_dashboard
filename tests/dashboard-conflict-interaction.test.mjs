@@ -73,32 +73,31 @@ const conflict = {
   source: { classIds: ["a", "b"], studentIds: [], examEventIds: [], examDetailIds: [], teacherCatalogIds: [],
     classroomCatalogIds: [], weekday: "월", overlapStart: "09:00", overlapEnd: "10:00", examDate: "", examRule: "" },
 }
-const unlinked = { conflictKey: conflict.key, linked: false, taskId: "", canOpen: false, alreadyExists: false }
-const linked = { conflictKey: conflict.key, linked: true, taskId: "task-1", canOpen: true, alreadyExists: false }
-
-async function mountConflict(t, service, role = "admin") {
+async function mountConflict(t, { rows = [conflict], status = "ready", role = "admin", retry = () => {} } = {}) {
   const dom = installDom()
+  const calls = []
+  const forbiddenCall = (kind) => () => { calls.push(kind); throw new Error("Conflict monitoring must not access tasks") }
   const utils = await loadTypeScript(new URL("src/lib/utils.ts", root))
   const modules = new Map([["@/lib/utils", utils]])
   for (const name of ["alert", "badge", "button", "card", "popover"]) {
     modules.set(`@/components/ui/${name}`, await loadTypeScript(new URL(`src/components/ui/${name}.tsx`, root), modules))
   }
-  modules.set("@/features/dashboard/conflict-contract", await loadTypeScript(new URL("src/features/dashboard/conflict-contract.ts", root)))
-  modules.set("@/features/dashboard/snapshot-sources.js", await import("../src/features/dashboard/snapshot-sources.js"))
-  modules.set("@/features/tasks/ops-task-service", service)
+  modules.set("@/features/tasks/ops-task-service", {
+    listDashboardConflictTaskLinks: forbiddenCall("read"),
+    createDashboardConflictTask: forbiddenCall("write"),
+  })
   modules.set("@/providers/auth-provider", { useAuth: () => ({ role }) })
-  modules.set("next/link", { default: ({ children, ...props }) => createElement("a", props, children), __esModule: true })
-  modules.set("sonner", { toast: { error() {} } })
   const { ConflictWarning } = await loadTypeScript(new URL("src/app/admin/dashboard/components/section-cards.tsx", root), modules)
   const container = document.createElement("div")
   document.body.append(container)
   const reactRoot = createRoot(container)
   t.after(async () => { await act(async () => reactRoot.unmount()); dom.window.close() })
   await act(async () => reactRoot.render(createElement(ConflictWarning, { metrics: {
-    conflictRows: [conflict], conflictSources: { schedule: { status: "ready", error: "" }, exam: { status: "ready", error: "" } },
-    retryConflictSources() {},
+    conflictRows: rows,
+    conflictSources: { schedule: { status, error: "" }, exam: { status, error: "" } },
+    retryConflictSources: retry,
   } })))
-  return container
+  return { container, calls }
 }
 
 function button(container, label) {
@@ -109,75 +108,55 @@ async function click(element) {
   await act(async () => element.click())
 }
 
-test("failed task-link lookup retries the read without creating a task or exposing the database error", async (t) => {
-  let reads = 0
-  let writes = 0
-  let resolveRetry
-  const container = await mountConflict(t, {
-    async listDashboardConflictTaskLinks(inputs) {
-      assert.equal(inputs[0].studentIds.length, 0)
-      reads++
-      if (reads === 1) throw { code: "22023", message: "dashboard_conflict_input_invalid" }
-      return new Promise(resolve => { resolveRetry = resolve })
-    },
-    async createDashboardConflictTask() { writes++; return linked },
+for (const role of ["admin", "staff", "teacher", "viewer"]) {
+  test(`${role} sees a populated conflict with no task creation, task link, or task lookup`, async (t) => {
+    const { container, calls } = await mountConflict(t, { role })
+    assert.match(container.textContent, /일정 충돌 1건/)
+    for (const value of [conflict.problem, conflict.ownerLabel, conflict.resolution, "월요일 09:00"]) {
+      assert.ok(container.textContent.includes(value), value)
+    }
+    assert.equal(container.querySelectorAll("button, a").length, 0)
+    assert.doesNotMatch(container.textContent, /할 일|등록됨|관리팀 등록 필요|확인 중/)
+    assert.deepEqual(calls, [])
   })
-  assert.equal(container.textContent.includes("등록 실패"), false, "a read failure must not claim that registration failed")
-  assert.equal(container.textContent.includes("dashboard_conflict_input_invalid"), false)
-  await click(button(container, "상태 확인 다시 시도"))
-  assert.equal(reads, 2)
-  assert.equal(writes, 0, "retry must never promote a read into a write")
-  assert.ok(button(container, "확인 중")?.disabled)
-  assert.equal(button(container, "할 일 등록"), undefined)
-  await act(async () => resolveRetry([unlinked]))
-  assert.ok(button(container, "할 일 등록"))
-  assert.equal(writes, 0)
+}
+
+test("monitoring expands all conflict types and collapses without any task RPC", async (t) => {
+  const rows = ["teacher", "classroom", "student", "exam"].map((type, index) => ({
+    ...conflict, key: `conflict-${index}`, type, problem: `문제 ${index}`,
+  }))
+  const { container, calls } = await mountConflict(t, { rows })
+  assert.equal(container.querySelector("#dashboard-conflict-rows").children.length, 3)
+  const expand = button(container, "전체 보기")
+  assert.equal(expand.getAttribute("aria-expanded"), "false")
+  await click(expand)
+  assert.equal(container.querySelector("#dashboard-conflict-rows").children.length, 4)
+  assert.equal(button(container, "접기").getAttribute("aria-expanded"), "true")
+  await click(button(container, "접기"))
+  assert.equal(container.querySelector("#dashboard-conflict-rows").children.length, 3)
+  assert.deepEqual(calls, [])
 })
 
-test("read-only viewer can retry a failed status lookup but never receives a registration action", async (t) => {
-  let reads = 0
-  let writes = 0
-  const container = await mountConflict(t, {
-    async listDashboardConflictTaskLinks() {
-      if (++reads === 1) throw new Error("network failed")
-      return [unlinked]
-    },
-    async createDashboardConflictTask() { writes++; return linked },
-  }, "viewer")
-  await click(button(container, "상태 확인 다시 시도"))
-  assert.equal(reads, 2)
-  assert.equal(writes, 0)
-  assert.equal(button(container, "할 일 등록"), undefined)
-  assert.ok(container.textContent.includes("관리팀 등록 필요"))
+test("source retry keeps known conflicts visible and only refreshes monitoring sources", async (t) => {
+  let retries = 0
+  const { container, calls } = await mountConflict(t, { status: "error", retry: () => { retries++ } })
+  assert.match(container.textContent, /일정 충돌을 확인하지 못했습니다/)
+  assert.ok(container.textContent.includes(conflict.problem))
+  await click(button(container, "다시 시도"))
+  assert.equal(retries, 1)
+  assert.equal(container.querySelectorAll("button").length, 1)
+  assert.deepEqual(calls, [])
 })
 
-test("explicit registration failure retains the registration retry and opens the created task", async (t) => {
-  let writes = 0
-  let reads = 0
-  const container = await mountConflict(t, {
-    async listDashboardConflictTaskLinks() { reads++; return [unlinked] },
-    async createDashboardConflictTask() {
-      if (++writes === 1) throw new Error("write failed")
-      return linked
-    },
-  })
-  await click(button(container, "할 일 등록"))
-  await click(button(container, "등록 실패 · 다시 시도"))
-  assert.equal(writes, 2)
-  assert.equal(reads, 1)
-  assert.equal(container.querySelector("a")?.getAttribute("href"), "/admin/tasks?taskId=task-1")
+test("empty successful monitoring has no warning or background task access", async (t) => {
+  const { container, calls } = await mountConflict(t, { rows: [] })
+  assert.equal(container.textContent, "")
+  assert.deepEqual(calls, [])
 })
 
-test("legacy statistics rows keep affected students for display but omit them from resource identity", async () => {
-  const { projectDashboardConflictRpcInput } = await loadTypeScript(new URL("src/features/dashboard/conflict-contract.ts", root))
-  for (const type of ["teacher", "classroom"]) {
-    const row = { ...conflict, type, source: { ...conflict.source, studentIds: ["student"] } }
-    assert.deepEqual(projectDashboardConflictRpcInput(row).studentIds, [])
-    assert.deepEqual(row.source.studentIds, ["student"], "projection must not mutate cached data")
-    assert.deepEqual(row.affectedStudentIds, ["student"])
-  }
-  for (const type of ["student", "exam"]) {
-    const row = { ...conflict, type, source: { ...conflict.source, studentIds: ["student"] } }
-    assert.deepEqual(projectDashboardConflictRpcInput(row).studentIds, ["student"])
-  }
+test("loading monitoring retains its own status without showing task-registration state", async (t) => {
+  const { container, calls } = await mountConflict(t, { rows: [], status: "loading" })
+  assert.match(container.textContent, /일정 충돌을 확인하고 있습니다/)
+  assert.equal(container.querySelectorAll("button, a").length, 0)
+  assert.deepEqual(calls, [])
 })
