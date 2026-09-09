@@ -133,9 +133,20 @@ insert into public.ops_registration_consultations(id,track_id,mode,status,direct
 select ('96800000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,('96700000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
  'phone','waiting','94000000-0000-4000-8000-000000000001','2026-01-01T00:00:00Z','inquiry' from generate_series(1,2) n;
 
-insert into public.ops_tasks(id,title,type,status,priority,requested_by,student_name,class_name,subject,created_at,updated_at)
+-- The current withdrawal source requires real management links even for a
+-- submitted read fixture. Keep nullable display values while supplying those links.
+insert into public.students(id,name,status,class_ids,waitlist_class_ids)
+select ('97910000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
+  '학생 '||case when n=4 then 10 when n=5 then 2 else n end,'재원','[]','[]'
+from generate_series(1,5) n;
+insert into public.classes(id,name,subject,teacher,schedule,room,status,student_ids,waitlist_ids,grade)
+values('97900000-0000-4000-8000-000000000001','반 10','영어','교사 2',
+  '월 17:00-19:00','본관1','수업 진행 중','[]','[]','중1');
+
+insert into public.ops_tasks(id,title,type,status,priority,requested_by,student_name,class_name,subject,student_id,class_id,created_at,updated_at)
 select ('97000000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'np-fixture '||kind,'withdrawal','requested','normal',
- '94000000-0000-4000-8000-000000000001','학생 '||n,'반 10',case when n=1 then '영어' else '' end,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
+ '94000000-0000-4000-8000-000000000001','학생 '||n,'반 10',case when n=1 then '영어' else '' end,
+ ('97910000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'97900000-0000-4000-8000-000000000001','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
 from (values (1,'withdrawal'),(2,'withdrawal'),(3,'withdrawal')) fixture(n,kind);
 insert into public.ops_withdrawal_details(task_id,teacher_name,withdrawal_date,completed_lesson_hours,four_week_lesson_hours,makeedu_withdrawal_done,fee_processed,textbook_fee_processed)
 select id,case when right(id::text,1)='1' then '교사 2' else '' end,current_date,2,8,true,false,false
@@ -161,9 +172,11 @@ select id,'본관',case when right(id::text,1)='1' then '교사 2' else null end
  case when right(id::text,1)='2' then 'done' else 'not_started' end,20,16,18
 from public.ops_tasks where id between '99000000-0000-4000-8000-000000000001' and '99000000-0000-4000-8000-000000000003';
 
-insert into public.ops_tasks(id,title,type,status,priority,requested_by,student_name,class_name,subject,created_at,updated_at)
+insert into public.ops_tasks(id,title,type,status,priority,requested_by,student_name,class_name,subject,student_id,class_id,created_at,updated_at)
 select (prefix||'-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'np-fixture header',kind,'requested','normal',
- '94000000-0000-4000-8000-000000000001',case when n=4 then '학생 10' else '학생 2' end,'반 10','영어','2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
+ '94000000-0000-4000-8000-000000000001',case when n=4 then '학생 10' else '학생 2' end,'반 10','영어',
+ case when kind='withdrawal' then ('97910000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid end,
+ case when kind='withdrawal' then '97900000-0000-4000-8000-000000000001'::uuid end,'2026-01-01T00:00:00Z','2026-01-01T00:00:00Z'
 from (values('97000000','withdrawal'),('98000000','transfer')) kinds(prefix,kind) cross join generate_series(4,5) n;
 insert into public.ops_withdrawal_details(task_id,teacher_name,withdrawal_date,completed_lesson_hours,four_week_lesson_hours)
 select id,'교사 2',current_date,2,8 from public.ops_tasks where id in ('97000000-0000-4000-8000-000000000004','97000000-0000-4000-8000-000000000005');
