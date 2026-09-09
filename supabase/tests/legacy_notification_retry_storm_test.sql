@@ -106,7 +106,7 @@ insert into dashboard_private.notification_rules(
 )
 values (
   '89000000-0000-4000-8000-000000000101',
-  'global', 'tasks', 'task.legacy_retry_storm_fixture', 'google_chat',
+  'global', 'transfer', 'transfer.legacy_retry_storm_fixture', 'google_chat',
   'management_team', 'immediate', 'immediate', null, null, true,
   '89000000-0000-4000-8000-000000000201', 1,
   null, 'system', null, 'system', pg_catalog.now(), pg_catalog.now()
@@ -134,7 +134,7 @@ set local role service_role;
 
 insert into legacy_notification_retry_storm_results(result_key, payload)
 select 'begun', public.begin_legacy_notification_dispatch_v1(
-  'tasks',
+  'transfer',
   'legacy-retry-storm-occurrence',
   '89000000-0000-4000-8000-000000000101',
   'google_chat',
@@ -158,7 +158,7 @@ select ok(
 
 insert into legacy_notification_retry_storm_results(result_key, payload)
 select 'interrupted-replay', public.begin_legacy_notification_dispatch_v1(
-  'tasks',
+  'transfer',
   'legacy-retry-storm-occurrence',
   '89000000-0000-4000-8000-000000000101',
   'google_chat',
@@ -205,7 +205,7 @@ select ok(
 
 insert into legacy_notification_retry_storm_results(result_key, payload)
 select 'closed-replay', public.begin_legacy_notification_dispatch_v1(
-  'tasks',
+  'transfer',
   'legacy-retry-storm-occurrence',
   '89000000-0000-4000-8000-000000000101',
   'google_chat',
