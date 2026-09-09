@@ -30,7 +30,7 @@ export function readNotificationSettingsLocation(params: URLSearchParams): Notif
   return {
     workflow: NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.some((option) => option.key === workflow)
       ? workflow as NotificationWorkflowKey
-      : "tasks",
+      : "registration",
     section: section === "connections" || section === "customer" ? section : "rules",
     group: group === "visit" || group === "progress" || group === "subject" || group === "archive" ? group : null,
   }

@@ -66,8 +66,8 @@ const RULE_GROUPS = [
     cells: [{ audienceKey: "subject_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE }],
     scopeState: "in_scope",
     configurationKind: "editable_rule",
-    enabledState: "enabled",
-    dispatchOwner: "legacy",
+    enabledState: workflowKey === "word_retests" ? "disabled" : "enabled",
+    dispatchOwner: workflowKey === "word_retests" ? "none" : "legacy",
   } as const)),
   {
     workflowKey: "tasks",

@@ -32,7 +32,7 @@ async function createEntrypointFixture(t, overrides = {}) {
       "withdrawal",
       "makeup_requests",
       "approvals",
-    ].map((key) => `{ key: "${key}" },`).join("\n") + '\n] as const\nexport const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS\n',
+    ].map((key) => `{ key: "${key}" },`).join("\n") + '\n] as const\nexport const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(\n  (workflow) => workflow.key !== "tasks" && workflow.key !== "word_retests",\n)\n',
     "src/lib/navigation.ts": '{ title: "알림 설정", url: "/admin/settings/notifications" }',
     "src/app/api/google-chat/route.ts": "notification_payload_forbidden sourceEventId",
     "src/app/api/web-push/route.ts": "notification_payload_forbidden",
@@ -214,7 +214,7 @@ test("settings open/save evidence는 관측 provider와 legacy bridge가 모두 
   })
 })
 
-test("공통 Chat 메뉴는 실제 workflow 배열 alias에서 일곱 업무를 읽는다", async (t) => {
+test("공통 Chat 메뉴는 과거 업무 목록에서 은퇴한 두 업무를 제외한다", async (t) => {
   const verifier = await import(verifierUrl.href)
   const rootUrl = await createEntrypointFixture(t)
   const result = await verifier.scanNotificationWorkflowEntrypoints(rootUrl)
@@ -225,7 +225,7 @@ test("workflow alias가 다른 목록을 참조하면 공통 메뉴 검증을 �
   const verifier = await import(verifierUrl.href)
   const rootUrl = await createEntrypointFixture(t)
   const file = new URL("src/features/notifications/notification-control-plane-types.ts", rootUrl)
-  await writeFile(file, (await readFile(file, "utf8")).replace("= NOTIFICATION_WORKFLOW_OPTIONS\n", "= UNRELATED_OPTIONS\n"))
+  await writeFile(file, (await readFile(file, "utf8")).replace("= NOTIFICATION_WORKFLOW_OPTIONS.filter(", "= UNRELATED_OPTIONS.filter("))
   const result = await verifier.scanNotificationWorkflowEntrypoints(rootUrl)
   assert.deepEqual(result.blockers, verifier.NOTIFICATION_WORKFLOW_ENTRYPOINTS.map(entry => `common_panel_missing:${entry.workflowKey}`))
 })

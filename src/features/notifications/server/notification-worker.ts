@@ -1696,7 +1696,8 @@ async function processDelivery(
   input: NotificationWorkerRuntimeInput,
 ) {
   validateDeliveryClaim(claim)
-  if (["in_app", "web_push"].includes(requiredString(claim.channel_key))) {
+  if (["tasks", "word_retests"].includes(requiredWorkflowKey(claim.workflow_key))
+    || ["in_app", "web_push"].includes(requiredString(claim.channel_key))) {
     await finalizeDelivery(claim, "canceled", "cutover_rollback", input.rpc)
     return
   }

@@ -9,12 +9,10 @@ const countItems = [
   { key: "levelTests", label: "레벨테스트" },
   { key: "visitConsultations", label: "방문상담" },
   { key: "observationClasses", label: "청강" },
-  { key: "openTasks", label: "오늘 업무" },
 ] as const
 
 const shortcuts = [
   { href: "/admin/registration", label: "등록" },
-  { href: "/admin/tasks", label: "업무" },
   { href: "/admin/academic-calendar", label: "학사" },
   { href: "/admin/statistics", label: "통계" },
 ]
@@ -36,7 +34,7 @@ export function DashboardDailyBrief() {
 
   return (
     <div className="grid min-w-0 gap-4">
-      <div className="grid grid-cols-2 gap-2 lg:grid-cols-4">
+      <div className="grid grid-cols-3 gap-2">
         {countItems.map((item) => (
           <div key={item.key} className="rounded-xl border bg-card px-4 py-3">
             <p className="text-xs font-medium text-muted-foreground">{item.label}</p>

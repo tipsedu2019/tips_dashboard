@@ -103,12 +103,12 @@ function jsonRequest(url, method, body, token = "session-token") {
 function createWireSnapshot(overrides = {}) {
   return {
     scope_key: "global",
-    workflow_key: "tasks",
+    workflow_key: "transfer",
     rules: [
       {
         id: RULE_ID,
-        workflow_key: "tasks",
-        event_key: "task.created",
+        workflow_key: "transfer",
+        event_key: "transfer.completed",
         event_label: "할 일 생성",
         group_label: "할 일",
         trigger_description: "할 일이 생성되면",
@@ -507,12 +507,12 @@ test("browser service maps one snake_case snapshot and preserves bigint revision
     },
   })
 
-  const snapshot = await service.getControlPlane({ workflowKey: "tasks" })
+  const snapshot = await service.getControlPlane({ workflowKey: "transfer" })
   assert.equal(requests.length, 1)
   assert.equal(new URL(requests[0].url).pathname, "/api/notifications/control-plane")
-  assert.equal(new URL(requests[0].url).searchParams.get("workflow_key"), "tasks")
+  assert.equal(new URL(requests[0].url).searchParams.get("workflow_key"), "transfer")
   assert.equal(requests[0].init.headers.Authorization, "Bearer session-token")
-  assert.equal(snapshot.workflowKey, "tasks")
+  assert.equal(snapshot.workflowKey, "transfer")
   assert.equal(snapshot.rules[0].revision, BIG_REVISION)
   assert.equal(snapshot.rules[0].configurationKind, "editable_rule")
   assert.equal(snapshot.rules[0].activationLocked, false)
@@ -549,7 +549,7 @@ test("browser service emits only the strict snake_case save wire contract", asyn
   })
 
   const result = await service.saveControlPlane({
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: {
@@ -572,7 +572,7 @@ test("browser service emits only the strict snake_case save wire contract", asyn
     "request_id",
     "workflow_key",
   ])
-  assert.equal(sentBody.workflow_key, "tasks")
+  assert.equal(sentBody.workflow_key, "transfer")
   assert.equal(sentBody.expected_rule_revisions[RULE_ID], BIG_REVISION)
   assert.equal(
     sentBody.expected_contract_versions[RULE_ID],
@@ -603,7 +603,7 @@ test("browser service adds the separate conflict override audit wire only when c
   })
 
   await service.saveControlPlane({
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -614,7 +614,7 @@ test("browser service adds the separate conflict override audit wire only when c
     },
   })
   await service.saveControlPlane({
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: false } } },
@@ -637,14 +637,14 @@ test("browser service treats a committed no-op save as success without inventing
   })
 
   const result = await service.saveControlPlane({
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: false } } },
     requestId: "30000000-0000-4000-8000-000000000202",
   })
 
-  assert.equal(result.workflowKey, "tasks")
+  assert.equal(result.workflowKey, "transfer")
   assert.equal(result.reconciliationJob, null)
 })
 
@@ -663,7 +663,7 @@ test("browser service maps revision conflicts without losing the current safe sn
 
   await assert.rejects(
     service.saveControlPlane({
-      workflowKey: "tasks",
+      workflowKey: "transfer",
       expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
       expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -672,7 +672,7 @@ test("browser service maps revision conflicts without losing the current safe sn
     (error) => {
       assert.equal(error.code, "notification_revision_conflict")
       assert.equal(error.status, 409)
-      assert.equal(error.currentSnapshot.workflowKey, "tasks")
+      assert.equal(error.currentSnapshot.workflowKey, "transfer")
       assert.equal(error.currentSnapshot.rules[0].revision, BIG_REVISION)
       assert.equal(error.currentRevisions[RULE_ID], NEXT_BIG_REVISION)
       return true
@@ -691,7 +691,7 @@ test("browser service rejects a snapshot containing a plaintext or ciphertext co
       fetch: async () => jsonResponse(unsafeSnapshot),
     })
     await assert.rejects(
-      service.getControlPlane({ workflowKey: "tasks" }),
+      service.getControlPlane({ workflowKey: "transfer" }),
       (error) => {
         assert.equal(error.code, "notification_unsafe_response")
         assert.doesNotMatch(String(error.message), /key-secret|token-secret/)
@@ -711,7 +711,7 @@ test("browser service rejects connection result codes outside the closed registr
     fetch: async () => jsonResponse(unsafeSnapshot),
   })
 
-  await assert.rejects(service.getControlPlane({ workflowKey: "tasks" }), (error) => {
+  await assert.rejects(service.getControlPlane({ workflowKey: "transfer" }), (error) => {
     assert.equal(error.code, "notification_unsafe_response")
     assert.doesNotMatch(String(error.message), /key-secret/)
     return true
@@ -737,7 +737,7 @@ test("control-plane route accepts only the exact workflow query and admin/staff 
   })
 
   const validRequest = new Request(
-    "http://localhost/api/notifications/control-plane?workflow_key=tasks",
+    "http://localhost/api/notifications/control-plane?workflow_key=transfer",
     { headers: { Authorization: "Bearer session-token" } },
   )
   const response = await handlers.get(validRequest)
@@ -747,11 +747,11 @@ test("control-plane route accepts only the exact workflow query and admin/staff 
     validRequest,
     "handler must authenticate the actual Request object",
   )
-  assert.equal((await response.json()).workflow_key, "tasks")
-  assert.deepEqual(calls, [{ workflowKey: "tasks", client: { id: "caller-client" } }])
+  assert.equal((await response.json()).workflow_key, "transfer")
+  assert.deepEqual(calls, [{ workflowKey: "transfer", client: { id: "caller-client" } }])
 
   const extraRequest = new Request(
-    "http://localhost/api/notifications/control-plane?workflow_key=tasks&table=notification_rules",
+    "http://localhost/api/notifications/control-plane?workflow_key=transfer&table=notification_rules",
   )
   const unknownRequest = new Request(
     "http://localhost/api/notifications/control-plane?workflow_key=unknown",
@@ -776,7 +776,7 @@ test("control-plane route preserves the closed configuration error without expos
   })
 
   const response = await handlers.get(new Request(
-    "http://localhost/api/notifications/control-plane?workflow_key=tasks",
+    "http://localhost/api/notifications/control-plane?workflow_key=transfer",
   ))
   assert.equal(response.status, 200)
   const payload = await response.json()
@@ -800,7 +800,7 @@ test("control-plane route rejects ordinary users and strict-save payload violati
     "http://localhost/api/notifications/control-plane",
     "PATCH",
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -811,34 +811,34 @@ test("control-plane route rejects ordinary users and strict-save payload violati
 
   const invalidBodies = [
     {
-      workflowKey: "tasks",
+      workflowKey: "transfer",
       expectedRevisions: { [RULE_ID]: BIG_REVISION },
       patch: { rules: {} },
       requestId: REQUEST_ID,
     },
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: Number(BIG_REVISION) },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: {} },
       request_id: REQUEST_ID,
     },
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: 1 },
       patch: { rules: {} },
       request_id: REQUEST_ID,
     },
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true, webhook_url: GOOGLE_CHAT_URL } } },
       request_id: REQUEST_ID,
     },
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: {} },
@@ -846,7 +846,7 @@ test("control-plane route rejects ordinary users and strict-save payload violati
       table_name: "dashboard_private.notification_rules",
     },
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -857,7 +857,7 @@ test("control-plane route rejects ordinary users and strict-save payload violati
       },
     },
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -895,7 +895,7 @@ test("control-plane route forwards a validated conflict override separately from
     "http://localhost/api/notifications/control-plane",
     "PATCH",
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -925,7 +925,7 @@ test("Supabase save adapter selects the v2 RPC and exact audit parameters only f
     },
   }
   const base = {
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true } } },
@@ -945,7 +945,7 @@ test("Supabase save adapter selects the v2 RPC and exact audit parameters only f
   assert.deepEqual(rpcCalls[0], [
     "save_notification_control_plane_with_override_v2",
     {
-      p_workflow_key: "tasks",
+      p_workflow_key: "transfer",
       p_expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       p_expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       p_patch: base.patch,
@@ -956,7 +956,7 @@ test("Supabase save adapter selects the v2 RPC and exact audit parameters only f
   ])
   assert.equal(rpcCalls[1][0], "save_notification_control_plane_v2")
   assert.deepEqual(rpcCalls[1][1], {
-    p_workflow_key: "tasks",
+    p_workflow_key: "transfer",
     p_expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
     p_expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     p_patch: base.patch,
@@ -977,7 +977,7 @@ test("기존 v2 저장 직렬화는 멘션 상태 없이 기존 초안 패치만
   })
 
   await service.saveControlPlane({
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true, titleTemplate: "새 제목" } } },
@@ -985,7 +985,7 @@ test("기존 v2 저장 직렬화는 멘션 상태 없이 기존 초안 패치만
   })
 
   assert.deepEqual(requests[0], {
-    workflow_key: "tasks",
+    workflow_key: "transfer",
     expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
     expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true, title_template: "새 제목" } } },
@@ -1017,7 +1017,7 @@ test("control-plane route forwards one strict save and returns a safe 409 snapsh
     "http://localhost/api/notifications/control-plane",
     "PATCH",
     {
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
       expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
       patch: { rules: { [RULE_ID]: { enabled: true, title_template: "새 제목" } } },
@@ -1029,7 +1029,7 @@ test("control-plane route forwards one strict save and returns a safe 409 snapsh
   assert.equal(authenticatedRequest, patchRequest, "PATCH must authenticate the actual Request")
   assert.equal(calls.length, 1)
   assert.deepEqual(calls[0], {
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     expectedRuleRevisions: { [RULE_ID]: BIG_REVISION },
     expectedContractVersions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
     patch: { rules: { [RULE_ID]: { enabled: true, title_template: "새 제목" } } },
@@ -1038,7 +1038,7 @@ test("control-plane route forwards one strict save and returns a safe 409 snapsh
   })
   const payload = await response.json()
   assert.equal(payload.code, "notification_revision_conflict")
-  assert.equal(payload.current_snapshot.workflow_key, "tasks")
+  assert.equal(payload.current_snapshot.workflow_key, "transfer")
   assert.equal(payload.current_revisions[RULE_ID], NEXT_BIG_REVISION)
   assert.doesNotMatch(JSON.stringify(payload), /key-secret|token-secret|webhook_url_ciphertext/)
 })
@@ -2506,15 +2506,15 @@ test("content contract v2 RPCs keep v1 compatibility and expose only role-checke
 })
 
 function atomicWireMention(overrides = {}) {
-  return { rule_id: RULE_ID, workflow_key: 'tasks', event_key: 'task.created', channel_key: 'google_chat',
+  return { rule_id: RULE_ID, workflow_key: 'transfer', event_key: 'task.created', channel_key: 'google_chat',
     mention_enabled: false, revision: BIG_REVISION, updated_at: null, editable: true, ...overrides }
 }
 function atomicRpcMention(overrides = {}) {
-  return { ruleId: RULE_ID, workflowKey: 'tasks', eventKey: 'task.created', channelKey: 'google_chat',
+  return { ruleId: RULE_ID, workflowKey: 'transfer', eventKey: 'task.created', channelKey: 'google_chat',
     mentionEnabled: false, revision: BIG_REVISION, updatedAt: null, editable: true, ...overrides }
 }
 function atomicServiceInput(overrides = {}) {
-  return { workflowKey: 'tasks', expectedRuleRevisions: {}, expectedContractVersions: {}, patch: { rules: {} },
+  return { workflowKey: 'transfer', expectedRuleRevisions: {}, expectedContractVersions: {}, patch: { rules: {} },
     expectedMentionRevisions: { [RULE_ID]: BIG_REVISION }, mentionPatch: { [RULE_ID]: false }, requestId: REQUEST_ID, ...overrides }
 }
 
@@ -2569,7 +2569,7 @@ test('atomic handler preserves archived read-only mentions and blocks malformed 
     getControlPlane: async () => createWireSnapshot(),
     saveControlPlane: async (input) => { calls.push(input); return { ...createWireSnapshot(), mention_settings: [atomicRpcMention({ editable: false })] } },
   })
-  const body = { workflow_key: 'tasks', expected_rule_revisions: {}, expected_contract_versions: {}, patch: { rules: {} },
+  const body = { workflow_key: 'transfer', expected_rule_revisions: {}, expected_contract_versions: {}, patch: { rules: {} },
     expected_mention_revisions: { [RULE_ID]: BIG_REVISION }, mention_patch: { [RULE_ID]: false }, request_id: REQUEST_ID }
   const invoke = (payload) => handlers.patch(new Request('http://localhost/api/notifications/control-plane', { method: 'PATCH', body: JSON.stringify(payload) }))
   const response = await invoke(body)
@@ -2610,7 +2610,7 @@ test('control-plane timeout covers late authentication and never sends after the
       getAccessToken: () => new Promise((resolve) => { finishToken = resolve }),
       fetch: async () => { calls++; return jsonResponse(createWireSnapshot()) },
     })
-    const pending = operation === 'read' ? service.getControlPlane({ workflowKey: 'tasks' }) : service.saveControlPlane(atomicServiceInput())
+    const pending = operation === 'read' ? service.getControlPlane({ workflowKey: 'transfer' }) : service.saveControlPlane(atomicServiceInput())
     await assert.rejects(pending, (error) => error instanceof NotificationControlPlaneHttpError && error.code === 'notification_request_timeout' && error.status === 504)
     finishToken('late-token')
     await new Promise((resolve) => setTimeout(resolve, 0))
@@ -2629,7 +2629,7 @@ test('control-plane timeout covers both fetch and body consumption and aborts th
           return phase === 'fetch' ? new Promise(() => {}) : { ok: true, json: () => new Promise(() => {}) }
         },
       })
-      const pending = operation === 'read' ? service.getControlPlane({ workflowKey: 'tasks' }) : service.saveControlPlane(atomicServiceInput())
+      const pending = operation === 'read' ? service.getControlPlane({ workflowKey: 'transfer' }) : service.saveControlPlane(atomicServiceInput())
       await assert.rejects(pending, (error) => error instanceof NotificationControlPlaneHttpError && error.code === 'notification_request_timeout')
       assert.equal(signal.aborted, true)
     }
@@ -2657,4 +2657,24 @@ test('timed-out atomic saves keep the caller draft and request identity while ig
   assert.equal(result.mentionSettings[0].ruleId, RULE_ID)
   assert.equal(calls.length, 2)
   assert.deepEqual(calls[0], calls[1])
+})
+
+
+test("retired task and word retest settings reject GET and PATCH before RPC", async () => {
+  const { createNotificationControlPlaneRouteHandlers } = await import(controlPlaneRouteUrl)
+  let authenticated = 0
+  const handlers = createNotificationControlPlaneRouteHandlers({
+    authenticate: async () => { authenticated += 1; return { userId: ADMIN_ID, role: "admin", client: {} } },
+    getControlPlane: async () => { throw new Error("retired workflow read") },
+    saveControlPlane: async () => { throw new Error("retired workflow save") },
+  })
+  for (const workflow_key of ["tasks", "word_retests"]) {
+    assert.equal((await handlers.get(new Request(`http://localhost/api/notifications/control-plane?workflow_key=${workflow_key}`))).status, 400)
+    assert.equal((await handlers.patch(jsonRequest("http://localhost/api/notifications/control-plane", "PATCH", {
+      workflow_key, expected_rule_revisions: { [RULE_ID]: BIG_REVISION },
+      expected_contract_versions: { [RULE_ID]: CONTENT_CONTRACT_VERSION },
+      patch: { rules: { [RULE_ID]: { enabled: true } } }, request_id: REQUEST_ID,
+    }))).status, 400)
+  }
+  assert.equal(authenticated, 4)
 })

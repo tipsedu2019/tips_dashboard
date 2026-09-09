@@ -163,5 +163,6 @@ jobs:
             --test supabase/tests/registration_manual_workflow_status_test.sql \
             --probe tests/probe-registration-management-recovery-concurrency.mjs \
             --probe tests/probe-registration-visit-cancellation-dto.mjs \
+            --test supabase/tests/operations_subject_completion_chat_test.sql \
             --test supabase/tests/word_retest_google_chat_retirement_test.sql \
             --test supabase/tests/legacy_notification_retry_storm_test.sql

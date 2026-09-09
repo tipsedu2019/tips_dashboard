@@ -8,9 +8,9 @@ import { getNotificationContentContract } from "../src/features/notifications/no
 
 const englishResultContract = getNotificationContentContract({ workflowKey: "word_retests", eventKey: "word_retest.result_reported", audienceKey: "subject_team", channelKey: "google_chat", ruleVariantKey: "immediate" })
 
-test("Google Chat settings expose only the English subject result rule from word retests", async () => {
+test("Google Chat settings exclude all task and word retest rules", async () => {
   assert.deepEqual(types.NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS?.map(({ key }) => key), [
-    "tasks", "word_retests", "registration", "transfer", "withdrawal", "makeup_requests", "approvals",
+    "registration", "transfer", "withdrawal", "makeup_requests", "approvals",
   ])
   assert.ok(types.NOTIFICATION_EVENT_KEYS_BY_WORKFLOW.word_retests.includes("word_retest.result_reported"))
   const panel = await readFile(new URL("../src/features/notifications/notification-control-panel.tsx", import.meta.url), "utf8")
@@ -23,10 +23,10 @@ test("Google Chat settings expose only the English subject result rule from word
     { id: "management", channelKey: "google_chat", workflowKey: "word_retests", eventKey: "word_retest.result_reported", audienceKey: "management_team", connectionKey: "google_chat.management", ruleVariantKey: "immediate" },
     { id: "wrong-team", channelKey: "google_chat", workflowKey: "word_retests", eventKey: "word_retest.result_reported", audienceKey: "subject_team", connectionKey: "google_chat.math", ruleVariantKey: "immediate" },
     { id: "registration", channelKey: "google_chat", workflowKey: "registration" },
-  ]).map(({ id }) => id), ["result", "registration"])
+  ]).map(({ id }) => id), ["registration"])
 })
 
-test("the RPC subject rule with a dynamic null connection remains editable only under the English-only contract", () => {
+test("historical word result snapshots remain readable but cannot be edited", () => {
   const wire = {
     scope_key: "global", workflow_key: "word_retests", connections: [],
     delivery_summary: { pending_count: 0, sent_count: 0, failed_count: 0, unknown_count: 0, latest_delivery_at: null },
@@ -48,7 +48,7 @@ test("the RPC subject rule with a dynamic null connection remains editable only 
   assert.equal(parsed.ok, true, JSON.stringify(parsed))
   const rule = parsed.value.rules[0]
   assert.equal(rule.connectionKey, null)
-  assert.deepEqual(selectEditableGoogleChatRules([rule]).map(({ id }) => id), ["word-result-rule"])
+  assert.deepEqual(selectEditableGoogleChatRules([rule]).map(({ id }) => id), [])
   for (const invalid of [
     { connectionKey: "google_chat.math" }, { connectionKey: "google_chat.management" },
     { contentContract: undefined },
@@ -57,7 +57,7 @@ test("the RPC subject rule with a dynamic null connection remains editable only 
   ]) assert.deepEqual(selectEditableGoogleChatRules([{ ...rule, ...invalid }]), [])
 })
 
-test("word retest provider allows only the explicit English subject result delivery identity", async () => {
+test("word retest provider rejects even the formerly allowed English subject result", async () => {
   let requests = 0
   const provider = createGoogleChatProvider({ fetch: async () => {
     requests += 1
@@ -85,8 +85,10 @@ test("word retest provider allows only the explicit English subject result deliv
     assert.equal(outcome.errorCode, "word_retest_google_chat_retired")
   }
   assert.equal(requests, 0)
-  assert.equal((await provider.send(context)).status, "sent")
-  assert.equal(requests, 1, "the only HTTP call uses a mocked transport")
+  assert.equal((await provider.send(context)).errorCode, "word_retest_google_chat_retired")
+  assert.equal(requests, 0)
+  assert.equal((await provider.send({ ...context, workflow_key: "tasks", event_key: "task.created" })).errorCode, "task_notifications_retired")
+  assert.equal(requests, 0)
 })
 
 test("the Google Chat transport refuses retired word retest deliveries before HTTP", async () => {

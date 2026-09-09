@@ -90,13 +90,14 @@ export async function scanNotificationWorkflowEntrypoints(rootUrl) {
   const workflowOptions = controlPlaneTypes.match(
     /export const NOTIFICATION_WORKFLOW_OPTIONS\s*=\s*(\[[\s\S]*?\])\s*as const/u,
   )?.[1] || ""
-  const hasGoogleChatWorkflowAlias = /export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS[ \t]*=[ \t]*NOTIFICATION_WORKFLOW_OPTIONS[ \t]*(?:;|\n(?![ \t]*[.(\[])|$)/u.test(controlPlaneTypes)
+  const hasActiveGoogleChatWorkflows = controlPlaneTypes.includes("export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(")
+    && controlPlaneTypes.includes('(workflow) => workflow.key !== "tasks" && workflow.key !== "word_retests"')
   const centralPanelReady = (
     settingsPage.includes("<NotificationSettingsWorkspace")
     && settingsWorkspace.includes("<NotificationControlPanel")
     && settingsWorkspace.includes('presentation="page"')
     && controlPanel.includes("NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map")
-    && hasGoogleChatWorkflowAlias
+    && hasActiveGoogleChatWorkflows
     && controlPanel.includes("data-notification-workflow={activeWorkflow}")
     && navigation.includes('{ title: "알림 설정", url: "/admin/settings/notifications" }')
   )

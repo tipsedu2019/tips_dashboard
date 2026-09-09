@@ -8001,11 +8001,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [attachmentName, setAttachmentName] = useState("")
   const [attachmentLink, setAttachmentLink] = useState("")
 
-  async function dispatchLegacyOpsTaskSources(sourceEventIds: string[], sessionToken: string) {
+  const dispatchLegacyOpsTaskSources = useCallback(async function dispatchLegacyOpsTaskSources(sourceEventIds: string[], sessionToken: string) {
+    if (isTodoWorkspace || isWordRetestWorkspace) return []
     const eventIds = await dispatchLegacyOpsTaskSourcesRequest(sourceEventIds, sessionToken)
     setLatestGoogleChatEventId(eventIds[eventIds.length - 1] || null)
     return eventIds
-  }
+  }, [isTodoWorkspace, isWordRetestWorkspace])
   const [deleteTarget, setDeleteTarget] = useState<OpsTask | null>(null)
   const [bulkDeleteTargets, setBulkDeleteTargets] = useState<OpsTask[]>([])
   const [statusUndo, setStatusUndo] = useState<StatusUndoState | null>(null)
@@ -11814,6 +11815,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     void autoMarkPastWordRetestsAbsent()
   }, [
     currentUserId,
+    dispatchLegacyOpsTaskSources,
     data,
     invalidatePendingWorkspaceReloads,
     isWordRetestWorkspace,

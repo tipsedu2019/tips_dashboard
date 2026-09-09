@@ -52,7 +52,6 @@ const SUBJECT_COMPLETION_EVENTS = new Set([
   "registration.subject_registration_completed",
   "transfer.completed",
   "withdrawal.completed",
-  "word_retest.result_reported",
 ])
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -127,7 +126,11 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
   if (!isRecord(value) || !Array.isArray(value.items)) {
     throw new Error("ops_task_legacy_dispatch_plan_invalid")
   }
-  return value.items.map((raw) => {
+  return value.items.filter((raw) => {
+    if (!isRecord(raw)) throw new Error("ops_task_legacy_dispatch_plan_invalid")
+    const eventKey = text(raw.eventKey)
+    return !eventKey.startsWith("task.") && !eventKey.startsWith("word_retest.")
+  }).map((raw) => {
     if (!isRecord(raw)) throw new Error("ops_task_legacy_dispatch_plan_invalid")
     const item = {
       eventId: text(raw.eventId),
@@ -161,13 +164,12 @@ function parsePlan(value: unknown): LegacyDispatchItem[] {
       && SUBJECT_COMPLETION_EVENTS.has(item.eventKey)
       && ["google_chat.english", "google_chat.math", "google_chat.science"].includes(item.connectionKey)
       && text(item.targetSnapshot.connection_key) === item.connectionKey
-      && (item.eventKey !== "word_retest.result_reported" || item.connectionKey === "google_chat.english")
     if (
       !UUID.test(item.eventId)
       || !UUID.test(item.ruleId)
       || !UUID.test(item.templateId)
       || !TEMPLATE_CHECKSUM.test(item.templateChecksum)
-      || !["task", "word_retest", "registration", "transfer", "withdrawal"].includes(item.eventKey.split(".")[0] || "")
+      || !["registration", "transfer", "withdrawal"].includes(item.eventKey.split(".")[0] || "")
       || !item.occurrenceKey
       || item.channelKey !== "google_chat"
       || !(managementTarget || subjectTarget)
@@ -451,11 +453,7 @@ export async function POST(request: Request) {
   try {
     await authorizeRegistrationLegacyDispatch(actorClient, sourceEventId)
     const plan = await loadLegacyDispatchPlan(serverClient, sourceEventId, actor.user.id)
-    const items = parsePlan(plan).filter((item) => !item.eventKey.startsWith("word_retest.") || (
-      item.eventKey === "word_retest.result_reported"
-      && item.audienceKey === "subject_team"
-      && item.connectionKey === "google_chat.english"
-    ))
+    const items = parsePlan(plan)
     const outcomes: string[] = []
     for (const item of items) {
       try {

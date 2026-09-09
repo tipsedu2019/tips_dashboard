@@ -3,7 +3,6 @@ import {
   BookOpen,
   CalendarDays,
   CalendarClock,
-  ClipboardCheck,
   FileCheck2,
   GraduationCap,
   ChartNoAxesCombined,
@@ -321,16 +320,6 @@ export function buildAdminNavGroups({
   canUseAssistantOperations?: boolean
 }): NavGroup[] {
   const assistantOverviewItems: NavItem[] = [
-    {
-      title: "할 일",
-      url: "/admin/tasks",
-      icon: ClipboardCheck,
-      items: [
-        { title: "받은함", url: "/admin/tasks?list=inbox" },
-        { title: "보낸함", url: "/admin/tasks?list=sent" },
-        { title: "완료", url: "/admin/tasks?list=completed" },
-      ],
-    },
     { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
     {
       title: "학사일정",
@@ -346,16 +335,6 @@ export function buildAdminNavGroups({
   const fullOverviewItems: NavItem[] = [
     { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
     { title: "통계", url: "/admin/statistics", icon: ChartNoAxesCombined },
-    {
-      title: "할 일",
-      url: "/admin/tasks",
-      icon: ClipboardCheck,
-      items: [
-        { title: "받은함", url: "/admin/tasks?list=inbox" },
-        { title: "보낸함", url: "/admin/tasks?list=sent" },
-        { title: "완료", url: "/admin/tasks?list=completed" },
-      ],
-    },
     { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
     { title: "등록", url: "/admin/registration", icon: UserPlus },
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },

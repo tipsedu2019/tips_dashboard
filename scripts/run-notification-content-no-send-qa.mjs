@@ -238,12 +238,9 @@ export async function runNotificationContentNoSendQa() {
       assert.equal(expected.ok, true)
       const beforeCalls = fakeFormattingCalls.length
       const sent = await provider.send(context)
-      const isSubjectRetestResult = identity.eventKey === "word_retest.result_reported"
-        && identity.audienceKey === "subject_team"
-        && expectedDestination === "google_chat.english"
-      if (identity.workflowKey === "word_retests" && !isSubjectRetestResult) {
+      if (["tasks", "word_retests"].includes(identity.workflowKey)) {
         assert.equal(sent.status, "failed")
-        assert.equal(sent.errorCode, "word_retest_google_chat_retired")
+        assert.equal(sent.errorCode, identity.workflowKey === "tasks" ? "task_notifications_retired" : "word_retest_google_chat_retired")
         assert.equal(fakeFormattingCalls.length, beforeCalls)
         retiredGoogleChatIdentityCount += 1
         continue
