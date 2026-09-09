@@ -13,7 +13,7 @@ import type { NotificationWorkflowKey } from "./notification-control-plane-types
 import type { NotificationSettingsSection, RegistrationSettingsGroup } from "./notification-settings-editor-state"
 
 const WORKFLOW_ORDER_TEXT =
-  "할 일 · 등록 · 전반 · 퇴원 · 휴보강 · 전자결재"
+  "등록 · 전반 · 퇴원 · 휴보강 · 전자결재"
 
 type NotificationSettingsWorkspaceProps = {
   initialSection?: NotificationSettingsSection
@@ -24,7 +24,7 @@ type NotificationSettingsWorkspaceProps = {
 
 export function NotificationSettingsWorkspace({
   initialSection = "rules",
-  initialWorkflow = "tasks",
+  initialWorkflow = "registration",
   initialGroup = null,
   customerGuidance,
 }: NotificationSettingsWorkspaceProps) {

@@ -432,7 +432,7 @@ test("UTF-8 최종 payload는 정확히 32,000바이트까지 허용한다", asy
   assert.equal(result.byteLength, 32_000)
 })
 
-test("historical legacy 59 identities plus four forward subject identities match the current manifest", async () => {
+test("historical legacy 59 identities plus three active subject identities match the current manifest", async () => {
   const [source, coverage, subjectSource] = await Promise.all([
     readFile(legacyProjectionUrl, "utf8"),
     readFile(coverageManifestUrl, "utf8").then(JSON.parse),
@@ -461,12 +461,11 @@ test("historical legacy 59 identities plus four forward subject identities match
     ["registration", "registration.subject_registration_completed"],
     ["transfer", "transfer.completed"],
     ["withdrawal", "withdrawal.completed"],
-    ["word_retests", "word_retest.result_reported"],
   ].map(([workflow, event]) => {
     assert.ok(subjectSource.includes(`('${workflow}','${event}'`))
     return `${workflow}|${event}|subject_team|google_chat|immediate`
   })
-  assert.equal(expected.length, 63)
+  assert.equal(expected.length, 62)
   assert.deepEqual([...actual, ...forwardIdentities].sort(), expected)
   assert.match(subjectSource, /get_subject_completion_legacy_plan_v1/i)
   assert.match(subjectSource, /render_subject_completion_template_v1/i)

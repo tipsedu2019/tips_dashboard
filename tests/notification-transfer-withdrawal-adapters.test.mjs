@@ -254,13 +254,13 @@ test("legacy ops-task route는 exact sourceEventId envelope만 받고 서버 pro
   assert.match(route, /items\.length === 0 \|\| deduped === items\.length \? 202 : 200/)
 })
 
-test("legacy route는 task·word_retest를 canonical workflow로 정규화하고 기존 등록·전반·퇴원 분기를 보존한다", async () => {
+test("legacy route excludes task and word retest plans and preserves registration transfer withdrawal", async () => {
   const route = await source(routeUrl)
   const parse = block(route, "function parsePlan", "async function beginLegacyDispatch")
   const begin = block(route, "async function beginLegacyDispatch", "async function loadLegacyDispatchPlan")
   const load = block(route, "async function loadLegacyDispatchPlan", "async function finalizeLegacyDispatch")
 
-  for (const prefix of ["task", "word_retest", "registration", "transfer", "withdrawal"]) {
+  for (const prefix of ["registration", "transfer", "withdrawal"]) {
     assert.ok(parse.includes(`"${prefix}"`), `route 이벤트 prefix 누락: ${prefix}`)
   }
   assert.match(begin, /const workflowKey = legacyNotificationWorkflowKey\(item\.eventKey\)/)

@@ -231,6 +231,42 @@ test("retired word retest plans never reserve or send a Google Chat message", as
   assert.deepEqual(harness.calls.map(({ name }) => name), ["get_ops_task_legacy_dispatch_plan_v1"])
 })
 
+test("retired task.created management_team plans never reserve or send a Google Chat message", async (t) => {
+  const harness = serviceHarness({
+    eventKey: "task.created",
+    planOverrides: { audienceKey: "management_team", connectionKey: "google_chat.management", targetKey: "connection:google_chat.management", targetSnapshot: { connection_key: "google_chat.management" } },
+    begun: { acquired: true, claim_id: IDS.claim, owner_generation: "0", dispatch_token: IDS.token, status: "dispatch_started" },
+  })
+  let providerCalls = 0
+  const result = await postWithHarness(t, harness, async () => {
+    providerCalls += 1
+    return { status: "sent", providerMessageId: "fixture-message" }
+  })
+  assert.equal(providerCalls, 0)
+  assert.equal(result.fetchCalls, 0)
+  assert.equal(result.body.sent, 0)
+  assert.equal(result.body.failed, 0)
+  assert.deepEqual(harness.calls.map(({ name }) => name), ["get_ops_task_legacy_dispatch_plan_v1"])
+})
+
+test("retired word_retest.result_reported subject_team plans never reserve or send a Google Chat message", async (t) => {
+  const harness = serviceHarness({
+    eventKey: "word_retest.result_reported",
+    planOverrides: { audienceKey: "subject_team", connectionKey: "google_chat.english", targetKey: "connection:google_chat.english", targetSnapshot: { connection_key: "google_chat.english" } },
+    begun: { acquired: true, claim_id: IDS.claim, owner_generation: "0", dispatch_token: IDS.token, status: "dispatch_started" },
+  })
+  let providerCalls = 0
+  const result = await postWithHarness(t, harness, async () => {
+    providerCalls += 1
+    return { status: "sent", providerMessageId: "fixture-message" }
+  })
+  assert.equal(providerCalls, 0)
+  assert.equal(result.fetchCalls, 0)
+  assert.equal(result.body.sent, 0)
+  assert.equal(result.body.failed, 0)
+  assert.deepEqual(harness.calls.map(({ name }) => name), ["get_ops_task_legacy_dispatch_plan_v1"])
+})
+
 test("교사·정지 계정의 등록 알림 재시도는 plan과 provider 전에 403으로 끝난다", async (t) => {
   for (const actorState of ["teacher", "banned"]) {
     await t.test(actorState, async (subtest) => {
@@ -318,7 +354,7 @@ test("closed begin replay는 provider, external attempt, finalize를 모두 0회
 
 test("external attempt 거부 종결이 실패해도 finalize를 두 번 호출하지 않는다", async (t) => {
   const harness = serviceHarness({
-    eventKey: "task.created",
+    eventKey: "transfer.completed",
     begun: {
       acquired: true,
       claim_id: IDS.claim,
@@ -354,7 +390,6 @@ test("external attempt 거부 종결이 실패해도 finalize를 두 번 호출�
 
 test("정상 legacy provider 호출은 업무별 canonical workflow를 정확히 한 번 전달한다", async (t) => {
   const cases = [
-    ["task.created", "tasks"],
     ["registration.case_created", "registration"],
     ["transfer.completed", "transfer"],
     ["withdrawal.completed", "withdrawal"],
@@ -438,7 +473,6 @@ for (const [eventKey, subject] of [
   ["registration.subject_registration_completed", "english"],
   ["transfer.completed", "math"],
   ["withdrawal.completed", "science"],
-  ["word_retest.result_reported", "english"],
 ]) {
   test(`${eventKey} dispatches only to its trusted ${subject} subject connection`, async (t) => {
     const connectionKey = `google_chat.${subject}`
@@ -482,7 +516,6 @@ for (const planOverrides of [
   { targetKey: "connection:google_chat.math" },
   { targetSnapshot: { connection_key: "google_chat.math" } },
   { targetSnapshot: {} },
-  { eventKey: "word_retest.result_reported", connectionKey: "google_chat.math", targetKey: "connection:google_chat.math", targetSnapshot: { connection_key: "google_chat.math" } },
 ]) {
   test(`invalid subject plan is rejected before ownership or provider: ${JSON.stringify(planOverrides)}`, async (t) => {
     const harness = serviceHarness({

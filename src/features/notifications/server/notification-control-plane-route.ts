@@ -6,7 +6,7 @@ import {
 } from "./notification-auth.ts"
 import { parseRpcSetting, settingToWire } from "./notification-mention-settings-route.ts"
 import {
-  NOTIFICATION_WORKFLOW_OPTIONS,
+  NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS,
   NOTIFICATION_CONNECTION_RESULT_CODE_PATTERN,
   parseNotificationControlPlaneSnapshot,
   type NotificationControlPlaneSnapshot,
@@ -17,7 +17,7 @@ import {
 } from "../notification-control-plane-types.ts"
 
 const WORKFLOW_KEYS = new Set<string>(
-  NOTIFICATION_WORKFLOW_OPTIONS.map(({ key }) => key),
+  NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map(({ key }) => key),
 )
 const DECIMAL_REVISION = /^(0|[1-9]\d*)$/
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i

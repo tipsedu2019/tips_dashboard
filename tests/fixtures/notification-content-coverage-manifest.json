@@ -18,7 +18,7 @@
     {
       "workflowKey": "word_retests", "eventKeys": ["word_retest.result_reported"],
       "cells": [{ "audienceKey": "subject_team", "channelKey": "google_chat", "ruleVariantKeys": ["immediate"] }],
-      "scopeState": "in_scope", "configurationKind": "editable_rule", "enabledState": "enabled", "dispatchOwner": "legacy"
+      "scopeState": "in_scope", "configurationKind": "editable_rule", "enabledState": "disabled", "dispatchOwner": "none"
     },
     {
       "workflowKey": "tasks",

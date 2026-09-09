@@ -36,8 +36,8 @@ create temporary table subject_results(k text primary key,v jsonb) on commit dro
 grant all on subject_results to authenticated,service_role;
 
 select is((select count(*)::integer from dashboard_private.notification_rules where audience_key='subject_team' and enabled
-  and event_key in ('registration.subject_registration_completed','transfer.completed','withdrawal.completed','word_retest.result_reported')),4,
-  'Only four immediate subject-team rules are added');
+  and event_key in ('registration.subject_registration_completed','transfer.completed','withdrawal.completed','word_retest.result_reported')),3,
+  'Only registration transfer and withdrawal subject-team rules remain enabled');
 select is((select count(*)::integer from dashboard_private.notification_rules rule_row
   join dashboard_private.notification_template_compliance_audits audit on audit.template_id=rule_row.active_template_id
   where rule_row.audience_key='subject_team' and rule_row.event_key in
@@ -184,8 +184,8 @@ select is((select payload->'notification_subjects' from dashboard_private.notifi
 select set_config('request.jwt.claim.role','service_role',true);
 insert into subject_results select 'word-plan',public.get_ops_task_legacy_dispatch_plan_v1(source_id::uuid,'99880000-0000-4000-8000-000000000001')
   from dashboard_private.notification_events where event_key='word_retest.result_reported';
-select is((select v->'items'->0->>'audienceKey' from subject_results where k='word-plan'),'subject_team','Result sharing cannot reuse retired management audience');
-select is((select v->'items'->0->>'connectionKey' from subject_results where k='word-plan'),'google_chat.english','Only the English team receives a result plan');
+select is((select v->'items' from subject_results where k='word-plan'),'[]'::jsonb,'Word result produces no dispatch plan');
+
 update public.ops_word_retests set cutoff_question_count=10 where task_id=(select (v#>>'{}')::uuid from subject_results where k='word-id');
 select is((public.get_ops_task_legacy_dispatch_plan_v1((select source_id::uuid from dashboard_private.notification_events where event_key='word_retest.result_reported'),
   '99880000-0000-4000-8000-000000000001')->'items'),'[]'::jsonb,'Threshold-only correction suppresses a stale passed result');
@@ -251,11 +251,11 @@ from dashboard_private.notification_events event_row join dashboard_private.noti
   on rule_row.event_key=event_row.event_key and rule_row.audience_key='subject_team'
 where event_row.event_key='word_retest.result_reported';
 select is((public.register_notification_external_attempt_v1(null,'99880000-0000-4000-8000-000000000090',0,null,
-  '99880000-0000-4000-8000-000000000091','99880000-0000-4000-8000-000000000091')->>'allowed')::boolean,true,
-  'Current English subject result alone passes the final SQL provider boundary');
+  '99880000-0000-4000-8000-000000000091','99880000-0000-4000-8000-000000000091')->>'allowed')::boolean,false,
+  'Even a previously started English subject result cannot cross the final SQL provider boundary');
 select is(public.register_notification_external_attempt_v1(null,'99880000-0000-4000-8000-000000000090',0,null,
   '99880000-0000-4000-8000-000000000091','99880000-0000-4000-8000-000000000091'),
-  '{"allowed":false,"reason":"attempt_already_registered"}'::jsonb,'The same dispatch token cannot register a duplicate attempt');
+  '{"allowed":false,"reason":"word_retest_google_chat_retired"}'::jsonb,'Repeated retired dispatch attempts remain blocked');
 update dashboard_private.notification_dispatch_ownership_claims set target_key='connection:google_chat.math'
 where id='99880000-0000-4000-8000-000000000090';
 select is(public.register_notification_external_attempt_v1(null,'99880000-0000-4000-8000-000000000090',0,null,

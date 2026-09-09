@@ -72,7 +72,7 @@ export function getRoleCapabilities(role: string | null | undefined) {
     canEditClassSchedulePlanning,
     canEditClassSchedule: canManageAll,
     canUseAssistantOperations,
-    defaultAdminPath: canUseAssistantOperations ? "/admin/tasks" : "/admin/dashboard",
+    defaultAdminPath: canUseAssistantOperations ? "/admin/word-retests" : "/admin/dashboard",
   };
 }
 

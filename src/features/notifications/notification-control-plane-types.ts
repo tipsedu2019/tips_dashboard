@@ -17,8 +17,10 @@ export const NOTIFICATION_WORKFLOW_OPTIONS = [
 
 export type NotificationWorkflowKey = (typeof NOTIFICATION_WORKFLOW_OPTIONS)[number]["key"]
 
-// Only the result-sharing rule is available for word retests; other Chat rules stay retired.
-export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS
+// Retired workflows remain parseable only for historical delivery records.
+export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(
+  (workflow) => workflow.key !== "tasks" && workflow.key !== "word_retests",
+)
 
 export const NOTIFICATION_EVENT_KEYS_BY_WORKFLOW = {
   tasks: [

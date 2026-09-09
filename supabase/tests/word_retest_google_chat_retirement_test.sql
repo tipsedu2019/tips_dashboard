@@ -19,9 +19,8 @@ values
  ('99700000-0000-4000-8000-000000000302','99700000-0000-4000-8000-000000000202',1,'검증','검증','[]',1,repeat('b',64),'system');
 
 select is((select count(*)::integer from dashboard_private.notification_rules
-  where workflow_key='word_retests' and channel_key='google_chat' and enabled
-    and not (event_key='word_retest.result_reported' and audience_key='subject_team')), 0,
-  'all word retest Google Chat rules except the subject result rule remain disabled');
+  where workflow_key in ('word_retests','tasks') and enabled), 0,
+  'all task and word retest rules remain disabled across channels');
 select ok(exists(select 1 from dashboard_private.notification_rules
   where workflow_key='word_retests' and channel_key='google_chat'),
   'historical rules remain available for delivery audit foreign keys');
@@ -55,7 +54,7 @@ select is(public.register_notification_external_attempt_v1(null,
 select is((public.register_notification_external_attempt_v1(null,
   '99700000-0000-4000-8000-000000000002',0,null,
   '99700000-0000-4000-8000-000000000102','99700000-0000-4000-8000-000000000102')->>'allowed')::boolean,
-  true,'the ordinary task external-attempt contract remains available without calling a provider');
+  false,'ordinary task external attempts are also retired');
 reset role;
 select is((select count(*)::integer from dashboard_private.notification_audit_logs
   where entity_kind='notification_external_attempt' and action='external_attempt_registered'
@@ -75,5 +74,13 @@ select throws_ok($$select public.register_notification_external_attempt_v1(null,
   '99700000-0000-4000-8000-000000000101','99700000-0000-4000-8000-000000000101')$$,
   '42501',null,'authenticated clients cannot bypass the service-only external-attempt API');
 reset role;
+select throws_ok($$update dashboard_private.notification_rules set enabled=true
+  where workflow_key='word_retests' and audience_key='subject_team'$$,
+  '23514',null,'the former English subject result exception cannot be re-enabled');
+select throws_ok($$update dashboard_private.notification_rules set enabled=true
+  where id='99700000-0000-4000-8000-000000000202'$$,
+  '23514',null,'a stale settings client cannot re-enable task notifications');
+select ok((select convalidated from pg_constraint where conname='notification_rules_unused_workflows_retired_check'),
+  'the retirement constraint is validated in the final migration chain');
 select * from finish();
 rollback;

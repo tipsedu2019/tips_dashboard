@@ -731,24 +731,17 @@ test("dedicated operations are split into separate admin routes", async () => {
   }
 });
 
-test("navigation keeps todo queues and separates operation menus", async () => {
+test("navigation removes todo queues for every role and preserves operation menus", async () => {
   const source = await readSource("src/lib/navigation.ts");
-  const todoBlock = source.slice(source.indexOf(`title: "${ko.todo}"`), source.indexOf(`title: "${ko.registration}"`));
   const fullOverviewBlock = source.slice(source.indexOf("const fullOverviewItems"), source.indexOf("const overview: NavGroup"));
   const assistantOverviewBlock = source.slice(
     source.indexOf("const assistantOverviewItems"),
     source.indexOf("const fullOverviewItems"),
   );
   const dashboardIndex = fullOverviewBlock.indexOf('title: "대시보드"');
-  const todoIndex = fullOverviewBlock.indexOf(`title: "${ko.todo}"`);
 
   assertIncludesAll(source, [
-    `title: "${ko.todo}"`,
-    'url: "/admin/tasks"',
     'items: [',
-    `{ title: "${ko.inbox}", url: "/admin/tasks?list=inbox" }`,
-    `{ title: "${ko.sent}", url: "/admin/tasks?list=sent" }`,
-    `{ title: "${ko.completed}", url: "/admin/tasks?list=completed" }`,
     `{ title: "${ko.registration}", url: "/admin/registration", icon: UserPlus }`,
     `{ title: "${ko.transfer}", url: "/admin/transfer", icon: Repeat2 }`,
     `{ title: "${ko.withdrawal}", url: "/admin/withdrawal", icon: UserMinus }`,
@@ -757,17 +750,14 @@ test("navigation keeps todo queues and separates operation menus", async () => {
     'match: "/admin/tasks"',
   ]);
 
-  assert.doesNotMatch(todoBlock, /url: "\/admin\/registration"/);
-  assert.doesNotMatch(todoBlock, /url: "\/admin\/transfer"/);
-  assert.doesNotMatch(todoBlock, /url: "\/admin\/withdrawal"/);
   assert.notEqual(dashboardIndex, -1);
-  assert.ok(dashboardIndex < todoIndex);
+  assert.doesNotMatch(fullOverviewBlock, /url: "\/admin\/tasks/);
+  assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/tasks/);
   assert.match(
     fullOverviewBlock,
     /const fullOverviewItems: NavItem\[\] = \[\s*\{ title: "대시보드", url: "\/admin\/dashboard"/,
   );
   assert.doesNotMatch(assistantOverviewBlock, /title: "대시보드"/);
-  assert.ok(fullOverviewBlock.indexOf(`title: "${ko.todo}"`) < fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`));
   assert.ok(fullOverviewBlock.indexOf(`title: "${ko.wordRetest}"`) < fullOverviewBlock.indexOf(`title: "${ko.registration}"`));
   assert.doesNotMatch(source, new RegExp(`title: "${ko.taskbox}"`));
 });

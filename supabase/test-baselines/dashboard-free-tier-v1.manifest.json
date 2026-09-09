@@ -419,6 +419,16 @@
       "fileName": "20260909063900_operations_subject_completion_constraints_validate.sql",
       "status": "final",
       "sha256": "d50707caabc9e5684d5ff0526d091aee5dab089cb5771ebeade3ee33cdb894a1"
+    },
+    {
+      "fileName": "20260909084130_retire_tasks_and_word_retest_notifications.sql",
+      "status": "final",
+      "sha256": "69290e004a62fde1a7e1230a49513a45be76cb60c9af572d432fc62cf82feee3"
+    },
+    {
+      "fileName": "20260909084131_validate_unused_notification_retirement.sql",
+      "status": "final",
+      "sha256": "a8941cf65d1ed8e3b88da06ef6d92f9f0fc90e6605fa5bfd165076b6b97d2381"
     }
   ]
 }

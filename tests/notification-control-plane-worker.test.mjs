@@ -410,8 +410,8 @@ function createDeliveryClaim(overrides = {}) {
     delivery_id: DELIVERY_ID,
     claim_token: CLAIM_TOKEN,
     event_id: EVENT_ID,
-    workflow_key: "tasks",
-    event_key: "task.created",
+    workflow_key: "transfer",
+    event_key: "transfer.completed",
     source_type: "ops_task",
     source_id: "task-42",
     source_revision: BIG_REVISION,
@@ -494,7 +494,7 @@ function createObservationSourceForJob(job, overrides = {}) {
 
 function createAdapter(overrides = {}) {
   return {
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     async resolveTargets() {
       return { targetGeneration: TARGET_GENERATION, targetSetHash: "fixture-hash", targets: [] }
     },
@@ -502,7 +502,7 @@ function createAdapter(overrides = {}) {
       return {}
     },
     async buildDeepLink() {
-      return "/admin/tasks"
+      return "/admin/transfer"
     },
     async revalidateBeforeSend() {
       return { ok: true }
@@ -522,8 +522,8 @@ function createBegunGoogleChatContext(overrides = {}) {
     webhook_url: GOOGLE_CHAT_URL,
     rendered_title: "새 할 일",
     rendered_body: "확인할 할 일이 있습니다.",
-    href: "/admin/tasks",
-    workflow_key: "tasks",
+    href: "/admin/transfer",
+    workflow_key: "transfer",
     ...overrides,
   }
 }
@@ -541,7 +541,7 @@ function createBegunWebPushContext(overrides = {}) {
     },
     rendered_title: "새 할 일",
     rendered_body: "확인할 할 일이 있습니다.",
-    href: "/admin/tasks",
+    href: "/admin/transfer",
     ...overrides,
   }
 }
@@ -1156,7 +1156,7 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
   assert.equal(hashA, hashNotificationTargets([first, second]), "A→B→A는 원래 A hash로 돌아와야 한다")
 
   const input = {
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     payloadSchemaVersion: 1,
     template: {
       titleTemplate: "{담당자}님 새 할 일",
@@ -1168,12 +1168,12 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
       payloadSchemaVersion: 1,
     },
     renderContext: { assignee_name: "김선생", task_title: "교재 확인" },
-    href: "/admin/tasks?focus=task-42",
+    href: "/admin/transfer?taskId=task-42",
   }
   assert.deepEqual(renderNotificationSnapshot(input), {
     renderedTitle: "김선생님 새 할 일",
     renderedBody: "교재 확인 업무를 확인해 주세요.",
-    href: "/admin/tasks?focus=task-42",
+    href: "/admin/transfer?taskId=task-42",
   })
   assert.deepEqual(renderNotificationSnapshot(input), renderNotificationSnapshot(clone(input)))
 
@@ -1195,7 +1195,7 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
   }), {
     renderedTitle: "김선생님 새 할 일",
     renderedBody: "첫 줄\n\n마지막 줄",
-    href: "/admin/tasks?focus=task-42",
+    href: "/admin/transfer?taskId=task-42",
   })
 
   const invalidInputs = [
@@ -1204,11 +1204,11 @@ test("공통 renderer는 target hash를 안정화하고 허용 변수·schema·w
     { ...input, renderContext: { assignee_name: "김선생" } },
     { ...input, renderContext: { ...input.renderContext, task_title: "<b>원문 HTML</b>" } },
     { ...input, renderContext: { ...input.renderContext, task_title: "@everyone 호출" } },
-    { ...input, href: "https://evil.invalid/admin/tasks" },
-    { ...input, href: "//evil.invalid/admin/tasks" },
+    { ...input, href: "https://evil.invalid/admin/transfer" },
+    { ...input, href: "//evil.invalid/admin/transfer" },
     { ...input, href: "javascript:alert(1)" },
     { ...input, href: "/admin/withdrawal" },
-    { ...input, href: "/login?next=/admin/tasks" },
+    { ...input, href: "/login?next=/admin/transfer" },
     { ...input, template: { ...input.template, bodyTemplate: "{알수없는변수}" } },
     {
       ...input,
@@ -1489,19 +1489,19 @@ test("worker는 adapter나 선택 reconciler가 없으면 다른 workflow를 추
     claim_notification_rule_reconciliation_jobs_v1: [{
       job_id: "71000000-0000-4000-8000-000000000003",
       claim_token: "71000000-0000-4000-8000-000000000004",
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       cursor: null,
     }],
     claim_notification_target_reconciliation_jobs_v1: [{
       job_id: "71000000-0000-4000-8000-000000000005",
       claim_token: "71000000-0000-4000-8000-000000000006",
-      workflow_key: "tasks",
+      workflow_key: "transfer",
       cursor: null,
     }],
   })
   let providerLookups = 0
   const worker = createNotificationWorkerRuntime({
-    getAdapter: (workflowKey) => workflowKey === "tasks" ? createAdapter() : null,
+    getAdapter: (workflowKey) => workflowKey === "transfer" ? createAdapter() : null,
     rpc: harness.rpc,
     getProvider: () => {
       providerLookups += 1
@@ -1845,9 +1845,9 @@ test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전�
   const fanoutJob = {
     job_id: "71000000-0000-4000-8000-000000000101",
     claim_token: "71000000-0000-4000-8000-000000000102",
-    workflow_key: "tasks",
+    workflow_key: "transfer",
     event_id: EVENT_ID,
-    event_key: "task.created",
+    event_key: "transfer.completed",
     source_type: "ops_task",
     source_id: "task-42",
     source_revision: BIG_REVISION,
@@ -1898,7 +1898,7 @@ test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전�
       }
     },
     async buildDeepLink() {
-      return "/admin/tasks?focus=task-42"
+      return "/admin/transfer?taskId=task-42"
     },
   })
   const worker = createNotificationWorkerRuntime({
@@ -1932,7 +1932,7 @@ test("worker fanout은 한 규칙을 렌더한 뒤 service-role apply에만 전�
         target_snapshot: { role: "staff", active: true },
         rendered_title: "김선생님 새 할 일",
         rendered_body: "교재 확인 업무를 확인해 주세요.",
-        href: "/admin/tasks?focus=task-42",
+        href: "/admin/transfer?taskId=task-42",
         scheduled_for: "2026-07-17T01:00:00.000Z",
       }],
     },
@@ -1963,9 +1963,9 @@ test("worker fanout은 중간 규칙이 superseded여도 다음 cursor를 재시
   const fanoutJob = {
     job_id: "71000000-0000-4000-8000-000000000111",
     claim_token: "71000000-0000-4000-8000-000000000112",
-    workflow_key: "tasks",
+    workflow_key: "transfer",
     event_id: EVENT_ID,
-    event_key: "task.created",
+    event_key: "transfer.completed",
     source_type: "ops_task",
     source_id: "task-42",
     source_revision: BIG_REVISION,
@@ -2055,7 +2055,7 @@ test("worker는 adapter 선검증 취소를 begin-send보다 먼저 확정하고
   assert.deepEqual(revalidationInput, {
     eventId: EVENT_ID,
     deliveryId: DELIVERY_ID,
-    eventKey: "task.created",
+    eventKey: "transfer.completed",
     sourceType: "ops_task",
     sourceId: "task-42",
     sourceRevision: BIG_REVISION,
@@ -2188,18 +2188,18 @@ test("worker는 begun payload의 위조 workflow를 덮고 claim workflow contex
   assert.deepEqual(timeline, ["prepare", "register", "provider", "finalize"])
   assert.deepEqual(providerInput, {
     ...begunContext,
-    workflow_key: "tasks",
-    event_key: "task.created",
+    workflow_key: "transfer",
+    event_key: "transfer.completed",
   })
   const prepare = harness.calls.find((call) => (
     call.name === "prepare_notification_immediate_delivery_v1"
   ))
   assert.deepEqual(prepare.parameters, {
-    p_workflow_key: "tasks",
+    p_workflow_key: "transfer",
     p_event_id: EVENT_ID,
     p_delivery_id: DELIVERY_ID,
     p_claim_token: CLAIM_TOKEN,
-    p_event_key: "task.created",
+    p_event_key: "transfer.completed",
     p_source_type: "ops_task",
     p_source_id: "task-42",
     p_source_revision: BIG_REVISION,
@@ -2239,43 +2239,19 @@ test("worker는 begun payload의 위조 workflow를 덮고 claim workflow contex
   assertNoSensitiveValue(finalize.parameters)
 })
 
-test("word result worker binds the begun audience and destination to the claimed event before any external attempt", async () => {
+test("retired task and word result deliveries are canceled before adapter or provider lookup", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
-  const claim = createDeliveryClaim({
-    workflow_key: "word_retests", event_key: "word_retest.result_reported",
-    source_type: "ops_task_event", source_revision: null,
-    target: { target_kind: "connection", target_key: "connection:google_chat.english", target_profile_id: null,
-      connection_key: "google_chat.english", target_snapshot: { connection_key: "google_chat.english" } },
-  })
-  const begun = createBegunGoogleChatContext({
-    workflow_key: "tasks", event_key: "word_retest.result_reported", audience_key: "subject_team", connection_key: "google_chat.english",
-  })
-  for (const invalid of [
-    { event_key: undefined }, { event_key: "word_retest.completed" },
-    { audience_key: undefined }, { audience_key: "management_team" },
-    { connection_key: "google_chat.math" }, { channel_key: "web_push" },
-  ]) {
-    let providerCalls = 0
-    const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim], prepare_notification_immediate_delivery_v1: { ...begun, ...invalid } })
-    const worker = createNotificationWorkerRuntime({ rpc: harness.rpc, getAdapter: () => createAdapter(),
-      getProvider: () => ({ async send() { providerCalls += 1 } }), createRunId: () => RUN_ID })
-    await assert.rejects(worker.runBatch({ workerId: "word-result-fixture", batchSize: 1, leaseSeconds: 30 }),
-      (error) => error?.code === "worker_envelope_invalid")
-    assert.equal(providerCalls, 0)
-    assert.equal(harness.calls.some((call) => call.name === "register_notification_external_attempt_v1"), false)
+  for (const [workflow_key, event_key] of [["tasks", "task.created"], ["word_retests", "word_retest.result_reported"]]) {
+    const harness = createRpcHarness({ claim_notification_deliveries_v1: [createDeliveryClaim({ workflow_key, event_key })] })
+    const worker = createNotificationWorkerRuntime({ rpc: harness.rpc,
+      getAdapter: () => { throw new Error("retired adapter must not run") },
+      getProvider: () => { throw new Error("retired provider must not run") }, createRunId: () => RUN_ID })
+    await worker.runBatch({ workerId: "retirement-fixture", batchSize: 1, leaseSeconds: 30 })
+    const final = harness.calls.find(({ name }) => name === "finalize_notification_delivery_v1")
+    assert.equal(final.parameters.p_status, "canceled")
+    assert.equal(final.parameters.p_status_reason, "cutover_rollback")
+    assert.equal(harness.calls.some(({ name }) => name === "register_notification_external_attempt_v1"), false)
   }
-  let delivered = null
-  const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim], prepare_notification_immediate_delivery_v1: begun })
-  const worker = createNotificationWorkerRuntime({ rpc: harness.rpc, getAdapter: () => createAdapter(),
-    getProvider: () => ({ async send(context) {
-      delivered = context
-      return { status: "sent", statusReason: null, providerMessageId: "spaces/test/messages/test", providerResponseCode: "200", errorCode: null, errorSummary: null, nextAttemptAt: null }
-    } }), createRunId: () => RUN_ID })
-  await worker.runBatch({ workerId: "word-result-fixture", batchSize: 1, leaseSeconds: 30 })
-  assert.equal(delivered.workflow_key, "word_retests")
-  assert.equal(delivered.event_key, claim.event_key)
-  assert.equal(delivered.audience_key, "subject_team")
-  assert.equal(delivered.connection_key, "google_chat.english")
 })
 
 test("worker retires in-app before the former atomic projection RPC", async () => {
@@ -3216,7 +3192,7 @@ test("worker는 malformed claim을 추측 처리하지 않고 실패 heartbeat�
     claim_notification_fanout_jobs_v1: [{
       job_id: "잘못된-job-id",
       claim_token: "71000000-0000-4000-8000-000000000122",
-      workflow_key: "tasks",
+      workflow_key: "transfer",
     }],
   })
   const worker = createNotificationWorkerRuntime({
@@ -3278,7 +3254,7 @@ test("Google Chat provider는 주입 fetch만 쓰고 확정 성공·429·영구 
               buttonList: {
                 buttons: [{
                   text: "대시보드에서 보기",
-                  onClick: { openLink: { url: "https://tipsedu.co.kr/admin/tasks" } },
+                  onClick: { openLink: { url: "https://tipsedu.co.kr/admin/transfer" } },
                 }],
               },
             },
@@ -3336,7 +3312,7 @@ test("Google Chat provider는 mention_user_names의 property presence로 legacy 
   assertProviderResult(await provider.send(createBegunGoogleChatContext()), "sent", null)
   assert.equal(
     bodies[0],
-    '{"cardsV2":[{"cardId":"tips-dashboard-notification","card":{"header":{"title":"새 할 일"},"sections":[{"widgets":[{"textParagraph":{"text":"확인할 할 일이 있습니다."}},{"buttonList":{"buttons":[{"text":"대시보드에서 보기","onClick":{"openLink":{"url":"https://tipsedu.co.kr/admin/tasks"}}}]}}]}]}}]}',
+    '{"cardsV2":[{"cardId":"tips-dashboard-notification","card":{"header":{"title":"새 할 일"},"sections":[{"widgets":[{"textParagraph":{"text":"확인할 할 일이 있습니다."}},{"buttonList":{"buttons":[{"text":"대시보드에서 보기","onClick":{"openLink":{"url":"https://tipsedu.co.kr/admin/transfer"}}}]}}]}]}}]}',
     "mention_user_names가 없으면 기존 cardsV2 JSON bytes를 유지해야 한다",
   )
 
@@ -3347,7 +3323,7 @@ test("Google Chat provider는 mention_user_names의 property presence로 legacy 
   )
   assert.equal(
     bodies[1],
-    '{"text":"새 할 일 — 확인할 할 일이 있습니다.","cardsV2":[{"cardId":"tips-dashboard-notification","card":{"header":{"title":"새 할 일"},"sections":[{"widgets":[{"textParagraph":{"text":"확인할 할 일이 있습니다."}},{"buttonList":{"buttons":[{"text":"대시보드에서 보기","onClick":{"openLink":{"url":"https://tipsedu.co.kr/admin/tasks"}}}]}}]}]}}]}',
+    '{"text":"새 할 일 — 확인할 할 일이 있습니다.","cardsV2":[{"cardId":"tips-dashboard-notification","card":{"header":{"title":"새 할 일"},"sections":[{"widgets":[{"textParagraph":{"text":"확인할 할 일이 있습니다."}},{"buttonList":{"buttons":[{"text":"대시보드에서 보기","onClick":{"openLink":{"url":"https://tipsedu.co.kr/admin/transfer"}}}]}}]}]}}]}',
     "빈 배열도 adopted no-mention text를 보내야 한다",
   )
 })
@@ -3777,7 +3753,7 @@ test("Web Push provider는 begun context 한 개와 주입 sender만 사용하�
     assert.deepEqual(JSON.parse(payload), {
       title: "새 할 일",
       body: "확인할 할 일이 있습니다.",
-      href: "/admin/tasks",
+      href: "/admin/transfer",
     })
   }
   const callsBeforeMissing = calls.length
@@ -3935,7 +3911,7 @@ test("legacy in-app projection은 8개 identity만 받고 authoritative 재조�
   const { hashNotificationTargets } = await import(workerModuleUrl)
   const calls = []
   const input = {
-    workflowKey: "tasks",
+    workflowKey: "transfer",
     eventId: EVENT_ID,
     ruleId: RULE_ID,
     targetProfileId: PROFILE_ID,
@@ -3950,8 +3926,8 @@ test("legacy in-app projection은 8개 identity만 받고 authoritative 재조�
       return {
         event: {
           eventId: EVENT_ID,
-          workflowKey: "tasks",
-          eventKey: "task.created",
+          workflowKey: "transfer",
+          eventKey: "transfer.completed",
           sourceType: "ops_task",
           sourceId: "task-42",
           sourceRevision: BIG_REVISION,
@@ -4012,7 +3988,7 @@ test("legacy in-app projection은 8개 identity만 받고 authoritative 재조�
       return { assignee_name: "김선생", task_title: "교재 확인" }
     },
     async buildDeepLink() {
-      return "/admin/tasks?focus=task-42"
+      return "/admin/transfer?taskId=task-42"
     },
   })
   const projection = createLegacyInAppProjection({
@@ -4033,7 +4009,7 @@ test("legacy in-app projection은 8개 identity만 받고 authoritative 재조�
   assert.equal(materialize.ownerKind, "legacy")
   assert.equal(materialize.renderedTitle, "김선생님 새 할 일")
   assert.equal(materialize.renderedBody, "교재 확인 업무를 확인해 주세요.")
-  assert.equal(materialize.href, "/admin/tasks?focus=task-42")
+  assert.equal(materialize.href, "/admin/transfer?taskId=task-42")
   assert.equal(materialize.targetSetHash, targetSetHash)
   const commit = calls.find((call) => call.name === "commitProjection").input
   assert.deepEqual(commit, {
@@ -4064,7 +4040,7 @@ test("legacy in-app projection은 8개 identity만 받고 authoritative 재조�
         return { assignee_name: "김선생", task_title: "교재 확인" }
       },
       async buildDeepLink() {
-        return "/admin/tasks?focus=task-42"
+        return "/admin/transfer?taskId=task-42"
       },
     }),
     repository,
@@ -4340,11 +4316,11 @@ test("service worker는 잘못된 Push JSON을 안전하게 기본값으로 처�
 
   handlers.get("notificationclick")({
     notification: {
-      data: { url: "/admin/tasks?focus=task-42" },
+      data: { url: "/admin/transfer?taskId=task-42" },
       close() {},
     },
     waitUntil(promise) { clickWork = promise },
   })
   await clickWork
-  assert.equal(opened[1], "/admin/tasks?focus=task-42")
+  assert.equal(opened[1], "/admin/transfer?taskId=task-42")
 })
