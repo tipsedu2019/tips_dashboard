@@ -54,7 +54,7 @@ function response(domain, request, totalCount = 260, patch = {}) {
   const rows = Array.from({ length: Math.min(pageSize, Math.max(0, totalCount - (page - 1) * pageSize)) }, (_, i) =>
     (domain === 'academic' ? academicRow : operationsRow)((page - 1) * pageSize + i + 1));
   return { page, pageSize, totalCount, rows, ...(domain === 'academic' ? {
-    resolvedPeriodId: request.args.p_filters.periodId || id(900),
+    resolvedPeriodId: request.args.p_filters.periodId,
     stats: { total: totalCount, managedClassCount: totalCount, totalSessions: totalCount, completedSessions: 520, pendingSessions: 0,
       linkedTextbooks: 260, unlinkedClassCount: 0, noScheduleClassCount: 0, updateNeededClassCount: 0, completedClassCount: 260,
       viewModeCounts: { all: 270, unlinked: 10, unscheduled: 0, update: 0, done: 260 } },
@@ -130,7 +130,7 @@ for (const domain of ['academic', 'operations']) {
     await act(async () => { void page.state.goToPage(12); });
     assert.equal(page.numbered().at(-1).args.p_filters.search, '');
     assert.equal(page.numbered().at(-1).args.p_page, 12);
-    if (domain === 'academic') assert.equal(page.numbered().at(-1).args.p_filters.periodId, id(900));
+    if (domain === 'academic') assert.equal(page.numbered().at(-1).args.p_filters.periodId, null);
     await act(async () => page.numbered().at(-1).reject(new Error('page failure')));
     await page.render();
     await act(async () => { void page.state.refresh(); });
@@ -294,25 +294,32 @@ for (const domain of ['academic', 'operations']) test(`${domain}: displayed rows
   await act(async () => page.finish(page.numbered()[0]));
   const content = [...document.querySelectorAll('tbody tr')].map((row) => row.textContent);
   const pager = document.querySelector('nav[aria-label="페이지 탐색"]');
-  assert.ok(pager); assert.equal(pager.closest('[data-slot="scroll-area-viewport"]'), null);
+  assert.ok(pager); assert.equal(pager.closest('[data-slot="scroll-area-viewport"], [data-slot="data-table-viewport"]'), null);
   assert.equal(document.querySelectorAll('[data-slot="pagination-number-group"] button').length, 10);
+  const listViewport = document.querySelector('[data-slot="data-table-viewport"]');
+  if (domain === 'academic') listViewport.scrollTop = 120;
   await act(async () => document.querySelector('button[aria-label="12 페이지"]').click());
+  if (domain === 'academic') assert.equal(listViewport.scrollTop, 120, 'pending page preserves visible rows and position');
   assert.deepEqual([...document.querySelectorAll('tbody tr')].map((row) => row.textContent), content);
   assert.ok(document.querySelector('button[aria-current="page"][aria-label="11 페이지"]'));
   await act(async () => page.numbered()[1].reject(new Error('PAGE FAILURE')));
+  if (domain === 'academic') assert.equal(listViewport.scrollTop, 120, 'failed page preserves scroll position');
   assert.deepEqual([...document.querySelectorAll('tbody tr')].map((row) => row.textContent), content);
-  assert.match(document.body.textContent, /260건/); assert.match(document.body.textContent, /PAGE FAILURE/);
+  assert.match(document.body.textContent, /260건/);
+  assert.match(document.body.textContent, domain === 'academic' ? /수업계획을 불러오지 못했습니다/ : /PAGE FAILURE/);
   const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === '다시 시도');
   assert.ok(retry, 'failed navigation exposes a working retry');
   await act(async () => retry.click());
   assert.equal(page.numbered().at(-1).args.p_page, 12);
   await act(async () => page.finish(page.numbered().at(-1)));
+  if (domain === 'academic') assert.equal(listViewport.scrollTop, 0, 'accepted new page begins at its first row');
   if (domain === 'operations') {
     const group = [...document.querySelectorAll('button')].find((button) => button.textContent.includes('그룹') && button.textContent.includes('260'));
     assert.ok(group, 'full-filter independent group count');
+    const readsBeforeGroupNavigation = page.numbered().length;
     await act(async () => group.click());
-    assert.equal(page.numbered().at(-1).args.p_filters.syncGroupId, id(900));
-    assert.equal(page.numbered().at(-1).args.p_page, 1);
+    assert.equal(page.numbered().length, readsBeforeGroupNavigation, 'group navigation must not become a list filter');
+    assert.equal(page.numbered().at(-1).args.p_filters.syncGroupId, null);
     assert.equal(page.observed.requestedClassId, id(999), 'representative outside the page owns existing group action');
   }
 });
@@ -340,26 +347,28 @@ for (const domain of ['academic', 'operations']) test(`${domain}: range density 
   assert.equal(page.state.densityError, null);
 });
 
-test('academic: default dataset survives detail return as a resolved URL selector', async (t) => {
+test('academic: unfiltered dataset survives detail return without restoring a period selector', async (t) => {
   const page = await setup(t, 'academic', { workspace: true, search: '?page=11' });
   await act(async () => page.finish(page.numbered()[0]));
   const link = document.querySelector('tbody a');
   const returnTo = new URL(link.href).searchParams.get('returnTo');
-  assert.equal(new URL(returnTo, window.location.origin).searchParams.get('period'), id(900));
+  assert.equal(new URL(returnTo, window.location.origin).searchParams.get('period'), null);
   assert.equal(new URL(returnTo, window.location.origin).searchParams.get('page'), '11');
   window.history.replaceState(null, '', returnTo);
   await page.remount();
-  assert.equal(page.numbered().at(-1).args.p_filters.periodId, id(900));
+  assert.equal(page.numbered().at(-1).args.p_filters.periodId, null);
 });
 
-test('academic: explicit period-name alias remains a visible selector and is not narrowed to one group', async (t) => {
+test('academic: legacy period alias is removed without narrowing to one group', async (t) => {
   const page = await setup(t, 'academic', { workspace: true, search: '?period=동일학기&page=11' });
   const defaults = response('academic', page.numbered()[0]).filterOptions;
   await act(async () => page.finish(page.numbered()[0], 260, { filterOptions: { ...defaults,
     periods: [{ value: id(900), label: '동일학기', isDefault: true }, { value: id(901), label: '동일학기', isDefault: false }] } }));
-  await act(async () => document.querySelector('button[aria-label^="필터"]').click());
-  assert.match(document.querySelector('button[aria-label="기간"]').textContent, /동일학기/);
-  assert.equal(new URLSearchParams(window.location.search).get('period'), '동일학기');
+  assert.equal(document.querySelector('button[aria-label^="필터"]'), null);
+  assert.ok(document.querySelector('button[aria-label="수업 상태"]'));
+  assert.equal(document.querySelector('button[aria-label="기간"]'), null);
+  assert.equal(new URLSearchParams(window.location.search).get('period'), null);
+  assert.equal(page.numbered()[0].args.p_filters.periodId, null);
   assert.equal(page.numbered().length, 1);
 });
 
@@ -379,15 +388,16 @@ for (const change of ['logout', 'role', 'back', 'unmount']) test(`academic: queu
     assert.equal(new URLSearchParams(window.location.search).get('page'), change === 'back' ? '7' : '11');
   } finally { globalThis.queueMicrotask = original; }
 });
-test('academic: resolved default pins next page/retry while explicit name alias remains intact', async (t) => {
+test('academic: paging and runtime legacy period input remain on the unfiltered scope', async (t) => {
   const page = await setup(t, 'academic');
   await act(async () => page.finish(page.numbered()[0]));
   await act(async () => { void page.state.goToPage(11); });
-  assert.equal(page.numbered()[1].args.p_filters.periodId, id(900));
+  assert.equal(page.numbered()[1].args.p_filters.periodId, null);
   await page.render({ periodId: '중복 학기 이름' });
-  await act(async () => page.finish(page.numbered()[2]));
+  assert.equal(page.numbered().length, 2, 'retired period input does not create a new read scope');
+  await act(async () => page.finish(page.numbered()[1]));
   await act(async () => { void page.state.goToPage(2); });
-  assert.equal(page.numbered()[3].args.p_filters.periodId, '중복 학기 이름');
+  assert.equal(page.numbered()[2].args.p_filters.periodId, null);
 });
 test('operations: catalogs settle independently and old logout session cannot seed the real cache', async (t) => {
   const page = await setup(t, 'operations');
@@ -443,7 +453,7 @@ for (const domain of ['academic', 'operations']) {
     const restored = page.numbered()[3];
     assert.equal(restored.args.p_page, 12); assert.equal(restored.args.p_filters.search, '');
     assert.equal(document.querySelector('input[placeholder*="검색"]').value, '');
-    if (domain === 'academic') assert.equal(restored.args.p_filters.periodId, id(900));
+    if (domain === 'academic') assert.equal(restored.args.p_filters.periodId, null);
     if (intervening === 'pending') await act(async () => page.finish(abandoned, 80));
     assert.ok(document.querySelector('button[aria-label="12 페이지"][aria-current="page"]'));
     assert.match(document.body.textContent, /260건/);
@@ -455,7 +465,7 @@ for (const domain of ['academic', 'operations']) {
     await act(async () => retry.click());
     const retried = page.numbered()[4];
     assert.equal(retried.args.p_page, 12); assert.equal(retried.args.p_filters.search, '');
-    if (domain === 'academic') assert.equal(retried.args.p_filters.periodId, id(900));
+    if (domain === 'academic') assert.equal(retried.args.p_filters.periodId, null);
     await act(async () => page.finish(retried));
     assert.ok(document.querySelector('button[aria-label="12 페이지"][aria-current="page"]'));
     assert.equal(document.querySelector('input[placeholder*="검색"]').value, '');
@@ -464,7 +474,8 @@ for (const domain of ['academic', 'operations']) {
   });
   test(`${domain}: actual workspace page11 restoration and mounted Back preserve all controls before one read`, async (t) => {
     const periodKey = domain === 'academic' ? 'period' : 'term';
-    const page = await setup(t, domain, { workspace: true, search: `?page=11&q=원본&${periodKey}=${id(900)}&subject=수학&grade=고1&teacher=교사&keep=1` });
+    const legacyOperationsPeriod = domain === 'operations' ? `&period=${id(903)}` : '';
+    const page = await setup(t, domain, { workspace: true, search: `?page=11&q=원본&${periodKey}=${id(900)}&subject=수학&grade=고1&teacher=교사&keep=1${legacyOperationsPeriod}` });
     assert.equal(page.numbered().length, 1); assert.equal(page.numbered()[0].args.p_page, 11);
     await act(async () => page.finish(page.numbered()[0]));
     assert.ok(document.querySelector('button[aria-label="11 페이지"][aria-current="page"]'));
@@ -478,13 +489,21 @@ for (const domain of ['academic', 'operations']) {
     assert.equal(restored.args.p_page, 7); assert.equal(restored.args.p_filters.search, '복원');
     assert.equal(restored.args.p_filters.subject, '영어'); assert.equal(restored.args.p_filters.grade, '중1');
     assert.equal(restored.args.p_filters.teacher, '다른');
-    assert.equal(restored.args.p_filters[domain === 'academic' ? 'periodId' : 'termId'], id(901));
+    assert.equal(restored.args.p_filters[domain === 'academic' ? 'periodId' : 'termId'], null);
     if (domain === 'academic') {
       assert.equal(restored.args.p_filters.status, '종강'); assert.equal(restored.args.p_filters.classroom, '본관1'); assert.equal(restored.args.p_filters.viewMode, 'done');
-    } else assert.equal(restored.args.p_filters.syncGroupId, id(902));
+    } else assert.equal(restored.args.p_filters.syncGroupId, null);
     await act(async () => page.finish(restored));
     assert.ok(document.querySelector('button[aria-label="7 페이지"][aria-current="page"]'));
     assert.equal(new URLSearchParams(window.location.search).get('keep'), '1');
+    if (domain === 'academic') {
+      assert.equal(new URLSearchParams(window.location.search).get('period'), null);
+    } else {
+      const canonicalParams = new URLSearchParams(window.location.search);
+      assert.equal(canonicalParams.get('term'), null);
+      assert.equal(canonicalParams.get('period'), null);
+      assert.equal(canonicalParams.get('syncGroup'), null);
+    }
     await page.remount();
     assert.equal(page.numbered().at(-1).args.p_page, 7);
     assert.equal(page.numbered().at(-1).args.p_filters.search, '복원');
@@ -549,4 +568,98 @@ for (const change of ['role', 'actor']) test(`operations: actual detail rejects 
   await act(async () => current.resolve({ error: null, data: detail('NEW ACTOR DETAIL') }));
   assert.match(document.querySelector('[data-testid="lesson-design-modal-dialog"]').textContent, /NEW ACTOR DETAIL/);
   assert.equal(document.body.textContent.includes('OLD ACTOR DETAIL'), false);
+});
+
+
+test('curriculum: a focused row opens its exact action and return context while nested links keep native keys', async (t) => {
+  const page = await setup(t, 'academic', { workspace: true, search: '?subject=수학&view=update&page=2' });
+  const row = { ...academicRow(11), totalSessions: 8, progressTargetSessions: 4, plannedProgressSessions: 3,
+    delayedProgressSessions: 1, progressTargetPercent: 75, stateLabel: '진도 미배정' };
+  await act(async () => page.finish(page.numbered()[0], 11, { rows: [row] }));
+  const desktop = document.querySelector(`[data-testid="curriculum-desktop-row-${row.id}"]`);
+  assert.ok(desktop, document.body.textContent);
+  const link = desktop.querySelector('a');
+  const expected = new URL(link.href);
+  assert.equal(expected.searchParams.get('section'), 'lesson-design-board');
+  assert.equal(expected.searchParams.get('classId'), row.id);
+  const returnUrl = new URL(expected.searchParams.get('returnTo'), window.location.origin);
+  assert.equal(returnUrl.pathname, '/admin/curriculum');
+  assert.deepEqual(Object.fromEntries(returnUrl.searchParams), { subject: '수학', view: 'update', page: '2' });
+  const progress = desktop.querySelector('[role="progressbar"]');
+  assert.equal(progress.getAttribute('aria-valuenow'), '75');
+  assert.equal(progress.getAttribute('aria-valuetext'), '3/4회 배정', 'use textbook-target sessions, not all eight sessions');
+  const initialHref = window.location.href;
+  for (const key of ['Enter', ' ']) {
+    const nested = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    await act(async () => link.dispatchEvent(nested));
+    assert.equal(nested.defaultPrevented, false, 'row must not cancel native link behavior');
+    assert.equal(window.location.href, initialHref, 'bubbled key must not trigger a second row navigation');
+  }
+  const viewport = document.querySelector('[data-slot="data-table-viewport"]');
+  viewport.scrollTop = 160;
+  const enter = new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true, cancelable: true });
+  await act(async () => desktop.dispatchEvent(enter));
+  assert.equal(enter.defaultPrevented, true);
+  assert.equal(window.location.pathname + window.location.search, expected.pathname + expected.search);
+  const saved = JSON.parse(window.sessionStorage.getItem(`tips:curriculum-work-queue-scroll:${expected.searchParams.get('returnTo')}`));
+  assert.equal(saved.listY, 160);
+});
+
+test('curriculum: initial read failure exposes retry without claiming an empty result or leaking the exception', async (t) => {
+  const page = await setup(t, 'academic', { workspace: true });
+  await act(async () => page.numbered()[0].reject(new Error('INTERNAL_RPC_ERROR')));
+  assert.match(document.body.textContent, /수업계획을 불러오지 못했습니다/);
+  assert.equal(document.querySelector('[role="combobox"][aria-label="수업 상태"]').textContent, '수강');
+  assert.doesNotMatch(document.body.textContent, /INTERNAL_RPC_ERROR|조건에 맞는 수업계획이 없습니다|수강 중인 수업이 없습니다/);
+  const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === '다시 시도');
+  await act(async () => retry.click());
+  await act(async () => page.finish(page.numbered().at(-1), 0));
+  assert.match(document.body.textContent, /수강 중인 수업이 없습니다/);
+  assert.equal(document.querySelector('a[href="/admin/classes"]').textContent, '수업 관리');
+});
+
+
+test('curriculum: classification focus and accepted rows survive pending and failed reads, then Retry accepts the selected scope', async (t) => {
+  const page = await setup(t, 'academic', { workspace: true });
+  await act(async () => page.finish(page.numbered()[0]));
+  const content = [...document.querySelectorAll('tbody tr')].map((row) => row.textContent);
+  const button = [...document.querySelectorAll('[data-testid="curriculum-work-queue"] button')].find((entry) => entry.textContent.includes('진도 미배정'));
+  button.focus();
+  await act(async () => button.click());
+  assert.equal(page.numbered().at(-1).args.p_filters.viewMode, 'update');
+  assert.equal(document.activeElement, button);
+  assert.equal(button.getAttribute('aria-pressed'), 'true');
+  assert.deepEqual([...document.querySelectorAll('tbody tr')].map((row) => row.textContent), content);
+  assert.equal(new URLSearchParams(window.location.search).has('view'), false, 'pending read must not replace accepted URL');
+  await act(async () => page.numbered().at(-1).reject(new Error('VIEW FAILURE')));
+  assert.equal(document.activeElement, button);
+  assert.deepEqual([...document.querySelectorAll('tbody tr')].map((row) => row.textContent), content);
+  const retry = [...document.querySelectorAll('button')].find((entry) => entry.textContent === '다시 시도');
+  await act(async () => retry.click());
+  assert.equal(page.numbered().at(-1).args.p_filters.viewMode, 'update');
+  await act(async () => page.finish(page.numbered().at(-1), 0));
+  assert.equal(new URLSearchParams(window.location.search).get('view'), 'update');
+  assert.match(document.body.textContent, /조건에 맞는 수업계획이 없습니다/);
+  const reset = [...document.querySelectorAll('button')].find((entry) => entry.textContent === '모든 수강 수업 보기');
+  await act(async () => reset.click());
+  assert.equal(page.numbered().at(-1).args.p_filters.viewMode, 'all');
+  assert.equal(page.numbered().at(-1).args.p_page, 1);
+});
+
+
+test('shared progress: visual fill and accessible value agree for known, bounded, custom and unknown totals', async (t) => {
+  const page = await setup(t, 'academic');
+  const { Progress } = page.load('src/components/ui/progress.tsx');
+  const container = document.createElement('div');
+  document.body.append(container);
+  const root = createRoot(container);
+  t.after(async () => act(async () => root.unmount()));
+  for (const [value, max, expected, transform] of [[75, 100, '75', '-25%'], [200, 100, '100', '-0%'], [-5, 100, '0', '-100%'], [3, 4, '3', '-25%'], [null, 100, null, '-100%']]) {
+    await act(async () => root.render(createElement(Progress, { value, max, 'aria-label': '배정 현황' })));
+    const bar = container.querySelector('[role="progressbar"]');
+    assert.equal(bar.getAttribute('aria-valuenow'), expected);
+    assert.equal(bar.getAttribute('aria-valuemax'), String(max));
+    assert.equal(bar.querySelector('[data-slot="progress-indicator"]').style.transform, `translateX(${transform})`);
+    assert.equal(bar.getAttribute('data-state'), value === null ? 'indeterminate' : Number(expected) === max ? 'complete' : 'loading');
+  }
 });

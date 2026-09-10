@@ -398,7 +398,7 @@ function RegistrationCaseActions({
       onKeyDown={(event) => event.stopPropagation()}
     >
       {canDelete(item) ? (
-        <Button type="button" variant="ghost" size="sm" className="text-destructive hover:text-destructive" aria-label={`${item.studentName} 등록 신청 삭제`} onClick={() => onDelete(item)} disabled={disabled}>삭제</Button>
+        <Button type="button" variant="destructive-ghost" size="sm" className="" aria-label={`${item.studentName} 등록 신청 삭제`} onClick={() => onDelete(item)} disabled={disabled}>삭제</Button>
       ) : null}
     </div>
   )

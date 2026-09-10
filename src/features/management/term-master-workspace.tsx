@@ -290,7 +290,7 @@ export function TermMasterWorkspace() {
                     </TableCell> : null}
                     {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="학기 삭제">
+                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={saving} aria-label="학기 삭제">
                           <Trash2 className="size-4" />
                         </Button>
                       </div>

@@ -1,5 +1,7 @@
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
+@import "../features/management/student-workspace.css";
+@import "../features/management/class-workspace.css";
 @source "../**/*.{js,jsx,ts,tsx}";
 
 @custom-variant dark (&:is(.dark *));
@@ -74,6 +76,10 @@
 
 :root {
   --radius: 0.375rem;
+  --motion-duration-control: 150ms;
+  --motion-duration-dialog: 200ms;
+  --motion-easing-control: ease-out;
+  --motion-easing-spatial: cubic-bezier(0.2, 0.8, 0.2, 1);
   --font-sans-stack: Pretendard, "Pretendard Variable", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --background: oklch(1.0000 0 0);
   --foreground: oklch(0.3211 0 0);
@@ -199,6 +205,19 @@
   [data-slot="dialog-overlay"][data-state="closed"] {
     visibility: hidden;
     pointer-events: none !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-slot="dialog-content"],
+  [data-slot="dialog-overlay"],
+  [data-slot="dropdown-menu-content"],
+  [data-slot="dropdown-menu-sub-content"],
+  [data-slot="select-content"],
+  [data-slot="popover-content"],
+  [data-slot="tooltip-content"] {
+    animation-duration: 0ms !important;
+    animation-delay: 0ms !important;
   }
 }
 
@@ -674,5 +693,17 @@ html {
   [data-slot="sidebar"],
   [data-slot="tooltip-content"] {
     display: none !important;
+  }
+}
+
+/* Keep textbook tab widths stable when a secondary ledger needs page scrolling.
+   Radix scroll lock must not compensate a gutter that the root already reserves. */
+@media screen {
+  html:has([data-slot="textbook-workspace"]) {
+    overflow-y: auto;
+    scrollbar-gutter: stable;
+  }
+  html:has([data-slot="textbook-workspace"]) body[data-scroll-locked] {
+    margin-right: 0 !important;
   }
 }

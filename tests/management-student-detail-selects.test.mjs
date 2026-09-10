@@ -47,6 +47,33 @@ test("student detail keeps only actionable student fields", async () => {
   assert.match(source, /renderEditableFields\("detail", kind === "students" \? STUDENT_DETAIL_FIELD_NAMES : undefined\)/);
 });
 
+test("student fields keep natural DOM order across the three, two, and one-column layouts", async () => {
+  const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const styles = await readFile(new URL("src/features/management/student-workspace.css", root), "utf8");
+  const detailSource = source.slice(
+    source.indexOf("const STUDENT_DETAIL_FIELD_NAMES"),
+    source.indexOf("];", source.indexOf("const STUDENT_DETAIL_FIELD_NAMES")) + 2,
+  );
+  const studentFieldsSource = source.slice(
+    source.indexOf("students: [", source.indexOf("const FORM_FIELDS")),
+    source.indexOf("],\n  classes:", source.indexOf("const FORM_FIELDS")) + 1,
+  );
+
+  assert.deepEqual(
+    [...detailSource.matchAll(/^\s+"([^"]+)",?$/gm)].map((match) => match[1]),
+    ["name", "status", "uid", "school_category", "school", "grade", "contact", "parentContact"],
+  );
+  assert.deepEqual(
+    [...studentFieldsSource.matchAll(/\{ name: "([^"]+)"/g)].map((match) => match[1]),
+    ["name", "status", "uid", "school_category", "school", "grade", "contact", "parentContact", "enrollDate"],
+  );
+  assert.match(source, /kind === "students" \? "student-fields" : kind === "classes" \? "class-fields sm:grid-cols-2" : "sm:grid-cols-2"/);
+  assert.match(styles, /\.student-fields \{[\s\S]*?grid-template-columns: repeat\(3, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /@container student-edit-sheet \(max-width: 759px\) \{[\s\S]*?repeat\(2, minmax\(0, 1fr\)\)/);
+  assert.match(styles, /@media \(max-width: 639px\) \{[\s\S]*?\.student-fields \{[^}]*grid-template-columns: minmax\(0, 1fr\);/);
+  assert.doesNotMatch(styles, /\.student-fields[^{}]*\{[^{}]*\border\s*:/);
+});
+
 test("student detail uses student-specific labels without redundant badges", async () => {
   const source = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 

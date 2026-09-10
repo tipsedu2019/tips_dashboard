@@ -413,7 +413,7 @@ export function ClassroomMasterWorkspace() {
                       <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={saving || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
                         <ArrowDown className="size-4" />
                       </Button>
-                      <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
+                      <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
@@ -530,7 +530,7 @@ export function ClassroomMasterWorkspace() {
                         <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={saving || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
                           <ArrowDown className="size-4" />
                         </Button>
-                        <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
+                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
                           <Trash2 className="size-4" />
                         </Button>
                       </div>

@@ -303,7 +303,7 @@ function FieldClearButton({
       variant="ghost"
       size="icon"
       className={[
-        "absolute right-8 top-1/2 z-10 size-6 -translate-y-1/2 rounded-full bg-background/90 text-muted-foreground hover:text-foreground",
+        "absolute right-8 top-1/2 z-10 size-6 -translate-y-1/2 rounded-full bg-background/90",
         className,
       ].filter(Boolean).join(" ")}
       disabled={disabled}

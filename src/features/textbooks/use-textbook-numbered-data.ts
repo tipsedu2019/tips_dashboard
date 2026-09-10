@@ -7,12 +7,12 @@ import { normalizePage, type DataTablePageSize, type DataTablePageSizePreference
 import {
   getTextbookInventorySummary, getTextbookMasterSummary, getTextbookOperationsSummary,
   getTextbookPurchaseSummary, getTextbookSaleHistorySummary, getTextbookSaleSummary,
-  listTextbookClosingMovementPage, listTextbookClosingPage, listTextbookInventoryHistoryPage,
+  listTextbookInventoryHistoryPage,
   listTextbookInventoryPage, listTextbookMasterPage, listTextbookPurchasePage,
   listTextbookSaleHistoryPage, listTextbookSalePage,
 } from "./textbook-read-service"
 import type {
-  ClosingFilters, ClosingMovementFilters, ClosingMovementRow, ClosingRow, InventoryCountRow,
+  InventoryCountRow,
   InventoryFilters, InventoryHistoryFilters, MasterFilters, PurchaseFilters, SaleFilters,
   SaleHistoryFilters, SaleHistorySummaryRow, SaleLineRow, TextbookInventoryHistoryTransport,
   TextbookMasterRow, TextbookPurchaseCaseRow,
@@ -40,8 +40,6 @@ export type TextbookNumberedDataInput = {
   saleHistory: TextbookNumberedEntry<SaleHistoryFilters>
   inventory: TextbookNumberedEntry<InventoryFilters>
   inventoryHistory: TextbookNumberedEntry<InventoryHistoryFilters>
-  closing: TextbookNumberedEntry<ClosingFilters>
-  closingMovements: TextbookNumberedEntry<ClosingMovementFilters>
 }
 export type TextbookSummaryResource<T> = {
   // For page summaries, value is exposed only for the accepted page's filters.
@@ -65,8 +63,6 @@ const readSale: PageReader<SaleFilters, SaleLineRow> = (filters, page, pageSize,
 const readSaleHistory: PageReader<SaleHistoryFilters, SaleHistorySummaryRow> = (filters, page, pageSize, signal) => listTextbookSaleHistoryPage({ filters, page, pageSize, sort: "month-class-title" }, { signal })
 const readInventory: PageReader<InventoryFilters, InventoryCountRow> = (filters, page, pageSize, signal) => listTextbookInventoryPage({ filters, page, pageSize, sort: "audit-priority" }, { signal })
 const readInventoryHistory: PageReader<InventoryHistoryFilters, TextbookInventoryHistoryTransport> = (filters, page, pageSize, signal) => listTextbookInventoryHistoryPage({ filters, page, pageSize, sort: "event-desc" }, { signal })
-const readClosing: PageReader<ClosingFilters, ClosingRow> = (filters, page, pageSize, signal) => listTextbookClosingPage({ filters, page, pageSize, sort: "month-desc" }, { signal })
-const readClosingMovements: PageReader<ClosingMovementFilters, ClosingMovementRow> = (filters, page, pageSize, signal) => listTextbookClosingMovementPage({ filters, page, pageSize, sort: "event-desc" }, { signal })
 const readOperations = (_filters: null, options: { signal: AbortSignal }) => getTextbookOperationsSummary(options)
 
 function useNumberedPage<F, T>(actor: Actor | null, tableId: string, entry: TextbookNumberedEntry<F>, read: PageReader<F, T>) {
@@ -233,15 +229,13 @@ export function useTextbookNumberedData(input: TextbookNumberedDataInput) {
   const saleHistory = usePageWithSummary(management, "textbooks:sales-history", input.saleHistory, readSaleHistory, getTextbookSaleHistorySummary)
   const inventory = usePageWithSummary(management, "textbooks:inventory", input.inventory, readInventory, getTextbookInventorySummary)
   const inventoryHistory = usePageOnly(management, "textbooks:inventory-history", input.inventoryHistory, readInventoryHistory)
-  const closing = usePageOnly(management, "textbooks:closing", input.closing, readClosing)
-  const closingMovements = usePageOnly(management, "textbooks:closing-movements", input.closingMovements, readClosingMovements)
   const operations = useSummary(management, input.operationsEnabled, JSON.stringify({ actor: management?.key, resource: "operations" }), null, readOperations)
   const refreshVisible = async () => {
     await Promise.all([
       master.refresh(), requests.refresh(), purchase.refresh(), sales.refresh(), saleHistory.refresh(), inventory.refresh(),
-      inventoryHistory.refresh(), closing.refresh(), closingMovements.refresh(),
+      inventoryHistory.refresh(),
       master.summary.retry(), requests.summary.retry(), purchase.summary.retry(), sales.summary.retry(), saleHistory.summary.retry(), inventory.summary.retry(), operations.retry(),
     ])
   }
-  return { master, requests, purchase, sales, saleHistory, inventory, inventoryHistory, closing, closingMovements, operations, refreshVisible }
+  return { master, requests, purchase, sales, saleHistory, inventory, inventoryHistory, operations, refreshVisible }
 }

@@ -30,7 +30,6 @@ export type AcademicWorkspaceRequest =
     }
   | {
       mode: "curriculum";
-      periodId: string | null;
       search: string;
       status: string | null;
       subject: string | null;
@@ -85,7 +84,17 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
   serviceRef.current = service;
   const size = useDataTablePageSize("academic:curriculum");
   const isNumbered = request.mode === "curriculum";
-  const sourceRequest = isNumbered ? { ...request, page: undefined, navigationKey: undefined, cursor: null } : request;
+  const sourceRequest = isNumbered ? {
+    mode: "curriculum" as const,
+    search: request.search,
+    status: request.status,
+    subject: request.subject,
+    grade: request.grade,
+    teacher: request.teacher,
+    classroom: request.classroom,
+    viewMode: request.viewMode,
+    cursor: null,
+  } : request;
   const fingerprint = JSON.stringify(sourceRequest);
   const stableRequest = useMemo(() => JSON.parse(fingerprint) as AcademicWorkspaceRequest, [fingerprint]);
   const fingerprintRef = useRef(fingerprint);
@@ -105,19 +114,14 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
   useEffect(() => {
     serviceRef.current = service;
     const instance = createNumberedPageController<NumberedResult["rows"][number]>({
-      async loadPage({ scope, page, pageSize, signal, canonicalizeScope }) {
+      async loadPage({ scope, page, pageSize, signal }) {
         if (!service || serviceRef.current !== service) throw new Error("stale_actor");
         const current = JSON.parse(scope) as Extract<AcademicWorkspaceRequest, { mode: "curriculum" }>;
-        const filters = { periodId: current.periodId, search: current.search, status: current.status, subject: current.subject,
+        const filters = { periodId: null, search: current.search, status: current.status, subject: current.subject,
           grade: current.grade, teacher: current.teacher, classroom: current.classroom, viewMode: current.viewMode };
         const result = await service.readCurriculumNumberedPage({
           filters: filters as import("./academic-read-service.js").CurriculumNumberedFilters, page, pageSize, signal, includeScopeMetadata: true,
         });
-        // Only the active invocation may pin an absent default; explicit name aliases stay selectors.
-        if (!current.periodId && result.resolvedPeriodId) {
-          const canonical = JSON.stringify({ ...current, periodId: result.resolvedPeriodId });
-          if (canonicalizeScope(canonical) && desired.current?.service === service) desired.current.scope = canonical;
-        }
         return result;
       },
       onChange(snapshot) {

@@ -495,9 +495,9 @@ export function SchoolMasterWorkspace() {
                       </Button>
                       <Button
                         type="button"
-                        variant="ghost"
+                        variant="destructive-ghost"
                         size="icon"
-                        className="size-8 text-destructive hover:text-destructive"
+                        className="size-8"
                         onClick={() => handleDelete(row)}
                         disabled={saving}
                         aria-label="학교 삭제"
@@ -668,9 +668,9 @@ export function SchoolMasterWorkspace() {
                           </Button>
                           <Button
                             type="button"
-                            variant="ghost"
+                            variant="destructive-ghost"
                             size="icon"
-                            className="size-8 text-destructive hover:text-destructive"
+                            className="size-8"
                             onClick={() => handleDelete(row)}
                             disabled={saving}
                             aria-label="학교 삭제"

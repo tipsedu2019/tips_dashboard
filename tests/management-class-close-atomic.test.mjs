@@ -219,14 +219,11 @@ test("a successful close keeps its receipt key for an outer workflow retry", asy
   assert.equal(rpcCalls[0][1].p_request_key, rpcCalls[1][1].p_request_key);
 });
 
-test("the detail save flow does not mutate class groups after the close commits", async () => {
+test("the detail save flow does not rewrite removed period group memberships", async () => {
   const pageSource = await readFile(
     new URL("../src/features/management/management-page.tsx", import.meta.url),
     "utf8",
   );
 
-  assert.match(
-    pageSource,
-    /if \(text\(\(updated as Record<string, unknown>\)\?\.status\) !== "종강"\) \{[\s\S]*?replaceClassGroupMemberships/,
-  );
+  assert.doesNotMatch(pageSource, /replaceClassGroupMemberships/);
 });

@@ -1,6 +1,5 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
 
 import {
   buildPurchaseLifecycleDraft,
@@ -137,17 +136,6 @@ test("monthly closing keeps science sales in a separate team bucket", () => {
       ["other", 0, 0],
     ],
   );
-});
-
-test("monthly closing controls include science without changing the approval shape", () => {
-  const workspaceSource = readFileSync(
-    new URL("../src/features/textbooks/textbook-operations-workspace.tsx", import.meta.url),
-    "utf8",
-  );
-
-  assert.match(workspaceSource, /item\.team === "science"/);
-  assert.match(workspaceSource, /\["all", "english", "math", "science"\]/);
-  assert.match(workspaceSource, /<SelectItem value="science">과학<\/SelectItem>/);
 });
 
 test("monthly closing filters stock moves by textbook subject", () => {
@@ -427,23 +415,59 @@ test("optional uuid fields ignore fallback location codes before Supabase writes
   );
 });
 
-test("textbook action errors expose Supabase messages instead of a generic failure", () => {
+test("textbook action errors keep known business guidance and hide internal failures", () => {
+  assert.equal(
+    getTextbookActionErrorMessage({ message: "textbook_sale_state_conflict" }),
+    "출고 상태가 변경되었습니다. 새로고침 후 현재 상태를 확인하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ message: "출고 작업 대상이 변경되었습니다." }),
+    "출고 작업 대상이 변경되었습니다.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ message: "requested quantity required: 요청 수량을 입력하세요." }),
+    "요청 수량을 입력하세요.",
+  );
   assert.equal(
     getTextbookActionErrorMessage({ message: "invalid input syntax for type uuid: \"main\"" }),
-    "invalid input syntax for type uuid: \"main\"",
+    "입력값을 확인한 뒤 다시 시도하세요.",
   );
   assert.equal(
     getTextbookActionErrorMessage({
       code: "PGRST205",
       message: "Could not find the table 'public.textbook_purchase_orders' in the schema cache",
     }),
-    "교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.",
+    "교재 관리 기능을 불러오지 못했습니다. 관리자에게 문의한 뒤 새로고침하세요.",
   );
   assert.equal(
     getTextbookActionErrorMessage({
       code: "PGRST204",
       message: "Could not find the 'student_name' column of 'textbook_sale_lines' in the schema cache",
     }),
-    "교재 관리 DB 스키마가 최신이 아닙니다. 누락 컬럼: textbook_sale_lines.student_name. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.",
+    "교재 관리 기능을 불러오지 못했습니다. 관리자에게 문의한 뒤 새로고침하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ code: "42501", message: "permission denied for table textbook_sale_lines" }),
+    "교재 관리 권한이 없습니다. 계정 권한을 확인하거나 관리자에게 문의하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage(new TypeError("Failed to fetch")),
+    "네트워크 연결을 확인한 뒤 다시 시도하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ message: "fixture_transport_disabled" }),
+    "처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ code: "23505", message: "duplicate key violates unique constraint textbook_isbn_key" }),
+    "처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ message: "내부 컬럼 textbook_sale_lines.student_id 오류" }),
+    "처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.",
+  );
+  assert.equal(
+    getTextbookActionErrorMessage({ message: "Missing Supabase environment variables: NEXT_PUBLIC_SUPABASE_URL" }),
+    "교재 관리 기능을 불러오지 못했습니다. 관리자에게 문의한 뒤 새로고침하세요.",
   );
 });

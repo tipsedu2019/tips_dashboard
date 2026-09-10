@@ -1,0 +1,206 @@
+/* Option 3 pilot. Keep these rules within the student workspace until review. */
+.student-workspace,
+.student-edit-sheet,
+.class-edit-sheet {
+  --student-control-height: 42px;
+  --student-control-radius: 6px;
+  --student-motion-fast: 120ms;
+  --student-motion-ease: cubic-bezier(0.2, 0, 0, 1);
+}
+
+.student-workspace > .\@container\/main { margin-top: 0; }
+.student-filter-status:empty { display: none; }
+
+:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
+  height: var(--student-control-height);
+  border-radius: var(--student-control-radius);
+  box-shadow: none;
+  font-size: 15px;
+  transition-property: background-color, border-color, color;
+  transition-duration: var(--student-motion-fast);
+}
+.student-list-toolbar [aria-label$="검색어 지우기"] { height: 32px; }
+:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
+  background: var(--background);
+  border-color: color-mix(in oklch, var(--input), var(--foreground) 12%);
+}
+:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]):hover:not(:disabled) {
+  border-color: color-mix(in oklch, var(--input), var(--foreground) 25%);
+}
+:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]):focus-visible {
+  outline: 3px solid color-mix(in oklch, var(--ring), transparent 65%);
+  outline-offset: 1px;
+  border-color: var(--ring);
+  box-shadow: none;
+}
+:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]):disabled {
+  background: var(--muted);
+  color: var(--muted-foreground);
+}
+:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"])[aria-invalid="true"] {
+  border-color: var(--destructive);
+}
+
+.student-edit-overlay,
+.class-edit-overlay {
+  background: color-mix(in oklch, var(--foreground), transparent 90%);
+  animation-duration: 180ms;
+}
+.student-edit-sheet {
+  container-name: student-edit-sheet;
+  container-type: inline-size;
+  display: block;
+  width: min(920px, calc(100vw - 32px));
+  max-width: 920px;
+  max-height: min(860px, calc(100dvh - 64px));
+  padding: 28px 32px 0;
+  border: 1px solid color-mix(in oklch, var(--border), transparent 50%);
+  border-radius: 16px;
+  box-shadow: 0 20px 64px -16px color-mix(in oklch, var(--foreground), transparent 78%);
+  overscroll-behavior: contain;
+  scroll-padding-block: 96px;
+}
+.student-edit-sheet[data-state="open"] { animation: student-sheet-enter 180ms var(--student-motion-ease); }
+/* Closed dialogs release pointers immediately, following the existing dialog contract. */
+.student-edit-sheet > [data-slot="dialog-header"] {
+  margin: -28px -32px 28px;
+  padding: 28px 64px 20px 32px;
+  position: sticky;
+  top: -28px;
+  z-index: 25;
+  background: var(--background);
+  text-align: left;
+}
+.student-edit-sheet [data-slot="dialog-title"] {
+  font-size: 22px;
+  line-height: 1.35;
+  letter-spacing: -0.025em;
+  font-weight: 650;
+}
+.student-edit-sheet .student-sheet-close {
+  position: absolute;
+  top: 24px;
+  right: 24px;
+  margin: 0;
+}
+.student-fields {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  column-gap: 20px;
+  row-gap: 24px;
+}
+.student-fields > div { min-width: 0; }
+.student-fields [data-slot="label"] { font-size: 13px; line-height: 18px; font-weight: 550; }
+.student-field-divider { grid-column: 1 / -1; height: 1px; background: var(--border); margin: 2px 0; }
+.student-detail-body > section + section { margin-top: 28px; padding-top: 24px; }
+.student-detail-body > section:not(:first-child) > .grid { min-width: 0; }
+.student-related-lists, .student-history-lists { grid-template-columns: minmax(0, 1fr); }
+.student-related-lists > section, .student-history-lists > section { min-width: 0; }
+.student-class-picker { grid-template-columns: minmax(0, 1fr); }
+.student-class-actions [data-slot="button"] { min-height: 36px; height: auto; padding: 6px 12px; }
+.student-history-lists .divide-y > div { padding: 14px 16px; row-gap: 4px; }
+@media (min-width: 768px) {
+  .student-class-picker { grid-template-columns: minmax(0, 1fr) auto auto; }
+  .student-class-row { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
+  .student-class-actions { justify-content: flex-end; }
+}
+@container student-edit-sheet (max-width: 759px) {
+  .student-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
+@container student-edit-sheet (max-width: 519px) {
+  .student-fields { grid-template-columns: minmax(0, 1fr); }
+}
+.student-sheet-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 20;
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: flex-end;
+  gap: 12px;
+  margin: 28px -32px 0;
+  padding: 20px 32px 28px;
+  background: var(--background);
+  border-top: 1px solid var(--border);
+}
+.student-sheet-actions [data-testid="management-save-status"] { flex: 1 1 auto; }
+.student-sheet-actions > [data-slot="button"] { min-width: 76px; height: 42px; padding-inline: 20px; }
+.student-sheet-actions .student-withdraw-action {
+  min-width: 0;
+  margin-right: auto;
+  padding-inline: 8px;
+  color: var(--destructive);
+}
+.student-edit-sheet > [data-slot="alert"] { margin-bottom: 24px; }
+
+/* Use the existing semantic theme and shell. Menu contents and preferences are unchanged. */
+body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-inset"] { margin: 0; border-radius: 0; box-shadow: none; }
+body:has(:is(.student-workspace, .class-workspace)) header { min-height: 72px; }
+body:has(:is(.student-workspace, .class-workspace)) header p { font-size: 14px; }
+body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-header"] { padding: 20px 12px 16px; }
+body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] > div:first-child {
+  border: 0;
+  box-shadow: none;
+  background: transparent;
+  padding: 0;
+}
+body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] img { width: 48px; height: 48px; max-width: none; flex-shrink: 0; }
+.dark body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] > div:first-child { background: white; }
+.dark .student-fields input[type="date"] { color-scheme: dark; }
+body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-button"][data-size="default"] { min-height: 40px; font-size: 14px; }
+body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub-button"] { min-height: 36px; }
+body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-button"][data-active="true"],
+body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub-button"][data-active="true"] {
+  color: var(--primary);
+  background: color-mix(in oklch, var(--primary), transparent 91%);
+  font-weight: 600;
+}
+body:has(:is(.student-workspace, .class-workspace)) header [data-slot="button"],
+body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-quick-search-trigger"],
+body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-public-site-link"] {
+  height: 36px;
+}
+body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {
+  border-radius: 8px;
+  animation-duration: 120ms;
+  --tw-enter-scale: 1;
+  --tw-exit-scale: 1;
+}
+
+@keyframes student-sheet-enter {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@media (min-width: 1024px) {
+  body:has(:is(.student-workspace, .class-workspace)):has([data-slot="sidebar"][data-state="expanded"][data-side="left"]) .student-edit-sheet { left: calc(50% + 128px); width: min(920px, calc(100vw - 320px)); }
+  body:has(:is(.student-workspace, .class-workspace)):has([data-slot="sidebar"][data-state="expanded"][data-side="right"]) .student-edit-sheet { left: calc(50% - 128px); width: min(920px, calc(100vw - 320px)); }
+}
+@media (max-width: 639px) {
+  .student-edit-sheet {
+    width: calc(100vw - 16px);
+    max-height: calc(100dvh - 16px);
+    padding: 24px 20px 0;
+    scroll-padding-block: 88px;
+  }
+  .student-edit-sheet > [data-slot="dialog-header"] {
+    margin: -24px -20px 20px;
+    padding: 24px 56px 16px 20px;
+    top: -24px;
+  }
+  .student-edit-sheet [data-slot="dialog-title"] { font-size: 20px; }
+  .student-edit-sheet .student-sheet-close { top: 20px; right: 16px; }
+  .student-fields { grid-template-columns: minmax(0, 1fr); gap: 20px; }
+  :is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) { height: 44px; font-size: 16px; }
+  .student-class-actions [data-slot="button"] { min-height: 44px; }
+  .student-sheet-actions { margin-inline: -20px; padding: 16px 20px max(16px, env(safe-area-inset-bottom)); gap: 8px; }
+  .student-sheet-actions > [data-slot="button"] { height: 44px; }
+  .student-sheet-actions [data-testid="management-save-status"] { flex-basis: 100%; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .student-edit-sheet[data-state], .student-edit-overlay,
+  body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {
+    animation: none;
+  }
+  .student-workspace *, .student-edit-sheet *,
+  body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar"] *,
+  body:has(:is(.student-workspace, .class-workspace)) header * { transition-duration: 0ms; scroll-behavior: auto; }
+}

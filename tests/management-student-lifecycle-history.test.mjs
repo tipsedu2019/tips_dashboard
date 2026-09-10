@@ -41,6 +41,7 @@ test("class relation removal can clear orphaned student references", async () =>
 test("student row actions hand off to the withdrawal workflow while classes end through status edits only", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const rowActionsSource = await readFile(new URL("src/features/management/student-row-actions.tsx", root), "utf8");
 
   assert.match(pageSource, /function buildStudentWithdrawalRequestPath/);
   assert.match(pageSource, /params\.set\("create", "withdrawal"\)/);
@@ -48,8 +49,9 @@ test("student row actions hand off to the withdrawal workflow while classes end 
   assert.match(pageSource, /router\.push\(buildStudentWithdrawalRequestPath\(row\.id\)\)/);
   assert.doesNotMatch(pageSource, /service\.updateStudent\(\{ \.\.\.\(row\.raw \|\| \{\}\), id: row\.id, status: WITHDRAWN_STUDENT_STATUS \}\)/);
   assert.match(pageSource, /kind === "classes" \? undefined : canMutateRows \? \(row: ManagementRow\) =>/);
-  assert.match(tableSource, /kind === "classes" \? null : \(/);
-  assert.match(tableSource, /kind === "students" \? "퇴원 처리" : "삭제"/);
+  assert.match(tableSource, /kind === "classes" \? null : kind === "students" \? \([\s\S]*?<StudentRowActions/);
+  assert.match(rowActionsSource, /<DropdownMenuItem variant="destructive" onSelect=\{onWithdraw\}>퇴원 처리<\/DropdownMenuItem>/);
+  assert.match(tableSource, /deleteLabel=\{kind === "students" \? "일괄 퇴원" : "일괄 삭제"\}/);
   assert.doesNotMatch(pageSource, /onBulkDeleteRows: canMutateRows && kind !== "classes"/);
   assert.doesNotMatch(pageSource, /종강 처리/);
   assert.doesNotMatch(tableSource, /종강 처리/);

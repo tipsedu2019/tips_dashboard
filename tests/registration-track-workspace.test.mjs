@@ -868,7 +868,7 @@ test("create and detail share the approved subject-first inquiry controls", asyn
   assert.match(picker, /grade: string/)
   assert.match(picker, /disabledReasonBySubject/)
   assert.match(picker, /grid-cols-3/)
-  assert.match(picker, /locked \? "disabled:opacity-100"/)
+  assert.doesNotMatch(picker, /disabled:opacity-/)
   assert.doesNotMatch(picker, /\["영어", "수학"\]/)
   assert.match(create, /options=\{ACADEMIC_SUBJECT_VALUES\}/)
   assert.match(inquiry, /options=\{ACADEMIC_SUBJECT_VALUES\}/)

@@ -32,22 +32,19 @@ import {
   useReactTable,
 } from "@tanstack/react-table";
 import {
-  ArrowDown,
-  ArrowUp,
   ChevronDown,
   ChevronRight,
   Pencil,
   Plus,
   Search,
-  Settings2,
-  SlidersHorizontal,
   Trash2,
   X,
 } from "lucide-react";
 
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
+import { DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection";
+import { StudentRowActions } from "./student-row-actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
@@ -62,13 +59,28 @@ import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
-  TableCell,
-  TableHead,
   TableHeader,
-  TableRow,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { DataTableSettings, DataTableSettingsSection, DataTableSettingsSelect, DataTableColumnSetting } from "@/components/data-table/data-table-settings";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
+import {
+  DATA_TABLE_LAYOUT_CLASS_NAME,
+  DATA_TABLE_MOBILE_LIST_CLASS_NAME,
+  DATA_TABLE_PAGER_CLASS_NAME,
+  DATA_TABLE_TABLE_CLASS_NAME,
+  DATA_TABLE_TOOLBAR_CLASS_NAME,
+  DataTableBodyCell,
+  DataTableBodyRow,
+  DataTableHeaderCell,
+  DataTableHeaderRow,
+  type DataTablePinnedColumn,
+  DataTableSortButton,
+  DataTableToolbar,
+  DataTableFilters,
+  DATA_TABLE_FILTER_FIELD_CLASS_NAME,
+  DataTableViewport,
+} from "@/components/data-table/data-table-surface";
 import { MANAGEMENT_NUMBERED_SORT_COLUMNS, type ManagementNumberedSort } from "./management-numbered-service";
 import { MANAGEMENT_TABLE_STORAGE_VERSION, managementTableStorageKey, resetManagementPageForFilters } from "./management-numbered-state";
 import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
@@ -79,10 +91,8 @@ import {
 } from "./management-page-size";
 import {
   ClassFilterPanel,
-  type ClassFilterPanelChip,
   type ClassFilterPanelSelect,
 } from "./class-filter-panel";
-import { pickDefaultPeriodValue } from "./period-preferences";
 import {
   formatClassScheduleDisplayLines,
   splitClassResourceDisplayValues,
@@ -96,10 +106,8 @@ import {
   reconcilePendingManagementFilters,
   reconcilePendingManagementSearch,
   replaceManagementListUrl,
-  resolveManagementPeriodFilterValue,
   shouldRenderManagementInitialLoading,
   sortStudentSchoolCategoryValues,
-  withRequestedDefaultClassPeriod,
 } from "./management-filter-transition.js";
 
 const STORAGE_VERSION = MANAGEMENT_TABLE_STORAGE_VERSION;
@@ -140,7 +148,6 @@ const CLASS_FILTERS = [
   { id: "teacher", label: "선생님" },
   { id: "classroom", label: "강의실" },
 ] as const;
-const CLASS_QUICK_FILTER_IDS = CLASS_FILTERS.map((filter) => `class-${filter.id}`);
 
 type ClassFilterColumnId = (typeof CLASS_FILTERS)[number]["id"];
 
@@ -149,7 +156,6 @@ const CLASS_STATUS_FILTER_OPTIONS = ["수강", "개강 준비", "종강"] as con
 
 const CLASS_LIST_QUERY_PARAM_KEYS = {
   q: "q",
-  period: "period",
   status: "status",
   subject: "subject",
   grade: "grade",
@@ -159,7 +165,6 @@ const CLASS_LIST_QUERY_PARAM_KEYS = {
 
 type ClassListQueryState = {
   q: string;
-  period: string;
   status: string;
   subject: string;
   grade: string;
@@ -169,7 +174,6 @@ type ClassListQueryState = {
 
 const EMPTY_CLASS_LIST_QUERY_STATE: ClassListQueryState = {
   q: "",
-  period: "",
   status: "",
   subject: "",
   grade: "",
@@ -325,13 +329,6 @@ type ColumnOption = {
   label: string;
 };
 
-type PeriodOption = {
-  value: string;
-  label: string;
-  aliases: string[];
-  isDefault?: boolean;
-};
-
 type ManagementTableActions = {
   onCreate?: () => void;
   onOpenRow?: (row: ManagementRow) => void;
@@ -341,7 +338,6 @@ type ManagementTableActions = {
   onOpenSchoolMaster?: () => void;
   onOpenTeacherMaster?: () => void;
   onOpenClassroomMaster?: () => void;
-  onOpenTermManager?: () => void;
   onLoadClassRoster?: (classId: string, mode: ClassRosterMode) => Promise<unknown[]>;
 };
 
@@ -425,14 +421,14 @@ function formatColumnLabel(columnId: string, badgeLabel: string, statusLabel: st
   return prettifyColumnKey(columnId);
 }
 
-function getPinnedColumnClassName(columnId: string) {
+function getPinnedColumn(columnId: string, surface: "header" | "body"): DataTablePinnedColumn | undefined {
   if (columnId === "select") {
-    return "sticky left-0 z-20 bg-background";
+    return { left: 0, layer: surface === "header" ? 40 : 20 };
   }
   if (columnId === "title") {
-    return "sticky left-[40px] z-10 bg-background";
+    return { left: 40, layer: surface === "header" ? 30 : 10 };
   }
-  return "";
+  return undefined;
 }
 
 function getColumnSizeStyle(size: number) {
@@ -480,7 +476,6 @@ function normalizeScalar(value: unknown): string {
 function getClassListQueryState(params: URLSearchParams): ClassListQueryState {
   return {
     q: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.q)),
-    period: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.period)),
     status: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.status)),
     subject: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.subject)),
     grade: normalizeScalar(params.get(CLASS_LIST_QUERY_PARAM_KEYS.grade)),
@@ -499,17 +494,18 @@ function setClassListQueryParam(params: URLSearchParams, key: string, value: str
   params.set(key, normalized);
 }
 
-function buildClassListHref(pathname: string, searchParamString: string, state: ClassListQueryState, canonicalPeriod = "") {
+function buildClassListHref(pathname: string, searchParamString: string, state: ClassListQueryState) {
   const params = new URLSearchParams(searchParamString);
+  params.delete("period");
+  const previousSearch = params.toString();
 
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.q, state.q);
-  setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.period, state.period);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.status, state.status, DEFAULT_CLASS_STATUS_FILTER);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.subject, state.subject);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.grade, state.grade);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.teacher, state.teacher);
   setClassListQueryParam(params, CLASS_LIST_QUERY_PARAM_KEYS.classroom, state.classroom);
-  resetManagementPageForFilters("classes", searchParamString, params, canonicalPeriod);
+  resetManagementPageForFilters("classes", previousSearch, params);
 
   const nextQuery = params.toString();
   return nextQuery ? `${pathname}?${nextQuery}` : pathname;
@@ -732,34 +728,6 @@ function sortStudentGradeOptions(values: string[]) {
   return [...values].sort((a, b) => a.localeCompare(b, "ko", { numeric: true }));
 }
 
-function getAvailableClassGroupOptions(value: unknown): PeriodOption[] {
-  if (!Array.isArray(value)) return [];
-  return value.flatMap((candidate) => {
-    if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return [];
-    const record = candidate as Record<string, unknown>;
-    const optionValue = normalizeScalar(record.value);
-    const label = normalizeScalar(record.label) || optionValue;
-    if (!optionValue || !label) return [];
-    const aliases = Array.isArray(record.aliases)
-      ? record.aliases.map(normalizeScalar).filter(Boolean)
-      : [];
-    return [{
-      value: optionValue,
-      label,
-      aliases: [...new Set([optionValue, label, ...aliases])],
-      isDefault: record.isDefault === true,
-    }];
-  }).sort((left, right) => left.label.localeCompare(right.label, "ko", { numeric: true }));
-}
-
-function getServerPeriodOptions(value: unknown) {
-  return getAvailableClassGroupOptions(value);
-}
-
-function getPeriodFilterLabel(options: PeriodOption[], value: string) {
-  return options.find((option) => option.value === value || option.aliases.includes(value))?.label || value;
-}
-
 function getClassStatusFilterValue(row: ManagementRow) {
   const status = normalizeScalar((row.raw || {}).status || row.status || row.statusValue);
 
@@ -896,9 +864,13 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
   const waitlistCount = Number(row.metrics.waitlistCount || 0);
   const mode = registeredCount > 0 ? "registered" : waitlistCount > 0 ? "waitlist" : "none";
   const lifecycleBadge = (
-    <Badge variant="secondary" className={getStatusColor(row.statusValue || row.status)}>
-      {row.status}
-    </Badge>
+    row.status === "재원" ? (
+      <span className="px-1 text-xs text-muted-foreground">{row.status}</span>
+    ) : (
+      <Badge variant="secondary" className={getStatusColor(row.statusValue || row.status)}>
+        {row.status}
+      </Badge>
+    )
   );
 
   if (mode === "none") {
@@ -924,7 +896,7 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
             className={cn(
               "relative z-20 h-6 rounded-full px-2.5 text-xs font-medium",
               mode === "registered"
-                ? "bg-green-50 text-green-700 hover:bg-green-100 dark:bg-green-950/30 dark:text-green-300 dark:hover:bg-green-950/50"
+                ? "bg-muted/60 text-foreground hover:bg-muted"
                 : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50",
             )}
             aria-label={`${row.title} ${label} 수업 ${count}개 보기`}
@@ -1168,7 +1140,7 @@ function ManagementBulkActionBar({
   const canApply = value.trim().length > 0 && !pending;
 
   return (
-    <div className="flex flex-col gap-3 border border-primary/20 bg-primary/5 px-3 py-3 md:flex-row md:items-end md:justify-between">
+    <div className="flex flex-col gap-3 border-b border-primary/20 bg-primary/5 px-3 py-3 md:flex-row md:items-end md:justify-between">
       <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-end">
         <Badge variant="secondary" className="h-9 w-fit rounded-md px-3">
           선택 {selectedCount}건
@@ -1311,7 +1283,6 @@ export function ManagementDataTable({
   const pendingSearchValueRef = useRef<string | null>(null);
   const deferredGlobalFilter = useDeferredValue(globalFilter);
   const debouncedGlobalFilter = useDebouncedValue(globalFilter, 300).trim();
-  const [classGroupFilter, setClassGroupFilter] = useState(() => requestedClassListQueryState.period);
   const [studentSchoolCategoryFilter, setStudentSchoolCategoryFilter] = useState(() => requestedStudentListQueryState.schoolCategory);
   const [studentSchoolFilter, setStudentSchoolFilter] = useState(() => requestedStudentListQueryState.school);
   const [studentGradeFilter, setStudentGradeFilter] = useState(() => requestedStudentListQueryState.grade);
@@ -1358,9 +1329,8 @@ export function ManagementDataTable({
       {
         id: "select",
         header: ({ table }) => (
-          <div className="flex items-center justify-center px-1">
-            <Checkbox
-              className="size-6"
+          <div className="flex items-center justify-center">
+            <DataTableSelectionCheckbox
               checked={
                 table.getIsAllPageRowsSelected() ||
                 (table.getIsSomePageRowsSelected() && "indeterminate")
@@ -1371,9 +1341,8 @@ export function ManagementDataTable({
           </div>
         ),
         cell: ({ row }) => (
-          <div className="flex items-center justify-center px-1">
-            <Checkbox
-              className="size-6"
+          <div className="flex items-center justify-center">
+            <DataTableSelectionCheckbox
               checked={row.getIsSelected()}
               onCheckedChange={(value) => row.toggleSelected(!!value)}
               aria-label={`${emptyLabel} 항목 선택`}
@@ -1393,19 +1362,21 @@ export function ManagementDataTable({
         accessorFn: (row) => row.title,
         header: kind === "classes" ? "수업명" : "이름",
         cell: ({ row }) => (
-          <div className="grid min-w-[14rem] gap-0.5 py-0.5">
+          <div className="grid min-w-0 gap-0.5 py-0.5">
             <button
               type="button"
               className={cn(
-                "-mx-1.5 inline-flex min-h-6 max-w-full cursor-pointer rounded-md px-1.5 py-0.5 text-left text-sm font-medium leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px",
+                "-mx-1.5 inline-flex min-h-6 max-w-full cursor-pointer rounded-md px-1.5 py-0.5 text-left text-sm font-medium leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0",
                 kind === "classes" ? "text-blue-600 dark:text-blue-400" : "text-foreground",
               )}
               onClick={() => openManagementRow(row.original)}
+              data-student-detail-trigger={kind === "students" ? row.original.id : undefined}
+              data-class-detail-trigger={kind === "classes" ? row.original.id : undefined}
             >
-              <span className="truncate">{row.original.title}</span>
+              <span className="min-w-0 whitespace-normal break-words">{row.original.title}</span>
             </button>
             {kind === "textbooks" ? (
-              <span className="truncate text-xs text-muted-foreground">{row.original.subtitle || "기본 정보 없음"}</span>
+              <span className="min-w-0 whitespace-normal break-words text-xs text-muted-foreground">{row.original.subtitle || "기본 정보 없음"}</span>
             ) : null}
           </div>
         ),
@@ -1532,14 +1503,21 @@ export function ManagementDataTable({
         enableHiding: false,
         enableResizing: false,
         enableGrouping: false,
-        cell: ({ row }) => kind === "classes" ? null : (
+        cell: ({ row }) => kind === "classes" ? null : kind === "students" ? (
+          <div className="flex items-center justify-center">
+            <StudentRowActions
+              studentName={row.original.title}
+              onWithdraw={actions.onDeleteRow ? () => actions.onDeleteRow?.(row.original) : undefined}
+            />
+          </div>
+        ) : (
           <div className="flex items-center justify-center">
             <Button
-              variant="ghost"
+              variant="destructive-ghost"
               size="icon"
-              className="size-6 text-destructive hover:bg-destructive/10 hover:text-destructive"
-              aria-label={`${row.original.title} ${kind === "students" ? "퇴원 처리" : "삭제"}`}
-              title={kind === "students" ? "퇴원 처리" : "삭제"}
+              className="size-6"
+              aria-label={`${row.original.title} 삭제`}
+              title="삭제"
               onClick={() => actions.onDeleteRow?.(row.original)}
             >
               <Trash2 className="size-4" />
@@ -1644,20 +1622,6 @@ export function ManagementDataTable({
     }
   }, [columnOrder, columnSizing, columnVisibility, grouping, hydratedStorageKey, sorting, storageKey, totalCount]);
 
-  const periodOptions = useMemo(
-    () => kind === "classes"
-      ? getServerPeriodOptions(filterOptions.periods)
-      : [],
-    [filterOptions.periods, kind],
-  );
-  const defaultPeriodFilter = useMemo(() => pickDefaultPeriodValue(periodOptions), [periodOptions]);
-  const effectiveClassGroupFilter = useMemo(
-    () =>
-      kind === "classes"
-        ? resolveManagementPeriodFilterValue(periodOptions, classGroupFilter, defaultPeriodFilter)
-        : classGroupFilter,
-    [classGroupFilter, defaultPeriodFilter, kind, periodOptions],
-  );
   const studentSchoolCategoryOptions = useMemo(
     () =>
       kind === "students"
@@ -1680,16 +1644,6 @@ export function ManagementDataTable({
     return sortStudentGradeOptions(serverOptions("grade"));
   }, [kind, serverOptions]);
   const tableSourceRows = rows;
-
-  useEffect(() => {
-    if (kind !== "classes") {
-      return;
-    }
-
-    if (classGroupFilter !== effectiveClassGroupFilter) {
-      setClassGroupFilter(effectiveClassGroupFilter);
-    }
-  }, [classGroupFilter, effectiveClassGroupFilter, kind, periodOptions]);
 
   useEffect(() => {
     if (kind !== "students") {
@@ -1900,9 +1854,7 @@ export function ManagementDataTable({
         value: "",
       }));
   const activeClassFilters = kind === "classes" ? classFilterValues.filter((filter) => filter.value) : [];
-  const normalizedClassGroupFilter = kind === "classes" ? effectiveClassGroupFilter : classGroupFilter;
   const normalizedClassStatusFilter = kind === "classes" ? statusFilter || DEFAULT_CLASS_STATUS_FILTER : statusFilter;
-  const hasNonDefaultPeriodFilter = kind === "classes" && normalizedClassGroupFilter !== defaultPeriodFilter;
   const hasNonDefaultStatusFilter = kind === "classes" && normalizedClassStatusFilter !== DEFAULT_CLASS_STATUS_FILTER;
   const hasActiveStudentFilters = kind === "students" && Boolean(statusFilter || studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
   const normalizedGlobalFilter = String(globalFilter || "").trim();
@@ -1911,7 +1863,6 @@ export function ManagementDataTable({
     normalizedGlobalFilter ||
       badgeFilter ||
       (kind === "classes" ? hasNonDefaultStatusFilter : statusFilter) ||
-      (kind === "classes" ? hasNonDefaultPeriodFilter : false) ||
       activeClassFilters.length > 0 ||
       hasActiveStudentFilters,
   );
@@ -1991,7 +1942,6 @@ export function ManagementDataTable({
   const currentClassListQueryState = useMemo<ClassListQueryState>(
     () => ({
       q: debouncedGlobalFilter,
-      period: normalizedClassGroupFilter,
       status: normalizedClassStatusFilter,
       subject: selectedSubjectFilter,
       grade: selectedGradeFilter,
@@ -1999,7 +1949,6 @@ export function ManagementDataTable({
       classroom: selectedClassroomFilter,
     }),
     [
-      normalizedClassGroupFilter,
       normalizedClassStatusFilter,
       debouncedGlobalFilter,
       selectedClassroomFilter,
@@ -2015,7 +1964,7 @@ export function ManagementDataTable({
       }
 
       const mergedState = { ...currentClassListQueryState, ...nextState };
-      const nextHref = buildClassListHref(pathname, searchParamString, mergedState, defaultPeriodFilter);
+      const nextHref = buildClassListHref(pathname, searchParamString, mergedState);
       const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
       if (nextHref !== currentHref) {
         if (preserveLocalUntilUrl) {
@@ -2026,7 +1975,7 @@ export function ManagementDataTable({
         pendingClassListQueryStateRef.current = null;
       }
     },
-    [currentClassListQueryState, defaultPeriodFilter, kind, pathname, searchParamString],
+    [currentClassListQueryState, kind, pathname, searchParamString],
   );
   const currentStudentListQueryState = useMemo<StudentListQueryState>(
     () => ({
@@ -2107,13 +2056,20 @@ export function ManagementDataTable({
   ]);
 
   useEffect(() => {
-    if (kind === "classes" && !requestedClassListQueryState.period && defaultPeriodFilter) {
-      syncClassListQueryState(withRequestedDefaultClassPeriod(
-        requestedClassListQueryState,
-        defaultPeriodFilter,
-      ));
-    }
-  }, [defaultPeriodFilter, kind, requestedClassListQueryState, syncClassListQueryState]);
+    if (kind !== "classes") return;
+    let active = true;
+    // The parent router installs its history listener after child mount effects.
+    queueMicrotask(() => {
+      if (!active || window.location.pathname !== pathname) return;
+      const params = new URLSearchParams(window.location.search);
+      if (!params.has("period")) return;
+      // Old bookmarks lose only their retired filter, preserving the current list and detail state.
+      params.delete("period");
+      const query = params.toString();
+      replaceManagementListUrl(window.history, `${pathname}${query ? `?${query}` : ""}${window.location.hash}`);
+    });
+    return () => { active = false; };
+  }, [kind, pathname, searchParamString]);
 
   useEffect(() => {
     const requestedSearch = kind === "classes"
@@ -2162,15 +2118,6 @@ export function ManagementDataTable({
     pendingClassListQueryStateRef.current = reconciliation.pending;
     const nextFilters = reconciliation.filters;
 
-    const requestedPeriodFilter = resolveManagementPeriodFilterValue(
-      periodOptions,
-      nextFilters.period,
-      defaultPeriodFilter,
-    );
-    if (requestedPeriodFilter && classGroupFilter !== requestedPeriodFilter) {
-      setClassGroupFilter(requestedPeriodFilter);
-    }
-
     const requestedStatusFilter = nextFilters.status || DEFAULT_CLASS_STATUS_FILTER;
     if (statusColumn && statusFilter !== requestedStatusFilter) {
       statusColumn.setFilterValue(requestedStatusFilter);
@@ -2184,11 +2131,8 @@ export function ManagementDataTable({
       }
     }
   }, [
-    classGroupFilter,
     currentClassListQueryState,
-    defaultPeriodFilter,
     kind,
-    periodOptions,
     requestedClassListQueryState,
     statusColumn,
     statusFilter,
@@ -2260,7 +2204,6 @@ export function ManagementDataTable({
   const resetFilters = () => {
     pendingSearchValueRef.current = "";
     setGlobalFilter("");
-    setClassGroupFilter(defaultPeriodFilter);
     setStudentSchoolCategoryFilter("");
     setStudentSchoolFilter("");
     setStudentGradeFilter("");
@@ -2279,7 +2222,6 @@ export function ManagementDataTable({
       }
       syncClassListQueryState({
         q: "",
-        period: defaultPeriodFilter,
         status: DEFAULT_CLASS_STATUS_FILTER,
         subject: "",
         grade: "",
@@ -2343,256 +2285,99 @@ export function ManagementDataTable({
   };
 
   const columnSettingsControl = (
-    <Popover
+    <DataTableSettings
+      title={`${emptyLabel} 표 설정`}
       open={settingsOpen}
       onOpenChange={(open) => {
         setSettingsOpen(open);
-        if (!open) {
-          setColumnSearchQuery("");
-        }
+        if (!open) setColumnSearchQuery("");
       }}
+      onReset={resetPreferences}
     >
-      <PopoverTrigger asChild>
-        <Button variant="ghost" size="icon" className="size-6" aria-label="컬럼 구성" title="컬럼 구성">
-          <Settings2 className="size-4" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent
-        align="end"
-        side="bottom"
-        sideOffset={10}
-        className="w-[min(92vw,340px)] rounded-lg border bg-popover p-0 shadow-xl"
-      >
-        <div className="border-b px-3 py-2.5">
-          <h3 className="text-sm font-semibold tracking-tight">{emptyLabel} 표 설정</h3>
-        </div>
-
-        <div className="max-h-[72vh] overflow-y-auto p-2">
-          <div className="grid items-start gap-2">
-            <div className="space-y-2">
-              <div className="rounded-md border p-2">
-                <h3 className="text-sm font-semibold">그룹화</h3>
-                <div className="mt-2 grid gap-2">
-                  <div className="space-y-2">
-                    <Label>1단 그룹</Label>
-                    <Select
-                      value={primaryGrouping}
-                      onValueChange={(value) => updateGrouping(buildGroupingValue(value === "none" ? "" : value, secondaryGrouping === "none" ? "" : secondaryGrouping === value ? "" : secondaryGrouping))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="없음" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">없음</SelectItem>
-                        {columnOptions.map((option) => (
-                          <SelectItem key={option.id} value={option.id}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>2단 그룹</Label>
-                    <Select
-                      value={secondaryGrouping}
-                      onValueChange={(value) => updateGrouping(buildGroupingValue(primaryGrouping === "none" ? "" : primaryGrouping, value === "none" || value === primaryGrouping ? "" : value))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="없음" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">없음</SelectItem>
-                        {columnOptions
-                          .filter((option) => option.id !== primaryGrouping)
-                          .map((option) => (
-                            <SelectItem key={option.id} value={option.id}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-
-              <div className="rounded-md border p-2">
-                <h3 className="text-sm font-semibold">정렬</h3>
-                <div className="mt-2 grid gap-2">
-                  <div className="space-y-2">
-                    <Label>1차 컬럼</Label>
-                    <Select
-                      value={primarySorting}
-                      onValueChange={(value) => updateSorting(buildSortingValue(value === "none" ? "" : value, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting === value ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="없음" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">없음</SelectItem>
-                        {columnOptions.filter((option) => MANAGEMENT_NUMBERED_SORT_COLUMNS[kind].includes(option.id)).map((option) => (
-                          <SelectItem key={option.id} value={option.id}>
-                            {option.label}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>1차 방향</Label>
-                    <Select
-                      value={primarySortDirection}
-                      onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, value as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asc">오름차순</SelectItem>
-                        <SelectItem value="desc">내림차순</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>2차 컬럼</Label>
-                    <Select
-                      value={secondarySorting}
-                      onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", value === "none" || value === primarySorting ? "" : value, secondarySortDirection as "asc" | "desc"))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue placeholder="없음" />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">없음</SelectItem>
-                        {columnOptions
-                          .filter((option) => option.id !== primarySorting)
-                          .filter((option) => MANAGEMENT_NUMBERED_SORT_COLUMNS[kind].includes(option.id))
-                          .map((option) => (
-                            <SelectItem key={option.id} value={option.id}>
-                              {option.label}
-                            </SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>2차 방향</Label>
-                    <Select
-                      value={secondarySortDirection}
-                      onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, value as "asc" | "desc"))}
-                    >
-                      <SelectTrigger>
-                        <SelectValue />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="asc">오름차순</SelectItem>
-                        <SelectItem value="desc">내림차순</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div className="rounded-md border p-2">
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <h3 className="text-sm font-semibold">컬럼 구성</h3>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    표시 {visibleColumns} / 전체 {columnOptions.length}열
-                  </p>
-                </div>
-                <Button variant="ghost" size="sm" onClick={resetPreferences}>
-                  기본값으로 복원
-                </Button>
-              </div>
-
-              <div className="mt-2 space-y-2">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                  <Input
-                    value={columnSearchQuery}
-                    onChange={(event) => setColumnSearchQuery(event.target.value)}
-                    placeholder="검색할 컬럼 이름"
-                    className="h-8 pl-9"
-                  />
-                </div>
-
-                {matchingColumnOrder.length === 0 ? (
-                  <div className="rounded-md border border-dashed px-3 py-5 text-center text-sm text-muted-foreground">
-                    일치하는 컬럼이 없습니다.
-                  </div>
-                ) : (
-                  <div className="grid gap-1">
-                    {matchingColumnOrder.map((columnId) => {
-                      const option = columnOptions.find((item) => item.id === columnId);
-                      const column = table.getColumn(columnId);
-                      const currentColumnIndex = columnOrder.indexOf(columnId);
-                      if (!option || !column || currentColumnIndex === -1) {
-                        return null;
-                      }
-                      const currentColumnWidth = column.getSize();
-
-                      return (
-                        <div key={columnId} className="grid gap-2 rounded-md px-2 py-1.5 hover:bg-muted/60 sm:grid-cols-[minmax(0,1fr)_4.75rem_auto] sm:items-center">
-                          <div className="flex min-w-0 items-center gap-3">
-                            <Checkbox
-                              checked={column.getIsVisible()}
-                              onCheckedChange={(value) => column.toggleVisibility(!!value)}
-                              disabled={!column.getCanHide()}
-                              className="size-6"
-                            />
-                            <span className="min-w-0 truncate text-sm font-medium">{option.label}</span>
-                          </div>
-                          <div>
-                            <Input
-                              id={`column-width-${kind}-${columnId}`}
-                              aria-label={`${option.label} 너비`}
-                              type="number"
-                              min={72}
-                              max={420}
-                              step={8}
-                              value={currentColumnWidth}
-                              onChange={(event) =>
-                                setColumnSizing((current) => ({
-                                  ...current,
-                                  [columnId]: normalizeColumnWidth(event.target.value, currentColumnWidth),
-                                }))
-                              }
-                              className="h-7 px-2 text-xs"
-                            />
-                          </div>
-                          <div className="flex items-center justify-end gap-0.5">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() => setColumnOrder((current) => reorderColumns(current, columnId, "up"))}
-                              disabled={currentColumnIndex === 1}
-                            >
-                              <ArrowUp className="size-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="size-7"
-                              onClick={() => setColumnOrder((current) => reorderColumns(current, columnId, "down"))}
-                              disabled={currentColumnIndex === columnOrder.length - 1}
-                            >
-                              <ArrowDown className="size-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                      );
-                    })}
-                  </div>
-                )}
-              </div>
-            </div>
+      <DataTableSettingsSection title="그룹화">
+        <div className="grid gap-2">
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-2">
+            <span className="text-xs text-muted-foreground">1단</span>
+            <DataTableSettingsSelect
+              label="1단 그룹" value={primaryGrouping}
+              options={[{ id: "none", label: "없음" }, ...columnOptions]}
+              onValueChange={(value) => updateGrouping(buildGroupingValue(value === "none" ? "" : value, secondaryGrouping === "none" ? "" : secondaryGrouping === value ? "" : secondaryGrouping))}
+            />
+          </div>
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)] items-center gap-2">
+            <span className="text-xs text-muted-foreground">2단</span>
+            <DataTableSettingsSelect
+              label="2단 그룹" value={secondaryGrouping}
+              options={[{ id: "none", label: "없음" }, ...columnOptions.filter((option) => option.id !== primaryGrouping)]}
+              onValueChange={(value) => updateGrouping(buildGroupingValue(primaryGrouping === "none" ? "" : primaryGrouping, value === "none" || value === primaryGrouping ? "" : value))}
+            />
           </div>
         </div>
-      </PopoverContent>
-    </Popover>
+      </DataTableSettingsSection>
+      <DataTableSettingsSection title="정렬">
+        <div className="grid gap-2">
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)_6.5rem] items-center gap-2">
+            <span className="text-xs text-muted-foreground">1차</span>
+            <DataTableSettingsSelect
+              label="1차 정렬 컬럼" value={primarySorting}
+              options={[{ id: "none", label: "없음" }, ...columnOptions.filter((option) => MANAGEMENT_NUMBERED_SORT_COLUMNS[kind].includes(option.id))]}
+              onValueChange={(value) => updateSorting(buildSortingValue(value === "none" ? "" : value, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting === value ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
+            />
+            <DataTableSettingsSelect
+              label="1차 정렬 방향" value={primarySortDirection}
+              options={[{ id: "asc", label: "오름차순" }, { id: "desc", label: "내림차순" }]}
+              onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, value as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, secondarySortDirection as "asc" | "desc"))}
+            />
+          </div>
+          <div className="grid grid-cols-[2rem_minmax(0,1fr)_6.5rem] items-center gap-2">
+            <span className="text-xs text-muted-foreground">2차</span>
+            <DataTableSettingsSelect
+              label="2차 정렬 컬럼" value={secondarySorting}
+              options={[{ id: "none", label: "없음" }, ...columnOptions.filter((option) => option.id !== primarySorting && MANAGEMENT_NUMBERED_SORT_COLUMNS[kind].includes(option.id))]}
+              onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", value === "none" || value === primarySorting ? "" : value, secondarySortDirection as "asc" | "desc"))}
+            />
+            <DataTableSettingsSelect
+              label="2차 정렬 방향" value={secondarySortDirection}
+              options={[{ id: "asc", label: "오름차순" }, { id: "desc", label: "내림차순" }]}
+              onValueChange={(value) => updateSorting(buildSortingValue(primarySorting === "none" ? "" : primarySorting, primarySortDirection as "asc" | "desc", secondarySorting === "none" ? "" : secondarySorting, value as "asc" | "desc"))}
+            />
+          </div>
+        </div>
+      </DataTableSettingsSection>
+      <DataTableSettingsSection title="컬럼 구성" meta={<span className="text-xs tabular-nums text-muted-foreground">{visibleColumns} / {columnOptions.length} 표시</span>}>
+        <div className="relative">
+          <Search className="absolute left-3 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" aria-hidden="true" />
+          <Input
+            value={columnSearchQuery} onChange={(event) => setColumnSearchQuery(event.target.value)}
+            aria-label="컬럼 검색" placeholder="컬럼 검색" className="h-9 bg-muted/40 pl-9 pr-9 text-[13px] shadow-none max-sm:h-11"
+          />
+          {columnSearchQuery ? <Button type="button" variant="ghost" size="icon" className="absolute right-0.5 top-1/2 size-8 -translate-y-1/2" aria-label="컬럼 검색 지우기" onClick={() => setColumnSearchQuery("")}><X className="size-3.5" /></Button> : null}
+        </div>
+        <div className="grid grid-cols-[minmax(0,1fr)_4.25rem_4.5rem] gap-2 px-1 text-[11px] text-muted-foreground" aria-hidden="true">
+          <span>표시 · 이름</span><span className="text-center">너비 (px)</span><span className="text-center">순서</span>
+        </div>
+        {matchingColumnOrder.length === 0 ? (
+          <p className="py-5 text-center text-sm text-muted-foreground" role="status">일치하는 컬럼이 없습니다.</p>
+        ) : (
+          <div className="-mt-1 divide-y divide-border/40">
+            {matchingColumnOrder.map((columnId) => {
+              const option = columnOptions.find((item) => item.id === columnId);
+              const column = table.getColumn(columnId);
+              const currentColumnIndex = columnOrder.indexOf(columnId);
+              if (!option || !column || currentColumnIndex === -1) return null;
+              const currentColumnWidth = column.getSize();
+              return <DataTableColumnSetting key={columnId}
+                label={option.label} visible={column.getIsVisible()} canHide={column.getCanHide()}
+                width={currentColumnWidth} canMoveUp={currentColumnIndex !== 1} canMoveDown={currentColumnIndex !== columnOrder.length - 1}
+                onVisibleChange={(value) => column.toggleVisibility(value)}
+                onWidthChange={(value) => setColumnSizing((current) => ({ ...current, [columnId]: normalizeColumnWidth(value, currentColumnWidth) }))}
+                onMove={(direction) => setColumnOrder((current) => reorderColumns(current, columnId, direction))}
+              />;
+            })}
+          </div>
+        )}
+      </DataTableSettingsSection>
+    </DataTableSettings>
   );
 
   const searchControl = (
@@ -2615,7 +2400,7 @@ export function ManagementDataTable({
           type="button"
           variant="ghost"
           size="icon"
-          className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md"
+          className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md active:-translate-y-1/2"
           onClick={() => updateGlobalFilter("")}
           aria-label={`${emptyLabel} 검색어 지우기`}
         >
@@ -2648,26 +2433,6 @@ export function ManagementDataTable({
   const classFilterSelects: ClassFilterPanelSelect[] =
     kind === "classes"
       ? [
-          {
-            id: "period",
-            label: "기간",
-            value: normalizedClassGroupFilter || "none",
-            options: periodOptions.map((option) => ({
-              value: option.value,
-              label: option.label,
-            })),
-            emptyValue: "none",
-            emptyLabel: "기간 없음",
-            disabled: periodOptions.length === 0,
-            onChange: (value) => {
-              if (value === "none") {
-                return;
-              }
-              setClassGroupFilter(value);
-              syncClassListQueryState({ period: value }, true);
-              setRowSelection({});
-            },
-          },
           {
             id: "status",
             label: statusLabel,
@@ -2712,39 +2477,6 @@ export function ManagementDataTable({
           }),
         ]
       : [];
-
-  const activePeriodLabel =
-    kind === "classes" && normalizedClassGroupFilter
-      ? getPeriodFilterLabel(periodOptions, normalizedClassGroupFilter)
-      : "";
-  const classFilterChips: ClassFilterPanelChip[] =
-    kind === "classes"
-      ? [
-          activePeriodLabel
-            ? { id: "period", label: <>기간 {activePeriodLabel}</> }
-            : null,
-          rows.length !== filteredRowCount
-            ? { id: "total", label: <>전체 {rows.length}건</> }
-            : null,
-          selectedRowCount > 0
-            ? { id: "selected", label: <>선택 {selectedRowCount}건</> }
-            : null,
-          grouping.length > 0
-            ? { id: "grouping", label: <>그룹 {grouping.length}단</> }
-            : null,
-          normalizedGlobalFilter
-            ? { id: "search", label: <>검색어 {normalizedGlobalFilter}</> }
-            : null,
-          hasNonDefaultStatusFilter
-            ? { id: "status", label: <>{statusLabel} {normalizedClassStatusFilter}</> }
-            : null,
-          ...activeClassFilters.map((filter) => ({
-            id: filter.id,
-            label: <>{filter.label} {filter.value}</>,
-          })),
-        ].filter(Boolean) as ClassFilterPanelChip[]
-      : [];
-  const activeStudentMenuFilterCount = [statusFilter].filter(Boolean).length;
 
   const renderStudentStatusSelect = () => (
     <div className="min-w-0">
@@ -2865,8 +2597,8 @@ export function ManagementDataTable({
     </div>
   );
 
-  const renderStudentQuickFilter = (label: string, select: ReactNode) => (
-    <div className="grid min-w-0 gap-1.5">
+  const renderStudentQuickFilter = (label: string, select: ReactNode, className?: string) => (
+    <div className={cn(DATA_TABLE_FILTER_FIELD_CLASS_NAME, className)}>
       <Label className="text-xs font-medium text-muted-foreground">{label}</Label>
       {select}
     </div>
@@ -2924,7 +2656,7 @@ export function ManagementDataTable({
   );
 
   const classMobileList = kind === "classes" ? (
-    <div className="grid gap-2 md:hidden" aria-label={`${emptyLabel} 모바일 목록`}>
+    <div className={DATA_TABLE_MOBILE_LIST_CLASS_NAME} aria-label={`${emptyLabel} 모바일 목록`}>
       {showInitialLoading ? (
         Array.from({ length: 5 }).map((_, index) => (
           <div key={`class-mobile-loading-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
@@ -2948,11 +2680,11 @@ export function ManagementDataTable({
           return (
             <article key={`class-mobile-${row.id}`} className="rounded-lg border border-border/70 bg-background p-3">
               <div className="flex items-start gap-3">
-                <Checkbox
+                <DataTableSelectionCheckbox
                   checked={row.getIsSelected()}
                   onCheckedChange={(value) => row.toggleSelected(!!value)}
                   aria-label={`${record.title} 선택`}
-                  className="mt-1 shrink-0"
+                  className="-ml-2 -mt-1"
                 />
                 <div className="min-w-0 flex-1">
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -2966,6 +2698,7 @@ export function ManagementDataTable({
                     type="button"
                     className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
+                    data-class-detail-trigger={record.id}
                   >
                     {record.title}
                   </button>
@@ -3025,7 +2758,7 @@ export function ManagementDataTable({
   ) : null;
 
   const studentMobileList = kind === "students" ? (
-    <div className="grid gap-2 md:hidden" aria-label={`${emptyLabel} 모바일 학생 목록`}>
+    <div className={DATA_TABLE_MOBILE_LIST_CLASS_NAME} aria-label={`${emptyLabel} 모바일 학생 목록`}>
       {showInitialLoading ? (
         Array.from({ length: 5 }).map((_, index) => (
           <div key={`student-mobile-loading-${index}`} className="rounded-lg border border-border/70 bg-background p-3">
@@ -3050,11 +2783,11 @@ export function ManagementDataTable({
               className="rounded-lg border border-border/70 bg-background p-3"
             >
               <div className="flex items-start gap-3">
-                <Checkbox
+                <DataTableSelectionCheckbox
                   checked={row.getIsSelected()}
                   onCheckedChange={(value) => row.toggleSelected(!!value)}
                   aria-label={`${record.title} 선택`}
-                  className="mt-1 shrink-0"
+                  className="-ml-2 -mt-1"
                 />
                 <div className="min-w-0 flex-1">
                   <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
@@ -3066,20 +2799,15 @@ export function ManagementDataTable({
                     type="button"
                     className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
+                    data-student-detail-trigger={record.id}
                   >
                     {record.title}
                   </button>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  aria-label={`${record.title} 퇴원 처리`}
-                  title="퇴원 처리"
-                  onClick={() => actions.onDeleteRow?.(record)}
-                >
-                  <Trash2 className="size-4" />
-                </Button>
+                <StudentRowActions
+                  studentName={record.title}
+                  onWithdraw={actions.onDeleteRow ? () => actions.onDeleteRow?.(record) : undefined}
+                />
               </div>
 
               <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
@@ -3118,9 +2846,10 @@ export function ManagementDataTable({
   ) : null;
 
   return (
-    <div ref={tableLayoutRef} className="w-full space-y-3">
+    <div ref={tableLayoutRef} className={DATA_TABLE_LAYOUT_CLASS_NAME}>
       {kind === "classes" ? (
         <ClassFilterPanel
+          className={DATA_TABLE_TOOLBAR_CLASS_NAME}
           selects={classFilterSelects}
           searchValue={String(globalFilter || "")}
           searchPlaceholder={`${emptyLabel} 검색`}
@@ -3131,62 +2860,28 @@ export function ManagementDataTable({
             updateGlobalFilter(value, { syncUrl: true });
           }}
           summaryLabel={""}
-          chips={[]}
-          filterCount={classFilterChips.length}
-          primaryLabel={activePeriodLabel}
           showReset={hasActiveFilters}
-          showFooterReset={false}
           onReset={resetFilters}
           createLabel={createLabel}
           onCreate={actions.onCreate}
           createDisabled={!hasCreateAction}
-          quickSelectIds={CLASS_QUICK_FILTER_IDS}
           footerAction={null}
+          toolbarAction={<div className="ml-auto flex justify-end">{columnSettingsControl}</div>}
         />
       ) : (
-        <div className="flex flex-col gap-2 border border-border/70 bg-background px-3 py-3">
-          <div
-            className={cn(
-              kind === "students" ? "flex flex-wrap items-center gap-2" : "grid gap-2",
-              kind === "students"
-                ? ""
-                : "md:grid-cols-2 xl:grid-cols-[minmax(18rem,1fr)_minmax(14rem,1fr)_11rem_auto]",
-            )}
-          >
+        <DataTableToolbar className={cn("gap-2", kind === "students" && "student-list-toolbar")}>
+          <div className="flex flex-wrap items-center gap-2">
             {kind === "students" ? (
               <>
-                <div className="min-w-[16rem] flex-1">{searchControl}</div>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button type="button" variant="outline" size="sm" className="h-9 shrink-0 rounded-md">
-                      <SlidersHorizontal className="mr-2 size-4" />
-                      필터
-                      {activeStudentMenuFilterCount > 0 ? (
-                        <span className="ml-2 rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
-                          {activeStudentMenuFilterCount}
-                        </span>
-                      ) : null}
-                    </Button>
-                  </PopoverTrigger>
-                  <PopoverContent align="end" className="w-[min(18rem,calc(100vw-2rem))] p-3">
-                    <div className="mb-3 flex items-center justify-between gap-2">
-                      <div className="text-sm font-semibold">필터</div>
-                      {statusFilter ? resetControl : null}
-                    </div>
-                    <div className="grid gap-3">
-                      <div className="grid min-w-0 gap-1.5">
-                        <Label className="text-xs font-medium text-muted-foreground">재원 상태</Label>
-                        {renderStudentStatusSelect()}
-                      </div>
-                    </div>
-                  </PopoverContent>
-                </Popover>
+                <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{searchControl}</div>
                 {createControl}
+                <div className="ml-auto flex justify-end">{columnSettingsControl}</div>
               </>
             ) : (
               <>
+                <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{searchControl}</div>
                 {badgeColumn ? (
-                  <div className="min-w-0">
+                  <div className="min-w-0 flex-1 sm:w-40 sm:flex-none">
                     <Label htmlFor="badge-filter" className="sr-only">
                       {badgeLabel}
                     </Label>
@@ -3213,8 +2908,7 @@ export function ManagementDataTable({
                     </Select>
                   </div>
                 ) : null}
-                {searchControl}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
                   <Label htmlFor="status-filter" className="sr-only">
                     {statusLabel}
                   </Label>
@@ -3241,34 +2935,36 @@ export function ManagementDataTable({
                   </Select>
                 </div>
                 {createControl}
+                <div className="ml-auto flex justify-end">{columnSettingsControl}</div>
               </>
             )}
           </div>
 
           {kind === "students" ? (
-            <div data-testid="student-quick-filters" className="grid gap-2 sm:grid-cols-3">
+            <DataTableFilters data-testid="student-quick-filters" aria-label="학생 검색 조건">
+              {renderStudentQuickFilter("재원 상태", renderStudentStatusSelect())}
               {renderStudentQuickFilter("학교 구분", renderStudentSchoolCategorySelect())}
-              {renderStudentQuickFilter("학교", renderStudentSchoolSelect())}
+              {renderStudentQuickFilter("학교", renderStudentSchoolSelect(), "sm:w-52")}
               {renderStudentQuickFilter("학년", renderStudentGradeSelect())}
-            </div>
+              {hasActiveFilters ? <div className="flex h-9 items-center sm:ml-auto">{resetControl}</div> : null}
+            </DataTableFilters>
           ) : null}
 
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">
+          <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", kind === "students" && "student-filter-status")} aria-live="polite">
             {showSummaryBadge ? <Badge variant="secondary">{summaryLabel}</Badge> : null}
             {rows.length !== filteredRowCount ? <Badge variant="outline">전체 {rows.length}건</Badge> : null}
             {selectedRowCount > 0 ? <Badge variant="outline">선택 {selectedRowCount}건</Badge> : null}
             {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
-            {normalizedGlobalFilter ? <Badge variant="outline">검색어 {normalizedGlobalFilter}</Badge> : null}
-            {badgeFilter ? <Badge variant="outline">{badgeLabel} {badgeFilter}</Badge> : null}
-            {statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
-            {studentSchoolCategoryFilter ? (
-              <Badge variant="outline">학교 구분 {formatStudentSchoolCategoryLabel(studentSchoolCategoryFilter)}</Badge>
+            {kind !== "students" ? (
+              <>
+                {normalizedGlobalFilter ? <Badge variant="outline">검색어 {normalizedGlobalFilter}</Badge> : null}
+                {badgeFilter ? <Badge variant="outline">{badgeLabel} {badgeFilter}</Badge> : null}
+                {statusFilter ? <Badge variant="outline">{statusLabel} {statusFilter}</Badge> : null}
+                {resetControl}
+              </>
             ) : null}
-            {studentSchoolFilter ? <Badge variant="outline">학교 {studentSchoolFilter}</Badge> : null}
-            {studentGradeFilter ? <Badge variant="outline">학년 {studentGradeFilter}</Badge> : null}
-            {resetControl}
           </div>
-        </div>
+        </DataTableToolbar>
       )}
 
       {bulkActionBar}
@@ -3276,66 +2972,57 @@ export function ManagementDataTable({
       {studentMobileList}
       {classMobileList}
 
-      <div
+      <DataTableViewport
         ref={tableViewportRef}
         data-testid="management-table-viewport"
         role="region"
         aria-label={`${emptyLabel} 목록 스크롤`}
         tabIndex={0}
         className={cn(
-          "overflow-auto rounded-lg border border-border/70 bg-background md:max-h-[var(--management-table-height)] [&>[data-slot=table-container]]:overflow-visible focus-visible:outline-2 focus-visible:outline-ring",
+          "md:max-h-[var(--management-table-height)] [&>[data-slot=table-container]]:overflow-visible",
           (kind === "classes" || kind === "students") && "hidden md:block",
         )}
         style={{ "--management-table-height": tableViewportHeight ? `${tableViewportHeight}px` : undefined } as CSSProperties}
         aria-busy={loading}
       >
-        <Table className="min-w-[980px] table-fixed">
+        <Table className={DATA_TABLE_TABLE_CLASS_NAME}>
           <caption className="sr-only">{emptyLabel} 운영 목록{captionSuffix ? ` · ${captionSuffix}` : ""}</caption>
           <TableHeader>
             {table.getHeaderGroups().map((headerGroup) => (
-              <TableRow key={headerGroup.id}>
+              <DataTableHeaderRow key={headerGroup.id}>
                 {headerGroup.headers.map((header) => {
                   const sortState = header.column.getIsSorted();
                   const canSort = header.column.getCanSort();
                   const columnLabel = formatColumnLabel(header.id, badgeLabel, statusLabel, kind);
                   return (
-                    <TableHead
+                    <DataTableHeaderCell
                       key={header.id}
                       aria-sort={sortState === "asc" ? "ascending" : sortState === "desc" ? "descending" : undefined}
                       className={cn(
-                        "sticky top-0 z-10 h-9 border-b bg-muted px-2 py-1 text-xs font-semibold text-foreground",
-                        getPinnedColumnClassName(header.id),
-                        header.id === "select" || header.id === "title" ? "z-40" : "z-30",
+                        header.id === "select" || header.id === "action" ? "text-center" : "",
+                        header.id === "select" && "px-0 py-0",
+                        !getPinnedColumn(header.id, "header") && "z-20",
                       )}
+                      pin={getPinnedColumn(header.id, "header")}
                       style={getColumnSizeStyle(header.getSize())}
                     >
                       {header.isPlaceholder ? null : (
                         <>
                           <div className={cn(header.id === "select" || header.id === "action" ? "flex items-center justify-center" : "pr-3")}>
                             {header.id === "action" ? (
-                              columnSettingsControl
+                              <span className="sr-only">작업</span>
                             ) : canSort ? (
-                              <button
-                                type="button"
-                                className="flex h-7 w-full min-w-0 items-center gap-1.5 rounded px-1 text-left font-semibold hover:bg-muted/70"
+                              <DataTableSortButton
+                                direction={sortState}
+                                label={columnLabel}
                                 onClick={() => {
                                   setRowSelection({});
                                   setBulkEditValue("");
                                   header.column.toggleSorting(sortState === "asc");
                                 }}
-                                aria-label={`${columnLabel} ${sortState === "asc" ? "내림차순" : "오름차순"} 정렬`}
                               >
-                                <span className="min-w-0 truncate">
-                                  {flexRender(header.column.columnDef.header, header.getContext())}
-                                </span>
-                                {sortState === "asc" ? (
-                                  <ArrowUp className="size-3.5 shrink-0 text-primary" />
-                                ) : sortState === "desc" ? (
-                                  <ArrowDown className="size-3.5 shrink-0 text-primary" />
-                                ) : (
-                                  <ChevronDown className="size-3.5 shrink-0 text-muted-foreground/50" />
-                                )}
-                              </button>
+                                {flexRender(header.column.columnDef.header, header.getContext())}
+                              </DataTableSortButton>
                             ) : (
                               flexRender(header.column.columnDef.header, header.getContext())
                             )}
@@ -3346,7 +3033,7 @@ export function ManagementDataTable({
                               aria-label={`${columnLabel} 열 너비 조절`}
                               title={`${columnLabel} 열 너비 조절`}
                               className={cn(
-                                "absolute right-0 top-0 h-full w-6 cursor-col-resize transition-colors after:absolute after:right-0 after:top-0 after:h-full after:w-px after:bg-transparent after:content-[''] hover:bg-accent/30 hover:after:bg-border focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:after:bg-primary",
+                                "absolute right-0 top-0 h-full w-6 cursor-col-resize transition-colors after:absolute after:right-0 after:top-0 after:h-full after:w-px after:bg-transparent after:content-[''] hover:bg-accent/30 hover:after:bg-border focus-visible:bg-primary/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:after:bg-primary motion-reduce:transition-none",
                                 header.column.getIsResizing() ? "bg-primary/15 after:bg-primary" : "",
                               )}
                               onMouseDown={header.getResizeHandler()}
@@ -3362,68 +3049,71 @@ export function ManagementDataTable({
                           ) : null}
                         </>
                       )}
-                    </TableHead>
+                    </DataTableHeaderCell>
                   );
                 })}
-              </TableRow>
+              </DataTableHeaderRow>
             ))}
           </TableHeader>
           <TableBody>
             {showInitialLoading ? (
               <>
-                <TableRow>
-                  <TableCell
+                <DataTableBodyRow>
+                  <DataTableBodyCell
                     colSpan={table.getVisibleLeafColumns().length || columns.length}
-                    className="px-2 py-1 text-sm text-muted-foreground"
+                    className="text-sm text-muted-foreground"
                     role="status"
                     aria-live="polite"
                   >
                     {emptyLabel} 데이터를 불러오는 중입니다.
-                  </TableCell>
-                </TableRow>
+                  </DataTableBodyCell>
+                </DataTableBodyRow>
                 {Array.from({ length: 5 }).map((_, index) => (
-                  <TableRow key={`loading-${index}`}>
-                    <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="px-2 py-1">
+                  <DataTableBodyRow key={`loading-${index}`}>
+                    <DataTableBodyCell colSpan={table.getVisibleLeafColumns().length || columns.length}>
                       <Skeleton className="h-6 w-full" />
-                    </TableCell>
-                  </TableRow>
+                    </DataTableBodyCell>
+                  </DataTableBodyRow>
                 ))}
               </>
             ) : table.getRowModel().rows.length ? (
               table.getRowModel().rows.map((row) => (
-                <TableRow
+                <DataTableBodyRow
                   key={row.id}
                   data-management-row="true"
                   data-state={row.getIsSelected() && "selected"}
-                  className="h-[34px] border-b transition-colors hover:bg-muted/30 data-[state=selected]:bg-primary/5 last:border-b-0"
                 >
                   {row.getVisibleCells().map((cell) => {
                     if (cell.getIsGrouped()) {
                       return (
-                        <TableCell
+                        <DataTableBodyCell
                           key={cell.id}
-                          className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
+                          pin={getPinnedColumn(cell.column.id, "body")}
+                          wrap
                           style={getColumnSizeStyle(cell.column.getSize())}
                         >
                           <Button
                             variant="ghost"
                             size="sm"
-                            className="min-h-6 px-0 py-0 font-normal"
+                            className="h-auto min-h-6 w-full items-start justify-start gap-1.5 px-0 py-0 text-left font-normal"
                             onClick={row.getToggleExpandedHandler()}
                           >
-                            {row.getIsExpanded() ? <ChevronDown className="mr-2 size-4" /> : <ChevronRight className="mr-2 size-4" />}
-                            <span className="max-w-[18rem] truncate">{String(cell.getValue() || "값 없음")}</span>
-                            <Badge variant="secondary" className="ml-2">{row.subRows.length}건</Badge>
+                            {row.getIsExpanded() ? <ChevronDown className="mt-0.5 size-4 shrink-0" /> : <ChevronRight className="mt-0.5 size-4 shrink-0" />}
+                            <span className="min-w-0 whitespace-normal break-words leading-5">
+                              {String(cell.getValue() || "값 없음")}
+                              <Badge variant="secondary" className="ml-1.5 align-middle">{row.subRows.length}건</Badge>
+                            </span>
                           </Button>
-                        </TableCell>
+                        </DataTableBodyCell>
                       );
                     }
 
                     if (cell.getIsPlaceholder()) {
                       return (
-                        <TableCell
+                        <DataTableBodyCell
                           key={cell.id}
-                          className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
+                          pin={getPinnedColumn(cell.column.id, "body")}
+                          wrap
                           style={getColumnSizeStyle(cell.column.getSize())}
                         />
                       );
@@ -3431,29 +3121,32 @@ export function ManagementDataTable({
 
                     if (cell.getIsAggregated()) {
                       return (
-                        <TableCell
+                        <DataTableBodyCell
                           key={cell.id}
-                          className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
+                          pin={getPinnedColumn(cell.column.id, "body")}
+                          wrap
                           style={getColumnSizeStyle(cell.column.getSize())}
                         />
                       );
                     }
 
                     return (
-                      <TableCell
+                      <DataTableBodyCell
                         key={cell.id}
-                        className={cn("px-2 py-1 align-middle", getPinnedColumnClassName(cell.column.id))}
+                        pin={getPinnedColumn(cell.column.id, "body")}
+                        wrap
+                        className={cell.column.id === "select" ? "px-0 py-1" : undefined}
                         style={getColumnSizeStyle(cell.column.getSize())}
                       >
                         {flexRender(cell.column.columnDef.cell, cell.getContext())}
-                      </TableCell>
+                      </DataTableBodyCell>
                     );
                   })}
-                </TableRow>
+                </DataTableBodyRow>
               ))
             ) : (
-              <TableRow>
-                <TableCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-28 px-3 py-6">
+              <DataTableBodyRow>
+                <DataTableBodyCell colSpan={table.getVisibleLeafColumns().length || columns.length} className="h-28 py-6">
                   <div className="mx-auto flex max-w-xl flex-wrap items-center justify-center gap-2 text-center">
                     <span className="text-sm font-medium text-muted-foreground">{emptyStateTitle}</span>
                     {hasActiveFilters ? (
@@ -3467,14 +3160,14 @@ export function ManagementDataTable({
                       </Button>
                     ) : null}
                   </div>
-                </TableCell>
-              </TableRow>
+                </DataTableBodyCell>
+              </DataTableBodyRow>
             )}
           </TableBody>
         </Table>
-      </div>
+      </DataTableViewport>
 
-      <div ref={tablePagerRef} className="flex min-h-11 flex-col gap-2 py-1 text-sm sm:flex-row sm:items-center sm:justify-between">
+      <div ref={tablePagerRef} className={DATA_TABLE_PAGER_CLASS_NAME}>
         <div className="w-full">
           <DataTablePagination
             page={page}

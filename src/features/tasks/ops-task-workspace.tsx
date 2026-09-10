@@ -12726,7 +12726,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 onClick={() => void undoStatusChange()}
                 disabled={saving}
                 aria-label={`${statusUndo.title} 진행상태 변경 되돌리기`}
-                className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
+                className="h-7 w-full px-2 sm:w-auto"
               >
                 되돌리기
               </Button>
@@ -13436,7 +13436,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   onClick={() => void undoStatusChange()}
                   disabled={saving}
                   aria-label={`${statusUndo.title} 진행상태 변경 되돌리기`}
-                  className="h-7 w-full px-2 text-primary hover:bg-primary/10 hover:text-primary sm:w-auto"
+                  className="h-7 w-full px-2 sm:w-auto"
                 >
                   되돌리기
                 </Button>

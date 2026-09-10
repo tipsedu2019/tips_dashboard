@@ -681,7 +681,8 @@ test("management hook and UI keep list reads bounded while details and relation 
   assert.match(pageSource, /다음 30건/);
   assert.match(pageSource, /const reconcileManagementPage = useCallback\(async[\s\S]*?await refresh\(\)/);
 
-  assert.match(tableSource, /const periodOptions = useMemo\([\s\S]*?getServerPeriodOptions\(filterOptions\.periods\)/);
+  assert.doesNotMatch(tableSource, /const periodOptions|getServerPeriodOptions|filterOptions\.periods/);
+  assert.match(tableSource, /params\.delete\("period"\)/);
   assert.match(tableSource, /manualFiltering: true/);
   assert.match(tableSource, /const tableSourceRows = rows/);
   assert.match(tableSource, /function buildTextbookListHref/);

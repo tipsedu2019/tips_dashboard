@@ -621,7 +621,7 @@ function AnnualBoardCellHoverContent({
           <Button
             type="button"
             size="sm"
-            className="h-8 rounded-[4px] bg-[#2F6FED] text-[12px] active:scale-[0.98]"
+            className="h-8 rounded-[4px] text-[12px]"
             disabled={readOnly}
             onClick={() => {
               if (primaryEntry) {
@@ -1675,7 +1675,7 @@ export function AcademicAnnualBoardWorkspace() {
                       size="sm"
                       variant={selectedCategory === option.value ? "default" : "ghost"}
                       onClick={() => handleSelectedCategoryChange(option.value as "high" | "middle")}
-                      className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium active:scale-[0.98]"
+                      className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium"
                     >
                       {option.label}
                     </Button>
@@ -1692,7 +1692,7 @@ export function AcademicAnnualBoardWorkspace() {
                       size="sm"
                       variant={selectedSemester === option ? "default" : "ghost"}
                       onClick={() => handleSelectedSemesterChange(option)}
-                      className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium active:scale-[0.98]"
+                      className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium"
                     >
                       {option}
                     </Button>
@@ -1726,7 +1726,7 @@ export function AcademicAnnualBoardWorkspace() {
                   type="button"
                   variant="outline"
                   size="sm"
-                  className="h-9 rounded-sm px-4 text-[12px] font-medium active:scale-[0.98]"
+                  className="h-9 rounded-sm px-4 text-[12px] font-medium"
                   disabled={loading || catalogSchoolsForSelectedCategory.length === 0}
                   onClick={handleFirstBoardEventCreate}
                 >
@@ -1737,7 +1737,7 @@ export function AcademicAnnualBoardWorkspace() {
               <Button
                 type="button"
                 size="sm"
-                className="h-9 rounded-sm bg-[#2F6FED] px-4 text-[12px] font-medium active:scale-[0.98]"
+                className="h-9 rounded-sm px-4 text-[12px] font-medium"
                 disabled={loading || isSavingBoardImage}
                 onClick={handleSaveBoardImage}
               >

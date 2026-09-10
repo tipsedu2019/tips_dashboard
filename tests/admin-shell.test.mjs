@@ -2,7 +2,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 import { access, readdir, readFile } from "node:fs/promises";
 import { getRoleCapabilities } from "../src/lib/auth-utils.ts";
-import { buildAdminNavGroups } from "../src/lib/navigation.ts";
+import { buildAdminNavGroups, resolveAdminWorkspaceMeta } from "../src/lib/navigation.ts";
 
 const root = new URL("../", import.meta.url);
 
@@ -82,18 +82,26 @@ test("sidebar keeps fallback permission status compact", async () => {
   assert.doesNotMatch(source, /leading-relaxed/);
 });
 
-test("todo navigation exposes direct queues and keeps query links distinct", async () => {
+test("todo navigation stays undiscoverable while legacy direct links keep query normalization", async () => {
   const [navigationSource, navMainSource] = await Promise.all([
     readSource("src/lib/navigation.ts"),
     readSource("src/components/nav-main.tsx"),
   ]);
 
-  for (const url of [
-    "/admin/tasks?list=inbox",
-    "/admin/tasks?list=sent",
-    "/admin/tasks?list=completed",
-  ]) {
-    assert.ok(navigationSource.includes(`url: "${url}"`), url);
+  for (const role of ["admin", "staff", "teacher", "assistant", "viewer"]) {
+    const groups = buildAdminNavGroups(getRoleCapabilities(role));
+    const navigationUrls = groups.flatMap(({ items }) =>
+      items.flatMap(({ url, items: childItems = [] }) => [
+        url,
+        ...childItems.map((item) => item.url),
+      ]),
+    );
+
+    assert.equal(
+      navigationUrls.some((url) => url.startsWith("/admin/tasks")),
+      false,
+      `${role} should not discover the retired task workspace`,
+    );
   }
 
   assert.doesNotMatch(navigationSource, /filter=confirmation/);
@@ -130,6 +138,30 @@ test("admin navigation nests notification settings inside environment settings",
   assert.equal(settingsGroup?.items.some(({ title }) => title === "알림 설정"), false);
   assert.doesNotMatch(headerSource, /DashboardNotificationPopover/);
   assert.doesNotMatch(headerSource, /aria-label="알림"/);
+});
+
+test("environment settings expose explicit class groups without a period workspace", async () => {
+  const [legacySettingsRoute, legacyAdminRoute, groupWorkspaceSource] = await Promise.all([
+    readSource("src/app/admin/settings/terms/page.tsx"),
+    readSource("src/app/admin/terms/page.tsx"),
+    readSource("src/features/management/class-group-master-workspace.tsx"),
+  ]);
+  const groups = buildAdminNavGroups(getRoleCapabilities("admin"));
+  const environmentSettings = groups
+    .find(({ label }) => label === "설정")
+    ?.items.find(({ title }) => title === "환경 설정");
+
+  assert.deepEqual(
+    environmentSettings?.items?.filter(({ url }) => url === "/admin/settings/class-groups"),
+    [{ title: "수업그룹 설정", url: "/admin/settings/class-groups" }],
+  );
+  assert.equal(environmentSettings?.items?.some(({ title }) => title.includes("기간")), false);
+  assert.equal(resolveAdminWorkspaceMeta("/admin/settings/class-groups").title, "수업그룹 설정");
+  assert.match(legacySettingsRoute, /redirect\("\/admin\/settings\/class-groups"\)/);
+  assert.match(legacyAdminRoute, /redirect\("\/admin\/settings\/class-groups"\)/);
+  assert.match(groupWorkspaceSource, /그룹명/);
+  assert.match(groupWorkspaceSource, /class-group-subject/);
+  assert.doesNotMatch(groupWorkspaceSource, /기간명|기간 추가|기본값으로 설정|readDefaultPeriodPreference|writeDefaultPeriodPreference|tips-settings-table:periods/);
 });
 
 test("role-based navigation exposes textbook requests to teachers without manager-only links", () => {
@@ -699,7 +731,7 @@ test("assistant navigation only exposes allowed operation surfaces", async () =>
 
   assert.match(navigationSource, /canUseAssistantOperations/);
   assert.match(navigationSource, /const assistantOverviewItems: NavItem\[\]/);
-  assert.match(navigationSource, /title: "할 일"[\s\S]*url: "\/admin\/tasks"/);
+  assert.doesNotMatch(assistantOverviewBlock, /title: "할 일"|url: "\/admin\/tasks"/);
   assert.match(navigationSource, /title: "영어 단어 재시험"[\s\S]*url: "\/admin\/word-retests"/);
   assert.match(navigationSource, /title: "학사일정"[\s\S]*url: "\/admin\/academic-calendar"/);
   assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);

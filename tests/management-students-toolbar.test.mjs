@@ -9,10 +9,9 @@ test("class toolbar uses the shared class filter panel", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
-  assert.match(source, /<ClassFilterPanel\s+selects=\{classFilterSelects\}/);
-  assert.match(source, /quickSelectIds=\{CLASS_QUICK_FILTER_IDS\}/);
-  assert.match(source, /const CLASS_QUICK_FILTER_IDS = CLASS_FILTERS\.map/);
-  assert.match(source, /classFilterChips/);
+  assert.match(source, /<ClassFilterPanel[\s\S]*?selects=\{classFilterSelects\}/);
+  assert.doesNotMatch(source, /CLASS_QUICK_FILTER_IDS|classFilterChips/);
+  assert.match(panelSource, /selects\.map\(renderSelectField\)/);
   assert.match(panelSource, /searchPlaceholder/);
   assert.match(panelSource, /role="search" aria-label=\{searchPlaceholder\}/);
   assert.match(panelSource, /type="search"/);
@@ -27,15 +26,13 @@ test("class toolbar removes the secondary result summary strip under filters", a
   const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
   assert.match(source, /summaryLabel=\{""\}/);
-  assert.match(source, /chips=\{\[\]\}/);
-  assert.match(source, /showFooterReset=\{false\}/);
   assert.doesNotMatch(source, /summaryLabel=\{showSummaryBadge \? summaryLabel : ""\}/);
-  assert.match(panelSource, /showFooterReset\?: boolean/);
-  assert.match(panelSource, /showFooterReset = true/);
-  assert.match(panelSource, /\{showFooterReset && showReset \? \(/);
+  assert.doesNotMatch(panelSource, /showFooterReset|ClassFilterPanelChip/);
+  assert.match(panelSource, /<DataTableFilters/);
+  assert.match(panelSource, /조건 초기화/);
 });
 
-test("student management filters lifecycle status separately from school filters", async () => {
+test("student management exposes lifecycle status alongside school filters", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(source, /const STUDENT_SCHOOL_CATEGORY_OPTIONS = \["고등", "중등", "초등"\]/);
@@ -46,12 +43,12 @@ test("student management filters lifecycle status separately from school filters
   assert.match(source, /renderStudentGradeSelect/);
   assert.match(source, /data-testid="student-quick-filters"/);
   assert.match(source, /renderStudentQuickFilter\("학교 구분", renderStudentSchoolCategorySelect\(\)\)/);
-  assert.match(source, /renderStudentQuickFilter\("학교", renderStudentSchoolSelect\(\)\)/);
+  assert.match(source, /renderStudentQuickFilter\("학교", renderStudentSchoolSelect\(\), "sm:w-52"\)/);
   assert.match(source, /renderStudentQuickFilter\("학년", renderStudentGradeSelect\(\)\)/);
   assert.match(source, /studentSchoolCategoryFilter/);
-  assert.match(source, /<div className="text-sm font-semibold">필터<\/div>/);
+  assert.match(source, /renderStudentQuickFilter\("재원 상태", renderStudentStatusSelect\(\)\)/);
   assert.match(source, /\{resetControl\}/);
-  assert.match(source, /const activeStudentMenuFilterCount = \[statusFilter\]/);
+  assert.doesNotMatch(source, /activeStudentMenuFilterCount/);
   assert.doesNotMatch(source, /sm:grid-cols-4/);
   assert.doesNotMatch(source, /kind !== "students" && statusFilter/);
 });
@@ -75,12 +72,12 @@ test("student management keeps search and school filters in the URL for cross-vi
   assert.match(source, /syncStudentListQueryState\(\{ grade: nextGradeFilter \}, true\)/);
 });
 
-test("student management renders the active school category summary in Korean", async () => {
+test("student management renders school category choices in Korean", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(
     source,
-    /학교 구분 \{formatStudentSchoolCategoryLabel\(studentSchoolCategoryFilter\)\}/,
+    /\{formatStudentSchoolCategoryLabel\(option\)\}/,
   );
 });
 
@@ -150,18 +147,20 @@ test("student status badge can open a class roster popover", async () => {
 test("student name cells do not repeat school and grade subtitle", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
-  assert.match(source, /kind === "textbooks" \? \(\s*<span className="truncate text-xs text-muted-foreground">\{row\.original\.subtitle/);
-  assert.doesNotMatch(source, /kind === "classes" \? null : \(\s*<span className="truncate text-xs text-muted-foreground">\{row\.original\.subtitle/);
+  assert.match(source, /kind === "textbooks" \? \(\s*<span className="min-w-0 whitespace-normal break-words text-xs text-muted-foreground">\{row\.original\.subtitle/);
+  assert.doesNotMatch(source, /kind === "classes" \? null : \(\s*<span[^>]*>\{row\.original\.subtitle/);
 });
 
 test("editable management titles expose pointer, hover, and focus feedback", async () => {
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const surfaceSource = await readFile(new URL("src/components/data-table/data-table-surface.tsx", root), "utf8");
 
   assert.match(source, /cursor-pointer/);
   assert.match(source, /hover:bg-primary\/5/);
   assert.match(source, /hover:text-primary/);
   assert.match(source, /focus-visible:ring-2/);
-  assert.match(source, /hover:bg-muted\/30/);
+  assert.match(surfaceSource, /hover:bg-muted/);
+  assert.match(surfaceSource, /data-\[state=selected\]:bg-accent/);
 });
 
 test("management table disables TanStack render-time auto reset queues", async () => {
@@ -249,7 +248,7 @@ test("class management uses mobile cards instead of a clipped wide table", async
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(source, /const classMobileList = kind === "classes" \? \(/);
-  assert.match(source, /className="grid gap-2 md:hidden"/);
+  assert.match(source, /className=\{DATA_TABLE_MOBILE_LIST_CLASS_NAME\}/);
   assert.match(source, /row\.toggleSelected\(\!\!value\)/);
   assert.match(source, /renderClassScheduleCell\(row\.original\)/);
   assert.match(source, /\(kind === "classes" \|\| kind === "students"\) && "hidden md:block"/);
@@ -331,12 +330,12 @@ test("management table keeps filter and search actions visible and reversible", 
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const panelSource = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
 
-  assert.match(panelSource, /primaryLabel\?: string/);
+  assert.doesNotMatch(panelSource, /Popover|primaryLabel/);
   assert.match(panelSource, /aria-label=\{`\$\{searchPlaceholder\} 지우기`\}/);
-  assert.match(panelSource, /필터 \$\{String\(primaryLabel\)\}|필터 \$\{primaryLabel\}/);
+  assert.match(panelSource, /<DataTableFilters/);
   assert.doesNotMatch(tableSource, /const DEFAULT_PAGE_SIZE = 30/);
   assert.match(tableSource, /onSearchChange=\{updateGlobalFilter\}/);
-  assert.match(tableSource, /primaryLabel=\{activePeriodLabel\}/);
+  assert.doesNotMatch(tableSource, /activePeriodLabel/);
   // Atomic filter/page resets are exercised by management-numbered-pagination.test.mjs.
   assert.match(tableSource, /aria-busy=\{loading\}/);
   assert.match(tableSource, /데이터를 불러오는 중입니다/);

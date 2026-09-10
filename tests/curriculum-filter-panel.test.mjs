@@ -9,21 +9,17 @@ test("curriculum workspace reuses the class management filter panel", async () =
 
   assert.match(source, /@\/features\/management\/class-filter-panel/);
   assert.match(source, /<ClassFilterPanel\s+selects=\{filterSelects\}/);
-  assert.match(source, /quickSelectIds=\{CURRICULUM_QUICK_FILTER_IDS\}/);
-  assert.match(source, /quickSelectGridClassName="grid-cols-2"/);
-  assert.match(source, /const CURRICULUM_QUICK_FILTER_IDS = \["subject", "grade", "teacher", "classroom"\]/);
   assert.doesNotMatch(source, /AcademicFilterToolbar/);
-  assert.match(source, /id: "period"/);
+  assert.doesNotMatch(source, /id: "period"/);
   assert.match(source, /label: "수업 상태"/);
   assert.match(source, /id: "classroom"/);
-  assert.match(source, /footerAction=\{/);
-  assert.match(source, /filterCount=\{filterChips\.length\}/);
+  assert.doesNotMatch(source, /footerAction=\{|Popover/);
   assert.doesNotMatch(source, /label: <>보기/);
   assert.doesNotMatch(source, /label: <>검색어/);
   assert.doesNotMatch(source, /mt-3 flex flex-wrap items-center gap-2/);
 });
 
-test("curriculum model exposes class-style period and status filtering", async () => {
+test("legacy curriculum model retains group matching for timetable-compatible records", async () => {
   const source = await readFile(new URL("src/features/academic/records.js", root), "utf8");
 
   assert.match(source, /buildClassGroupContext\(eligibleClasses, classTerms, classGroups, classGroupMembers\)/);
@@ -32,22 +28,19 @@ test("curriculum model exposes class-style period and status filtering", async (
   assert.match(source, /classroomOptions: buildCatalogBackedOptions/);
 });
 
-test("curriculum default period follows the configured period option", async () => {
-  const source = await readFile(new URL("src/features/academic/records.js", root), "utf8");
-  const typeSource = await readFile(new URL("src/features/academic/records.d.ts", root), "utf8");
+test("curriculum workspace does not construct or restore legacy period options", async () => {
   const workspaceSource = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
-  assert.match(source, /isDefault: group\.isDefault === true/);
-  assert.match(source, /const option = \{ value, label, aliases \}/);
-  assert.match(source, /if \(isDefault === true\) \{\s*option\.isDefault = true;\s*\}/);
-  assert.match(typeSource, /classGroupOptions: Array<\{ value: string; label: string; aliases\?: string\[\]; isDefault\?: boolean \}>/);
-  assert.match(workspaceSource, /const defaultPeriod = useMemo\(\(\) => pickDefaultPeriodValue\(model\.classGroupOptions\), \[model\.classGroupOptions\]\)/);
+  assert.doesNotMatch(workspaceSource, /pickDefaultPeriodValue|readDefaultPeriodPreference/);
+  assert.doesNotMatch(workspaceSource, /classGroupOptions|filterOptions\.periods|normalizedPeriod|periodOptions/);
+  assert.doesNotMatch(workspaceSource, /학기 미정/);
 });
 
-test("curriculum summary shows actionable planning workload", async () => {
+test("curriculum work queue shows actionable planning workload without a repeated summary", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
-  assert.match(source, /진도 필요 \$\{model\.summary\.updateNeededClassCount\}개/);
+  assert.match(source, /value: "update", label: "진도 미배정"/);
+  assert.doesNotMatch(source, /summaryLabel=/);
   assert.doesNotMatch(source, /미배정 회차 \$\{model\.summary\.pendingSessions\}회/);
 });
 
@@ -59,20 +52,22 @@ test("curriculum overview has a PC-first work queue, dense table shell, and shar
   assert.match(source, /CURRICULUM_VIEW_MODES\.map/);
   assert.match(source, /const visibleViewRows = model\.rows/);
   assert.match(source, /data-testid="curriculum-work-queue"/);
-  assert.match(source, /className="grid grid-cols-2 gap-2 xl:grid-cols-5"/);
-  assert.match(source, /flex h-10 items-center justify-between rounded-md border px-3 text-left text-sm transition-colors/);
+  assert.match(source, /aria-label="계획 상태"/);
+  assert.match(source, /aria-pressed=\{viewMode === item\.value\}/);
   assert.match(source, /import \{ DataTablePagination \} from "@\/components\/data-table\/data-table-pagination"/);
   assert.match(source, /useAcademicWorkspaceData\(\{\s*mode: "curriculum"/);
   assert.match(source, /cursor: null/);
   assert.match(source, /page: navigation\.page/);
   assert.match(source, /navigationKey: navigation\.key/);
   assert.match(source, /const visibleViewRows = model\.rows/);
-  assert.match(source, /const viewRowSessionCount = Number\(model\.summary\.totalSessions/);
+
   assert.match(source, /const curriculumViewModeCounts = model\.summary\.viewModeCounts/);
   assert.match(source, /data-testid="curriculum-mobile-list"/);
   assert.match(source, /data-testid=\{`curriculum-mobile-card-\$\{row\.id\}`\}/);
   assert.match(source, /data-testid="curriculum-desktop-scroll-anchor"/);
-  assert.match(source, /<ScrollArea className="hidden h-\[38rem\] \[contain-intrinsic-size:640px\] \[content-visibility:auto\] md:block">/);
+  assert.match(source, /<DataTableViewport/);
+  assert.match(source, /max-h-\[38rem\]/);
+  assert.doesNotMatch(source, /className="hidden h-\[38rem\]/);
   assert.match(source, /const curriculumViewModeCounts = model\.summary\.viewModeCounts/);
   assert.match(source, /\{visibleViewRows\.map\(\(row\) =>/);
   assert.match(source, /<DataTablePagination page=\{displayedPage\} pageSize=\{pageSize\} totalCount=\{totalCount\} loading=\{loading\}/);
@@ -80,7 +75,7 @@ test("curriculum overview has a PC-first work queue, dense table shell, and shar
   assert.doesNotMatch(source, /CURRICULUM_CLASS_PAGE_SIZE/);
   assert.doesNotMatch(source, /loadMore/);
   assert.doesNotMatch(source, /hasMoreViewRows/);
-  assert.match(source, /\{viewRowSessionCount\}회차 · \{viewRowTextbookCount\}권/);
+
   assert.doesNotMatch(source, /\{model\.summary\.totalSessions\}회차 · \{model\.summary\.linkedTextbooks\}권/);
   assert.doesNotMatch(source, /selectedClassId/);
   assert.doesNotMatch(source, /selectedRow/);
@@ -90,18 +85,18 @@ test("curriculum overview has a PC-first work queue, dense table shell, and shar
   assert.match(source, /viewMode === item\.value/);
   assert.match(source, /교재 미연결/);
   assert.match(source, /진도 미배정/);
-  assert.match(source, /sticky top-0 z-10 bg-background/);
+  assert.match(source, /DataTableHeaderCell/);
   assert.match(source, /min-w-\[920px\]/);
-  assert.match(source, /<TableHead className="w-\[12%\] text-right">작업<\/TableHead>/);
+  assert.match(source, /다음 작업<\/DataTableHeaderCell>/);
   assert.match(source, /const hasLinkedTextbooks = row\.textbookCount > 0/);
-  assert.match(source, /inline-flex h-8 items-center rounded-md border border-dashed/);
+
   assert.match(modelSource, /const progressTargetSessions = textbookCount > 0/);
   assert.match(modelSource, /Number\(session\.textbookEntryCount \|\| 0\) > 0/);
   assert.doesNotMatch(modelSource, /scheduleState !== "exception" && scheduleState !== "tbd"/);
   assert.match(source, /const progressTargetSessionCount = row\.progressTargetSessions \?\? row\.totalSessions/);
   assert.match(source, /formatProgressPrimary\(row\.plannedProgressSessions, progressTargetSessionCount\)/);
-  assert.match(source, /formatProgressPercent\(row\.progressTargetPercent, progressTargetSessionCount\)/);
-  assert.match(source, /formatProgressMeta\(row\.plannedProgressSessions, row\.delayedProgressSessions, progressTargetSessionCount\)/);
+  assert.match(source, /value=\{row\.progressTargetPercent\}/);
+
   assert.match(source, /교재 연결 필요/);
   assert.doesNotMatch(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
 });
@@ -109,7 +104,7 @@ test("curriculum overview has a PC-first work queue, dense table shell, and shar
 test("curriculum workspace delegates all filters and numbered navigation to the scoped service", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
   const hookSource = await readFile(new URL("src/features/academic/use-academic-workspace-data.ts", root), "utf8");
-  assert.match(source, /periodId: period \|\| null/);
+  assert.doesNotMatch(source, /periodId:/);
   assert.match(source, /\n\s+search,/);
   assert.match(source, /status,/);
   assert.match(source, /subject,/);
@@ -123,6 +118,7 @@ test("curriculum workspace delegates all filters and numbered navigation to the 
   assert.match(hookSource, /loadCurriculumDetail/);
   assert.match(hookSource, /createNumberedPageController/);
   assert.match(hookSource, /readCurriculumNumberedPage/);
+  assert.match(hookSource, /const filters = \{ periodId: null,/);
   assert.match(hookSource, /useDataTablePageSize\("academic:curriculum"\)/);
   assert.match(hookSource, /successfulRequest/);
   assert.match(hookSource, /dataMatchesCurrentScope/);
@@ -133,7 +129,7 @@ test("curriculum workspace delegates all filters and numbered navigation to the 
   assert.match(source, /if \(loading && !renderData\)/);
   assert.match(source, /onClick=\{\(\) => void refresh\(\)\}/);
   assert.match(source, /다시 시도/);
-  assert.doesNotMatch(source, /setPeriod\(normalizedPeriod\)/);
+  assert.doesNotMatch(source, /setPeriod|readDefaultPeriodPreference|pickDefaultPeriodValue/);
   assert.doesNotMatch(source, /\.slice\(0, classListLimit\)/);
   assert.doesNotMatch(source, /loadingMore/);
 });
@@ -150,7 +146,7 @@ test("curriculum workspace removes duplicated right detail panel", async () => {
   assert.doesNotMatch(source, /회차 배치/);
   assert.doesNotMatch(source, /buildLessonDesignHref\(selectedRow\.id, "", "lesson-design-periods"\)/);
   assert.match(source, /buildLessonDesignHref\(\s*row\.id,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
-  assert.match(source, /className="h-7 rounded-md px-2 text-xs lg:hidden"/);
+  assert.doesNotMatch(source, /PopoverTrigger/);
 });
 
 test("curriculum row action opens the lesson design modal route", async () => {
@@ -225,12 +221,13 @@ test("curriculum work queue persists filter context in the URL and return path",
   assert.match(source, /usePathname, useRouter, useSearchParams/);
   assert.match(source, /function applyCurriculumQueryState/);
   assert.match(source, /\["q", state\.search\.trim\(\), ""\]/);
+  assert.match(source, /params\.delete\("period"\)/);
   assert.match(source, /\["view", normalizeCurriculumViewMode\(state\.viewMode\), "all"\]/);
   assert.match(source, /params\.delete\("classId"\)/);
   assert.match(source, /const curriculumReturnPath = useMemo/);
   assert.match(source, /buildCurriculumListHref\(pathname, searchParamString, curriculumQueryState\)/);
   assert.match(source, /router\.replace\(nextHref, \{ scroll: false \}\)/);
-  assert.match(source, /setPeriod\(value === "none" \? "" : value\)/);
+  assert.doesNotMatch(source, /setPeriod|id: "period"|label: "기간"/);
 });
 
 test("curriculum work queue restores scroll position after opening class detail", async () => {
@@ -244,29 +241,18 @@ test("curriculum work queue restores scroll position after opening class detail"
   assert.match(source, /window\.sessionStorage\.setItem/);
   assert.match(source, /pageY: window\.scrollY/);
   assert.match(source, /listY: viewport\?\.scrollTop \|\| 0/);
-  assert.match(source, /querySelector<HTMLElement>\('\[data-slot="scroll-area-viewport"\]'\)/);
+  assert.match(source, /querySelector<HTMLElement>\('\[data-slot="data-table-viewport"\]'\)/);
   assert.match(source, /window\.requestAnimationFrame/);
   assert.match(source, /window\.scrollTo\(\{ top: savedScroll\.pageY \}\)/);
   assert.match(source, /viewport\.scrollTop = savedScroll\.listY/);
   assert.match(source, /rememberCurriculumScrollPosition\(\)/);
 });
 
-test("shared class filter panel separates search and view state from filter count", async () => {
+test("shared class filter panel exposes all conditions and reset directly", async () => {
   const source = await readFile(new URL("src/features/management/class-filter-panel.tsx", root), "utf8");
-
-  assert.match(source, /filterCount\?: number/);
-  assert.match(source, /quickSelectIds\?: string\[\]/);
-  assert.match(source, /quickSelectGridClassName\?: string/);
-  assert.match(source, /const quickSelects = selects\.filter/);
-  assert.match(source, /const menuSelects = selects\.filter/);
-  assert.match(source, /data-testid="class-filter-quick-selects"/);
-  assert.match(source, /className=\{cn\("grid gap-2 sm:grid-cols-2 xl:grid-cols-4", quickSelectGridClassName\)\}/);
-  assert.match(source, /quickSelects\.map\(renderSelectField\)/);
-  assert.match(source, /menuSelects\.map\(renderSelectField\)/);
-  assert.match(source, /const activeFilterCount = filterCount \?\? chips\.length/);
-  assert.match(source, /const activeMenuFilterCount = quickSelects\.length > 0/);
+  assert.match(source, /<DataTableFilters/);
+  assert.match(source, /selects\.map\(renderSelectField\)/);
   assert.match(source, /aria-label=\{searchPlaceholder\}/);
-  assert.match(source, /data-testid="class-filter-popover-header"/);
-  assert.match(source, /<PopoverContent align="end" className="w-\[min\(34rem,calc\(100vw-2rem\)\)\] p-0">/);
-  assert.match(source, /<p className="truncate text-sm font-semibold text-foreground">필터<\/p>/);
+  assert.match(source, /onClick=\{onReset\}/);
+  assert.doesNotMatch(source, /Popover|menuSelects|quickSelects|filterCount|ClassFilterPanelChip/);
 });

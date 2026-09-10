@@ -55,12 +55,11 @@ test("student enrollment pages merge direct roster arrays with registration enro
   assert.match(relation, /className/);
 });
 
-test("the configured default class period canonicalizes the URL without dropping requested filters", async () => {
+test("retired period parameters are removed without dropping other requested filters", async () => {
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
-  assert.match(tableSource, /setClassListQueryParam\(params, CLASS_LIST_QUERY_PARAM_KEYS\.period, state\.period\)/);
-  assert.doesNotMatch(tableSource, /CLASS_LIST_QUERY_PARAM_KEYS\.period, state\.period, defaultPeriodFilter/);
-  assert.match(tableSource, /!requestedClassListQueryState\.period && defaultPeriodFilter[\s\S]*?syncClassListQueryState\(withRequestedDefaultClassPeriod\([\s\S]*?requestedClassListQueryState,[\s\S]*?defaultPeriodFilter,[\s\S]*?\)\)/);
-  assert.doesNotMatch(tableSource, /syncClassListQueryState\(\{ period: defaultPeriodFilter \}\)/);
+  const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  assert.doesNotMatch(tableSource, /setClassListQueryParam\(params, CLASS_LIST_QUERY_PARAM_KEYS\.period/);
+  assert.doesNotMatch(pageSource, /effectiveClassPeriodId|params\.set\("period"/);
 });
 
 test("bounded list rows preserve every currently rendered scalar field", async () => {

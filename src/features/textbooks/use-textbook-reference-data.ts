@@ -14,7 +14,6 @@ import {
 } from "./textbook-reference-service"
 import {
   checkTextbookMasterDuplicate,
-  getTextbookClosingPreview,
   getTextbookInventoryBalance,
   getTextbookMasterDetail,
   getTextbookPurchaseDetail,
@@ -24,13 +23,11 @@ import { getClassTextbookSaleContext } from "./textbook-work-context-service"
 import type {
   ClassTextbookSaleContext,
   ClassTextbookSaleContextInput,
-  ClosingPreviewInput,
   PageRequest,
   SearchSelectFilterGroup,
   SearchSelectOption,
   TextbookClassReferenceFilters,
   TextbookClassReferenceResult,
-  TextbookClosingPreview,
   TextbookInventoryBalance,
   TextbookInventoryBalanceInput,
   TextbookLocationReferencePage,
@@ -74,7 +71,6 @@ export type TextbookReferenceDataInput = {
   classSalePreviewInput?: ClassTextbookSaleContextInput | null
   teacherSaleBalanceInput?: TextbookInventoryBalanceInput | null
   purchaseBalanceInput?: TextbookInventoryBalanceInput | null
-  closingPreviewInput?: ClosingPreviewInput | null
 }
 
 export type TextbookReferenceResource<TInput, TValue> = {
@@ -254,10 +250,9 @@ export function useTextbookReferenceData(input: TextbookReferenceDataInput) {
   const classSalePreview = useIndependentResource<ClassTextbookSaleContextInput, ClassTextbookSaleContext>(managementActor, input.classSalePreviewInput || null, getClassTextbookSaleContext)
   const teacherSaleBalance = useIndependentResource<TextbookInventoryBalanceInput, TextbookInventoryBalance>(managementActor, input.teacherSaleBalanceInput || null, getTextbookInventoryBalance)
   const purchaseBalance = useIndependentResource<TextbookInventoryBalanceInput, TextbookInventoryBalance>(managementActor, input.purchaseBalanceInput || null, getTextbookInventoryBalance)
-  const closingPreview = useIndependentResource<ClosingPreviewInput, TextbookClosingPreview>(managementActor, input.closingPreviewInput || null, getTextbookClosingPreview)
   return {
     bookOptions, classOptions, teacherOptions, locationOptions, selectedBook, selectedClass, selectedLocation,
     masterOptions, masterDetail, purchaseDetail, saleDetail, masterDuplicate, classSalePreview,
-    teacherSaleBalance, purchaseBalance, closingPreview,
+    teacherSaleBalance, purchaseBalance,
   }
 }

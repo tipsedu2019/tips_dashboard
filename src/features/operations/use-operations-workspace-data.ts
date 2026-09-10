@@ -21,12 +21,10 @@ export type OperationsWorkspaceRequest =
   | { mode: "annual"; academicYear: number }
   | {
       mode: "class_schedule";
-      termId: string | null;
       search: string;
       subject: string | null;
       grade: string | null;
       teacher: string | null;
-      syncGroupId: string | null;
       page?: number;
       navigationKey?: string;
       cursor: OperationsKeysetCursor | null;
@@ -66,7 +64,14 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
   serviceRef.current = service;
   const size = useDataTablePageSize("operations:class-schedule");
   const isNumbered = request.mode === "class_schedule";
-  const sourceRequest = isNumbered ? { ...request, page: undefined, navigationKey: undefined, cursor: null } : request;
+  const sourceRequest = isNumbered ? {
+    mode: "class_schedule" as const,
+    search: request.search,
+    subject: request.subject,
+    grade: request.grade,
+    teacher: request.teacher,
+    cursor: null,
+  } : request;
   const fingerprint = JSON.stringify(sourceRequest);
   const stableRequest = useMemo(() => JSON.parse(fingerprint) as OperationsWorkspaceRequest, [fingerprint]);
   const fingerprintRef = useRef(fingerprint);
@@ -89,8 +94,8 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
       async loadPage({ scope, page, pageSize, signal }) {
         if (!service || serviceRef.current !== service) throw new Error("stale_actor");
         const current = JSON.parse(scope) as Extract<OperationsWorkspaceRequest, { mode: "class_schedule" }>;
-        const filters = { termId: current.termId, search: current.search, subject: current.subject, grade: current.grade,
-          teacher: current.teacher, syncGroupId: current.syncGroupId };
+        const filters = { termId: null, search: current.search, subject: current.subject, grade: current.grade,
+          teacher: current.teacher, syncGroupId: null };
         const result = await service.readClassScheduleNumberedPage({
           filters, page, pageSize, signal,
         });

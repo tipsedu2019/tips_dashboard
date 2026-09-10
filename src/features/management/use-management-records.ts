@@ -805,9 +805,6 @@ export function useManagementRecords(
   const [classFormReferences, setClassFormReferences] = useState<{ owner: string; references: ClassFormReferences } | null>(null);
   const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
-  const [resolvedClassPeriod, setResolvedClassPeriod] = useState<{
-    requestScope: string; canonicalScope: string; periodId: string;
-  } | null>(null);
   const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
   const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ManagementRow> & { authorizationScope: string; kind: ManagementKind }) | null>(null);
   const [metadataOwner, setMetadataOwner] = useState("");
@@ -815,17 +812,15 @@ export function useManagementRecords(
   const lastRequestKeyRef = useRef("");
   const onQueryChangeRef = useRef(onQueryChange);
   useEffect(() => { onQueryChangeRef.current = onQueryChange; }, [onQueryChange]);
-  const filters = useMemo(() => requestedFilters || defaultManagementFilters(kind), [kind, requestedFilters]);
+  const filters = useMemo(() => {
+    const next = requestedFilters || defaultManagementFilters(kind);
+    return next.kind === "classes" ? { ...next, periodId: null } : next;
+  }, [kind, requestedFilters]);
   const readService = useMemo(() => supabase ? createManagementReadService({ supabase }) : null, []);
   const numberedService = useMemo(() => supabase ? createManagementNumberedReadService({ supabase }) : null, []);
   const requestedSort = sanitizeManagementNumberedSort(kind, sort);
   const scope = JSON.stringify({ authorizationScope, kind, filters, sort: requestedSort });
   const owner = JSON.stringify([authorizationScope, kind]);
-  const periodScopeMatches = enabled && resolvedClassPeriod !== null
-    && (resolvedClassPeriod.requestScope === scope || resolvedClassPeriod.canonicalScope === scope);
-  if (resolvedClassPeriod && !periodScopeMatches) {
-    setResolvedClassPeriod(null);
-  }
   if (classFormReferences && classFormReferences.owner !== owner) {
     setClassFormReferences(null);
   }
@@ -840,24 +835,11 @@ export function useManagementRecords(
     let active = true;
     lastRequestKeyRef.current = "";
     const controller = createNumberedPageController<ManagementRow>({
-      loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal, canonicalizeScope }) => {
+      loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal }) => {
         if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
         const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
-        let effectiveFilters = request.filters;
+        const effectiveFilters = request.filters;
         const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
-        if (effectiveFilters.kind === "classes" && !effectiveFilters.periodId) {
-          const { data, error } = await supabase.rpc("get_management_default_class_period_v1").abortSignal(requestSignal).retry(false);
-          requestSignal.throwIfAborted();
-          if (error) throw error;
-          const period = textValue((Array.isArray(data) ? data[0] : data)?.periodId);
-          if (!period) throw new Error("management_default_period_unavailable");
-          effectiveFilters = { ...effectiveFilters, periodId: period };
-          const canonicalScope = JSON.stringify({ authorizationScope, kind, filters: effectiveFilters, sort: request.sort });
-          if (!canonicalizeScope(canonicalScope)) throw new Error("management_request_superseded");
-          // The subsequent canonical URL rewrite describes this same request.
-          lastRequestKeyRef.current = JSON.stringify([canonicalScope, requestedPage, requestedSize]);
-          setResolvedClassPeriod({ requestScope, canonicalScope, periodId: period });
-        }
         setMetadataFailure(null);
         const metadata = Promise.all([
           supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
@@ -1004,7 +986,6 @@ export function useManagementRecords(
     error,
     classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
     filterOptions: metadataOwner === owner ? filterOptions : {},
-    effectiveClassPeriodId: periodScopeMatches ? resolvedClassPeriod.periodId : "",
     page: displayed?.page || 1,
     pageSize: displayed?.totalCount !== null && displayed ? displayed.pageSize : pageSize,
     totalCount: displayed?.totalCount ?? null,

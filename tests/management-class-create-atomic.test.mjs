@@ -31,7 +31,7 @@ function makeAtomicClassCreateClient() {
   };
 }
 
-test("class creation commits the class and its period memberships through one atomic RPC", async () => {
+test("class creation commits any explicit group memberships through one atomic RPC", async () => {
   const client = makeAtomicClassCreateClient();
   const service = createManagementService({
     supabase: client,
@@ -78,21 +78,22 @@ test("class creation commits the class and its period memberships through one at
   }]]);
 });
 
-test("class creation rejects a missing period before any mutation can begin", async () => {
+test("class creation accepts no period and sends an empty group list through the same atomic RPC", async () => {
   const client = makeAtomicClassCreateClient();
   const service = createManagementService({
     supabase: client,
     probeRegistrationRuntime: async () => ({ mode: "legacy", version: 0 }),
   });
 
-  await assert.rejects(
-    () => service.createClass({ id: CLASS_ID, name: "초6 중등과정반" }),
-    /기간을 하나 이상 선택하세요/,
-  );
-  assert.deepEqual(client.calls, []);
+  const result = await service.createClass({ id: CLASS_ID, name: "초6 중등과정반" });
+  assert.equal(result.id, CLASS_ID);
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0][0], "create_class_with_group_memberships_v1");
+  assert.deepEqual(client.calls[0][1].p_group_ids, []);
+  assert.equal(client.calls[0][1].p_class.status, "수강");
 });
 
-test("class period replacement is atomic so a failed insert cannot erase the existing period", async () => {
+test("explicit class group replacement continues to use the atomic membership RPC", async () => {
   const client = makeAtomicClassCreateClient();
   const service = createManagementService({ supabase: client });
 

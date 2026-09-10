@@ -1730,9 +1730,6 @@ export function createManagementService(options = {}) {
     async createClass(record = {}, options = {}) {
       const client = ensureClient(supabase);
       const groupIds = normalizeIdList(options.groupIds);
-      if (groupIds.length === 0) {
-        throw new Error("기간을 하나 이상 선택하세요.");
-      }
       const payload = buildClassPayload(record, {
         generateId,
         candidateMembershipContext: options.candidateMembershipContext,

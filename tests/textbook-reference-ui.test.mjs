@@ -30,6 +30,33 @@ const classGroups = (count) => [
   { key: "grade", label: "학년", options: [{ value: "m2", label: "중2", count }] },
   { key: "teacher", label: "선생님", options: [{ value: "teacher", label: "담당", count }] },
 ]
+
+test("shared action feedback uses status semantics without stealing focus and returns it on dismiss", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=master" })
+  const ActionFeedback = h.load("src/components/ui/action-feedback.tsx").ActionFeedback
+  const origin = document.createElement("button")
+  origin.textContent = "원래 작업"
+  document.body.appendChild(origin)
+  origin.focus()
+  let dismissCount = 0
+  const mounted = await h.mountTestComponent(ActionFeedback, {
+    message: "작업이 완료되었습니다.",
+    onDismiss: () => { dismissCount += 1 },
+  })
+
+  const feedback = mounted.node.querySelector('[data-slot="action-feedback"]')
+  assert.ok(feedback)
+  assert.ok(feedback.querySelector('[role="status"]'))
+  assert.equal(feedback.querySelector('[role="alert"]'), null)
+  assert.equal(feedback.querySelector('[aria-label="처리 결과"]')?.textContent, "작업이 완료되었습니다.")
+  assert.equal(document.activeElement, origin, "mounting non-modal feedback keeps the current work control focused")
+
+  await h.act(() => feedback.querySelector('[aria-label="처리 결과 닫기"]').click())
+  assert.equal(dismissCount, 1)
+  assert.equal(document.activeElement, origin, "dismiss returns focus to the control active when feedback appeared")
+  await mounted.cleanup()
+  origin.remove()
+})
 const classOption = {
   value: classSaleWire.input.classId, label: classSaleWire.class.name, description: "담당", searchText: `${classSaleWire.class.name} 담당`,
   metaRows: [{ label: "학생", value: "24명" }],
@@ -39,6 +66,7 @@ const classOption = {
 }
 const locationOption = { value: classSaleWire.input.locationId, label: classSaleWire.location.name, searchText: classSaleWire.location.code }
 const requestLocationOption = { value: id(900), label: "본관", searchText: "main" }
+const safeUnexpectedError = "처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요."
 
 async function waitForOption(h, label, timeoutMs = 1000) {
   const deadline = Date.now() + timeoutMs
@@ -77,16 +105,6 @@ const masterOptions = (patch = {}) => ({
   counts: { publisherOptions: 0, subSubjectOptions: 1, categoryOptions: 1, bulkCategoryOptions: 1, scienceSubjectAreas: 0 }, complete: true,
   ...patch,
 })
-const closingResult = (openingQuantity) => ({
-  closingMonth: "2026-09", subject: "all", sourceLineCount: 0,
-  closing: {
-    openingQuantity, purchaseQuantity: 0, saleQuantity: 0, adjustmentQuantity: 0, endingQuantity: openingQuantity,
-    openingAmount: 0, purchaseAmount: 0, saleAmount: 0, adjustmentAmount: 0, endingAmount: 0,
-    receivedAmount: 0, supplierPaymentAmount: 0, paymentDifference: 0, textbookMarginAmount: 0, settlementDifference: 0,
-    teamMargins: ["english", "math", "science", "other"].map((team) => ({ team, saleQuantity: 0, saleAmount: 0, purchaseCostAmount: 0, marginAmount: 0 })),
-    needsReview: false,
-  },
-})
 const unregisteredPurchaseRow = () => {
   const original = purchaseRow("request")
   const lines = original.lines.map((line) => ({ ...line, textbook_id: null, requested_textbook_title: "Legacy title" }))
@@ -103,7 +121,7 @@ test("mounted request form starts bounded independent reference pickers without 
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
   await h.assertNoLegacyReads()
 
-  const addRequest = button("요청 바로 추가")
+  const addRequest = button("교재 요청 추가")
   assert.ok(addRequest, document.body.textContent)
   await h.act(() => addRequest.click())
 
@@ -136,21 +154,18 @@ test("reference hook addresses every named service and aborts the old same-user 
     masterDuplicateInput: { excludeId: null, title: "문법", subject: "english", publisher: "출판사", category: "문법" },
     classSalePreviewInput: { classId: id(800), textbookId: id(101), chargeMonth: "2026-08", locationId: id(900) },
     teacherSaleBalanceInput: { textbookIds: [id(101)], locationId: id(900) },
-    closingPreviewInput: { closingMonth: "2026-08", subject: "all", openingQuantity: 0, openingAmount: 0 },
   })
   const expected = [
     "list_textbook_reference_page_v1", "list_textbook_class_reference_page_v1", "list_textbook_teacher_reference_page_v1", "list_textbook_location_reference_page_v1",
     "resolve_textbook_reference_v1", "get_textbook_class_reference_v1", "get_textbook_location_reference_v1", "get_textbook_master_options_v1",
     "get_textbook_master_detail_v1", "get_textbook_purchase_detail_v1", "get_textbook_sale_detail_v1", "check_textbook_master_duplicate_v1",
-    "get_class_textbook_sale_context_v1", "get_textbook_inventory_balance_v1", "get_textbook_closing_preview_v1",
+    "get_class_textbook_sale_context_v1", "get_textbook_inventory_balance_v1",
   ]
   assert.deepEqual(h.requests.map((request) => request.name).sort(), expected.sort())
   assert.ok(h.requests.every((request) => request.retry === false && request.signal instanceof AbortSignal))
   assert.deepEqual(h.requests.find((request) => request.name === "get_textbook_purchase_detail_v1").args, { p_anchor_line_id: id(301), p_mode: "request" })
   assert.deepEqual(h.requests.find((request) => request.name === "get_textbook_inventory_balance_v1").args, { p_input: { textbookIds: [id(101)], locationId: id(900) } })
-  assert.deepEqual(h.requests.find((request) => request.name === "get_textbook_closing_preview_v1").args.p_input, {
-    closingMonth: "2026-08", subject: "all", openingQuantity: 0, openingAmount: 0,
-  })
+
 
   const oldRequests = [...h.requests]
   await h.rerender({ ...actor, viewerRole: "staff", managementEnabled: true })
@@ -275,7 +290,7 @@ test("mounted class sale uses the complete off-page school roster, duplicates, a
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), saleHistorySummary(0))
   await h.assertNoLegacyReads()
-  await h.act(() => button("출고 바로 추가").click())
+  await h.act(() => button("교재 출고 추가").click())
   const monthInput = document.querySelector('[aria-label="출고월"]')
   await h.act(() => {
     const props = monthInput[Object.keys(monthInput).find((key) => key.startsWith("__reactProps$"))]
@@ -354,7 +369,7 @@ test("mounted teacher sale preserves a manual name and re-reads its exact accept
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_summary_v1"), saleSummary(0))
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_sale_history_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), saleHistorySummary(0))
-  await h.act(() => button("출고 바로 추가").click())
+  await h.act(() => button("교재 출고 추가").click())
   await h.act(() => button("교사용").click())
   const option = bookOption(101)
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_reference_page_v1"), { rows: [option], page: 1, pageSize: 20, totalCount: 1, baseFilterGroups: facetGroups(1), visibleFilterGroups: facetGroups(1), activeFilterCount: 0 })
@@ -376,7 +391,21 @@ test("mounted teacher sale preserves a manual name and re-reads its exact accept
   assert.notEqual(saveBalance, previewBalance)
   assert.deepEqual(saveBalance.args.p_input, { textbookIds: [id(101)], locationId: id(900) })
   assert.equal(h.requests.some((request) => request.table), false)
-  await h.resolve(saveBalance, balancePayload)
+  await h.reject(saveBalance, { message: "합성 출고 저장 전 조회 실패" })
+  const saleDialog = document.querySelector('[role="dialog"]')
+  assert.ok(saleDialog.querySelector('[role="alert"]').textContent.includes(safeUnexpectedError))
+  assert.equal(saleDialog.textContent.includes("합성 출고 저장 전 조회 실패"), false)
+  assert.equal(saleDialog.querySelector('[aria-label="교사용 수령 선생님 선택"]').textContent.includes("수동 선생님"), true)
+  assert.equal(button("출고 대기 저장").disabled, false)
+  const form = button("출고 대기 저장").closest('form')
+  const requestCount = h.requests.length
+  await h.act(() => {
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+  })
+  const retries = h.requests.slice(requestCount).filter(r => r.name === "get_textbook_inventory_balance_v1")
+  assert.equal(retries.length, 1, "a repeated sale submission starts one fresh balance read")
+  await h.resolve(retries[0], balancePayload)
   const saleWrite = h.requests.find((request) => request.table === "textbook_sales")
   await h.resolve(saleWrite, { id: id(500) })
   const lineWrite = h.requests.find((request) => request.table === "textbook_sale_lines")
@@ -500,8 +529,8 @@ test("off-page direct purchase save re-reads its frozen direct identity and clos
     option: directClassOption,
   } })
   const requestCount = h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").length
-  assert.equal(button("선택 건 저장").disabled, false, document.body.textContent)
-  await h.act(() => button("선택 건 저장").click())
+  assert.equal(button("변경 저장").disabled, false, document.body.textContent)
+  await h.act(() => button("변경 저장").click())
   const fresh = h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").at(-1)
   assert.equal(h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").length, requestCount + 1)
   assert.deepEqual(fresh.args, { p_anchor_line_id: direct.anchorLineId, p_mode: "request" })
@@ -525,8 +554,8 @@ test("off-page direct purchase save re-reads its frozen direct identity and clos
     id: id(800), name: "중2반", enrolledStudentCount: 3, defaultTeacherName: "담당", inferredLocation: { id: id(900), code: "main", name: "본관" },
     option: directClassOption,
   } })
-  assert.equal(button("선택 건 저장").disabled, false)
-  await h2.act(() => button("선택 건 저장").click())
+  assert.equal(button("변경 저장").disabled, false)
+  await h2.act(() => button("변경 저장").click())
   const pending = h2.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").at(-1)
   await h2.popstate("?textbookTab=requests&textbookPage=4&textbookPageSize=15")
   await h2.resolve(pending, { row: direct })
@@ -556,7 +585,7 @@ test("hydrated master and purchase forms close immediately on same-kind B or non
   assert.equal(masterTitle.value, "교재 151")
   await h.popstate(`?textbookTab=master&textbookPage=7&textbookPageSize=10&textbookDetailKind=master&textbookDetail=${masterB}`)
   assert.equal(masterTitle.isConnected, false, "accepted A master form closes before B settles")
-  assert.equal(document.body.textContent.includes("교재 상세를 불러오는 중입니다."), true)
+  assert.equal(document.body.textContent.includes("상세 정보를 불러오는 중입니다."), true)
   assert.equal(masterSave.isConnected, false, "old master cannot save under B URL")
   const masterBRequest = h.requests.find((request) => request.name === "get_textbook_master_detail_v1" && request.args.p_id === masterB)
   await h.reject(masterBRequest, { code: "PGRST202", message: "master B missing" })
@@ -575,7 +604,7 @@ test("hydrated purchase A closes before same-kind B loading and error", async (t
   assert.ok(purchasePicker)
   await h.popstate(`?textbookTab=requests&textbookPage=2&textbookPageSize=10&textbookDetailKind=purchase&textbookDetail=${b.anchorLineId}`)
   assert.equal(purchasePicker.isConnected, false)
-  assert.equal(document.body.textContent.includes("구매 상세를 불러오는 중입니다."), true)
+  assert.equal(document.body.textContent.includes("상세 정보를 불러오는 중입니다."), true)
   const bRequest = h.requests.find((request) => request.name === "get_textbook_purchase_detail_v1" && request.args.p_anchor_line_id === b.anchorLineId)
   await h.reject(bRequest, { code: "PGRST202", message: "purchase B missing" })
   assert.ok(button("다시 시도"))
@@ -600,21 +629,8 @@ test("explicit direct detail close replaces its history entry", async (t) => {
   assert.equal(new URLSearchParams(window.location.search).has("textbookDetail"), false)
 })
 
-test("former accepted closing and sale values never render or enable under changed input", async (t) => {
-  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
-  await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
-  await h.assertNoLegacyReads()
-  await h.act(() => button("월마감 추가").click())
-  const first = h.requests.find((request) => request.name === "get_textbook_closing_preview_v1")
-  await h.resolve(first, closingResult(0))
-  assert.equal(document.body.textContent.includes("기말0권"), true)
-  const opening = document.querySelector('[aria-label="기초 수량"]')
-  const props = opening[Object.keys(opening).find((key) => key.startsWith("__reactProps$"))]
-  flushSync(() => props.onChange({ target: { value: "7" } }))
-  assert.equal(document.body.textContent.includes("기말0권"), false, "accepted opening 0 is stale for opening 7")
-  assert.equal([...document.querySelectorAll('form button[type="submit"]')].at(-1).disabled, true)
-
-  await h.act(() => button("취소")?.click())
+test("former accepted sale values never render under changed detail input", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=sales" })
   const saleA = id(401)
   const saleB = id(402)
   await h.popstate(`?textbookTab=sales&textbookPage=3&textbookPageSize=20&textbookDetailKind=sale&textbookDetail=${saleA}`)
@@ -625,7 +641,7 @@ test("former accepted closing and sale values never render or enable under chang
     window.dispatchEvent(new window.PopStateEvent("popstate"))
   })
   assert.equal(document.body.textContent.includes("김선생1"), false, "accepted sale A is never shown under B")
-  assert.equal(document.body.textContent.includes("출고 상세를 불러오는 중입니다."), true)
+  assert.equal(document.body.textContent.includes("상세 정보를 불러오는 중입니다."), true)
 })
 
 test("purchase catalog B owns its picker and stays blocked until exact book and real location are accepted", async (t) => {
@@ -633,7 +649,7 @@ test("purchase catalog B owns its picker and stays blocked until exact book and 
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_purchase_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
   await h.assertNoLegacyReads()
-  await h.act(() => button("요청 바로 추가").click())
+  await h.act(() => button("교재 요청 추가").click())
   const page = h.requests.find((request) => request.name === "list_textbook_reference_page_v1")
   const locationPage = h.requests.find((request) => request.name === "list_textbook_location_reference_page_v1")
   await h.resolve(page, { rows: [bookOption(101), bookOption(102)], page: 1, pageSize: 20, totalCount: 2, baseFilterGroups: facetGroups(2), visibleFilterGroups: facetGroups(2), activeFilterCount: 0 })
@@ -666,7 +682,7 @@ test("accepted catalog request skips inventory balance transport and its irrelev
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_purchase_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
   await h.resolve(h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
   await h.assertNoLegacyReads()
-  await h.act(() => button("요청 바로 추가").click())
+  await h.act(() => button("교재 요청 추가").click())
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_reference_page_v1"), {
     rows: [bookOption(101)], page: 1, pageSize: 20, totalCount: 1,
     baseFilterGroups: facetGroups(1), visibleFilterGroups: facetGroups(1), activeFilterCount: 0,
@@ -744,8 +760,17 @@ test("master option consumers use exact accepted category and bulk metadata and 
   const nextOptions = h.requests.findLast((request) => request.name === "get_textbook_master_options_v1")
   assert.notEqual(nextOptions, optionsRequest)
   await h.reject(nextOptions, { code: "PGRST202", message: "options missing" })
-  assert.ok(button("다시 시도"), "metadata error is visible")
-  assert.equal(button("적용").disabled, true, "bulk action is blocked without exact options")
+  const dialog = document.querySelector('[role="dialog"]')
+  assert.ok(dialog)
+  assert.ok([...dialog.querySelectorAll("button")].some((node) => node.textContent.trim() === "다시 시도"), "metadata retry stays in the bulk form")
+  const save = button("선택 교재 변경 저장")
+  assert.equal(save.textContent.trim(), "변경 저장")
+  assert.equal(save.disabled, true, "bulk action is blocked without exact options")
+  await h.act(() => [...dialog.querySelectorAll("button")].find((node) => node.textContent.trim() === "다시 시도").click())
+  const retriedOptions = h.requests.findLast((request) => request.name === "get_textbook_master_options_v1")
+  assert.notEqual(retriedOptions, nextOptions)
+  await h.resolve(retriedOptions, masterOptions())
+  assert.equal(button("선택 교재 변경 저장").disabled, false)
 })
 
 test("duplicate identity uses canonical category, excludeId, and authoritative totalCount", async (t) => {
@@ -776,32 +801,161 @@ test("static TeacherSelect retains Radix combobox and explicit unassigned option
   await mounted.cleanup()
 })
 
-test("mounted closing preview rejects a late manual-input result and displays only the accepted service calculation", async (t) => {
-  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
-  await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
-  await h.assertNoLegacyReads()
-  await h.act(() => button("월마감 추가").click())
-  const first = h.requests.find((request) => request.name === "get_textbook_closing_preview_v1")
-  assert.ok(first)
-
-  const opening = document.querySelector('[aria-label="기초 수량"]')
-  await h.act(() => {
-    const props = opening[Object.keys(opening).find((key) => key.startsWith("__reactProps$"))]
-    props.onChange({ target: { value: "7" } })
-  })
-  const second = h.requests.findLast((request) => request.name === "get_textbook_closing_preview_v1")
-  assert.notEqual(second, first)
-  assert.equal(first.signal.aborted, true)
-  assert.equal(second.args.p_input.openingQuantity, 7)
-  const closing = {
-    openingQuantity: 7, purchaseQuantity: 0, saleQuantity: 0, adjustmentQuantity: 0, endingQuantity: 7,
-    openingAmount: 0, purchaseAmount: 0, saleAmount: 0, adjustmentAmount: 0, endingAmount: 0,
-    receivedAmount: 0, supplierPaymentAmount: 0, paymentDifference: 0, textbookMarginAmount: 0, settlementDifference: 0,
-    teamMargins: ["english", "math", "science", "other"].map((team) => ({ team, saleQuantity: 0, saleAmount: 0, purchaseCostAmount: 0, marginAmount: 0 })),
-    needsReview: false,
+test("request form keeps failed input and stable save controls, rejects double submits, and clears a cancelled error", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=requests" })
+  await h.resolve(h.requests.find(r => r.name === "list_textbook_purchase_page_v1"), { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  await h.resolve(h.requests.find(r => r.name === "get_textbook_purchase_summary_v1"), purchaseSummary("request", 0))
+  await h.act(() => button("교재 요청 추가").click())
+  await h.act(() => button("직접 입력").click())
+  const change = async (label, value) => {
+    const input = document.querySelector(`[aria-label="${label}"]`)
+    await h.act(() => input[Object.keys(input).find(key => key.startsWith("__reactProps$"))].onChange({ target: { value } }))
   }
-  await h.resolve(first, { closingMonth: first.args.p_input.closingMonth, subject: "all", sourceLineCount: 0, closing: { ...closing, openingQuantity: 0, endingQuantity: 0 } })
-  assert.equal(document.body.textContent.includes("기말0권"), false)
-  await h.resolve(second, { closingMonth: second.args.p_input.closingMonth, subject: "all", sourceLineCount: 0, closing })
-  assert.equal(document.body.textContent.includes("기말7권"), true)
+  await change("요청 교재명", "실패해도 남을 교재")
+  await change("학생용 요청 수량", "7")
+  await change("요청 메모", "다음 수업 전 필요")
+  await h.resolve(h.requests.find(r => r.name === "list_textbook_location_reference_page_v1"), {
+    rows: [requestLocationOption], page: 1, pageSize: 20, totalCount: 1, defaultLocation: { id: id(900), code: "main", name: "본관" },
+  })
+  await h.resolve(h.requests.find(r => r.name === "get_textbook_location_reference_v1"), {
+    row: { id: id(900), code: "main", name: "본관", option: requestLocationOption },
+  })
+  const submit = button("요청 저장")
+  const dialog = submit.closest('[role="dialog"]')
+  const form = submit.closest('form')
+  assert.equal(submit.disabled, false)
+  // Dispatch twice in one React turn, before disabled state can be committed.
+  await h.act(() => {
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+  })
+  const writes = h.requests.filter(r => r.name === "create_textbook_request_v1")
+  assert.equal(writes.length, 1)
+  assert.equal(writes[0].args.p_student_requested_quantity, 7)
+  assert.equal(button("요청 저장"), submit, "pending state preserves the same labeled button")
+  assert.equal(submit.disabled, true)
+  assert.equal(form.getAttribute("aria-busy"), "true")
+  await h.reject(writes[0], { message: "합성 요청 저장 실패" })
+  const error = dialog.querySelector('[role="alert"]')
+  assert.ok(error.textContent.includes(safeUnexpectedError))
+  assert.equal(error.textContent.includes("합성 요청 저장 실패"), false)
+  assert.equal(document.activeElement, error, "failure is focused inside the visible dialog")
+  assert.equal([...document.querySelectorAll('[role="alert"]')].filter(node => node.textContent.includes(safeUnexpectedError)).length, 1, "no duplicate announcement behind the dialog")
+  assert.equal(dialog.querySelector('[aria-label="요청 교재명"]').value, "실패해도 남을 교재")
+  assert.equal(dialog.querySelector('[aria-label="요청 메모"]').value, "다음 수업 전 필요")
+  assert.equal(submit.disabled, false)
+  await h.act(() => submit.click())
+  const retry = h.requests.findLast(r => r.name === "create_textbook_request_v1")
+  assert.notEqual(retry, writes[0], "a completed failure releases the submission guard")
+  assert.equal(dialog.querySelector('[role="alert"]'), null)
+  await h.reject(retry, { message: "합성 재시도 실패" })
+  await h.act(() => button("교재 요청·주문 창 닫기").click())
+  await h.act(() => button("교재 요청 추가").click())
+  assert.equal(document.querySelector('[role="dialog"] [role="alert"]'), null, "a new form does not inherit the cancelled failure")
+})
+
+test("bulk order keeps quantities and selection after a fresh-detail failure and permits one retry", async (t) => {
+  const row = purchaseRow("order")
+  const h = await setup(t, { search: "?textbookTab=purchase" })
+  await h.resolve(h.requests.find(r => r.name === "list_textbook_purchase_page_v1"), { rows: [row], page: 1, pageSize: 10, totalCount: 1 })
+  await h.resolve(h.requests.find(r => r.name === "get_textbook_purchase_summary_v1"), purchaseSummary("order", 1))
+  const checkbox = document.querySelector('[data-prepared-surface="purchase-desktop"] [aria-label$="일괄 처리 선택"]')
+  assert.ok(checkbox)
+  await h.act(() => checkbox.click())
+  assert.ok(document.body.textContent.includes("2개 선택"), "grouped checkbox owns both student and teacher members")
+  await h.act(() => button("선택 요청 일괄 주문").click())
+  const dialog = document.querySelector('[role="dialog"]')
+  const studentQuantity = dialog.querySelector('[aria-label="교재 101 학생용 주문 수량"]')
+  const teacherQuantity = dialog.querySelector('[aria-label="교재 101 교사용 주문 수량"]')
+  assert.equal(studentQuantity.value, "2")
+  assert.equal(teacherQuantity.value, "2")
+  await h.act(() => studentQuantity[Object.keys(studentQuantity).find(key => key.startsWith("__reactProps$"))].onChange({ target: { value: "9" } }))
+  await h.act(() => teacherQuantity[Object.keys(teacherQuantity).find(key => key.startsWith("__reactProps$"))].onChange({ target: { value: "4" } }))
+  const form = studentQuantity.closest('form')
+  await h.act(() => {
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+  })
+  const reads = h.requests.filter(r => r.name === "get_textbook_purchase_detail_v1")
+  assert.equal(reads.length, 1, "two scope lines share one fresh detail read and repeated submit stays locked")
+  assert.equal(button("일괄 주문").disabled, true)
+  await h.reject(reads[0], { message: "합성 일괄 주문 조회 실패" })
+  assert.ok(dialog.querySelector('[role="alert"]').textContent.includes(safeUnexpectedError))
+  assert.equal(dialog.textContent.includes("합성 일괄 주문 조회 실패"), false)
+  assert.equal(studentQuantity.value, "9")
+  assert.equal(teacherQuantity.value, "4")
+  assert.equal(h.requests.some(r => r.table), false, "failed authoritative read never reaches a writer")
+  assert.equal(button("일괄 주문").disabled, false)
+  await h.act(() => button("일괄 주문").click())
+  const retry = h.requests.findLast(r => r.name === "get_textbook_purchase_detail_v1")
+  assert.notEqual(retry, reads[0])
+  assert.deepEqual(retry.args, reads[0].args)
+})
+
+test("master common form keeps ISBN and price after failed save and admits only one concurrent write", async (t) => {
+  const row = masterRow(151)
+  const h = await setup(t, { search: `?textbookTab=master&textbookDetailKind=master&textbookDetail=${row.id}` })
+  await h.resolve(h.requests.find(r => r.name === "get_textbook_master_detail_v1"), { row })
+  await h.resolve(h.requests.findLast(r => r.name === "get_textbook_master_options_v1"), masterOptions())
+  await h.resolve(h.requests.findLast(r => r.name === "check_textbook_master_duplicate_v1"), { totalCount: 0, previewRows: [] })
+  const change = async (label, value) => {
+    const input = document.querySelector(`[aria-label="${label}"]`)
+    await h.act(() => input[Object.keys(input).find(k => k.startsWith("__reactProps$"))].onChange({ target: { value } }))
+  }
+  await change("ISBN", "9781234567890")
+  await change("판매가", "14500")
+  const save = document.querySelector('[aria-label="교재 저장"]')
+  assert.equal(save.disabled, false, document.querySelector('[role="dialog"]').textContent)
+  const form = save.closest('form')
+  await h.act(() => {
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+    form.dispatchEvent(new window.Event("submit", { bubbles: true, cancelable: true }))
+  })
+  const writes = h.requests.filter(r => r.table === "textbooks")
+  assert.equal(writes.length, 1)
+  const payload = writes[0].steps.find(s => s.method === "upsert").args[0]
+  assert.equal(payload.isbn13, "9781234567890")
+  assert.equal(payload.barcode, "9781234567890")
+  assert.equal(payload.sale_price, 14500)
+  assert.equal(save.textContent.trim(), "변경 저장")
+  await h.reject(writes[0], { message: "합성 교재 저장 실패" })
+  const dialog = document.querySelector('[role="dialog"]')
+  const alert = dialog.querySelector('[role="alert"]')
+  assert.equal(document.activeElement, alert)
+  assert.ok(alert.textContent.includes(safeUnexpectedError))
+  assert.equal(alert.textContent.includes("합성 교재 저장 실패"), false)
+  assert.equal(dialog.querySelector('[aria-label="ISBN"]').value, "9781234567890")
+  assert.equal(dialog.querySelector('[aria-label="판매가"]').value, "14500")
+  assert.equal(save.disabled, false)
+  await h.act(() => save.click())
+  assert.equal(h.requests.filter(r => r.table === "textbooks").length, 2)
+  assert.equal(dialog.querySelector('[role="alert"]'), null)
+})
+
+test("sale detail retries in place and shows complete long identity and operational fields without writes", async (t) => {
+  const row = saleRow()
+  const h = await setup(t, { search: `?textbookTab=sales&textbookDetailKind=sale&textbookDetail=${row.id}` })
+  const detail = h.requests.find(r => r.name === "get_textbook_sale_detail_v1")
+  const body = document.querySelector('[data-slot="detail-dialog-body"]')
+  assert.ok(body.querySelector('[role="status"]'))
+  await h.reject(detail, { message: "합성 상세 조회 실패" })
+  assert.equal(document.querySelector('[data-slot="detail-dialog-body"]'), body)
+  assert.ok(body.querySelector('[role="alert"]').textContent.includes(safeUnexpectedError))
+  assert.equal(body.textContent.includes("합성 상세 조회 실패"), false)
+  await h.act(() => button("다시 시도").click())
+  const retry = h.requests.findLast(r => r.name === "get_textbook_sale_detail_v1")
+  const title = "줄임 없이 보여야 하는 매우 긴 영어 교재명 ".repeat(8)
+  const recipient = "긴 이름의 교사용 수령인"
+  await h.resolve(retry, { row: { ...row, textbook: { ...row.textbook, title, name: title }, recipientName: recipient, line: { ...row.line, teacher_name: recipient, memo: "첫째 줄\n둘째 줄" } } })
+  const values = Object.fromEntries([...body.querySelectorAll('dl > div')].map(node => [node.querySelector('dt').textContent, node.querySelector('dd').textContent]))
+  assert.equal(values.교재, title.trim())
+  assert.equal(values.대상, recipient)
+  assert.equal(values.구분, "교사용")
+  assert.equal(values.위치, "본관")
+  assert.equal(values.수량, "2권")
+  assert.equal(values.메모, "첫째 줄\n둘째 줄")
+  assert.equal(h.requests.some(r => r.table), false)
+  await h.act(() => button("닫기").click())
+  assert.equal(document.querySelector('[role="dialog"]'), null)
+  assert.equal(new URLSearchParams(window.location.search).has('textbookDetail'), false)
 })

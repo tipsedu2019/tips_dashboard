@@ -53,7 +53,7 @@ test("management table keeps one scrollport and observes only stable layout boun
   assert.match(source, /resizeObserver\.observe\(tableLayout\)/);
   assert.match(source, /resizeObserver\.observe\(tablePager\)/);
   assert.match(source, /resizeObserver\.disconnect\(\)/);
-  assert.match(source, /<\/Table>\s*<\/div>\s*<div ref=\{tablePagerRef\}/);
+  assert.match(source, /<\/Table>\s*<\/DataTableViewport>\s*<div ref=\{tablePagerRef\}/);
   assert.doesNotMatch(source, /getManagementListRowCapacity|onAutoPageSizeChange|pageSizeMode/);
   assert.doesNotMatch(source, /resizeObserver\.observe\(tableBody\)/);
 });

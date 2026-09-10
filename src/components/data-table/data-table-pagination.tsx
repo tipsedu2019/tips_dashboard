@@ -7,6 +7,7 @@ import {
   ChevronsRight,
 } from "lucide-react"
 
+import { cn } from "@/lib/utils"
 import { Button } from "@/components/ui/button"
 import {
   Pagination,
@@ -36,6 +37,7 @@ export type DataTablePaginationProps = {
   loading?: boolean
   onPageChange: (page: number) => void
   onPageSizeChange?: (preference: DataTablePageSizePreference) => void
+  stableDesktopLayout?: boolean
   ariaLabel?: string
 }
 
@@ -47,6 +49,7 @@ export function DataTablePagination({
   onPageChange,
   onPageSizeChange,
   ariaLabel = "페이지 탐색",
+  stableDesktopLayout = false,
 }: DataTablePaginationProps) {
   const pagination = getNumberedPagination({ page, pageSize, totalCount })
   const navigationDisabled = loading || pagination.totalPages === null
@@ -93,9 +96,9 @@ export function DataTablePagination({
               </Button>
             </PaginationItem>
             <PaginationItem>
-              <div data-slot="pagination-number-group" className="flex flex-wrap justify-center gap-1">
+              <div data-slot="pagination-number-group" className={cn("flex flex-wrap justify-center gap-1", stableDesktopLayout && "xl:w-[356px] xl:flex-nowrap")}>
                 {pagination.pages.map((number) => (
-                  <Button key={number} type="button" variant={number === pagination.page ? "default" : "outline"} size="sm" aria-label={`${number} 페이지`} aria-current={number === pagination.page ? "page" : undefined} onClick={() => changePage(number)} disabled={navigationDisabled}>
+                  <Button key={number} className={stableDesktopLayout ? "xl:w-8 xl:px-0" : undefined} type="button" variant={number === pagination.page ? "default" : "outline"} size="sm" aria-label={`${number} 페이지`} aria-current={number === pagination.page ? "page" : undefined} onClick={() => changePage(number)} disabled={navigationDisabled}>
                     {number}
                   </Button>
                 ))}

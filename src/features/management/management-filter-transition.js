@@ -39,7 +39,8 @@ export function serializeManagementListFilters(kind, searchParamString) {
     return JSON.stringify({
       kind,
       search: normalizeSearchValue(params.get("q")),
-      periodId: nullableSearchParam(params, "period"),
+      // Kept as null for the existing RPC filter schema; period URLs are retired.
+      periodId: null,
       status: nullableSearchParam(params, "status") || "수강",
       subject: nullableSearchParam(params, "subject"),
       grade: nullableSearchParam(params, "grade"),

@@ -160,7 +160,7 @@ select is(data#>>'{stats,totalSessions}','2','selected-view stats use filtered c
 select is(data#>>'{stats,viewModeCounts,all}','4','view counts remain pre-view') from update_view;
 select is(data#>'{filterOptions,grades}','["고2","고3"]'::jsonb,'options use base before view selection') from update_view;
 select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"periodId":"__numbered_period_A__"}'),11,10)->>'resolvedPeriodId','__numbered_period_A__','explicit period name alias remains selector');
-select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"periodId":null}'),11,10)->>'resolvedPeriodId',pg_temp.fid(901)::text,'absent period resolves deterministic default UUID');
+select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"periodId":null}'),11,10)->'resolvedPeriodId','null'::jsonb,'absent period remains unscoped');
 select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af(),11,10,false)->'stats','null'::jsonb,'metadata false stats explicit null');
 select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af(),11,10,false)->'filterOptions','null'::jsonb,'metadata false options explicit null');
 select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af(),11,10,false)->>'totalCount','111','metadata false count still fresh');
@@ -169,7 +169,7 @@ update public.class_schedule_sync_groups set is_default=false where is_default;
 update public.class_schedule_sync_groups set is_default=true where id=pg_temp.fid(902);
 set local role authenticated;
 select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af(),11,10,false)->>'resolvedPeriodId',pg_temp.fid(901)::text,'pinned period unchanged after default mutation');
-select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"periodId":null}'),1,10)->>'totalCount','2','new absent scope follows new default');
+select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"periodId":null}'),1,10)->>'totalCount','111','absent period remains unscoped after default mutation');
 
 -- Guard validation before object expansion and offset arithmetic; exact SQLSTATE.
 select throws_ok(format('select public.get_academic_curriculum_numbered_page_v1(%L::jsonb,1,10)',bad),'22023',null,'academic rejects invalid JSON/filter shape')
