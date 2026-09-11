@@ -17,7 +17,6 @@ const CONTINUOUS_CLASS_SCHEDULE_RPC = {
   initializeNewClass: "initialize_new_class_schedule_v1",
   saveDefaults: "save_class_schedule_defaults_v1",
 };
-const CLASS_CREATE_WITH_GROUPS_RPC = "create_class_with_group_memberships_v1";
 const CLASS_REPLACE_GROUPS_RPC = "replace_class_group_memberships_v1";
 const MANAGEMENT_LIST_PAGE_SIZES = new Set([10, 15, 20]);
 const MANAGEMENT_LIST_DEFAULT_PAGE_SIZE = 20;
@@ -1734,10 +1733,12 @@ export function createManagementService(options = {}) {
         generateId,
         candidateMembershipContext: options.candidateMembershipContext,
       });
-      const { data, error } = await client.rpc(CLASS_CREATE_WITH_GROUPS_RPC, {
+      const { data, error } = await client.rpc("create_class_with_group_memberships_v1", {
         p_class: stripPayloadFields(payload, ["student_ids", "waitlist_ids"]),
         p_group_ids: groupIds,
-      });
+      })
+        .abortSignal(AbortSignal.timeout(8_000))
+        .retry(false);
       if (error) {
         throw error;
       }

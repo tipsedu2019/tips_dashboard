@@ -6456,7 +6456,7 @@ function InventoryCountWorkspace({
                 })}
               </Fragment>;
             })}
-            {visibleRows.length === 0 ? <DataTableBodyRow><DataTableBodyCell colSpan={9} className="h-28 text-center text-muted-foreground"><span role="status">{noRowsLabel}</span></DataTableBodyCell></DataTableBodyRow> : null}
+            {visibleRows.length === 0 ? <DataTableBodyRow><DataTableBodyCell colSpan={8} className="h-28 text-center text-muted-foreground"><span role="status">{noRowsLabel}</span></DataTableBodyCell></DataTableBodyRow> : null}
           </TableBody>
         </Table>
       </DataTableViewport>

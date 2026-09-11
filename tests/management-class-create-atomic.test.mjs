@@ -9,23 +9,30 @@ const GROUP_IDS = [
   "20000000-0000-4000-8000-000000000102",
 ];
 
-function makeAtomicClassCreateClient() {
+function makeAtomicClassCreateClient({ error = null } = {}) {
   const calls = [];
+  const requestControls = [];
 
   return {
     calls,
+    requestControls,
     from() {
       throw new Error("direct class write invoked");
     },
-    async rpc(name, args) {
+    rpc(name, args) {
       calls.push([name, args]);
-      return {
+      const result = {
         data: {
           id: CLASS_ID,
           name: "초6 중등과정반",
           status: "수강",
         },
-        error: null,
+        error,
+      };
+      return {
+        abortSignal(signal) { requestControls.push(["signal", signal]); return this; },
+        retry(value) { requestControls.push(["retry", value]); return this; },
+        then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); },
       };
     },
   };
@@ -76,6 +83,10 @@ test("class creation commits any explicit group memberships through one atomic R
     },
     p_group_ids: GROUP_IDS,
   }]]);
+  assert.equal(client.requestControls[0][0], "signal");
+  assert.ok(client.requestControls[0][1] instanceof AbortSignal);
+  assert.equal(client.requestControls[0][1].aborted, false);
+  assert.deepEqual(client.requestControls[1], ["retry", false]);
 });
 
 test("class creation accepts no period and sends an empty group list through the same atomic RPC", async () => {
@@ -111,4 +122,13 @@ test("explicit class group replacement continues to use the atomic membership RP
     p_class_id: CLASS_ID,
     p_group_ids: GROUP_IDS,
   }]]);
+});
+
+test("class creation surfaces a failed response without starting a second write", async () => {
+  const error = new Error("response unavailable");
+  const client = makeAtomicClassCreateClient({ error });
+  const service = createManagementService({ supabase: client });
+  await assert.rejects(service.createClass({ id: CLASS_ID, name: "수업" }), (actual) => actual === error);
+  assert.equal(client.calls.length, 1);
+  assert.deepEqual(client.requestControls[1], ["retry", false]);
 });

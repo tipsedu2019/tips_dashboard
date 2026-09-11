@@ -429,6 +429,16 @@
       "fileName": "20260909084131_validate_unused_notification_retirement.sql",
       "status": "final",
       "sha256": "a8941cf65d1ed8e3b88da06ef6d92f9f0fc90e6605fa5bfd165076b6b97d2381"
+    },
+    {
+      "fileName": "20260909152352_allow_classes_without_period_memberships.sql",
+      "status": "final",
+      "sha256": "97e8d39f387c7c8a7936102e31759ffbaa0c3866b68438235331963a43d7d58e"
+    },
+    {
+      "fileName": "20260909153611_remove_academic_curriculum_default_period_scope.sql",
+      "status": "final",
+      "sha256": "9135a5684b62fb9e11712182eb28e01f83532f3cd2eccbb626b66603ae81e7c8"
     }
   ]
 }

@@ -11,6 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/lib/supabase";
 
 import { createId, managementService } from "./management-service.js";
+import { collectClassGroupPages, sortClassGroupRows } from "./class-group-pagination";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
@@ -36,6 +37,8 @@ const CLASS_GROUP_TABLE_COLUMNS = [
   { id: "subject", label: "과목" },
   { id: "action", label: "작업", required: true },
 ] satisfies SettingsTableColumn[];
+
+const CLASS_GROUP_PAGE_SIZE = 30;
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -81,16 +84,22 @@ export function ClassGroupMasterWorkspace() {
       setLoading(false);
       return;
     }
+    const client = supabase;
 
     setLoading(true);
     setError(null);
 
     try {
-      const { data, error: queryError } = await supabase
-        .from("class_schedule_sync_groups")
-        .select("id, name, subject, sort_order, is_default")
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true });
+      const { data, error: queryError } = await collectClassGroupPages(async (afterId) => {
+        return client
+          .from("class_schedule_sync_groups")
+          .select("id, name, subject, sort_order, is_default")
+          .or(afterId ? `id.gt.${afterId}` : "id.not.is.null")
+          .order("id", { ascending: true })
+          .limit(30)
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false);
+      }, CLASS_GROUP_PAGE_SIZE);
 
       if (queryError) {
         const message = String(queryError.message || "");
@@ -98,22 +107,28 @@ export function ClassGroupMasterWorkspace() {
           throw queryError;
         }
 
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from("class_schedule_sync_groups")
-          .select("id, name, subject")
-          .order("name", { ascending: true });
+        const { data: fallbackData, error: fallbackError } = await collectClassGroupPages(async (afterId) => {
+          return client
+            .from("class_schedule_sync_groups")
+            .select("id, name, subject")
+            .or(afterId ? `id.gt.${afterId}` : "id.not.is.null")
+            .order("id", { ascending: true })
+            .limit(30)
+            .abortSignal(AbortSignal.timeout(8_000))
+            .retry(false);
+        }, CLASS_GROUP_PAGE_SIZE);
 
         if (fallbackError) {
           throw fallbackError;
         }
 
-        setRows((fallbackData || []).map((row, index) => toClassGroupRecord(row as Record<string, unknown>, index + 1)));
+        setRows(sortClassGroupRows(fallbackData || [], false).map((row, index) => toClassGroupRecord(row, index + 1)));
         setDeletedIds([]);
         setIsDirty(false);
         return;
       }
 
-      setRows((data || []).map((row, index) => toClassGroupRecord(row as Record<string, unknown>, index + 1)));
+      setRows(sortClassGroupRows(data || [], true).map((row, index) => toClassGroupRecord(row, index + 1)));
       setDeletedIds([]);
       setIsDirty(false);
     } catch (loadError) {

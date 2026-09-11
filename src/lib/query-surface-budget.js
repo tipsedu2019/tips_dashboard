@@ -80,6 +80,10 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "finish_registration_observation_explicit_chat_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
+  // 20260909152352 + class_period_membership_optional_test.sql: creates one
+  // identified class and returns that row. This action has no pageable result;
+  // timeout and retry(false) remain mandatory, as for close_class_atomic_v1.
+  "create_class_with_group_memberships_v1",
 ])
 const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
   "save_class_schedule_defaults_v1",
