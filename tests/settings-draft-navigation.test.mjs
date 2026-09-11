@@ -44,6 +44,13 @@ async function mount(t, spec, rows = [spec.row]) {
   const { createRoot } = await import("react-dom/client");
   const root = createRoot(document.getElementById("root"));
   const flush = async callback => { await act(async () => { callback?.(); await new Promise(resolve => setTimeout(resolve, 25)); }); };
+  const waitForRoutes = async count => {
+    // Radix releases the dialog's focus scope after React commits its close.
+    // Confirmed navigation is queued from that cleanup, beyond the first act.
+    const deadline = performance.now() + 2_000;
+    while (routes.length < count && performance.now() < deadline) await flush();
+    assert.equal(routes.length, count, "confirmed navigation must complete exactly once");
+  };
   await flush(() => root.render(createElement(Component)));
   t.after(async () => { await act(async () => root.unmount()); await flush(); dom.window.close(); });
   const button = name => [...document.querySelectorAll("button")].find(b => b.textContent.trim() === name);
@@ -59,7 +66,7 @@ async function mount(t, spec, rows = [spec.row]) {
   const unload = () => { const e = new window.Event("beforeunload", { cancelable: true }); window.dispatchEvent(e); return e.defaultPrevented; };
   const acceptLoad = () => flush(() => request.resolve(spec.kind === "subject" ? rows : { data: rows, error: null }));
   const acceptSave = index => flush(() => writes[index].resolve(spec.kind === "subject" ? writes[index].payload : undefined));
-  return { flush, button, field, edit, confirmation, app, save, unload, routes, writes, traversals, acceptLoad, acceptSave };
+  return { flush, waitForRoutes, button, field, edit, confirmation, app, save, unload, routes, writes, traversals, acceptLoad, acceptSave };
 }
 for (const spec of cases) test(`${spec.kind}: clean load, anchor cancellation, app discard and Back share draft protection`, async t => {
   const ui = await mount(t, spec);
@@ -70,7 +77,7 @@ for (const spec of cases) test(`${spec.kind}: clean load, anchor cancellation, a
   assert.equal(spec.kind === "subject" ? ui.field().getAttribute("aria-checked") : ui.field().value, spec.kind === "subject" ? "false" : "미저장 초안");
   await ui.flush(() => { const e = new window.Event("navigate", { cancelable: true }); Object.assign(e, { navigationType: "traverse", destination: { key: "old-entry", sameDocument: true } }); window.navigation.dispatchEvent(e); assert.equal(e.defaultPrevented, true); });
   assert.ok(ui.confirmation()); await ui.flush(() => ui.button("계속 편집").click()); assert.deepEqual(ui.traversals, []);
-  await ui.app("/accepted"); await ui.app("/must-not-overwrite"); assert.ok(ui.confirmation()); await ui.flush(() => ui.button("변경사항 버리기").click()); assert.deepEqual(ui.routes, ["/clean", "/accepted"]);
+  await ui.app("/accepted"); await ui.app("/must-not-overwrite"); assert.ok(ui.confirmation()); await ui.flush(() => ui.button("변경사항 버리기").click()); await ui.waitForRoutes(2); assert.deepEqual(ui.routes, ["/clean", "/accepted"]);
 });
 for (const spec of cases) test(`${spec.kind}: pending/failed save keeps guard; accepted save becomes clean`, async t => {
   const ui = await mount(t, spec); await ui.acceptLoad(); await ui.edit(); await ui.save(); assert.equal(ui.writes.length, 1); assert.equal(ui.unload(), true, "submitted but unaccepted values remain protected");
