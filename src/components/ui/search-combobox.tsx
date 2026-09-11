@@ -93,7 +93,7 @@ function SearchCombobox({
           id={triggerId}
           type="button"
           role="combobox"
-          aria-label={triggerAriaLabel}
+          aria-label={triggerAriaLabel || `${searchAriaLabel}: ${triggerLabel}`}
           aria-expanded={open}
           variant="outline"
           className={cn("h-10 w-full justify-between px-3", triggerClassName)}
@@ -111,7 +111,7 @@ function SearchCombobox({
       </PopoverTrigger>
       <PopoverContent
         align="start"
-        className={cn("w-[--radix-popover-trigger-width] p-0", contentClassName)}
+        className={cn("w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] p-0", contentClassName)}
       >
         <Command
           shouldFilter={false}

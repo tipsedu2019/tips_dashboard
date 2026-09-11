@@ -14,32 +14,9 @@
 :is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
   height: var(--student-control-height);
   border-radius: var(--student-control-radius);
-  box-shadow: none;
   font-size: 15px;
-  transition-property: background-color, border-color, color;
-  transition-duration: var(--student-motion-fast);
 }
 .student-list-toolbar [aria-label$="검색어 지우기"] { height: 32px; }
-:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
-  background: var(--background);
-  border-color: color-mix(in oklch, var(--input), var(--foreground) 12%);
-}
-:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]):hover:not(:disabled) {
-  border-color: color-mix(in oklch, var(--input), var(--foreground) 25%);
-}
-:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]):focus-visible {
-  outline: 3px solid color-mix(in oklch, var(--ring), transparent 65%);
-  outline-offset: 1px;
-  border-color: var(--ring);
-  box-shadow: none;
-}
-:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]):disabled {
-  background: var(--muted);
-  color: var(--muted-foreground);
-}
-:is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"])[aria-invalid="true"] {
-  border-color: var(--destructive);
-}
 
 .student-edit-overlay,
 .class-edit-overlay {

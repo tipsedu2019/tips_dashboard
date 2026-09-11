@@ -92,6 +92,10 @@ test("master bulk edit dialog keeps selection while cancel resets the draft befo
   assert.equal(button("선택 교재 변경 저장").disabled, false);
 
   await h.act(() => button("선택 교재 속성 변경 취소").click());
+  if (document.querySelector('[data-testid="draft-navigation-confirm-dialog"]')) {
+    await h.act(() => button("변경사항 버리기").click());
+    await h.act(() => new Promise(resolve => setTimeout(resolve, 30)));
+  }
   assert.equal(document.querySelector('[role="dialog"]'), null);
   assert.ok(document.querySelector('[aria-label="선택한 교재 일괄 작업"]')?.textContent.includes("1개 선택"));
 
@@ -150,6 +154,10 @@ test("master bulk edit dialog revision rejects late failure and completion after
   assert.ok(firstWriter);
 
   await h.act(() => button("선택 교재 속성 변경 취소").click());
+  if (document.querySelector('[data-testid="draft-navigation-confirm-dialog"]')) {
+    await h.act(() => button("변경사항 버리기").click());
+    await h.act(() => new Promise(resolve => setTimeout(resolve, 30)));
+  }
   await h.act(() => button("속성 변경").click());
   await changeInput(h, "일괄 출판사", "동일 초안 출판사");
   await h.reject(firstWriter, { message: "늦은 합성 실패" });
@@ -163,6 +171,10 @@ test("master bulk edit dialog revision rejects late failure and completion after
   const secondWriter = h.requests.filter(request => request.table === "textbooks").at(-1);
   assert.notEqual(secondWriter, firstWriter);
   await h.act(() => button("선택 교재 속성 변경 취소").click());
+  if (document.querySelector('[data-testid="draft-navigation-confirm-dialog"]')) {
+    await h.act(() => button("변경사항 버리기").click());
+    await h.act(() => new Promise(resolve => setTimeout(resolve, 30)));
+  }
   await h.act(() => button("속성 변경").click());
   await changeInput(h, "일괄 출판사", "동일 초안 출판사");
   const rpcCount = h.requests.filter(request => request.name).length;

@@ -11,6 +11,7 @@ import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
 import { readOpsTaskListNavigation, writeOpsTaskListNavigation } from "./ops-task-list-navigation"
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
 import { Button } from "@/components/ui/button"
+import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import {
   Dialog,
   DialogContent,
@@ -41,6 +42,8 @@ import {
   subjectSupports,
 } from "@/lib/academic-subject-registry"
 import { supabase } from "@/lib/supabase"
+import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
+import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback"
 import { useAuth } from "@/providers/auth-provider"
 
 import {
@@ -604,7 +607,6 @@ const LINKED_SELECT_QUERY_OPTION_LIMIT = 50
 const LINKED_SELECT_MANUAL_VALUE = "__manual__"
 const HORIZONTAL_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md border bg-background p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const HORIZONTAL_MUTED_CHIP_BAR_CLASS = "flex gap-1.5 overflow-x-auto rounded-md bg-muted/45 p-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
-const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
 const TOUCH_SCROLL_AREA_STYLE = {
   WebkitOverflowScrolling: "touch",
   overscrollBehavior: "contain",
@@ -7925,6 +7927,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [operationTablePageControls, setOperationTablePageControls] = useState<OperationTablePageControls>(EMPTY_OPERATION_TABLE_PAGE_CONTROLS)
   const [wordRetestTablePageSort, setWordRetestTablePageSort] = useState<{ column: string | null; direction: "asc" | "desc" | null }>({ column: null, direction: null })
   const [wordRetestScoreDrafts, setWordRetestScoreDrafts] = useState<Record<string, WordRetestScoreDraft>>({})
+  const wordRetestScoreBaselinesRef = useRef<Record<string, WordRetestScoreDraft>>({})
+  const wordRetestScoreSavingRef = useRef(new Set<string>())
   const [wordRetestStudentIds, setWordRetestStudentIds] = useState<string[]>([])
   const [wordRetestSelectedTaskIds, setWordRetestSelectedTaskIds] = useState<Set<string>>(() => new Set())
   const [wordRetestManualOpen, setWordRetestManualOpen] = useState(false)
@@ -7958,6 +7962,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const [formCompletionBlockers, setFormCompletionBlockers] = useState<string[]>([])
   const [formCompletionIntent, setFormCompletionIntent] = useState<FormCompletionIntent | null>(null)
   const [confirmingFormClose, setConfirmingFormClose] = useState(false)
+  const confirmingFormCloseRef = useRef(confirmingFormClose)
+  confirmingFormCloseRef.current = confirmingFormClose
+  const pendingRouteNavigationRef = useRef(false)
+  const pendingLocalNavigationRef = useRef(false)
+  const confirmRouteAfterCloseRef = useRef(false)
+  const acceptedRouteNavigationRef = useRef(false)
   const formCloseReturnFocusRef = useRef<HTMLElement | null>(null)
   const workspaceMountedRef = useRef(false)
   const latestWorkspaceViewerIdRef = useRef(currentUserId)
@@ -8713,43 +8723,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     replaceRegistrationWorkspaceSearch({ mode: "list", view: registrationView, ownerScope })
   }
 
-  function handleRegistrationViewTabKeyDown(event: KeyboardEvent<HTMLButtonElement>, currentView: RegistrationWorkspaceViewKey) {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
-    event.preventDefault()
-    const currentIndex = registrationViewTabs.findIndex((tab) => tab.key === currentView)
-    const nextIndex = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? registrationViewTabs.length - 1
-        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + registrationViewTabs.length) % registrationViewTabs.length
-    const nextView = registrationViewTabs[nextIndex]?.key
-    if (!nextView) return
-    syncRegistrationView(nextView)
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>(`[data-registration-view-tab="${nextView}"]`)?.focus()
-    })
-  }
-
-  function handleRegistrationCalendarKindTabKeyDown(
-    event: KeyboardEvent<HTMLButtonElement>,
-    currentKind: RegistrationAppointmentCalendarKindFilter,
-  ) {
-    if (!["ArrowLeft", "ArrowRight", "Home", "End"].includes(event.key)) return
-    event.preventDefault()
-    const currentIndex = registrationCalendarKindTabs.findIndex((tab) => tab.key === currentKind)
-    const nextIndex = event.key === "Home"
-      ? 0
-      : event.key === "End"
-        ? registrationCalendarKindTabs.length - 1
-        : (currentIndex + (event.key === "ArrowRight" ? 1 : -1) + registrationCalendarKindTabs.length) % registrationCalendarKindTabs.length
-    const nextKind = registrationCalendarKindTabs[nextIndex]?.key
-    if (!nextKind) return
-    syncRegistrationCalendarKind(nextKind)
-    window.requestAnimationFrame(() => {
-      document.querySelector<HTMLButtonElement>(`[data-registration-calendar-kind-tab="${nextKind}"]`)?.focus()
-    })
-  }
-
   const syncWordRetestMode = (nextMode: WordRetestMode) => {
     if (isAssistant && nextMode !== "assistant") return
     setWordRetestMode(nextMode)
@@ -8835,7 +8808,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     const mutation = getOpsTaskHistoryMutation({ currentUrl, nextUrl, intent: historyIntent })
     if (mutation === "none") return
     if (mutation === "push") {
-      window.history.pushState(window.history.state, "", nextUrl)
+      pushLocalHistoryState(window, window.history.state, "", nextUrl)
       pushedTaskDetailHistoryUrlRef.current = nextUrl
       return
     }
@@ -9485,19 +9458,37 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       serializeOpsTaskInput(form) !== formBaselineRef.current
       || (form.type === "word_retest" && expectedRetestDraft.isPartial)
     )
-  const hasUnsavedWorkspaceInput = isFormDirty
+  const hasUnsavedDialogInput = isFormDirty
     || (registrationApplicationHost.kind === "detail" && registrationApplicationDirty)
+  const hasUnsavedWorkspaceInput = hasUnsavedDialogInput || Object.keys(wordRetestScoreDrafts).length > 0
   navigationBlockedRef.current = hasUnsavedWorkspaceInput || saving
 
+  const requestWorkspaceNavigationConfirmation = useCallback(() => {
+    if (confirmingFormCloseRef.current && !pendingRouteNavigationRef.current) return
+    pendingRouteNavigationRef.current = true
+    formCloseReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    setConfirmingFormClose(true)
+  }, [])
+  const navigateWorkspace = useCallback((href: string) => router.push(href), [router])
+  const workspaceNavigationGuard = useUnsavedNavigationGuard({
+    enabled: workspaceDataBelongsToCurrentViewer && (hasUnsavedWorkspaceInput || saving),
+    onConfirmRequest: requestWorkspaceNavigationConfirmation,
+    navigate: navigateWorkspace,
+  })
+  const { requestNavigation: requestGuardedWorkspaceNavigation } = workspaceNavigationGuard
+  const requestRegistrationLocalNavigation = useCallback((intent: () => void) => {
+    if (confirmingFormCloseRef.current) return
+    pendingLocalNavigationRef.current = true
+    requestGuardedWorkspaceNavigation(() => {
+      pendingLocalNavigationRef.current = false
+      intent()
+    }, { preserveHistory: true })
+  }, [requestGuardedWorkspaceNavigation])
   useEffect(() => {
-    if (!hasUnsavedWorkspaceInput) return
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      event.preventDefault()
-      event.returnValue = ""
-    }
-    window.addEventListener("beforeunload", handleBeforeUnload)
-    return () => window.removeEventListener("beforeunload", handleBeforeUnload)
-  }, [hasUnsavedWorkspaceInput])
+    if (hasUnsavedWorkspaceInput || saving || !pendingRouteNavigationRef.current) return
+    pendingRouteNavigationRef.current = false
+    setConfirmingFormClose(false)
+  }, [hasUnsavedWorkspaceInput, saving])
   const isEditingLockedCompletedTask = Boolean(editingTask && isClosedOpsTask(editingTask) && !formCompletionIntent)
   const canSubmitCurrentForm = canSubmitOpsTaskForm(form, Boolean(editingTask))
   const formDialogTitle = formCompletionIntent?.kind === "word_retest_retry"
@@ -10605,7 +10596,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }, [canManageRegistrationWorkflow, notificationSessionToken, reload, saving])
 
-  const closeRegistrationApplicationHost = useCallback(() => {
+  const closeRegistrationApplicationHost = useCallback((syncLocation = true) => {
     registrationObservationLoadOwnershipRef.current.invalidate()
     setRegistrationApplicationHost({ kind: "closed" })
     setFormOpen(false)
@@ -10623,7 +10614,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationCreateAttemptRef.current = null
     registrationCommittedReceiptRef.current = null
     registrationCloseDeepLinkRestoreRef.current = null
-    syncTaskDeepLink(null)
+    if (syncLocation) syncTaskDeepLink(null)
   }, [syncTaskDeepLink])
 
   const requestRegistrationApplicationClose = useCallback(() => {
@@ -10642,6 +10633,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   useEffect(() => {
     if (deleteTarget) return
+    const acceptedRouteNavigation = acceptedRouteNavigationRef.current
+    acceptedRouteNavigationRef.current = false
     const currentSearchParams = new URLSearchParams(window.location.search)
     if (currentSearchParams.has("observationId")) return
     const deepLinkedTaskId = currentSearchParams.get("taskId") || ""
@@ -10665,7 +10658,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       const dirtyBackPlan = getRegistrationDirtyBackPlan({
         urlHasTask: false,
         hostKind: registrationApplicationHost.kind,
-        dirty: registrationApplicationDirty,
+        dirty: !acceptedRouteNavigation && registrationApplicationDirty,
         taskId: registrationApplicationHost.taskId,
         focusTrackId: registrationApplicationHost.focusTrackId,
         appointmentId: registrationApplicationHost.appointmentId,
@@ -10688,7 +10681,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           ? "forward"
           : "replace"
       }
-      requestRegistrationApplicationClose()
+      if (acceptedRouteNavigation) closeRegistrationApplicationHost()
+      else requestRegistrationApplicationClose()
       return
     }
     if (directRegistrationTarget) {
@@ -10796,7 +10790,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     registrationTrackSelectionRef.current = ""
     setSelectedTask(deepLinkedTask)
     setDetailOpen(true)
-  }, [data, deleteTarget, isRegistrationWorkspace, detailOpen, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
+  }, [data, deleteTarget, isRegistrationWorkspace, detailOpen, closeRegistrationApplicationHost, openRegistrationAppointment, openRegistrationCase, openRegistrationObservation, openRegistrationTrack, openWordRetestEditor, registrationApplicationDirty, registrationApplicationHost, registrationCaseDetail?.task.id, registrationDeepLinkedAttempt?.observationId, registrationObservationRuntime.runtimeVersion, registrationViewerId, requestRegistrationApplicationClose, searchParams, selectedRegistrationAppointmentId, selectedRegistrationTrackId, selectedTask, syncTaskDeepLink, taskById, taskHistoryRevision, workspaceDataBelongsToCurrentViewer])
 
   function handleDetailOpenChange(nextOpen: boolean) {
     setDetailOpen(nextOpen)
@@ -10831,6 +10825,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   function discardFormAndClose() {
+    if (pendingRouteNavigationRef.current) {
+      confirmRouteAfterCloseRef.current = true
+      setConfirmingFormClose(false)
+      return
+    }
+    workspaceNavigationGuard.cancelNavigation()
     const closeDecision = getRegistrationDirtyCloseDecision(
       "discard",
       registrationCloseDeepLinkRestoreRef.current,
@@ -10852,6 +10852,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   function cancelFormCloseConfirmation() {
+    pendingRouteNavigationRef.current = false
+    pendingLocalNavigationRef.current = false
+    confirmRouteAfterCloseRef.current = false
+    workspaceNavigationGuard.cancelNavigation()
     pendingNavigationRestoreRef.current = false
     const restoreDeepLink = registrationCloseDeepLinkRestoreRef.current
     const closeDecision = getRegistrationDirtyCloseDecision("cancel", restoreDeepLink, {
@@ -11717,8 +11721,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       await refreshFirstTaskPageAfterMutation()
       await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, notificationSessionToken)
       setNotice(successMessage)
+      return true
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "단어 재시험 진행상태를 바꾸지 못했습니다."))
+      return false
     } finally {
       setSaving(false)
     }
@@ -11844,17 +11850,22 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }
 
   const updateWordRetestScoreDraft = (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => {
-    setWordRetestScoreDrafts((current) => ({
-      ...current,
-      [task.id]: {
-        ...(current[task.id] || getWordRetestScoreDraft(task)),
-        [key]: value,
-      },
-    }))
+    setWordRetestScoreDrafts((current) => {
+      const baseline = current[task.id]
+        ? wordRetestScoreBaselinesRef.current[task.id] || getWordRetestScoreDraft(task)
+        : getWordRetestScoreDraft(task)
+      wordRetestScoreBaselinesRef.current[task.id] = baseline
+      const next = { ...(current[task.id] || baseline), [key]: value }
+      const drafts = { ...current }
+      if (JSON.stringify(next) === JSON.stringify(baseline)) delete drafts[task.id]
+      else drafts[task.id] = next
+      return drafts
+    })
   }
 
   const saveWordRetestInlineScores = async (task: OpsTask) => {
     const wordRetest = task.wordRetest || {}
+    if (wordRetestScoreSavingRef.current.has(task.id)) return
     if (isWordRetestAbsent(wordRetest)
       || task.status !== "in_progress"
       || wordRetest.retestStatus !== "in_progress") {
@@ -11862,21 +11873,28 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return
     }
     const draft = wordRetestScoreDrafts[task.id] || getWordRetestScoreDraft(task)
-
-    await updateWordRetestFlow(task, {
-      ...formFromTask(task),
-      status: task.status,
-      wordRetest: {
-        ...wordRetest,
-        ...draft,
-        retestStatus: wordRetest.retestStatus || "not_started",
-      },
-    }, "점수를 저장했습니다.")
-    setWordRetestScoreDrafts((current) => {
-      const nextDrafts = { ...current }
-      delete nextDrafts[task.id]
-      return nextDrafts
-    })
+    wordRetestScoreSavingRef.current.add(task.id)
+    try {
+      const saved = await updateWordRetestFlow(task, {
+        ...formFromTask(task),
+        status: task.status,
+        wordRetest: {
+          ...wordRetest,
+          ...draft,
+          retestStatus: wordRetest.retestStatus || "not_started",
+        },
+      }, "점수를 저장했습니다.")
+      if (!saved) return
+      wordRetestScoreBaselinesRef.current[task.id] = draft
+      setWordRetestScoreDrafts((current) => {
+        if (JSON.stringify(current[task.id]) !== JSON.stringify(draft)) return current
+        const nextDrafts = { ...current }
+        delete nextDrafts[task.id]
+        return nextDrafts
+      })
+    } finally {
+      wordRetestScoreSavingRef.current.delete(task.id)
+    }
   }
 
   const changeRegistrationPipeline = async (task: OpsTask, pipelineStatus: string) => {
@@ -12236,6 +12254,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     if (isTodoWorkspace) focusQuickAdd()
   }, [focusQuickAdd, isTodoWorkspace])
+  const workspaceTab = isWordRetestWorkspace ? wordRetestMode
+    : isRegistrationWorkspace ? registrationMode === "calendar" ? registrationCalendarKind : registrationView
+    : isWithdrawalWorkspace || isTransferWorkspace ? withdrawalView
+    : isTodoWorkspace ? todoView : view
+
+  const changeWorkspaceTab = (nextView: string) => {
+    if (isWordRetestWorkspace) syncWordRetestMode(nextView as WordRetestMode)
+    else if (isRegistrationWorkspace) {
+      if (registrationMode === "calendar") syncRegistrationCalendarKind(nextView as RegistrationAppointmentCalendarKindFilter)
+      else syncRegistrationView(nextView as RegistrationWorkspaceViewKey)
+    } else if (isWithdrawalWorkspace || isTransferWorkspace) syncWithdrawalView(nextView as WithdrawalViewKey)
+    else if (isTodoWorkspace) syncTodoView(nextView as TodoViewKey)
+    else syncView(nextView as ViewKey)
+  }
+
   const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace
     ? "flex flex-col gap-2"
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
@@ -12271,7 +12304,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [bulkDeleteTargets.length, deleteTarget, detailOpen, focusQuickAdd, focusSearch, formOpen, isTodoWorkspace])
 
   return (
-    <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+    <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
       {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0 && (
         <div className={HORIZONTAL_CHIP_BAR_CLASS}>
           {visibleOperationMetrics.map((metric) => (
@@ -12316,33 +12349,24 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
         <div className={isTodoWorkspace ? "flex min-w-0 flex-col gap-2 sm:flex-row sm:items-start" : isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2" : "flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"}>
-	          <div className={`${HORIZONTAL_TAB_BAR_CLASS} ${isTodoWorkspace ? "flex-1" : isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto" : isRegistrationWorkspace ? "w-full !flex-nowrap !overflow-x-auto lg:flex-1" : "w-full lg:flex-1"}`} role="tablist" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? registrationMode === "calendar" ? "등록 예약 종류" : "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
+          <WorkspaceTabsList className="lg:w-auto lg:flex-1" aria-label={isTodoWorkspace ? "할 일 목록" : isWordRetestWorkspace ? "단어 재시험 역할" : isRegistrationWorkspace ? registrationMode === "calendar" ? "등록 예약 종류" : "등록 흐름" : isWithdrawalWorkspace ? "퇴원 흐름" : isTransferWorkspace ? "전반 흐름" : `${workspaceLabel} 보기`}>
 	            {isWordRetestWorkspace
 	              ? wordRetestRoleTabs.map((tab) => {
 	                const roleCount = wordRetestRoleCounts[tab.key]
 
 	                return (
-	                  <button
+	                  <WorkspaceTabsTrigger
 	                    key={tab.key}
-	                    type="button"
-	                    role="tab"
-	                    onClick={() => syncWordRetestMode(tab.key)}
-	                    aria-selected={wordRetestMode === tab.key}
+	                    value={tab.key}
 	                    aria-label={roleCount > 0 ? `${tab.label} ${roleCount}건` : tab.label}
-	                    className={[
-	                      "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-	                      wordRetestMode === tab.key
-	                        ? "bg-primary text-primary-foreground"
-	                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-	                    ].join(" ")}
 	                  >
 	                    <span>{tab.label}</span>
 	                    {roleCount > 0 && (
-	                      <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+	                      <span aria-hidden="true" className="text-xs tabular-nums opacity-80">
 	                        {roleCount}
 	                      </span>
 	                    )}
-	                  </button>
+	                  </WorkspaceTabsTrigger>
 	                )
 	              })
 	              : isRegistrationWorkspace
@@ -12351,52 +12375,30 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                    const registrationCount = registrationCalendarKindCounts[tab.key]
 
 	                    return (
-	                      <button
+	                      <WorkspaceTabsTrigger
 	                        key={tab.key}
-	                        type="button"
-	                        role="tab"
+	                        value={tab.key}
 	                        data-registration-calendar-kind-tab={tab.key}
-	                        tabIndex={registrationCalendarKind === tab.key ? 0 : -1}
-	                        onClick={() => syncRegistrationCalendarKind(tab.key)}
-	                        onKeyDown={(event) => handleRegistrationCalendarKindTabKeyDown(event, tab.key)}
-	                        aria-selected={registrationCalendarKind === tab.key}
 	                        aria-label={registrationCount > 0 ? `${tab.label} ${registrationCount}건` : tab.label}
-	                        className={[
-	                          "shrink-0 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
-	                          registrationCalendarKind === tab.key
-	                            ? "bg-primary text-primary-foreground"
-	                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
-	                        ].join(" ")}
 	                      >
 	                        <span>{tab.label}</span>
 	                        <RegistrationTabCountSlot count={registrationCount} />
-	                      </button>
+	                      </WorkspaceTabsTrigger>
 	                    )
 	                  })
 	                  : registrationViewTabs.map((tab) => {
 	                    const registrationCount = registrationCounts[tab.key]
 
 	                    return (
-	                      <button
+	                      <WorkspaceTabsTrigger
 	                        key={tab.key}
-	                        type="button"
-	                        role="tab"
+	                        value={tab.key}
 	                        data-registration-view-tab={tab.key}
-	                        tabIndex={registrationView === tab.key ? 0 : -1}
-	                        onClick={() => syncRegistrationView(tab.key)}
-	                        onKeyDown={(event) => handleRegistrationViewTabKeyDown(event, tab.key)}
-	                        aria-selected={registrationView === tab.key}
 	                        aria-label={registrationCount > 0 ? `${tab.label} ${registrationCount}건` : tab.label}
-	                        className={[
-	                          "shrink-0 rounded-md px-3 py-2 text-sm font-medium outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/40",
-	                          registrationView === tab.key
-	                            ? "bg-primary text-primary-foreground"
-	                            : "text-muted-foreground hover:bg-muted hover:text-foreground",
-	                        ].join(" ")}
 	                      >
 	                        <span>{tab.label}</span>
 	                        <RegistrationTabCountSlot count={registrationCount} />
-	                      </button>
+	                      </WorkspaceTabsTrigger>
 	                    )
 	                  })
 	              : isWithdrawalWorkspace || isTransferWorkspace
@@ -12404,27 +12406,18 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                  const withdrawalCount = (isTransferWorkspace ? transferCounts : withdrawalCounts)[tab.key]
 
 	                  return (
-	                    <button
+	                    <WorkspaceTabsTrigger
 	                      key={tab.key}
-	                      type="button"
-	                      role="tab"
-	                      onClick={() => syncWithdrawalView(tab.key)}
-	                      aria-selected={withdrawalView === tab.key}
+	                      value={tab.key}
 	                      aria-label={withdrawalCount > 0 ? `${tab.label} ${withdrawalCount}건` : tab.label}
-	                      className={[
-	                        "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-	                        withdrawalView === tab.key
-	                          ? "bg-primary text-primary-foreground"
-	                          : "text-muted-foreground hover:bg-muted hover:text-foreground",
-	                      ].join(" ")}
 	                    >
 	                      <span>{tab.label}</span>
 	                      {withdrawalCount > 0 && (
-	                        <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+	                        <span aria-hidden="true" className="text-xs tabular-nums opacity-80">
 	                          {withdrawalCount}
 	                        </span>
 	                      )}
-	                    </button>
+	                    </WorkspaceTabsTrigger>
 	                  )
 	                })
 	              : isTodoWorkspace
@@ -12432,47 +12425,29 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                const todoCount = todoCounts[tab.key]
 
                 return (
-                  <button
+                  <WorkspaceTabsTrigger
                     key={tab.key}
-                    type="button"
-                    role="tab"
-                    onClick={() => syncTodoView(tab.key)}
-                    aria-selected={todoView === tab.key}
+                    value={tab.key}
                     aria-label={todoCount > 0 ? `${tab.label} ${todoCount}건` : tab.label}
-                    className={[
-                      "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                      todoView === tab.key
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                    ].join(" ")}
                   >
                     <span>{tab.label}</span>
                     {todoCount > 0 && (
-                      <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
+                      <span aria-hidden="true" className="text-xs tabular-nums opacity-80">
                         {todoCount}
                       </span>
                     )}
-                  </button>
+                  </WorkspaceTabsTrigger>
                 )
               })
               : OPERATION_VIEW_TABS.map((tab) => (
-                <button
+                <WorkspaceTabsTrigger
                   key={tab.key}
-                  type="button"
-                  role="tab"
-                  onClick={() => syncView(tab.key)}
-                  aria-selected={view === tab.key}
-                  className={[
-                    "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    view === tab.key
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  ].join(" ")}
+                  value={tab.key}
                 >
                   {tab.label}
-                </button>
+                </WorkspaceTabsTrigger>
               ))}
-          </div>
+          </WorkspaceTabsList>
           <div className={isTodoWorkspace ? "flex shrink-0 flex-wrap items-center justify-end gap-2" : isWordRetestWorkspace ? "flex shrink-0 items-center justify-end gap-2" : "flex flex-wrap items-center gap-2 lg:shrink-0 lg:justify-end"}>
 	            {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && taskFocus !== "none" && (
               <Button type="button" variant="secondary" size="sm" onClick={() => syncView(view)}>
@@ -12506,6 +12481,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            )}
           </div>
         </div>
+        <WorkspaceTabsPanel className="flex flex-col gap-2">
         {isRegistrationWorkspace
           && registrationMode === "list"
           && isRegistrationConsultationViewKey(registrationView) ? (
@@ -12932,7 +12908,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               totalCount={listNumberedPage.totalCount}
               loading={numberedPage.loading}
               onPageChange={(page) => {
-                if (hasUnsavedWorkspaceInput) {
+                if (hasUnsavedDialogInput) {
                   if (registrationApplicationHost.kind !== "closed") requestRegistrationApplicationClose()
                   else closeForm()
                   return
@@ -12941,7 +12917,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 else setFixturePage(page)
               }}
               onPageSizeChange={(size) => {
-                if (hasUnsavedWorkspaceInput) {
+                if (hasUnsavedDialogInput) {
                   if (registrationApplicationHost.kind !== "closed") requestRegistrationApplicationClose()
                   else closeForm()
                   return
@@ -12952,6 +12928,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             />
           </div>
         ) : null}
+        </WorkspaceTabsPanel>
       </div>
       {registrationApplicationHost.kind === "closed" ? (
       <Dialog open={workspaceDataBelongsToCurrentViewer && formOpen} onOpenChange={handleFormOpenChange}>
@@ -13386,7 +13363,35 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           if (!nextOpen) cancelFormCloseConfirmation()
         }}
       >
-        <DialogContent className="z-[90] sm:max-w-md">
+        <DialogContent layer="nested" className="sm:max-w-md" data-testid="ops-draft-navigation-confirm-dialog"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const opener = formCloseReturnFocusRef.current
+            if (opener?.isConnected && !opener.matches(":disabled") && !opener.closest("[hidden], [inert]") && opener.getClientRects().length > 0) opener.focus({ preventScroll: true })
+            if (!confirmRouteAfterCloseRef.current) return
+            confirmRouteAfterCloseRef.current = false
+            pendingRouteNavigationRef.current = false
+            // Let this focus scope retire before the accepted route resumes.
+            queueMicrotask(() => {
+              if (pendingLocalNavigationRef.current) {
+                pendingLocalNavigationRef.current = false
+                workspaceNavigationGuard.confirmNavigation()
+                return
+              }
+              acceptedRouteNavigationRef.current = true
+              navigationBlockedRef.current = false
+              wordRetestScoreBaselinesRef.current = {}
+              setWordRetestScoreDrafts({})
+              workspaceNavigationGuard.confirmNavigation()
+              // Clear the accepted editor without rewriting the destination URL.
+              if (registrationApplicationHost.kind !== "closed") closeRegistrationApplicationHost(false)
+              else {
+                setFormOpen(false)
+                setFormCompletionIntent(null)
+                registrationCreateAttemptRef.current = null
+              }
+            })
+          }}>
           <DialogHeader>
             <DialogTitle>입력한 내용을 버릴까요?</DialogTitle>
             <DialogDescription className="sr-only">
@@ -13398,10 +13403,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </DialogHeader>
           <DialogFooter className="flex-col-reverse gap-2 sm:flex-row">
             <Button type="button" variant="outline" onClick={cancelFormCloseConfirmation} disabled={saving}>
-              계속 작성
+              계속 편집
             </Button>
             <Button type="button" variant="destructive" onClick={discardFormAndClose} disabled={saving}>
-              저장하지 않고 닫기
+              변경사항 버리기
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -13474,6 +13479,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       observationRuntime={registrationObservationRuntime}
                       deepLinkedAttempt={registrationDeepLinkedAttempt}
                       onFocusTrack={handleSelectRegistrationTrack}
+                      onRequestLocalNavigation={requestRegistrationLocalNavigation}
                       onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                       onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
                       onReload={reloadRegistrationCaseDetail}
@@ -13894,6 +13900,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 observationRuntime={registrationObservationRuntime}
                 deepLinkedAttempt={registrationDeepLinkedAttempt}
                 onFocusTrack={handleSelectRegistrationTrack}
+                      onRequestLocalNavigation={requestRegistrationLocalNavigation}
                 onAppointmentOpenChange={handleRegistrationAppointmentOpenChange}
                 onAppointmentSaved={() => setRegistrationCalendarRefreshToken((current) => current + 1)}
                 onReload={reloadRegistrationCaseDetail}
@@ -13971,7 +13978,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         </DialogContent>
       </Dialog>
 
-    </div>
+    </WorkspaceTabs>
   )
 }
 

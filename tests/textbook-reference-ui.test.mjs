@@ -449,6 +449,10 @@ test("master duplicate read blocks pending/error/stale submit and opens an off-p
   const duplicate = document.querySelector('[aria-label="교재 151 기존 교재 열기"]')
   assert.ok(duplicate)
   await h.act(() => duplicate.click())
+  assert.ok(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'), "opening an existing book must confirm the current draft")
+  assert.equal(h.requests.some(request => request.name === "get_textbook_master_detail_v1" && request.args.p_id === id(151)), false)
+  await h.act(() => button("변경사항 버리기").click())
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 30)))
   assert.ok(h.requests.find((request) => request.name === "get_textbook_master_detail_v1" && request.args.p_id === id(151)))
 })
 
@@ -850,8 +854,11 @@ test("request form keeps failed input and stable save controls, rejects double s
   assert.equal(dialog.querySelector('[role="alert"]'), null)
   await h.reject(retry, { message: "합성 재시도 실패" })
   await h.act(() => button("교재 요청·주문 창 닫기").click())
+  assert.ok(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'))
+  await h.act(() => button("변경사항 버리기").click())
+  await h.act(() => new Promise(resolve => setTimeout(resolve, 30)))
   await h.act(() => button("교재 요청 추가").click())
-  assert.equal(document.querySelector('[role="dialog"] [role="alert"]'), null, "a new form does not inherit the cancelled failure")
+  assert.equal(document.querySelector('[role="dialog"] [role="alert"]'), null, "a new form does not inherit the explicitly discarded failure")
 })
 
 test("bulk order keeps quantities and selection after a fresh-detail failure and permits one retry", async (t) => {

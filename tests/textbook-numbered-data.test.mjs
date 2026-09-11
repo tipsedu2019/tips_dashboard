@@ -46,9 +46,19 @@ const cases = [
   ['saleHistory', 'sale_history', 'month-class-title', { search: '', year: '2026', month: '2026-08', classId: id(800) }, () => ({ totalCount: 0, totalWaitingQuantity: 0, totalIssuedQuantity: 0, sourceTotalCount: 0, yearOptions: [], monthOptions: [], classOptions: [], effectiveMonth: 'all' })],
   ['inventory', 'inventory', 'audit-priority', { ...masterFilters, locationId: id(900), audit: 'pending' }, () => ({ ...masterSummary(), auditCounts: { recommended: 0, pending: 0, done: 0, all: 0 } })],
   ['inventoryHistory', 'inventory_history', 'event-desc', { textbookId: id(101), locationId: id(900) }],
-  ['closing', 'closing', 'month-desc', { month: '2026-08', subject: 'english', status: 'locked' }],
-  ['closingMovements', 'closing_movement', 'event-desc', { closingMonth: '2026-08', subject: 'english', search: '출고' }],
 ];
+
+test('retired closing scopes never mount readers, even when legacy inputs enable them', async t => {
+  const input = inputs();
+  input.closing.enabled = true;
+  input.closingMovements.enabled = true;
+  const h = await setupHook(t, input);
+  assert.deepEqual(h.requests, []);
+  assert.equal('closing' in h.current, false);
+  assert.equal('closingMovements' in h.current, false);
+  await h.act(() => h.current.refreshVisible());
+  assert.deepEqual(h.requests, []);
+});
 
 test('actual hook restores page 11 directly with strict service rows and no full-load transport', async t => {
   const h = await setupHook(t, onlyMaster({ restoredPage: 11, restorationKey: 'direct-11' }));
@@ -123,7 +133,7 @@ for (const [key, rpc, sort, filters, summary] of cases) test(`${key} owns exact 
       assert.equal(h.requests.filter(r => r.name === `get_textbook_${rpc}_summary_v1`).length, 1);
     } else assert.equal('summary' in h.current[key], false);
   }
-  const scopeNames = { saleHistory: 'sales-history', inventoryHistory: 'inventory-history', closingMovements: 'closing-movements' };
+  const scopeNames = { saleHistory: 'sales-history', inventoryHistory: 'inventory-history' };
   const stored = JSON.parse(window.localStorage.getItem('tips.data-table-page-size.v1'));
   assert.deepEqual(stored[`textbooks:${scopeNames[key] || key}`], { mode: 'manual', pageSize: 20 });
   assert.equal('pageSizeMode' in h.current[key], false);
@@ -185,15 +195,15 @@ test('one simultaneous filter/size reset leaves the accepted old filters intact 
 
 test('request/order and secondary scopes navigate and pause independently', async t => {
   let input = inputs();
-  for (const key of ['requests', 'purchase', 'saleHistory', 'inventoryHistory', 'closing', 'closingMovements']) input[key].enabled = true;
+  for (const key of ['requests', 'purchase', 'saleHistory', 'inventoryHistory']) input[key].enabled = true;
   const h = await setupHook(t, input);
   for (const request of pages(h)) await h.resolve(request, pageData(request));
   await h.act(() => h.current.requests.goToPage(11));
-  assert.equal(pages(h).length, 7); assert.equal(pages(h).at(-1).args.p_filters.mode, 'request');
+  assert.equal(pages(h).length, 5); assert.equal(pages(h).at(-1).args.p_filters.mode, 'request');
   input = { ...input, requests: { ...input.requests, enabled: false } };
   await h.rerender(input);
   assert.equal(pages(h).at(-1).signal.aborted, true);
-  for (const key of ['purchase', 'saleHistory', 'inventoryHistory', 'closing', 'closingMovements']) assert.equal(h.current[key].loading, false);
+  for (const key of ['purchase', 'saleHistory', 'inventoryHistory']) assert.equal(h.current[key].loading, false);
 });
 
 test('pause aborts page and summary; same-filter resume preserves interrupted target and restoration takes precedence', async t => {

@@ -6,6 +6,7 @@ import {
   type CompositionEvent,
   type CSSProperties,
   type ReactNode,
+  memo,
   useCallback,
   useDeferredValue,
   useEffect,
@@ -555,7 +556,7 @@ function buildTextbookListHref(pathname: string, searchParamString: string, stat
   return nextQuery ? `${pathname}?${nextQuery}` : pathname;
 }
 
-function getManagementListScrollStorageKey(kind: ManagementKind, pathname: string, searchParamString: string) {
+function getManagementListQueryString(searchParamString: string) {
   const params = new URLSearchParams(searchParamString);
   params.delete("classId");
   params.delete("studentId");
@@ -565,7 +566,11 @@ function getManagementListScrollStorageKey(kind: ManagementKind, pathname: strin
   params.delete("returnTo");
   params.sort();
 
-  const nextQuery = params.toString();
+  return params.toString();
+}
+
+function getManagementListScrollStorageKey(kind: ManagementKind, pathname: string, searchParamString: string) {
+  const nextQuery = getManagementListQueryString(searchParamString);
   return `${MANAGEMENT_SCROLL_STORAGE_PREFIX}${kind}:${pathname}${nextQuery ? `?${nextQuery}` : ""}`;
 }
 
@@ -1205,25 +1210,7 @@ function ManagementBulkActionBar({
   );
 }
 
-export function ManagementDataTable({
-  kind,
-  rows,
-  stats,
-  loading,
-  page,
-  totalCount,
-  sort,
-  displayedScope,
-  onPageChange,
-  onSortChange,
-  filterOptions = {},
-  badgeLabel,
-  statusLabel,
-  emptyLabel,
-  actions = {},
-  pageSize,
-  onPageSizePreferenceChange,
-}: {
+type ManagementDataTableProps = {
   kind: ManagementKind;
   rows: ManagementRow[];
   stats: ManagementStat[];
@@ -1241,11 +1228,38 @@ export function ManagementDataTable({
   actions?: ManagementTableActions;
   pageSize: ManagementListPageSize;
   onPageSizePreferenceChange: (value: ManagementListPageSize) => void;
-}) {
-  const router = useRouter();
+};
+
+export function ManagementDataTable(props: ManagementDataTableProps) {
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const searchParamString = searchParams.toString();
+  // Detail routes share this page, but do not change the list query or its state.
+  const searchParamString = getManagementListQueryString(searchParams.toString());
+  return <ManagementDataTableContent {...props} pathname={pathname} searchParamString={searchParamString} />;
+}
+
+const ManagementDataTableContent = memo(function ManagementDataTableContent({
+  kind,
+  rows,
+  stats,
+  loading,
+  page,
+  totalCount,
+  sort,
+  displayedScope,
+  onPageChange,
+  onSortChange,
+  filterOptions = {},
+  badgeLabel,
+  statusLabel,
+  emptyLabel,
+  actions = {},
+  pageSize,
+  onPageSizePreferenceChange,
+  pathname,
+  searchParamString,
+}: ManagementDataTableProps & { pathname: string; searchParamString: string }) {
+  const router = useRouter();
   const tableLayoutRef = useRef<HTMLDivElement | null>(null);
   const tableViewportRef = useRef<HTMLDivElement | null>(null);
   const tablePagerRef = useRef<HTMLDivElement | null>(null);
@@ -1964,8 +1978,9 @@ export function ManagementDataTable({
       }
 
       const mergedState = { ...currentClassListQueryState, ...nextState };
-      const nextHref = buildClassListHref(pathname, searchParamString, mergedState);
-      const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+      const liveQuery = window.location.search.slice(1);
+      const nextHref = buildClassListHref(pathname, liveQuery, mergedState);
+      const currentHref = liveQuery ? `${pathname}?${liveQuery}` : pathname;
       if (nextHref !== currentHref) {
         if (preserveLocalUntilUrl) {
           pendingClassListQueryStateRef.current = mergedState;
@@ -1975,7 +1990,7 @@ export function ManagementDataTable({
         pendingClassListQueryStateRef.current = null;
       }
     },
-    [currentClassListQueryState, kind, pathname, searchParamString],
+    [currentClassListQueryState, kind, pathname],
   );
   const currentStudentListQueryState = useMemo<StudentListQueryState>(
     () => ({
@@ -1994,8 +2009,9 @@ export function ManagementDataTable({
       }
 
       const mergedState = { ...currentStudentListQueryState, ...nextState };
-      const nextHref = buildStudentListHref(pathname, searchParamString, mergedState);
-      const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+      const liveQuery = window.location.search.slice(1);
+      const nextHref = buildStudentListHref(pathname, liveQuery, mergedState);
+      const currentHref = liveQuery ? `${pathname}?${liveQuery}` : pathname;
       if (nextHref !== currentHref) {
         if (preserveLocalUntilUrl) {
           pendingStudentListQueryStateRef.current = mergedState;
@@ -2005,7 +2021,7 @@ export function ManagementDataTable({
         pendingStudentListQueryStateRef.current = null;
       }
     },
-    [currentStudentListQueryState, kind, pathname, searchParamString],
+    [currentStudentListQueryState, kind, pathname],
   );
   const currentTextbookListQueryState = useMemo<TextbookListQueryState>(() => ({
     q: debouncedGlobalFilter,
@@ -2015,14 +2031,15 @@ export function ManagementDataTable({
   }), [badgeFilter, debouncedGlobalFilter, kind, requestedTextbookListQueryState.subject, statusFilter]);
   const syncTextbookListQueryState = useCallback((nextState: Partial<TextbookListQueryState>) => {
     if (kind !== "textbooks") return;
+    const liveQuery = window.location.search.slice(1);
     const nextHref = buildTextbookListHref(
       pathname,
-      searchParamString,
+      liveQuery,
       { ...currentTextbookListQueryState, ...nextState },
     );
-    const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
+    const currentHref = liveQuery ? `${pathname}?${liveQuery}` : pathname;
     if (nextHref !== currentHref) router.replace(nextHref, { scroll: false });
-  }, [currentTextbookListQueryState, kind, pathname, router, searchParamString]);
+  }, [currentTextbookListQueryState, kind, pathname, router]);
 
   useEffect(() => {
     const requestedSearch = kind === "classes"
@@ -3182,4 +3199,4 @@ export function ManagementDataTable({
       </div>
     </div>
   );
-}
+});

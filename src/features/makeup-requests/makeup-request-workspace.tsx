@@ -1,5 +1,6 @@
 "use client"
 
+import { useDraftNavigation } from "@/hooks/use-draft-navigation"
 import {
   useCallback,
   useEffect,
@@ -21,6 +22,7 @@ import { readMakeupNumberedPage, readMakeupDetail, readMakeupReservationContext,
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import { DatePickerControl, TimePickerControl } from "@/components/ui/date-time-picker"
 import {
   Dialog,
@@ -1704,6 +1706,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const [input, setInput] = useState<MakeupRequestInput>(EMPTY_INPUT)
   const [selectedSubject, setSelectedSubject] = useState("")
   const [selectedTeacherKey, setSelectedTeacherKey] = useState("")
+  const [requestDraftBaseline, setRequestDraftBaseline] = useState(() => JSON.stringify([EMPTY_INPUT, "", ""]))
   const [editingRequestId, setEditingRequestId] = useState("")
   const [editingRequest, setEditingRequest] = useState<MakeupRequest | null>(null)
   const loading = pageState.loading
@@ -1714,6 +1717,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const formCatalogGeneration = useRef(-1)
   const [contextState, setContextState] = useState<{ scope: string; context?: MakeupReservationContext; error?: string }>({ scope: "" })
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
   const [approvalRequest, setApprovalRequest] = useState<MakeupRequest | null>(null)
@@ -1723,6 +1727,13 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const [finalCancelRequest, setFinalCancelRequest] = useState<MakeupRequest | null>(null)
   const [finalCancelNote, setFinalCancelNote] = useState("")
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
+  const draftNavigation = useDraftNavigation({ dirty:
+    requestDialogOpen && JSON.stringify([input, selectedSubject, selectedTeacherKey]) !== requestDraftBaseline
+      || Boolean(approvalRequest && approvalNote.trim())
+      || Boolean(actionNoteRequest && actionNote.trim())
+      || Boolean(finalCancelRequest && finalCancelNote.trim()),
+  })
+  const { requestLocalAction } = draftNavigation
   const [selectedDetailRequest, setSelectedDetailRequest] = useState<MakeupRequest | null>(null)
   const [detailId, setDetailId] = useState(() => searchParams.get("requestId") || searchParams.get("request") || "")
   const adoptLocationQuery = useCallback((query: string) => {
@@ -2074,6 +2085,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [])
 
   const resetForm = useCallback(() => {
+    setRequestDraftBaseline(JSON.stringify([EMPTY_INPUT, "", ""]))
     setInput(EMPTY_INPUT)
     setSelectedSubject("")
     setSelectedTeacherKey("")
@@ -2088,13 +2100,15 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [resetForm])
 
   const closeRequestDialog = useCallback(() => {
-    if (saving) return
-    setRequestDialogOpen(false)
-    resetForm()
-  }, [resetForm, saving])
+    if (savingRef.current) return
+    requestLocalAction(() => {
+      setRequestDialogOpen(false)
+      resetForm()
+    })
+  }, [requestLocalAction, resetForm])
 
   const handleSubmit = useCallback(async () => {
-    if (!lifetime.current) return
+    if (!lifetime.current || savingRef.current) return
     if (!currentUserId) {
       setError("로그인 세션을 확인할 수 없습니다.")
       return
@@ -2138,6 +2152,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       patchInput({ approverTeacherCatalogId: submissionApproverTeacherCatalogId })
     }
 
+    savingRef.current = true
     setSaving(true)
     setError("")
     setMessage("")
@@ -2166,12 +2181,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       if (!lifetime.current) return
       setError(getMakeupActionErrorMessage(submitError, "휴보강 신청서 저장에 실패했습니다."))
     } finally {
+      savingRef.current = false
       if (lifetime.current) setSaving(false)
     }
   }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
 
   const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
-    if (!lifetime.current) return false
+    if (!lifetime.current || savingRef.current) return false
+    savingRef.current = true
     setSaving(true)
     setError("")
     setMessage("")
@@ -2186,15 +2203,18 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       setError(getMakeupActionErrorMessage(actionError, "요청 처리에 실패했습니다."))
       return false
     } finally {
+      savingRef.current = false
       if (lifetime.current) setSaving(false)
     }
   }, [refresh])
 
   const closeApprovalDialog = useCallback(() => {
-    if (saving) return
-    setApprovalRequest(null)
-    setApprovalNote("")
-  }, [saving])
+    if (savingRef.current) return
+    requestLocalAction(() => {
+      setApprovalRequest(null)
+      setApprovalNote("")
+    })
+  }, [requestLocalAction])
 
   const handleApproveWithNote = useCallback(async () => {
     if (!approvalRequest || !data.collisionContextReady || hasMakeupRequestRoomCollision(approvalRequest, data)) return
@@ -2219,10 +2239,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [])
 
   const closeActionNoteDialog = useCallback(() => {
-    if (saving) return
-    setActionNoteRequest(null)
-    setActionNote("")
-  }, [saving])
+    if (savingRef.current) return
+    requestLocalAction(() => {
+      setActionNoteRequest(null)
+      setActionNote("")
+    })
+  }, [requestLocalAction])
 
   const handleSubmitActionNote = useCallback(async () => {
     if (!actionNoteRequest) return
@@ -2253,10 +2275,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [actionNote, actionNoteConfig.label, actionNoteConfig.required, actionNoteConfig.successMessage, actionNoteRequest, closeDetailRequest, currentUserId, runAction])
 
   const closeFinalCancelDialog = useCallback(() => {
-    if (saving) return
-    setFinalCancelRequest(null)
-    setFinalCancelNote("")
-  }, [saving])
+    if (savingRef.current) return
+    requestLocalAction(() => {
+      setFinalCancelRequest(null)
+      setFinalCancelNote("")
+    })
+  }, [requestLocalAction])
 
   const handleFinalCancel = useCallback(async () => {
     if (!finalCancelRequest) return
@@ -2282,7 +2306,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       setSelectedTeacherKey(getClassTeacherKey(requestClass))
     }
     selectedClassIdRef.current = request.classId
-    setInput({
+    const nextInput: MakeupRequestInput = {
       requestKind: request.requestKind,
       classId: request.classId,
       reason: request.reason,
@@ -2293,10 +2317,12 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
         : [toFormSlot({ startAt: request.makeupStartAt, endAt: request.makeupEndAt, classroom: request.makeupClassroom })],
       makeupClassroom: request.makeupSlots[0]?.classroom || request.makeupClassroom,
       approverTeacherCatalogId: request.approverTeacherCatalogId,
-    })
+    }
+    setInput(nextInput)
+    setRequestDraftBaseline(JSON.stringify([nextInput, requestClass?.subject || selectedSubject, requestClass ? getClassTeacherKey(requestClass) : selectedTeacherKey]))
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [data.classes, setView])
+  }, [data.classes, selectedSubject, selectedTeacherKey, setView])
 
   const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
     setFormCatalogReady(false)
@@ -2310,7 +2336,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       setSelectedTeacherKey(getClassTeacherKey(requestClass))
     }
     selectedClassIdRef.current = request.classId
-    setInput({
+    const nextInput: MakeupRequestInput = {
       requestKind: "cancel_makeup",
       classId: request.classId,
       reason: request.reason,
@@ -2319,44 +2345,28 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       makeupSlots: [{ id: createSlotId(), date: "", startTime: "", endTime: "", classroom: "" }],
       makeupClassroom: "",
       approverTeacherCatalogId: request.approverTeacherCatalogId,
-    })
+    }
+    setInput(nextInput)
+    setRequestDraftBaseline(JSON.stringify([nextInput, requestClass?.subject || selectedSubject, requestClass ? getClassTeacherKey(requestClass) : selectedTeacherKey]))
     setError(clearMakeupClassSchedulePlanLoadError)
     setRequestDialogOpen(true)
-  }, [closeDetailRequest, data.classes, setView])
+  }, [closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   return (
-    <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+    <WorkspaceTabs value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
       <div className="grid min-w-0 gap-2">
-        <div className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
-          <div className="flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden w-full lg:flex-1" role="tablist" aria-label="휴보강 흐름">
+        <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
+          <WorkspaceTabsList aria-label="휴보강 흐름" className="lg:w-auto">
             {MAKEUP_REQUEST_VIEW_TABS.map((tab) => {
               const count = viewCounts[tab.id]
-
               return (
-                <button
-                  key={tab.id}
-                  type="button"
-                  role="tab"
-                  aria-selected={view === tab.id}
-                  aria-label={count > 0 ? `${tab.label} ${count}건` : tab.label}
-                  onClick={() => setView(tab.id)}
-                  className={[
-                    "shrink-0 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-                    view === tab.id
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  ].join(" ")}
-                >
+                <WorkspaceTabsTrigger key={tab.id} value={tab.id} aria-label={count > 0 ? `${tab.label} ${count}건` : tab.label}>
                   <span>{tab.label}</span>
-                  {count > 0 && (
-                    <span aria-hidden="true" className="ml-1 rounded bg-background/65 px-1.5 py-0.5 text-xs text-inherit opacity-80">
-                      {count}
-                    </span>
-                  )}
-                </button>
+                  {count > 0 && <span aria-hidden="true" className="text-xs tabular-nums opacity-80">{count}</span>}
+                </WorkspaceTabsTrigger>
               )
             })}
-          </div>
+          </WorkspaceTabsList>
           <div className="flex items-center justify-end gap-2">
             <Button type="button" size="sm" onClick={openRequestDialog}>
               <Plus className="size-4" aria-hidden="true" />
@@ -2366,6 +2376,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
         </div>
       </div>
 
+      <WorkspaceTabsPanel className="flex flex-col gap-4">
       {message ? <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
       {pageState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}<Button variant="outline" onClick={() => void controllerRef.current?.retry()}>다시 시도</Button></div> : null}
       {contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null}
@@ -2401,7 +2412,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
                 휴보강 신청 정보를 입력하고 결재자에게 상신합니다.
               </DialogDescription>
             </DialogHeader>
-            <div className="grid gap-4">
+            <fieldset disabled={saving} aria-busy={saving} className="grid min-w-0 gap-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
 	                <RequiredFormLabel htmlFor="makeup-subject">과목</RequiredFormLabel>
@@ -2649,7 +2660,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
                 저장하지 않고 닫기
               </Button>
             </div>
-            </div>
+            </fieldset>
           </DialogContent>
         </Dialog>
 
@@ -2684,6 +2695,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           onPageSizeChange={(preference) => { setNavigation({ filters: acceptedFilters, page: 1 }); pageSize.setPreference(preference) }}
           onPageChange={(page) => setNavigation({ filters: acceptedFilters, page })} ariaLabel="휴보강 페이지 탐색" />
       </div>
+      </WorkspaceTabsPanel>
 
       <Dialog open={Boolean(detailRequest)} onOpenChange={(open) => {
         if (!open) {
@@ -2743,6 +2755,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             <Label htmlFor="makeup-approval-note">승인 메모</Label>
             <Textarea
               id="makeup-approval-note"
+              disabled={saving}
               value={approvalNote}
               onChange={(event) => setApprovalNote(event.target.value)}
               placeholder={approvalRequest?.className || "승인 메모 입력"}
@@ -2775,6 +2788,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             <Label htmlFor="makeup-action-note">{actionNoteConfig.label}</Label>
             <Textarea
               id="makeup-action-note"
+              disabled={saving}
               value={actionNote}
               onChange={(event) => setActionNote(event.target.value)}
               placeholder={actionNoteConfig.placeholder}
@@ -2806,6 +2820,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             <Label htmlFor="makeup-final-cancel-note">취소 메모</Label>
             <Textarea
               id="makeup-final-cancel-note"
+              disabled={saving}
               value={finalCancelNote}
               onChange={(event) => setFinalCancelNote(event.target.value)}
               placeholder={finalCancelRequest?.className || "필요 시 메모"}
@@ -2823,6 +2838,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+      {draftNavigation.confirmation}
+    </WorkspaceTabs>
   )
 }

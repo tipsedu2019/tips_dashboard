@@ -1547,8 +1547,6 @@ export function AcademicAnnualBoardWorkspace() {
 
       setMutationError(null);
       await refresh();
-      setBoardDraft(null);
-      setEditingBoardEvent(null);
       setHoveredCell(null);
       return true;
     } catch (saveError) {
@@ -1585,15 +1583,14 @@ export function AcademicAnnualBoardWorkspace() {
         return false;
       }
 
-      const { error: deleteError } = await supabase.from("academic_events").delete().eq("id", persistedId);
+      const { error: deleteError } = await supabase.from("academic_events").delete().eq("id", persistedId)
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false);
       if (deleteError) {
         throw deleteError;
       }
       setMutationError(null);
       toast.success("학사 일정을 삭제했습니다.");
       await refresh();
-      setBoardDraft(null);
-      setEditingBoardEvent(null);
       setHoveredCell(null);
       return true;
     } catch (deleteError) {

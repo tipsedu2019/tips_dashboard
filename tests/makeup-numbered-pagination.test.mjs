@@ -1,3 +1,4 @@
+import { clickTab, pressTabKey } from "./helpers/tab-interactions.mjs";
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import test from 'node:test';
@@ -158,7 +159,7 @@ test('actual makeup workspace direct page11, failed view retention and coherent 
   assert.equal(p.numbered()[0].args.p_page, 11);
   await act(async () => p.finish(p.numbered()[0])); await p.catalogs();
   assert.match(document.body.textContent, /수업 101/); assert.match(document.body.textContent, /112건/);
-  await act(async () => tab('승인/반려').click());
+  await act(async () => clickTab(tab('승인/반려')));
   assert.equal(p.numbered()[1].args.p_filters.view, 'closed');
   assert.equal(button('12 페이지').disabled, true);
   await act(async () => p.numbered()[1].reject(new Error('VIEW FAILURE')));
@@ -530,4 +531,41 @@ test('already-issued create retains postcommit notification follow-up despite ca
  assert.deepEqual(JSON.parse(followUp.options.body),{sourceEventId:id(901)});
  delivery.resolve({ok:false,status:503});assert.equal((await pending).id,id(900));assert.equal(warnings.length,1);
  assert.equal(io.requests.filter(r=>r.table).length,4);assert.equal(io.requests.filter(r=>r.name).length,1);
+});
+
+test('makeup keyboard tab navigation defers RPC until Space and preserves accepted controls on failure', async (t) => {
+  const p = await setup(t, { search: '?view=approvalPending' });
+  await act(async () => p.finish(p.numbered()[0]));
+  const accepted = tab('결재대기'), target = tab('승인/반려');
+  const panel = document.querySelector('[role="tabpanel"]');
+  await act(async () => accepted.focus());
+  await act(async () => pressTabKey(accepted, 'End'));
+  assert.equal(document.activeElement, target);
+  assert.equal(p.numbered().length, 1);
+  await act(async () => pressTabKey(target, ' '));
+  assert.equal(p.numbered().length, 2);
+  assert.equal(p.numbered()[1].args.p_filters.view, 'closed');
+  assert.equal(document.querySelector('[role="tabpanel"]'), panel);
+  await act(async () => p.numbered()[1].reject(new Error('offline')));
+  assert.equal(accepted.getAttribute('aria-selected'), 'true');
+  assert.equal(panel.getAttribute('aria-labelledby'), accepted.id);
+  assert.equal(document.activeElement, target);
+});
+
+
+test('makeup pending submission locks all form fields and same-tick duplicate actions; failure restores the draft', async t => {
+ const p=await setup(t,{search:'?view=approvalPending',clock:'2026-08-31T00:00:00Z'});
+ await act(async()=>p.finish(p.numbered()[0]));await p.catalogs();await act(async()=>button('휴보강 신청').click());
+ const rows=createCatalogRows({role:'admin'});
+ await act(async()=>{for(const r of p.requests.filter(r=>r.table).slice(3))r.resolve({data:rows[r.table]||[],error:null});});
+ await act(async()=>p.observed.patch(()=>({...createInput})));
+ const save=button('상신');const handler=save[Object.keys(save).find(key=>key.startsWith('__reactProps'))].onClick;
+ const before=p.requests.length;await act(async()=>{handler();handler();});
+ const reason=document.querySelector('#makeup-reason');assert.equal(reason.matches(':disabled'),true,'submitted input cannot be edited then silently reset');
+ assert.equal(document.querySelector('#makeup-class').matches(':disabled'),true);
+ await act(async()=>{for(const r of p.requests.slice(before).filter(r=>r.table))r.resolve({data:rows[r.table]||[],error:null});});
+ const mutation=await p.waitFor('create_makeup_request_v2');
+ assert.equal(p.requests.filter(r=>r.name==='create_makeup_request_v2').length,1);
+ await act(async()=>mutation.resolve({data:null,error:{message:'합성 저장 실패'}}));
+ assert.equal(reason.matches(':disabled'),false);assert.equal(reason.value,createInput.reason);assert.match(document.body.textContent,/합성 저장 실패/);
 });

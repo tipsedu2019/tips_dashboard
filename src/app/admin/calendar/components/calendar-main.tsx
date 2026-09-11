@@ -935,17 +935,17 @@ export function CalendarMain({
   return (
     <>
       <div className="flex h-full flex-col">
-        <div className="flex flex-col gap-4 border-b px-4 py-4 sm:px-6 md:flex-row md:items-center md:justify-between">
+        <div className="flex min-w-0 flex-col gap-4 border-b px-4 py-4 sm:px-6 md:flex-row md:flex-wrap md:items-center md:justify-between">
           <div className="flex flex-wrap items-center gap-3">
-            <Button variant="outline" size="icon" className="cursor-pointer xl:hidden" onClick={onMenuClick}>
+            <Button variant="outline" size="icon" className="cursor-pointer xl:hidden" onClick={onMenuClick} aria-label="학사일정 메뉴 열기">
               <Menu className="size-4" />
             </Button>
 
             <div className="flex items-center gap-1 rounded-lg border bg-muted/20 p-1">
-              <Button variant="ghost" size="icon" onClick={() => navigateMonth("prev")} className="cursor-pointer rounded-md">
+              <Button variant="ghost" size="icon" onClick={() => navigateMonth("prev")} className="cursor-pointer rounded-md" aria-label="이전 달">
                 <ChevronLeft className="size-4" />
               </Button>
-              <Button variant="ghost" size="icon" onClick={() => navigateMonth("next")} className="cursor-pointer rounded-md">
+              <Button variant="ghost" size="icon" onClick={() => navigateMonth("next")} className="cursor-pointer rounded-md" aria-label="다음 달">
                 <ChevronRight className="size-4" />
               </Button>
               <Button variant="outline" size="sm" onClick={goToToday} className="cursor-pointer rounded-md bg-background">
@@ -958,7 +958,7 @@ export function CalendarMain({
             </div>
           </div>
 
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center">
+          <div className="flex min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
             <div className="relative min-w-0 flex-1 sm:w-64" role="search" aria-label="학사일정 검색">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input

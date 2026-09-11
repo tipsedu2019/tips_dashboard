@@ -2283,7 +2283,7 @@ test("textbook workspace keeps master filters reversible and avoids native delet
   assert.match(workspaceSource, /function changeSchoolLevelGroupFilter\(value: string\)/);
   assert.match(workspaceSource, /onGradeLevelFilterChange=\{changeGradeLevelGroupFilter\}/);
   assert.match(workspaceSource, /onCategoryFilterChange=\{changeCategoryGroupFilter\}/);
-  assert.match(workspaceSource, /onClear=\{\(\) => \{ clearMasterSelection\(\); setMasterBulkControlsOpen\(false\); masterSearchRef\.current\?\.focus\(\{ preventScroll: true \}\); \}\}/);
+  assert.match(workspaceSource, /onClear=\{\(\) => requestLocalAction\(\(\) => \{ clearMasterSelection\(\); setMasterBulkControlsOpen\(false\); masterSearchRef\.current\?\.focus\(\{ preventScroll: true \}\); \}, \{ skipConfirmation: !masterBulkDraftDirty \}\)\}/);
   assert.match(workspaceSource, /textbookService\.deleteTextbookMasters/);
   assert.match(workspaceSource, /invalidateMaster/);
 });
@@ -2789,7 +2789,7 @@ test("textbook workspace locks 50 saved purchase visibility safeguards", async (
     /showSavedPurchaseFlow\(completedPurchaseStage, completedPurchaseTitle, completedPurchaseHasCatalogTextbook\)/,
     /setPurchaseDialogOpen\(false\)/,
     /setSelectedPurchaseLineId\(""\)/,
-    /setPurchaseForm\(emptyPurchaseForm\)/,
+    /replacePurchaseForm\(emptyPurchaseForm\)/,
     /textbookId: selectedPurchaseTextbookId/,
     /requestedTextbookTitle: normalizeStoredTextInput\(purchaseRequestTitle\)/,
     /const fresh = await getTextbookPurchaseDetail\(directSnapshot\.input\)[\s\S]*await textbookService\.updatePurchaseLifecycle\(applyConfiguredPurchasePricingToPayload/,

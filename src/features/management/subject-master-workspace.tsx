@@ -2,6 +2,9 @@
 
 import { useEffect, useRef, useState } from "react";
 
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
+
+import { ActionFeedback } from "@/components/ui/action-feedback";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,22 +57,40 @@ function getDirectorCandidates(
   ));
 }
 
+function serializeSubjectDraft(row: AcademicSubjectSetting) {
+  return JSON.stringify([row.isActive, row.registrationCreateEnabled, row.gradeLevels, row.defaultDirectorProfileId]);
+}
+
 export function SubjectMasterWorkspace() {
   const { isAdmin } = useAuth();
   const [rows, setRows] = useState<AcademicSubjectSetting[]>([]);
+  const [savedRows, setSavedRows] = useState<AcademicSubjectSetting[]>([]);
+  const isDirty = rows.some((row) => {
+    const saved = savedRows.find((candidate) => candidate.subject === row.subject);
+    return saved !== undefined && serializeSubjectDraft(row) !== serializeSubjectDraft(saved);
+  });
+  const { confirmation } = useDraftNavigation({ dirty: isDirty });
   const [teachers, setTeachers] = useState<TeacherCatalogRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [savingSubject, setSavingSubject] = useState<AcademicSubjectValue | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [loadVersion, setLoadVersion] = useState(0);
   const workspaceLoadRef = useRef<Promise<WorkspaceLoadResult> | null>(null);
+  const loadingRef = useRef(true);
+  const savingRef = useRef(false);
+  const retryFocusPendingRef = useRef(false);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const feedbackFocusRef = useRef<HTMLButtonElement>(null);
+  const workspaceFocusRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     let active = true;
 
     async function loadWorkspace() {
+      loadingRef.current = true;
       setLoading(true);
-      setError(null);
       try {
         workspaceLoadRef.current ??= Promise.all([
           academicSubjectSettingsService.list(),
@@ -77,17 +98,18 @@ export function SubjectMasterWorkspace() {
         ]) as Promise<WorkspaceLoadResult>;
         const [settings, teacherData] = await workspaceLoadRef.current;
         if (!active) return;
+        setLoadError(null);
         setRows([...settings]);
+        setSavedRows([...settings]);
         setTeachers((teacherData.teachers || []) as TeacherCatalogRow[]);
-      } catch (loadError) {
+      } catch {
         if (!active) return;
-        setError(
-          loadError instanceof Error
-            ? loadError.message
-            : "과목 설정을 불러오지 못했습니다.",
-        );
+        setLoadError("과목 설정을 불러오지 못했습니다. 다시 시도해 주세요.");
       } finally {
-        if (active) setLoading(false);
+        if (active) {
+          loadingRef.current = false;
+          setLoading(false);
+        }
       }
     }
 
@@ -95,7 +117,22 @@ export function SubjectMasterWorkspace() {
     return () => {
       active = false;
     };
-  }, []);
+  }, [loadVersion]);
+
+  const retryLoad = () => {
+    if (loadingRef.current || savingRef.current) return;
+    loadingRef.current = true;
+    retryFocusPendingRef.current = true;
+    workspaceLoadRef.current = null;
+    setLoadVersion((current) => current + 1);
+  };
+
+  useEffect(() => {
+    if (loading || !retryFocusPendingRef.current) return;
+    retryFocusPendingRef.current = false;
+    const target = loadError ? retryButtonRef.current : feedbackFocusRef.current || workspaceFocusRef.current;
+    target?.focus({ preventScroll: true });
+  }, [loading, loadError]);
 
   const updateDraft = (
     subject: AcademicSubjectValue,
@@ -104,6 +141,7 @@ export function SubjectMasterWorkspace() {
       "isActive" | "registrationCreateEnabled" | "defaultDirectorProfileId"
     >>,
   ) => {
+    if (!isAdmin || savingRef.current || loadingRef.current) return;
     setRows((current) => current.map((row) => (
       row.subject === subject ? { ...row, ...patch } : row
     )));
@@ -111,6 +149,7 @@ export function SubjectMasterWorkspace() {
   };
 
   const handleSave = async (subject: AcademicSubjectValue) => {
+    if (savingRef.current || loadingRef.current) return;
     if (!isAdmin) {
       setError("과목 설정은 운영자만 변경할 수 있습니다.");
       return;
@@ -122,6 +161,7 @@ export function SubjectMasterWorkspace() {
       return;
     }
 
+    savingRef.current = true;
     setSavingSubject(subject);
     setError(null);
     setMessage(null);
@@ -136,20 +176,21 @@ export function SubjectMasterWorkspace() {
       setRows((current) => current.map((candidate) => (
         candidate.subject === updated.subject ? updated : candidate
       )));
+      setSavedRows((current) => current.map((candidate) => (
+        candidate.subject === updated.subject ? updated : candidate
+      )));
       setMessage(`${subject} 설정을 저장했습니다.`);
-    } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "과목 설정을 저장하지 못했습니다.",
-      );
+    } catch {
+      setError("과목 설정을 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.");
     } finally {
+      savingRef.current = false;
       setSavingSubject(null);
     }
   };
 
   return (
     <SettingsWorkspaceShell>
+      {confirmation}
       <SettingsMasterHeader
         filters={(
           <Badge variant={isAdmin ? "default" : "secondary"}>
@@ -158,18 +199,21 @@ export function SubjectMasterWorkspace() {
         )}
       />
 
-      {error ? (
+      {loadError ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex min-w-0 flex-wrap items-center justify-between gap-2 break-words">
+            <span>{loadError}</span>
+            <Button ref={retryButtonRef} type="button" variant="outline" size="sm" disabled={loading || savingSubject !== null} onClick={retryLoad}>
+              다시 불러오기
+            </Button>
+          </AlertDescription>
         </Alert>
       ) : null}
-      {message ? (
-        <Alert>
-          <AlertDescription>{message}</AlertDescription>
-        </Alert>
+      {error || message ? (
+        <ActionFeedback returnFocusRef={feedbackFocusRef} message={error || message || ""} error={Boolean(error)} onDismiss={() => { setError(null); setMessage(null); }} />
       ) : null}
 
-      <div className="overflow-hidden rounded-md border border-border/70 bg-background">
+      <div ref={workspaceFocusRef} role="region" aria-label="과목 설정" tabIndex={-1} className="overflow-hidden rounded-md border border-border/70 bg-background">
         {loading ? (
           Array.from({ length: 3 }).map((_, index) => (
             <div key={`subject-setting-loading-${index}`} className="border-b p-4 last:border-b-0">
@@ -261,6 +305,7 @@ export function SubjectMasterWorkspace() {
 
                 {isAdmin ? (
                   <Button
+                    ref={rows[0]?.subject === subject.value ? feedbackFocusRef : undefined}
                     type="button"
                     size="sm"
                     disabled={savingSubject !== null}

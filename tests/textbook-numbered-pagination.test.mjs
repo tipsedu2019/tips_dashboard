@@ -307,6 +307,10 @@ test('bulk order grouped selectors include both scopes and preserve their exact 
   await change(studentQuantity, '9');
   await change(teacherQuantity, '4');
   await h.act(() => button('선택 요청 일괄 주문 창 닫기').click());
+  if (document.querySelector('[data-testid="draft-navigation-confirm-dialog"]')) {
+    await h.act(() => button("변경사항 버리기").click());
+    await h.act(() => new Promise(resolve => setTimeout(resolve, 30)));
+  }
   assert.equal(document.querySelector('[role="dialog"]'), null);
   assertTwoSelected();
   assert.equal(h.requests.some(request => request.table || request.name === 'get_textbook_purchase_detail_v1'), false, 'cancel starts zero reads and writes');

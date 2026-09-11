@@ -2612,7 +2612,7 @@ async function closeDirtyFixtureDialog(page, dialog) {
   await closeButton.click()
   const discardDialog = page.getByRole("dialog").filter({ hasText: "입력한 내용을 버릴까요?" }).first()
   if (await discardDialog.isVisible().catch(() => false)) {
-    await discardDialog.getByRole("button", { name: "저장하지 않고 닫기", exact: true }).click()
+    await discardDialog.getByRole("button", { name: "변경사항 버리기", exact: true }).click()
   }
   await dialog.waitFor({ state: "hidden", timeout: 5000 })
 }
@@ -3607,12 +3607,12 @@ async function verifyRegistrationSubjectTrackFixture(page, { baseUrl, registrati
   await page.keyboard.press("Escape")
   const dirtyCloseConfirm = page.getByRole("dialog", { name: "입력한 내용을 버릴까요?", exact: true })
   await dirtyCloseConfirm.waitFor({ state: "visible", timeout: 5000 })
-  await dirtyCloseConfirm.getByRole("button", { name: "계속 작성", exact: true }).click()
+  await dirtyCloseConfirm.getByRole("button", { name: "계속 편집", exact: true }).click()
   await dirtyCloseConfirm.waitFor({ state: "hidden", timeout: 5000 })
   await consultationDialog.waitFor({ state: "visible", timeout: 5000 })
   await page.keyboard.press("Escape")
   await dirtyCloseConfirm.waitFor({ state: "visible", timeout: 5000 })
-  await dirtyCloseConfirm.getByRole("button", { name: "저장하지 않고 닫기", exact: true }).click()
+  await dirtyCloseConfirm.getByRole("button", { name: "변경사항 버리기", exact: true }).click()
   await dirtyCloseConfirm.waitFor({ state: "hidden", timeout: 5000 })
   await consultationDialog.waitFor({ state: "hidden", timeout: 5000 })
 

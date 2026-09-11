@@ -25,7 +25,14 @@ export const DataTableSearchField = forwardRef<HTMLInputElement, {
     <div role="search" aria-label={label} data-slot="data-table-search" className={cn("relative min-w-0 flex-1", className)}>
       <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
       <Input ref={inputRef} type="search" value={value} onChange={(event) => onValueChange(event.target.value)}
-        onKeyDown={(event) => { if (event.key === "Escape" && value) { event.preventDefault(); clear(); } }}
+        onKeyDown={(event) => {
+          if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+          if (event.key === "Escape" && value) {
+            event.preventDefault();
+            event.stopPropagation();
+            clear();
+          }
+        }}
         aria-label={label} aria-keyshortcuts={shortcut} autoComplete="off" enterKeyHint="search" placeholder={placeholder}
         className="h-11 pl-9 pr-11 sm:h-9 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none" />
       <Button type="button" variant="ghost" size="icon" aria-label={clearLabel} disabled={!value}

@@ -358,7 +358,7 @@ export function TimePickerControl({
           {showIcon ? <Clock aria-hidden="true" /> : null}
         </Button>
       </PopoverTrigger>
-      <PopoverContent align="start" sideOffset={6} disablePortal={disablePortal} className="w-[--radix-popover-trigger-width] min-w-44 p-0">
+      <PopoverContent align="start" sideOffset={6} disablePortal={disablePortal} className="w-[var(--radix-popover-trigger-width)] max-w-[calc(100vw-2rem)] min-w-44 p-0">
         <div
           ref={timeListRef}
           role="listbox"

@@ -43,6 +43,7 @@ import { useAuth } from "@/providers/auth-provider";
 
 import { ManagementDataTable } from "./management-data-table";
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
+import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard";
 import type { DataTablePageSizePreference } from "@/lib/numbered-pagination";
 import { managementTableStorageKey, readManagementNumberedQuery, replaceManagementNumberedQuery, type ManagementNumberedQuery } from "./management-numbered-state";
 import { ClassTextbookPicker } from "./class-textbook-picker";
@@ -58,7 +59,7 @@ import {
   isTeacherCatalogForClassSubject,
   managementService,
 } from "./management-service.js";
-import { serializeManagementListFilters } from "./management-filter-transition.js";
+import { replaceManagementListUrl, serializeManagementListFilters } from "./management-filter-transition.js";
 import { getManagementListErrorRecoveryState } from "./management-list-load-state";
 import {
   filterClassStudentCandidates,
@@ -132,6 +133,7 @@ const PAGE_CONFIG = {
 } satisfies Record<ManagementKind, { badgeLabel: string; statusLabel: string; emptyLabel: string }>;
 
 type FormState = Record<string, string>;
+type PendingManagementDraft = { detailRequestId: number; form?: string; schedule?: string };
 type RelatedRecord = Record<string, unknown>;
 type ManagementPageCursor = { sortKey: string; id: string; scopeHash: string };
 type TextbookCandidateScope = {
@@ -775,6 +777,14 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
   return nextForm;
 }
 
+function serializeManagementDraft(form: FormState, kind: ManagementKind, includeClassScheduleFields = false) {
+  // Details compare schedule slots separately; creation submits its free-text fields directly.
+  return JSON.stringify(Object.keys(form)
+    .filter((key) => includeClassScheduleFields || kind !== "classes" || !["schedule", "teacher", "classroom"].includes(key))
+    .sort()
+    .map((key) => [key, key === "textbookIds" ? parseTextbookIds(form[key]) : form[key].trim()]));
+}
+
 function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow | null): Record<string, unknown> {
   const payload: Record<string, unknown> = {
     ...(row?.raw || {}),
@@ -1358,11 +1368,25 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
+  const [savedForm, setSavedForm] = useState<FormState>(() => initialForm(kind));
+  const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
+  const discardReturnFocusRef = useRef<HTMLElement | null>(null);
+  const discardConfirmedRef = useRef(false);
+  const requestDiscardConfirmation = useCallback(() => {
+    discardConfirmedRef.current = false;
+    discardReturnFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    setDiscardConfirmationOpen(true);
+  }, []);
+  const navigateToManagementDestination = useCallback((href: string) => router.push(href), [router]);
   const [classScheduleSlots, setClassScheduleSlots] = useState<ClassScheduleSlot[]>([]);
   const [normalizedScheduleDefaults, setNormalizedScheduleDefaults] = useState<NormalizedClassScheduleDefaults | null>(null);
-  const [scheduleDefaultsSaving, setScheduleDefaultsSaving] = useState(false);
+  const scheduleDefaultsPendingRef = useRef(new Set<string>());
+  const scheduleDefaultsDraftsRef = useRef(new Map<string, PendingManagementDraft>());
+  const [scheduleDefaultsPending, setScheduleDefaultsPending] = useState<ReadonlySet<string>>(() => new Set());
+  const scheduleDefaultsSaving = Boolean(selectedRow && scheduleDefaultsPending.has(selectedRow.id));
   const [scheduleDefaultsRequestKey, setScheduleDefaultsRequestKey] = useState("");
   const detailRequestRef = useRef(0);
+  const pageActiveRef = useRef(true);
   const managementDialogOpenerRef = useRef<HTMLElement | null>(null);
   const managementDialogRowIdRef = useRef<string | null>(null);
   const scheduleRequestRef = useRef(0);
@@ -1380,11 +1404,34 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       canReplaceDraft: () => scheduleEditRevisionRef.current === editRevision,
     };
   };
-  useEffect(() => () => { detailRequestRef.current += 1; }, []);
+  useEffect(() => {
+    pageActiveRef.current = true;
+    return () => {
+      pageActiveRef.current = false;
+      detailRequestRef.current += 1;
+    };
+  }, []);
   const [pendingClassScheduleInitialization, setPendingClassScheduleInitialization] = useState<PendingClassScheduleInitialization | null>(null);
   const [operationError, setOperationError] = useState<string | null>(null);
   const [saveNotice, setSaveNotice] = useState("");
   const [saving, setSaving] = useState(false);
+  // React batches state updates; this lock is shared before any mutation starts.
+  const savingRef = useRef(false);
+  const savingDraftRef = useRef<PendingManagementDraft | null>(null);
+  const beginSaving = useCallback((draft?: Omit<PendingManagementDraft, "detailRequestId">) => {
+    if (savingRef.current) return null;
+    savingRef.current = true;
+    setSaving(true);
+    // Writes continue after closing; only their original editing lifetime owns UI feedback.
+    const detailRequestId = detailRequestRef.current;
+    savingDraftRef.current = draft ? { ...draft, detailRequestId } : null;
+    return () => detailRequestRef.current === detailRequestId;
+  }, []);
+  const finishSaving = useCallback(() => {
+    savingRef.current = false;
+    savingDraftRef.current = null;
+    setSaving(false);
+  }, []);
   const [deleteRequest, setDeleteRequest] = useState<DeleteRequest | null>(null);
   const [relatedRows, setRelatedRows] = useState<RelatedRecord[]>([]);
   const [targetId, setTargetId] = useState("");
@@ -1689,9 +1736,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         params.delete("studentId");
       }
       const nextQuery = params.toString();
-      router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+      replaceManagementListUrl(window.history, nextQuery ? `${pathname}?${nextQuery}` : pathname);
     },
-    [kind, pathname, router],
+    [kind, pathname],
   );
   const clearClassDetailRoute = useCallback(() => {
     if (kind !== "classes") return;
@@ -1705,8 +1752,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     params.delete("studentId");
     params.delete("returnTo");
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [kind, pathname, router]);
+    replaceManagementListUrl(window.history, nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  }, [kind, pathname]);
   useEffect(() => {
     if (kind === "classes" && !requestedClassId) {
       classDetailRouteClearPendingRef.current = false;
@@ -1729,7 +1776,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     params.delete("section");
     params.delete("sessionId");
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
+    replaceManagementListUrl(window.history, nextQuery ? `${pathname}?${nextQuery}` : pathname);
   }, [
     kind,
     pathname,
@@ -1737,25 +1784,24 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     requestedClassDetailSessionId,
     requestedClassDetailTab,
     requestedClassDetailTabParam,
-    router,
     searchParams,
   ]);
   const writeStudentDetailRoute = useCallback((studentId: string) => {
     if (kind !== "students") return;
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
     params.set("studentId", studentId);
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [kind, pathname, router, searchParams]);
+    replaceManagementListUrl(window.history, nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  }, [kind, pathname]);
   const clearStudentDetailRoute = useCallback(() => {
     if (kind !== "students") return;
     studentDetailRouteClearPendingRef.current = true;
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
     params.delete("studentId");
     params.delete("returnTo");
     const nextQuery = params.toString();
-    router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [kind, pathname, router, searchParams]);
+    replaceManagementListUrl(window.history, nextQuery ? `${pathname}?${nextQuery}` : pathname);
+  }, [kind, pathname]);
   useEffect(() => {
     if (kind === "students" && !requestedStudentId) {
       studentDetailRouteClearPendingRef.current = false;
@@ -1775,7 +1821,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     const params = new URLSearchParams();
     params.set("studentId", targetStudentId);
     params.set("returnTo", buildClassDetailReturnPath("students", { studentId: targetStudentId }));
-    router.push(`/admin/students?${params.toString()}`);
+    requestManagementNavigation(`/admin/students?${params.toString()}`);
   };
   const confirmClassStudentDetailOpen = () => {
     const targetStudentId = pendingClassStudentDetailId;
@@ -1798,7 +1844,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     params.set("tab", tab);
     params.set("studentId", selectedRow.id);
     params.set("returnTo", buildStudentDetailReturnPath());
-    router.push(`/admin/classes?${params.toString()}`);
+    requestManagementNavigation(`/admin/classes?${params.toString()}`);
   };
   const handleRelationLoadMore = async (relationKind: ManagementRelationKind) => {
     if (!selectedRow || loadingRelationKind) return;
@@ -2114,6 +2160,39 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const classScheduleDefaultsDirty = Boolean(normalizedScheduleDefaults) && JSON.stringify(
     toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
   ) !== JSON.stringify(toContinuousClassScheduleSlots(normalizedScheduleDefaults?.slots || []));
+  const formDraft = serializeManagementDraft(form, kind, dialogMode === "create");
+  const savedFormDraft = serializeManagementDraft(savedForm, kind, dialogMode === "create");
+  const scheduleDraft = kind !== "classes" || dialogMode === "create" ? undefined : JSON.stringify(normalizedScheduleDefaults
+    ? toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm())
+    : formatClassScheduleSlots(getClassScheduleSlotsFromForm()));
+  const savedScheduleDraft = kind !== "classes" || dialogMode === "create" ? undefined : JSON.stringify(normalizedScheduleDefaults
+    ? toContinuousClassScheduleSlots(normalizedScheduleDefaults.slots)
+    : formatClassScheduleSlots(parseClassScheduleSlots(savedForm.schedule, savedForm.teacher, savedForm.classroom)));
+  const selectedRowId = selectedRow?.id;
+  const requiresDraftConfirmation = useCallback(() => {
+    const submitted = savingDraftRef.current;
+    const currentSubmission = submitted?.detailRequestId === detailRequestRef.current ? submitted : null;
+    const scheduleSubmission = selectedRowId ? scheduleDefaultsDraftsRef.current.get(selectedRowId) : null;
+    const currentSchedule = scheduleSubmission?.detailRequestId === detailRequestRef.current ? scheduleSubmission : null;
+    // Pending writes cover only their submitted values and editing lifetime.
+    // A later edit (including reverting to the old saved value) still needs a decision.
+    return Boolean(dialogMode && (
+      formDraft !== (currentSubmission?.form ?? savedFormDraft)
+      || scheduleDraft !== (currentSchedule?.schedule ?? currentSubmission?.schedule ?? savedScheduleDraft)
+    ));
+  }, [dialogMode, formDraft, savedFormDraft, savedScheduleDraft, scheduleDraft, selectedRowId]);
+  const navigationGuard = useUnsavedNavigationGuard({
+    enabled: requiresDraftConfirmation(),
+    onConfirmRequest: requestDiscardConfirmation,
+    navigate: navigateToManagementDestination,
+  });
+  const managementNavigationRef = useRef({ navigationGuard, requiresDraftConfirmation });
+  managementNavigationRef.current = { navigationGuard, requiresDraftConfirmation };
+  const requestManagementNavigation = useCallback((href: string) => {
+    const intent = () => navigateToManagementDestination(href);
+    const current = managementNavigationRef.current;
+    current.navigationGuard.requestNavigation(intent, { skipConfirmation: !current.requiresDraftConfirmation() });
+  }, [navigateToManagementDestination]);
   const reloadClassScheduleDefaults = async () => {
     if (!selectedRow || !normalizedScheduleDefaults) return;
     const request = beginScheduleRequest();
@@ -2140,15 +2219,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
   const handleClassScheduleDefaultsSave = async () => {
     if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || !classScheduleDefaultsDirty) return;
+    const classId = selectedRow.id;
+    if (scheduleDefaultsPendingRef.current.has(classId)) return;
+    const requestKey = scheduleDefaultsRequestKey || createContinuousScheduleRequestKey();
+    // Different classes may save independently; reopening cannot duplicate an in-flight class write.
+    scheduleDefaultsPendingRef.current.add(classId);
+    scheduleDefaultsDraftsRef.current.set(classId, { detailRequestId: detailRequestRef.current, schedule: scheduleDraft });
+    setScheduleDefaultsPending(new Set(scheduleDefaultsPendingRef.current));
     const request = beginScheduleRequest();
-    setScheduleDefaultsSaving(true);
     setOperationError(null);
     setSaveNotice("");
-    const requestKey = scheduleDefaultsRequestKey || createContinuousScheduleRequestKey();
     setScheduleDefaultsRequestKey(requestKey);
     try {
       const result = await service.saveClassScheduleDefaults({
-        classId: selectedRow.id,
+        classId,
         expectedScheduleRevision: normalizedScheduleDefaults.scheduleRevision,
         slots: toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
         requestKey,
@@ -2174,7 +2258,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const message = getSaveErrorMessage(error);
       setOperationError(message.includes("class_schedule_stale") ? "다른 변경이 있습니다. 최신값을 불러온 뒤 다시 저장하세요." : message);
     } finally {
-      if (request.isCurrent()) setScheduleDefaultsSaving(false);
+      scheduleDefaultsPendingRef.current.delete(classId);
+      scheduleDefaultsDraftsRef.current.delete(classId);
+      setScheduleDefaultsPending(new Set(scheduleDefaultsPendingRef.current));
     }
   };
 
@@ -2370,6 +2456,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
 
   const renderEditableFields = (scope: "detail" | "form" | "quick", fieldNames?: string[]) => {
+    const fieldsDisabled = !canMutateRows || (scope === "form" && saving);
     const requestedFields = fieldNames
       ? fieldNames.map((fieldName) => FORM_FIELDS[kind].find((field) => field.name === fieldName)).filter((field): field is Field => Boolean(field))
       : FORM_FIELDS[kind];
@@ -2401,7 +2488,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   <Select
                     value={value || "__none__"}
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
-                    disabled={!canMutateRows || scienceSubjectAreaOptions.length === 0}
+                    disabled={fieldsDisabled || scienceSubjectAreaOptions.length === 0}
                   >
                     <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택">
                       <SelectValue placeholder={field.placeholder} />
@@ -2422,7 +2509,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   value={value}
                   placeholder={field.placeholder}
                   required={field.required}
-                  disabled={!canMutateRows}
+                  disabled={fieldsDisabled}
                   autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
                   onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                 />
@@ -2433,7 +2520,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   value={value}
                   placeholder={field.placeholder}
                   required={field.required}
-                  disabled={!canMutateRows}
+                  disabled={fieldsDisabled}
                   autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
                   onChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                 />
@@ -2443,14 +2530,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   name={field.name}
                   value={value}
                   placeholder={field.placeholder}
-                  disabled={!canMutateRows}
+                  disabled={fieldsDisabled}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               ) : selectOptions.length > 0 ? (
                 <Select
                   value={value || "__none__"}
                   onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
-                  disabled={!canMutateRows}
+                  disabled={fieldsDisabled}
                 >
                   <SelectTrigger id={id} className="w-full">
                     <SelectValue placeholder={field.placeholder || `${field.label} 선택`} />
@@ -2475,7 +2562,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   value={value}
                   placeholder={field.placeholder}
                   required={field.required}
-                  disabled={!canMutateRows}
+                  disabled={fieldsDisabled}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               )}
@@ -2510,10 +2597,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       : Promise.resolve(null);
     setSelectedRow(activeRow);
     setForm(nextForm);
+    setSavedForm(nextForm);
+    setDiscardConfirmationOpen(false);
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
     setNormalizedScheduleDefaults(null);
     setScheduleDefaultsRequestKey("");
-    setScheduleDefaultsSaving(false);
     const editRevision = scheduleEditRevisionRef.current;
     setTargetId("");
     setPendingRelationMode(null);
@@ -2659,23 +2747,29 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       return;
     }
 
-    setSaving(true);
+    const isCurrent = beginSaving();
+    if (!isCurrent) return;
     setOperationError(null);
     try {
-      const results = await Promise.all(rows.map((row) => {
+      // A failed row must not release the lock while another row is still saving.
+      const outcomes = await Promise.allSettled(rows.map(async (row) => {
         const payload = compact({ [change.field]: value }, kind, row);
         if (kind === "students") return service.updateStudent(payload);
         if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         return service.updateTextbook(payload);
       }));
-      reportPublicClassesCacheRefresh(results);
+      const results = outcomes.map((outcome) => {
+        if (outcome.status === "rejected") throw outcome.reason;
+        return outcome.value;
+      });
+      if (isCurrent()) reportPublicClassesCacheRefresh(results);
       await reconcileManagementPage();
     } catch (bulkError) {
-      setOperationError(getSaveErrorMessage(bulkError));
+      if (isCurrent()) setOperationError(getSaveErrorMessage(bulkError));
     } finally {
-      setSaving(false);
+      finishSaving();
     }
-  }, [canMutateRows, classFormReferences, kind, reconcileManagementPage]);
+  }, [beginSaving, canMutateRows, classFormReferences, finishSaving, kind, reconcileManagementPage]);
 
   const deleteRows = useCallback(async (rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2690,18 +2784,23 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       return;
     }
 
-    setSaving(true);
+    const isCurrent = beginSaving();
+    if (!isCurrent) return;
     setOperationError(null);
     try {
-      const results = await Promise.all(rows.map((row) => service.deleteTextbook(row.id)));
-      reportPublicClassesCacheRefresh(results);
+      const outcomes = await Promise.allSettled(rows.map(async (row) => service.deleteTextbook(row.id)));
+      const results = outcomes.map((outcome) => {
+        if (outcome.status === "rejected") throw outcome.reason;
+        return outcome.value;
+      });
+      if (isCurrent()) reportPublicClassesCacheRefresh(results);
       await reconcileManagementPage();
     } catch (bulkError) {
-      setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
+      if (isCurrent()) setOperationError(bulkError instanceof Error ? bulkError.message : "일괄 처리 중 오류가 발생했습니다.");
     } finally {
-      setSaving(false);
+      finishSaving();
     }
-  }, [canMutateRows, kind, reconcileManagementPage]);
+  }, [beginSaving, canMutateRows, finishSaving, kind, reconcileManagementPage]);
 
   const handleBulkDeleteRows = useCallback((rows: ManagementRow[]) => {
     if (rows.length === 0) {
@@ -2724,9 +2823,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setSelectedRow(null);
         setNormalizedScheduleDefaults(null);
         setScheduleDefaultsRequestKey("");
-        setScheduleDefaultsSaving(false);
         const nextForm = initialForm(kind);
         setForm(nextForm);
+        setSavedForm(nextForm);
+        setDiscardConfirmationOpen(false);
         setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
         setPendingClassScheduleInitialization(null);
         setPendingRelationMode(null);
@@ -2746,22 +2846,22 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       onBulkDeleteRows: canMutateRows && kind === "textbooks" ? handleBulkDeleteRows : undefined,
       onDeleteRow: kind === "classes" ? undefined : canMutateRows ? (row: ManagementRow) => {
         if (kind === "students") {
-          router.push(buildStudentWithdrawalRequestPath(row.id));
+          requestManagementNavigation(buildStudentWithdrawalRequestPath(row.id));
           return;
         }
         setDeleteRequest({ rows: [row] });
       } : undefined,
     };
-    if (kind === "students") return { ...base, onOpenSchoolMaster: () => router.push("/admin/settings/schools") };
+    if (kind === "students") return { ...base, onOpenSchoolMaster: () => requestManagementNavigation("/admin/settings/schools") };
     if (kind === "classes") {
       return {
         ...base,
-        onOpenTeacherMaster: () => router.push("/admin/settings/teachers"),
-        onOpenClassroomMaster: () => router.push("/admin/settings/classrooms"),
+        onOpenTeacherMaster: () => requestManagementNavigation("/admin/settings/teachers"),
+        onOpenClassroomMaster: () => requestManagementNavigation("/admin/settings/classrooms"),
       };
     }
     return base;
-  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, router]);
+  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, requestManagementNavigation]);
 
   const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
@@ -2772,18 +2872,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
   const retryClassScheduleInitialization = async () => {
     if (!pendingClassScheduleInitialization) return;
-    setSaving(true);
+    const isCurrent = beginSaving();
+    if (!isCurrent) return;
     setOperationError(null);
     try {
       await service.initializeClassSchedule(pendingClassScheduleInitialization);
       await reconcileManagementPage(pendingClassScheduleInitialization.classId);
+      if (!isCurrent()) return;
       setPendingClassScheduleInitialization(null);
       setDialogMode(null);
       setSelectedRow(null);
     } catch (error) {
-      setOperationError(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(error)}`);
+      if (isCurrent()) setOperationError(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(error)}`);
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   };
 
@@ -2797,9 +2899,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
+    const isCurrent = beginSaving({ form: formDraft, schedule: scheduleDraft });
+    if (!isCurrent) return;
     setOperationError(null);
     setSaveNotice("");
-    setSaving(true);
     try {
       const payload = compact(form, kind, selectedRow);
       let createdId = text(payload.id);
@@ -2815,7 +2918,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         savedResult = created;
         const classId = getSavedClassId(created, payload.id);
         createdId = classId;
+        // Closing a detail keeps this page alive; changing actor or leaving it
+        // must not start another RPC through the shared client's new session.
+        if (!pageActiveRef.current) return;
+        if (isCurrent()) setSavedForm(form);
         const defaults = await service.getClassScheduleDefaults(classId);
+        if (!pageActiveRef.current) return;
         if (defaults && typeof defaults === "object" && !Array.isArray(defaults)) {
           const source = defaults as Record<string, unknown>;
           if (Number(source.runtimeVersion) === 1 && text(source.authoritativeSource) === "legacy" && text(source.schedulePlanHash)) {
@@ -2826,10 +2934,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               slots: toContinuousClassScheduleSlots(getClassScheduleSlotsFromForm()),
               requestKey: createContinuousScheduleRequestKey(),
             };
-            setPendingClassScheduleInitialization(initialization);
+            if (isCurrent()) setPendingClassScheduleInitialization(initialization);
             try {
               await service.initializeClassSchedule(initialization);
-              setPendingClassScheduleInitialization(null);
+              if (isCurrent()) setPendingClassScheduleInitialization(null);
             } catch (initializationError) {
               throw new Error(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(initializationError)}`);
             }
@@ -2840,15 +2948,19 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         savedResult = created;
         createdId = text((created as Record<string, unknown> | null)?.id) || createdId;
       }
-      reportPublicClassesCacheRefresh(savedResult);
+      if (isCurrent()) {
+        setSavedForm(form);
+        reportPublicClassesCacheRefresh(savedResult);
+      }
       if (createdId) await reconcileManagementPage(createdId);
       else await reconcileManagementPage();
+      if (!isCurrent()) return;
       setDialogMode(null);
       setSelectedRow(null);
     } catch (saveError) {
-      setOperationError(getSaveErrorMessage(saveError));
+      if (isCurrent()) setOperationError(getSaveErrorMessage(saveError));
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   };
 
@@ -2862,9 +2974,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
+    const isCurrent = beginSaving({ form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
+    if (!isCurrent) return;
     setOperationError(null);
     setSaveNotice("");
-    setSaving(true);
     try {
       const payload = compact(form, kind, selectedRow);
       let savedResult: unknown = null;
@@ -2879,7 +2992,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       } else {
         savedResult = await service.updateTextbook(payload);
       }
-      reportPublicClassesCacheRefresh(savedResult);
+      if (isCurrent()) {
+        setSavedForm(form);
+        reportPublicClassesCacheRefresh(savedResult);
+      }
 
       const nextTitle =
         text(payload.name || payload.class_name || payload.className || payload.title) || selectedRow.title;
@@ -2890,7 +3006,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             ? text(payload.grade) || selectedRow.badge
             : text(payload.publisher) || selectedRow.badge;
 
-      setSelectedRow((current) =>
+      if (isCurrent()) setSelectedRow((current) =>
         current && current.id === selectedRow.id
           ? {
               ...current,
@@ -2904,12 +3020,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           : current,
       );
       const refreshed = await reconcileManagementPage(selectedRow.id);
+      if (!isCurrent()) return;
       if (refreshed) setSelectedRow(refreshed);
       setSaveNotice("저장 완료");
     } catch (saveError) {
-      setOperationError(getSaveErrorMessage(saveError));
+      if (isCurrent()) setOperationError(getSaveErrorMessage(saveError));
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   };
 
@@ -2919,9 +3036,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("관계 변경 권한이 없습니다.");
       return;
     }
+    const isCurrent = beginSaving();
+    if (!isCurrent) return;
     const relatedId = targetId;
     setPendingRelationMode(null);
-    setSaving(true);
     setOperationError(null);
     setSaveNotice("");
     try {
@@ -2930,16 +3048,19 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       } else if (kind === "classes") {
         await service.assignStudentToClass({ studentId: relatedId, classId: selectedRow.id, mode });
       }
-      setTargetId("");
-      setRelationQuery("");
-      setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, mode) : current);
+      if (isCurrent()) {
+        setTargetId("");
+        setRelationQuery("");
+        setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, mode) : current);
+      }
       const refreshed = await reconcileManagementPage(selectedRow.id);
+      if (!isCurrent()) return;
       if (refreshed) setSelectedRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 학생 추가 완료" : "대기 학생 추가 완료");
     } catch (relationError) {
-      setOperationError(relationError instanceof Error ? relationError.message : "수강/대기 등록 중 오류가 발생했습니다.");
+      if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "수강/대기 등록 중 오류가 발생했습니다.");
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   };
 
@@ -2960,7 +3081,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("관계 변경 권한이 없습니다.");
       return;
     }
-    setSaving(true);
+    const isCurrent = beginSaving();
+    if (!isCurrent) return;
     setOperationError(null);
     setSaveNotice("");
     try {
@@ -2969,14 +3091,15 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       } else if (kind === "classes") {
         await service.assignStudentToClass({ studentId: id, classId: selectedRow.id, mode });
       }
-      setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
+      if (isCurrent()) setSelectedRow((current) => current && current.id === selectedRow.id ? updateRelationOnRow(current, kind, id, mode) : current);
       const refreshed = await reconcileManagementPage(selectedRow.id);
+      if (!isCurrent()) return;
       if (refreshed) setSelectedRow(refreshed);
       setSaveNotice(mode === "enrolled" ? "등록 전환 완료" : "대기 전환 완료");
     } catch (relationError) {
-      setOperationError(relationError instanceof Error ? relationError.message : "등록 상태 변경 중 오류가 발생했습니다.");
+      if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "등록 상태 변경 중 오류가 발생했습니다.");
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   };
 
@@ -2985,28 +3108,30 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("관계 변경 권한이 없습니다.");
       return;
     }
+    const isCurrent = beginSaving();
+    if (!isCurrent) return;
     const relatedId = kind === "students" ? classId : studentId;
-    setSaving(true);
     setOperationError(null);
     setSaveNotice("");
     try {
       await service.removeStudentFromClass({ studentId, classId });
-      setSelectedRow((current) => current && selectedRow && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, "removed") : current);
+      if (isCurrent()) setSelectedRow((current) => current && selectedRow && current.id === selectedRow.id ? updateRelationOnRow(current, kind, relatedId, "removed") : current);
       if (selectedRow) {
         const refreshed = await reconcileManagementPage(selectedRow.id);
+        if (!isCurrent()) return;
         if (refreshed) setSelectedRow(refreshed);
       }
-      setSaveNotice("연결 해제 완료");
+      if (isCurrent()) setSaveNotice("연결 해제 완료");
     } catch (relationError) {
-      setOperationError(relationError instanceof Error ? relationError.message : "수강 연결 해제 중 오류가 발생했습니다.");
+      if (isCurrent()) setOperationError(relationError instanceof Error ? relationError.message : "수강 연결 해제 중 오류가 발생했습니다.");
     } finally {
-      setSaving(false);
+      finishSaving();
     }
   };
 
-  const handleDialogOpenChange = (open: boolean) => {
-    if (open) return;
+  const closeManagementDialog = () => {
     beginDetailRequest();
+    setDiscardConfirmationOpen(false);
     setDialogMode(null);
     setPendingClassScheduleInitialization(null);
     setPendingClassStudentDetailId("");
@@ -3016,6 +3141,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (kind === "students") {
       clearStudentDetailRoute();
     }
+  };
+  const handleDialogOpenChange = (open: boolean) => {
+    if (open) return;
+    navigationGuard.requestNavigation(closeManagementDialog, { skipConfirmation: !requiresDraftConfirmation() });
   };
 
   const buildClassDetailReturnPath = (
@@ -3115,7 +3244,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       variant="outline"
                       data-testid="class-detail-return-to-student"
                       className="h-8 shrink-0 rounded-md px-2.5 text-xs"
-                      onClick={() => router.push(requestedClassReturnPath)}
+                      onClick={() => requestManagementNavigation(requestedClassReturnPath)}
                     >
                       학생 상세
                     </Button>
@@ -3126,7 +3255,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       variant="outline"
                       data-testid="class-detail-return-to-work-queue"
                       className="h-8 shrink-0 rounded-md px-2.5 text-xs"
-                      onClick={() => router.push(requestedClassReturnPath)}
+                      onClick={() => requestManagementNavigation(requestedClassReturnPath)}
                     >
                       {getClassReturnPathLabel(requestedClassReturnPath)}
                     </Button>
@@ -3598,7 +3727,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       variant="outline"
                       data-testid="student-detail-return-to-class"
                       className="h-8 rounded-md px-2.5 text-xs"
-                      onClick={() => router.push(requestedStudentReturnPath)}
+                      onClick={() => requestManagementNavigation(requestedStudentReturnPath)}
                     >
                       수업 상세
                     </Button>
@@ -3684,8 +3813,42 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         </DialogContent>
       </Dialog>
 
+
+      <Dialog open={discardConfirmationOpen} onOpenChange={(open) => {
+        if (!open) navigationGuard.cancelNavigation();
+        setDiscardConfirmationOpen(open);
+      }}>
+        <DialogContent
+          data-testid="management-discard-confirm-dialog"
+          layer="nested"
+          className="sm:max-w-md"
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            if (!discardConfirmedRef.current && discardReturnFocusRef.current?.isConnected) {
+              discardReturnFocusRef.current.focus({ preventScroll: true });
+            }
+          }}
+        >
+          <DialogHeader>
+            <DialogTitle>저장하지 않은 변경사항</DialogTitle>
+            <DialogDescription>변경사항을 버리고 이동할까요?</DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => {
+              navigationGuard.cancelNavigation();
+              setDiscardConfirmationOpen(false);
+            }}>계속 편집</Button>
+            <Button type="button" variant="destructive" onClick={() => {
+              discardConfirmedRef.current = true;
+              setDiscardConfirmationOpen(false);
+              navigationGuard.confirmNavigation();
+            }}>변경사항 버리기</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
 	      <Dialog open={Boolean(pendingClassStudentDetailId)} onOpenChange={(open) => !open && setPendingClassStudentDetailId("")}>
-	        <DialogContent data-testid="class-student-detail-confirm-dialog" className="z-[90] sm:max-w-md">
+	        <DialogContent data-testid="class-student-detail-confirm-dialog" layer="nested" className="sm:max-w-md">
 	          <DialogHeader>
 	            <DialogTitle>학생 상세로 이동</DialogTitle>
 	            <DialogDescription>
@@ -3704,7 +3867,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	      </Dialog>
 
 	      <Dialog open={Boolean(pendingRelationMode)} onOpenChange={(open) => !open && setPendingRelationMode(null)}>
-        <DialogContent data-testid="class-relation-confirm-dialog" className="z-[90] sm:max-w-md">
+	        <DialogContent data-testid="class-relation-confirm-dialog" layer="nested" className="sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{relationConfirmActionLabel}</DialogTitle>
             <DialogDescription>

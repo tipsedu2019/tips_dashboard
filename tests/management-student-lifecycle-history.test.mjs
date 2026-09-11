@@ -46,7 +46,7 @@ test("student row actions hand off to the withdrawal workflow while classes end 
   assert.match(pageSource, /function buildStudentWithdrawalRequestPath/);
   assert.match(pageSource, /params\.set\("create", "withdrawal"\)/);
   assert.match(pageSource, /params\.set\("studentId", studentId\)/);
-  assert.match(pageSource, /router\.push\(buildStudentWithdrawalRequestPath\(row\.id\)\)/);
+  assert.match(pageSource, /requestManagementNavigation\(buildStudentWithdrawalRequestPath\(row\.id\)\)/);
   assert.doesNotMatch(pageSource, /service\.updateStudent\(\{ \.\.\.\(row\.raw \|\| \{\}\), id: row\.id, status: WITHDRAWN_STUDENT_STATUS \}\)/);
   assert.match(pageSource, /kind === "classes" \? undefined : canMutateRows \? \(row: ManagementRow\) =>/);
   assert.match(tableSource, /kind === "classes" \? null : kind === "students" \? \([\s\S]*?<StudentRowActions/);
@@ -88,7 +88,7 @@ test("student detail class cards open the official class detail with return cont
   assert.match(pageSource, /params\.set\("tab", tab\)/);
   assert.match(pageSource, /params\.set\("studentId", selectedRow\.id\)/);
   assert.match(pageSource, /params\.set\("returnTo", buildStudentDetailReturnPath\(\)\)/);
-  assert.match(pageSource, /router\.push\(`\/admin\/classes\?\$\{params\.toString\(\)\}`\)/);
+  assert.match(pageSource, /requestManagementNavigation\(`\/admin\/classes\?\$\{params\.toString\(\)\}`\)/);
   assert.match(pageSource, /data-testid="student-class-official-link"/);
   assert.match(pageSource, /onClick=\{\(\) => handleStudentClassDetailOpen\(id, "students"\)\}/);
   assert.match(pageSource, /학생 현황/);
@@ -106,10 +106,10 @@ test("class detail student rows open the official student detail with return con
   assert.match(pageSource, /const handleClassStudentDetailOpen = \(studentId: string\) =>/);
   assert.match(pageSource, /params\.set\("studentId", targetStudentId\)/);
   assert.match(pageSource, /params\.set\("returnTo", buildClassDetailReturnPath\("students", \{ studentId: targetStudentId \}\)\)/);
-  assert.match(pageSource, /router\.push\(`\/admin\/students\?\$\{params\.toString\(\)\}`\)/);
+  assert.match(pageSource, /requestManagementNavigation\(`\/admin\/students\?\$\{params\.toString\(\)\}`\)/);
   assert.match(pageSource, /data-testid="class-roster-student-name-link"/);
   assert.match(pageSource, /onClick=\{\(\) => setPendingClassStudentDetailId\(id\)\}/);
   assert.match(pageSource, /handleClassStudentDetailOpen\(targetStudentId\)/);
   assert.match(pageSource, /data-testid="student-detail-return-to-class"/);
-  assert.match(pageSource, /router\.push\(requestedStudentReturnPath\)/);
+  assert.match(pageSource, /requestManagementNavigation\(requestedStudentReturnPath\)/);
 });

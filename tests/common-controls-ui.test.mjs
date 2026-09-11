@@ -54,7 +54,7 @@ test("shared dialog can expose explicit top close copy for unsaved forms", async
   assert.match(source, /closeButtonLabel = "모달 닫기"/);
   assert.match(source, /onCloseButtonClick\?: React\.MouseEventHandler<HTMLButtonElement>/);
   assert.match(source, /showCloseButtonText\?: boolean/);
-  assert.match(source, /showCloseButtonText \? "whitespace-nowrap" : "sr-only"/);
+  assert.match(source, /showCloseButtonText \? "min-w-0 whitespace-normal text-left \[overflow-wrap:anywhere\]" : "sr-only"/);
   assert.match(source, /aria-label=\{closeButtonLabel\}/);
   assert.match(source, /onClick=\{onCloseButtonClick\}/);
 });

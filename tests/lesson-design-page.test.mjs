@@ -44,7 +44,7 @@ test("lesson design close suppresses route-driven reopen until the close route i
   assert.match(source, /const isLessonDesignClosingRef = useRef\(false\);/);
   assert.match(
     source,
-    /if \(isLessonDesignClosingRef\.current\) \{\s*return;\s*\}\s*isLessonDesignClosingRef\.current = true;/,
+    /if \(isLessonDesignClosingRef\.current\) \{\s*return;\s*\}\s*requestNavigation\(\(\) => \{\s*isLessonDesignClosingRef\.current = true;/,
   );
   assert.match(source, /setLessonDesignOpen\(false\);\s*finishLessonDesignClose\(\);/);
   assert.match(
@@ -598,7 +598,7 @@ test("lesson design splits schedule generation from progress generation", async 
 
   assert.match(textbookSection, /"xl:grid-cols-2"/);
   assert.match(textbookSection, /id="lesson-textbook-finder" className="order-2/);
-  assert.match(textbookSection, /"order-1 rounded-lg border border-primary\/20 bg-primary\/5 p-2 shadow-xs"/);
+  assert.match(textbookSection, /"order-1 min-w-0 rounded-lg border border-primary\/20 bg-primary\/5 p-2 shadow-xs"/);
 });
 
 test("lesson design modal removes the readiness jump strip", async () => {

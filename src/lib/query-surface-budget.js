@@ -1337,6 +1337,28 @@ function finalOperation(operations, method) {
   return [...operations].reverse().find((operation) => callMethod(operation) === method)
 }
 
+function hasFinalRootLimit(operations, constants, bindings) {
+  // PostgREST range() sets offset and limit; a later root limit() replaces
+  // that limit. Relation limits and unproven option targets cannot cap it.
+  const last = [...operations].reverse().find((operation) => ["limit", "range"].includes(callMethod(operation)))
+  if (!last || callMethod(last) !== "limit" || optionTarget(last, bindings) !== "root") return false
+  const value = last.arguments[0] && argumentValue(last.arguments[0], constants)
+  return Number.isInteger(value) && value >= 1 && value <= 30
+}
+
+function isExactIdDelete(query, constants) {
+  // A non-returning primary-key delete is not a paginated list read. Keep
+  // request controls below and reject every broader or returning chain.
+  const methods = query.operations.map(callMethod)
+  if (methods[0] !== "from" || methods[1] !== "delete"
+    || methods.filter((method) => method === "eq").length !== 1
+    || methods.some((method) => !["from", "delete", "eq", "abortSignal", "retry"].includes(method))) return false
+  const predicate = query.operations.find((operation) => callMethod(operation) === "eq")
+  return predicate.arguments.length === 2
+    && argumentValue(predicate.arguments[0], constants) === "id"
+    && !ts.isSpreadElement(predicate.arguments[1])
+}
+
 function queryLineSpan(scope, query) {
   const sourceFile = scope.getSourceFile()
   const start = query.entry.getStart(sourceFile)
@@ -1528,7 +1550,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       queryOccurrenceContext(scope, query),
     )
   }
-  if (query.directMethod === "from") {
+  if (query.directMethod === "from" && !isExactIdDelete(query, constants)) {
     const projections = query.operations.filter((operation) => callMethod(operation) === "select")
     if (projections.length === 0) reasons.push("list_projection_missing")
     for (const projection of projections) {
@@ -1555,6 +1577,7 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       for (const range of ranges) {
         const first = range.arguments[0] && argumentValue(range.arguments[0], constants)
         const last = range.arguments[1] && argumentValue(range.arguments[1], constants)
+        if ((first === undefined || last === undefined) && hasFinalRootLimit(query.operations, constants, optionBindings)) continue
         if (!Number.isInteger(first) || !Number.isInteger(last)) reasons.push("list_range_unresolved")
         else if (first < 0 || last < first || last - first + 1 > 30) reasons.push("list_range_invalid")
       }

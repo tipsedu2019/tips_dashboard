@@ -31,7 +31,7 @@ test("school settings guards invalid edits and makes pending changes recoverable
 
   assert.match(source, /const duplicateNameSet = useMemo/);
   assert.match(source, /const invalidRows = useMemo/);
-  assert.match(source, /disabled=\{!isDirty \|\| saving \|\| invalidRows\.size > 0\}/);
+  assert.match(source, /disabled=\{!hasLoaded \|\| !isDirty \|\| saving \|\| loading \|\| invalidRows\.size > 0\}/);
   assert.match(source, /되돌리기/);
   assert.match(source, /삭제 대기/);
   assert.match(source, /변경/);

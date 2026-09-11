@@ -280,7 +280,7 @@ test("subject-track fixture verification exercises the refined no-save applicati
     "과목 분리 확인 필요",
     "fixture-task-cross-stage",
     "fixture-task-all-terminal",
-    "저장하지 않고 닫기",
+    "변경사항 버리기",
     "option_data_once",
     "assertSubjectQualifiedAccessibleNames",
     "assertAppointmentPlanAccessibleNames",

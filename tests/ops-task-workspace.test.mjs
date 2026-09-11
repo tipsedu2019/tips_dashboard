@@ -219,7 +219,7 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
   assert.ok(source.includes(`label="${ko.requestedTeam}"`));
   assert.ok(source.includes(`aria-label="${ko.todo} 필터"`));
   assert.ok(source.includes("const todoTaskSource = scopedTasks"));
-  assert.match(source, /const HORIZONTAL_TAB_BAR_CLASS = "flex min-w-0 flex-wrap gap-1 overflow-visible sm:flex-nowrap sm:overflow-x-auto/);
+  assert.match(source, /<WorkspaceTabsList className="lg:w-auto lg:flex-1"/);
   assert.doesNotMatch(source, /TODO_SORT_TABS/);
   assert.doesNotMatch(source, /TODO_DUE_FILTER_OPTIONS/);
   assert.doesNotMatch(source, /aria-label="할 일 정렬"/);
@@ -623,8 +623,8 @@ test("common registration host owns one shell close while other forms keep dialo
     "discardFormAndClose",
     'open={workspaceDataBelongsToCurrentViewer && confirmingFormClose}',
     '입력한 내용을 버릴까요?',
-    '계속 작성',
-    '저장하지 않고 닫기',
+    '계속 편집',
+    '변경사항 버리기',
     "cancelFormCloseConfirmation",
     "formCloseReturnFocusRef.current?.focus()",
   ]);
@@ -646,7 +646,8 @@ test("common registration host owns one shell close while other forms keep dialo
   assert.doesNotMatch(formDialogSource, /\bshowCloseButtonText\b/);
   assert.doesNotMatch(workspaceSource, /function blurActiveElementBeforeDialog/);
   assert.doesNotMatch(workspaceSource, /blurActiveElementBeforeDialog\(\)/);
-  assert.match(dialogSource, /showCloseButtonText[\s\S]*: "size-8 rounded-md/);
+  assert.match(dialogSource, /buttonVariants\(\{ variant: showCloseButtonText \? "outline" : "ghost", size: showCloseButtonText \? "sm" : "icon" \}\)/);
+  assert.match(dialogSource, /absolute top-2 right-2 size-11 sm:top-3 sm:right-3 sm:size-9/);
 });
 
 test("linked selectors support one-result keyboard selection", async () => {
@@ -664,7 +665,7 @@ test("linked selectors support one-result keyboard selection", async () => {
   ]);
 });
 
-test("custom listboxes and registration tabs implement their declared keyboard patterns", async () => {
+test("custom listboxes keep their keyboard pattern and registration uses shared manual tabs", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const listboxSource = source.slice(
     source.indexOf("function TaskListboxField"),
@@ -684,10 +685,10 @@ test("custom listboxes and registration tabs implement their declared keyboard p
     "tabIndex={selected || (!selectedOption && index === 0) ? 0 : -1}",
   ]);
   assertIncludesAll(source, [
-    "handleRegistrationViewTabKeyDown",
+    "<WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab}",
     'data-registration-view-tab={tab.key}',
-    "tabIndex={registrationView === tab.key ? 0 : -1}",
-    "onKeyDown={(event) => handleRegistrationViewTabKeyDown(event, tab.key)}",
+    "<WorkspaceTabsTrigger",
+    "<WorkspaceTabsPanel",
   ]);
 });
 
@@ -1106,7 +1107,7 @@ test("registration toolbar keeps search without a manual or refresh button", asy
     workspaceSource.indexOf("{!isWordRetestWorkspace && !isRegistrationWorkspace", workspaceSource.indexOf("{isRegistrationWorkspace && (")),
   );
   assert.doesNotMatch(registrationToolbar, /aria-label="새로고침"|등록 목록과 달력 새로고침/);
-  assert.match(workspaceSource, /isRegistrationWorkspace \? "w-full !flex-nowrap !overflow-x-auto lg:flex-1"/);
+  assert.match(workspaceSource, /<WorkspaceTabsList className="lg:w-auto lg:flex-1"/);
 });
 
 test("closing a registration form clears validation feedback before returning to the list", async () => {
@@ -1157,8 +1158,9 @@ test("registration list and calendar navigation clear stale detail notices", asy
     ["  const syncRegistrationView", "  const syncRegistrationConsultationOwnerScope"],
     ["  const syncRegistrationConsultationOwnerScope", "  const syncRegistrationCalendarKind"],
     ["  const syncRegistrationCalendarKind", "  const syncRegistrationMode"],
-    ["  const syncRegistrationMode", "  function handleRegistrationViewTabKeyDown"],
+    ["  const syncRegistrationMode", "  const syncWordRetestMode"],
   ]) {
+    assert.ok(source.indexOf(start) >= 0 && source.indexOf(end) > source.indexOf(start), "navigation source boundaries exist");
     const navigationSource = source.slice(source.indexOf(start), source.indexOf(end));
     assert.match(navigationSource, /clearRegistrationWorkspaceSelection\(\)/, `${start.trim()} must clear stale selection notices`);
   }
@@ -2089,11 +2091,11 @@ test("registration browser-back closure clears canonical state and restores the 
   const openTrack = source.slice(openTrackStart, openTrackEnd);
 
   assert.match(source, /getOpsTaskHistoryMutation/);
-  assert.match(source, /window\.history\.pushState/);
+  assert.match(source, /pushLocalHistoryState\(window, window\.history\.state/);
   assert.match(source, /window\.history\.replaceState/);
   assert.match(source, /window\.history\.forward\(\)/);
   assert.match(source, /addEventListener\("popstate"/);
-  assert.match(source, /addEventListener\("beforeunload"/);
+  assert.match(source, /useUnsavedNavigationGuard\(\{[\s\S]*?enabled: workspaceDataBelongsToCurrentViewer && \(hasUnsavedWorkspaceInput \|\| saving\)/);
   assert.match(openTrack, /syncTaskDeepLink\(taskId, trackId, null, "push"\)/);
   assert.doesNotMatch(deepLink, /if \(!deepLinkedTaskId \|\| !data/);
   assert.match(deepLink, /if \(!deepLinkedTaskId\) \{[\s\S]*?\["loading_detail", "detail", "refresh_failed"\]\.includes\(registrationApplicationHost\.kind\)/);
@@ -3484,7 +3486,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "WordRetestScoreResultCell",
     "getWordRetestScorePercent",
     'isWordRetestWorkspace ? "flex min-w-0 items-center justify-between gap-2"',
-    'isWordRetestWorkspace ? "flex-1 flex-nowrap overflow-x-auto"',
+    '<WorkspaceTabsList className="lg:w-auto lg:flex-1"',
     "showClosedToggle && !isWordRetestWorkspace",
     "{(showSearch || (isWordRetestWorkspace && showClosedToggle)) && (",
     'className="relative min-w-0 flex-1"',
@@ -3846,8 +3848,8 @@ test("actual assistants are locked to the shared assistant word retest queue", a
     workspaceSource.indexOf("const branchScopedWordRetestTasks"),
   );
   const toolbarTabsSource = workspaceSource.slice(
-    workspaceSource.indexOf('role="tablist" aria-label={isTodoWorkspace'),
-    workspaceSource.indexOf(": isRegistrationWorkspace", workspaceSource.indexOf('role="tablist" aria-label={isTodoWorkspace')),
+    workspaceSource.indexOf('<WorkspaceTabsList'),
+    workspaceSource.indexOf(": isRegistrationWorkspace", workspaceSource.indexOf('<WorkspaceTabsList')),
   );
 
   assert.match(modelSource, /export function getWordRetestRoleContext/);

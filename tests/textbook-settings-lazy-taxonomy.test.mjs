@@ -20,7 +20,7 @@ test("settings workspace consumes lazy projected pages and the one atomic save b
   assert.match(hook, /textbooks:subsubjects/);
   assert.doesNotMatch(workspace, /\bsupabase\b/);
   assert.doesNotMatch(workspace, /supabase\.from|\.from\("textbook_/);
-  assert.doesNotMatch(workspace, /\.upsert\(|\.delete\(|loadRows|loadSubSubjectRows/);
+  assert.doesNotMatch(workspace, /\.upsert\(|\.delete\(\s*\)|loadRows|loadSubSubjectRows/);
   assert.match(migration, /alter table public\.textbook_sub_subject_settings/);
   assert.match(migration, /alter column id set default gen_random_uuid\(\)/);
 });

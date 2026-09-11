@@ -599,8 +599,9 @@ type TemplateEditorProps = {
   rule: NotificationRuleDto | null
   draft: NotificationDraft | null
   saving: boolean
-  onOpenChange: (open: boolean) => void
+  onOpenChange: (open: boolean, options?: { applied?: boolean }) => void
   onChange: (ruleId: string, patch: NotificationRulePatch) => void
+  onDraftChange: (ruleId: string, value: ReturnType<typeof createTemplateEditorDraft>) => void
 }
 
 function TemplateEditor({ snapshot, rule, draft, ...props }: TemplateEditorProps) {
@@ -608,13 +609,19 @@ function TemplateEditor({ snapshot, rule, draft, ...props }: TemplateEditorProps
   return <TemplateEditorFields key={rule.id} snapshot={snapshot} rule={rule} draft={draft} {...props} />
 }
 
-function TemplateEditorFields({ snapshot, rule, draft, saving, onOpenChange, onChange }: Omit<TemplateEditorProps, "snapshot" | "rule" | "draft"> & {
+function TemplateEditorFields({ snapshot, rule, draft, saving, onOpenChange, onChange, onDraftChange }: Omit<TemplateEditorProps, "snapshot" | "rule" | "draft"> & {
   snapshot: NotificationControlPlaneSnapshot
   rule: NotificationRuleDto
   draft: NotificationDraft
 }) {
   const [value, setValue] = React.useState(() => createTemplateEditorDraft(draft.rules[rule.id]))
-  const updateEditor = (patch: NotificationRulePatch) => setValue((current) => ({ ...current, ...patch }))
+  const valueRef = React.useRef(value)
+  const updateEditor = (patch: NotificationRulePatch) => {
+    const next = { ...valueRef.current, ...patch }
+    valueRef.current = next
+    setValue(next)
+    onDraftChange(rule.id, next)
+  }
   const schedule = value.scheduleConfig
   const evaluation = evaluateNotificationDraft(snapshot, { ...draft, rules: { ...draft.rules, [rule.id]: value } })
   const blockingIssues = evaluation.validation.ok
@@ -758,7 +765,7 @@ function TemplateEditorFields({ snapshot, rule, draft, saving, onOpenChange, onC
           <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>취소</Button>
           <Button type="button" disabled={saving || blockingIssues.length > 0} onClick={() => {
             onChange(rule.id, { titleTemplate: value.titleTemplate, bodyTemplate: value.bodyTemplate, scheduleConfig: value.scheduleConfig })
-            onOpenChange(false)
+            onOpenChange(false, { applied: true })
           }}>변경사항에 반영</Button>
         </DialogFooter>
       </DialogContent>
@@ -770,6 +777,8 @@ type ConnectionsViewProps = {
   connections: ReadonlyArray<NotificationConnectionDto>
   busyKey: NotificationConnectionKey | null
   error: string | null
+  webhookInputs: Record<string, string>
+  setWebhookInputs: React.Dispatch<React.SetStateAction<Record<string, string>>>
   onMutate: (
     connection: NotificationConnectionDto,
     action: "replace" | "verify" | "disconnect",
@@ -785,11 +794,11 @@ function ConnectionsView({
   connections,
   busyKey,
   error,
+  webhookInputs,
+  setWebhookInputs,
   onMutate,
   onRequestConfirmation,
 }: ConnectionsViewProps) {
-  const [webhookInputs, setWebhookInputs] = React.useState<Record<string, string>>({})
-
   return (
     <div className="space-y-3">
       <div>
@@ -955,6 +964,8 @@ export function NotificationControlPanel({
   const [savePhase, setSavePhase] = React.useState<SavePhase>("idle")
   const [savedAt, setSavedAt] = React.useState<string | null>(null)
   const [editingRuleId, setEditingRuleId] = React.useState<string | null>(null)
+  const [templateEditorDraft, setTemplateEditorDraft] = React.useState<{ ruleId: string; value: ReturnType<typeof createTemplateEditorDraft> } | null>(null)
+  const [webhookInputs, setWebhookInputs] = React.useState<Record<string, string>>({})
   const [activeSection, setActiveSection] = React.useState<NotificationControlPanelSection>(
     presentation === "page" ? initialSection : "rules",
   )
@@ -991,6 +1002,8 @@ export function NotificationControlPanel({
     setConflictOverride(null)
     setLatestSnapshotConfirmationOpen(false)
     setEditingRuleId(null)
+    setTemplateEditorDraft(null)
+    setWebhookInputs({})
     saveRequestRef.current = null
     const mentionController = new AbortController()
     const mentionLoadGeneration = mentionLoadGenerationRef.current + 1
@@ -1042,9 +1055,13 @@ export function NotificationControlPanel({
   }, [activeWorkflow, loadAttempt, mentionService, service, visible])
 
   const mentionChanges = React.useMemo(() => buildMentionDraftPatch(mentionSettings, mentionDraft), [mentionSettings, mentionDraft])
+  const templateEditorDirty = Boolean(editingRuleId && templateEditorDraft?.ruleId === editingRuleId && draft?.rules[editingRuleId]
+    && JSON.stringify(templateEditorDraft.value) !== JSON.stringify(createTemplateEditorDraft(draft.rules[editingRuleId])))
+  const webhookInputsDirty = Object.values(webhookInputs).some(value => value.trim().length > 0)
+  const childDraftDirty = templateEditorDirty || webhookInputsDirty
   const dirty = React.useMemo(() => (
-    (baseDraft !== null && draft !== null && isNotificationDraftDirty(baseDraft, draft)) || Object.keys(mentionChanges.mentionPatch).length > 0
-  ), [baseDraft, draft, mentionChanges])
+    (baseDraft !== null && draft !== null && isNotificationDraftDirty(baseDraft, draft)) || Object.keys(mentionChanges.mentionPatch).length > 0 || childDraftDirty
+  ), [baseDraft, draft, mentionChanges, childDraftDirty])
   const saving = savePhase === "saving"
   const displayedMentionSettings = React.useMemo(() => new Map(Array.from(mentionSettings, ([ruleId, setting]) => [ruleId, { ...setting, mentionEnabled: mentionDraft.get(ruleId) ?? setting.mentionEnabled }])), [mentionSettings, mentionDraft])
   const mentionSavingRuleIds = React.useMemo(() => saving ? new Set(mentionSettings.keys()) : new Set<string>(), [saving, mentionSettings])
@@ -1126,6 +1143,7 @@ export function NotificationControlPanel({
 
   const handleSave = React.useCallback(async () => {
     if (!snapshot || !baseDraft || !draft) return false
+    if (childDraftDirty) return false
     if (saving || mentionLoading) return false
     if (!dirty) return true
     if (conflict || mentionConflict) {
@@ -1231,7 +1249,7 @@ export function NotificationControlPanel({
       setSavePhase("idle")
       return false
     }
-  }, [activeWorkflow, baseDraft, conflict, conflictOverride, dirty, draft, mentionChanges, mentionConflict, mentionDraft, mentionLoading, mentionSettings, pollReconciliation, saving, service, snapshot])
+  }, [activeWorkflow, baseDraft, childDraftDirty, conflict, conflictOverride, dirty, draft, mentionChanges, mentionConflict, mentionDraft, mentionLoading, mentionSettings, pollReconciliation, saving, service, snapshot])
 
   const handleRetryReconciliation = React.useCallback(async () => {
     if (!reconciliationJob || reconciliationRetrying) return
@@ -1257,10 +1275,12 @@ export function NotificationControlPanel({
   }, [pollReconciliation, reconciliationJob, reconciliationRetrying])
 
   const navigationGuard = useNotificationNavigationGuard({
+    active: visible,
     dirty,
     saving,
     onSave: handleSave,
   })
+  const isHistoryCleanupEvent = navigationGuard.isHistoryCleanupEvent
 
   const changeSection = (section: NotificationSettingsSection) => {
     if (section === activeSection) return
@@ -1272,7 +1292,14 @@ export function NotificationControlPanel({
 
   const discardDraftAndContinue = () => {
     if (saving) return
+    if (navigationGuard.localClosePending) {
+      navigationGuard.discardAndContinue()
+      return
+    }
     setDraft(baseDraft)
+    setTemplateEditorDraft(null)
+    setEditingRuleId(null)
+    setWebhookInputs({})
     setMentionDraft(createMentionDraft(mentionSettings))
     setMentionConflict(null)
     setConflict(null)
@@ -1288,8 +1315,8 @@ export function NotificationControlPanel({
 
   React.useEffect(() => {
     if (presentation !== "page") return
-    const onPopState = () => {
-      if (dirty) return
+    const onPopState = (event: PopStateEvent) => {
+      if (dirty || isHistoryCleanupEvent(event)) return
       queueMicrotask(() => {
         const location = readNotificationSettingsLocation(new URLSearchParams(window.location.search))
         setPageWorkflow(location.workflow)
@@ -1299,7 +1326,7 @@ export function NotificationControlPanel({
     }
     window.addEventListener("popstate", onPopState)
     return () => window.removeEventListener("popstate", onPopState)
-  }, [dirty, presentation])
+  }, [dirty, isHistoryCleanupEvent, presentation])
 
   const requestClose = React.useCallback(() => {
     navigationGuard.requestNavigation(() => onOpenChange?.(false))
@@ -1614,7 +1641,7 @@ export function NotificationControlPanel({
         <Button
           type="button"
           className="h-9 w-full sm:w-auto"
-          disabled={!dirty || saving || mentionLoading || conflict !== null || mentionConflict !== null}
+          disabled={!dirty || childDraftDirty || saving || mentionLoading || conflict !== null || mentionConflict !== null}
           onClick={() => void handleSave()}
         >
           {saving ? "저장 중" : "변경사항 저장"}
@@ -1630,15 +1657,24 @@ export function NotificationControlPanel({
         rule={editingRule}
         draft={draft}
         saving={saving}
-        onOpenChange={(nextOpen) => {
-          if (!nextOpen) setEditingRuleId(null)
+        onOpenChange={(nextOpen, options) => {
+          if (nextOpen) return
+          const close = () => { setEditingRuleId(null); setTemplateEditorDraft(null) }
+          if (options?.applied) close()
+          else navigationGuard.requestNavigation(close, { preserveHistory: true, skipConfirmation: !templateEditorDirty })
         }}
         onChange={updateRule}
+        onDraftChange={(ruleId, value) => setTemplateEditorDraft({ ruleId, value })}
       />
-      <Dialog open={presentation === "page" && activeSection === "connections"} onOpenChange={(nextOpen) => { if (!nextOpen && connectionBusyKey === null) setActiveSection("rules") }}>
+      <Dialog open={presentation === "page" && activeSection === "connections"} onOpenChange={(nextOpen) => {
+        if (!nextOpen && connectionBusyKey === null) navigationGuard.requestNavigation(() => {
+          setWebhookInputs({})
+          setActiveSection("rules")
+        }, { preserveHistory: true, skipConfirmation: !webhookInputsDirty })
+      }}>
         <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl" closeButtonLabel="수신 채팅방 닫기" showCloseButton={connectionBusyKey === null} onEscapeKeyDown={(event) => { if (connectionBusyKey !== null) event.preventDefault() }} onPointerDownOutside={(event) => { if (connectionBusyKey !== null) event.preventDefault() }}>
           <DialogHeader><DialogTitle>수신 채팅방</DialogTitle><DialogDescription>여러 업무에서 함께 사용하는 Google Chat 연결입니다.</DialogDescription></DialogHeader>
-          {snapshot ? <ConnectionsView connections={snapshot.connections} busyKey={connectionBusyKey} error={connectionError} onMutate={mutateConnection} onRequestConfirmation={(connection, action) => setPendingConnectionAction({ connection, action })} /> : <p role="status" className="py-8 text-center text-sm text-muted-foreground">{loading ? "수신 채팅방을 불러오는 중입니다." : "수신 채팅방을 불러오지 못했습니다."}</p>}
+          {snapshot ? <ConnectionsView connections={snapshot.connections} busyKey={connectionBusyKey} error={connectionError} webhookInputs={webhookInputs} setWebhookInputs={setWebhookInputs} onMutate={mutateConnection} onRequestConfirmation={(connection, action) => setPendingConnectionAction({ connection, action })} /> : <p role="status" className="py-8 text-center text-sm text-muted-foreground">{loading ? "수신 채팅방을 불러오는 중입니다." : "수신 채팅방을 불러오지 못했습니다."}</p>}
         </DialogContent>
       </Dialog>
       <Dialog
@@ -1648,6 +1684,7 @@ export function NotificationControlPanel({
         }}
       >
         <DialogContent
+          layer="nested"
           showCloseButton={false}
           onEscapeKeyDown={(event) => event.preventDefault()}
           onPointerDownOutside={(event) => event.preventDefault()}
@@ -1655,13 +1692,19 @@ export function NotificationControlPanel({
           <DialogHeader>
             <DialogTitle>저장하지 않은 변경사항이 있습니다</DialogTitle>
             <DialogDescription>
-              이동하기 전에 저장하거나 변경을 버릴지 선택해 주세요.
+              {navigationGuard.localClosePending ? "이 창의 변경사항을 버리고 닫을까요?" : webhookInputsDirty
+                ? "새 Webhook URL은 수신 채팅방에서 연결 교체로 적용해 주세요." : templateEditorDirty
+                ? "편집한 내용을 변경사항에 반영한 뒤 저장해 주세요."
+                : "이동하기 전에 저장하거나 변경을 버릴지 선택해 주세요."}
             </DialogDescription>
           </DialogHeader>
+          {!childDraftDirty && !navigationGuard.localClosePending && message ? (
+            <p role="alert" className="text-sm text-destructive">{message}</p>
+          ) : null}
           <DialogFooter>
             <Button
               type="button"
-              variant="ghost"
+              variant="outline"
               disabled={saving}
               onClick={navigationGuard.continueEditing}
             >
@@ -1669,15 +1712,15 @@ export function NotificationControlPanel({
             </Button>
             <Button
               type="button"
-              variant="outline"
+              variant={!childDraftDirty && !navigationGuard.localClosePending ? "destructive-outline" : "destructive"}
               disabled={saving}
               onClick={discardDraftAndContinue}
             >
-              저장하지 않고 이동
+              변경사항 버리기
             </Button>
-            <Button type="button" disabled={saving} onClick={() => void navigationGuard.saveAndContinue()}>
+            {!childDraftDirty && !navigationGuard.localClosePending ? <Button type="button" disabled={saving} onClick={() => void navigationGuard.saveAndContinue()}>
               저장하고 이동
-            </Button>
+            </Button> : null}
           </DialogFooter>
         </DialogContent>
       </Dialog>

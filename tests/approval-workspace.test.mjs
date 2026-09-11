@@ -80,7 +80,7 @@ test("english monthly approvals can recommend the repeated approval line", () =>
 test("switching approval templates clears stale approver across subjects", () => {
   assert.match(workspaceSource, /const nextInput = buildTemplateInput\(templateKey, current\.reportMonth \|\| monthInputValue\(\)\)/)
   assert.match(workspaceSource, /approverId: current\.subject === nextInput\.subject \? current\.approverId : ""/)
-  assert.match(workspaceSource, /setManualApproverTouched\(false\)[\s\S]*setInput\(\(current\) => \(\{[\s\S]*subject: template\.subject,[\s\S]*approverId: current\.subject === template\.subject \? current\.approverId : ""/)
+  assert.match(workspaceSource, /setManualApproverTouched\(false\)[\s\S]*startComposer\(\{[\s\S]*subject: template\.subject,[\s\S]*approverId: current\.subject === template\.subject \? current\.approverId : ""/)
 })
 
 test("approval submit requires month approver and body", () => {
@@ -120,7 +120,7 @@ test("saved approval drafts can be reopened, edited, and submitted", () => {
   assert.match(workspaceSource, /const \[editingRequestStatus, setEditingRequestStatus\]/)
   assert.match(workspaceSource, /function approvalInputFromRequest\(request: ApprovalRequest\)/)
   assert.match(workspaceSource, /const editApproval = \(request: ApprovalRequest\)/)
-  assert.match(workspaceSource, /setInput\(approvalInputFromRequest\(request\)\)/)
+  assert.match(workspaceSource, /startComposer\(approvalInputFromRequest\(request\)\)/)
   assert.match(workspaceSource, /setEditingRequestId\(request\.id\)/)
   assert.match(workspaceSource, /await updateMonthlyReportApproval\(editingRequestId, input, nextStatus\)/)
   assert.match(workspaceSource, /onEdit=\{editApproval\}/)
@@ -197,10 +197,10 @@ test("approval draft and list expose attachment count and progress at a glance",
 test("approval composer stays compact until a template or document is selected", () => {
   assert.match(workspaceSource, /const \[composerOpen, setComposerOpen\] = useState\(false\)/)
   assert.match(workspaceSource, /const composerExpanded = composerOpen \|\| Boolean\(editingRequestId\)/)
-  assert.match(workspaceSource, /const applyTemplate = \(templateKey: ApprovalTemplateKey\) => \{[\s\S]*setComposerOpen\(true\)/)
+  assert.match(workspaceSource, /const applyTemplate = \(templateKey: ApprovalTemplateKey\) => requestLocalAction\(\(\) => \{[\s\S]*setComposerOpen\(true\)/)
   assert.match(workspaceSource, /const applySavedTemplate = \(templateId: string\) => \{[\s\S]*setComposerOpen\(true\)/)
-  assert.match(workspaceSource, /const editApproval = \(request: ApprovalRequest\) => \{[\s\S]*setComposerOpen\(true\)/)
-  assert.match(workspaceSource, /const cancelEdit = \(\) => \{[\s\S]*setComposerOpen\(false\)/)
+  assert.match(workspaceSource, /const editApproval = \(request: ApprovalRequest\) => requestLocalAction\(\(\) => \{[\s\S]*setComposerOpen\(true\)/)
+  assert.match(workspaceSource, /const cancelEdit = \(\) => requestLocalAction\(\(\) => \{[\s\S]*setComposerOpen\(false\)/)
   assert.match(workspaceSource, /\{composerExpanded && \(/)
   assert.match(workspaceSource, /\{composerExpanded && <Badge variant="secondary">\{approvalSubjectLabel\(input\.subject\)} · \{progress\.resolved\}\/\{progress\.total\}<\/Badge>\}/)
 })

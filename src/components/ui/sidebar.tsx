@@ -171,6 +171,8 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const mobileOpenerRef = React.useRef<HTMLElement | null>(null)
+  const mobileOpenPathRef = React.useRef<string | null>(null)
 
   if (collapsible === "none") {
     return (
@@ -194,6 +196,29 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          onOpenAutoFocus={(event) => {
+            const active = document.activeElement
+            const scope = event.target
+            mobileOpenerRef.current = active instanceof HTMLElement
+              && active !== document.body
+              && !(scope instanceof HTMLElement && scope.contains(active))
+              ? active
+              : null
+            mobileOpenPathRef.current = window.location.pathname
+          }}
+          onCloseAutoFocus={(event) => {
+            event.preventDefault()
+            const opener = mobileOpenerRef.current
+            mobileOpenerRef.current = null
+            // A menu navigation may already have focused the new page.
+            if (window.location.pathname !== mobileOpenPathRef.current) return
+            if (opener?.isConnected
+              && !opener.matches(":disabled")
+              && !opener.closest("[hidden], [inert]")
+              && opener.getClientRects().length > 0) {
+              opener.focus({ preventScroll: true })
+            }
+          }}
           className="bg-sidebar text-sidebar-foreground w-(--sidebar-width) p-0 [&>button]:hidden"
           style={
             {
@@ -528,6 +553,9 @@ function SidebarMenuButton({
 } & VariantProps<typeof sidebarMenuButtonVariants>) {
   const Comp = asChild ? Slot : "button"
   const { isMobile, state } = useSidebar()
+  const canShowTooltip = state === "collapsed" && !isMobile
+  const [tooltipOpen, setTooltipOpen] = React.useState(false)
+  if (!canShowTooltip && tooltipOpen) setTooltipOpen(false)
 
   const button = (
     <Comp
@@ -552,7 +580,7 @@ function SidebarMenuButton({
   }
 
   return (
-    <Tooltip>
+    <Tooltip open={canShowTooltip && tooltipOpen} onOpenChange={(open) => setTooltipOpen(canShowTooltip && open)}>
       <TooltipTrigger asChild>{button}</TooltipTrigger>
       <TooltipContent
         side="right"

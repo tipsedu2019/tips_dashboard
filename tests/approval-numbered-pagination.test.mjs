@@ -1,3 +1,5 @@
+import { requestAppNavigation } from '../src/lib/guarded-navigation.ts';
+import { clickTab, pressTabKey } from "./helpers/tab-interactions.mjs";
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -19,6 +21,7 @@ function modules(supabase, overrides = {}) {
     let input = readFileSync(file, 'utf8');
     if (file.endsWith('/approval-workspace.tsx') && overrides['@test/observer']) input = input.replace('  const approverOptions = useMemo(',
       '  require("@test/observer").observe({ catalogs, commentDrafts, input, checklistTextDraft, templateName, editingRequestId });\n  const approverOptions = useMemo(');
+    if (file.endsWith('/approval-workspace.tsx') && overrides['@test/observer']) input = input.replace('  if (!actorScope) return', '  require("@test/observer").observe({ applySavedTemplate });\n  if (!actorScope) return');
     const source = ts.transpileModule(input, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -126,12 +129,16 @@ async function setup(t, initial = {}) {
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle; globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0); window.cancelAnimationFrame = window.clearTimeout; window.scrollTo = () => {};
+  globalThis.requestAnimationFrame = window.requestAnimationFrame; globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
   window.HTMLElement.prototype.scrollIntoView = () => {}; window.HTMLElement.prototype.attachEvent = () => {}; window.HTMLElement.prototype.detachEvent = () => {};
   window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'approvals:requests': { mode: 'manual', pageSize: initial.pageSize || 10 } }));
   const root = createRoot(document.getElementById('root')), io = transport();
   let auth = { user: { id: id(800), name: '교사' }, role: 'admin', loading: false, canManageAll: true, isStaff: false, isAdmin: true, ...initial.auth };
   let search = null, params, observed;
-  const load = modules(io.supabase, { '@test/observer': { observe(value) { observed = value; } }, '@/providers/auth-provider': { useAuth: () => auth }, 'next/navigation': { useSearchParams() {
+  const router = { push() {}, replace() {} };
+  window.navigation = Object.assign(new window.EventTarget(), { traverseTo() {} });
+  window.HTMLElement.prototype.getClientRects = () => [{ width: 20, height: 20 }];
+  const load = modules(io.supabase, { '@test/observer': { observe(value) { observed = { ...observed, ...value }; } }, '@/providers/auth-provider': { useAuth: () => auth }, 'next/navigation': { useRouter: () => router, useSearchParams() {
     if (search !== window.location.search) { search = window.location.search; params = new URLSearchParams(search); } return params;
   } } });
   const Workspace = load('src/features/approvals/approval-workspace.tsx').ApprovalWorkspace;
@@ -172,7 +179,7 @@ for (const { page, nextPage, pageAction, firstTitle } of [
 ]) test(`failed tab switch pages the retained mine view from ${page} to ${nextPage}`, async (t) => {
   const p = await setup(t, { search: `?view=mine&page=${page}` });
   await act(async () => p.finish(p.numbered()[0]));
-  await act(async () => tab('반려').click());
+  await act(async () => clickTab(tab('반려')));
   const failed = p.numbered()[1];
   assert.deepEqual(failed.args, { p_view: 'returned', p_page: 1, p_page_size: 10 });
   assert.equal(tab('내 문서').getAttribute('aria-selected'), 'true');
@@ -196,14 +203,14 @@ for (const { page, nextPage, pageAction, firstTitle } of [
 test('failed tab retry retains its target while a late superseded tab result cannot replace paged mine rows', async (t) => {
   const p = await setup(t, { search: '?view=mine&page=11' });
   await act(async () => p.finish(p.numbered()[0]));
-  await act(async () => tab('반려').click());
+  await act(async () => clickTab(tab('반려')));
   await act(async () => p.numbered()[1].reject(new Error('RETURNED FAILURE')));
   await act(async () => button('다시 시도').click());
   const oldRetry = p.numbered()[2];
   assert.deepEqual(oldRetry.args, { p_view: 'returned', p_page: 1, p_page_size: 10 });
   assert.equal(tab('내 문서').getAttribute('aria-selected'), 'true');
   assert.equal(button('11 페이지').getAttribute('aria-current'), 'page');
-  await act(async () => tab('진행').click());
+  await act(async () => clickTab(tab('진행')));
   assert.equal(oldRetry.signal.aborted, true);
   await act(async () => p.numbered()[3].reject(new Error('OPEN FAILURE')));
   await act(async () => button('12 페이지').click());
@@ -473,4 +480,136 @@ test('mounted Back restoration revisits an earlier self-written URL without echo
   await act(async () => p.finish(p.numbered().at(-1), 100));
   window.history.replaceState(null, '', earlier); await p.render();
   assert.equal(p.numbered().at(-1).args.p_page, 11); assert.equal(p.numbered().at(-1).args.p_view, 'mine');
+});
+
+test('approval keyboard tab navigation defers RPC until activation and keeps accepted panel on failure', async (t) => {
+  const p = await setup(t, { search: '?view=mine' });
+  await act(async () => p.finish(p.numbered()[0]));
+  const accepted = document.querySelector('[role="tab"][aria-selected="true"]');
+  const panel = document.querySelector('[role="tabpanel"]');
+  await act(async () => accepted.focus());
+  await act(async () => pressTabKey(accepted, 'End'));
+  const target = document.activeElement;
+  assert.equal(target.getAttribute('role'), 'tab');
+  assert.notEqual(target, accepted);
+  assert.equal(p.numbered().length, 1);
+  await act(async () => pressTabKey(target, 'Enter'));
+  assert.equal(p.numbered().length, 2);
+  assert.equal(document.querySelector('[role="tabpanel"]'), panel);
+  await act(async () => p.numbered()[1].reject(new Error('offline')));
+  assert.equal(accepted.getAttribute('aria-selected'), 'true');
+  assert.equal(panel.getAttribute('aria-labelledby'), accepted.id);
+  assert.equal(document.activeElement, target);
+});
+
+const settleDraft = () => act(async () => { await new Promise(resolve => setTimeout(resolve, 30)); });
+const draftDialog = () => document.querySelector('[data-testid="draft-navigation-confirm-dialog"]');
+const draftClick = async label => { await act(async () => button(label).click()); await settleDraft(); };
+async function readyDraft(t) { const p=await setup(t);await act(async()=>p.finish(p.numbered()[0]));await p.catalogs();return p; }
+
+test('approval draft navigation: untouched and reverted composer remain clean; dirty template replacement can be cancelled', async t => {
+  await readyDraft(t);await draftClick('자유');
+  let routes=0;await act(async()=>requestAppNavigation(()=>routes++));assert.equal(routes,1);assert.equal(draftDialog(),null);
+  const body=document.querySelector('textarea');const original=body.value;
+  await changeInput(body,'새 본문');await draftClick('수학');assert.ok(draftDialog());
+  await draftClick('계속 편집');assert.equal(body.value,'새 본문');
+  await changeInput(body,original);await act(async()=>requestAppNavigation(()=>routes++));assert.equal(routes,2);assert.equal(draftDialog(),null);
+});
+
+test('approval draft navigation: local composer replacement retains independent comment protection', async t => {
+  const p=await readyDraft(t);await draftClick('자유');
+  const comment=document.querySelector('input[aria-label="문서 1 댓글"]');await changeInput(comment,'댓글 초안');
+  await changeInput(document.querySelector('textarea'),'본문 초안');await draftClick('수학');assert.ok(draftDialog());
+  await draftClick('변경사항 버리기');assert.equal(p.observed.input.templateKey,'math_monthly');assert.equal(comment.value,'댓글 초안');
+  let routes=0;await act(async()=>requestAppNavigation(()=>routes++));assert.ok(draftDialog());assert.equal(routes,0);
+  await draftClick('계속 편집');await changeInput(comment,'');await act(async()=>requestAppNavigation(()=>routes++));assert.equal(routes,1);
+});
+
+test('approval draft navigation: un-applied checklist cancellation retains parent draft and its route guard', async t => {
+  await readyDraft(t);await draftClick('자유');await changeInput(document.querySelector('textarea'),'부모 초안');
+  await act(async()=>document.querySelector('section[aria-label="월간 보고서 점검"] > button').click());await draftClick('항목 편집');
+  const editor=()=>document.querySelector('[aria-label="점검 항목 편집"]');await changeInput(editor(),'새 항목');
+  await draftClick('취소');assert.ok(draftDialog());await draftClick('계속 편집');assert.equal(editor().value,'새 항목');
+  await draftClick('취소');await draftClick('변경사항 버리기');assert.equal(editor(),null);assert.equal(document.querySelector('textarea').value,'부모 초안');
+  await act(async()=>requestAppNavigation(()=>assert.fail('parent draft must remain protected')));assert.ok(draftDialog());
+});
+
+test('approval draft navigation: same tick duplicate save runs once and acknowledgment protects newer input', async t => {
+  const p=await readyDraft(t);await draftClick('자유');await changeInput(document.querySelector('textarea'),'제출 본문');
+  const save=button('임시저장');const handler=save[Object.keys(save).find(key=>key.startsWith('__reactProps'))].onClick;
+  await act(async()=>{handler();handler();await p.waitForRequest('create_approval_request_v2');});
+  await settleDraft();assert.equal(p.requests.filter(r=>r.name==='create_approval_request_v2').length,1);
+  await changeInput(document.querySelector('textarea'),'추가 본문');
+  await act(async()=>p.requests.find(r=>r.name==='create_approval_request_v2').resolve({data:{request:{id:id(77),status:'draft',updated_at:stamp}},error:null}));
+  await act(async()=>p.finish(p.numbered().at(-1)));assert.equal(document.querySelector('textarea').value,'추가 본문');
+  const unload=new window.Event('beforeunload',{cancelable:true});window.dispatchEvent(unload);assert.equal(unload.defaultPrevented,true);
+  await changeInput(document.querySelector('textarea'),'제출 본문');let routes=0;await act(async()=>requestAppNavigation(()=>routes++));assert.equal(routes,1,'reverting to accepted submitted input is clean');
+});
+
+test('approval draft navigation: an old composer receipt cannot clean a replacement composer lifetime', async t => {
+  const p=await readyDraft(t);await draftClick('자유');await changeInput(document.querySelector('textarea'),'A 제출');
+  await act(async()=>{button('임시저장').click();await p.waitForRequest('create_approval_request_v2');});
+  await draftClick('수학');assert.ok(draftDialog());await draftClick('변경사항 버리기');await changeInput(document.querySelector('textarea'),'B 초안');
+  await act(async()=>p.requests.find(r=>r.name==='create_approval_request_v2').resolve({data:{request:{id:id(77),status:'draft',updated_at:stamp}},error:null}));
+  await act(async()=>p.finish(p.numbered().at(-1)));assert.equal(document.querySelector('textarea').value,'B 초안');
+  let routes=0;await act(async()=>requestAppNavigation(()=>routes++));assert.equal(routes,0);assert.ok(draftDialog());
+});
+
+
+test('approval pending template replacement compares against the latest accepted document baseline', async t => {
+ const p=await setup(t);await act(async()=>p.finish(p.numbered()[0],1,{rows:[row(1,{classSummary:'원본 서식'})]}));
+ await act(async()=>{
+  p.requests.find(r=>r.table==='profiles').resolve({data:[],error:null});
+  p.requests.find(r=>r.table==='approval_templates').resolve({data:[{id:id(901),name:'원본 서식',subject:'general',body:'본문',checklist_items:[],attachment_links:''}],error:null});
+ });
+ await draftClick('편집');await changeInput(document.querySelector('textarea'),'제출 내용');
+ await act(async()=>{button('수정 저장').click();await p.waitForRequest('approval_requests');});
+ await act(async()=>{p.requests.filter(r=>r.table==='approval_requests').at(-1).resolve({data:{id:id(1),status:'draft',updated_at:stamp},error:null});await p.waitForRequest('update_approval_request_v2');});
+ await changeInput(document.querySelector('textarea'),'추가 내용');
+ await act(async()=>p.observed.applySavedTemplate(id(901)));assert.ok(draftDialog());
+ await act(async()=>p.requests.find(r=>r.name==='update_approval_request_v2').resolve({data:{request:{id:id(1),status:'draft',updated_at:stamp}},error:null}));
+ await act(async()=>p.finish(p.numbered().at(-1),1));
+ await draftClick('변경사항 버리기');assert.equal(document.querySelector('textarea').value,'본문');
+ const unload=new window.Event('beforeunload',{cancelable:true});window.dispatchEvent(unload);
+ assert.equal(unload.defaultPrevented,true,'template differs from the latest accepted submission even when it matches the old document');
+});
+
+
+test('approval accepted create keeps its document identity for a subsequent save of newer input', async t => {
+  const p=await readyDraft(t);await draftClick('자유');await changeInput(document.querySelector('textarea'),'첫 저장 본문');
+  await act(async()=>{button('임시저장').click();await p.waitForRequest('create_approval_request_v2');});
+  await changeInput(document.querySelector('textarea'),'이어 쓴 본문');
+  await act(async()=>p.requests.find(r=>r.name==='create_approval_request_v2').resolve({data:{request:{id:id(77),status:'draft',updated_at:stamp}},error:null}));
+  await act(async()=>p.finish(p.numbered().at(-1)));
+  assert.equal(p.observed.editingRequestId,id(77),'retained input belongs to the accepted document');
+  assert.equal(document.querySelector('textarea').value,'이어 쓴 본문');
+  await act(async()=>{button('수정 저장').click();await p.waitForRequest('approval_requests');});
+  const snapshot=p.requests.filter(r=>r.table==='approval_requests').at(-1);
+  assert.ok(snapshot.steps.some(step=>step.name==='eq'&&step.args[0]==='id'&&step.args[1]===id(77)));
+  await act(async()=>{snapshot.resolve({data:{id:id(77),status:'draft',updated_at:stamp},error:null});await p.waitForRequest('update_approval_request_v2');});
+  const update=p.requests.find(r=>r.name==='update_approval_request_v2');
+  assert.equal(update.args.p_approval_id,id(77));assert.equal(update.args.p_input.body,'이어 쓴 본문');
+  assert.equal(p.requests.filter(r=>r.name==='create_approval_request_v2').length,1);
+  await act(async()=>update.resolve({data:{request:{id:id(77),status:'draft',updated_at:stamp}},error:null}));
+  await act(async()=>p.finish(p.numbered().at(-1)));
+  assert.equal(document.querySelector('textarea'),null,'accepted unchanged follow-up closes the same document');
+});
+
+
+test('approval pending saved template remains dirty when create acknowledgement attaches the document first', async t => {
+  const p=await setup(t);await act(async()=>p.finish(p.numbered()[0]));
+  await act(async()=>{
+    p.requests.find(r=>r.table==='profiles').resolve({data:[],error:null});
+    p.requests.find(r=>r.table==='approval_templates').resolve({data:[{id:id(901),name:'저장 서식',subject:'general',body:'서식 본문',checklist_items:[],attachment_links:''}],error:null});
+  });
+  await draftClick('자유');await changeInput(document.querySelector('textarea'),'첫 저장 본문');
+  await act(async()=>{button('임시저장').click();await p.waitForRequest('create_approval_request_v2');});
+  await changeInput(document.querySelector('textarea'),'추가 본문');
+  await act(async()=>p.observed.applySavedTemplate(id(901)));assert.ok(draftDialog());
+  await act(async()=>p.requests.find(r=>r.name==='create_approval_request_v2').resolve({data:{request:{id:id(77),status:'draft',updated_at:stamp}},error:null}));
+  await act(async()=>p.finish(p.numbered().at(-1)));
+  await draftClick('변경사항 버리기');assert.equal(document.querySelector('textarea').value,'서식 본문');
+  assert.equal(p.observed.editingRequestId,id(77));
+  const unload=new window.Event('beforeunload',{cancelable:true});window.dispatchEvent(unload);
+  assert.equal(unload.defaultPrevented,true,'applied template has not been saved to the document created during confirmation');
 });

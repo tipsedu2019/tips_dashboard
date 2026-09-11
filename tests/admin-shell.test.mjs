@@ -763,7 +763,7 @@ test("global shell exposes stable browser-use targets", async () => {
   assert.match(commandSearchSource, /data-testid="admin-quick-search-trigger"/);
   assert.match(commandSearchSource, /data-testid="admin-quick-search-dialog"/);
   assert.match(commandSearchSource, /data-testid=\{`admin-quick-search-item-\$\{itemTargetId\}`\}/);
-  assert.match(commandSearchSource, /onClick=\{\(\) => handleSelect\(item\.url\)\}/);
+  assert.match(commandSearchSource, /onSelect=\{\(\) => handleSelect\(item\.url\)\}/);
   assert.match(commandSearchSource, /flushSync\(\(\) => \{/);
   assert.match(commandSearchSource, /aria-label="빠른 이동 검색"/);
   assert.match(headerSource, /setSearchOpen\(false\)[\s\S]*\[pathname\]/);
@@ -774,7 +774,8 @@ test("global shell exposes stable browser-use targets", async () => {
   assert.match(appSidebarSource, /<SidebarRail \/>/);
   assert.match(dialogSource, /data-\[state=closed\]:pointer-events-none/);
   assert.doesNotMatch(dialogSource, /data-\[state=closed\]:hidden|data-\[state=closed\]:invisible/);
-  assert.match(dialogSource, /absolute top-4 right-4 z-30/);
+  assert.match(dialogSource, /"z-30 text-muted-foreground"/);
+  assert.match(dialogSource, /absolute top-2 right-2 size-11 sm:top-3 sm:right-3 sm:size-9/);
   assert.match(globalsSource, /\[data-slot="dialog-content"\]\[data-state="closed"\]/);
 });
 
@@ -808,8 +809,8 @@ test("global shell avoids hidden palette and avatar over-render work", async () 
   assert.match(commandSearchSource, /function groupSearchItems/);
   assert.match(commandSearchSource, /React\.startTransition/);
   assert.doesNotMatch(commandSearchSource, /navGroups\.flatMap/);
-  assert.match(modeToggleSource, /React\.useState\(getSystemDarkMode\)/);
-  assert.match(modeToggleSource, /if \(theme === "dark" \|\| theme === "light"\)/);
+  assert.match(modeToggleSource, /React\.useSyncExternalStore/);
+  assert.match(modeToggleSource, /theme === "system" \? subscribeSystemMode : skipSystemSubscription/);
   assert.match(navUserSource, /const PROFILE_AVATAR_INITIAL_LIMIT = 20/);
   assert.match(navUserSource, /profileAvatarPresets\.slice\(0, avatarLimit\)/);
   assert.match(navUserSource, /const visibleProfileAvatarPresets = React\.useMemo/);

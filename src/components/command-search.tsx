@@ -8,6 +8,7 @@ import { ArrowRight, Search, type LucideIcon } from "lucide-react"
 
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import { buildAdminNavGroups } from "@/lib/navigation"
+import { requestAppNavigation } from "@/lib/guarded-navigation"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/providers/auth-provider"
 
@@ -193,14 +194,20 @@ function groupSearchItems(items: SearchItem[]) {
 interface CommandSearchProps {
   open: boolean
   onOpenChange: (open: boolean) => void
+  returnFocusRef?: React.RefObject<HTMLElement | null>
 }
 
-export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
+export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSearchProps) {
   const router = useRouter()
   const pathname = usePathname()
   const { canManageAll, canEditCurriculumPlanning, canUseAssistantOperations } = useAuth()
   const currentPath = React.useMemo(() => normalizeCommandPath(pathname), [pathname])
   const prefetchedCommandRoutesRef = React.useRef(new Set<string>())
+  const pendingTargetRef = React.useRef<string | null>(null)
+  const selectedRef = React.useRef(false)
+  React.useLayoutEffect(() => {
+    if (open) selectedRef.current = false
+  }, [open])
 
   const prefetchCommandRoute = React.useCallback((url: string) => {
     const targetPath = normalizeCommandPath(url)
@@ -221,18 +228,15 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   )
 
   const handleSelect = React.useCallback((url: string) => {
+    if (selectedRef.current) return
+    selectedRef.current = true
     const targetPath = normalizeCommandPath(url)
+    pendingTargetRef.current = targetPath === currentPath ? null : targetPath
 
     flushSync(() => {
       onOpenChange(false)
     })
-
-    if (targetPath !== currentPath) {
-      React.startTransition(() => {
-        router.push(targetPath)
-      })
-    }
-  }, [currentPath, onOpenChange, router])
+  }, [currentPath, onOpenChange])
 
   if (!open) {
     return null
@@ -241,8 +245,23 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent
+        layer="nested"
         aria-label="빠른 이동"
         data-testid="admin-quick-search-dialog"
+        onCloseAutoFocus={(event) => {
+          event.preventDefault()
+          const opener = returnFocusRef?.current
+          if (opener?.isConnected && !opener.matches(":disabled")
+            && !opener.closest("[hidden], [inert]") && opener.getClientRects().length > 0) {
+            opener.focus({ preventScroll: true })
+          }
+          const target = pendingTargetRef.current
+          pendingTargetRef.current = null
+          // Let Radix remove this focus scope before the editor opens its confirmation.
+          if (target) queueMicrotask(() => requestAppNavigation(() => {
+            React.startTransition(() => router.push(target))
+          }))
+        }}
         className="w-[calc(100vw-2rem)] max-w-[640px] overflow-hidden border border-zinc-200 p-0 shadow-2xl dark:border-zinc-800"
       >
         <DialogTitle className="sr-only">빠른 이동</DialogTitle>
@@ -275,7 +294,6 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
                       data-testid={`admin-quick-search-item-${itemTargetId}`}
                       onPointerEnter={() => prefetchCommandRoute(item.url)}
                       onFocus={() => prefetchCommandRoute(item.url)}
-                      onClick={() => handleSelect(item.url)}
                       onSelect={() => handleSelect(item.url)}
                       className={isCurrent ? "bg-primary/5 text-primary data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary" : undefined}
                     >
@@ -302,7 +320,7 @@ export function CommandSearch({ open, onOpenChange }: CommandSearchProps) {
   )
 }
 
-export function SearchTrigger({ onClick }: { onClick: () => void }) {
+export function SearchTrigger({ onClick }: { onClick: React.MouseEventHandler<HTMLButtonElement> }) {
   return (
     <button
       type="button"

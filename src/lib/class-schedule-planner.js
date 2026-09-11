@@ -867,7 +867,7 @@ function resolveTextbookSessionRangeIndex(sessionIndexById, sessionCount, sessio
   return Number.isFinite(directIndex) ? directIndex : fallbackIndex;
 }
 
-function applyTextbookSessionRanges(sessions = [], textbooks = []) {
+export function applyTextbookSessionRanges(sessions = [], textbooks = []) {
   if (!Array.isArray(sessions) || sessions.length === 0) {
     return [];
   }

@@ -390,10 +390,10 @@ test("dirty navigation guard는 닫기, 링크, 뒤로 가기, 새로고침을 �
   assert.match(panelSource, /onPointerDownOutside/)
   assert.match(panelSource, /저장하지 않은 변경사항이 있습니다/)
   assert.match(panelSource, /저장하고 이동/)
-  assert.match(panelSource, /저장하지 않고 이동/)
+  assert.match(panelSource, /변경사항 버리기/)
   assert.match(panelSource, /계속 편집/)
-  assert.match(panelSource, /variant="ghost"[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{navigationGuard\.continueEditing\}/)
-  assert.match(panelSource, /variant="outline"[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{discardDraftAndContinue\}/)
+  assert.match(panelSource, /variant="outline"[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{navigationGuard\.continueEditing\}/)
+  assert.match(panelSource, /variant=\{!childDraftDirty && !navigationGuard\.localClosePending \? "destructive-outline" : "destructive"\}[\s\S]*disabled=\{saving\}[\s\S]*onClick=\{discardDraftAndContinue\}/)
   assert.match(panelSource, /setDraft\(baseDraft\)[\s\S]*setMentionDraft\(createMentionDraft\(mentionSettings\)\)[\s\S]*navigationGuard\.discardAndContinue/)
 })
 

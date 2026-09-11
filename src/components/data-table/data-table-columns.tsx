@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from "react";
 
 import {
   DataTableColumnVisibilitySetting,
@@ -80,6 +80,7 @@ export function useDataTableColumns(
   const exposedVisibility = hydrated ? sanitizedVisibility : defaultVisibility;
   const requiredColumns = useMemo(() => columns.filter((column) => column.required), [columns]);
   const optionalColumns = useMemo(() => columns.filter((column) => !column.required), [columns]);
+  const lastPersisted = useRef<{ key: string; value: string } | null>(null);
 
   useEffect(() => {
     if (!hydrated || !ready || typeof window === "undefined") {
@@ -87,7 +88,10 @@ export function useDataTableColumns(
     }
 
     try {
-      window.localStorage.setItem(storageKey, JSON.stringify(sanitizedVisibility));
+      const value = JSON.stringify(sanitizedVisibility);
+      if (lastPersisted.current?.key === storageKey && lastPersisted.current.value === value) return;
+      window.localStorage.setItem(storageKey, value);
+      lastPersisted.current = { key: storageKey, value };
     } catch {
       // Table settings are convenience state only.
     }

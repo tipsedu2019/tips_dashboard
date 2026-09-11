@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect as useDataEffect, useMemo, useState } from "react"
+import { useEffect as useDataEffect, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 import { supabase } from "@/lib/supabase"
+import { useDraftNavigation } from "@/hooks/use-draft-navigation"
 import {
   Dialog,
   DialogContent,
@@ -118,18 +119,21 @@ function ScopeFields({
           <div key={`${label}-${index}`} className="grid gap-3 rounded-lg border p-3 md:grid-cols-[1fr_1fr_1.4fr_auto]">
             <Input
               placeholder="교재명"
+              aria-label={`${label} ${index + 1} 교재명`}
               value={item.name}
               disabled={disabled}
               onChange={(event) => onChange(index, "name", event.target.value)}
             />
             <Input
               placeholder="출판사"
+              aria-label={`${label} ${index + 1} 출판사`}
               value={item.publisher}
               disabled={disabled}
               onChange={(event) => onChange(index, "publisher", event.target.value)}
             />
             <Input
               placeholder="범위"
+              aria-label={`${label} ${index + 1} 범위`}
               value={item.scope}
               disabled={disabled}
               onChange={(event) => onChange(index, "scope", event.target.value)}
@@ -283,14 +287,30 @@ export function EventForm({
   onDelete,
 }: EventFormProps) {
   const formResetKey = buildEventFormResetKey({ event, initialDraft, defaultDate, defaultEndDate, open, typeOptions })
+  // A late catalog default is not a different event or a newly opened editor.
+  const formOwnerKey = buildEventFormResetKey({ event, initialDraft, defaultDate, defaultEndDate, open, typeOptions: [] })
   const [appliedFormResetKey, setAppliedFormResetKey] = useState(formResetKey)
+  const [appliedFormOwnerKey, setAppliedFormOwnerKey] = useState(formOwnerKey)
   const [formData, setFormData] = useState<EventFormData>(() =>
     buildEventFormData({ event, initialDraft, defaultDate, defaultEndDate, typeOptions }),
   )
+  const [baseline, setBaseline] = useState(formData)
+  const [pendingAction, setPendingAction] = useState<"save" | "delete" | null>(null)
+  const saving = pendingAction !== null
+  const savingRef = useRef(false)
+  const aliveRef = useRef(true)
+  const sessionRef = useRef({ key: `${formOwnerKey}:${readOnly}`, token: {} })
+  const sessionKey = `${formOwnerKey}:${readOnly}`
+  if (sessionRef.current.key !== sessionKey) sessionRef.current = { key: sessionKey, token: {} }
   const [formError, setFormError] = useState<string | null>(null)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [activeScienceAreas, setActiveScienceAreas] = useState<ScienceSubjectArea[]>([])
   const [loadingScienceAreas, setLoadingScienceAreas] = useState(false)
+
+  useDataEffect(() => {
+    aliveRef.current = true
+    return () => { aliveRef.current = false }
+  }, [])
 
   useDataEffect(() => {
     let cancelled = false
@@ -322,13 +342,21 @@ export function EventForm({
     }
   }, [open])
 
+  const currentFormDirty = JSON.stringify(formData) !== JSON.stringify(baseline)
   if (!open && appliedFormResetKey !== formResetKey) {
     setAppliedFormResetKey(formResetKey)
+    setAppliedFormOwnerKey(formOwnerKey)
   }
 
-  if (open && appliedFormResetKey !== formResetKey) {
+  if (open && appliedFormResetKey !== formResetKey
+    && appliedFormOwnerKey === formOwnerKey && (currentFormDirty || saving)) {
     setAppliedFormResetKey(formResetKey)
-    setFormData(buildEventFormData({ event, initialDraft, defaultDate, defaultEndDate, typeOptions }))
+  } else if (open && appliedFormResetKey !== formResetKey) {
+    setAppliedFormResetKey(formResetKey)
+    setAppliedFormOwnerKey(formOwnerKey)
+    const nextForm = buildEventFormData({ event, initialDraft, defaultDate, defaultEndDate, typeOptions })
+    setFormData(nextForm)
+    setBaseline(nextForm)
     if (formError) {
       setFormError(null)
     }
@@ -336,6 +364,10 @@ export function EventForm({
       setDeleteConfirming(false)
     }
   }
+
+  const dirty = open && !readOnly && currentFormDirty
+  const draftNavigation = useDraftNavigation({ dirty })
+  const requestClose = () => draftNavigation.requestLocalAction(() => onOpenChange(false))
 
   const selectedSchool = useMemo(
     () => schoolOptions.find((school) => school.id === formData.schoolId) || null,
@@ -463,6 +495,7 @@ export function EventForm({
   }
 
   const handleSave = async () => {
+    if (readOnly || savingRef.current) return
     const nextDate = fromDateInputValue(formData.date)
     const nextEndDate = fromDateInputValue(formData.endDate || formData.date)
 
@@ -513,39 +546,51 @@ export function EventForm({
     })
     const scopeFieldsForSave = buildAcademicEventFormOutputScopeFields(formData)
 
-    const saved = await onSave({
-      id: persistedEventId,
-      sourceId: persistedEventId,
-      title: formData.title,
-      date: nextDate || new Date(),
-      endDate: nextEndDate || nextDate || new Date(),
-      time: selectedSchool?.name || "학교 미지정",
-      duration: formData.endDate && formData.endDate !== formData.date ? `${formData.date} ~ ${formData.endDate}` : "하루 일정",
-      type: event?.type || "meeting",
-      typeLabel: formData.typeLabel,
-      attendees: selectedGrades.includes("all") ? [] : selectedGrades,
-      location: selectedSchool?.name || "",
-      color: event?.color || "bg-blue-500",
-      description: formData.note,
-      schoolId: formData.schoolId,
-      schoolName: selectedSchool?.name || "",
-      category: selectedSchool?.category || "all",
-      grade: serializeGradeSelection(selectedGrades),
-      examTerm: showExamTermField ? formData.examTerm : "",
-      ...scopeFieldsForSave,
-      note: noteWithMetadata || "",
-      scienceAreaKey: showScienceAreaField ? formData.scienceAreaKey : "",
-      scienceAreaLabel: showScienceAreaField
-        ? activeScienceAreas.find((area) => area.areaKey === formData.scienceAreaKey)?.label || formData.scienceAreaLabel
-        : "",
-      embeddedNoteMeta: formData.embeddedNoteMeta,
-    } as Partial<CalendarEvent>)
-    if (saved !== false) {
-      onOpenChange(false)
+    const session = sessionRef.current.token
+    savingRef.current = true
+    setPendingAction("save")
+    try {
+      const saved = await onSave({
+        id: persistedEventId,
+        sourceId: persistedEventId,
+        title: formData.title,
+        date: nextDate || new Date(),
+        endDate: nextEndDate || nextDate || new Date(),
+        time: selectedSchool?.name || "학교 미지정",
+        duration: formData.endDate && formData.endDate !== formData.date ? `${formData.date} ~ ${formData.endDate}` : "하루 일정",
+        type: event?.type || "meeting",
+        typeLabel: formData.typeLabel,
+        attendees: selectedGrades.includes("all") ? [] : selectedGrades,
+        location: selectedSchool?.name || "",
+        color: event?.color || "bg-blue-500",
+        description: formData.note,
+        schoolId: formData.schoolId,
+        schoolName: selectedSchool?.name || "",
+        category: selectedSchool?.category || "all",
+        grade: serializeGradeSelection(selectedGrades),
+        examTerm: showExamTermField ? formData.examTerm : "",
+        ...scopeFieldsForSave,
+        note: noteWithMetadata || "",
+        scienceAreaKey: showScienceAreaField ? formData.scienceAreaKey : "",
+        scienceAreaLabel: showScienceAreaField
+          ? activeScienceAreas.find((area) => area.areaKey === formData.scienceAreaKey)?.label || formData.scienceAreaLabel
+          : "",
+        embeddedNoteMeta: formData.embeddedNoteMeta,
+      } as Partial<CalendarEvent>)
+      if (aliveRef.current && sessionRef.current.token === session && saved !== false) {
+        setBaseline(formData)
+        onOpenChange(false)
+      }
+    } catch {
+      if (aliveRef.current && sessionRef.current.token === session) showFormError("일정을 저장하지 못했습니다. 입력한 내용을 확인한 뒤 다시 시도해 주세요.")
+    } finally {
+      savingRef.current = false
+      if (aliveRef.current) setPendingAction(null)
     }
   }
 
   const handleDelete = async () => {
+    if (readOnly || savingRef.current || !onDelete) return
     if (!persistedEventId) {
       return
     }
@@ -556,20 +601,30 @@ export function EventForm({
       return
     }
 
-    const deleted = await onDelete?.(persistedEventId)
-    if (deleted !== false) {
-      onOpenChange(false)
+    const session = sessionRef.current.token
+    savingRef.current = true
+    setPendingAction("delete")
+    try {
+      const deleted = await onDelete(persistedEventId)
+      if (aliveRef.current && sessionRef.current.token === session && deleted !== false) onOpenChange(false)
+    } catch {
+      if (aliveRef.current && sessionRef.current.token === session) showFormError("일정을 삭제하지 못했습니다. 다시 시도해 주세요.")
+    } finally {
+      savingRef.current = false
+      if (aliveRef.current) setPendingAction(null)
     }
   }
 
-  const isDisabled = readOnly
+  const isDisabled = readOnly || saving
   const isEditingPersistedEvent = Boolean(persistedEventId)
   const showExamTermField = isExamTypeWithTerm(formData.typeLabel)
   const showScopeFields = isSubjectExamType(formData.typeLabel)
   const schoolRequired = formData.typeLabel !== "팁스"
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
+    <>
+    {draftNavigation.confirmation}
+    <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen) onOpenChange(true); else requestClose() }}>
       <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
@@ -808,20 +863,21 @@ export function EventForm({
           <div className="space-y-2 pt-2">
             <div className="flex gap-3">
               {!readOnly ? (
-                <Button onClick={handleSave} className="flex-1 cursor-pointer">
-                  {isEditingPersistedEvent ? "변경 저장" : "일정 추가"}
+                <Button onClick={handleSave} disabled={saving} className="flex-1 cursor-pointer">
+                  {pendingAction === "save" ? "저장 중" : isEditingPersistedEvent ? "변경 저장" : "일정 추가"}
                 </Button>
               ) : null}
               {!readOnly && isEditingPersistedEvent && onDelete ? (
                 <Button
                   onClick={handleDelete}
+                  disabled={saving}
                   variant={deleteConfirming ? "destructive" : "outline"}
                   className="cursor-pointer"
                 >
-                  {deleteConfirming ? "삭제 확인" : "삭제"}
+                  {pendingAction === "delete" ? "삭제 중" : deleteConfirming ? "삭제 확인" : "삭제"}
                 </Button>
               ) : null}
-              <Button onClick={() => onOpenChange(false)} variant="outline" className="cursor-pointer">
+              <Button onClick={requestClose} variant="outline" className="cursor-pointer">
                 닫기
               </Button>
             </div>
@@ -834,5 +890,6 @@ export function EventForm({
         </div>
       </DialogContent>
     </Dialog>
+    </>
   )
 }

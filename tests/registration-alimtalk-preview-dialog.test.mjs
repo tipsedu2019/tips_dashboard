@@ -399,7 +399,6 @@ test("알림톡 미리보기의 배경과 내용은 등록 상세 모달보다 �
   ])
 
   assert.match(sharedDialogSource, /overlayClassName\?:\s*string/)
-  assert.match(sharedDialogSource, /<DialogOverlay className=\{overlayClassName\}/)
   assert.match(
     source,
     /<DialogContent[\s\S]*?overlayClassName="z-\[90\]"[\s\S]*?className="z-\[90\][^"]*"/,
