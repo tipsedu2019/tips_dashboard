@@ -166,6 +166,7 @@ export type RegistrationApplicationProps = {
   viewerId: string | null
   viewerRole: RegistrationTrackViewerRole
   onFocusTrack: (trackId: string) => void
+  onRequestLocalNavigation?: (intent: () => void) => void
   onReload: (preferredTrackId?: string) => void | Promise<void>
   onWarning: (message: string) => void
   onAppointmentSaved?: (
@@ -300,6 +301,7 @@ export function RegistrationApplication({
   viewerId,
   viewerRole,
   onFocusTrack,
+  onRequestLocalNavigation,
   onReload,
   onWarning,
   onAppointmentSaved,
@@ -605,6 +607,7 @@ export function RegistrationApplication({
     dirtyProducersRef.current = new Map()
     onDirtyChangeRef.current?.(false)
   }, [detail.task.id])
+  const observationDirtyKeysRef = useRef(new Set<RegistrationApplicationDirtyKey>())
   const setDirty = useCallback((key: RegistrationApplicationDirtyKey, dirty: boolean, producer: string = key) => {
     const producers = new Set(dirtyProducersRef.current.get(key) || [])
     if (dirty) producers.add(producer)
@@ -616,6 +619,11 @@ export function RegistrationApplication({
     dirtyKeysRef.current = next
     onDirtyChangeRef.current?.(next.size > 0)
   }, [])
+  const setObservationDirty = useCallback((key: RegistrationApplicationDirtyKey, dirty: boolean) => {
+    if (dirty) observationDirtyKeysRef.current.add(key)
+    else observationDirtyKeysRef.current.delete(key)
+    setDirty(key, dirty)
+  }, [setDirty])
   useEffect(() => {
     setMigrationConflictState(null)
     setMigrationConflictRetrying(false)
@@ -1155,6 +1163,11 @@ export function RegistrationApplication({
   }
 
   function handleSubjectTabChange(trackId: string) {
+    if (trackId === activeTrackId) return
+    if (observationDirtyKeysRef.current.size > 0 && onRequestLocalNavigation) {
+      onRequestLocalNavigation(() => onFocusTrack(trackId))
+      return
+    }
     onFocusTrack(trackId)
   }
 
@@ -1279,7 +1292,7 @@ export function RegistrationApplication({
             directorCatalogStatus={directorCatalogStatus}
             subjectCapabilities={subjectCapabilities}
             onRetryDirectorCatalog={onRetryDirectorCatalog}
-            onOpenVisit={onFocusTrack}
+            onOpenVisit={handleSubjectTabChange}
             onReload={onReload}
             onWarning={onWarning}
             onDirtyChange={(dirty) => setConsultationDirectorDirty(context.track.id, dirty)}
@@ -1478,6 +1491,7 @@ export function RegistrationApplication({
   const activeObservationFeedbackPanel = observationFeedbackDetail?.observationId
     === activeFeedbackObservationId ? (
       <RegistrationObservationFeedbackPanel
+        key={activeFeedbackObservationId}
         detail={observationFeedbackDetail}
         canRecordAttendance={!activeDeepLinkedAttemptTerminal
           && canManageCase
@@ -1488,6 +1502,7 @@ export function RegistrationApplication({
         actions={registrationObservationFeedbackActions}
         onSaved={handleObservationFeedbackSaved}
         onReload={reloadObservationFeedback}
+        onDirtyChange={(dirty) => setObservationDirty(`observation:decision-${activeFeedbackObservationId}`, dirty)}
       />
     ) : observationFeedbackError ? (
       <p role="alert" className="text-sm text-destructive">{observationFeedbackError}</p>
@@ -1774,6 +1789,7 @@ export function RegistrationApplication({
               onSaved={handleObservationSaved}
               onOpenCustomerMessage={canManageCase ? openCustomerMessage : undefined}
               feedbackPanel={activeObservationFeedbackPanel}
+              onDirtyChange={(dirty) => setObservationDirty(`observation:booking-${activeTrack.id}`, dirty)}
             />
           )
         ) : observationDetailError ? (

@@ -1,3 +1,5 @@
+import { createObservationDraftFixtureState } from "./helpers/registration-observation-draft-fixture.mjs";
+import { clickTab, pressTabKey } from "./helpers/tab-interactions.mjs";
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -95,6 +97,7 @@ async function setup(t, url = 'https://test.invalid/admin/tasks') {
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
   window.cancelAnimationFrame = window.clearTimeout; window.scrollTo = () => {};
+  globalThis.requestAnimationFrame = window.requestAnimationFrame; globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'ops-task:general': { mode: 'manual', pageSize: 10 } }));
   const root = createRoot(document.getElementById('root'));
@@ -291,6 +294,9 @@ async function workspace(t, initial = {}) {
       return params;
     } },
   });
+  // Match the real Next entry: install the history dispatcher before any
+  // workspace effect subscribes to popstate, including the legacy Back test.
+  load('src/instrumentation-client.ts');
   if (initial.expandWordFixture) {
     const fixture = load('src/features/tasks/word-retest-browser-fixture.ts');
     const original = fixture.getWordRetestBrowserFixtureData;
@@ -302,18 +308,24 @@ async function workspace(t, initial = {}) {
       }) };
     };
   }
+  if (initial.observationDraftMode) {
+    const fixture = load('src/features/tasks/registration-track-fixtures.ts');
+    const fixtureState = createObservationDraftFixtureState(fixture.createRegistrationSubjectTrackFixtureState(), initial.observationDraftMode);
+    fixture.createRegistrationSubjectTrackFixtureState = () => structuredClone(fixtureState);
+    load("src/features/tasks/registration-track-service.ts").toObservationAwareCaseDetail(fixtureState.caseDetails["20000000-0000-4000-8000-000000000002"]);
+  }
   const { OpsTaskWorkspace } = load('src/features/tasks/ops-task-workspace.tsx');
   let mountKey = 0;
   const render = async (next = {}) => { props = { ...props, ...next }; await act(async () => root.render(createElement(OpsTaskWorkspace, { workspace: props.workspace, key: mountKey }))); };
   await render();
   return { ...io, queries, tableRequests, render, load, remount: async () => { mountKey++; await render(); }, get props() { return props; } };
 }
-function currentComponentProps(name) {
+function currentComponentProps(name, predicate = () => true) {
   const container = document.getElementById('root');
   const rootFiber = container[Object.keys(container).find((key) => key.startsWith('__reactContainer'))].stateNode.current;
   function visit(fiber) {
     if (!fiber) return null;
-    if (fiber.type?.name === name) return fiber.memoizedProps;
+    if (fiber.type?.name === name && predicate(fiber.memoizedProps)) return fiber.memoizedProps;
     return visit(fiber.child) || visit(fiber.sibling);
   }
   const props = visit(rootFiber);
@@ -323,7 +335,7 @@ function currentComponentProps(name) {
 for (const storedLabel of ['STORED ACTOR', '']) test(`completed workspace catalog keeps stored actor ${storedLabel || 'unrecorded'} across same-page refresh and replacement`, async (t) => {
   const page = await workspace(t, { workspace: 'withdrawal', deferTables: true });
   const completed = [...document.querySelectorAll('[role="tab"]')].find((tab) => tab.textContent.includes('완료'));
-  await act(async () => completed.click());
+  await act(async () => clickTab(completed));
   const numbered = () => page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1');
   assert.equal(numbered().at(-1).args.p_filters.view, 'closed');
   const patch = { ...operationPatch('withdrawal'), status: 'done', completedAt: '2026-08-30T00:00:00Z', completedById: id(800), completedByLabel: storedLabel,
@@ -691,7 +703,7 @@ test('word-retest drafts survive numbered replacement while selection and bulk t
   });
   await act(async () => document.querySelector('button[aria-label="2 페이지"]').click());
   await finish([operationPatch('word_retest', '학생11'), operationPatch('word_retest', '학생12')]);
-  assert.equal(document.body.textContent.includes('1건 선택'), false);
+  assert.equal(document.body.textContent.includes('1건 선택'), false, JSON.stringify({pages: requests().map(r=>r.args.p_page), text:document.body.textContent.slice(-1200), url:window.location.href}));
   await act(async () => document.querySelector('input[aria-label="보이는 단어 재시험 전체 선택"]').click());
   assert.ok(document.body.textContent.includes('2건 선택'));
   await act(async () => document.querySelector('button[aria-label="1 페이지"]').click()); await finish(first);
@@ -702,7 +714,7 @@ test('word-retest drafts survive numbered replacement while selection and bulk t
   await page.render({ viewerRole: 'staff' }); await finish(first);
   assert.equal(document.querySelector('input[aria-label="학생1 1차 점수"]').value, '', 'role session cannot inherit score drafts');
 });
-test('registration fixture dirty Back cancellation keeps the edited host and restores Forward without list URL writes', async (t) => {
+test('registration fixture legacy Back restores the edited host before confirmation and cancellation keeps it', async (t) => {
   const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test';
   t.after(() => { process.env.NODE_ENV = env; });
   const page = await workspace(t, { workspace: 'registration', search: '?fixture=registration-subject-tracks&fixtureRole=staff' });
@@ -714,11 +726,12 @@ test('registration fixture dirty Back cancellation keeps the edited host and res
   assert.ok(input, document.querySelector('[role="dialog"]')?.textContent.slice(0, 600));
   await act(async () => input[Object.keys(input).find((key) => key.startsWith('__reactProps'))].onChange({ target: { value: '변경된 초안' } }));
   const detailUrl = window.location.href;
-  await act(async () => { const popped = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true })); window.history.back(); await popped; });
-  assert.ok(document.body.textContent.includes('변경사항') || document.body.textContent.includes('작성 중'));
-  const cancel = [...document.querySelectorAll('button')].find((button) => /계속 작성|돌아가기|계속 수정/.test(button.textContent));
+  await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 60)); });
+  assert.equal(window.location.href, detailUrl, 'legacy guard restores the owned entry before prompting');
+  assert.ok(document.body.textContent.includes('입력한 내용을 버릴까요?'));
+  const cancel = [...document.querySelectorAll('button')].find((button) => /계속 편집|돌아가기|계속 수정/.test(button.textContent));
   assert.ok(cancel, [...document.querySelectorAll('button')].map((b) => b.textContent).join('|').slice(-600));
-  await act(async () => { const forward = new Promise((resolve) => window.addEventListener('popstate', resolve, { once: true })); cancel.click(); await forward; });
+  await act(async () => { cancel.click(); await new Promise(resolve => setTimeout(resolve, 30)); });
   assert.equal(window.location.href, detailUrl);
   assert.equal(page.requests.length, 0, 'fixture never calls production page/detail authority');
 });
@@ -767,7 +780,7 @@ test('registration tab pending and failure retain the accepted parent and matchi
   const accepted = list().textContent;
   const nextTab = [...document.querySelectorAll('[role="tab"]')].find((tab) => tab.getAttribute('aria-selected') === 'false' && /대기/.test(tab.textContent));
   assert.ok(nextTab);
-  await act(async () => nextTab.click());
+  await act(async () => clickTab(nextTab));
   const pending = page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1').at(-1);
   assert.notEqual(pending, first);
   assert.equal(list()?.textContent, accepted, 'pending tab must not reshape accepted tracks');
@@ -815,4 +828,182 @@ for (const view of ['consultation_requested', 'consultation_completed']) for (co
   assert.ok(document.body.textContent.includes('2건 · 1–2번째'));
   await act(async () => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
   assert.equal(new URLSearchParams(window.location.search).get('trackId'), representative, 'actual row action opens the accepted owner track');
+});
+
+for (const kind of ['todo', 'registration', 'withdrawal', 'transfer', 'word_retest']) {
+  test(`${kind} tabs move focus without requests and use the existing route writer only on activation`, async (t) => {
+    const page = await workspace(t, { workspace: kind });
+    const accepted = document.querySelector('[role="tab"][aria-selected="true"]');
+    const panel = document.querySelector('[role="tabpanel"]');
+    assert.ok(accepted); assert.ok(panel);
+    const originalUrl = window.location.href;
+    const numbered = () => page.requests.filter((r) => r.name === 'list_ops_task_numbered_page_v1');
+    const count = numbered().length;
+    await act(async () => accepted.focus());
+    await act(async () => pressTabKey(accepted, 'End'));
+    const target = document.activeElement;
+    assert.equal(target.getAttribute('role'), 'tab');
+    assert.notEqual(target, accepted);
+    assert.equal(numbered().length, count);
+    assert.equal(window.location.href, originalUrl);
+    assert.equal(panel.getAttribute('aria-labelledby'), accepted.id);
+    await act(async () => pressTabKey(target, 'Enter'));
+    assert.notEqual(window.location.href, originalUrl, 'uses the existing URL sync handler');
+    assert.equal(document.querySelector('[role="tabpanel"]'), panel);
+    assert.equal(target.getAttribute('aria-controls'), panel.id);
+    assert.equal(document.activeElement, target);
+  });
+}
+
+test('registration calendar kind tabs use manual activation and keep their shared panel mounted', async (t) => {
+  await workspace(t, { workspace: 'registration' });
+  const modeButton = [...document.querySelectorAll('[aria-label="등록 화면 보기"] button')].find((button) => button.textContent.includes('달력'));
+  await act(async () => modeButton.click());
+  const list = document.querySelector('[role="tablist"][aria-label="등록 예약 종류"]');
+  assert.ok(list);
+  const accepted = list.querySelector('[aria-selected="true"]'), panel = document.querySelector('[role="tabpanel"]');
+  const originalUrl = window.location.href;
+  await act(async () => accepted.focus());
+  await act(async () => pressTabKey(accepted, 'ArrowRight'));
+  const target = document.activeElement;
+  assert.notEqual(target, accepted);
+  assert.equal(window.location.href, originalUrl);
+  assert.equal(panel.getAttribute('aria-labelledby'), accepted.id);
+  await act(async () => pressTabKey(target, ' '));
+  assert.notEqual(window.location.href, originalUrl);
+  assert.equal(document.querySelector('[role="tabpanel"]'), panel);
+  assert.equal(target.getAttribute('aria-selected'), 'true');
+  assert.equal(panel.getAttribute('aria-labelledby'), target.id);
+});
+
+test('inline word scores protect application navigation before any detail form opens', async (t) => {
+  const page = await workspace(t, { workspace: 'word_retest', search: '?fixture=word-retest-expected-schedule&fixtureRole=assistant&role=assistant' });
+  const editor = currentComponentProps('WordRetestInlineScoreEditor');
+  await act(async () => editor.onDraftChange(editor.task, 'firstScore', '17'));
+  const { requestAppNavigation } = page.load('src/lib/guarded-navigation.ts');
+  const routes = [];
+  await act(async () => requestAppNavigation(() => routes.push('/admin/dashboard')));
+  assert.deepEqual(routes, [], 'an inline draft must reach the page guard');
+  assert.ok(document.body.textContent.includes('입력한 내용을 버릴까요?'));
+  await act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === '계속 편집').click());
+  assert.equal(currentComponentProps('WordRetestInlineScoreEditor').draft.firstScore, '17');
+});
+
+const settleDraftUi = (fn) => act(async () => { fn?.(); await new Promise(resolve => setTimeout(resolve, 50)); });
+const draftAction = (label) => { const button = [...document.querySelectorAll('button')].findLast(b => b.textContent === label); assert.ok(button, label); button.click(); };
+const unloadIsBlocked = () => !window.dispatchEvent(new window.Event('beforeunload', { cancelable: true }));
+
+test('inline word score failure retains ownership; retry commits only the submitted value and rejects duplicate clicks', async t => {
+  const page = await workspace(t, { workspace: 'word_retest' });
+  const numbered = () => page.requests.filter(request => request.name === 'list_ops_task_numbered_page_v1').at(-1);
+  await settleDraftUi(() => page.finish(page.requests.indexOf(numbered()), 1, [operationPatch('word_retest')]));
+  window.navigation = Object.assign(new window.EventTarget(), { traverseTo: () => ({ committed: Promise.resolve(), finished: Promise.resolve() }) });
+  const service = page.load('src/features/tasks/ops-task-service.ts'), writes = [];
+  service.updateOpsTask = (taskId, input) => { const pending = Promise.withResolvers(); writes.push({ ...pending, taskId, input }); return pending.promise; };
+  service.loadOpsTaskById = async () => null;
+  const editor = () => currentComponentProps('WordRetestInlineScoreEditor');
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'firstScore', '17'));
+  const first = editor();
+  await settleDraftUi(() => { first.onSave(first.task); first.onSave(first.task); });
+  assert.equal(writes.length, 1);
+  await settleDraftUi(() => writes[0].reject(new Error('synthetic score save failed')));
+  assert.equal(editor().draft.firstScore, '17'); assert.equal(unloadIsBlocked(), true);
+  await settleDraftUi(() => editor().onSave(editor().task));
+  assert.equal(writes.length, 2);
+  // A queued input from the same editor must not be cleared by an earlier submission.
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'firstScore', '18'));
+  await settleDraftUi(() => writes[1].resolve({ sourceEventIds: [] }));
+  const submitted = operationPatch('word_retest'); submitted.inlineState.firstScore = 17;
+  await settleDraftUi(() => page.finish(page.requests.indexOf(numbered()), 1, [submitted]));
+  assert.equal(editor().draft.firstScore, '18'); assert.equal(unloadIsBlocked(), true);
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'firstScore', '17'));
+  assert.equal(unloadIsBlocked(), false, 'reverting to the accepted submission clears the draft');
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'firstScore', '19'));
+  await settleDraftUi(() => editor().onSave(editor().task));
+  await settleDraftUi(() => writes[2].resolve({ sourceEventIds: [] }));
+  submitted.inlineState.firstScore = 19;
+  await settleDraftUi(() => page.finish(page.requests.indexOf(numbered()), 1, [submitted]));
+  assert.equal(unloadIsBlocked(), false, 'successful save without later input is clean');
+});
+
+for (const navigationMode of ['native', 'legacy']) test(`registration ${navigationMode} Back cancellation then accepted traversal does not reopen the dirty confirmation`, async t => {
+  const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test'; t.after(() => { process.env.NODE_ENV = env; });
+  const page = await workspace(t, { workspace: 'registration', search: '?fixture=registration-subject-tracks&fixtureRole=staff' });
+  const listUrl = window.location.href;
+  let native, traversals = 0;
+  const traversalEvent = () => Object.assign(new window.Event('navigate', { cancelable: true }), { navigationType: 'traverse', destination: { key: 'list', url: listUrl, sameDocument: true } });
+  if (navigationMode === 'native') {
+    native = Object.assign(new window.EventTarget(), { traverseTo: () => {
+      const event = traversalEvent(); native.dispatchEvent(event); assert.equal(event.defaultPrevented, false, 'accepted native traversal has one bypass');
+      traversals++; window.history.replaceState(null, '', listUrl); window.dispatchEvent(new window.PopStateEvent('popstate'));
+      return { committed: Promise.resolve(), finished: Promise.resolve() };
+    } }); window.navigation = native;
+  }
+  await settleDraftUi(() => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
+  const input = [...document.querySelectorAll('[role="dialog"] input')].find(input => input.type === 'text' && !input.disabled);
+  await settleDraftUi(() => input[Object.keys(input).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '유지되는 등록 초안' } }));
+  const detailUrl = window.location.href;
+  const back = async () => settleDraftUi(() => { if (native) { const event = traversalEvent(); native.dispatchEvent(event); assert.equal(event.defaultPrevented, true); } else window.history.back(); });
+  await back(); assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
+  await settleDraftUi(() => draftAction('계속 편집'));
+  assert.equal(input.value, '유지되는 등록 초안'); assert.equal(window.location.href, detailUrl);
+  await back(); await settleDraftUi(() => draftAction('변경사항 버리기'));
+  await settleDraftUi();
+  assert.equal(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'), null);
+  assert.equal(document.querySelector('[data-registration-application-dirty]'), null);
+  assert.equal(new URLSearchParams(window.location.search).has('taskId'), false);
+  assert.equal(unloadIsBlocked(), false);
+  if (native) assert.equal(traversals, 1);
+  assert.equal(page.requests.length, 0);
+});
+
+for (const mode of ['booking', 'decision']) test(`real registration ${mode} child protects parent close, subject replacement and remaining sibling drafts`, async t => {
+  const env = process.env.NODE_ENV; process.env.NODE_ENV = 'test'; t.after(() => { process.env.NODE_ENV = env; });
+  const page = await workspace(t, { workspace: 'registration', observationDraftMode: mode, search: `?fixture=registration-subject-tracks&fixtureRole=staff&observationDraftQa=${mode}` });
+  await settleDraftUi(() => document.querySelector('[data-testid="registration-case-desktop-list"] [data-registration-case-row]').click());
+  const app = () => currentComponentProps('RegistrationApplication');
+  await settleDraftUi(() => app().onFocusTrack('20000000-0000-4000-8000-000000000001'));
+  assert.ok(document.querySelector("[data-registration-application-dirty]"), document.body.textContent.slice(-4000));
+  assert.ok(app());
+  assert.ok(document.querySelector('[aria-label="청강 반"], [id^="observation-decision-"]'), JSON.stringify({runtime:app().observationRuntime,body:document.body.textContent.slice(-9000)}));
+  const choice = mode === 'booking' ? '20000000-0000-4000-8000-000000000003' : 'waiting_current_class';
+  const selector = () => currentComponentProps('RegistrationSelect', p => mode === 'booking' ? p['aria-label'] === '청강 반' : p.id?.startsWith('observation-decision-'));
+  await settleDraftUi(() => selector().onValueChange(choice));
+  assert.equal(unloadIsBlocked(), true);
+  const { requestAppNavigation } = page.load('src/lib/guarded-navigation.ts'); const routes = [];
+  await settleDraftUi(() => requestAppNavigation(() => routes.push('outside')));
+  assert.equal(routes.length, 0); await settleDraftUi(() => draftAction('계속 편집'));
+  assert.equal(selector().value, choice);
+  // An inquiry draft is retained by the mounted parent while the active observation is replaced.
+  const inquiry = [...document.querySelectorAll('[role="dialog"] input')].find(input => input.type === 'text' && !input.disabled);
+  await settleDraftUi(() => inquiry[Object.keys(inquiry).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '남는 본체 초안' } }));
+  const subjectTab = [...document.querySelectorAll('[role="tab"]')].find(tab => tab.textContent.includes('수학'));
+  assert.ok(subjectTab);
+  await settleDraftUi(() => clickTab(subjectTab));
+  assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
+  await settleDraftUi(() => draftAction('계속 편집')); assert.equal(selector().value, choice);
+  await settleDraftUi(() => clickTab(subjectTab)); await settleDraftUi(() => draftAction('변경사항 버리기'));
+  assert.equal(subjectTab.getAttribute('aria-selected'), 'true');
+  assert.equal(inquiry.value, '남는 본체 초안'); assert.equal(unloadIsBlocked(), true);
+  await settleDraftUi(() => requestAppNavigation(() => routes.push('remaining')));
+  assert.equal(routes.length, 0); assert.ok(document.querySelector('[data-testid="ops-draft-navigation-confirm-dialog"]'));
+  await settleDraftUi(() => draftAction('계속 편집'));
+  assert.equal(page.requests.length, 0);
+});
+
+test('a new inline score draft uses the latest accepted server row after an earlier draft was reverted', async t => {
+  const page = await workspace(t, { workspace: 'word_retest' });
+  const numbered = () => page.requests.filter(request => request.name === 'list_ops_task_numbered_page_v1').at(-1);
+  const finish = async firstScore => { const patch = operationPatch('word_retest'); patch.inlineState.firstScore = firstScore; await settleDraftUi(() => page.finish(page.requests.indexOf(numbered()), 1, [patch])); };
+  await finish(null);
+  const editor = () => currentComponentProps('WordRetestInlineScoreEditor');
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'firstScore', '17'));
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'firstScore', ''));
+  assert.equal(unloadIsBlocked(), false);
+  const search = document.querySelector('input[placeholder*="검색"]');
+  await settleDraftUi(() => search[Object.keys(search).find(key => key.startsWith('__reactProps'))].onChange({ target: { value: '최신 행' } }));
+  await finish(23); assert.equal(editor().draft.firstScore, '23');
+  await settleDraftUi(() => editor().onDraftChange(editor().task, 'secondScore', '7'));
+  assert.equal(editor().draft.firstScore, '23', 'an untouched score must not revert to the retired draft baseline');
+  assert.equal(editor().draft.secondScore, '7');
 });

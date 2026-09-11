@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, RotateCcw, Search, Trash2, X } from "lucide-react";
 
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
+
+import { ActionFeedback } from "@/components/ui/action-feedback";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -116,32 +119,23 @@ function reorderWithSequentialSort(rows: SchoolRecord[], fromIndex: number, toIn
   return nextRows.map((row, index) => ({ ...row, sortOrder: String(index + 1) }));
 }
 
-function getErrorMessage(error: unknown, fallback: string) {
-  if (error instanceof Error && error.message) {
-    return error.message;
-  }
-  if (typeof error === "string" && error.trim()) {
-    return error;
-  }
-  if (error && typeof error === "object") {
-    const maybeError = error as { message?: unknown; details?: unknown; hint?: unknown };
-    const parts = [maybeError.message, maybeError.details, maybeError.hint]
-      .map((part) => (typeof part === "string" ? part.trim() : ""))
-      .filter(Boolean);
-    if (parts.length > 0) {
-      return parts.join(" ");
-    }
-  }
-  return fallback;
-}
-
 export function SchoolMasterWorkspace() {
   const [rows, setRows] = useState<SchoolRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const feedbackFocusRef = useRef<HTMLButtonElement>(null);
+  const retryFocusPendingRef = useRef(false);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const savingRef = useRef(false);
+  const loadingRef = useRef(true);
+  const loadRequestRef = useRef(0);
+  const busy = saving || loading;
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
+  const { confirmation } = useDraftNavigation({ dirty: isDirty });
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<(typeof CATEGORY_FILTERS)[number]>("전체");
   const [nameSortDirection, setNameSortDirection] = useState<NameSortDirection>("none");
@@ -151,15 +145,16 @@ export function SchoolMasterWorkspace() {
   );
 
   const loadSchools = useCallback(async () => {
+    const request = ++loadRequestRef.current;
+    loadingRef.current = true;
     if (!supabase) {
-      setRows([]);
-      setError(managementService.configError || "Supabase 연결 설정을 확인해 주세요.");
+      setLoadError("학교 목록을 불러올 수 없습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      loadingRef.current = false;
       setLoading(false);
-      return;
+      return false;
     }
 
     setLoading(true);
-    setError(null);
 
     try {
       const { data, error: queryError } = await supabase
@@ -168,24 +163,45 @@ export function SchoolMasterWorkspace() {
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
 
+      if (request !== loadRequestRef.current) return false;
       if (queryError) {
         throw queryError;
       }
 
+      setLoadError(null);
+
       setRows((data || []).map((row, index) => toSchoolRecord(row as Record<string, unknown>, index + 1)));
       setDeletedIds([]);
       setIsDirty(false);
-    } catch (loadError) {
-      setRows([]);
-      setError(getErrorMessage(loadError, "학교 목록을 불러오지 못했습니다."));
+      return true;
+    } catch {
+      if (request === loadRequestRef.current) setLoadError("학교 목록을 불러오지 못했습니다. 다시 시도해 주세요.");
+      return false;
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadSchools();
+    return () => { loadRequestRef.current += 1; };
   }, [loadSchools]);
+
+  const retryLoad = async () => {
+    if (savingRef.current || loadingRef.current || isDirty) return;
+    retryFocusPendingRef.current = true;
+    await loadSchools();
+  };
+
+  useEffect(() => {
+    if (busy || !retryFocusPendingRef.current) return;
+    retryFocusPendingRef.current = false;
+    const target = loadError ? retryButtonRef.current : feedbackFocusRef.current;
+    target?.focus({ preventScroll: true });
+  }, [busy, loadError]);
 
   const nextSortOrder = useMemo(() => {
     const numericSortOrders = rows
@@ -245,6 +261,7 @@ export function SchoolMasterWorkspace() {
   }, [categoryFilter, query, rows]);
 
   const handleFieldChange = (id: string, field: keyof SchoolRecord, value: string) => {
+    if (savingRef.current || loadingRef.current) return;
     setRows((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
     setIsDirty(true);
   };
@@ -254,18 +271,21 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleAdd = () => {
+    if (savingRef.current || loadingRef.current) return;
     setRows((current) => [createEmptySchool(nextSortOrder, categoryFilter), ...current]);
     setNameSortDirection("none");
     setIsDirty(true);
   };
 
   const handleResetChanges = () => {
+    if (savingRef.current || loadingRef.current) return;
     setQuery("");
     setNameSortDirection("none");
     void loadSchools();
   };
 
   const handleSaveAll = async () => {
+    if (savingRef.current || loadingRef.current) return;
     const nextRows = rows.map((row, index) => ({
       ...row,
       name: normalizeSchoolName(row.name),
@@ -279,8 +299,10 @@ export function SchoolMasterWorkspace() {
       return;
     }
 
+    savingRef.current = true;
     setSaving(true);
     setError(null);
+    setMessage(null);
 
     try {
       if (deletedIds.length > 0) {
@@ -297,15 +319,25 @@ export function SchoolMasterWorkspace() {
           })),
         );
       }
-      await loadSchools();
-    } catch (saveError) {
-      setError(getErrorMessage(saveError, "학교 정보를 저장하지 못했습니다."));
+      // The write has committed; a failed read must not turn it into a new draft.
+      setRows(nextRows.map((row) => ({ ...row, isNew: false })));
+      setDeletedIds([]);
+      setIsDirty(false);
+      if (await loadSchools()) {
+        setMessage("학교 변경 사항을 저장했습니다.");
+      } else {
+        setLoadError("변경 사항은 저장했지만 목록을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 확인해 주세요.");
+      }
+    } catch {
+      setError("학교 정보를 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const handleDelete = (row: SchoolRecord) => {
+    if (savingRef.current || loadingRef.current) return;
     if (!row.isNew) {
       setDeletedIds((current) => (current.includes(row.id) ? current : [...current, row.id]));
     }
@@ -316,6 +348,7 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleMoveRow = (id: string, direction: "up" | "down") => {
+    if (savingRef.current || loadingRef.current) return;
     const currentIndex = rows.findIndex((row) => row.id === id);
     if (currentIndex < 0) {
       return;
@@ -333,6 +366,7 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleNameSort = () => {
+    if (savingRef.current || loadingRef.current) return;
     const nextDirection: NameSortDirection = nameSortDirection === "asc" ? "desc" : "asc";
     const directionValue = nextDirection === "asc" ? 1 : -1;
     setRows((current) =>
@@ -345,11 +379,12 @@ export function SchoolMasterWorkspace() {
   };
 
   const dirtyLabel = isDirty
-    ? `변경 ${rows.filter((row) => row.isNew).length + deletedIds.length}건`
+    ? "저장 전"
     : `${filteredRows.length}/${rows.length}개`;
 
   return (
     <SettingsWorkspaceShell>
+      {confirmation}
       <SettingsMasterHeader
         filters={
           <>
@@ -404,12 +439,12 @@ export function SchoolMasterWorkspace() {
               </div>
             ) : null}
             {isDirty ? (
-              <Button type="button" variant="outline" size="sm" className="h-9" onClick={handleResetChanges} disabled={saving}>
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={handleResetChanges} disabled={busy}>
                 <RotateCcw className="mr-2 size-4" />
                 되돌리기
               </Button>
             ) : null}
-            <Button type="button" size="sm" className="h-9" onClick={handleAdd}>
+            <Button type="button" size="sm" className="h-9" onClick={handleAdd} disabled={busy} ref={feedbackFocusRef}>
               <Plus className="mr-2 size-4" />
               학교 추가
             </Button>
@@ -418,7 +453,7 @@ export function SchoolMasterWorkspace() {
               size="sm"
               className="h-9"
               onClick={() => void handleSaveAll()}
-              disabled={!isDirty || saving || invalidRows.size > 0}
+              disabled={!isDirty || saving || loading || invalidRows.size > 0}
             >
               {saving ? "저장 중" : "변경 저장"}
             </Button>
@@ -427,14 +462,22 @@ export function SchoolMasterWorkspace() {
         }
       />
 
-      {error ? (
+      {loadError ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex min-w-0 flex-wrap items-center justify-between gap-2 break-words">
+            <span>{loadError}</span>
+            <Button ref={retryButtonRef} type="button" variant="outline" size="sm" disabled={busy || isDirty} onClick={() => void retryLoad()}>
+              다시 불러오기
+            </Button>
+          </AlertDescription>
         </Alert>
+      ) : null}
+      {error || message ? (
+        <ActionFeedback returnFocusRef={feedbackFocusRef} message={error || message || ""} error={Boolean(error)} onDismiss={() => { setError(null); setMessage(null); }} />
       ) : null}
 
       <div data-testid="school-settings-mobile-list" className="grid gap-2 md:hidden">
-        {loading ? (
+        {loading && rows.length === 0 ? (
           Array.from({ length: 4 }).map((_, index) => (
             <div key={`school-mobile-loading-${index}`} className="rounded-md border p-3">
               <Skeleton className="h-24 w-full" />
@@ -477,7 +520,7 @@ export function SchoolMasterWorkspace() {
                         size="icon"
                         className="size-8"
                         onClick={() => handleMoveRow(row.id, "up")}
-                        disabled={saving || currentIndex <= 0}
+                        disabled={busy || currentIndex <= 0}
                         aria-label="학교 순서 위로 이동"
                       >
                         <ArrowUp className="size-4" />
@@ -488,7 +531,7 @@ export function SchoolMasterWorkspace() {
                         size="icon"
                         className="size-8"
                         onClick={() => handleMoveRow(row.id, "down")}
-                        disabled={saving || currentIndex === rows.length - 1}
+                        disabled={busy || currentIndex === rows.length - 1}
                         aria-label="학교 순서 아래로 이동"
                       >
                         <ArrowDown className="size-4" />
@@ -499,7 +542,7 @@ export function SchoolMasterWorkspace() {
                         size="icon"
                         className="size-8"
                         onClick={() => handleDelete(row)}
-                        disabled={saving}
+                        disabled={busy}
                         aria-label="학교 삭제"
                       >
                         <Trash2 className="size-4" />
@@ -509,6 +552,7 @@ export function SchoolMasterWorkspace() {
 
                   <div className="grid gap-2">
                     <Select
+                      disabled={busy}
                       value={normalizeSchoolCategory(row.category)}
                       onValueChange={(value) =>
                         handleCategoryChange(row.id, value as Exclude<(typeof CATEGORY_FILTERS)[number], "전체">)
@@ -527,6 +571,7 @@ export function SchoolMasterWorkspace() {
                     </Select>
                     <Input
                       name="school-name"
+                      disabled={busy}
                       className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
                       value={row.name}
                       onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -557,6 +602,7 @@ export function SchoolMasterWorkspace() {
                     type="button"
                     className="flex w-full items-center gap-1 text-left font-semibold hover:text-foreground"
                     onClick={handleNameSort}
+                    disabled={busy}
                     aria-label="학교명으로 정렬"
                   >
                     학교명
@@ -572,7 +618,7 @@ export function SchoolMasterWorkspace() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {loading && rows.length === 0 ? (
               Array.from({ length: 4 }).map((_, index) => (
                 <TableRow key={`school-loading-${index}`}>
                   <TableCell colSpan={visibleColumnCount} className="px-3 py-2">
@@ -598,6 +644,7 @@ export function SchoolMasterWorkspace() {
                     {isColumnVisible("category") ? (
                       <TableCell className={settingsTableCellClass}>
                         <Select
+                          disabled={busy}
                           value={normalizeSchoolCategory(row.category)}
                           onValueChange={(value) =>
                             handleCategoryChange(row.id, value as Exclude<(typeof CATEGORY_FILTERS)[number], "전체">)
@@ -621,6 +668,7 @@ export function SchoolMasterWorkspace() {
                         <div className="flex items-center gap-2">
                           <Input
                             name="school-name"
+                            disabled={busy}
                             className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
                             value={row.name}
                             onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -650,7 +698,7 @@ export function SchoolMasterWorkspace() {
                             size="icon"
                             className="size-8"
                             onClick={() => handleMoveRow(row.id, "up")}
-                            disabled={saving || currentIndex <= 0}
+                            disabled={busy || currentIndex <= 0}
                             aria-label="학교 순서 위로 이동"
                           >
                             <ArrowUp className="size-4" />
@@ -661,7 +709,7 @@ export function SchoolMasterWorkspace() {
                             size="icon"
                             className="size-8"
                             onClick={() => handleMoveRow(row.id, "down")}
-                            disabled={saving || currentIndex === rows.length - 1}
+                            disabled={busy || currentIndex === rows.length - 1}
                             aria-label="학교 순서 아래로 이동"
                           >
                             <ArrowDown className="size-4" />
@@ -672,7 +720,7 @@ export function SchoolMasterWorkspace() {
                             size="icon"
                             className="size-8"
                             onClick={() => handleDelete(row)}
-                            disabled={saving}
+                            disabled={busy}
                             aria-label="학교 삭제"
                           >
                             <Trash2 className="size-4" />

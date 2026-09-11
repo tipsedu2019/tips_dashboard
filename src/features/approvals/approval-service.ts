@@ -661,6 +661,7 @@ export async function createMonthlyReportApproval(input: ApprovalInput, requeste
     )
   }
   clearApprovalMutationAttempt("create", attempt, session)
+  return createdApprovalId
 }
 
 export async function updateMonthlyReportApproval(id: string, input: ApprovalInput, status: ApprovalStatus) {

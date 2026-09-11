@@ -73,13 +73,15 @@ async function setup(t, initial = {}) {
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle; globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0); window.cancelAnimationFrame = window.clearTimeout; window.scrollTo = () => {};
+  globalThis.requestAnimationFrame = window.requestAnimationFrame; globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
   window.HTMLElement.prototype.scrollIntoView = () => {}; window.HTMLElement.prototype.attachEvent = () => {}; window.HTMLElement.prototype.detachEvent = () => {};
   window.localStorage.setItem('tips.data-table-page-size.v1', JSON.stringify({ 'makeup:requests': { mode: 'manual', pageSize: 10 } }));
   const root = createRoot(document.getElementById('root')), io = transport();
   let auth = { user: { id: id(804), name: '관리자' }, role: 'admin', loading: false, ...initial.auth }, search, params, observed;
   const RealDate = Date;
   const clock = initial.clock ? { '@test/date': class extends RealDate { constructor(...args) { super(...(args.length ? args : [initial.clock])); } static now() { return RealDate.parse(initial.clock); } } } : {};
-  const load = modules(io.supabase, { ...clock, '@test/observer': { observe(value) { observed = value; } }, '@/providers/auth-provider': { useAuth: () => auth }, 'next/navigation': { useSearchParams() {
+  const router = { push: href => window.history.pushState(null, '', href) };
+  const load = modules(io.supabase, { ...clock, '@test/observer': { observe(value) { observed = value; } }, '@/providers/auth-provider': { useAuth: () => auth }, 'next/navigation': { useRouter: () => router, useSearchParams() {
     if (search !== window.location.search) { search = window.location.search; params = new URLSearchParams(search); } return params;
   } } });
   const Workspace = load('src/features/makeup-requests/makeup-request-workspace.tsx').MakeupRequestWorkspace;

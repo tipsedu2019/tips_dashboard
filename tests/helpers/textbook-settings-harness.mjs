@@ -174,6 +174,7 @@ export async function setupTextbookSettings(t, options = {}) {
   };
   const load = modules(io.supabase, {
     "@/providers/auth-provider": { useAuth: () => auth },
+    "next/navigation": { useRouter: () => ({ push() {} }) },
   });
   const Workspace = load("src/features/textbooks/textbook-supplier-settings-workspace.tsx").TextbookSupplierSettingsWorkspace;
   const render = async () => act(async () => root.render(createElement(Workspace)));

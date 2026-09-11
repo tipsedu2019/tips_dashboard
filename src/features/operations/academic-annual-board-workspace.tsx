@@ -1547,8 +1547,6 @@ export function AcademicAnnualBoardWorkspace() {
 
       setMutationError(null);
       await refresh();
-      setBoardDraft(null);
-      setEditingBoardEvent(null);
       setHoveredCell(null);
       return true;
     } catch (saveError) {
@@ -1592,8 +1590,6 @@ export function AcademicAnnualBoardWorkspace() {
       setMutationError(null);
       toast.success("학사 일정을 삭제했습니다.");
       await refresh();
-      setBoardDraft(null);
-      setEditingBoardEvent(null);
       setHoveredCell(null);
       return true;
     } catch (deleteError) {

@@ -1,8 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ArrowDown, ArrowUp, Plus, Trash2 } from "lucide-react";
 
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
+
+import { ActionFeedback } from "@/components/ui/action-feedback";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -19,6 +22,7 @@ import {
   type AcademicSubjectValue,
 } from "@/lib/academic-subject-registry";
 import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/providers/auth-provider";
 import {
   createId,
   filterClassroomCatalogRowsForSubject,
@@ -165,12 +169,37 @@ function reorderWithSequentialSort(rows: ClassroomRecord[], fromIndex: number, t
 }
 
 export function ClassroomMasterWorkspace() {
+  const { user, canManageAll, isTeacher } = useAuth();
+  return <ClassroomMasterEditor key={user?.id ?? "anonymous"} accessRole={user?.role ?? "viewer"} canEdit={Boolean(canManageAll || isTeacher)} />;
+}
+
+function ClassroomMasterEditor({ canEdit, accessRole }: { canEdit: boolean; accessRole: string }) {
   const [rows, setRows] = useState<ClassroomRecord[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const feedbackFocusRef = useRef<HTMLButtonElement>(null);
+  const retryFocusPendingRef = useRef(false);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const savingRef = useRef(false);
+  const loadingRef = useRef(true);
+  const loadRequestRef = useRef(0);
+  const busy = saving || loading;
+  const editBlocked = busy || !canEdit;
+  const canEditRef = useRef(canEdit);
+  const editRevisionRef = useRef(0);
+  const editRoleRef = useRef(accessRole);
+  useEffect(() => {
+    canEditRef.current = canEdit;
+    editRoleRef.current = accessRole;
+    editRevisionRef.current += 1;
+    return () => { canEditRef.current = false; };
+  }, [accessRole, canEdit]);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
+  const { confirmation } = useDraftNavigation({ dirty: isDirty });
   const [subjectFilter, setSubjectFilter] = useState<(typeof SUBJECT_FILTERS)[number]>("전체");
   const { isColumnVisible, visibleColumnCount, columnSettingsControl } = useSettingsTableColumns(
     "tips-settings-table:classrooms:v1",
@@ -178,15 +207,16 @@ export function ClassroomMasterWorkspace() {
   );
 
   const loadClassrooms = useCallback(async () => {
+    const request = ++loadRequestRef.current;
+    loadingRef.current = true;
     if (!supabase) {
-      setRows([]);
-      setError(managementService.configError || "Supabase 연결 설정을 확인해 주세요.");
+      setLoadError("강의실 목록을 불러올 수 없습니다. 연결 상태를 확인한 뒤 다시 시도해 주세요.");
+      loadingRef.current = false;
       setLoading(false);
-      return;
+      return false;
     }
 
     setLoading(true);
-    setError(null);
 
     try {
       const { data, error: queryError } = await supabase
@@ -195,24 +225,45 @@ export function ClassroomMasterWorkspace() {
         .order("sort_order", { ascending: true })
         .order("name", { ascending: true });
 
+      if (request !== loadRequestRef.current) return false;
       if (queryError) {
         throw queryError;
       }
 
+      setLoadError(null);
+
       setRows((data || []).map((row, index) => toClassroomRecord(row as Record<string, unknown>, index + 1)));
       setDeletedIds([]);
       setIsDirty(false);
-    } catch (loadError) {
-      setRows([]);
-      setError(loadError instanceof Error ? loadError.message : "강의실 목록을 불러오지 못했습니다.");
+      return true;
+    } catch {
+      if (request === loadRequestRef.current) setLoadError("강의실 목록을 불러오지 못했습니다. 다시 시도해 주세요.");
+      return false;
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadClassrooms();
+    return () => { loadRequestRef.current += 1; };
   }, [loadClassrooms]);
+
+  const retryLoad = async () => {
+    if (savingRef.current || loadingRef.current || isDirty) return;
+    retryFocusPendingRef.current = true;
+    await loadClassrooms();
+  };
+
+  useEffect(() => {
+    if (busy || !retryFocusPendingRef.current) return;
+    retryFocusPendingRef.current = false;
+    const target = loadError ? retryButtonRef.current : feedbackFocusRef.current;
+    target?.focus({ preventScroll: true });
+  }, [busy, loadError]);
 
   const nextSortOrder = useMemo(() => {
     const numericSortOrders = rows
@@ -227,11 +278,13 @@ export function ClassroomMasterWorkspace() {
   );
 
   const handleFieldChange = (id: string, field: keyof ClassroomRecord, value: string | boolean) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     setRows((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
     setIsDirty(true);
   };
 
   const handleSubjectToggle = (id: string, subject: AcademicSubjectValue) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     const row = rows.find((item) => item.id === id);
     if (!row) return;
 
@@ -257,11 +310,13 @@ export function ClassroomMasterWorkspace() {
   };
 
   const handleAdd = () => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     setRows((current) => [createEmptyClassroom(nextSortOrder), ...current]);
     setIsDirty(true);
   };
 
   const handleSaveAll = async () => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     const nextRows = rows.map((row, index) => ({
       ...row,
       name: row.name.trim(),
@@ -283,12 +338,27 @@ export function ClassroomMasterWorkspace() {
       return;
     }
 
+    savingRef.current = true;
+    const saveRequest = loadRequestRef.current;
+    const saveAccess = editRevisionRef.current;
+    const canContinueSave = () => {
+      const allowed = canEditRef.current
+        && saveAccess === editRevisionRef.current
+        && saveRequest === loadRequestRef.current;
+      if (!allowed && canEditRef.current) {
+        setError("권한이 변경되어 저장을 중단했습니다. 남은 변경 사항을 확인한 뒤 다시 저장해 주세요.");
+      }
+      return allowed;
+    };
     setSaving(true);
     setError(null);
+    setMessage(null);
 
     try {
       if (deletedIds.length > 0) {
         await managementService.deleteClassroomCatalogs(deletedIds);
+        setDeletedIds((current) => current.filter((id) => !deletedIds.includes(id)));
+        if (!canContinueSave()) return;
       }
       if (nextRows.length > 0) {
         await managementService.upsertClassroomCatalogs(
@@ -302,15 +372,27 @@ export function ClassroomMasterWorkspace() {
           })),
         );
       }
-      await loadClassrooms();
-    } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "강의실 정보를 저장하지 못했습니다.");
+      if (!canContinueSave()) return;
+      // The write has committed; a failed read must not turn it into a new draft.
+      setRows(nextRows.map((row) => ({ ...row, isNew: false })));
+      setDeletedIds([]);
+      setIsDirty(false);
+      if (await loadClassrooms()) {
+        setMessage("강의실 변경 사항을 저장했습니다.");
+      } else {
+        setLoadError("변경 사항은 저장했지만 목록을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 확인해 주세요.");
+      }
+    } catch {
+      if (!canContinueSave()) return;
+      setError("강의실 정보를 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const handleDelete = (row: ClassroomRecord) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     if (!row.isNew) {
       setDeletedIds((current) => (current.includes(row.id) ? current : [...current, row.id]));
     }
@@ -319,6 +401,7 @@ export function ClassroomMasterWorkspace() {
   };
 
   const handleMoveRow = (id: string, direction: "up" | "down") => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     const currentIndex = rows.findIndex((row) => row.id === id);
     if (currentIndex < 0) {
       return;
@@ -336,6 +419,7 @@ export function ClassroomMasterWorkspace() {
 
   return (
     <SettingsWorkspaceShell>
+      {confirmation}
       <SettingsMasterHeader
         filters={SUBJECT_FILTERS.map((filter) => (
           <Button
@@ -351,11 +435,11 @@ export function ClassroomMasterWorkspace() {
         ))}
         actions={
           <>
-            <Button type="button" size="sm" className="h-9" onClick={handleAdd}>
+            <Button type="button" size="sm" className="h-9" onClick={handleAdd} disabled={editBlocked} ref={feedbackFocusRef}>
               <Plus className="mr-2 size-4" />
               강의실 추가
             </Button>
-            <Button type="button" size="sm" className="h-9" onClick={() => void handleSaveAll()} disabled={!isDirty || saving}>
+            <Button type="button" size="sm" className="h-9" onClick={() => void handleSaveAll()} disabled={!canEdit || !isDirty || saving || loading}>
               {saving ? "저장 중" : "변경 저장"}
             </Button>
             {columnSettingsControl}
@@ -363,14 +447,26 @@ export function ClassroomMasterWorkspace() {
         }
       />
 
-      {error ? (
+      {!canEdit ? (
+        <p role="status" className="text-sm text-muted-foreground">읽기 전용 · 강의실을 수정할 권한이 없습니다.</p>
+      ) : null}
+
+      {loadError ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex min-w-0 flex-wrap items-center justify-between gap-2 break-words">
+            <span>{loadError}</span>
+            <Button ref={retryButtonRef} type="button" variant="outline" size="sm" disabled={busy || isDirty} onClick={() => void retryLoad()}>
+              다시 불러오기
+            </Button>
+          </AlertDescription>
         </Alert>
+      ) : null}
+      {error || message ? (
+        <ActionFeedback returnFocusRef={feedbackFocusRef} message={error || message || ""} error={Boolean(error)} onDismiss={() => { setError(null); setMessage(null); }} />
       ) : null}
 
       <div data-testid="classroom-settings-mobile-list" className="grid gap-2 md:hidden">
-        {loading ? (
+        {loading && rows.length === 0 ? (
           Array.from({ length: 4 }).map((_, index) => (
             <div key={`classroom-mobile-loading-${index}`} className="rounded-md border p-3">
               <Skeleton className="h-24 w-full" />
@@ -407,13 +503,13 @@ export function ClassroomMasterWorkspace() {
                       )}
                     </div>
                     <div className="flex shrink-0 gap-1.5">
-                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={saving || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
+                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={editBlocked || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
                         <ArrowUp className="size-4" />
                       </Button>
-                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={saving || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
+                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={editBlocked || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
                         <ArrowDown className="size-4" />
                       </Button>
-                      <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
+                      <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={editBlocked} aria-label="강의실 삭제">
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
@@ -422,12 +518,13 @@ export function ClassroomMasterWorkspace() {
                   <div className="grid gap-2">
                     <ClassroomSubjectToggles
                       subjects={row.subjects}
-                      disabled={saving}
+                      disabled={editBlocked}
                       onToggle={(subject) => handleSubjectToggle(row.id, subject)}
                     />
                     <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-start gap-2">
                       <Input
                         name="classroom-name"
+                        disabled={editBlocked}
                         className="h-9"
                         value={row.name}
                         onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -436,7 +533,7 @@ export function ClassroomMasterWorkspace() {
                       />
                       <ClassroomCampusSelect
                         campus={row.campus}
-                        disabled={saving}
+                        disabled={editBlocked}
                         onChange={(campus) => handleFieldChange(row.id, "campus", campus)}
                       />
                     </div>
@@ -444,6 +541,7 @@ export function ClassroomMasterWorkspace() {
                       <span>표시</span>
                       <Checkbox
                         aria-label="강의실 표시 여부"
+                        disabled={editBlocked}
                         checked={row.isVisible}
                         onCheckedChange={(checked) => handleFieldChange(row.id, "isVisible", checked === true)}
                       />
@@ -469,7 +567,7 @@ export function ClassroomMasterWorkspace() {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {loading ? (
+            {loading && rows.length === 0 ? (
               Array.from({ length: 4 }).map((_, index) => (
                 <TableRow key={`classroom-loading-${index}`}>
                   <TableCell colSpan={visibleColumnCount} className="px-3 py-2">
@@ -492,7 +590,7 @@ export function ClassroomMasterWorkspace() {
                     {isColumnVisible("subjects") ? <TableCell className={settingsTableCellClass}>
                       <ClassroomSubjectToggles
                         subjects={row.subjects}
-                        disabled={saving}
+                        disabled={editBlocked}
                         onToggle={(subject) => handleSubjectToggle(row.id, subject)}
                       />
                     </TableCell> : null}
@@ -500,6 +598,7 @@ export function ClassroomMasterWorkspace() {
                       <div className="grid grid-cols-[minmax(0,1fr)_7rem] items-start gap-2">
                         <Input
                           name="classroom-name"
+                          disabled={editBlocked}
                           className="h-9"
                           value={row.name}
                           onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -508,7 +607,7 @@ export function ClassroomMasterWorkspace() {
                         />
                         <ClassroomCampusSelect
                           campus={row.campus}
-                          disabled={saving}
+                          disabled={editBlocked}
                           onChange={(campus) => handleFieldChange(row.id, "campus", campus)}
                         />
                       </div>
@@ -517,6 +616,7 @@ export function ClassroomMasterWorkspace() {
                       <div className="flex justify-center">
                         <Checkbox
                           aria-label="강의실 표시 여부"
+                          disabled={editBlocked}
                           checked={row.isVisible}
                           onCheckedChange={(checked) => handleFieldChange(row.id, "isVisible", checked === true)}
                         />
@@ -524,13 +624,13 @@ export function ClassroomMasterWorkspace() {
                     </TableCell> : null}
                     {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={saving || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
+                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={editBlocked || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
                           <ArrowUp className="size-4" />
                         </Button>
-                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={saving || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
+                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={editBlocked || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
                           <ArrowDown className="size-4" />
                         </Button>
-                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={saving} aria-label="강의실 삭제">
+                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={editBlocked} aria-label="강의실 삭제">
                           <Trash2 className="size-4" />
                         </Button>
                       </div>

@@ -300,6 +300,7 @@ export type RegistrationObservationFeedbackPanelProps = Readonly<{
   actions: RegistrationObservationFeedbackActions
   onSaved: (detail: RegistrationObservationFeedbackDetail) => void | Promise<void>
   onReload: () => void | Promise<void>
+  onDirtyChange?: (dirty: boolean) => void
 }>
 
 type PanelReducerAction =
@@ -350,12 +351,18 @@ export function RegistrationObservationFeedbackPanel({
   actions,
   onSaved,
   onReload,
+  onDirtyChange,
 }: RegistrationObservationFeedbackPanelProps) {
   const [state, dispatch] = useReducer(
     panelReducer,
     detail,
     createRegistrationObservationFeedbackPanelState,
   )
+  const navigationDirty = Boolean(state.decisionKind) && !state.detail.decisionKind
+  const dirtyCallbackRef = useRef(onDirtyChange)
+  useEffect(() => { dirtyCallbackRef.current = onDirtyChange }, [onDirtyChange])
+  useEffect(() => { onDirtyChange?.(navigationDirty) }, [navigationDirty, onDirtyChange])
+  useEffect(() => () => { dirtyCallbackRef.current?.(false) }, [])
   const requestKeysRef = useRef(new Map<string, string>())
   const mutationGuardRef = useRef(false)
   const proxyLabel = getRegistrationObservationProxyLabel(state.detail)

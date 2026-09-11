@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowDown,
   ArrowUp,
@@ -10,6 +10,9 @@ import {
   Trash2,
 } from "lucide-react";
 
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
+
+import { ActionFeedback } from "@/components/ui/action-feedback";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -330,6 +333,7 @@ function TeacherAccountSelect({
   rows,
   profiles,
   isAccountSchemaReady,
+  disabled,
   onAccountChange,
   onManualAccountChange,
 }: {
@@ -337,6 +341,7 @@ function TeacherAccountSelect({
   rows: TeacherRecord[];
   profiles: AccountProfile[];
   isAccountSchemaReady: boolean;
+  disabled: boolean;
   onAccountChange: (id: string, value: string) => void;
   onManualAccountChange: (id: string, value: string) => void;
 }) {
@@ -350,11 +355,12 @@ function TeacherAccountSelect({
       <Select
         value={row.profileId || "unlinked"}
         onValueChange={(value) => onAccountChange(row.id, value)}
+        disabled={disabled || !isAccountSchemaReady}
       >
         <SelectTrigger
           aria-label="연결된 계정"
           className="h-auto min-h-9 w-full py-1.5 text-left"
-          disabled={!isAccountSchemaReady}
+          disabled={disabled || !isAccountSchemaReady}
         >
           {selectedProfile ? (
             <span className="min-w-0">
@@ -419,7 +425,7 @@ function TeacherAccountSelect({
           onChange={(event) => onManualAccountChange(row.id, event.target.value)}
           placeholder="이메일 또는 아이디"
           aria-label="로그인 계정 이메일 또는 아이디"
-          disabled={!isAccountSchemaReady}
+          disabled={disabled || !isAccountSchemaReady}
         />
       ) : null}
     </div>
@@ -447,6 +453,11 @@ function formatAuditTime(value: string) {
 }
 
 export function TeacherMasterWorkspace() {
+  const { user, canManageAll, isTeacher } = useAuth();
+  return <TeacherMasterEditor key={user?.id ?? "anonymous"} accessRole={user?.role ?? "viewer"} canEdit={Boolean(canManageAll || isTeacher)} />;
+}
+
+function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; accessRole: string }) {
   const { session } = useAuth();
   const [rows, setRows] = useState<TeacherRecord[]>([]);
   const [profiles, setProfiles] = useState<AccountProfile[]>([]);
@@ -456,8 +467,29 @@ export function TeacherMasterWorkspace() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const [message, setMessage] = useState<string | null>(null);
+  const feedbackFocusRef = useRef<HTMLButtonElement>(null);
+  const retryFocusPendingRef = useRef(false);
+  const retryButtonRef = useRef<HTMLButtonElement>(null);
+  const savingRef = useRef(false);
+  const loadingRef = useRef(true);
+  const dirtyRef = useRef(false);
+  const loadRequestRef = useRef(0);
+  const busy = saving || loading;
+  const editBlocked = busy || !canEdit;
+  const canEditRef = useRef(canEdit);
+  const editRevisionRef = useRef(0);
+  const editRoleRef = useRef(accessRole);
+  useEffect(() => {
+    canEditRef.current = canEdit;
+    editRoleRef.current = accessRole;
+    editRevisionRef.current += 1;
+    return () => { canEditRef.current = false; };
+  }, [accessRole, canEdit]);
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
+  const { confirmation } = useDraftNavigation({ dirty: isDirty });
   const [teamFilter, setTeamFilter] =
     useState<(typeof TEAM_FILTERS)[number]>("전체");
   const getGoogleChatAccessToken = useCallback(
@@ -466,11 +498,13 @@ export function TeacherMasterWorkspace() {
   );
 
   const loadTeachers = useCallback(async () => {
+    const request = ++loadRequestRef.current;
+    loadingRef.current = true;
     setLoading(true);
-    setError(null);
 
     try {
       const data = await managementService.listTeacherAccountSettingsData();
+      if (request !== loadRequestRef.current) return false;
       const nextProfiles: AccountProfile[] = (data.profiles || []).map(
         (row: Record<string, unknown>) => toAccountProfile(row),
       );
@@ -485,6 +519,7 @@ export function TeacherMasterWorkspace() {
       );
       setIsAccountSchemaReady(data.isAccountSchemaReady !== false);
       setSchemaWarning(data.schemaWarning || "");
+      setLoadError(null);
       setRows(
         (data.teachers || []).map(
           (row: Record<string, unknown>, index: number) =>
@@ -492,22 +527,44 @@ export function TeacherMasterWorkspace() {
         ),
       );
       setDeletedIds([]);
+      dirtyRef.current = false;
       setIsDirty(false);
-    } catch (loadError) {
-      setRows([]);
-      setError(
-        loadError instanceof Error
-          ? loadError.message
-          : "선생님 목록을 불러오지 못했습니다.",
-      );
+      return true;
+    } catch {
+      if (request === loadRequestRef.current) {
+        setLoadError("선생님 목록을 불러오지 못했습니다. 다시 시도해 주세요.");
+      }
+      return false;
     } finally {
-      setLoading(false);
+      if (request === loadRequestRef.current) {
+        loadingRef.current = false;
+        setLoading(false);
+      }
     }
   }, []);
 
   useEffect(() => {
     void loadTeachers();
+    return () => { loadRequestRef.current += 1; };
   }, [loadTeachers]);
+
+  const refreshTeachers = useCallback(async () => {
+    if (savingRef.current || loadingRef.current || dirtyRef.current) return false;
+    return loadTeachers();
+  }, [loadTeachers]);
+
+  const retryLoad = async () => {
+    if (savingRef.current || loadingRef.current || dirtyRef.current) return;
+    retryFocusPendingRef.current = true;
+    await refreshTeachers();
+  };
+
+  useEffect(() => {
+    if (busy || !retryFocusPendingRef.current) return;
+    retryFocusPendingRef.current = false;
+    const target = loadError ? retryButtonRef.current : feedbackFocusRef.current;
+    target?.focus({ preventScroll: true });
+  }, [busy, loadError]);
 
   useEffect(() => {
     if (isDirty) {
@@ -516,11 +573,11 @@ export function TeacherMasterWorkspace() {
 
     const reloadWhenVisible = () => {
       if (document.visibilityState === "visible") {
-        void loadTeachers();
+        void refreshTeachers();
       }
     };
     const reloadOnFocus = () => {
-      void loadTeachers();
+      void refreshTeachers();
     };
 
     document.addEventListener("visibilitychange", reloadWhenVisible);
@@ -530,7 +587,7 @@ export function TeacherMasterWorkspace() {
       document.removeEventListener("visibilitychange", reloadWhenVisible);
       window.removeEventListener("focus", reloadOnFocus);
     };
-  }, [isDirty, loadTeachers]);
+  }, [isDirty, refreshTeachers]);
 
   const visibleTeams = useMemo(
     () =>
@@ -556,13 +613,16 @@ export function TeacherMasterWorkspace() {
     field: keyof TeacherRecord,
     value: string | boolean,
   ) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     setRows((current) =>
       current.map((row) => (row.id === id ? { ...row, [field]: value } : row)),
     );
+    dirtyRef.current = true;
     setIsDirty(true);
   };
 
   const handleTeamChange = (id: string, value: TeamOption) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     setRows((current) =>
       current.map((row) =>
         row.id === id
@@ -574,10 +634,12 @@ export function TeacherMasterWorkspace() {
           : row,
       ),
     );
+    dirtyRef.current = true;
     setIsDirty(true);
   };
 
   const handleAccountChange = (id: string, value: string) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     const profile = profiles.find((item) => item.id === value);
     setRows((current) =>
       current.map((row) =>
@@ -593,6 +655,7 @@ export function TeacherMasterWorkspace() {
           : row,
       ),
     );
+    dirtyRef.current = true;
     setIsDirty(true);
   };
 
@@ -601,6 +664,7 @@ export function TeacherMasterWorkspace() {
   };
 
   const handleAddToTeam = (team: TeamOption) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     setRows((current) => {
       const defaultRole: DashboardRole =
         team === "조교팀" ? "assistant" : "teacher";
@@ -620,6 +684,7 @@ export function TeacherMasterWorkspace() {
       nextRows.splice(insertIndex, 0, newTeacher);
       return withSequentialSort(nextRows);
     });
+    dirtyRef.current = true;
     setIsDirty(true);
   };
 
@@ -628,6 +693,7 @@ export function TeacherMasterWorkspace() {
   };
 
   const handleSaveAll = async () => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     const nextRows = rows.map((row, index) => ({
       ...row,
       name: row.name.trim(),
@@ -640,12 +706,27 @@ export function TeacherMasterWorkspace() {
       return;
     }
 
+    savingRef.current = true;
+    const saveRequest = loadRequestRef.current;
+    const saveAccess = editRevisionRef.current;
+    const canContinueSave = () => {
+      const allowed = canEditRef.current
+        && saveAccess === editRevisionRef.current
+        && saveRequest === loadRequestRef.current;
+      if (!allowed && canEditRef.current) {
+        setError("권한이 변경되어 저장을 중단했습니다. 남은 변경 사항을 확인한 뒤 다시 저장해 주세요.");
+      }
+      return allowed;
+    };
     setSaving(true);
     setError(null);
+    setMessage(null);
 
     try {
       if (deletedIds.length > 0) {
         await managementService.deleteTeacherCatalogs(deletedIds);
+        setDeletedIds((current) => current.filter((id) => !deletedIds.includes(id)));
+        if (!canContinueSave()) return;
       }
       if (nextRows.length > 0) {
         await managementService.upsertTeacherCatalogs(
@@ -661,19 +742,28 @@ export function TeacherMasterWorkspace() {
           })),
         );
       }
-      await loadTeachers();
-    } catch (saveError) {
-      setError(
-        saveError instanceof Error
-          ? saveError.message
-          : "선생님 정보를 저장하지 못했습니다.",
-      );
+      if (!canContinueSave()) return;
+      // Keep the committed snapshot when the follow-up read is unavailable.
+      setRows(nextRows.map((row) => ({ ...row, isNew: false })));
+      setDeletedIds([]);
+      dirtyRef.current = false;
+      setIsDirty(false);
+      if (await loadTeachers()) {
+        setMessage("선생님 변경 사항을 저장했습니다.");
+      } else {
+        setLoadError("변경 사항은 저장했지만 목록을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 확인해 주세요.");
+      }
+    } catch {
+      if (!canContinueSave()) return;
+      setError("선생님 정보를 저장하지 못했습니다. 입력한 내용은 유지됩니다. 다시 시도해 주세요.");
     } finally {
+      savingRef.current = false;
       setSaving(false);
     }
   };
 
   const handleDelete = (row: TeacherRecord) => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     if (!row.isNew) {
       setDeletedIds((current) =>
         current.includes(row.id) ? current : [...current, row.id],
@@ -684,10 +774,12 @@ export function TeacherMasterWorkspace() {
         .filter((item) => item.id !== row.id)
         .map((item, index) => ({ ...item, sortOrder: String(index + 1) })),
     );
+    dirtyRef.current = true;
     setIsDirty(true);
   };
 
   const handleMoveRowWithinTeam = (id: string, direction: "up" | "down") => {
+    if (!canEditRef.current || editRoleRef.current !== accessRole || savingRef.current || loadingRef.current) return;
     const row = rows.find((item) => item.id === id);
     if (!row) {
       return;
@@ -710,11 +802,13 @@ export function TeacherMasterWorkspace() {
     }
 
     setRows(reorderWithSequentialSort(rows, currentIndex, targetIndex));
+    dirtyRef.current = true;
     setIsDirty(true);
   };
 
   return (
     <SettingsWorkspaceShell>
+      {confirmation}
       <SettingsMasterHeader
         filters={TEAM_FILTERS.map((filter) => (
           <Button
@@ -735,13 +829,13 @@ export function TeacherMasterWorkspace() {
               variant="outline"
               size="sm"
               className="h-9"
-              onClick={() => void loadTeachers()}
-              disabled={loading || saving}
+              onClick={() => void refreshTeachers()}
+              disabled={busy || isDirty}
             >
               <RefreshCw className="mr-2 size-4" />
               계정 새로고침
             </Button>
-            <Button type="button" size="sm" className="h-9" onClick={handleAdd}>
+            <Button type="button" size="sm" className="h-9" onClick={handleAdd} disabled={editBlocked} ref={feedbackFocusRef}>
               <Plus className="mr-2 size-4" />
               선생님 추가
             </Button>
@@ -750,7 +844,7 @@ export function TeacherMasterWorkspace() {
               size="sm"
               className="h-9"
               onClick={() => void handleSaveAll()}
-              disabled={!isDirty || saving}
+              disabled={!canEdit || !isDirty || busy}
             >
               {saving ? "저장 중" : "변경 저장"}
             </Button>
@@ -758,10 +852,22 @@ export function TeacherMasterWorkspace() {
         }
       />
 
-      {error ? (
+      {!canEdit ? (
+        <p role="status" className="text-sm text-muted-foreground">읽기 전용 · 선생님 정보를 수정할 권한이 없습니다.</p>
+      ) : null}
+
+      {loadError ? (
         <Alert variant="destructive">
-          <AlertDescription>{error}</AlertDescription>
+          <AlertDescription className="flex min-w-0 flex-wrap items-center justify-between gap-2 break-words">
+            <span>{loadError}</span>
+            <Button ref={retryButtonRef} type="button" variant="outline" size="sm" disabled={busy || isDirty} onClick={() => void retryLoad()}>
+              다시 불러오기
+            </Button>
+          </AlertDescription>
         </Alert>
+      ) : null}
+      {error || message ? (
+        <ActionFeedback returnFocusRef={feedbackFocusRef} message={error || message || ""} error={Boolean(error)} onDismiss={() => { setError(null); setMessage(null); }} />
       ) : null}
       {schemaWarning ? (
         <Alert>
@@ -774,7 +880,7 @@ export function TeacherMasterWorkspace() {
         aria-label="선생님 모바일 편집 목록"
         className="grid gap-2 md:hidden"
       >
-        {loading ? (
+        {loading && rows.length === 0 ? (
           Array.from({ length: 4 }).map((_, index) => (
             <Skeleton key={`teacher-mobile-loading-${index}`} className="h-48 w-full" />
           ))
@@ -806,6 +912,7 @@ export function TeacherMasterWorkspace() {
                   </div>
                   <div className="flex shrink-0 items-center gap-2">
                     <Checkbox
+                      disabled={editBlocked}
                       aria-label="선생님 표시 여부"
                       checked={row.isVisible}
                       onCheckedChange={(checked) =>
@@ -820,6 +927,7 @@ export function TeacherMasterWorkspace() {
                   <div className="grid gap-1.5">
                     <span className="text-xs font-medium text-muted-foreground">팀</span>
                     <Select
+                      disabled={editBlocked}
                       value={normalizeTeamValue(row.subjects)}
                       onValueChange={(value) => handleTeamChange(row.id, value as TeamOption)}
                     >
@@ -840,6 +948,7 @@ export function TeacherMasterWorkspace() {
                     <span className="text-xs font-medium text-muted-foreground">이름</span>
                     <Input
                       name="teacher-name-mobile"
+                      disabled={editBlocked}
                       className="h-9"
                       value={row.name}
                       onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -855,6 +964,7 @@ export function TeacherMasterWorkspace() {
                       rows={rows}
                       profiles={profiles}
                       isAccountSchemaReady={isAccountSchemaReady}
+                      disabled={editBlocked}
                       onAccountChange={handleAccountChange}
                       onManualAccountChange={(id, value) =>
                         handleFieldChange(id, "accountEmail", value)
@@ -867,7 +977,7 @@ export function TeacherMasterWorkspace() {
                     <Select
                       value={row.dashboardRole}
                       onValueChange={(value) => handleRoleChange(row.id, value)}
-                      disabled={!isAccountSchemaReady}
+                      disabled={editBlocked || !isAccountSchemaReady}
                     >
                       <SelectTrigger className="h-9">
                         <SelectValue placeholder="권한" />
@@ -889,7 +999,7 @@ export function TeacherMasterWorkspace() {
                       size="icon"
                       className="size-8"
                       onClick={() => handleMoveRowWithinTeam(row.id, "up")}
-                      disabled={saving || currentIndex <= 0}
+                      disabled={editBlocked || currentIndex <= 0}
                       aria-label="선생님 순서 위로 이동"
                     >
                       <ArrowUp className="size-4" />
@@ -900,7 +1010,7 @@ export function TeacherMasterWorkspace() {
                       size="icon"
                       className="size-8"
                       onClick={() => handleMoveRowWithinTeam(row.id, "down")}
-                      disabled={saving || currentIndex === teamRows.length - 1}
+                      disabled={editBlocked || currentIndex === teamRows.length - 1}
                       aria-label="선생님 순서 아래로 이동"
                     >
                       <ArrowDown className="size-4" />
@@ -911,7 +1021,7 @@ export function TeacherMasterWorkspace() {
                       size="icon"
                       className="size-8"
                       onClick={() => handleDelete(row)}
-                      disabled={saving}
+                      disabled={editBlocked}
                       aria-label="선생님 삭제"
                     >
                       <Trash2 className="size-4" />
@@ -953,7 +1063,7 @@ export function TeacherMasterWorkspace() {
                   size="sm"
                   className="h-8"
                   onClick={() => handleAddToTeam(team)}
-                  disabled={saving}
+                  disabled={editBlocked}
                 >
                   <Plus className="mr-1.5 size-3.5" />
                   추가
@@ -961,7 +1071,7 @@ export function TeacherMasterWorkspace() {
               </div>
 
               <div className="px-3 py-3">
-                {loading ? (
+                {loading && rows.length === 0 ? (
                   <div className="grid gap-2">
                     {Array.from({ length: 3 }).map((_, index) => (
                       <Skeleton
@@ -979,7 +1089,7 @@ export function TeacherMasterWorkspace() {
                       size="sm"
                       className="h-8"
                       onClick={() => handleAddToTeam(team)}
-                      disabled={saving}
+                      disabled={editBlocked}
                     >
                       <Plus className="mr-1.5 size-3.5" />
                       추가
@@ -998,6 +1108,7 @@ export function TeacherMasterWorkspace() {
                           className="grid grid-cols-[minmax(120px,0.8fr)_minmax(150px,0.9fr)_minmax(230px,1.4fr)_minmax(112px,0.7fr)_72px_112px] items-center gap-2 px-2 py-2"
                         >
                           <Select
+                            disabled={editBlocked}
                             value={normalizeTeamValue(row.subjects)}
                             onValueChange={(value) =>
                               handleTeamChange(row.id, value as TeamOption)
@@ -1017,6 +1128,7 @@ export function TeacherMasterWorkspace() {
 
                           <Input
                             name="teacher-name"
+                            disabled={editBlocked}
                             className="h-9"
                             value={row.name}
                             onChange={(event) =>
@@ -1035,6 +1147,7 @@ export function TeacherMasterWorkspace() {
                             rows={rows}
                             profiles={profiles}
                             isAccountSchemaReady={isAccountSchemaReady}
+                            disabled={editBlocked}
                             onAccountChange={handleAccountChange}
                             onManualAccountChange={(id, value) =>
                               handleFieldChange(id, "accountEmail", value)
@@ -1046,7 +1159,7 @@ export function TeacherMasterWorkspace() {
                             onValueChange={(value) =>
                               handleRoleChange(row.id, value)
                             }
-                            disabled={!isAccountSchemaReady}
+                            disabled={editBlocked || !isAccountSchemaReady}
                           >
                             <SelectTrigger className="h-9 w-full">
                               <SelectValue placeholder="권한" />
@@ -1062,6 +1175,7 @@ export function TeacherMasterWorkspace() {
 
                           <div className="flex h-9 items-center justify-center gap-2">
                             <Checkbox
+                              disabled={editBlocked}
                               aria-label="선생님 표시 여부"
                               checked={row.isVisible}
                               onCheckedChange={(checked) =>
@@ -1082,7 +1196,7 @@ export function TeacherMasterWorkspace() {
                               size="icon"
                               className="size-8"
                               onClick={() => handleMoveRowWithinTeam(row.id, "up")}
-                              disabled={saving || currentIndex <= 0}
+                              disabled={editBlocked || currentIndex <= 0}
                               aria-label="선생님 순서 위로 이동"
                             >
                               <ArrowUp className="size-4" />
@@ -1094,7 +1208,7 @@ export function TeacherMasterWorkspace() {
                               className="size-8"
                               onClick={() => handleMoveRowWithinTeam(row.id, "down")}
                               disabled={
-                                saving || currentIndex === teamRows.length - 1
+                                editBlocked || currentIndex === teamRows.length - 1
                               }
                               aria-label="선생님 순서 아래로 이동"
                             >
@@ -1106,7 +1220,7 @@ export function TeacherMasterWorkspace() {
                               size="icon"
                               className="size-8"
                               onClick={() => handleDelete(row)}
-                              disabled={saving}
+                              disabled={editBlocked}
                               aria-label="선생님 삭제"
                             >
                               <Trash2 className="size-4" />

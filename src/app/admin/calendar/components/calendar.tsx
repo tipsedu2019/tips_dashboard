@@ -296,8 +296,6 @@ export function Calendar({
     if (saved === false) {
       return false
     }
-    setShowEventForm(false)
-    setEditingEvent(null)
     return true
   }
 
@@ -306,8 +304,6 @@ export function Calendar({
     if (deleted === false) {
       return false
     }
-    setShowEventForm(false)
-    setEditingEvent(null)
     return true
   }
 
@@ -405,7 +401,10 @@ export function Calendar({
         typeOptions={typeOptions}
         defaultDate={selectedDate}
         defaultEndDate={selectedEndDate || selectedDate}
-        onOpenChange={setShowEventForm}
+        onOpenChange={(open) => {
+          setShowEventForm(open)
+          if (!open) setEditingEvent(null)
+        }}
         onSave={handleSaveEvent}
         onDelete={readOnly ? undefined : handleDeleteEvent}
       />

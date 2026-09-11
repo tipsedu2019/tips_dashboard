@@ -3,8 +3,10 @@ import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, d
 import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
-import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useReducer, useRef, useState, type SetStateAction } from "react";
 import { useSearchParams } from "next/navigation";
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
+import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback";
 import {
   Barcode,
   BookOpen,
@@ -866,6 +868,21 @@ function getOperationSearchLabel(activeTab: string) {
   return "업무 검색";
 }
 
+// Initial data and automatic defaults are not user edits. A default only advances
+// the baseline while the form is still unchanged; accepted writes reset their own form.
+function useTextbookFormDraft<T>(initial: T) {
+  const [state, dispatch] = useReducer((current: { value: T; baseline: T }, action: { value: SetStateAction<T>; mode: "edit" | "replace" | "defaults" }) => {
+    const value = typeof action.value === "function" ? (action.value as (previous: T) => T)(current.value) : action.value;
+    const baseline = action.mode === "replace" || (action.mode === "defaults" && JSON.stringify(current.value) === JSON.stringify(current.baseline))
+      ? value : current.baseline;
+    return Object.is(value, current.value) && Object.is(baseline, current.baseline) ? current : { value, baseline };
+  }, { value: initial, baseline: initial });
+  const edit = useCallback((value: SetStateAction<T>) => dispatch({ value, mode: "edit" }), []);
+  const replace = useCallback((value: SetStateAction<T>) => dispatch({ value, mode: "replace" }), []);
+  const defaults = useCallback((value: SetStateAction<T>) => dispatch({ value, mode: "defaults" }), []);
+  return [state.value, edit, replace, defaults, JSON.stringify(state.value) !== JSON.stringify(state.baseline)] as const;
+}
+
 export function TextbookOperationsWorkspace() {
   const { user, role, loading } = useAuth();
   if (loading || !user?.id || !role) return <div role="status">로그인 정보를 확인하는 중입니다.</div>;
@@ -900,7 +917,7 @@ function TextbookOperationsWorkspaceContent() {
   const masterBulkDialogRevisionRef = useRef(0);
   const [selectedTextbookIds, setSelectedTextbookIds] = useState<string[]>([]);
   const [bulkTextbookPatch, setBulkTextbookPatch] = useState(emptyBulkTextbookPatch);
-  const [masterForm, setMasterForm] = useState(emptyMasterForm);
+  const [masterForm, setMasterForm, replaceMasterForm, , masterFormDirty] = useTextbookFormDraft(emptyMasterForm);
   const [masterDialogOpen, setMasterDialogOpen] = useState(false);
   const dialogOpenerRef = useRef<HTMLElement | null>(null);
   const [textbookDeleteDialogOpen, setTextbookDeleteDialogOpen] = useState(false);
@@ -909,7 +926,7 @@ function TextbookOperationsWorkspaceContent() {
   const [confirmationBusy, setConfirmationBusy] = useState(false);
   const [confirmationError, setConfirmationError] = useState("");
   const confirmationPendingRef = useRef(false);
-  const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
+  const [purchaseForm, setPurchaseForm, replacePurchaseForm, applyPurchaseDefaults, purchaseFormDirty] = useTextbookFormDraft(emptyPurchaseForm);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
   const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
   const purchaseAutoDefaultsRef = useRef({ title: "", supplierId: "", unitCost: "", requestBy: "", locationId: "" });
@@ -917,7 +934,7 @@ function TextbookOperationsWorkspaceContent() {
   const [selectedPurchaseScopeLineIds, setSelectedPurchaseScopeLineIds] = useState<Record<TextbookCopyScope, string>>({ student: "", teacher: "" });
   const [selectedPurchaseLineIds, setSelectedPurchaseLineIds] = useState<string[]>([]);
   const [bulkOrderDialogOpen, setBulkOrderDialogOpen] = useState(false);
-  const [bulkOrderQuantities, setBulkOrderQuantities] = useState<Record<string, string>>({});
+  const [bulkOrderQuantities, setBulkOrderQuantities, replaceBulkOrderQuantities, , bulkOrderFormDirty] = useTextbookFormDraft<Record<string, string>>({});
   const [purchaseBoardScope, setPurchaseBoardScope] = useState<PurchaseBoardScope>(() => (text(initialPrimaryFilters.boardScope) || "active") as PurchaseBoardScope);
   const [purchaseRequestFilter, setPurchaseRequestFilter] = useState<PurchaseRequestFilter>(() => (text(initialPrimaryFilters.requestFilter) || "all") as PurchaseRequestFilter);
   const [purchaseOrderFilter, setPurchaseOrderFilter] = useState<PurchaseOrderFilter>(() => (text(initialPrimaryFilters.orderFilter) || "all") as PurchaseOrderFilter);
@@ -927,7 +944,7 @@ function TextbookOperationsWorkspaceContent() {
   const inventoryCountDraftRevisionsRef = useRef<Record<string, number>>({});
   const inventoryCountRequestsRef = useRef<Record<string, { fingerprint: string; requestId: string; countedAt: string }>>({});
   const textbookSelectionRevisionsRef = useRef<Record<string, number>>({});
-  const [saleForm, setSaleForm] = useState(emptySaleForm);
+  const [saleForm, setSaleForm, replaceSaleForm, applySaleDefaults, saleFormDirty] = useTextbookFormDraft(emptySaleForm);
   const saleAutoDefaultsRef = useRef({ locationId: "" });
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
   const [saleHistoryFilters, setSaleHistoryFilters] = useState(initialNavigationRef.current.history.filters);
@@ -961,17 +978,21 @@ function TextbookOperationsWorkspaceContent() {
     setSelectedPurchaseDetail(nextPurchaseDetail);
     setSelectedSaleDetailId(restoredDetail?.kind === "sale" ? restoredDetail.id : "");
     setMasterDialogOpen(false);
-    setMasterForm(emptyMasterForm);
+    replaceMasterForm(emptyMasterForm);
     setPurchaseDialogOpen(false);
     purchaseAutoDefaultsRef.current = { title: "", supplierId: "", unitCost: "", requestBy: "", locationId: "" };
     setSelectedPurchaseLineId("");
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-    setPurchaseForm(emptyPurchaseForm);
+    replacePurchaseForm(emptyPurchaseForm);
     setPurchaseRequestInputMode("catalog");
     setSelectedTextbookIds([]);
     setSelectedPurchaseLineIds([]);
     setSelectedSaleLineIds([]);
-  }, []);
+    setMasterBulkControlsOpen(false);
+    setBulkTextbookPatch(emptyBulkTextbookPatch);
+    setBulkOrderDialogOpen(false);
+    replaceBulkOrderQuantities({});
+  }, [replaceMasterForm, replacePurchaseForm, replaceBulkOrderQuantities]);
   if (observedQuery !== searchParamString) {
     setObservedQuery(searchParamString);
     adoptLocationQuery(searchParamString);
@@ -999,6 +1020,18 @@ function TextbookOperationsWorkspaceContent() {
   });
   const [excludedStudentIds, setExcludedStudentIds] = useState<string[]>([]);
   const [saleStudentQuery, setSaleStudentQuery] = useState("");
+  const masterDraftDirty = masterDialogOpen && masterFormDirty;
+  const purchaseDraftDirty = purchaseDialogOpen && purchaseFormDirty;
+  const saleDraftDirty = saleDialogOpen && (saleFormDirty || excludedStudentIds.length > 0);
+  const masterBulkDraftDirty = JSON.stringify(bulkTextbookPatch) !== JSON.stringify(emptyBulkTextbookPatch);
+  const bulkOrderDraftDirty = bulkOrderDialogOpen && bulkOrderFormDirty;
+  const inventoryDraftDirty = Object.values(inventoryCountDrafts).some((value) => value !== "")
+    || Object.values(inventoryCountMemoDrafts).some((value) => value !== "");
+  const queryResetDraftDirty = masterDraftDirty || purchaseDraftDirty || masterBulkDraftDirty || bulkOrderDraftDirty;
+  const { requestLocalAction, confirmation: draftNavigationConfirmation } = useDraftNavigation({
+    dirty: queryResetDraftDirty || saleDraftDirty || inventoryDraftDirty,
+  });
+
 
   const masterFilters = useMemo(() => ({
     search: deferredQuery,
@@ -1141,7 +1174,7 @@ function TextbookOperationsWorkspaceContent() {
     if (!purchaseDialogOpen || !resolved) return;
     const supplierId = resolved.configuredSupplierId;
     const supplierRows = resolved.supplier ? [resolved.supplier] : [];
-    setPurchaseForm((current) => {
+    applyPurchaseDefaults((current) => {
       if (current.textbookId && getRecordId(resolved.textbook) !== current.textbookId) return current;
       const nextTitle = getTextbookTitle(resolved.textbook);
       const nextUnitCost = String(getConfiguredTextbookPurchaseUnitCost(resolved.textbook, supplierId, supplierRows, current.unitCost, current.copyScope));
@@ -1161,14 +1194,14 @@ function TextbookOperationsWorkspaceContent() {
         unitCost: canSetUnitCost ? nextUnitCost : current.unitCost,
       };
     });
-  }, [acceptedSelectedBook, purchaseDialogOpen, purchaseRequestInputMode]);
+  }, [acceptedSelectedBook, applyPurchaseDefaults, purchaseDialogOpen, purchaseRequestInputMode]);
   useEffect(() => {
     const resolved = acceptedSelectedClass;
     if (!resolved) return;
     if (purchaseDialogOpen && purchaseForm.classId === resolved.id) {
       const nextTeacher = resolved.defaultTeacherName;
       const nextLocation = resolved.inferredLocation?.id || "";
-      setPurchaseForm((current) => {
+      applyPurchaseDefaults((current) => {
         if (current.classId !== resolved.id) return current;
         const canSetTeacher = !current.requestBy || current.requestBy === purchaseAutoDefaultsRef.current.requestBy;
         const canSetLocation = Boolean(nextLocation) && (!current.locationId || current.locationId === purchaseAutoDefaultsRef.current.locationId);
@@ -1181,14 +1214,14 @@ function TextbookOperationsWorkspaceContent() {
       });
     }
     if (saleDialogOpen && saleForm.classId === resolved.id && resolved.inferredLocation?.id) {
-      setSaleForm((current) => {
+      applySaleDefaults((current) => {
         if (current.classId !== resolved.id) return current;
         const canSetLocation = !current.locationId || current.locationId === saleAutoDefaultsRef.current.locationId;
         if (canSetLocation) saleAutoDefaultsRef.current.locationId = resolved.inferredLocation?.id || "";
         return canSetLocation ? { ...current, locationId: resolved.inferredLocation?.id || current.locationId } : current;
       });
     }
-  }, [acceptedSelectedClass, purchaseDialogOpen, purchaseForm.classId, saleDialogOpen, saleForm.classId]);
+  }, [acceptedSelectedClass, applyPurchaseDefaults, applySaleDefaults, purchaseDialogOpen, purchaseForm.classId, saleDialogOpen, saleForm.classId]);
   useEffect(() => {
     const row = acceptedMasterDetail?.row;
     if (!row) return;
@@ -1205,17 +1238,17 @@ function TextbookOperationsWorkspaceContent() {
   }, [acceptedPurchaseDetail, selectedPurchaseDetail]);
   useEffect(() => {
     if (activeTab === "inventory" && inventoryDefaultLocationId) setInventoryCountLocationId((current) => current || inventoryDefaultLocationId);
-    if (purchaseDialogOpen && inventoryDefaultLocationId) setPurchaseForm((current) => {
+    if (purchaseDialogOpen && inventoryDefaultLocationId) applyPurchaseDefaults((current) => {
       if (current.locationId) return current;
       purchaseAutoDefaultsRef.current.locationId = inventoryDefaultLocationId;
       return { ...current, locationId: inventoryDefaultLocationId };
     });
-    if (saleDialogOpen && inventoryDefaultLocationId) setSaleForm((current) => {
+    if (saleDialogOpen && inventoryDefaultLocationId) applySaleDefaults((current) => {
       if (current.locationId) return current;
       saleAutoDefaultsRef.current.locationId = inventoryDefaultLocationId;
       return { ...current, locationId: inventoryDefaultLocationId };
     });
-  }, [activeTab, inventoryDefaultLocationId, purchaseDialogOpen, saleDialogOpen]);
+  }, [activeTab, applyPurchaseDefaults, applySaleDefaults, inventoryDefaultLocationId, purchaseDialogOpen, saleDialogOpen]);
   const preparedInventoryLocationId = inventoryCountLocationId || inventoryLocationReference.defaultLocationId;
   const selectInventoryCountLocation = useCallback((locationId: string) => {
     setInventoryCountLocationId(locationId);
@@ -1920,12 +1953,14 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function navigateToTextbookDetail(kind: "master" | "purchase" | "sale", id: string) {
-    if (!isTextbookUuid(id)) return;
-    const current = new URLSearchParams(window.location.search);
-    const parsed = parseTextbookNavigation(current);
-    const next = serializeTextbookNavigation(current, { ...parsed, detail: { kind, id } });
-    window.history.pushState(null, "", `${window.location.pathname}?${next.toString()}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    requestLocalAction(() => {
+      if (!isTextbookUuid(id)) return;
+      const current = new URLSearchParams(window.location.search);
+      const parsed = parseTextbookNavigation(current);
+      const next = serializeTextbookNavigation(current, { ...parsed, detail: { kind, id } });
+      pushLocalHistoryState(window, null, "", `${window.location.pathname}?${next.toString()}`);
+      adoptLocationQuery(next.toString());
+    }, { skipConfirmation: !(queryResetDraftDirty) });
   }
 
   function closeTextbookDetail(kind: "master" | "purchase" | "sale") {
@@ -1934,7 +1969,7 @@ function TextbookOperationsWorkspaceContent() {
     if (parsed.detail?.kind !== kind) return;
     const next = serializeTextbookNavigation(current, { ...parsed, detail: null });
     window.history.replaceState(null, "", `${window.location.pathname}?${next.toString()}`);
-    window.dispatchEvent(new PopStateEvent("popstate"));
+    adoptLocationQuery(next.toString());
   }
 
   function setMasterIsbn13(value: string) {
@@ -1956,21 +1991,24 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openNewMasterDialog() {
-    clearTransientTextbookFeedback();
-    setMasterForm(emptyMasterForm);
-    setMessage("");
-    setMasterDialogOpen(true);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      replaceMasterForm(emptyMasterForm);
+      setMessage("");
+      setMasterDialogOpen(true);
+    }, { skipConfirmation: !(masterDraftDirty) });
   }
 
   function selectMasterTextbook(row: Row) {
     clearTransientTextbookFeedback();
     const rowId = getRecordId(row);
+    if (masterDraftDirty && masterForm.id === rowId) return;
     if (rowId !== selectedMasterDetailId) {
       navigateToTextbookDetail("master", rowId);
       return;
     }
     const taxonomy = getTextbookTaxonomySelection(row);
-    setMasterForm({
+    replaceMasterForm({
       id: getRecordId(row),
       title: getTextbookTitle(row),
       subject: getTextbookSubjectWriteValue(row.subject),
@@ -1990,89 +2028,103 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openMasterFromPurchaseRequest(line: Row) {
-    clearTransientTextbookFeedback();
-    const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)));
-    const title = getPurchaseTextbookTitle(line, prepared?.references.textbook || undefined);
-    const taxonomy = getTextbookTaxonomySelection(line);
-    setMasterForm({
-      ...emptyMasterForm,
-      title: title === "-" ? "" : title,
-      subject: getTextbookSubjectWriteValue(line.subject),
-      subjectAreaKey: getTextbookSubjectAreaKey(line),
-      schoolLevels: taxonomy.schoolLevels,
-      gradeLevels: taxonomy.gradeLevels,
-      subSubject: getTextbookSubSubject(line),
-    });
-    setMasterDialogOpen(true);
-    setMessage("");
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)));
+      const title = getPurchaseTextbookTitle(line, prepared?.references.textbook || undefined);
+      const taxonomy = getTextbookTaxonomySelection(line);
+      replaceMasterForm({
+        ...emptyMasterForm,
+        title: title === "-" ? "" : title,
+        subject: getTextbookSubjectWriteValue(line.subject),
+        subjectAreaKey: getTextbookSubjectAreaKey(line),
+        schoolLevels: taxonomy.schoolLevels,
+        gradeLevels: taxonomy.gradeLevels,
+        subSubject: getTextbookSubSubject(line),
+      });
+      setMasterDialogOpen(true);
+      setMessage("");
+    }, { skipConfirmation: !(masterDraftDirty) });
   }
 
   function resetPurchaseForm() {
     purchaseAutoDefaultsRef.current = { title: "", supplierId: "", unitCost: "", requestBy: "", locationId: "" };
     setSelectedPurchaseLineId("");
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-    setPurchaseForm(emptyPurchaseForm);
+    replacePurchaseForm(emptyPurchaseForm);
     setPurchaseRequestInputMode("catalog");
     setMessage("");
   }
 
   function resetSaleForm() {
     saleAutoDefaultsRef.current = { locationId: "" };
-    setSaleForm({ ...emptySaleForm, chargeMonth: currentMonth() });
+    replaceSaleForm({ ...emptySaleForm, chargeMonth: currentMonth() });
     setExcludedStudentIds([]);
     setSaleStudentQuery("");
   }
 
   function openNewPurchaseDialog() {
-    clearTransientTextbookFeedback();
-    setSelectedPurchaseLineId("");
-    setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-    setPurchaseForm({ ...emptyPurchaseForm, requestStage: "order" });
-    setPurchaseRequestInputMode("catalog");
-    setMessage("");
-    setPurchaseDialogOpen(true);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setSelectedPurchaseLineId("");
+      setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
+      replacePurchaseForm({ ...emptyPurchaseForm, requestStage: "order" });
+      setPurchaseRequestInputMode("catalog");
+      setMessage("");
+      setPurchaseDialogOpen(true);
+    }, { skipConfirmation: !(purchaseDraftDirty) });
   }
 
   function openNewRequestDialog() {
-    clearTransientTextbookFeedback();
-    setSelectedPurchaseLineId("");
-    setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-    setPurchaseForm({ ...emptyPurchaseForm, requestStage: "request", requestBy: currentUserLabel });
-    setPurchaseRequestInputMode("catalog");
-    setMessage("");
-    setPurchaseDialogOpen(true);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setSelectedPurchaseLineId("");
+      setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
+      replacePurchaseForm({ ...emptyPurchaseForm, requestStage: "request", requestBy: currentUserLabel });
+      setPurchaseRequestInputMode("catalog");
+      setMessage("");
+      setPurchaseDialogOpen(true);
+    }, { skipConfirmation: !(purchaseDraftDirty) });
   }
 
   function openNewSaleDialog() {
-    clearTransientTextbookFeedback();
-    resetSaleForm();
-    setMessage("");
-    setSaleDialogOpen(true);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      resetSaleForm();
+      setMessage("");
+      setSaleDialogOpen(true);
+    }, { skipConfirmation: !(saleDraftDirty) });
   }
 
   function closeMasterDialog() {
-    clearTransientTextbookFeedback();
-    setMasterDialogOpen(false);
-    setMasterForm(emptyMasterForm);
-    setMessage("");
-    closeTextbookDetail("master");
-    window.setTimeout(() => setMasterDialogOpen(false), 0);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setMasterDialogOpen(false);
+      replaceMasterForm(emptyMasterForm);
+      setMessage("");
+      closeTextbookDetail("master");
+      window.setTimeout(() => setMasterDialogOpen(false), 0);
+    }, { skipConfirmation: !(masterDraftDirty) });
   }
 
   function closePurchaseDialog() {
-    clearTransientTextbookFeedback();
-    setPurchaseDialogOpen(false);
-    resetPurchaseForm();
-    closeTextbookDetail("purchase");
-    window.setTimeout(() => setPurchaseDialogOpen(false), 0);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setPurchaseDialogOpen(false);
+      resetPurchaseForm();
+      closeTextbookDetail("purchase");
+      window.setTimeout(() => setPurchaseDialogOpen(false), 0);
+    }, { skipConfirmation: !(purchaseDraftDirty) });
   }
 
   function closeSaleDialog() {
-    clearTransientTextbookFeedback();
-    setSaleDialogOpen(false);
-    resetSaleForm();
-    setMessage("");
-    window.setTimeout(() => setSaleDialogOpen(false), 0);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setSaleDialogOpen(false);
+      resetSaleForm();
+      setMessage("");
+      window.setTimeout(() => setSaleDialogOpen(false), 0);
+    }, { skipConfirmation: !(saleDraftDirty) });
   }
 
   function clearMasterSelection() {
@@ -2087,10 +2139,12 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function closeMasterBulkDialog() {
-    masterBulkDialogRevisionRef.current += 1;
-    clearTransientTextbookFeedback();
-    setMasterBulkControlsOpen(false);
-    setBulkTextbookPatch(emptyBulkTextbookPatch);
+    requestLocalAction(() => {
+      masterBulkDialogRevisionRef.current += 1;
+      clearTransientTextbookFeedback();
+      setMasterBulkControlsOpen(false);
+      setBulkTextbookPatch(emptyBulkTextbookPatch);
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function clearTransientTextbookFeedback() {
@@ -2100,41 +2154,53 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function updateMasterSearchQuery(value: string) {
-    clearTransientTextbookFeedback();
-    setQuery(value);
-    clearMasterSelection();
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setQuery(value);
+      clearMasterSelection();
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function changeTextbookQualityFilter(value: "all" | "inactive") {
-    clearTransientTextbookFeedback();
-    setTextbookQualityFilter(value);
-    clearMasterSelection();
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setTextbookQualityFilter(value);
+      clearMasterSelection();
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function changeSubjectGroupFilter(value: string) {
-    clearTransientTextbookFeedback();
-    setSubjectGroupFilter(value);
-    setCategoryGroupFilter("all");
-    clearMasterSelection();
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setSubjectGroupFilter(value);
+      setCategoryGroupFilter("all");
+      clearMasterSelection();
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function changeSchoolLevelGroupFilter(value: string) {
-    clearTransientTextbookFeedback();
-    setSchoolLevelGroupFilter(value);
-    setGradeLevelGroupFilter("all");
-    clearMasterSelection();
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setSchoolLevelGroupFilter(value);
+      setGradeLevelGroupFilter("all");
+      clearMasterSelection();
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function changeGradeLevelGroupFilter(value: string) {
-    clearTransientTextbookFeedback();
-    setGradeLevelGroupFilter(value);
-    clearMasterSelection();
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setGradeLevelGroupFilter(value);
+      clearMasterSelection();
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function changeCategoryGroupFilter(value: string) {
-    clearTransientTextbookFeedback();
-    setCategoryGroupFilter(value);
-    clearMasterSelection();
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setCategoryGroupFilter(value);
+      clearMasterSelection();
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function requestTextbookConfirmation(request: TextbookConfirmationRequest) {
@@ -2181,44 +2247,48 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function changeActiveTab(value: string) {
-    if (!canManageTextbookOperations && value !== "requests") {
-      setActiveTab("requests");
+    requestLocalAction(() => {
+      if (!canManageTextbookOperations && value !== "requests") {
+        setActiveTab("requests");
+        setMessage("");
+        setActionErrorMessage("");
+        return;
+      }
+
+      if (value !== activeTab) {
+        clearMasterSelection();
+        setSelectedPurchaseLineIds([]);
+        setSelectedSaleLineIds([]);
+        const params = new URLSearchParams(window.location.search);
+        params.set("textbookTab", value);
+        params.set("textbookPage", "1");
+        params.delete("textbookFilters");
+        const queryString = params.toString();
+        pushLocalHistoryState(window, null, "", `${window.location.pathname}?${queryString}`);
+        adoptLocationQuery(queryString);
+      }
+      setActiveTab(value as TextbookTab);
       setMessage("");
       setActionErrorMessage("");
-      return;
-    }
-
-    if (value !== activeTab) {
-      clearMasterSelection();
-      setSelectedPurchaseLineIds([]);
-      setSelectedSaleLineIds([]);
-      const params = new URLSearchParams(window.location.search);
-      params.set("textbookTab", value);
-      params.set("textbookPage", "1");
-      params.delete("textbookFilters");
-      const queryString = params.toString();
-      window.history.pushState(null, "", `${window.location.pathname}?${queryString}`);
-      window.dispatchEvent(new PopStateEvent("popstate"));
-    }
-    setActiveTab(value as TextbookTab);
-    setMessage("");
-    setActionErrorMessage("");
-    if (value !== "requests" && value !== "purchase" && value !== "sales") {
-      updateOperationSearchQuery("");
-    }
-    if (value !== "purchase") {
-      setPurchaseRequestFilter("all");
-    }
-    if (value !== "purchase") {
-      setPurchaseOrderFilter("all");
-    }
-    if (value !== "sales") {
-      setSalesProcessFilter("all");
-    }
+      if (value !== "requests" && value !== "purchase" && value !== "sales") {
+        updateOperationSearchQuery("");
+      }
+      if (value !== "purchase") {
+        setPurchaseRequestFilter("all");
+      }
+      if (value !== "purchase") {
+        setPurchaseOrderFilter("all");
+      }
+      if (value !== "sales") {
+        setSalesProcessFilter("all");
+      }
+    }, { skipConfirmation: !(value !== activeTab && queryResetDraftDirty) });
   }
 
   function clearTextbookListFilters(nextQuery = "") {
-    updateMasterSearchQuery(nextQuery);
+    clearTransientTextbookFeedback();
+    setQuery(nextQuery);
+    clearMasterSelection();
     setTextbookQualityFilter("all");
     setSubjectGroupFilter("all");
     setSchoolLevelGroupFilter("all");
@@ -2229,7 +2299,9 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function resetTextbookListFilters() {
-    clearTextbookListFilters("");
+    requestLocalAction(() => {
+      clearTextbookListFilters("");
+    }, { skipConfirmation: !(masterBulkDraftDirty) });
   }
 
   function showSavedMasterTextbook(title: string) {
@@ -2343,7 +2415,7 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
-    setBulkOrderQuantities(Object.fromEntries(selectedBulkOrderLines.map((line) => {
+    replaceBulkOrderQuantities(Object.fromEntries(selectedBulkOrderLines.map((line) => {
       const order = getPurchaseLineOrder(line, purchaseOrdersById);
       const draft = buildPurchaseCardDraft(line, order);
       return [getRecordId(line), getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1"];
@@ -2368,11 +2440,13 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function closeBulkOrderDialog() {
-    clearTransientTextbookFeedback();
-    setBulkOrderDialogOpen(false);
-    setBulkOrderQuantities({});
-    setMessage("");
-    window.setTimeout(() => setBulkOrderDialogOpen(false), 0);
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setBulkOrderDialogOpen(false);
+      replaceBulkOrderQuantities({});
+      setMessage("");
+      window.setTimeout(() => setBulkOrderDialogOpen(false), 0);
+    }, { skipConfirmation: !(bulkOrderDraftDirty) });
   }
 
   function setBulkOrderQuantity(lineId: string, value: string) {
@@ -2441,7 +2515,7 @@ function TextbookOperationsWorkspaceContent() {
     ).then((ok) => {
       if (ok) {
         setSelectedPurchaseLineIds([]);
-        setBulkOrderQuantities({});
+        replaceBulkOrderQuantities({});
         setBulkOrderDialogOpen(false);
       }
     });
@@ -2752,6 +2826,7 @@ function TextbookOperationsWorkspaceContent() {
       if (anchorLineId) navigateToTextbookDetail("purchase", anchorLineId);
       return;
     }
+    if (purchaseDraftDirty && selectedPurchaseLineId === getRecordId(primaryLine)) return;
     const primaryOrder = order;
     const studentLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "student");
     const teacherLine = scopeLines.find((scopeLine) => getTextbookCopyScope(scopeLine) === "teacher");
@@ -2795,7 +2870,7 @@ function TextbookOperationsWorkspaceContent() {
       teacher: getRecordId(teacherLine || {}),
     });
     setPurchaseRequestInputMode(textbook ? "catalog" : "manual");
-    setPurchaseForm({
+    replacePurchaseForm({
       requestStage: nextStage,
       copyScope,
       textbookId: getRecordId(textbook || {}) || text(primaryLine.textbook_id || primaryLine.textbookId),
@@ -2921,7 +2996,7 @@ function TextbookOperationsWorkspaceContent() {
           showSavedMasterTextbook(completedMasterTitle);
         }
         setMasterDialogOpen(false);
-        setMasterForm(emptyMasterForm);
+        replaceMasterForm(emptyMasterForm);
       }
     });
   }
@@ -2959,7 +3034,7 @@ function TextbookOperationsWorkspaceContent() {
           setPurchaseDialogOpen(false);
           setSelectedPurchaseLineId("");
           setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-          setPurchaseForm(emptyPurchaseForm);
+          replacePurchaseForm(emptyPurchaseForm);
         }
       });
       return;
@@ -3061,7 +3136,7 @@ function TextbookOperationsWorkspaceContent() {
         setPurchaseDialogOpen(false);
         setSelectedPurchaseLineId("");
         setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
-        setPurchaseForm(emptyPurchaseForm);
+        replacePurchaseForm(emptyPurchaseForm);
       }
     });
   }
@@ -3807,6 +3882,7 @@ function TextbookOperationsWorkspaceContent() {
 
   return (
     <div data-slot="textbook-workspace" onClickCapture={rememberTextbookDialogOpener} onFocusCapture={rememberTextbookDialogOpener} className="flex min-h-[calc(100dvh-5rem)] min-w-0 flex-col gap-3 px-4 md:min-h-[calc(100dvh-7.25rem)] lg:px-6">
+      {draftNavigationConfirmation}
       {(actionErrorMessage || message) && !(
         (masterDialogOpen && actionErrorOwner === "master")
         || (purchaseDialogOpen && actionErrorOwner === "purchase")
@@ -4799,7 +4875,7 @@ function TextbookOperationsWorkspaceContent() {
             actions={<div data-slot="textbook-master-actions" className="flex min-w-0 flex-1 items-center justify-end gap-1">{selectedTextbookRows.length > 0 ? (
               <TextbookSelectionActions selectedCount={selectedTextbookRows.length} saving={saving} metadataReady={masterOptionsAccepted}
                 controlsOpen={masterBulkControlsOpen} onToggleControls={openMasterBulkDialog}
-                onSetStatus={applyBulkTextbookStatus} onDelete={deleteSelectedTextbooks} onClear={() => { clearMasterSelection(); setMasterBulkControlsOpen(false); masterSearchRef.current?.focus({ preventScroll: true }); }} />
+                onSetStatus={applyBulkTextbookStatus} onDelete={deleteSelectedTextbooks} onClear={() => requestLocalAction(() => { clearMasterSelection(); setMasterBulkControlsOpen(false); masterSearchRef.current?.focus({ preventScroll: true }); }, { skipConfirmation: !masterBulkDraftDirty })} />
             ) : (
             <div className="flex min-w-0 items-center justify-end gap-1">
               {activeTab === "master" ? (

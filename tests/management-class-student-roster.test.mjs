@@ -76,7 +76,7 @@ test("class management accepts legacy class detail tab URLs without rendering de
   assert.match(pageSource, /openRow\(targetRow, \{[\s\S]*tab: requestedClassDetailTab[\s\S]*syncRoute: false/);
   assert.match(pageSource, /data-testid="class-official-summary-bar"/);
   assert.match(pageSource, /data-testid="class-detail-return-to-work-queue"/);
-  assert.match(pageSource, /router\.push\(requestedClassReturnPath\)/);
+  assert.match(pageSource, /requestManagementNavigation\(requestedClassReturnPath\)/);
   assert.match(pageSource, /function getClassReturnPathLabel\(path: string\)/);
   assert.match(pageSource, /if \(path\.startsWith\("\/admin\/class-schedule"\)\) return "수업일정"/);
   assert.match(pageSource, /if \(path\.startsWith\("\/admin\/curriculum"\)\) return "수업계획"/);

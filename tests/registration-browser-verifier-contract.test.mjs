@@ -194,7 +194,7 @@ test("read-only edge scenarios keep permissions migration terminal and dirty-clo
   assert.match(verifier, /readOnlyAdmissionDialog[\s\S]*?getByRole\("button", \{ name: "입학 처리 시작" \}\)\.count\(\)/)
   assert.match(verifier, /migrationDialog[\s\S]*?section\[aria-label="영어 문의 처리"\][\s\S]*?count\(\)/)
   assert.match(verifier, /consultationTaskId[\s\S]*?levelTestTaskId[\s\S]*?fixture-task-cross-stage/)
-  assert.match(verifier, /unsavedInquiryRequestNote[\s\S]*?fill\(unsavedInquiryRequestNote\)[\s\S]*?keyboard\.press\("Escape"\)[\s\S]*?입력한 내용을 버릴까요\?[\s\S]*?계속 작성[\s\S]*?저장하지 않고 닫기/)
+  assert.match(verifier, /unsavedInquiryRequestNote[\s\S]*?fill\(unsavedInquiryRequestNote\)[\s\S]*?keyboard\.press\("Escape"\)[\s\S]*?입력한 내용을 버릴까요\?[\s\S]*?계속 편집[\s\S]*?변경사항 버리기/)
   assert.doesNotMatch(verifier, /phoneConsultationSave|공통 정보 저장[^\n]*click\(/)
 })
 

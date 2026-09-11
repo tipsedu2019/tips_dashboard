@@ -1165,8 +1165,8 @@ test("makeup workspace avoids browser prompt and fills wide screens", () => {
   assert.doesNotMatch(workspaceSource, /max-w-7xl/);
   assert.match(workspaceSource, /className="w-full overflow-x-auto"/);
   assert.match(workspaceSource, /className="grid min-w-0 gap-2"/);
-  assert.match(workspaceSource, /className="flex flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"/);
-  assert.match(workspaceSource, /role="tablist" aria-label="휴보강 흐름"/);
+  assert.match(workspaceSource, /className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between"/);
+  assert.match(workspaceSource, /<WorkspaceTabsList aria-label="휴보강 흐름"/);
   assert.doesNotMatch(workspaceSource, /<Card className="gap-0 overflow-hidden rounded-lg py-0">/);
   assert.match(workspaceSource, /className="grid min-w-full border-b bg-muted\/45 text-xs \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);
   assert.match(workspaceSource, /className="grid min-w-full border-b last:border-b-0 hover:bg-muted\/30 \[grid-template-columns:var\(--makeup-request-grid-template\)\]"/);

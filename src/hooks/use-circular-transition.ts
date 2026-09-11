@@ -16,6 +16,10 @@ export function useCircularTransition(): CircularTransitionHook {
   const startTransition = useCallback((coords: { x: number; y: number }, callback: () => void) => {
     if (isTransitioningRef.current) return
 
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
+      callback()
+      return
+    }
     isTransitioningRef.current = true
 
     // Set CSS variables for the circular reveal animation - exactly like tweakcn
@@ -32,9 +36,8 @@ export function useCircularTransition(): CircularTransitionHook {
         callback()
       })
 
-      transition.finished.finally(() => {
-        isTransitioningRef.current = false
-      })
+      const finish = () => { isTransitioningRef.current = false }
+      void transition.finished.then(finish, finish)
     } else {
       // Fallback for browsers without View Transitions API
       callback()
@@ -52,7 +55,8 @@ export function useCircularTransition(): CircularTransitionHook {
     }
 
     startTransition(coords, () => {
-      setTheme(theme === "dark" ? "light" : "dark")
+      const isDark = theme === "dark" || (theme === "system" && window.matchMedia("(prefers-color-scheme: dark)").matches)
+      setTheme(isDark ? "light" : "dark")
     })
   }, [theme, setTheme, startTransition])
 

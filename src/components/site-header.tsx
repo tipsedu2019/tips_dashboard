@@ -14,7 +14,12 @@ import { resolveAdminWorkspaceMeta } from "@/lib/navigation"
 export function SiteHeader() {
   const pathname = usePathname()
   const [searchOpen, setSearchOpen] = React.useState(false)
+  const searchOpenerRef = React.useRef<HTMLElement | null>(null)
   const workspaceMeta = React.useMemo(() => resolveAdminWorkspaceMeta(pathname), [pathname])
+  const openSearch = React.useCallback((opener: HTMLElement | null) => {
+    searchOpenerRef.current = opener
+    setSearchOpen(true)
+  }, [])
 
   React.useEffect(() => {
     setSearchOpen(false)
@@ -24,13 +29,14 @@ export function SiteHeader() {
     const down = (e: KeyboardEvent) => {
       if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
         e.preventDefault()
-        setSearchOpen((open) => !open)
+        if (searchOpen) setSearchOpen(false)
+        else openSearch(document.activeElement instanceof HTMLElement ? document.activeElement : null)
       }
     }
 
     document.addEventListener("keydown", down)
     return () => document.removeEventListener("keydown", down)
-  }, [])
+  }, [openSearch, searchOpen])
 
   return (
     <>
@@ -64,14 +70,14 @@ export function SiteHeader() {
                 <span className="sr-only">홈페이지 확인</span>
               </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
-                <SearchTrigger onClick={() => setSearchOpen(true)} />
+                <SearchTrigger onClick={(event) => openSearch(event.currentTarget)} />
               </div>
               <ModeToggle />
             </div>
           </div>
         </div>
       </header>
-      <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} />
+      <CommandSearch open={searchOpen} onOpenChange={setSearchOpen} returnFocusRef={searchOpenerRef} />
     </>
   )
 }

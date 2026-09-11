@@ -768,14 +768,16 @@ test("new registration saves inquiry basics only and starts every subject at reg
 })
 
 test("registration selects use the shared dashboard select and disabled gray treatment", async () => {
-  const [select, initialPlan, shell, workspace] = await Promise.all([
+  const [select, initialPlan, shell, workspace, fieldStates] = await Promise.all([
     readFile(new URL("../src/components/ui/select.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-initial-plan-control.tsx", import.meta.url), "utf8"),
     readFile(new URL("../src/features/tasks/registration-application-shell.tsx", import.meta.url), "utf8"),
     readWorkspaceSource(),
+    readFile(new URL("../src/components/ui/control-styles.ts", import.meta.url), "utf8"),
   ])
-  assert.match(select, /disabled:bg-muted/)
-  assert.match(select, /disabled:opacity-100/)
+  assert.match(select, /fieldStateClassName/)
+  assert.match(fieldStates, /disabled:bg-muted/)
+  assert.match(fieldStates, /disabled:opacity-100/)
   assert.match(initialPlan, /SelectTrigger/)
   assert.doesNotMatch(initialPlan, /<select/)
   assert.match(shell, /\[&_select:disabled\]:bg-muted/)
@@ -3391,7 +3393,7 @@ test("ordinary tracks expose one explicit nullable director fact editor", async 
   assert.match(source, /registration_visit_reassign_requires_reschedule/)
   assert.match(source, /방문상담 예약에서 담당 원장을 다시 확인하세요/)
   assert.match(source, /const activeVisitAppointment = activeVisitPlan/)
-  assert.match(source, /onOpenVisit=\{onFocusTrack\}/)
+  assert.match(source, /onOpenVisit=\{handleSubjectTabChange\}/)
   assert.match(source, /requestKeysRef\.current\.delete\(logicalKey\)/)
   assert.match(source, /activeDirectorProfileIds/)
   assert.match(source, /teacherOptions\.map\(\(teacher\) => teacher\.profileId\)/)
@@ -5014,11 +5016,11 @@ test("registration host owns dirty close protection and clears every application
   assert.match(closeSource, /registrationApplicationHost\.kind === "detail" && registrationApplicationDirty/)
   assert.match(closeSource, /setConfirmingFormClose\(true\)/)
   assert.match(closeSource, /closeRegistrationApplicationHost\(\)/)
-  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setRegistrationApplicationHost\(\{ kind: "closed" \}\)/)
-  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setSelectedRegistrationTrackId\(null\)/)
-  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setSelectedRegistrationAppointmentId\(null\)/)
-  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?setRegistrationCaseDetail\(null\)/)
-  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(\) => \{[\s\S]*?syncTaskDeepLink\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(syncLocation = true\) => \{[\s\S]*?setRegistrationApplicationHost\(\{ kind: "closed" \}\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(syncLocation = true\) => \{[\s\S]*?setSelectedRegistrationTrackId\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(syncLocation = true\) => \{[\s\S]*?setSelectedRegistrationAppointmentId\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(syncLocation = true\) => \{[\s\S]*?setRegistrationCaseDetail\(null\)/)
+  assert.match(workspace, /const closeRegistrationApplicationHost = useCallback\(\(syncLocation = true\) => \{[\s\S]*?syncTaskDeepLink\(null\)/)
 })
 
 test("saved detail owns one unified inquiry draft and removes duplicate inquiry summaries", async () => {

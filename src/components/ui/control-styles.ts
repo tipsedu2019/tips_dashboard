@@ -1,0 +1,3 @@
+/** Shared interaction states for editable fields; callers own size and layout. */
+export const fieldStateClassName =
+  "outline-none transition-[background-color,border-color,color,box-shadow] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] motion-reduce:transition-none enabled:hover:not-focus-visible:not-aria-invalid:border-ring/50 focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] disabled:cursor-not-allowed disabled:border-muted-foreground/20 disabled:bg-muted dark:disabled:bg-muted disabled:text-muted-foreground disabled:opacity-100 aria-invalid:border-destructive aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40"

@@ -420,3 +420,34 @@ test("persisted hidden columns hydrate server markup without a mismatch before a
     }
   }
 });
+
+test("unchanged column definitions do not repeat synchronous storage writes during unrelated updates", async (t) => {
+  await withDom(async ({ container, root }) => {
+    const { useDataTableColumns } = await loadDataTableColumns();
+    const harness = createHarness(useDataTableColumns);
+    const storagePrototype = Object.getPrototypeOf(window.localStorage);
+    const originalSetItem = storagePrototype.setItem;
+    let writes = 0;
+    storagePrototype.setItem = function (key, value) {
+      writes += 1;
+      return originalSetItem.call(this, key, value);
+    };
+    try {
+      const start = performance.now();
+      for (let render = 0; render < 21; render += 1) {
+        await act(async () => root.render(createElement(harness.Harness, { columns: [
+          { id: "title", label: "교재명", required: true },
+          { id: "location", label: "위치" },
+        ] })));
+      }
+      t.diagnostic(`21 renders: ${writes} storage writes, ${(performance.now() - start).toFixed(2)} ms`);
+      assert.equal(writes, 1, "the accepted visibility is persisted once, independent of array identity");
+      await act(async () => container.querySelector('button[aria-label="컬럼 구성"]').click());
+      await act(async () => container.querySelector('button[role="checkbox"][aria-label="위치 표시"]').click());
+      assert.equal(writes, 2, "a real preference change still persists");
+      assert.equal(JSON.parse(window.localStorage.getItem("columns-test")).location, false);
+    } finally {
+      storagePrototype.setItem = originalSetItem;
+    }
+  });
+});

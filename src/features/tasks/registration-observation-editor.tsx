@@ -530,6 +530,7 @@ export type RegistrationObservationEditorProps = {
   onSaved: (result: RegistrationObservationMutationResult) => void | Promise<void>
   onOpenCustomerMessage?: (target: RegistrationCustomerMessageTarget) => void
   feedbackPanel?: ReactNode
+  onDirtyChange?: (dirty: boolean) => void
 }
 
 function dateKey(date: Date) {
@@ -570,6 +571,7 @@ export function RegistrationObservationEditor({
   onSaved,
   onOpenCustomerMessage,
   feedbackPanel,
+  onDirtyChange,
 }: RegistrationObservationEditorProps) {
   const selectedObservationId = deepLinkedAttempt?.observationId
     || detail.currentObservation?.observationId
@@ -671,6 +673,15 @@ export function RegistrationObservationEditor({
     classId,
     sessionId,
   })
+  // A new untouched booking is empty even though the save eligibility helper
+  // treats the missing canonical booking as changed. Accepted writes are clean.
+  const navigationDirty = !mutationCommitted && canBook && (
+    current ? bookingDirty : Boolean(classId || sessionId)
+  )
+  const dirtyCallbackRef = useRef(onDirtyChange)
+  useEffect(() => { dirtyCallbackRef.current = onDirtyChange }, [onDirtyChange])
+  useEffect(() => { onDirtyChange?.(navigationDirty) }, [navigationDirty, onDirtyChange])
+  useEffect(() => () => { dirtyCallbackRef.current?.(false) }, [])
   const classOptions = detail.classes.map((classItem) => ({ value: classItem.id, label: classItem.name }))
   const sessionOptions = sessions.map((session) => ({ value: sessionValue(session), label: sessionLabel(session) }))
 

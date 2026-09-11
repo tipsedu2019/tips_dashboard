@@ -16,32 +16,24 @@ function getSystemDarkMode() {
   return typeof window !== "undefined" && window.matchMedia("(prefers-color-scheme: dark)").matches
 }
 
+function subscribeSystemMode(onChange: () => void) {
+  const mediaQuery = window.matchMedia("(prefers-color-scheme: dark)")
+  mediaQuery.addEventListener("change", onChange)
+  return () => mediaQuery.removeEventListener("change", onChange)
+}
+const serverSystemDarkMode = () => false
+const skipSystemSubscription = () => () => {}
+
 export function ModeToggle({ variant = "outline" }: ModeToggleProps) {
   const { theme } = useTheme()
   const { toggleTheme } = useCircularTransition()
 
-  const [systemDarkMode, setSystemDarkMode] = React.useState(getSystemDarkMode)
-  const isDarkMode = theme === "dark" || (theme !== "light" && systemDarkMode)
-
-  React.useEffect(() => {
-    if (theme === "dark" || theme === "light") {
-      return
-    }
-
-    const updateMode = () => setSystemDarkMode(getSystemDarkMode())
-
-    const mediaQuery = typeof window !== "undefined" ? window.matchMedia("(prefers-color-scheme: dark)") : null
-    if (mediaQuery) {
-      updateMode()
-      mediaQuery.addEventListener("change", updateMode)
-    }
-
-    return () => {
-      if (mediaQuery) {
-        mediaQuery.removeEventListener("change", updateMode)
-      }
-    }
-  }, [theme])
+  const systemDarkMode = React.useSyncExternalStore(
+    theme === "system" ? subscribeSystemMode : skipSystemSubscription,
+    getSystemDarkMode,
+    serverSystemDarkMode,
+  )
+  const isDarkMode = theme === "dark" || (theme === "system" && systemDarkMode)
 
   const handleToggle = (event: React.MouseEvent<HTMLButtonElement>) => {
     toggleTheme(event)

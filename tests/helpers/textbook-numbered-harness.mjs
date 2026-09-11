@@ -122,6 +122,7 @@ export async function setup(t, initial = {}) {
   window.cancelAnimationFrame = window.clearTimeout;
   globalThis.requestAnimationFrame = window.requestAnimationFrame;
   globalThis.cancelAnimationFrame = window.cancelAnimationFrame;
+  window.navigation = Object.assign(new window.EventTarget(), { traverseTo: () => ({ committed: Promise.resolve(), finished: Promise.resolve() }) });
   window.scrollTo = () => {};
   window.HTMLElement.prototype.scrollIntoView = () => {};
   window.HTMLElement.prototype.attachEvent = () => {};
@@ -137,9 +138,11 @@ export async function setup(t, initial = {}) {
   const io = transport();
   let auth = { user: { id: id(804), email: 'admin@test.invalid' }, role: 'admin', loading: false, isAdmin: true, isStaff: false, isTeacher: false, canManageAll: true, ...initial.auth };
   let search, params;
+  const routes = [];
+  const router = { push: href => { routes.push(href); window.history.pushState(null, "", href); } };
   const load = modules(io.supabase, {
     '@/providers/auth-provider': { useAuth: () => auth },
-    'next/navigation': { useSearchParams() {
+    'next/navigation': { useRouter: () => router, useSearchParams() {
       if (search !== window.location.search) { search = window.location.search; params = new URLSearchParams(search); }
       return params;
     } },
@@ -176,7 +179,7 @@ export async function setup(t, initial = {}) {
     testComponentCleanups.add(cleanup);
     return { node, cleanup };
   };
-  return { ...io, load, render, clipboardWrites, unmount, mountTestComponent,
+  return { ...io, load, render, clipboardWrites, unmount, mountTestComponent, routes,
     act: callback => act(async () => { await callback(); }),
     resolve: (request, data) => act(async () => { request.resolve({ data, error: null }); }),
     reject: (request, error) => act(async () => { request.resolve({ data: null, error }); }),

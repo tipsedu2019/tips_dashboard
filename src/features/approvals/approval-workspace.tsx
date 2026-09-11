@@ -6,10 +6,13 @@ import { useSearchParams } from "next/navigation"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
+import { useDraftNavigation } from "@/hooks/use-draft-navigation"
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
 import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller"
+import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback"
 import { normalizePage } from "@/lib/numbered-pagination"
 import {
   Empty,
@@ -265,6 +268,12 @@ function approvalInputFromRequest(request: ApprovalRequest): ApprovalInput {
   }
 }
 
+function approvalDraftValue(input: ApprovalInput) {
+  return JSON.stringify({ ...input, checklistItems: input.checklistItems.map((item) => ({
+    label: item.label, group: item.group || "확인", state: checklistState(item),
+  })) })
+}
+
 function approvalStatusLabel(status: ApprovalStatus) {
   if (status === "draft") return "작성"
   if (status === "submitted") return "상신"
@@ -482,9 +491,15 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   const [catalogError, setCatalogError] = useState("")
   const [snapshot, setSnapshot] = useState<(NumberedPageSnapshot<ApprovalRequest> & Partial<Pick<ApprovalNumberedPage, "tabCounts">>) | null>(null)
   const [saving, setSaving] = useState(false)
+  const savingRef = useRef(false)
   const [legacyRecovery, setLegacyRecovery] = useState<ApprovalMutationAttemptKind | null>(null)
   const [commentDrafts, setCommentDrafts] = useState<Record<string, string>>({})
   const [input, setInput] = useState<ApprovalInput>(() => buildTemplateInput("english_monthly", monthInputValue()))
+  const [inputBaseline, setInputBaseline] = useState(input)
+  const inputBaselineRef = useRef(inputBaseline)
+  inputBaselineRef.current = inputBaseline
+  const composerLifetime = useRef(0)
+  const [templateNameBaseline, setTemplateNameBaseline] = useState("")
   const inputRef = useRef(input)
   inputRef.current = input
   const [message, setMessage] = useState("")
@@ -524,6 +539,23 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   const canSubmitApproval = data.schemaReady && submitMissingLabels.length === 0
   const submitDisabledReason = submitMissingLabels.length > 0 ? `${submitMissingLabels.join(", ")} 필요` : "상신"
   const composerExpanded = composerOpen || Boolean(editingRequestId)
+  const composerDirty = composerExpanded && approvalDraftValue(input) !== approvalDraftValue(inputBaseline)
+  const checklistDraftDirty = checklistEditOpen && checklistTextDraft !== serializeChecklistItems(input.checklistItems)
+  const templateNameDirty = templateName.trim() !== templateNameBaseline.trim()
+  const composerScopeDirty = composerDirty || checklistDraftDirty || templateNameDirty
+  const { requestLocalAction, confirmation } = useDraftNavigation({
+    dirty: composerScopeDirty || Object.values(commentDrafts).some((body) => body.trim().length > 0),
+  })
+  const startComposer = (nextInput: ApprovalInput, name = "") => {
+    composerLifetime.current += 1
+    setInput(nextInput)
+    setInputBaseline(nextInput)
+    setChecklistTextDraft("")
+    setChecklistEditOpen(false)
+    setTemplateSaveOpen(false)
+    setTemplateName(name)
+    setTemplateNameBaseline(name)
+  }
 
   const controller = useRef<ReturnType<typeof createNumberedPageController<ApprovalRequest>> | null>(null)
   const lastRequest = useRef("")
@@ -533,7 +565,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     params.set("view", next.view); params.set("page", String(next.page))
     const url = `${window.location.pathname}?${params}${window.location.hash}`
     if (replace) window.history.replaceState(null, "", url)
-    else window.history.pushState(null, "", url)
+    else pushLocalHistoryState(window, null, "", url)
   }, [])
   const navigate = useCallback((nextView: ApprovalView, page: number, replace = false) => {
     if (!alive.current || !actorScope) return
@@ -640,6 +672,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   useEffect(() => {
     if (manualApproverTouched || input.approverId || !recommendedApprovalLine?.approver.id) return
     setInput((current) => current.approverId ? current : { ...current, approverId: recommendedApprovalLine.approver.id })
+    setInputBaseline((current) => current.approverId ? current : { ...current, approverId: recommendedApprovalLine.approver.id })
   }, [input.approverId, manualApproverTouched, recommendedApprovalLine?.approver.id])
 
   const updateInput = <Key extends keyof ApprovalInput>(key: Key, value: ApprovalInput[Key]) => {
@@ -647,46 +680,40 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     setInput((current) => ({ ...current, [key]: value }))
   }
 
-  const applyTemplate = (templateKey: ApprovalTemplateKey) => {
+  const applyTemplate = (templateKey: ApprovalTemplateKey) => requestLocalAction(() => {
     setMessage("")
     setComposerOpen(true)
     setSelectedSavedTemplate(NONE_VALUE)
     setManualApproverTouched(false)
     setEditingRequestId("")
     setEditingRequestStatus("draft")
-    setInput((current) => {
-      const nextInput = buildTemplateInput(templateKey, current.reportMonth || monthInputValue())
-      return {
-        ...nextInput,
-        approverId: current.subject === nextInput.subject ? current.approverId : "",
-      }
-    })
-    setTemplateName("")
-  }
+    const current = inputRef.current
+    const nextInput = buildTemplateInput(templateKey, current.reportMonth || monthInputValue())
+    startComposer({ ...nextInput, approverId: current.subject === nextInput.subject ? current.approverId : "" })
+  }, { skipConfirmation: !composerScopeDirty })
 
   const applySavedTemplate = (templateId: string) => {
-    setSelectedSavedTemplate(templateId)
-    if (templateId === NONE_VALUE) return
-
+    if (templateId === NONE_VALUE) { setSelectedSavedTemplate(templateId); return }
     const template = data.templates.find((item) => item.id === templateId)
     if (!template) return
-    setMessage("")
-    setComposerOpen(true)
-    setManualApproverTouched(false)
-    setInput((current) => ({
-      ...current,
-      title: current.title === buildReportTitle(current.templateKey, current.reportMonth) || !current.title
-        ? buildSavedTemplateTitle(template.name, current.reportMonth || monthInputValue())
-        : current.title,
-      subject: template.subject,
-      templateKey: "free",
-      approverId: current.subject === template.subject ? current.approverId : "",
-      classSummary: template.name,
-      body: template.body,
-      checklistItems: template.checklistItems,
-      attachmentLinks: template.attachmentLinks,
-    }))
-    setTemplateName(template.name)
+    requestLocalAction(() => {
+      setSelectedSavedTemplate(templateId)
+      setMessage("")
+      setComposerOpen(true)
+      setManualApproverTouched(false)
+      const current = inputRef.current
+      startComposer({
+        ...current,
+        title: current.title === buildReportTitle(current.templateKey, current.reportMonth) || !current.title
+          ? buildSavedTemplateTitle(template.name, current.reportMonth || monthInputValue()) : current.title,
+        subject: template.subject, templateKey: "free",
+        approverId: current.subject === template.subject ? current.approverId : "",
+        classSummary: template.name, body: template.body,
+        checklistItems: template.checklistItems, attachmentLinks: template.attachmentLinks,
+      }, template.name)
+      // Applying a template to a saved document still needs a document save.
+      if (draftRef.current.editingRequestId) setInputBaseline(inputBaselineRef.current)
+    }, { skipConfirmation: !composerScopeDirty })
   }
 
   const updateReportMonth = (reportMonth: string) => {
@@ -740,14 +767,14 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     }))
   }
 
-  const resetChecklistFromTemplate = () => {
+  const resetChecklistFromTemplate = () => requestLocalAction(() => {
     setMessage("")
     setChecklistEditOpen(false)
     setInput((current) => ({
       ...current,
       checklistItems: buildChecklistItems(current.templateKey as ApprovalTemplateKey, current.reportMonth || monthInputValue()),
     }))
-  }
+  }, { skipConfirmation: !checklistDraftDirty && JSON.stringify(input.checklistItems) === JSON.stringify(buildChecklistItems(input.templateKey as ApprovalTemplateKey, input.reportMonth || monthInputValue())) })
 
   const openChecklistEditor = () => {
     setChecklistTextDraft(serializeChecklistItems(input.checklistItems))
@@ -772,27 +799,35 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   }
 
   const createApproval = async (status: ApprovalStatus) => {
-    if (!userId || saving) return
+    if (!userId || savingRef.current) return
+    const submittedLifetime = composerLifetime.current
     const nextStatus = status === "draft" && editingRequestId ? editingRequestStatus : status
     const missingLabels = nextStatus === "submitted" ? approvalSubmitMissingLabels(input) : []
     if (missingLabels.length > 0) {
       setMessage(`${missingLabels.join(", ")} 입력`)
       return
     }
+    savingRef.current = true
     setSaving(true)
     try {
+      let savedRequestId = editingRequestId
       if (editingRequestId) {
         await updateMonthlyReportApproval(editingRequestId, input, nextStatus)
       } else {
-        await createMonthlyReportApproval(input, userId, status)
+        savedRequestId = await createMonthlyReportApproval(input, userId, status)
       }
       if (!alive.current) return
-      if (inputRef.current === input && draftRef.current.checklistTextDraft === checklistTextDraft
+      if (composerLifetime.current === submittedLifetime) setInputBaseline(input)
+      if (composerLifetime.current === submittedLifetime && inputRef.current === input && draftRef.current.checklistTextDraft === checklistTextDraft
         && draftRef.current.templateName === templateName && draftRef.current.editingRequestId === editingRequestId) {
-        setInput(buildTemplateInput(input.templateKey as ApprovalTemplateKey, monthInputValue()))
+        startComposer(buildTemplateInput(input.templateKey as ApprovalTemplateKey, monthInputValue()))
         setComposerOpen(false)
         setEditingRequestId("")
         setEditingRequestStatus("draft")
+      } else if (composerLifetime.current === submittedLifetime && !editingRequestId) {
+        // Newer input continues editing the document just created.
+        setEditingRequestId(savedRequestId)
+        setEditingRequestStatus(status)
       }
       await reload()
       if (!alive.current) return
@@ -800,11 +835,12 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     } catch (error) {
       mutationError(error, "저장하지 못했습니다.")
     } finally {
+      savingRef.current = false
       if (alive.current) setSaving(false)
     }
   }
 
-  const editApproval = (request: ApprovalRequest) => {
+  const editApproval = (request: ApprovalRequest) => requestLocalAction(() => {
     setMessage("")
     setChecklistEditOpen(false)
     setTemplateSaveOpen(false)
@@ -813,32 +849,38 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     setComposerOpen(true)
     setEditingRequestId(request.id)
     setEditingRequestStatus(request.status)
-    setInput(approvalInputFromRequest(request))
+    startComposer(approvalInputFromRequest(request))
     window.scrollTo({ top: 0, behavior: "smooth" })
-  }
+  }, { skipConfirmation: !composerScopeDirty })
 
-  const cancelEdit = () => {
+  const cancelEdit = () => requestLocalAction(() => {
     setMessage("")
     setComposerOpen(false)
     setEditingRequestId("")
     setEditingRequestStatus("draft")
-    setInput(buildTemplateInput(input.templateKey as ApprovalTemplateKey, input.reportMonth || monthInputValue()))
-  }
+    startComposer(buildTemplateInput(input.templateKey as ApprovalTemplateKey, input.reportMonth || monthInputValue()))
+  }, { skipConfirmation: !composerScopeDirty })
 
   const saveTemplate = async () => {
-    if (!userId || saving) return
+    if (!userId || savingRef.current) return
+    const submittedLifetime = composerLifetime.current
     const nextName = templateName.trim() || defaultTemplateName(input)
     if (!input.body.trim() && input.checklistItems.length === 0) {
       setMessage("저장할 본문이나 확인 항목이 없습니다.")
       return
     }
 
+    savingRef.current = true
     setSaving(true)
     try {
       await saveApprovalTemplate(input, userId, nextName)
       if (!alive.current) return
-      setTemplateName((current) => current === templateName ? "" : current)
-      if (inputRef.current === input && draftRef.current.templateName === templateName) setTemplateSaveOpen(false)
+      if (composerLifetime.current === submittedLifetime) {
+        const unchangedName = draftRef.current.templateName === templateName
+        setTemplateNameBaseline(unchangedName ? "" : templateName)
+        if (unchangedName) setTemplateName("")
+        if (inputRef.current === input && unchangedName) setTemplateSaveOpen(false)
+      }
       await loadCatalogs()
       await reload()
       if (!alive.current) return
@@ -846,6 +888,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     } catch (error) {
       mutationError(error, "서식을 저장하지 못했습니다.")
     } finally {
+      savingRef.current = false
       if (alive.current) setSaving(false)
     }
   }
@@ -856,7 +899,8 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   }
 
   const changeStatus = async (request: ApprovalRequest, status: ApprovalStatus) => {
-    if (saving) return
+    if (savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     try {
       await updateApprovalStatus(request.id, status)
@@ -867,12 +911,14 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     } catch (error) {
       mutationError(error, "상태를 바꾸지 못했습니다.")
     } finally {
+      savingRef.current = false
       if (alive.current) setSaving(false)
     }
   }
 
   const addComment = async (request: ApprovalRequest, body: string) => {
-    if (!userId || saving) return
+    if (!userId || savingRef.current) return
+    savingRef.current = true
     setSaving(true)
     try {
       await addApprovalComment(request.id, userId, body)
@@ -884,6 +930,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     } catch (error) {
       mutationError(error, "댓글을 저장하지 못했습니다.")
     } finally {
+      savingRef.current = false
       if (alive.current) setSaving(false)
     }
   }
@@ -893,9 +940,10 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   }
 
   const deleteApproval = async (request: ApprovalRequest) => {
-    if (!canDeleteApprovalRequest(request) || saving) return
+    if (!canDeleteApprovalRequest(request) || savingRef.current) return
     const confirmed = window.confirm(`${request.title || "전자결재 문서"} 삭제할까요?`)
     if (!confirmed) return
+    savingRef.current = true
     setSaving(true)
     try {
       await deleteApprovalRequest(request.id)
@@ -906,6 +954,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     } catch (error) {
       mutationError(error, "문서를 삭제하지 못했습니다.")
     } finally {
+      savingRef.current = false
       if (alive.current) setSaving(false)
     }
   }
@@ -921,6 +970,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
 
   return (
     <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+      {confirmation}
       <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <form onSubmit={submit} className="self-start rounded-lg border bg-card p-4 shadow-xs">
           <div className="flex items-center justify-between gap-3">
@@ -1099,7 +1149,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
                         placeholder={"그룹: 점검 항목\n예: 상담: 신규생 2주 내 상담"}
                       />
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" size="sm" onClick={() => setChecklistEditOpen(false)}>
+                        <Button type="button" variant="outline" size="sm" onClick={() => requestLocalAction(() => setChecklistEditOpen(false), { skipConfirmation: !checklistDraftDirty })}>
                           취소
                         </Button>
                         <Button type="button" size="sm" onClick={applyChecklistEditor}>
@@ -1180,26 +1230,16 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
           )}
         </form>
 
-        <section className="min-w-0 rounded-lg border bg-card shadow-xs">
+        <WorkspaceTabs value={view} onValueChange={(value) => navigate(value as ApprovalView, 1)} className="rounded-lg border bg-card shadow-xs">
           <div className="flex flex-col gap-2 border-b p-3 sm:flex-row sm:items-center sm:justify-between">
-            <div className="flex gap-1 overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden" role="tablist" aria-label="전자결재 보기">
+            <WorkspaceTabsList aria-label="전자결재 보기" className="sm:w-auto">
               {APPROVAL_VIEWS.map((tab) => (
-                <button
-                  key={tab.key}
-                  type="button"
-                  role="tab"
-                  aria-selected={view === tab.key}
-                  onClick={() => navigate(tab.key, 1)}
-                  className={[
-                    "shrink-0 rounded-md px-3 py-2 text-sm font-medium",
-                    view === tab.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  ].join(" ")}
-                >
+                <WorkspaceTabsTrigger key={tab.key} value={tab.key}>
                   {tab.label}
-                  {approvalCounts && approvalCounts[tab.key] > 0 && <span className="ml-1 text-xs opacity-80">{approvalCounts[tab.key]}</span>}
-                </button>
+                  {approvalCounts && approvalCounts[tab.key] > 0 && <span className="text-xs tabular-nums opacity-80">{approvalCounts[tab.key]}</span>}
+                </WorkspaceTabsTrigger>
               ))}
-            </div>
+            </WorkspaceTabsList>
             <div className="flex items-center justify-end gap-2">
               <Button type="button" variant="outline" size="sm" onClick={() => void reload()} disabled={loading}>
                 <RefreshCw />
@@ -1208,6 +1248,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
             </div>
           </div>
 
+          <WorkspaceTabsPanel>
           {message && <div role="status" className="border-b px-3 py-2 text-sm text-primary">{message}</div>}
           {legacyRecovery && <Alert><AlertDescription>
             저장된 문서를 먼저 확인하세요. 로컬 재시도 기록만 폐기하며 서버 문서는 변경하지 않습니다.
@@ -1241,7 +1282,8 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
           <div className="border-t p-3"><DataTablePagination page={snapshot?.page || 1} pageSize={snapshot?.scope ? snapshot.pageSize : size.pageSize}
             totalCount={snapshot?.totalCount ?? null} loading={loading} onPageChange={(page) => navigate(view, page)}
             onPageSizeChange={size.setPreference} /></div>
-        </section>
+          </WorkspaceTabsPanel>
+        </WorkspaceTabs>
       </div>
     </div>
   )

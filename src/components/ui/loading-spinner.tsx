@@ -15,10 +15,11 @@ export function LoadingSpinner({ className, size = "md" }: LoadingSpinnerProps) 
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[200px]">
+    <div role="status" aria-label="불러오는 중" className="flex items-center justify-center min-h-[200px]">
       <div
+        aria-hidden="true"
         className={cn(
-          "animate-spin rounded-full border-b-2 border-primary",
+          "animate-spin motion-reduce:animate-none rounded-full border-b-2 border-primary",
           sizeClasses[size],
           className
         )}

@@ -37,6 +37,7 @@ import {
 } from "@/features/management/settings-master-layout";
 import { cn } from "@/lib/utils";
 import { useAuth } from "@/providers/auth-provider";
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 
 import { saveTextbookSettingsDraft } from "./textbook-settings-draft-service";
 import {
@@ -81,6 +82,59 @@ const SUBJECT_LABELS: Record<string, string> = Object.fromEntries(
 );
 const EMPTY_OWNER_COUNTS: OwnerCounts = { publishers: 0, suppliers: 0 };
 const EMPTY_SUBJECT_COUNTS: SubSubjectCounts = { english: 0, math: 0, science: 0, other: 0 };
+
+type NavigationBaselines = {
+  publishers: Map<string, PublisherSettingRow>;
+  suppliers: Map<string, SupplierSettingRow>;
+  subSubjects: Map<string, TextbookSubSubjectSettingRow>;
+};
+const createNavigationBaselines = (): NavigationBaselines => ({ publishers: new Map(), suppliers: new Map(), subSubjects: new Map() });
+const normalizedValues = (values: string[]) => [...new Set(values.map(value => value.trim()).filter(Boolean))];
+const publisherFields = (row: PublisherSettingRow | null) => row && JSON.stringify([row.name.trim(), normalizedValues(row.subjects), normalizedValues(row.suppliers.map(supplier => supplier.id))]);
+const supplierFields = (row: SupplierSettingRow | null) => row && JSON.stringify([row.name.trim(), row.contact.trim(), row.memo.trim()]);
+const subSubjectFields = (row: TextbookSubSubjectSettingRow | null) => row && JSON.stringify([row.name.trim(), row.isVisible]);
+
+function hasUnsubmittedSettingsFields(state: TextbookSettingsDraftState, baseline: NavigationBaselines) {
+  if (state.pendingSave) return true;
+  const checked = new Set<string>();
+  // Preserve the chronological save journal. Only an already-read field baseline
+  // can establish that editing was reverted; structural/order changes stay guarded.
+  for (const operation of state.ownerOperations) {
+    const key = `${operation.type}:${operation.id}`;
+    if (checked.has(key)) continue;
+    checked.add(key);
+    if (operation.type === "publisher.patch") {
+      const row = baseline.publishers.get(operation.id);
+      if (!row || publisherFields(row) !== publisherFields(overlayPublisherSettingRow(row, state))) return true;
+    } else if (operation.type === "supplier.patch") {
+      const row = baseline.suppliers.get(operation.id);
+      if (!row || supplierFields(row) !== supplierFields(overlaySupplierSettingRow(row, state))) return true;
+    } else return true;
+  }
+  for (const operation of state.subSubjectOperations) {
+    if (operation.type !== "patch") return true;
+    if (checked.has(operation.id)) continue;
+    checked.add(operation.id);
+    const row = baseline.subSubjects.get(operation.id);
+    if (!row || subSubjectFields(row) !== subSubjectFields(overlaySubSubjectSettingRow(row, state))) return true;
+  }
+  return false;
+}
+
+function acknowledgeNavigationBaselines(baseline: NavigationBaselines, submitted: TextbookSettingsDraftState) {
+  for (const [id, row] of baseline.publishers) {
+    const next = overlayPublisherSettingRow(row, submitted);
+    if (next) baseline.publishers.set(id, next); else baseline.publishers.delete(id);
+  }
+  for (const [id, row] of baseline.suppliers) {
+    const next = overlaySupplierSettingRow(row, submitted);
+    if (next) baseline.suppliers.set(id, next); else baseline.suppliers.delete(id);
+  }
+  for (const [id, row] of baseline.subSubjects) {
+    const next = overlaySubSubjectSettingRow(row, submitted);
+    if (next) baseline.subSubjects.set(id, next); else baseline.subSubjects.delete(id);
+  }
+}
 
 function formatQuantity(value: number) {
   return new Intl.NumberFormat("ko-KR").format(Number.isFinite(value) ? value : 0);
@@ -342,6 +396,7 @@ function TextbookSupplierSettingsSession({
 }) {
   const [draftState, setDraftState] = useState<TextbookSettingsDraftState>(() => createTextbookSettingsDraftState(actorScope));
   const draftRef = useRef(draftState);
+  const navigationBaselinesRef = useRef(createNavigationBaselines());
   const [activeSection, setActiveSection] = useState<TextbookSettingsSection>("publishers");
   const [activeSubject, setActiveSubject] = useState<TextbookSettingsSubject>("english");
   const [query, setQuery] = useState("");
@@ -550,6 +605,7 @@ function TextbookSupplierSettingsSession({
   }, [activeResource.loading, pendingFocusId, publisherRows, subSubjectRows, supplierRows]);
 
   const isDirty = hasTextbookSettingsChanges(draftState);
+  const { confirmation } = useDraftNavigation({ dirty: canManage && isDirty && hasUnsubmittedSettingsFields(draftState, navigationBaselinesRef.current) });
   const saveUnknown = draftState.pendingSave?.status === "unknown";
   const ownerReady = Boolean(draftState.ownerBaseRevision);
   const subSubjectsReady = Boolean(draftState.subSubjectBaseRevision);
@@ -565,6 +621,15 @@ function TextbookSupplierSettingsSession({
 
   function appendOwner(operation: OwnerDraftOperation) {
     if (!canManage || activeBaselineReloading || !ownerReady) return;
+    if (!hasTextbookSettingsChanges(draftRef.current)) navigationBaselinesRef.current = createNavigationBaselines();
+    if (operation.type === "publisher.patch" && !navigationBaselinesRef.current.publishers.has(operation.id)) {
+      const row = publisherRows.find(row => row.id === operation.id);
+      if (row) navigationBaselinesRef.current.publishers.set(operation.id, row);
+    }
+    if (operation.type === "supplier.patch" && !navigationBaselinesRef.current.suppliers.has(operation.id)) {
+      const row = supplierRows.find(row => row.id === operation.id);
+      if (row) navigationBaselinesRef.current.suppliers.set(operation.id, row);
+    }
     setNotice(null);
     if (operation.type === "publisher.add") {
       setOwnerCounts((current) => ({ ...current, publishers: current.publishers + 1 }));
@@ -580,6 +645,11 @@ function TextbookSupplierSettingsSession({
 
   function appendSubSubject(operation: SubSubjectDraftOperation) {
     if (!canManage || subSubjectBaselineReloading || !subSubjectsReady) return;
+    if (!hasTextbookSettingsChanges(draftRef.current)) navigationBaselinesRef.current = createNavigationBaselines();
+    if (operation.type === "patch" && !navigationBaselinesRef.current.subSubjects.has(operation.id)) {
+      const row = subSubjectRows.find(row => row.id === operation.id);
+      if (row) navigationBaselinesRef.current.subSubjects.set(operation.id, row);
+    }
     setNotice(null);
     if (operation.type === "delete") {
       const row = subSubjectRows.find((candidate) => candidate.id === operation.id);
@@ -683,6 +753,11 @@ function TextbookSupplierSettingsSession({
       const result = await saveTextbookSettingsDraft(frozen.request);
       if (!aliveRef.current || draftRef.current.actorScope !== actorScope) return;
       const next = acknowledgeTextbookSettingsSave(draftRef.current, result);
+      acknowledgeNavigationBaselines(navigationBaselinesRef.current, {
+        ...frozen.state,
+        ownerOperations: frozen.request.draft.owners?.operations || [],
+        subSubjectOperations: frozen.request.draft.subSubjects?.operations || [],
+      });
       draftRef.current = next;
       setDraftState(next);
       setConflictPending(false);
@@ -716,6 +791,7 @@ function TextbookSupplierSettingsSession({
       setDraftState(next);
       setConflictPending(false);
       setConflictOpen(false);
+      navigationBaselinesRef.current = createNavigationBaselines();
       setPublisherBaselineReloading(true);
       setSupplierBaselineReloading(true);
       setSubSubjectBaselineReloading(true);
@@ -732,6 +808,7 @@ function TextbookSupplierSettingsSession({
 
   return (
     <SettingsWorkspaceShell>
+      {confirmation}
       <div className="flex flex-col gap-3">
         <Tabs value={activeSection} onValueChange={changeSection} className="min-w-0">
           <div className="sticky top-0 z-20 -mx-1 bg-background/95 px-1 pb-3 pt-1 backdrop-blur supports-[backdrop-filter]:bg-background/85">

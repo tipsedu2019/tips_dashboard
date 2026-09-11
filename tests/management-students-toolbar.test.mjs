@@ -308,9 +308,9 @@ test("student and class tables expose bulk edit and delete actions for selected 
   assert.doesNotMatch(tableSource, /일괄 종강/);
   assert.match(pageSource, /handleBulkUpdateRows/);
   assert.match(pageSource, /handleBulkDeleteRows/);
-  assert.match(pageSource, /Promise\.all\(rows\.map/);
+  assert.match(pageSource, /Promise\.allSettled\(rows\.map/);
   assert.match(pageSource, /buildStudentWithdrawalRequestPath/);
-  assert.match(pageSource, /router\.push\(buildStudentWithdrawalRequestPath\(row\.id\)\)/);
+  assert.match(pageSource, /requestManagementNavigation\(buildStudentWithdrawalRequestPath\(row\.id\)\)/);
   assert.match(pageSource, /onBulkUpdateRows: canMutateRows \? handleBulkUpdateRows : undefined/);
   assert.match(pageSource, /onBulkDeleteRows: canMutateRows && kind === "textbooks" \? handleBulkDeleteRows : undefined/);
 });
