@@ -29,7 +29,7 @@ async function mount(spec, initialRole = "staff") {
     const deferred = Promise.withResolvers();
     requests.push(deferred);
     const query = { then: deferred.promise.then.bind(deferred.promise) };
-    for (const method of ["select", "order", "or", "limit", "abortSignal", "retry"]) query[method] = () => query;
+    for (const method of ["select", "order", "or", "range", "limit", "abortSignal", "retry"]) query[method] = () => query;
     return query;
   } };
   const managementService = { [spec.upsert](payload) { const write = { ...Promise.withResolvers(), payload }; writes.push(write); return write.promise; }, [spec.remove](ids) { const removal = { ...Promise.withResolvers(), ids }; removals.push(removal); return removal.promise; } };

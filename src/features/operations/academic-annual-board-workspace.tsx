@@ -1583,7 +1583,8 @@ export function AcademicAnnualBoardWorkspace() {
         return false;
       }
 
-      const { error: deleteError } = await supabase.from("academic_events").delete().eq("id", persistedId);
+      const { error: deleteError } = await supabase.from("academic_events").delete().eq("id", persistedId)
+        .abortSignal(AbortSignal.timeout(8_000)).retry(false);
       if (deleteError) {
         throw deleteError;
       }

@@ -25,7 +25,7 @@ async function mount(t, spec, rows = [spec.row]) {
   const traversals = [], routes = [], writes = [], request = Promise.withResolvers();
   window.navigation = Object.assign(new window.EventTarget(), { traverseTo: key => { traversals.push(key); return { committed: Promise.resolve(), finished: Promise.resolve() }; } });
   const router = { push: href => routes.push(href) };
-  const supabase = { from() { const query = { then: request.promise.then.bind(request.promise) }; for (const method of ["select", "order", "or", "limit", "abortSignal", "retry"]) query[method] = () => query; return query; } };
+  const supabase = { from() { const query = { then: request.promise.then.bind(request.promise) }; for (const method of ["select", "order", "or", "range", "limit", "abortSignal", "retry"]) query[method] = () => query; return query; } };
   const managementService = {
     [spec.upsert || "unused"](payload) { const write = { ...Promise.withResolvers(), payload }; writes.push(write); return write.promise; },
     listTeacherAccountSettingsData: async () => spec.kind === "teacher" ? request.promise.then(data => ({ teachers: data.data, profiles: [], auditLogs: [], isAccountSchemaReady: true })) : { teachers: [] },

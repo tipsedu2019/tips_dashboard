@@ -122,6 +122,9 @@ function reorderWithSequentialSort(rows: SchoolRecord[], fromIndex: number, toIn
 export function SchoolMasterWorkspace() {
   const [rows, setRows] = useState<SchoolRecord[]>([]);
   const [loading, setLoading] = useState(true);
+  const [hasLoaded, setHasLoaded] = useState(false);
+  const hasLoadedRef = useRef(false);
+  const loadAbortRef = useRef<AbortController | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -133,6 +136,7 @@ export function SchoolMasterWorkspace() {
   const loadingRef = useRef(true);
   const loadRequestRef = useRef(0);
   const busy = saving || loading;
+  const editBlocked = busy || !hasLoaded;
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
   const { confirmation } = useDraftNavigation({ dirty: isDirty });
@@ -145,6 +149,9 @@ export function SchoolMasterWorkspace() {
   );
 
   const loadSchools = useCallback(async () => {
+    loadAbortRef.current?.abort();
+    const controller = new AbortController();
+    loadAbortRef.current = controller;
     const request = ++loadRequestRef.current;
     loadingRef.current = true;
     if (!supabase) {
@@ -157,16 +164,34 @@ export function SchoolMasterWorkspace() {
     setLoading(true);
 
     try {
-      const { data, error: queryError } = await supabase
-        .from("academic_schools")
-        .select("id, name, category, color, sort_order")
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true });
+      // This editor saves and reorders the whole catalog. Publish no partial page.
+      const data: Record<string, unknown>[] = [];
+      const seenIds = new Set<string>();
+      for (let offset = 0; ; offset += 30) {
+        const { data: page, error: queryError } = await supabase
+          .from("academic_schools")
+          .select("id, name, category, color, sort_order")
+          .range(offset, offset + 29)
+          .limit(30)
+          .order("sort_order", { ascending: true })
+          .order("name", { ascending: true })
+          .order("id", { ascending: true })
+          .abortSignal(AbortSignal.any([AbortSignal.timeout(8_000), controller.signal]))
+          .retry(false);
 
-      if (request !== loadRequestRef.current) return false;
-      if (queryError) {
-        throw queryError;
+        if (request !== loadRequestRef.current || controller.signal.aborted) return false;
+        if (queryError) throw queryError;
+        if (!Array.isArray(page) || page.length > 30) throw new Error("settings_page_invalid");
+        for (const row of page) {
+          const id = String(row.id ?? "");
+          if (!id || seenIds.has(id)) throw new Error("settings_page_changed");
+          seenIds.add(id);
+          data.push(row as Record<string, unknown>);
+        }
+        if (page.length < 30) break;
       }
+      hasLoadedRef.current = true;
+      setHasLoaded(true);
 
       setLoadError(null);
 
@@ -187,7 +212,7 @@ export function SchoolMasterWorkspace() {
 
   useEffect(() => {
     void loadSchools();
-    return () => { loadRequestRef.current += 1; };
+    return () => { loadRequestRef.current += 1; loadAbortRef.current?.abort(); };
   }, [loadSchools]);
 
   const retryLoad = async () => {
@@ -261,7 +286,7 @@ export function SchoolMasterWorkspace() {
   }, [categoryFilter, query, rows]);
 
   const handleFieldChange = (id: string, field: keyof SchoolRecord, value: string) => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     setRows((current) => current.map((row) => (row.id === id ? { ...row, [field]: value } : row)));
     setIsDirty(true);
   };
@@ -271,21 +296,21 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleAdd = () => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     setRows((current) => [createEmptySchool(nextSortOrder, categoryFilter), ...current]);
     setNameSortDirection("none");
     setIsDirty(true);
   };
 
   const handleResetChanges = () => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     setQuery("");
     setNameSortDirection("none");
     void loadSchools();
   };
 
   const handleSaveAll = async () => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     const nextRows = rows.map((row, index) => ({
       ...row,
       name: normalizeSchoolName(row.name),
@@ -337,7 +362,7 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleDelete = (row: SchoolRecord) => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     if (!row.isNew) {
       setDeletedIds((current) => (current.includes(row.id) ? current : [...current, row.id]));
     }
@@ -348,7 +373,7 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleMoveRow = (id: string, direction: "up" | "down") => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     const currentIndex = rows.findIndex((row) => row.id === id);
     if (currentIndex < 0) {
       return;
@@ -366,7 +391,7 @@ export function SchoolMasterWorkspace() {
   };
 
   const handleNameSort = () => {
-    if (savingRef.current || loadingRef.current) return;
+    if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
     const nextDirection: NameSortDirection = nameSortDirection === "asc" ? "desc" : "asc";
     const directionValue = nextDirection === "asc" ? 1 : -1;
     setRows((current) =>
@@ -439,12 +464,12 @@ export function SchoolMasterWorkspace() {
               </div>
             ) : null}
             {isDirty ? (
-              <Button type="button" variant="outline" size="sm" className="h-9" onClick={handleResetChanges} disabled={busy}>
+              <Button type="button" variant="outline" size="sm" className="h-9" onClick={handleResetChanges} disabled={editBlocked}>
                 <RotateCcw className="mr-2 size-4" />
                 되돌리기
               </Button>
             ) : null}
-            <Button type="button" size="sm" className="h-9" onClick={handleAdd} disabled={busy} ref={feedbackFocusRef}>
+            <Button type="button" size="sm" className="h-9" onClick={handleAdd} disabled={editBlocked} ref={feedbackFocusRef}>
               <Plus className="mr-2 size-4" />
               학교 추가
             </Button>
@@ -453,7 +478,7 @@ export function SchoolMasterWorkspace() {
               size="sm"
               className="h-9"
               onClick={() => void handleSaveAll()}
-              disabled={!isDirty || saving || loading || invalidRows.size > 0}
+              disabled={!hasLoaded || !isDirty || saving || loading || invalidRows.size > 0}
             >
               {saving ? "저장 중" : "변경 저장"}
             </Button>
@@ -520,7 +545,7 @@ export function SchoolMasterWorkspace() {
                         size="icon"
                         className="size-8"
                         onClick={() => handleMoveRow(row.id, "up")}
-                        disabled={busy || currentIndex <= 0}
+                        disabled={editBlocked || currentIndex <= 0}
                         aria-label="학교 순서 위로 이동"
                       >
                         <ArrowUp className="size-4" />
@@ -531,7 +556,7 @@ export function SchoolMasterWorkspace() {
                         size="icon"
                         className="size-8"
                         onClick={() => handleMoveRow(row.id, "down")}
-                        disabled={busy || currentIndex === rows.length - 1}
+                        disabled={editBlocked || currentIndex === rows.length - 1}
                         aria-label="학교 순서 아래로 이동"
                       >
                         <ArrowDown className="size-4" />
@@ -542,7 +567,7 @@ export function SchoolMasterWorkspace() {
                         size="icon"
                         className="size-8"
                         onClick={() => handleDelete(row)}
-                        disabled={busy}
+                        disabled={editBlocked}
                         aria-label="학교 삭제"
                       >
                         <Trash2 className="size-4" />
@@ -552,7 +577,7 @@ export function SchoolMasterWorkspace() {
 
                   <div className="grid gap-2">
                     <Select
-                      disabled={busy}
+                      disabled={editBlocked}
                       value={normalizeSchoolCategory(row.category)}
                       onValueChange={(value) =>
                         handleCategoryChange(row.id, value as Exclude<(typeof CATEGORY_FILTERS)[number], "전체">)
@@ -571,7 +596,7 @@ export function SchoolMasterWorkspace() {
                     </Select>
                     <Input
                       name="school-name"
-                      disabled={busy}
+                      disabled={editBlocked}
                       className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
                       value={row.name}
                       onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -602,7 +627,7 @@ export function SchoolMasterWorkspace() {
                     type="button"
                     className="flex w-full items-center gap-1 text-left font-semibold hover:text-foreground"
                     onClick={handleNameSort}
-                    disabled={busy}
+                    disabled={editBlocked}
                     aria-label="학교명으로 정렬"
                   >
                     학교명
@@ -644,7 +669,7 @@ export function SchoolMasterWorkspace() {
                     {isColumnVisible("category") ? (
                       <TableCell className={settingsTableCellClass}>
                         <Select
-                          disabled={busy}
+                          disabled={editBlocked}
                           value={normalizeSchoolCategory(row.category)}
                           onValueChange={(value) =>
                             handleCategoryChange(row.id, value as Exclude<(typeof CATEGORY_FILTERS)[number], "전체">)
@@ -668,7 +693,7 @@ export function SchoolMasterWorkspace() {
                         <div className="flex items-center gap-2">
                           <Input
                             name="school-name"
-                            disabled={busy}
+                            disabled={editBlocked}
                             className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
                             value={row.name}
                             onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
@@ -698,7 +723,7 @@ export function SchoolMasterWorkspace() {
                             size="icon"
                             className="size-8"
                             onClick={() => handleMoveRow(row.id, "up")}
-                            disabled={busy || currentIndex <= 0}
+                            disabled={editBlocked || currentIndex <= 0}
                             aria-label="학교 순서 위로 이동"
                           >
                             <ArrowUp className="size-4" />
@@ -709,7 +734,7 @@ export function SchoolMasterWorkspace() {
                             size="icon"
                             className="size-8"
                             onClick={() => handleMoveRow(row.id, "down")}
-                            disabled={busy || currentIndex === rows.length - 1}
+                            disabled={editBlocked || currentIndex === rows.length - 1}
                             aria-label="학교 순서 아래로 이동"
                           >
                             <ArrowDown className="size-4" />
@@ -720,7 +745,7 @@ export function SchoolMasterWorkspace() {
                             size="icon"
                             className="size-8"
                             onClick={() => handleDelete(row)}
-                            disabled={busy}
+                            disabled={editBlocked}
                             aria-label="학교 삭제"
                           >
                             <Trash2 className="size-4" />

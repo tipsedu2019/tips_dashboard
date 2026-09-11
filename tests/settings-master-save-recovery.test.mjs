@@ -25,10 +25,10 @@ async function mount(spec) {
   const requests = [], writes = [];
   const supabase = { from(table) {
     assert.equal(table, spec.table);
-    const deferred = Promise.withResolvers();
+    const deferred = { ...Promise.withResolvers(), calls: [] };
     requests.push(deferred);
     const query = { then: deferred.promise.then.bind(deferred.promise) };
-    for (const method of ["select", "order", "or", "limit", "abortSignal", "retry"]) query[method] = () => query;
+    for (const method of ["select", "order", "or", "range", "limit", "abortSignal", "retry"]) query[method] = (...args) => { deferred.calls.push([method, ...args]); return query; };
     return query;
   } };
   const managementService = { [spec.upsert](payload) { const write = { ...Promise.withResolvers(), payload }; writes.push(write); return write.promise; }, [spec.remove]: async () => {} };
@@ -63,6 +63,87 @@ async function mount(spec) {
   };
   const edit = (value) => flush(() => changeName(value));
   return { requests, writes, flush, button, name, edit, changeName, async close() { await act(async () => root.unmount()); dom.window.close(); } };
+}
+
+for (const spec of cases.filter(({ kind }) => ["school", "classroom"].includes(kind))) {
+  const page = (from, size) => Array.from({ length: size }, (_, index) => ({ ...spec.row, id: `${spec.kind}-${from + index}`, name: `이름 ${from + index}`, sort_order: from + index }));
+
+  test(`${spec.kind}: all bounded pages finish before editing and saving the complete catalog`, async () => {
+    const ui = await mount(spec);
+    try {
+      assert.deepEqual(ui.requests[0].calls.filter(([method]) => method === "range" || method === "limit"), [["range", 0, 29], ["limit", 30]]);
+      assert.deepEqual(ui.requests[0].calls.filter(([method]) => method === "order").map(([, column]) => column), ["sort_order", "name", "id"]);
+      assert.equal(ui.requests[0].calls.find(([method]) => method === "retry")?.[1], false);
+      assert.ok(ui.requests[0].calls.find(([method]) => method === "abortSignal")?.[1] instanceof AbortSignal);
+      await ui.flush(() => ui.requests[0].resolve({ data: page(0, 30), error: null }));
+      assert.equal(ui.requests.length, 2);
+      assert.equal(ui.button(spec.add).disabled, true);
+      assert.equal(ui.name(), null, "a first page must not become an editable full catalog");
+      await ui.flush(() => ui.requests[1].resolve({ data: page(30, 30), error: null }));
+      assert.deepEqual(ui.requests[2].calls.find(([method]) => method === "range"), ["range", 60, 89]);
+      await ui.flush(() => ui.requests[2].resolve({ data: page(60, 1), error: null }));
+      assert.equal(ui.button(spec.add).disabled, false);
+      await ui.edit("전체 목록 저장");
+      await ui.flush(() => ui.button("변경 저장").click());
+      assert.equal(ui.writes.length, 1);
+      assert.equal(ui.writes[0].payload.length, 61);
+      assert.equal(ui.writes[0].payload.at(-1).id, `${spec.kind}-60`);
+    } finally { await ui.close(); }
+  });
+
+  test(`${spec.kind}: an intermediate page failure never exposes a partial catalog and retry starts at zero`, async () => {
+    const ui = await mount(spec);
+    try {
+      await ui.flush(() => ui.requests[0].resolve({ data: page(0, 30), error: null }));
+      assert.equal(ui.requests.length, 2);
+      await ui.flush(() => ui.requests[1].resolve({ data: null, error: new Error("page unavailable") }));
+      assert.equal(ui.name(), null);
+      assert.equal(ui.button(spec.add).disabled, true);
+      assert.equal(ui.button("변경 저장").disabled, true);
+      await ui.flush(() => { ui.button(spec.add).click(); ui.button("다시 불러오기").click(); });
+      assert.equal(ui.writes.length, 0);
+      assert.deepEqual(ui.requests[2].calls.find(([method]) => method === "range"), ["range", 0, 29]);
+      await ui.flush(() => ui.requests[2].resolve({ data: page(0, 1), error: null }));
+      assert.equal(ui.button(spec.add).disabled, false);
+      assert.equal(ui.name().value, "이름 0");
+    } finally { await ui.close(); }
+  });
+
+  test(`${spec.kind}: unmount aborts a pending page and prevents another request`, async () => {
+    const ui = await mount(spec);
+    const signal = ui.requests[0].calls.find(([method]) => method === "abortSignal")?.[1];
+    await ui.close();
+    assert.ok(signal?.aborted, "the pending read must be cancelled on unmount");
+    await ui.flush(() => ui.requests[0].resolve({ data: page(0, 30), error: null }));
+    assert.equal(ui.requests.length, 1);
+  });
+
+  test(`${spec.kind}: a full last page requires an empty continuation and catalogs over 300 are not capped`, async () => {
+    const ui = await mount(spec);
+    try {
+      for (let index = 0; index < 11; index += 1) {
+        assert.deepEqual(ui.requests[index].calls.find(([method]) => method === "range"), ["range", index * 30, index * 30 + 29]);
+        await ui.flush(() => ui.requests[index].resolve({ data: page(index * 30, 30), error: null }));
+        assert.equal(ui.button(spec.add).disabled, true);
+      }
+      assert.equal(ui.requests.length, 12);
+      await ui.flush(() => ui.requests[11].resolve({ data: [], error: null }));
+      assert.equal(ui.button(spec.add).disabled, false);
+      assert.ok([...document.querySelectorAll(`input[name="${spec.field}"]`)].some(input => input.value === "이름 329"));
+    } finally { await ui.close(); }
+  });
+
+  test(`${spec.kind}: a repeated page is a recoverable error, not an infinite read or partial save`, async () => {
+    const ui = await mount(spec);
+    try {
+      await ui.flush(() => ui.requests[0].resolve({ data: page(0, 30), error: null }));
+      await ui.flush(() => ui.requests[1].resolve({ data: page(0, 30), error: null }));
+      assert.equal(ui.requests.length, 2);
+      assert.equal(ui.name(), null);
+      assert.equal(ui.button(spec.add).disabled, true);
+      assert.equal(ui.button("다시 불러오기").disabled, false);
+    } finally { await ui.close(); }
+  });
 }
 
 test("teacher: account refresh and window focus preserve an unsaved draft", async () => {

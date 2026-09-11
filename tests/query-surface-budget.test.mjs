@@ -4,12 +4,80 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
+import { createClient } from "@supabase/supabase-js"
 
 import {
   inspectQuerySurfaceSource,
   QUERY_SURFACE_DEBT_MANIFEST,
   verifyQuerySurfaceBudget,
 } from "../src/lib/query-surface-budget.js"
+
+function inspectReleaseQuery(expression) {
+  return inspectQuerySurfaceSource({
+    surface: "operations",
+    file: "src/features/operations/academic-annual-board-workspace.tsx",
+    source: `async function execute(client, id, offset, options, size) { return ${expression} }`,
+  })
+}
+
+test("an exact-ID non-returning delete uses mutation request controls, not list pagination", () => {
+  assert.deepEqual(inspectReleaseQuery(`client.from("academic_events").delete().eq("id", id).abortSignal(AbortSignal.timeout(8_000)).retry(false)`), [])
+  const uncontrolled = inspectReleaseQuery(`client.from("academic_events").delete().eq("id", id)`)
+  assert.deepEqual(uncontrolled.map((violation) => violation.reason).sort(), ["list_abort_signal_missing", "list_retry_false_missing"])
+})
+
+test("delete recognition does not exempt broader writes, returning reads, or ordinary ID-filtered lists", () => {
+  for (const expression of [
+    `client.from("academic_events").delete()`,
+    `client.from("academic_events").delete().eq("name", id)`,
+    `client.from("academic_events").delete().in("id", [id])`,
+    `client.from("academic_events").delete().eq("id", id).select("*")`,
+    `client.from("academic_events").select("id").eq("id", id)`,
+  ]) {
+    assert.ok(inspectReleaseQuery(`${expression}.abortSignal(AbortSignal.timeout(8_000)).retry(false)`).length > 0, expression)
+  }
+})
+
+test("a final explicit root limit bounds a dynamic range without accepting unsafe overrides", () => {
+  const tail = `.order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)`
+  const prefix = `client.from("academic_events").select("id")`
+  assert.deepEqual(inspectReleaseQuery(`${prefix}.range(offset, offset + 29).limit(30)${tail}`), [])
+  for (const chain of [
+    `.limit(30).range(offset, offset + 29)`,
+    `.range(offset, offset + 29).limit(31)`,
+    `.range(offset, offset + 29).limit(size)`,
+    `.range(offset, offset + 29).limit(30, { foreignTable: "children" })`,
+    `.range(offset, offset + 29).limit(30, options)`,
+    `.range(offset, offset + 29).limit(30).range(0, 99)`,
+    `.range(offset, offset + 29).limit(30).limit(500)`,
+    `.range(offset, offset + 29).limit(30).limit(500, { referencedTable: undefined })`,
+    `.range(offset, offset + 29).limit(30).limit(500, options)`,
+  ]) assert.ok(inspectReleaseQuery(`${prefix}${chain}${tail}`).length > 0, chain)
+  const conditional = inspectQuerySurfaceSource({
+    surface: "operations", file: "src/features/operations/academic-annual-board-workspace.tsx",
+    source: `async function execute(client, offset, cap) {
+      const query = client.from("academic_events").select("id").range(offset, offset + 29)
+      if (cap) query.limit(30)
+      return query.order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+    }`,
+  })
+  assert.ok(conditional.length > 0)
+})
+
+test("installed PostgREST transport confirms that the last root range or limit controls the request cap", async () => {
+  const requests = []
+  const client = createClient("https://bounded-query.example.invalid", "fixture-anon", {
+    auth: { persistSession: false, autoRefreshToken: false, detectSessionInUrl: false },
+    global: { fetch: async (input) => {
+      requests.push(new URL(String(input)))
+      return new Response("[]", { status: 200, headers: { "Content-Type": "application/json" } })
+    } },
+  })
+  await client.from("academic_events").select("id").range(30, 1000).limit(30)
+  await client.from("academic_events").select("id").limit(30).range(30, 1000)
+  await client.from("academic_events").select("id").range(30, 1000).limit(30, { referencedTable: "children" })
+  assert.deepEqual(requests.map((url) => [url.searchParams.get("offset"), url.searchParams.get("limit")]), [["30", "30"], ["30", "971"], ["30", "971"]])
+})
 
 async function createFixtureRepository(files) {
   const root = await mkdtemp(join(tmpdir(), "query-surface-budget-"))
