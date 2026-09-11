@@ -235,7 +235,7 @@ test("class detail route parameters do not change the list filter request scope"
   const expected = {
     kind: "classes",
     search: "",
-    periodId: "period-1",
+    periodId: null,
     status: "수강",
     subject: null,
     grade: null,

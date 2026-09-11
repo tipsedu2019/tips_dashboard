@@ -1,12 +1,13 @@
 import assert from "node:assert/strict"
 import test from "node:test"
+import { openFilter, closeFilter } from "./helpers/textbook-filter-actions.mjs"
 
 import {
   parseTextbookNavigation,
   serializeTextbookNavigation,
 } from "../src/features/textbooks/textbook-navigation.ts"
 import {
-  button, closingDetailEnvelope, closingMovementRow, closingRow, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistoryRow, saleHistorySummary, saleRow, saleSummary, setup,
+  button, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistoryRow, saleHistorySummary, saleRow, saleSummary, setup,
 } from "./helpers/textbook-numbered-harness.mjs"
 
 const stockCountResult = (request) => ({
@@ -19,14 +20,17 @@ const stockCountResult = (request) => ({
 const preparedRowIds = (surface) => [...document.querySelectorAll(`[data-prepared-surface="${surface}"]`)]
   .map((node) => node.getAttribute("data-prepared-row-id"))
 
+const renderedColumnCount = (row) => [...row.children]
+  .reduce((count, cell) => count + Number(cell.getAttribute("colspan") || 1), 0)
+
 const masterFilters = {
   search: "grammar",
   subject: "english",
   schoolLevel: "middle",
   gradeLevel: "m2",
   subSubject: "문법",
-  quality: "attention",
-  inventory: "shortage",
+  quality: "all",
+  inventory: "all",
 }
 
 const completePurchaseHandoffWire = (count = 12) => {
@@ -76,6 +80,41 @@ test("textbook navigation restores a valid direct primary page and preserves unr
   assert.deepEqual(JSON.parse(serialized.get("textbookFilters")), masterFilters)
 })
 
+test("catalog bookmark migration removes every retired filter without losing independent navigation", () => {
+  for (const tab of ['master', 'inventory']) {
+    for (const quality of ['all', 'attention', 'duplicate', 'missingCode', 'missingPublisher', 'missingCategory', 'missingPrice', 'subjectMismatch', 'inactive']) {
+      for (const inventory of ['all', 'shortage', 'surplus', 'unused', 'negative']) {
+        const filters = { ...masterFilters, quality, inventory }
+        const params = new URLSearchParams({ textbookTab: tab, textbookPage: '7', textbookPageSize: '15', textbookFilters: JSON.stringify(filters), textbookHistoryPage: '3', textbookMovementPage: '4', textbookDetailKind: 'master', textbookDetail: id(1), unrelated: 'keep' })
+        const parsed = parseTextbookNavigation(params)
+        const expectedQuality = tab === 'master' && quality === 'inactive' ? 'inactive' : 'all'
+        const changed = expectedQuality !== quality || inventory !== 'all'
+        assert.equal(parsed.primary.page, changed ? 1 : 7)
+        assert.equal(parsed.primary.pageSize, 15)
+        assert.deepEqual(parsed.primary.filters, { ...masterFilters, quality: expectedQuality })
+        assert.equal(parsed.history.page, 3)
+        assert.equal(parsed.movements, undefined)
+        assert.deepEqual(parsed.detail, { kind: 'master', id: id(1) })
+        const serialized = serializeTextbookNavigation(params, { ...parsed, primary: { page: 7, pageSize: 15, filters } })
+        assert.equal(serialized.get('unrelated'), 'keep')
+        assert.deepEqual(parseTextbookNavigation(serialized), parsed)
+      }
+    }
+  }
+})
+
+test("inventory URL commits keep catalog filters while omitting local count context", () => {
+  const state = parseTextbookNavigation(new URLSearchParams({ textbookTab: 'inventory' }))
+  state.primary = { page: 3, pageSize: 20, filters: { ...masterFilters, locationId: id(900), audit: 'done' } }
+  const url = serializeTextbookNavigation(new URLSearchParams(), state)
+  const restored = parseTextbookNavigation(url)
+  assert.equal(restored.primary.page, 3)
+  assert.equal(restored.primary.pageSize, 20)
+  assert.deepEqual(restored.primary.filters, masterFilters)
+  assert.equal(JSON.parse(url.get('textbookFilters')).locationId, undefined)
+  assert.equal(JSON.parse(url.get('textbookFilters')).audit, undefined)
+})
+
 test("textbook navigation rejects invalid primary, secondary and detail state without leaking private UI state", () => {
   const params = new URLSearchParams({
     textbookTab: "unknown",
@@ -112,7 +151,7 @@ test("textbook navigation rejects invalid primary, secondary and detail state wi
     pageSize: 10,
     filters: { search: "", year: "all", month: "all", classId: "all" },
   })
-  assert.deepEqual(parsed.movements, { page: 1, pageSize: 20, search: "확인" })
+  assert.equal(parsed.movements, undefined)
   assert.equal(parsed.detail, null)
 
   const serialized = serializeTextbookNavigation(params, parsed)
@@ -138,10 +177,10 @@ test("textbook navigation validates fixed filter values and normalizes only boun
     textbookTab: "master",
     textbookPage: "2",
     textbookPageSize: "15",
-    textbookFilters: JSON.stringify({ search: "", subject: "english", schoolLevel: "middle", gradeLevel: "m2", subSubject: "  문법  ", quality: "attention", inventory: "shortage" }),
+    textbookFilters: JSON.stringify({ search: "", subject: "english", schoolLevel: "middle", gradeLevel: "m2", subSubject: "  문법  ", quality: "all", inventory: "all" }),
   })
   assert.deepEqual(parseTextbookNavigation(valid).primary.filters, {
-    search: "", subject: "english", schoolLevel: "middle", gradeLevel: "m2", subSubject: "문법", quality: "attention", inventory: "shortage",
+    search: "", subject: "english", schoolLevel: "middle", gradeLevel: "m2", subSubject: "문법", quality: "all", inventory: "all",
   })
 })
 
@@ -176,7 +215,8 @@ test("direct and external URL restoration use the requested size on the first ac
 })
 
 test("mounted master renderer keeps strict server order on desktop and mobile and renders the 11-20 pager block", async (t) => {
-  const h = await setup(t, { search: "?textbookTab=master&textbookPage=10&textbookPageSize=10" })
+  const retiredPreferences = { classification: false, amount: false }
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=10&textbookPageSize=10", localStorage: { "textbook-master-columns-v1": retiredPreferences } })
   const page = h.requests.find((request) => request.name === "list_textbook_master_page_v1" && request.args.p_page === 10)
   const summary = h.requests.find((request) => request.name === "get_textbook_master_summary_v1")
   assert.ok(page)
@@ -184,7 +224,7 @@ test("mounted master renderer keeps strict server order on desktop and mobile an
   await h.resolve(page, { rows: Array.from({ length: 10 }, (_, index) => masterRow(100 + index)), page: 10, pageSize: 10, totalCount: 200 })
   await h.resolve(summary, masterSummary(200))
   await h.assertNoLegacyReads()
-  await h.act(() => document.querySelector('[aria-label="교재 목록 페이지 탐색"] [aria-label="다음 페이지"]').click())
+  await h.act(() => document.querySelector('[aria-label="교재 재고 페이지 탐색"] [aria-label="다음 페이지"]').click())
   const nextPage = h.requests.find((request) => request.name === "list_textbook_master_page_v1" && request.args.p_page === 11)
   assert.ok(nextPage)
   const rows = Array.from({ length: 10 }, (_, index) => masterRow(110 + index))
@@ -200,6 +240,12 @@ test("mounted master renderer keeps strict server order on desktop and mobile an
   assert.deepEqual(desktopIds, expectedIds)
   assert.deepEqual(preparedRowIds("master-mobile"), expectedIds)
   assert.deepEqual(preparedRowIds("master-desktop"), expectedIds)
+  const table = document.querySelector('[data-prepared-surface="master-desktop"]').closest("table")
+  assert.deepEqual([...table.querySelectorAll("thead th")].map((cell) => cell.textContent.trim()), ["", "교재", "분류", "합계", "판매가", "관리"])
+  assert.equal(renderedColumnCount(table.querySelector('[data-prepared-surface="master-desktop"]')), 6)
+  assert.equal(renderedColumnCount(table.querySelector("tbody tr:last-child")), 6)
+  assert.deepEqual(JSON.parse(window.localStorage.getItem("textbook-master-columns-v1")), retiredPreferences)
+  assert.equal(button("컬럼 구성"), undefined)
   assert.deepEqual(
     [...document.querySelectorAll('[data-slot="pagination-number-group"] button')].map((node) => Number(node.textContent)),
     [11, 12, 13, 14, 15, 16, 17, 18, 19, 20],
@@ -216,7 +262,7 @@ test("master selection is pruned when the accepted page changes", async (t) => {
   const firstCard = document.querySelector(`[data-testid="textbook-master-mobile-card-${id(1)}"]`)
   await h.act(() => firstCard.querySelector('[aria-label$="선택"]').click())
   assert.ok(document.querySelector('[aria-label="선택한 교재 일괄 작업"]'))
-  await h.act(() => document.querySelector('[aria-label="교재 목록 페이지 탐색"] [aria-label="2 페이지"]').click())
+  await h.act(() => document.querySelector('[aria-label="교재 재고 페이지 탐색"] [aria-label="2 페이지"]').click())
   const second = h.requests.find((request) => request.name === "list_textbook_master_page_v1" && request.args.p_page === 2)
   assert.ok(second, JSON.stringify(h.requests.filter((request) => request.name).map((request) => [request.name, request.args?.p_page])))
   await h.resolve(second, { rows: [masterRow(11)], page: 2, pageSize: 10, totalCount: 11 })
@@ -237,7 +283,7 @@ test("master bulk edit preserves a newer selection and patch after its first wri
   const publisher = document.querySelector('[aria-label="일괄 출판사"]')
   const publisherProps = publisher[Object.keys(publisher).find((key) => key.startsWith("__reactProps$"))]
   await h.act(() => publisherProps.onChange({ target: { value: "기존 작업 출판사" } }))
-  await h.act(() => button("적용").click())
+  await h.act(() => button("선택 교재 변경 저장").click())
   const writer = h.requests.find((request) => request.table === "textbooks")
   assert.ok(writer)
   assert.equal(writer.steps.find((step) => step.method === "upsert").args[0].publisher, "기존 작업 출판사")
@@ -269,7 +315,7 @@ test("master bulk edit preserves a same-book deselect and reselect intent after 
   const publisher = document.querySelector('[aria-label="일괄 출판사"]')
   const publisherProps = publisher[Object.keys(publisher).find((key) => key.startsWith("__reactProps$"))]
   await h.act(() => publisherProps.onChange({ target: { value: "동일 작업 출판사" } }))
-  await h.act(() => button("적용").click())
+  await h.act(() => button("선택 교재 변경 저장").click())
   const writer = h.requests.find((request) => request.table === "textbooks")
   assert.ok(writer)
   assert.equal(writer.steps.find((step) => step.method === "upsert").args[0].publisher, "동일 작업 출판사")
@@ -283,6 +329,7 @@ test("master bulk edit preserves a same-book deselect and reselect intent after 
   assert.equal(h.requests.filter((request) => request.table === "textbooks").length, 1, "the started writer is neither cancelled nor retried")
   assert.equal(h.requests.filter((request) => request.name).length, rpcCountAtReselection, "the obsolete completion dispatches no stale invalidation")
   assert.equal(document.querySelector('[aria-label="선택한 교재 일괄 작업"]')?.textContent.includes("1개 선택"), true, "the reselected A remains selected")
+  await h.act(() => button("속성 변경").click())
   assert.equal(document.querySelector('[aria-label="일괄 출판사"]')?.value, "동일 작업 출판사", "the unchanged patch remains owned by the new intent")
   assert.equal(document.body.textContent.includes("개 교재를 수정했습니다."), false, "the obsolete completion publishes no stale success")
 })
@@ -317,9 +364,50 @@ test("a strict page API failure stays visible and retryable without fabricated t
   await h.reject(page, { code: "PGRST202", message: "missing" })
   await h.assertNoLegacyReads()
   assert.ok(document.querySelector('[role="alert"]'))
-  assert.equal(document.querySelector('[aria-label="교재 목록 페이지 탐색"]').parentElement.parentElement.textContent.includes("건수 확인 중"), true)
+  assert.equal(document.querySelector('[aria-label="교재 재고 페이지 탐색"]').parentElement.parentElement.textContent.includes("건수 확인 중"), true)
+  const list = document.querySelector('div[aria-label="교재 재고"]')
+  assert.equal(list.textContent.includes("교재 재고를 불러오지 못했습니다."), true)
+  assert.equal(list.textContent.includes("교재가 없습니다"), false)
+  assert.equal(list.textContent.includes("신규 등록"), false)
   await h.act(() => button("다시 시도").click())
   assert.equal(h.requests.filter((request) => request.name === "list_textbook_master_page_v1").length, 2)
+})
+
+test("primary request read failure stays in its toolbar and retry restores controls without an empty-state lie", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=requests&textbookPage=1&textbookPageSize=10" })
+  const page = h.requests.find((request) => request.name === "list_textbook_purchase_page_v1")
+  const summary = h.requests.find((request) => request.name === "get_textbook_purchase_summary_v1")
+  await h.resolve(summary, purchaseSummary("request"))
+  await h.reject(page, { message: "__request_primary_read_failed__" })
+
+  const workspace = document.querySelector('[data-slot="textbook-workspace"]')
+  const tablist = workspace.querySelector('[role="tablist"]')
+  const requestList = document.querySelector('[aria-label="교재 요청 목록"]')
+  const toolbar = requestList.querySelector('[data-slot="data-table-toolbar"]')
+  const alert = toolbar.querySelector('[role="alert"]')
+  assert.ok(alert, "the primary read error replaces toolbar actions")
+  assert.equal(Boolean(alert.compareDocumentPosition(tablist) & Node.DOCUMENT_POSITION_FOLLOWING), false, "no read alert is inserted before the tabs")
+  assert.ok(alert.textContent.includes("목록 조회 실패"))
+  assert.ok(alert.textContent.includes("처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요."))
+  assert.ok(toolbar.querySelector('[aria-label="교재 목록 다시 시도"]'))
+  assert.ok(requestList.textContent.includes("교재 목록을 불러오지 못했습니다"))
+  assert.equal(requestList.textContent.includes("대기 중인 요청이 없습니다"), false, "a failed read is not announced as a valid zero-result page")
+
+  const search = document.querySelector('[aria-label="요청 검색"][type="search"]')
+  await h.act(() => toolbar.querySelector('[aria-label="교재 목록 다시 시도"]').click())
+  assert.equal(document.activeElement, search, "retry keeps focus on the stable list search while feedback disappears")
+  const retry = h.requests.filter((request) => request.name === "list_textbook_purchase_page_v1").at(-1)
+  assert.notEqual(retry, page)
+  assert.equal(h.requests.filter((request) => request.name === "list_textbook_purchase_page_v1").length, 2)
+  await h.resolve(retry, { rows: [purchaseRow("request")], page: 1, pageSize: 10, totalCount: 1 })
+
+  assert.equal(toolbar.querySelector('[role="alert"]'), null)
+  assert.equal(document.querySelector('[aria-label="요청 검색"][type="search"]'), search)
+  assert.equal(document.activeElement, search)
+  assert.ok(document.querySelector('[data-prepared-surface="requests-desktop"]'))
+  assert.ok(document.querySelector('[aria-label="교재 요청 추가"]'))
+  assert.equal(requestList.textContent.includes("교재 목록을 불러오지 못했습니다"), false)
+  await h.assertNoLegacyReads()
 })
 
 test("a summary failure stays explicit and retryable without rendering current-page totals as authoritative", async (t) => {
@@ -327,11 +415,12 @@ test("a summary failure stays explicit and retryable without rendering current-p
   await h.resolve(h.requests.find((request) => request.name === "list_textbook_master_page_v1"), {
     rows: [masterRow(91, { totalQuantity: 7 })], page: 1, pageSize: 10, totalCount: 1,
   })
-  await h.reject(h.requests.find((request) => request.name === "get_textbook_master_summary_v1"), { code: "PGRST202", message: "missing summary" })
+  await h.reject(h.requests.find((request) => request.name === "get_textbook_master_summary_v1"), { message: "missing summary" })
   await h.assertNoLegacyReads()
 
-  assert.equal(document.body.textContent.includes("집계 정보를 불러오지 못했습니다"), true)
+  assert.equal(document.body.textContent.includes("집계 조회 실패"), true)
   assert.equal(document.body.textContent.includes("집계 확인 필요"), true)
+  assert.equal(document.body.textContent.includes("missing summary"), false)
   await h.act(() => document.querySelector('[aria-label="교재 집계 다시 시도"]').click())
   assert.equal(h.requests.filter((request) => request.name === "get_textbook_master_summary_v1").length, 2)
 })
@@ -353,6 +442,8 @@ test("mounted inventory waits for the real default location and renders prepared
   assert.ok(history)
   assert.ok(summary)
   assert.equal(page.args.p_filters.locationId, locationId)
+  assert.equal(page.args.p_filters.quality, "all")
+  assert.equal(page.args.p_filters.inventory, "all")
   const source = masterRow(301, {
     locationQuantities: { [locationId]: 3 }, studentLocationQuantities: { [locationId]: 3 }, teacherLocationQuantities: {}, totalQuantity: 3, studentQuantity: 3,
     locationSummary: [{ id: locationId, code: "main", name: "본관", sortOrder: 1, quantity: 3 }], stockValue: 30000,
@@ -454,7 +545,7 @@ test("inventory page changes clear current-page selection while retaining page-o
   assert.equal(input.value, "7")
 
   await h.act(() => button("2").click())
-  assert.equal(document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]'), null)
+  assert.equal(document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]')?.disabled, true)
   const secondPage = h.requests.find((request) => request.name === "list_textbook_inventory_page_v1" && request.args.p_page === 2)
   assert.ok(secondPage)
   const secondSource = masterRow(312, {
@@ -693,7 +784,13 @@ test("prepared schema errors disable actionable inventory writes and expose the 
   const submit = document.querySelector('[aria-label="실사 반영 불가"]')
   assert.ok(submit)
   assert.equal(submit.disabled, true)
-  assert.equal(document.body.textContent.includes("교재 읽기 API가 아직 적용되지 않았습니다."), true)
+  const mobileQuantity = document.querySelector('[data-prepared-surface="inventory-mobile"] input[aria-label$="실사 수량"]')
+  await h.act(() => mobileQuantity[Object.keys(mobileQuantity).find(key => key.startsWith('__reactProps$'))].onKeyDown({key:'Enter',preventDefault(){}}))
+
+  const schemaFeedback = document.querySelector('[data-slot="data-table-toolbar"] [role="alert"]')
+  assert.ok(schemaFeedback)
+  assert.ok(schemaFeedback.textContent.includes("운영 정보 확인 필요"))
+  assert.ok(schemaFeedback.textContent.includes("교재 관리 기능을 불러오지 못했습니다."))
   const retry = document.querySelector('[aria-label="교재 운영 API 다시 시도"]')
   assert.ok(retry)
   await h.act(() => retry.click())
@@ -820,7 +917,8 @@ for (const [tab, pageRpc, summaryRpc, mode, pagerLabel] of [
     assert.deepEqual(preparedRowIds(`${tab}-desktop`), rows.map((row) => row.id))
     assert.ok(document.querySelector(`[aria-label="${pagerLabel}"]`))
     if (tab === "purchase") {
-      await h.act(() => button("공급처별 주문 전달 열기").click())
+      await h.act(() => button("주문 문서 메뉴").dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+      await h.act(() => document.querySelector('[role="menuitem"][aria-label="공급처별 주문 전달 열기"]').click())
       const handoff = h.requests.find((request) => request.name === "get_textbook_purchase_handoff_context_v1")
       assert.ok(handoff)
       assert.equal(handoff.args.p_kind, "order")
@@ -830,6 +928,57 @@ for (const [tab, pageRpc, summaryRpc, mode, pagerLabel] of [
     }
   })
 }
+
+test("paired purchase columns preserve all six quantities, authoritative totals and next actions", async (t) => {
+  const retiredPreferences = { textbook: false, status: false, requested: false, ordered: false, received: false, supplier: false, classLocation: false }
+  const h = await setup(t, { search: "?textbookTab=purchase", localStorage: { "textbook-purchase-process-order": retiredPreferences } })
+  const row = purchaseRow('order')
+  const amounts = { student: { requested: 17, ordered: 13, received: 5 }, teacher: { requested: 3, ordered: 2, received: 1 } }
+  row.lines = row.lines.map(line => ({ ...line, requested_quantity: amounts[line.copy_scope].requested, ordered_quantity: amounts[line.copy_scope].ordered, received_quantity: amounts[line.copy_scope].received }))
+  row.line = { ...row.lines[0], purchaseScopeLines: row.lines }
+  row.quantities = { requested: 20, ordered: 15, received: 6, ...amounts }
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_purchase_page_v1'), { rows: [row], page: 1, pageSize: 10, totalCount: 1 })
+  for (const surface of ['purchase-desktop', 'purchase-mobile']) {
+    const rendered = document.querySelector(`[data-prepared-surface="${surface}"]`)
+    assert.equal(rendered.querySelectorAll('[data-quantity-stage]').length, 3)
+    for (const [stage, label] of [['requested', '요청'], ['ordered', '주문'], ['received', '입고']]) {
+      const cell = rendered.querySelector(`[data-quantity-stage="${stage}"]`)
+      for (const [scope, scopeLabel] of [['student', '학생용'], ['teacher', '교사용']]) {
+        assert.equal(cell.querySelector(`[data-copy-scope="${scope}"]`).getAttribute('aria-label'), `${scopeLabel} ${label} ${amounts[scope][stage]}`)
+      }
+    }
+    assert.ok(rendered.querySelector('[aria-label="교재 101 주문"]'))
+    assert.equal(rendered.textContent.includes('14권 여유'), false, 'roster-based quantity judgments are retired')
+    assert.equal(rendered.textContent.includes('수업 미선택'), false)
+    assert.equal(rendered.querySelector('[aria-label="교재 101 주문·입고 건 삭제"]'), null, 'destructive action is behind the menu')
+    assert.ok(rendered.querySelector('[aria-label="교재 101 주문·입고 더보기"]'))
+  }
+  const table = document.querySelector('[data-prepared-surface="purchase-desktop"]').closest('table')
+  assert.deepEqual([...table.querySelectorAll('thead th')].map((cell) => cell.textContent.trim()), ["", "교재", "진행상태", "요청", "주문", "입고", "총판 · 단가", "수업 · 위치", "작업"])
+  assert.equal(Number(table.getAttribute('aria-colcount')), table.querySelectorAll('thead th').length)
+  assert.equal(renderedColumnCount(table.querySelector('[data-prepared-surface="purchase-desktop"]')), 9)
+  assert.deepEqual(JSON.parse(window.localStorage.getItem("textbook-purchase-process-order")), retiredPreferences)
+  assert.equal(button("컬럼 구성"), undefined)
+  assert.equal(table.querySelector('tbody tr:last-child [aria-label="학생용 요청 합계 집계 확인 필요"]') !== null, true, 'unavailable aggregate is not fabricated from the visible row')
+  const totals = { requested: 107, ordered: 94, received: 61, student: { requested: 100, ordered: 90, received: 60 }, teacher: { requested: 7, ordered: 4, received: 1 } }
+  const summary = purchaseSummary('order', 9)
+  await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_summary_v1'), { ...summary, quantities: totals, groups: [{ ...summary.groups[0], quantities: totals }] })
+  assert.ok(table.querySelector('[aria-label="학생용 요청 합계 100"]'))
+  assert.ok(table.querySelector('[aria-label="교사용 입고 합계 1"]'))
+  assert.equal(renderedColumnCount(table.querySelector('tbody tr:last-child')), Number(table.getAttribute('aria-colcount')))
+  await h.assertNoLegacyReads()
+})
+
+test("teachers retain request creation without purchase row management menus", async (t) => {
+  const h = await setup(t, { search: '?textbookTab=requests', auth: { role: 'teacher', isTeacher: true, isAdmin: false, isStaff: false, canManageAll: false } })
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_purchase_page_v1'), { rows: [purchaseRow('request')], page: 1, pageSize: 10, totalCount: 1 })
+  await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_summary_v1'), purchaseSummary('request'))
+  assert.ok(document.querySelector('[aria-label="교재 요청 추가"]'))
+  assert.equal(document.querySelector('[aria-label="교재 101 요청 더보기"]'), null)
+  assert.equal(document.querySelector('[aria-label="교재 101 요청 수정"]'), null)
+  assert.equal(document.querySelector('[aria-label="주문 문서 메뉴"]'), null)
+  await h.assertNoLegacyReads()
+})
 
 test("purchase aggregate badges use only authoritative summary quantities", async (t) => {
   const h = await setup(t, { search: "?textbookTab=purchase&textbookPage=1&textbookPageSize=10" })
@@ -855,10 +1004,11 @@ test("purchase aggregate badges use only authoritative summary quantities", asyn
   assert.equal(document.body.textContent.includes("입고 10"), true)
   assert.equal(document.querySelector('[aria-label^="주문 필요 그룹"]').getAttribute('aria-label').includes('31건'), true)
   assert.equal(document.querySelector('[aria-label^="주문 필요 그룹"]').getAttribute('aria-label').includes('요청 99'), true)
-  await h.act(() => document.querySelector('[aria-label="주문·입고 보기 필터"]').click())
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('전체') && node.textContent.includes('73')), true)
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('부분입고') && node.textContent.includes('44')), true)
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('미등록 요청') && node.textContent.includes('23')), true)
+  for (const [label, expected] of [['주문·입고 범위', '전체73'], ['주문·입고 단계', '부분입고44'], ['주문·입고 교재 등록', '미등록 요청23']]) {
+    const options = await openFilter(h, label)
+    assert.ok(options.some(node => node.textContent === expected))
+    await closeFilter(h)
+  }
 })
 
 test("master and inventory controls use summary counts plus authoritative reference options", async (t) => {
@@ -881,9 +1031,10 @@ test("master and inventory controls use summary counts plus authoritative refere
   })
   await h.assertNoLegacyReads()
 
-  await h.act(() => document.querySelector('[aria-label="교재 상태 필터 열기"]').click())
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('부족') && node.textContent.includes('37')), true)
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('대기') && node.textContent.includes('7')), true)
+  assert.equal(document.querySelector('[aria-label="교재 재고 상태"]'), null)
+  assert.equal(document.querySelector('[aria-label="교재 정리 상태"]'), null)
+  assert.equal(document.querySelector('[aria-label="교재관리 할 일 보기"]'), null)
+  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('대기') && node.textContent.includes('7')), false)
   await h.act(() => document.querySelector('[aria-label="교재 세부과목 필터"]').click())
   assert.equal(document.body.textContent.includes("서비스 목록 분류"), true)
   assert.equal(document.body.textContent.includes("서버 세부과목"), false)
@@ -915,9 +1066,11 @@ test("filtered-zero sales history and process retain their recovery controls", a
   assert.ok(document.querySelector('[aria-label="교재 출고 이력"]'))
   assert.ok(document.querySelector('[aria-label="출고 이력 연도"]'))
   assert.ok(document.querySelector('[aria-label="교재 출고 목록"]'))
-  assert.ok([...document.querySelectorAll('button[aria-pressed="true"]')].find((node) => node.textContent.includes("반품")))
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('전체 출고') && node.textContent.includes('4')), true)
-  assert.equal([...document.querySelectorAll('button')].some((node) => node.textContent.includes('출고 대기') && node.textContent.includes('2')), true)
+  assert.equal(document.querySelector('[aria-label="출고 상태"]').textContent, "반품")
+  await openFilter(h, "출고 상태")
+  assert.equal([...document.querySelectorAll('[role=option]')].some((node) => node.textContent.includes('전체 출고') && node.textContent.includes('4')), true)
+  assert.equal([...document.querySelectorAll('[role=option]')].some((node) => node.textContent.includes('출고 대기') && node.textContent.includes('2')), true)
+  await closeFilter(h)
 })
 
 test("sale-history summary failure is visible and retryable independently of the sales summary", async (t) => {
@@ -928,8 +1081,12 @@ test("sale-history summary failure is visible and retryable independently of the
   await h.reject(h.requests.find((request) => request.name === "get_textbook_sale_history_summary_v1"), { message: "history summary failed" })
   await h.assertNoLegacyReads()
 
-  assert.equal(document.body.textContent.includes("출고 이력 집계 정보를 불러오지 못했습니다"), true)
-  await h.act(() => document.querySelector('[aria-label="출고 이력 집계 다시 시도"]').click())
+  const historyFeedback = document.querySelector('[aria-label="교재 출고 이력"] [role="alert"]')
+  assert.ok(historyFeedback)
+  assert.equal(historyFeedback.textContent.includes("출고 이력 조회 실패"), true)
+  assert.equal(historyFeedback.textContent.includes("처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요."), true)
+  assert.equal(historyFeedback.textContent.includes("history summary failed"), false)
+  await h.act(() => document.querySelector('[aria-label="출고 이력 다시 시도"]').click())
   assert.equal(h.requests.filter((request) => request.name === "get_textbook_sale_history_summary_v1").length, 2)
   assert.equal(h.requests.filter((request) => request.name === "get_textbook_sale_summary_v1").length, 1)
 })
@@ -953,6 +1110,10 @@ test("mounted sales renderers consume independent prepared history and process p
   assert.deepEqual(preparedRowIds("sales-process-mobile"), rows.map((row) => row.id))
   assert.deepEqual(preparedRowIds("sales-process-desktop"), rows.map((row) => row.id))
   assert.deepEqual(preparedRowIds("sales-history"), historyRows.map((row) => row.id))
+  const processTable = document.querySelector('[data-prepared-surface="sales-process-desktop"]').closest("table")
+  assert.deepEqual([...processTable.querySelectorAll("thead th")].map((cell) => cell.textContent.trim()), ["", "교재", "대상", "진행상태", "수량", "수업 · 위치", "작업"])
+  assert.equal(renderedColumnCount(processTable.querySelector('[data-prepared-surface="sales-process-desktop"]')), 7)
+  assert.equal(renderedColumnCount(processTable.querySelector("tbody tr:last-child")), 7)
   assert.ok(document.querySelector('[aria-label="출고 이력 페이지 탐색"]'))
   assert.ok(document.querySelector('[aria-label="교재 출고 페이지 탐색"]'))
   await h.act(() => button("메이크에듀 청구 준비 열기").click())
@@ -962,123 +1123,6 @@ test("mounted sales renderers consume independent prepared history and process p
   await h.resolve(billing, completeBillingHandoffWire(12))
   assert.equal(document.body.textContent.includes("12건"), true, "billing document exposes its complete filtered source count, not the two visible rows")
 })
-
-test("mounted closing uses its prepared page, direct detail, independent movement page and complete-copy export", async (t) => {
-  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
-  const page = h.requests.find((request) => request.name === "list_textbook_closing_page_v1")
-  assert.ok(page)
-  const closingRows = [closingRow({ id: id(702), closing_month: "2026-09" }), closingRow()]
-  await h.resolve(page, { rows: closingRows, page: 1, pageSize: 10, totalCount: 2 })
-  await h.assertNoLegacyReads()
-  assert.equal(document.body.textContent.includes("2026-08"), true)
-  assert.deepEqual(preparedRowIds("closing-mobile"), closingRows.map((row) => row.id))
-  assert.deepEqual(preparedRowIds("closing-desktop"), closingRows.map((row) => row.id))
-  assert.ok(document.querySelector('[aria-label="월마감 페이지 탐색"]'))
-
-  await h.act(() => button("2026-08 전체 정산 상세 열기").click())
-  const detail = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1")
-  assert.ok(detail)
-  assert.equal(h.requests.some((request) => request.name === "list_textbook_closing_movement_page_v1"), false)
-  await h.resolve(detail, closingDetailEnvelope({ closing_month: "2026-09", subject: "science" }))
-  const movementRequests = h.requests.filter((request) => request.name === "list_textbook_closing_movement_page_v1")
-  assert.equal(movementRequests.length, 1, JSON.stringify(movementRequests.map((request) => request.args)))
-  const [movements] = movementRequests
-  assert.ok(movements)
-  assert.deepEqual(movements.args.p_filters, { closingMonth: "2026-09", subject: "science", search: "" })
-  assert.equal(movements.signal.aborted, false)
-  const movementRows = [closingMovementRow(1), closingMovementRow(0)].map((row) => ({ ...row, at: "2026-09-01T00:00:00+00:00" }))
-  await h.resolve(movements, { rows: movementRows, page: 1, pageSize: movements.args.p_page_size, totalCount: 2 })
-  assert.equal(movements.signal.aborted, false)
-  assert.equal(document.body.textContent.includes("교재 101"), true)
-  assert.deepEqual(preparedRowIds("closing-movement"), movementRows.map((row) => row.id))
-  assert.ok(document.querySelector('[aria-label="월마감 상세 이동 페이지 탐색"]'))
-
-  await h.act(() => button("복사").click())
-  const exported = h.requests.find((request) => request.name === "get_textbook_closing_movement_export_v1")
-  assert.ok(exported)
-  assert.deepEqual(exported.args.p_filters, { closingMonth: "2026-09", subject: "science", search: "" })
-})
-
-test("external and popstate navigation restore or clear off-page closing detail identity and movement search", async (t) => {
-  const a = id(791), b = id(792)
-  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
-  await h.navigate(`?textbookTab=closing&textbookPage=4&textbookPageSize=10&textbookDetailKind=closing&textbookDetail=${a}&textbookMovementSearch=alpha`)
-  const detailA = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1" && request.args.p_id === a)
-  assert.ok(detailA)
-  await h.resolve(detailA, closingDetailEnvelope({ id: a, closing_month: "2026-08", subject: "english" }))
-  const movementA = h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1" && request.args.p_filters.search === "alpha")
-  assert.ok(movementA)
-
-  await h.popstate(`?textbookTab=closing&textbookPage=8&textbookPageSize=10&textbookDetailKind=closing&textbookDetail=${b}&textbookMovementSearch=beta`)
-  const detailB = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1" && request.args.p_id === b)
-  assert.ok(detailB)
-  assert.equal(movementA.signal.aborted, true)
-  assert.equal(h.requests.some((request) => request.name === "list_textbook_closing_movement_page_v1" && request.args.p_filters.search === "beta"), false)
-  await h.resolve(detailB, closingDetailEnvelope({ id: b, closing_month: "2026-09", subject: "science" }))
-  assert.deepEqual(h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1" && request.args.p_filters.search === "beta").args.p_filters,
-    { closingMonth: "2026-09", subject: "science", search: "beta" })
-
-  await h.popstate("?textbookTab=closing&textbookPage=1&textbookPageSize=10")
-  assert.equal(document.querySelector('[aria-label="월마감 상세 이동 페이지 탐색"]'), null)
-  assert.equal(h.requests.filter((request) => request.name === "get_textbook_closing_detail_v1").length, 2)
-})
-
-test("a closing detail URL loads an off-page detail before starting its scoped movement page", async (t) => {
-  const detailId = id(799)
-  const h = await setup(t, { search: `?textbookTab=closing&textbookPage=4&textbookPageSize=10&textbookDetailKind=closing&textbookDetail=${detailId}` })
-  const detail = h.requests.find((request) => request.name === "get_textbook_closing_detail_v1")
-  assert.ok(detail)
-  assert.equal(detail.args.p_id, detailId)
-  assert.equal(h.requests.some((request) => request.name === "list_textbook_closing_movement_page_v1"), false)
-
-  await h.resolve(detail, closingDetailEnvelope({ id: detailId }))
-  const movements = h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1")
-  assert.ok(movements)
-  assert.deepEqual(movements.args.p_filters, { closingMonth: "2026-08", subject: "all", search: "" })
-})
-
-test("a slow closing export cannot reach the clipboard or stale UI after a same-user role change", async (t) => {
-  const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
-  await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 })
-  await h.assertNoLegacyReads()
-  await h.act(() => button("2026-08 전체 정산 상세 열기").click())
-  await h.resolve(h.requests.find((request) => request.name === "get_textbook_closing_detail_v1"), closingDetailEnvelope())
-  await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1"), { rows: [closingMovementRow()], page: 1, pageSize: 10, totalCount: 1 })
-  await h.act(() => button("복사").click())
-  const exported = h.requests.find((request) => request.name === "get_textbook_closing_movement_export_v1")
-  assert.ok(exported)
-
-  await h.auth({ role: "staff", isAdmin: false, isStaff: true, canManageAll: false })
-  await h.resolve(exported, { rows: [closingMovementRow()], totalCount: 1 })
-
-  assert.equal(exported.signal?.aborted, true)
-  assert.deepEqual(h.clipboardWrites, [])
-  assert.equal(document.body.textContent.includes("복사됨"), false)
-})
-
-for (const [boundary, leaveActor] of [
-  ["logout", (h) => h.auth({ user: null, role: null, isAdmin: false, isStaff: false, canManageAll: false })],
-  ["unmount", (h) => h.unmount()],
-]) {
-  test(`a slow closing export cannot invoke the clipboard after ${boundary}`, async (t) => {
-    const h = await setup(t, { search: "?textbookTab=closing&textbookPage=1&textbookPageSize=10" })
-    await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_page_v1"), { rows: [closingRow()], page: 1, pageSize: 10, totalCount: 1 })
-    await h.assertNoLegacyReads()
-    await h.act(() => button("2026-08 전체 정산 상세 열기").click())
-    await h.resolve(h.requests.find((request) => request.name === "get_textbook_closing_detail_v1"), closingDetailEnvelope())
-    await h.resolve(h.requests.find((request) => request.name === "list_textbook_closing_movement_page_v1"), { rows: [closingMovementRow()], page: 1, pageSize: 10, totalCount: 1 })
-    await h.act(() => button("복사").click())
-    const exported = h.requests.find((request) => request.name === "get_textbook_closing_movement_export_v1")
-    assert.ok(exported)
-
-    await leaveActor(h)
-    await h.resolve(exported, { rows: [closingMovementRow()], totalCount: 1 })
-
-    assert.equal(exported.signal?.aborted, true)
-    assert.deepEqual(h.clipboardWrites, [])
-    if (boundary === "logout") assert.equal(document.body.textContent.includes("복사됨"), false)
-  })
-}
 
 test("single inventory response-loss retry reuses the original request and accepts its committed balance", async (t) => {
   const h = await setup(t, { search: "?textbookTab=inventory&textbookPage=1&textbookPageSize=10" })
@@ -1159,3 +1203,244 @@ test("bulk inventory stops remaining writes when the actor leaves during the fir
   assert.equal(h.requests.filter((request) => request.name === "create_textbook_stock_count_v1").length, 1,
     "an old batch cannot submit its remaining rows under a different authenticated session")
 })
+
+
+test("textbook tabs keep arrow-key exploration separate from an activated remote workflow", async (t) => {
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
+  const master = document.querySelector('[role="tab"][aria-label="교재 재고"]')
+  const requests = document.querySelector('[role="tab"][aria-label="요청"]')
+  const panel = document.getElementById(master.getAttribute('aria-controls'))
+  assert.equal(panel?.getAttribute('role'), 'tabpanel', 'initial loading retains its accessible panel')
+  const before = h.requests.length
+  await h.act(async () => {
+    master.focus()
+    master.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }))
+    await new Promise(resolve => setTimeout(resolve, 5))
+  })
+  assert.equal(document.activeElement, requests)
+  assert.equal(master.getAttribute('aria-selected'), 'true')
+  assert.equal(h.requests.length, before, 'focus does not dispatch another workflow read')
+  await h.act(() => requests.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })))
+  assert.equal(requests.getAttribute('aria-selected'), 'true')
+  assert.equal(h.requests.some(request => request.name === 'list_textbook_purchase_page_v1' && request.args.p_filters.mode === 'request'), true)
+  assert.equal(document.getElementById(requests.getAttribute('aria-controls'))?.getAttribute('role'), 'tabpanel')
+  await h.assertNoLegacyReads()
+})
+
+test("inactive catalog toggle resets paging and selection while retaining search and classification", async (t) => {
+  const filters = { ...masterFilters, search: "", subject: "english" }
+  const h = await setup(t, { search: `?${new URLSearchParams({ textbookTab: "master", textbookPage: "2", textbookPageSize: "10", textbookFilters: JSON.stringify(filters) })}` })
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_master_page_v1'), {
+    rows: Array.from({ length: 10 }, (_, index) => masterRow(index + 11)), page: 2, pageSize: 10, totalCount: 25,
+  })
+  await h.resolve(h.requests.find(request => request.name === 'get_textbook_master_summary_v1'), masterSummary(25))
+  await h.act(() => document.querySelector('[data-testid="textbook-master-desktop-row-' + id(11) + '"] [role="checkbox"]').click())
+  assert.ok(document.querySelector('[aria-label="선택한 교재 일괄 작업"]'))
+  await h.act(() => document.querySelector('[aria-label="선택 교재 선택 해제"]').click())
+  const toggle = document.querySelector('[aria-label="미사용 교재 보기"]')
+  assert.equal(toggle.getAttribute('aria-pressed'), 'false')
+  await h.act(() => toggle.click())
+  let request = h.requests.findLast(request => request.name === 'list_textbook_master_page_v1')
+  assert.equal(request.args.p_page, 1)
+  assert.deepEqual(request.args.p_filters, { ...filters, quality: 'inactive' })
+  assert.equal(toggle.getAttribute('aria-pressed'), 'true')
+  assert.equal(document.querySelectorAll('[data-prepared-surface="master-desktop"] [role="checkbox"][data-state="checked"]').length, 0)
+  await h.resolve(request, { rows: [], page: 1, pageSize: 10, totalCount: 0 })
+  assert.equal(document.querySelector('[aria-label="미사용 교재 보기"]'), toggle, 'empty archive keeps its return control')
+  await h.act(() => toggle.click())
+  request = h.requests.findLast(request => request.name === 'list_textbook_master_page_v1')
+  assert.deepEqual(request.args.p_filters, filters)
+  assert.equal(request.args.p_page, 1)
+  assert.equal(h.requests.some(request => request.table), false)
+})
+
+test("retired catalog bookmarks normalize before the first read and external navigation", async (t) => {
+  const oldFilters = { ...masterFilters, quality: 'missingCode', inventory: 'shortage' }
+  const params = new URLSearchParams({ textbookTab: 'master', textbookPage: '8', textbookPageSize: '20', textbookFilters: JSON.stringify(oldFilters), unrelated: 'keep' })
+  const h = await setup(t, { search: `?${params}` })
+  let request = h.requests.find(request => request.name === 'list_textbook_master_page_v1')
+  assert.equal(request.args.p_page, 1)
+  assert.equal(request.args.p_page_size, 20)
+  assert.deepEqual(request.args.p_filters, masterFilters)
+  await h.resolve(request, { rows: [], page: 1, pageSize: 20, totalCount: 0 })
+  assert.equal(document.querySelector('[aria-label="교재관리 할 일 보기"]'), null)
+  assert.equal(document.querySelector('[aria-label="교재 재고 상태"]'), null)
+  assert.equal(document.querySelector('[aria-label="교재 정리 상태"]'), null)
+  assert.equal(document.querySelectorAll('[aria-label="교재관리 새로고침"]').length, 1)
+  params.set('textbookFilters', JSON.stringify({ ...oldFilters, quality: 'inactive', inventory: 'surplus' }))
+  await h.navigate(`?${params}`)
+  request = h.requests.findLast(request => request.name === 'list_textbook_master_page_v1')
+  assert.equal(request.args.p_page, 1)
+  assert.deepEqual(request.args.p_filters, { ...masterFilters, quality: 'inactive' })
+  await h.assertNoLegacyReads()
+})
+
+test("interleaved subject groups keep unique identities when an accepted master page changes", async (t) => {
+  const errors = []
+  const previousError = console.error
+  console.error = (...args) => { errors.push(args.map(String).join(' ')); previousError(...args) }
+  t.after(() => { console.error = previousError })
+  const h = await setup(t, { search: "?textbookTab=master&textbookPage=1&textbookPageSize=10" })
+  const mixedRows = (start) => Array.from({ length: 10 }, (_, index) => masterRow(start + index, { subject: index % 2 ? 'math' : 'english' }))
+  const first = mixedRows(300)
+  await h.resolve(h.requests.find(request => request.name === 'list_textbook_master_page_v1'), { rows: first, page: 1, pageSize: 10, totalCount: 20 })
+  await h.act(() => document.querySelector('[aria-label="2 페이지"]').click())
+  const second = mixedRows(400)
+  await h.resolve(h.requests.findLast(request => request.name === 'list_textbook_master_page_v1'), { rows: second, page: 2, pageSize: 10, totalCount: 20 })
+  assert.deepEqual(preparedRowIds('master-desktop'), second.map(row => row.id))
+  assert.deepEqual(preparedRowIds('master-mobile'), second.map(row => row.id))
+  assert.equal(errors.some(message => message.includes('same key')), false, 'repeated subject labels must not collide across contiguous groups')
+})
+
+test('sale selection reuses unchanged display data and refreshed records invalidate it', async t => {
+  const h = await setup(t, {search:'?textbookTab=sales&textbookPage=1&textbookPageSize=10'});
+  const model = h.load('src/features/textbooks/textbook-read-model.ts');
+  const original = model.getTextbookById;
+  let lookups = 0;
+  model.getTextbookById = (...args) => { lookups++; return original(...args); };
+  const rows = [saleRow(0),saleRow(1)];
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_sale_page_v1'),{rows,page:1,pageSize:10,totalCount:2});
+  assert.match(document.querySelector('[aria-label="교재 출고 목록"]').textContent,/집계 확인 필요/,'unavailable summary must not be shown as zero');
+  await h.resolve(h.requests.find(r=>r.name==='get_textbook_sale_summary_v1'),saleSummary(2));
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_sale_history_page_v1'),{rows:[],page:1,pageSize:10,totalCount:0});
+  await h.resolve(h.requests.find(r=>r.name==='get_textbook_sale_history_summary_v1'),{...saleHistorySummary(0),yearOptions:[],monthOptions:[],classOptions:[]});
+  assert.equal(document.querySelector('[aria-label="출고 이력 페이지 탐색"]'),null,'no orphaned pager for an empty history');
+  const requests = h.requests.length;
+  lookups = 0;
+  await h.act(()=>document.querySelector('[data-prepared-surface="sales-process-desktop"] [role="checkbox"]').click());
+  assert.equal(lookups,0,'changing selection must not recompute unchanged display references');
+  assert.equal(h.requests.length,requests);
+  for(const surface of ['sales-process-mobile','sales-process-desktop']) assert.deepEqual(preparedRowIds(surface),rows.map(r=>r.id));
+  await h.act(()=>button('교재관리 새로고침').click());
+  const refreshed = rows.map(r=>({...r,textbook:{...r.textbook,title:'수정한 긴 교재명',name:'수정한 긴 교재명'}}));
+  await h.resolve(h.requests.findLast(r=>r.name==='list_textbook_sale_page_v1'),{rows:refreshed,page:1,pageSize:10,totalCount:2});
+  assert.ok(lookups>0,'new data must invalidate the cached display values');
+  for(const surface of ['sales-process-mobile','sales-process-desktop']) assert.match(document.querySelector(`[data-prepared-surface="${surface}"]`).textContent,/수정한 긴 교재명/);
+  await h.assertNoLegacyReads();
+});
+
+test('sale more menu keeps cancellation behind its existing fresh-read boundary', async t => {
+  const h = await setup(t,{search:'?textbookTab=sales'});
+  const row = saleRow();
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_sale_page_v1'),{rows:[row],page:1,pageSize:10,totalCount:1});
+  const more=document.querySelector('[data-prepared-surface="sales-process-desktop"] [aria-label="김선생 교재 101 출고 더보기"]');
+  await h.act(()=>more.dispatchEvent(new window.KeyboardEvent('keydown',{key:'Enter',bubbles:true})));
+  assert.ok(document.querySelector('[role="menuitem"][aria-label="김선생 교재 101 출고 전 취소"]'));
+  assert.equal(document.querySelector('[role="menuitem"][aria-label="김선생 교재 101 고객 반품"]'),null);
+  assert.equal(h.requests.some(r=>r.table),false);
+  await h.act(()=>document.querySelector('[role="menuitem"][aria-label="김선생 교재 101 출고 전 취소"]').click());
+  assert.ok(h.requests.some(r=>r.name==='get_textbook_sale_detail_v1'));
+  assert.equal(h.requests.some(r=>r.table),false,'menu selection still requires a fresh detail before any writer');
+});
+
+test('inventory mobile selection and zero count share the desktop draft and block repeated Enter while saving', async t => {
+  const h = await setup(t,{search:'?textbookTab=inventory'});
+  const locationId=id(900);
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_location_reference_page_v1'),{rows:[{value:locationId,label:'본관',searchText:'본관 main'}],page:1,pageSize:20,totalCount:1,defaultLocation:{id:locationId,code:'main',name:'본관'}});
+  const source=masterRow(399,{locationQuantities:{[locationId]:3},studentLocationQuantities:{[locationId]:3},teacherLocationQuantities:{},totalQuantity:3,studentQuantity:3,stockValue:30000,locationSummary:[{id:locationId,code:'main',name:'본관',sortOrder:1,quantity:3}]});
+  const row={source,id:source.id,title:source.title,publisher:source.publisher,locationId,locationName:'본관',currentQuantity:3,latestCountAt:'',daysSinceLatestCount:null,isCountedThisCycle:false,isRecommended:true,status:'recommended',reason:'실사 필요',dueLabel:'지금'};
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_inventory_page_v1'),{rows:[row],page:1,pageSize:10,totalCount:1});
+  await h.resolve(h.requests.find(r=>r.name==='get_textbook_inventory_summary_v1'),masterSummary(1,{locations:[{id:locationId,code:'main',name:'본관',sortOrder:1}],auditCounts:{all:1,recommended:1,pending:1,done:0}}));
+  const props=e=>e[Object.keys(e).find(k=>k.startsWith('__reactProps$'))];
+  const mobile=()=>document.querySelector('[data-prepared-surface="inventory-mobile"]');
+  const quantity=()=>mobile().querySelector('input[aria-label$="실사 수량"]');
+  const memo=()=>mobile().querySelector('input[aria-label$="실사 메모"]');
+  const bulkApply=document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]');
+  assert.ok(bulkApply);
+  assert.equal(bulkApply.disabled,true);
+  assert.match(document.querySelector('[aria-label="재고 실사 목록"] table').className,/min-w-\[1164px\]/);
+  await h.act(()=>mobile().querySelector('[role="checkbox"]').click());
+  assert.equal(document.querySelector('[data-prepared-surface="inventory-desktop"] [role="checkbox"]').getAttribute('data-state'),'checked');
+  await h.act(()=>props(quantity()).onChange({target:{value:'0'}}));
+  await h.act(()=>props(memo()).onChange({target:{value:'수량 없음 확인'}}));
+  assert.equal(document.querySelector('[data-prepared-surface="inventory-desktop"] input[aria-label$="실사 수량"]').value,'0');
+  assert.match(mobile().textContent,/차이 -3/);
+  assert.equal(document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').disabled,false);
+  const pressEnter=()=>props(quantity()).onKeyDown({key:'Enter',preventDefault(){}});
+  await h.act(pressEnter);
+  const balance=h.requests.find(r=>r.name==='get_textbook_inventory_balance_v1');
+  assert.ok(balance);
+  assert.equal(mobile().querySelector('[aria-label$="반영 중"]').disabled,true);
+  await h.act(pressEnter);
+  assert.equal(h.requests.filter(r=>r.name==='get_textbook_inventory_balance_v1').length,1);
+  assert.equal(h.requests.some(r=>r.name==='create_textbook_stock_count_v1'),false);
+  await h.reject(balance,{message:'합성 재고 조회 실패'});
+  assert.equal(quantity().value,'0');
+  assert.equal(memo().value,'수량 없음 확인');
+  assert.equal(mobile().querySelector('[role="checkbox"]').getAttribute('data-state'),'checked');
+  await h.act(()=>mobile().querySelector('[aria-label$="실사 입력 초기화"]').click());
+  assert.equal(quantity().value,'');
+  assert.equal(memo().value,'');
+  assert.equal(document.querySelector('[aria-label="선택 재고 실사 일괄 반영"]').disabled,true);
+  await h.act(()=>mobile().querySelector('[aria-label$="현재 수량 입력"]').click());
+  assert.equal(quantity().value,'3');
+  assert.equal(h.requests.some(r=>r.table || r.name==='create_textbook_stock_count_v1'),false);
+});
+
+test('retired closing bookmarks return to stock page one and discard closing-only navigation', async t => {
+  const params=new URLSearchParams({textbookTab:'closing',textbookPage:'7',textbookPageSize:'15',textbookFilters:JSON.stringify({month:'2026-08',subject:'science',status:'locked'}),textbookDetailKind:'closing',textbookDetail:id(700),textbookMovementPage:'4',textbookMovementPageSize:'20',textbookMovementSearch:'교재',selectedClosingIds:id(700),unrelated:'keep'});
+  const parsed=parseTextbookNavigation(params);
+  assert.equal(parsed.tab,'master');
+  assert.equal(parsed.primary.page,1);
+  assert.equal(parsed.primary.pageSize,15);
+  assert.equal(parsed.detail,null);
+  const serialized=serializeTextbookNavigation(params,parsed);
+  for(const key of ['textbookDetail','textbookDetailKind','textbookMovementPage','textbookMovementPageSize','textbookMovementSearch','selectedClosingIds']) assert.equal(serialized.has(key),false,key);
+  assert.equal(serialized.get('unrelated'),'keep');
+  const h=await setup(t,{search:`?${params}`});
+  const page=h.requests.find(r=>r.name==='list_textbook_master_page_v1');
+  assert.equal(page.args.p_page,1);
+  assert.equal(page.args.p_page_size,15);
+  await h.resolve(page,{rows:[masterRow(1)],page:1,pageSize:15,totalCount:1});
+  assert.equal(document.querySelector('[role="tab"][aria-label="교재 재고"]').getAttribute('aria-selected'),'true');
+  assert.equal(document.querySelector('[role="tab"][aria-label="정산"]'),null);
+  assert.equal(document.querySelector('[role="dialog"]'),null);
+  assert.equal(h.requests.some(r=>/closing/.test(r.name||'')||r.table),false);
+  await h.popstate(`?textbookTab=master&textbookDetailKind=closing&textbookDetail=${id(701)}&textbookMovementSearch=legacy`);
+  assert.equal(document.querySelector('[role="dialog"]'),null);
+  assert.equal(h.requests.some(r=>/closing/.test(r.name||'')),false);
+  await h.assertNoLegacyReads();
+});
+
+test('request table ignores retired column preferences and keeps its fixed workflow columns aligned', async t => {
+  const retiredPreferences={decision:true,requester:false,requested:false,textbook:false};
+  const h=await setup(t,{search:'?textbookTab=requests',localStorage:{'textbook-purchase-process-request':retiredPreferences}});
+  const row=purchaseRow('request');
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_purchase_page_v1'),{rows:[row],page:1,pageSize:10,totalCount:1});
+  await h.resolve(h.requests.find(r=>r.name==='get_textbook_purchase_summary_v1'),purchaseSummary('request',1));
+  for(const surface of ['requests-mobile','requests-desktop']){
+    const element=document.querySelector(`[data-prepared-surface="${surface}"]`);
+    assert.ok(element.querySelector('[aria-label="학생용 요청 2"]'));
+    assert.ok(element.querySelector('[aria-label="교사용 요청 2"]'));
+    assert.doesNotMatch(element.textContent,/판단|\d+권 부족|\d+권 여유|수량 일치/);
+  }
+  const table=document.querySelector('[data-prepared-surface="requests-desktop"]').closest('table');
+  assert.deepEqual([...table.querySelectorAll('thead th')].map(cell=>cell.textContent.trim()),['교재','요청','요청자','수업 · 위치','작업']);
+  assert.equal(table.querySelector('[data-prepared-surface="requests-desktop"]').querySelectorAll('td').length,5);
+  assert.equal(table.querySelector('tbody tr:last-child').querySelectorAll('td').length,5);
+  assert.match(table.querySelector('[data-prepared-surface="requests-desktop"]').textContent,/선생님/);
+  assert.deepEqual(JSON.parse(window.localStorage.getItem('textbook-purchase-process-request')),retiredPreferences);
+  assert.equal(button('컬럼 구성'),undefined);
+  assert.equal(h.requests.some(r=>r.table||/closing/.test(r.name||'')),false);
+});
+
+test('inventory counts use all books without heuristic filters or badges and preserve zero drafts', async t => {
+  const h=await setup(t,{search:'?textbookTab=inventory'});
+  const locationId=id(900);
+  await h.resolve(h.requests.find(r=>r.name==='list_textbook_location_reference_page_v1'),{rows:[{value:locationId,label:'본관',searchText:'본관 main'}],page:1,pageSize:20,totalCount:1,defaultLocation:{id:locationId,code:'main',name:'본관'}});
+  const page=h.requests.find(r=>r.name==='list_textbook_inventory_page_v1');
+  assert.equal(page.args.p_filters.audit,'all');
+  const source=masterRow(331,{totalQuantity:3,studentQuantity:3,stockValue:30000,locationQuantities:{[locationId]:3},studentLocationQuantities:{[locationId]:3},teacherLocationQuantities:{}});
+  const row={source,id:source.id,title:source.title,publisher:source.publisher,locationId,locationName:'본관',currentQuantity:3,latestCountAt:'',daysSinceLatestCount:null,isCountedThisCycle:false,isRecommended:true,status:'recommended',reason:'재고 부족 권장',dueLabel:'지금'};
+  await h.resolve(page,{rows:[row],page:1,pageSize:10,totalCount:1});
+  await h.resolve(h.requests.find(r=>r.name==='get_textbook_inventory_summary_v1'),masterSummary(1,{auditCounts:{all:1,recommended:1,pending:1,done:0},locations:[{id:locationId,code:'main',name:'본관',sortOrder:1}]}));
+  const countRegion=document.querySelector('[aria-label="재고 실사 입력"]');
+  assert.doesNotMatch(countRegion.textContent,/실사 권장|재고 부족 권장|실사 대기|지금/);
+  assert.equal([...countRegion.querySelectorAll('button')].some(el=>['전체','대기','완료'].includes(el.textContent.trim())),false);
+  const input=countRegion.querySelector('[aria-label="교재 331 본관 실사 수량"]');
+  await h.act(()=>input[Object.keys(input).find(k=>k.startsWith('__reactProps$'))].onChange({target:{value:'0'}}));
+  assert.ok(countRegion.querySelector('[aria-label="교재 331 본관 0권 반영"]'));
+  assert.match(countRegion.textContent,/-3/);
+  assert.equal(h.requests.some(r=>r.table||r.name==='create_textbook_stock_count_v1'),false);
+  await h.assertNoLegacyReads();
+});

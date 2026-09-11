@@ -107,7 +107,7 @@ const hasClassScheduleListSummaryChange = (
 ) => {
   const currentClass = (currentDetail?.classItem || currentDetail || {}) as Record<string, unknown>;
   const nextClass = (nextDetail?.classItem || nextDetail || {}) as Record<string, unknown>;
-  return ["name", "title", "subject", "grade", "teacher", "teacherName", "classroom", "classroomName", "status", "termId", "termName", "scheduleLabel", "syncGroupId"]
+  return ["name", "title", "subject", "grade", "teacher", "teacherName", "classroom", "classroomName", "status", "scheduleLabel", "syncGroupId"]
     .some((key) => text(currentClass[key]) !== text(nextClass[key]));
 };
 
@@ -752,25 +752,29 @@ function parseStoredClassScheduleScroll(value: string | null) {
   }
 }
 
+function classScheduleNavigationKey(query: string) {
+  const params = new URLSearchParams(query);
+  params.delete("term");
+  params.delete("period");
+  params.delete("syncGroup");
+  return params.toString();
+}
+
 function applyClassScheduleQueryState(
   params: URLSearchParams,
   state: {
     search: string;
-    termId: string;
     subject: string;
     grade: string;
     teacher: string;
-    selectedSyncGroupId: string;
     page: number;
   },
 ) {
   const values = [
     ["q", state.search.trim(), ""],
-    ["term", state.termId, ""],
     ["subject", state.subject, ""],
     ["grade", state.grade, ""],
     ["teacher", state.teacher, ""],
-    ["syncGroup", state.selectedSyncGroupId, ""],
     ["page", String(state.page), "1"],
   ] as const;
 
@@ -781,6 +785,10 @@ function applyClassScheduleQueryState(
       params.delete(key);
     }
   }
+
+  params.delete("term");
+  params.delete("period");
+  params.delete("syncGroup");
 
   params.delete("lessonDesign");
   params.delete("classId");
@@ -2618,23 +2626,22 @@ export function ClassScheduleWorkspace() {
   const requestedClassId = text(searchParams.get("classId"));
   const classScheduleListRef = useRef<HTMLDivElement | null>(null);
   const [search, setSearch] = useState(() => text(searchParams.get("q")));
-  const [termId, setTermId] = useState(() => text(searchParams.get("term")));
   const [subject, setSubject] = useState(() => text(searchParams.get("subject")));
   const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
   const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
-  const [selectedSyncGroupId, setSelectedSyncGroupId] = useState(() => text(searchParams.get("syncGroup")));
+  const [selectedSyncGroupCardId, setSelectedSyncGroupCardId] = useState("");
   const [observedQuery, setObservedQuery] = useState(searchParamString);
   const [writtenQuery, setWrittenQuery] = useState<string | null>(null);
-  const [navigation, setNavigation] = useState(() => ({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) }));
+  const [navigation, setNavigation] = useState(() => ({ key: classScheduleNavigationKey(searchParamString), page: normalizePage(Number(searchParams.get("page"))) }));
   if (observedQuery !== searchParamString) {
     setObservedQuery(searchParamString);
     // A self-write is acknowledged once; any other location invalidates it too.
     setWrittenQuery(null);
     if (!isLessonDesignRouteActive && writtenQuery !== searchParamString) {
-      setSearch(text(searchParams.get("q"))); setTermId(text(searchParams.get("term")));
+      setSearch(text(searchParams.get("q")));
       setSubject(text(searchParams.get("subject"))); setGrade(text(searchParams.get("grade")));
-      setTeacher(text(searchParams.get("teacher"))); setSelectedSyncGroupId(text(searchParams.get("syncGroup")));
-      setNavigation({ key: searchParamString, page: normalizePage(Number(searchParams.get("page"))) });
+      setTeacher(text(searchParams.get("teacher")));
+      setNavigation({ key: classScheduleNavigationKey(searchParamString), page: normalizePage(Number(searchParams.get("page"))) });
     }
   }
   const [selectedClassId, setSelectedClassId] = useState("");
@@ -2692,17 +2699,15 @@ export function ClassScheduleWorkspace() {
   const operationsRequest = useMemo(
     () => ({
       mode: "class_schedule" as const,
-      termId: termId || null,
       search,
       subject: subject || null,
       grade: grade || null,
       teacher: teacher || null,
-      syncGroupId: selectedSyncGroupId || null,
       cursor: null,
       page: navigation.page,
       navigationKey: navigation.key,
     }),
-    [grade, navigation, search, selectedSyncGroupId, subject, teacher, termId],
+    [grade, navigation, search, subject, teacher],
   );
   const {
     data: scopedData,
@@ -2717,9 +2722,9 @@ export function ClassScheduleWorkspace() {
   } = useOperationsWorkspaceData(operationsRequest);
   const handlePageChange = (page: number) => {
     if (totalCount === null || displayRequest.mode !== "class_schedule") return;
-    setSearch(displayRequest.search); setTermId(displayRequest.termId || "");
+    setSearch(displayRequest.search);
     setSubject(displayRequest.subject || ""); setGrade(displayRequest.grade || "");
-    setTeacher(displayRequest.teacher || ""); setSelectedSyncGroupId(displayRequest.syncGroupId || "");
+    setTeacher(displayRequest.teacher || "");
     return goToPage(page);
   };
   const [editorActorScope, setEditorActorScope] = useState(actorScope);
@@ -2745,7 +2750,6 @@ export function ClassScheduleWorkspace() {
   const data = useMemo(() => {
     const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
     const filterOptions = (scopedData?.filterOptions || {}) as {
-      terms?: Array<{ value: string; label: string }>;
       subjects?: string[];
       grades?: string[];
       teachers?: string[];
@@ -2759,10 +2763,6 @@ export function ClassScheduleWorkspace() {
       ...row,
       teacher: row.teacherName,
       term_id: row.termId,
-    }));
-    const classTerms = (Array.isArray(filterOptions.terms) ? filterOptions.terms : []).map((option) => ({
-      id: option.value,
-      name: option.label,
     }));
     const syncGroups = (Array.isArray(filterOptions.syncGroups) ? filterOptions.syncGroups : []).map((option) => ({
       id: option.value,
@@ -2779,7 +2779,6 @@ export function ClassScheduleWorkspace() {
       classes,
       textbooks: [] as Record<string, unknown>[],
       progressLogs: [] as Record<string, unknown>[],
-      classTerms,
       syncGroups,
       syncGroupMembers,
       syncGroupCounts: (scopedData?.syncGroupCounts || []) as { groupId: string; memberCount: number; representativeClassId: string }[],
@@ -2906,7 +2905,7 @@ export function ClassScheduleWorkspace() {
         classes: data.classes,
         textbooks: data.textbooks,
         progressLogs: data.progressLogs,
-        classTerms: data.classTerms,
+        classTerms: [],
         syncGroups: data.syncGroups,
         syncGroupMembers: data.syncGroupMembers,
         numbered: true,
@@ -2916,14 +2915,12 @@ export function ClassScheduleWorkspace() {
     return {
       ...routeModel,
       filterOptions: {
-        terms: Array.isArray(data.filterOptions.terms) ? data.filterOptions.terms : [],
         subjects: Array.isArray(data.filterOptions.subjects) ? data.filterOptions.subjects : [],
         grades: Array.isArray(data.filterOptions.grades) ? data.filterOptions.grades : [],
         teachers: Array.isArray(data.filterOptions.teachers) ? data.filterOptions.teachers : [],
       },
     };
   }, [
-      data.classTerms,
       data.classes,
       data.filterOptions,
       data.progressLogs,
@@ -2937,14 +2934,12 @@ export function ClassScheduleWorkspace() {
   const classScheduleQueryState = useMemo(
     () => ({
       search: displayRequest.mode === "class_schedule" ? displayRequest.search : search,
-      termId: displayRequest.mode === "class_schedule" ? displayRequest.termId || "" : termId,
       subject: displayRequest.mode === "class_schedule" ? displayRequest.subject || "" : subject,
       grade: displayRequest.mode === "class_schedule" ? displayRequest.grade || "" : grade,
       teacher: displayRequest.mode === "class_schedule" ? displayRequest.teacher || "" : teacher,
-      selectedSyncGroupId: displayRequest.mode === "class_schedule" ? displayRequest.syncGroupId || "" : selectedSyncGroupId,
       page: displayedPage,
     }),
-    [displayRequest, displayedPage, grade, search, selectedSyncGroupId, subject, teacher, termId],
+    [displayRequest, displayedPage, grade, search, subject, teacher],
   );
   const classScheduleReturnPath = useMemo(
     () => buildClassScheduleListHref("/admin/class-schedule", searchParamString, classScheduleQueryState),
@@ -2954,13 +2949,17 @@ export function ClassScheduleWorkspace() {
   useEffect(() => {
     if (isLessonDesignPage || searchParams.get("lessonDesign") === "1") return;
     if (loading || !dataMatchesCurrentScope) return;
-
-    const nextHref = buildClassScheduleListHref(pathname, searchParamString, classScheduleQueryState);
-    const currentHref = searchParamString ? `${pathname}?${searchParamString}` : pathname;
-    if (nextHref !== currentHref) {
+    let current = true;
+    queueMicrotask(() => {
+      if (!current || window.location.pathname !== pathname) return;
+      const liveQuery = window.location.search.replace(/^\?/, "");
+      const nextHref = buildClassScheduleListHref(pathname, liveQuery, classScheduleQueryState);
+      const currentHref = liveQuery ? `${pathname}?${liveQuery}` : pathname;
+      if (nextHref === currentHref) return;
       setWrittenQuery(nextHref.split("?")[1] || "");
       router.replace(nextHref, { scroll: false });
-    }
+    });
+    return () => { current = false; };
   }, [classScheduleQueryState, dataMatchesCurrentScope, isLessonDesignPage, loading, pathname, router, searchParamString, searchParams]);
 
   const rememberClassScheduleListPosition = useCallback(() => {
@@ -3052,14 +3051,6 @@ export function ClassScheduleWorkspace() {
     });
   }, [allRowsModel.rows, isLessonDesignRouteActive, model.rows]);
 
-  const syncGroupOptions = useMemo(
-    () =>
-      (Array.isArray(data.filterOptions.syncGroups) ? data.filterOptions.syncGroups : []).map((group) => ({
-        value: text(group.value),
-        label: text(group.label) || text(group.value),
-      })),
-    [data.filterOptions.syncGroups],
-  );
   const rowSnapshotById = useMemo(
     () =>
       new Map(
@@ -4959,7 +4950,7 @@ export function ClassScheduleWorkspace() {
 
   const lessonDesignTitle = selectedRow?.title || "수업 설계";
   const lessonDesignDescription = selectedRow
-    ? `${selectedRow.termName || "학기 미정"} · ${selectedRow.teacher || "선생님 미정"}`
+    ? selectedRow.teacher || "선생님 미정"
     : "수업 설계";
   const lessonDesignTeacherName = text(
     selectedLessonSession?.teacherNameSnapshot || selectedRow?.teacher || selectedRowClassItem?.teacher,
@@ -5071,8 +5062,8 @@ export function ClassScheduleWorkspace() {
                   <Button
                     type="button"
                     size="icon"
-                    variant="ghost"
-                    className="absolute right-2 top-2 size-8 rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+                    variant="destructive-ghost"
+                    className="absolute right-2 top-2 size-8 rounded-md"
                     aria-label={`${session.label} 일정 해제`}
                     onClick={() => handleLessonSessionRelease(session)}
                   >
@@ -5747,8 +5738,8 @@ export function ClassScheduleWorkspace() {
                             <Button
                               type="button"
                               size="sm"
-                              variant="outline"
-                              className="h-8 w-8 rounded-md p-0 text-destructive hover:text-destructive"
+                              variant="destructive-outline"
+                              className="h-8 w-8 rounded-md p-0"
                               aria-label={`${period.label} 삭제`}
                               onClick={() => handleRemoveLessonPeriod(period.id)}
                               disabled={lessonDesignSnapshot.billingPeriods.length <= 1}
@@ -6345,13 +6336,6 @@ export function ClassScheduleWorkspace() {
           onSearchChange={setSearch}
           filters={[
             {
-              label: "학기",
-              value: termId,
-              options: model.filterOptions.terms,
-              placeholder: "전체 학기",
-              onChange: setTermId,
-            },
-            {
               label: "과목",
               value: subject,
               options: model.filterOptions.subjects,
@@ -6371,13 +6355,6 @@ export function ClassScheduleWorkspace() {
               options: model.filterOptions.teachers,
               placeholder: "전체 선생님",
               onChange: setTeacher,
-            },
-            {
-              label: "동기 그룹",
-              value: selectedSyncGroupId,
-              options: syncGroupOptions,
-              placeholder: "전체 그룹",
-              onChange: setSelectedSyncGroupId,
             },
           ]}
         />
@@ -6407,28 +6384,15 @@ export function ClassScheduleWorkspace() {
               data-testid="class-schedule-sync-group-bar"
               className="flex gap-2 overflow-x-auto border-b px-4 py-2"
             >
-              <button
-                type="button"
-                aria-pressed={!selectedSyncGroupId}
-                className={cn(
-                  "inline-flex h-8 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors",
-                  !selectedSyncGroupId
-                    ? "border-primary bg-primary text-primary-foreground"
-                    : "border-border/70 bg-background hover:bg-muted/50",
-                )}
-                onClick={() => setSelectedSyncGroupId("")}
-              >
-                전체
-                <span className="rounded bg-background/20 px-1.5">{totalCount ?? "…"}</span>
-              </button>
               {model.syncGroupCards.map((group) => {
-                const isSelected = selectedSyncGroupId === group.id;
+                const isSelected = selectedSyncGroupCardId === group.id;
 
                 return (
                   <button
                     key={group.id}
                     type="button"
                     aria-pressed={isSelected}
+                    aria-label={`${group.name || group.id} 대표 수업 열기`}
                     className={cn(
                       "inline-flex h-8 max-w-72 shrink-0 items-center gap-2 rounded-md border px-3 text-xs font-medium transition-colors",
                       isSelected
@@ -6438,7 +6402,7 @@ export function ClassScheduleWorkspace() {
                     onClick={() => {
                       const nextGroupId = isSelected ? "" : group.id;
                       const nextClassId = group.members[0]?.classId || "";
-                      setSelectedSyncGroupId(nextGroupId);
+                      setSelectedSyncGroupCardId(nextGroupId);
                       selectedClassIdRef.current = nextClassId;
                       lessonMutationLifecycleRef.current?.enter(nextClassId);
                       setSelectedClassId(nextClassId);
@@ -6508,7 +6472,7 @@ export function ClassScheduleWorkspace() {
                               {row.title}
                             </Link>
                             <p className="text-muted-foreground leading-5 break-keep">
-                              {row.termName || "학기 미정"} · {row.teacher || "선생님 미정"}
+                              {row.teacher || "선생님 미정"}
                             </p>
                           </div>
                           <span className="shrink-0 text-sm font-semibold text-foreground">{progressPercent}%</span>
@@ -6650,7 +6614,7 @@ export function ClassScheduleWorkspace() {
                                   {row.title}
                                 </Link>
                                 <p className="text-muted-foreground text-sm leading-5 break-keep">
-                                  {row.termName || "학기 미정"} · {row.teacher || "선생님 미정"}
+                                  {row.teacher || "선생님 미정"}
                                 </p>
                               </div>
                             </div>

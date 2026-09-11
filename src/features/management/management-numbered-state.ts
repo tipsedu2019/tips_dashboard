@@ -38,9 +38,8 @@ export function replaceManagementNumberedQuery(target: Pick<Window, "history" | 
   replaceManagementListUrl(target.history, params ? `${pathname}?${params}` : pathname);
 }
 
-export function resetManagementPageForFilters(kind: ManagementNumberedKind, previousSearch: string, next: URLSearchParams, canonicalPeriod = "") {
+export function resetManagementPageForFilters(kind: ManagementNumberedKind, previousSearch: string, next: URLSearchParams) {
   const previous = JSON.parse(serializeManagementListFilters(kind, previousSearch));
   const changed = JSON.parse(serializeManagementListFilters(kind, next.toString()));
-  if (kind === "classes" && !previous.periodId && changed.periodId === canonicalPeriod) previous.periodId = canonicalPeriod;
   if (JSON.stringify(previous) !== JSON.stringify(changed)) next.delete("page");
 }

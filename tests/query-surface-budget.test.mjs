@@ -2208,6 +2208,22 @@ test("mutable, derived, destructured, and computed RPC invocation aliases fail c
   assert.equal(result.violations.some((violation) => violation.reason === "rpc_page_limit_missing"), false)
 })
 
+test("single-class creation is nonpageable but still requires deadline and no-retry controls", async () => {
+  const options = { surface: "management", file: "src/features/management/management-service.js" }
+  const bounded = await verifyFixture({ ...options, source: `async function create(client, payload) {
+    return client.rpc("create_class_with_group_memberships_v1", payload).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }` })
+  assert.deepEqual(bounded, { ok: true, violations: [] })
+  const unbounded = await verifyFixture({ ...options, source: `async function create(client, payload) {
+    return client.rpc("create_class_with_group_memberships_v1", payload)
+  }` })
+  assert.deepEqual(unbounded.violations.map(({ reason }) => reason).sort(), ["list_abort_signal_missing", "list_retry_false_missing"])
+  const unknown = await verifyFixture({ ...options, source: `async function create(client, payload) {
+    return client.rpc("create_class_unreviewed_v1", payload).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }` })
+  assert.ok(unknown.violations.some(({ reason }) => reason === "rpc_page_limit_missing"))
+})
+
 test("exact continuous-schedule mutation RPCs require and accept the bounded request controls", async () => {
   const result = await verifyFixture({
     surface: "operations",

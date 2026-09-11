@@ -153,6 +153,7 @@ export function getStudentGradeLabel(row: Row | undefined) {
 }
 
 export function getSupplierName(suppliers: Row[], id: string) {
+  if (id === "unspecified") return "";
   const match = suppliers.find((supplier) => getRecordId(supplier) === id || text(supplier.name) === id);
   return text(match?.name || id);
 }

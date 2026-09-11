@@ -67,6 +67,7 @@ async function mountClassConsumer(t, { renderTable = false, deferDefault = false
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
   window.cancelAnimationFrame = window.clearTimeout;
   window.scrollTo = () => {};
+  window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
   const io = transport(), defaults = [];
   let defaultPeriod = "period-A", state, query;
   const rpc = io.supabase.rpc;
@@ -121,41 +122,41 @@ for (const fixture of [
   });
 }
 
-test("canonical class period survives default changes, refresh, mutation retry and shrink clamp", async (t) => {
+test("retired class periods stay ignored across refresh, mutation retry and shrink clamp", async (t) => {
   const page = await mountClassConsumer(t);
   await act(async () => page.finish(0, 102));
   await page.render({ periodId: "period-A" });
-  assert.equal(page.requests.length, 1, "canonical URL rerender must not refetch");
+  assert.equal(page.requests.length, 1, "retired period URL rerender must not refetch");
   page.setDefault("period-B");
   await act(async () => { void page.state.refresh(); });
-  assert.equal(page.requests[1].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[1].args.p_filters.periodId, null);
   await act(async () => page.finish(1, 102));
-  assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-A");
+  assert.equal(JSON.parse(page.state.scope).filters.periodId, null);
   await act(async () => { void page.state.reloadRow("outside-page"); });
-  assert.equal(page.requests[2].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[2].args.p_filters.periodId, null);
   await act(async () => page.finish(2, 102));
   await act(async () => page.state.removeRows(["deleted-row"]));
-  assert.equal(page.requests[3].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[3].args.p_filters.periodId, null);
   await act(async () => page.finish(3, 100));
-  assert.equal(page.requests[4].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[4].args.p_filters.periodId, null);
   assert.equal(page.requests[4].args.p_page, 10);
   await act(async () => page.finish(4, 100));
   assert.equal(page.state.page, 10); assert.equal(page.queryPage, 10);
-  assert.equal(page.requests.length, 5); assert.equal(page.defaults.length, 1);
+  assert.equal(page.requests.length, 5); assert.equal(page.defaults.length, 0);
 });
 
-test("canonical class period is retained even when its first numbered read fails", async (t) => {
+test("class page failure is retryable without resolving a default period", async (t) => {
   const page = await mountClassConsumer(t);
   await act(async () => page.requests[0].reject(new Error("page unavailable")));
   assert.equal(page.state.error, "page unavailable");
   await page.render({ periodId: "period-A" });
   page.setDefault("period-B");
   await act(async () => { void page.state.refresh(); });
-  assert.equal(page.requests[1].args.p_filters.periodId, "period-A");
+  assert.equal(page.requests[1].args.p_filters.periodId, null);
   assert.equal(page.requests[1].args.p_page, 11);
   await act(async () => page.finish(1, 102));
-  assert.equal(page.defaults.length, 1);
-  assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-A");
+  assert.equal(page.defaults.length, 0);
+  assert.equal(JSON.parse(page.state.scope).filters.periodId, null);
 });
 
 test("initial failed class load keeps visible caption and pager unknown, but true zero stays empty", async (t) => {
@@ -175,40 +176,15 @@ test("initial failed class load keeps visible caption and pager unknown, but tru
   assert.equal(document.querySelectorAll('button[aria-current="page"]').length, 0);
 });
 
-test("default resolution failure is retryable and never pins a missing period", async (t) => {
-  const page = await mountClassConsumer(t, { deferDefault: true });
-  await act(async () => page.defaults[0].resolve({ data: null, error: new Error("resolver unavailable") }));
-  assert.equal(page.state.error, "resolver unavailable");
-  assert.equal(page.state.effectiveClassPeriodId, "");
-  assert.equal(page.requests.length, 0);
-  await act(async () => { void page.state.refresh(); });
-  await act(async () => page.defaults[1].resolve({ data: { periodId: "period-B" }, error: null }));
-  assert.equal(page.requests[0].args.p_filters.periodId, "period-B");
+test("class pages load even when no default period is available", async (t) => {
+  const page = await mountClassConsumer(t, { deferDefault: true, periodId: "retired-period" });
+  assert.equal(page.defaults.length, 0);
+  assert.equal(page.requests.length, 1);
+  assert.equal(page.requests[0].args.p_filters.periodId, null);
   await act(async () => page.finish(0, 102));
-  assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-B");
+  assert.equal(page.state.error, null);
+  assert.equal(page.state.rows.length, 2);
 });
-
-for (const transition of [
-  { label: "filter", props: { search: "changed" } },
-  { label: "actor", props: { actor: "other:admin" } },
-  { label: "role", props: { actor: "actor:teacher" } },
-]) {
-  test(`default resolution cannot reuse an old period across a ${transition.label} change`, async (t) => {
-    const page = await mountClassConsumer(t, { deferDefault: true });
-    await act(async () => page.defaults[0].resolve({ data: { periodId: "period-A" }, error: null }));
-    await act(async () => page.finish(0, 102));
-    assert.equal(page.state.effectiveClassPeriodId, "period-A");
-    await page.render(transition.props);
-    assert.equal(page.state.effectiveClassPeriodId, "", "do not canonicalize a new scope using the old resolver result");
-    await act(async () => page.defaults[1].resolve({ data: null, error: new Error("new resolver unavailable") }));
-    assert.equal(page.state.effectiveClassPeriodId, "");
-    await act(async () => { void page.state.refresh(); });
-    await act(async () => page.defaults[2].resolve({ data: { periodId: "period-B" }, error: null }));
-    assert.equal(page.requests[1].args.p_filters.periodId, "period-B");
-    await act(async () => page.finish(1, 102));
-    assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-B");
-  });
-}
 
 for (const transition of [
   { label: "filter", props: { search: "changed" } },
@@ -216,20 +192,20 @@ for (const transition of [
   { label: "role", props: { actor: "actor:teacher" } },
   { label: "disabled list", props: { enabled: false } },
 ]) {
-  test(`late default resolver after ${transition.label} change cannot pin or fetch the abandoned period`, async (t) => {
-    const page = await mountClassConsumer(t, { deferDefault: true });
+  test(`late class results after ${transition.label} changes cannot overwrite the current scope`, async (t) => {
+    const page = await mountClassConsumer(t, { deferDefault: true, periodId: "retired-period" });
     await page.render(transition.props);
-    assert.equal(page.defaults[0].signal.aborted, true);
-    await act(async () => page.defaults[0].resolve({ data: { periodId: "abandoned-period" }, error: null }));
-    assert.equal(page.requests.length, 0);
-    assert.equal(page.state.effectiveClassPeriodId, "");
+    assert.equal(page.requests[0].signal.aborted, true);
+    await act(async () => page.finish(0, 102, [{ name: "Abandoned class" }]));
+    assert.equal(page.state.rows.length, 0);
     if (transition.props.enabled === false) await page.render({ enabled: true });
-    await act(async () => page.defaults[1].resolve({ data: { periodId: "period-B" }, error: null }));
-    assert.equal(page.requests[0].args.p_filters.periodId, "period-B");
-    await act(async () => page.finish(0, 102));
-    await page.render({ periodId: "period-B" });
-    assert.equal(page.requests.length, 1);
-    assert.equal(JSON.parse(page.state.scope).filters.periodId, "period-B");
+    assert.equal(page.requests[1].args.p_filters.periodId, null);
+    await act(async () => page.finish(1, 102, [{ name: "Current class" }]));
+    assert.equal(page.state.rows[0].title, "Current class");
+    await page.render({ periodId: "another-retired-period" });
+    assert.equal(page.requests.length, 2);
+    assert.equal(page.defaults.length, 0);
+    assert.equal(JSON.parse(page.state.scope).filters.periodId, null);
   });
 }
 
@@ -409,7 +385,7 @@ test("URL and saved sorts are sanitized with per-kind defaults and preserve unre
   assert.equal(params.get("page"), null); assert.deepEqual(JSON.parse(params.get("sort")), [{ id: "school", desc: true }]);
 });
 
-test("filter changes reset page atomically, while default-period canonicalization preserves restore", async () => {
+test("filter changes reset page atomically, while retired period parameters preserve restore", async () => {
   const exports = await import("../src/features/management/management-numbered-state.ts");
   assert.equal(typeof exports.resetManagementPageForFilters, "function");
   const changed = new URLSearchParams("q=new&page=11&studentId=detail&sort=%5B%5D");
@@ -419,11 +395,11 @@ test("filter changes reset page atomically, while default-period canonicalizatio
   exports.resetManagementPageForFilters("students", "q=old&page=11", unchanged);
   assert.equal(unchanged.get("page"), "11");
   const canonical = new URLSearchParams("page=11&period=default&q=math");
-  exports.resetManagementPageForFilters("classes", "page=11&q=math", canonical, "default");
+  exports.resetManagementPageForFilters("classes", "page=11&q=math", canonical);
   assert.equal(canonical.get("page"), "11");
   const explicit = new URLSearchParams("page=11&period=next&q=math");
-  exports.resetManagementPageForFilters("classes", "page=11&period=old&q=math", explicit, "default");
-  assert.equal(explicit.get("page"), null);
+  exports.resetManagementPageForFilters("classes", "page=11&period=old&q=math", explicit);
+  assert.equal(explicit.get("page"), "11");
 });
 
 test("numbered navigation notifies Next history rather than copying its internal bypass marker", async () => {
@@ -467,7 +443,7 @@ test("StrictMode mount replay creates a live controller and authorization aborts
   await act(async () => root.unmount());
 });
 
-test("default-period resolution and canonical URL restore issue only one numbered page request", async (t) => {
+test("retired period URL cleanup issues only one numbered page request", async (t) => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid/?page=11" });
   globalThis.window = dom.window; globalThis.document = dom.window.document;
   t.after(() => dom.window.close());
@@ -483,10 +459,10 @@ test("default-period resolution and canonical URL restore issue only one numbere
   const root = createRoot(document.getElementById("root"));
   await act(async () => root.render(createElement(StrictMode, null, createElement(Probe))));
   assert.equal(requests.length, 1);
-  assert.equal(requests[0].args.p_filters.periodId, "period-default");
+  assert.equal(requests[0].args.p_filters.periodId, null);
   assert.equal(requests[0].args.p_page, 11);
   await act(async () => finish(0));
-  assert.equal(state.effectiveClassPeriodId, "period-default");
+  assert.equal(JSON.parse(state.scope).filters.periodId, null);
   await act(async () => root.render(createElement(StrictMode, null, createElement(Probe, { periodId: "period-default" }))));
   assert.equal(requests.length, 1);
   assert.equal(state.page, 11);
@@ -577,6 +553,7 @@ test("the real table renders server page rows unchanged, routes sort headers and
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
   window.cancelAnimationFrame = window.clearTimeout;
   window.scrollTo = () => {};
+  window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
   const router = { replace() {}, push() {} };
   t.after(() => dom.window.close());
   const { ManagementDataTable } = loadHook(null, "src/features/management/management-data-table.tsx", {

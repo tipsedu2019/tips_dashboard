@@ -114,8 +114,7 @@ function parsePage<K extends ManagementNumberedKind>(data: unknown, request: Man
 
 export function createManagementNumberedReadService({ supabase }: { supabase: Pick<SupabaseClient, "rpc"> }) {
   return {
-    // Class default-period resolution is intentionally caller-owned, using the existing
-    // get_management_default_class_period_v1 resolver at the hook boundary.
+    // Class period filters are retired; callers pass null in the legacy RPC field.
     async readPage<K extends ManagementNumberedKind>(request: ManagementNumberedRequest<K>): Promise<NumberedPage<RowFor<K>>> {
       validateRequest(request);
       request.signal?.throwIfAborted();

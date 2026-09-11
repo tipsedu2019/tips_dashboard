@@ -1,7 +1,7 @@
 "use client";
 
-import { type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Check, ChevronDown, ChevronUp, Plus, Save, Trash2, X } from "lucide-react";
+import { Fragment, type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 
 import type { ClassFormReferences, ManagementKind, ManagementListFilters, ManagementRow } from "@/features/management/use-management-records";
@@ -20,7 +20,6 @@ import {
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -59,7 +58,6 @@ import {
   isTeacherCatalogForClassSubject,
   managementService,
 } from "./management-service.js";
-import { pickDefaultPeriodValue } from "./period-preferences";
 import { serializeManagementListFilters } from "./management-filter-transition.js";
 import { getManagementListErrorRecoveryState } from "./management-list-load-state";
 import {
@@ -93,7 +91,7 @@ type ManagementServiceClient = {
   createStudent: (record: Record<string, unknown>) => Promise<unknown>;
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
-  createClass: (record: Record<string, unknown>, options: { candidateMembershipContext?: ClassFormReferences; groupIds: string[] }) => Promise<unknown>;
+  createClass: (record: Record<string, unknown>, options: { candidateMembershipContext?: ClassFormReferences; groupIds?: string[] }) => Promise<unknown>;
   updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized" }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -104,7 +102,6 @@ type ManagementServiceClient = {
   searchRelationPicker: (args: { kind: "students" | "classes"; search: string }) => Promise<RelatedRecord[]>;
   assignStudentToClass: (args: { studentId: string; classId: string; mode: "enrolled" | "waitlist" }) => Promise<unknown>;
   removeStudentFromClass: (args: { studentId: string; classId: string }) => Promise<unknown>;
-  replaceClassGroupMemberships: (args: { classId: string; groupIds: string[] }) => Promise<unknown>;
   getClassScheduleDefaults: (classId: string) => Promise<unknown>;
   saveClassScheduleDefaults: (input: {
     classId: string;
@@ -153,11 +150,10 @@ type Field = {
   inputMode?: "text" | "search" | "tel" | "url" | "email" | "numeric" | "decimal";
   autoComplete?: string;
 };
-type ClassGroupOption = { id: string; name: string; subject?: string; isDefault?: boolean };
 type DeleteRequest = { rows: ManagementRow[] };
 const CLASS_STATUS_OPTIONS = ["수강", "개강 준비", "종강"] as const;
 const CLASS_SCHEDULE_DAYS = ["월", "화", "수", "목", "금", "토", "일"] as const;
-const CLASS_ROSTER_GRID_CLASS_NAME = "grid gap-3 px-3 lg:grid-cols-[minmax(9rem,1.1fr)_minmax(7rem,.7fr)_minmax(5rem,.45fr)_minmax(8rem,.85fr)_minmax(8rem,.85fr)_auto] lg:items-center";
+const CLASS_ROSTER_GRID_CLASS_NAME = "grid gap-3 px-3 lg:grid-cols-[minmax(8rem,1.1fr)_minmax(6.5rem,.7fr)_minmax(4rem,.45fr)_minmax(8rem,.85fr)_minmax(8rem,.85fr)_9.5rem] lg:items-center";
 const CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME = "grid gap-2 md:grid-cols-[repeat(5,minmax(0,1fr))_2.5rem]";
 const CLASS_TUITION_UNIT_WON = 10000;
 const CLASS_DETAIL_TABS = [
@@ -732,150 +728,6 @@ function getStudentGradeOptions(rawRows: Record<string, unknown>[], category: st
   );
 }
 
-function parseClassGroupIds(value: unknown) {
-  const raw = text(value);
-  if (!raw) return [];
-
-  try {
-    const parsed = JSON.parse(raw);
-    if (Array.isArray(parsed)) {
-      return [...new Set(parsed.map(text).filter(Boolean))];
-    }
-  } catch {
-    // Older draft state may have comma-separated group IDs.
-  }
-
-  return [...new Set(raw.split(",").map(text).filter(Boolean))];
-}
-
-function stringifyClassGroupIds(ids: string[]) {
-  return JSON.stringify([...new Set(ids.map(text).filter(Boolean))]);
-}
-
-function normalizeClassGroupOptions(value: unknown): ClassGroupOption[] {
-  if (!Array.isArray(value)) return [];
-
-  return value
-    .map((item): ClassGroupOption | null => {
-      if (item && typeof item === "object") {
-        const group = item as Record<string, unknown>;
-        const id = text(group.id);
-        const name = text(group.name) || id;
-        return id || name
-          ? {
-              id: id || name,
-              name,
-              subject: text(group.subject),
-              isDefault: group.is_default === true || group.isDefault === true,
-            }
-          : null;
-      }
-
-      const name = text(item);
-      return name ? { id: name, name } : null;
-    })
-    .filter((item): item is ClassGroupOption => Boolean(item));
-}
-
-function getClassGroupIdsFromRaw(raw: Record<string, unknown>) {
-  const explicit = Array.isArray(raw.classGroupIds)
-    ? raw.classGroupIds
-    : Array.isArray(raw.class_group_ids)
-      ? raw.class_group_ids
-      : [];
-  const explicitIds = explicit.map(text).filter(Boolean);
-  if (explicitIds.length > 0) {
-    return [...new Set(explicitIds)];
-  }
-
-  const assignedGroupIds = normalizeClassGroupOptions(raw.classGroups || raw.class_groups).map((group) => group.id);
-  if (assignedGroupIds.length > 0) {
-    return [...new Set(assignedGroupIds)];
-  }
-
-  const legacyLabel = [getClassAcademicYearOption(raw), getClassTermOption(raw)].filter(Boolean).join(" ").trim();
-  if (!legacyLabel) {
-    return [];
-  }
-
-  return [
-    ...new Set(
-      normalizeClassGroupOptions(raw.availableClassGroups || raw.available_class_groups)
-        .filter((group) => group.id === legacyLabel || group.name === legacyLabel)
-        .map((group) => group.id),
-    ),
-  ];
-}
-
-function getClassGroupOptionsFromRows(rows: ManagementRow[]) {
-  const byId = new Map<string, ClassGroupOption>();
-  for (const row of rows) {
-    const raw = (row.raw || {}) as Record<string, unknown>;
-    for (const group of [
-      ...normalizeClassGroupOptions(raw.availableClassGroups || raw.available_class_groups),
-      ...normalizeClassGroupOptions(raw.classGroups || raw.class_groups),
-    ]) {
-      if (!byId.has(group.id)) {
-        byId.set(group.id, group);
-      }
-    }
-  }
-
-  return [...byId.values()].sort(
-    (left, right) =>
-      text(left.subject).localeCompare(text(right.subject), "ko") ||
-      left.name.localeCompare(right.name, "ko", { numeric: true }),
-  );
-}
-
-function getDefaultClassGroupIdsForCreate(classGroupOptions: ClassGroupOption[]) {
-  const defaultGroupId = pickDefaultPeriodValue(
-    classGroupOptions.map((group) => ({
-      value: group.id,
-      label: group.name,
-      aliases: [group.id, group.name],
-      isDefault: group.isDefault,
-    })),
-  );
-
-  return defaultGroupId ? stringifyClassGroupIds([defaultGroupId]) : "";
-}
-
-function getClassAcademicYearOption(record: Record<string, unknown>) {
-  const explicitYear = text(
-    record.academic_year ||
-      record.academicYear ||
-      record.year ||
-      record.term_year ||
-      record.termYear,
-  );
-  if (explicitYear) {
-    return explicitYear;
-  }
-
-  const dateText = text(
-    record.start_date ||
-      record.startDate ||
-      record.end_date ||
-      record.endDate ||
-      record.created_at ||
-      record.createdAt,
-  );
-  return dateText.match(/\d{4}/)?.[0] || "";
-}
-
-function getClassTermOption(record: Record<string, unknown>) {
-  return text(
-    record.term ||
-      record.term_name ||
-      record.termName ||
-      record.semester ||
-      record.academic_term ||
-      record.academicTerm ||
-      record.period,
-  );
-}
-
 function getLabel(kind: ManagementKind) {
   if (kind === "students") return "학생 등록";
   if (kind === "classes") return "수업 등록";
@@ -918,7 +770,6 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
   };
   const nextForm = Object.fromEntries(FORM_FIELDS[kind].map((field) => [field.name, valueFor(field.name)]));
   if (kind === "classes") {
-    nextForm.classGroupIds = stringifyClassGroupIds(getClassGroupIdsFromRaw(raw));
     nextForm.textbookIds = JSON.stringify(idList(raw.textbook_ids || raw.textbookIds));
   }
   return nextForm;
@@ -1316,16 +1167,16 @@ function renderStudentHistoryPanel(row: ManagementRow) {
   const textbookHistory = getStudentTextbookHistory(row);
 
   return (
-    <section className="space-y-3 border-t pt-4">
+    <section className="student-history-panel space-y-3 border-t pt-4">
       <div className="text-sm font-semibold">수업·교재 이력</div>
-      <div className="grid gap-3 lg:grid-cols-2">
+      <div className="student-history-lists grid min-w-0 gap-3">
         {renderStudentTimelineList("수업 이력", classHistory, (item, index) => (
           <div key={text(item.id) || `class-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <span className="truncate text-sm font-medium">{text(item.className || item.class_name) || "-"}</span>
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <span className="min-w-0 whitespace-normal break-words text-sm font-medium">{text(item.className || item.class_name) || "-"}</span>
               <Badge variant="outline" className="shrink-0">{text(item.label || item.action) || "-"}</Badge>
             </div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">
               {[text(item.subject), text(item.teacher), formatHistoryDate(item.changedAt || item.changed_at)]
                 .filter(Boolean)
                 .join(" · ")}
@@ -1334,11 +1185,11 @@ function renderStudentHistoryPanel(row: ManagementRow) {
         ))}
         {renderStudentTimelineList("교재 이력", textbookHistory, (item, index) => (
           <div key={text(item.id) || `textbook-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
-            <div className="flex min-w-0 items-center justify-between gap-2">
-              <span className="truncate text-sm font-medium">{text(item.title) || "-"}</span>
+            <div className="flex min-w-0 items-start justify-between gap-3">
+              <span className="min-w-0 whitespace-normal break-words text-sm font-medium">{text(item.title) || "-"}</span>
               <Badge variant="outline" className="shrink-0">{text(item.quantity) || "0"}권</Badge>
             </div>
-            <div className="truncate text-xs text-muted-foreground">
+            <div className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">
               {[text(item.className || item.class_name), text(item.status), formatHistoryDate(item.issuedAt || item.issued_at || item.createdAt || item.created_at)]
                 .filter(Boolean)
                 .join(" · ")}
@@ -1424,7 +1275,7 @@ function FieldClearButton({
       type="button"
       variant="ghost"
       size="icon"
-      className="absolute right-8 top-1/2 z-10 size-6 -translate-y-1/2 rounded-full bg-background/90 text-muted-foreground hover:text-foreground"
+      className="absolute right-8 top-1/2 z-10 size-6 -translate-y-1/2 rounded-full bg-background/90"
       disabled={disabled}
       aria-label={ariaLabel}
       onClick={(event) => {
@@ -1483,7 +1334,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     error,
     classFormReferences,
     filterOptions,
-    effectiveClassPeriodId,
     page,
     pageSize: displayedPageSize,
     totalCount,
@@ -1513,6 +1363,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [scheduleDefaultsSaving, setScheduleDefaultsSaving] = useState(false);
   const [scheduleDefaultsRequestKey, setScheduleDefaultsRequestKey] = useState("");
   const detailRequestRef = useRef(0);
+  const managementDialogOpenerRef = useRef<HTMLElement | null>(null);
+  const managementDialogRowIdRef = useRef<string | null>(null);
   const scheduleRequestRef = useRef(0);
   const scheduleEditRevisionRef = useRef(0);
   const beginDetailRequest = useCallback(() => {
@@ -1589,12 +1441,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   ]);
   const textbookCandidateScopeMatches = textbookCandidateCommittedScope?.key === textbookCandidateScopeKey;
 
-  useEffect(() => {
-    if (kind !== "classes" || searchParams.get("period") || !effectiveClassPeriodId) return;
-    const params = new URLSearchParams(searchParams.toString());
-    params.set("period", effectiveClassPeriodId);
-    router.replace(`${pathname}?${params.toString()}`, { scroll: false });
-  }, [effectiveClassPeriodId, kind, pathname, router, searchParams]);
+
 
   useEffect(() => {
     const requestId = textbookCandidateRequestRef.current + 1;
@@ -1823,14 +1670,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       grade: getStudentGradeOptions(rawRows, studentSchoolCategory),
     } satisfies Record<string, string[]>;
   }, [kind, rows, studentSchoolCategory]);
-  const classGroupOptions = useMemo(
-    () => (kind === "classes" ? getClassGroupOptionsFromRows(rows) : []),
-    [kind, rows],
-  );
-  const defaultClassGroupIdsForCreate = useMemo(
-    () => (kind === "classes" ? getDefaultClassGroupIdsForCreate(classGroupOptions) : ""),
-    [classGroupOptions, kind],
-  );
   const writeClassDetailRoute = useCallback(
     (
       classId: string,
@@ -1838,7 +1677,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       options: { studentId?: string } = {},
     ) => {
       if (kind !== "classes") return;
-      const params = new URLSearchParams(searchParams.toString());
+      const params = new URLSearchParams(window.location.search);
+      params.delete("period");
       params.set("classId", classId);
       params.set("tab", tab);
       params.delete("section");
@@ -1851,12 +1691,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const nextQuery = params.toString();
       router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
     },
-    [kind, pathname, router, searchParams],
+    [kind, pathname, router],
   );
   const clearClassDetailRoute = useCallback(() => {
     if (kind !== "classes") return;
     classDetailRouteClearPendingRef.current = true;
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
+    params.delete("period");
     params.delete("classId");
     params.delete("tab");
     params.delete("section");
@@ -1865,7 +1706,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     params.delete("returnTo");
     const nextQuery = params.toString();
     router.replace(nextQuery ? `${pathname}?${nextQuery}` : pathname, { scroll: false });
-  }, [kind, pathname, router, searchParams]);
+  }, [kind, pathname, router]);
   useEffect(() => {
     if (kind === "classes" && !requestedClassId) {
       classDetailRouteClearPendingRef.current = false;
@@ -1880,7 +1721,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     ) {
       return;
     }
-    const params = new URLSearchParams(searchParams.toString());
+    const params = new URLSearchParams(window.location.search);
+    params.delete("period");
     if (shouldNormalizeTab) {
       params.set("tab", requestedClassDetailTab);
     }
@@ -2006,7 +1848,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         <div className="divide-y">
           {kind === "classes" ? (
             <>
-              <div className={cn("hidden bg-muted/25 py-2 text-xs font-medium text-muted-foreground lg:grid", CLASS_ROSTER_GRID_CLASS_NAME)}>
+              <div className={cn(CLASS_ROSTER_GRID_CLASS_NAME, "hidden bg-muted/25 py-2 text-xs font-medium text-muted-foreground lg:grid")}>
                 <div>학생</div>
                 <div>학교</div>
                 <div>학년</div>
@@ -2039,7 +1881,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                      <button
 	                        type="button"
 	                        data-testid="class-roster-student-name-link"
-	                        className="block max-w-full truncate text-left text-sm font-semibold underline-offset-2 transition hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+	                        className="block max-w-full whitespace-normal break-words text-left text-sm font-semibold underline-offset-2 transition hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	                        onClick={() => setPendingClassStudentDetailId(id)}
 	                      >
 	                        {resolveRelatedTitle(id)}
@@ -2047,19 +1889,19 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                    </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학교</div>
-                      <div className="truncate text-sm font-medium">{school || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm font-medium">{school || "-"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학년</div>
-                      <div className="truncate text-sm font-medium">{grade || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm font-medium">{grade || "-"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학생 연락처</div>
-                      <div className="truncate text-sm font-medium">{studentContact || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm font-medium">{studentContact || "-"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학부모 연락처</div>
-                      <div className="truncate text-sm font-medium">{parentContact || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm font-medium">{parentContact || "-"}</div>
                     </div>
 	                    <div className="flex flex-wrap justify-end gap-1">
 	                      {modeLabel !== "수강" ? (
@@ -2076,9 +1918,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                      ) : null}
 	                      <Button
                         type="button"
-                        variant="outline"
+                        variant="destructive-outline"
                         size="sm"
-                        className="h-7 px-2 text-destructive hover:text-destructive"
+                        className="h-7 px-2"
                         onClick={() => handleRelationRemove(selectedRow?.id || "", id)}
                         disabled={saving || !canMutateRows}
                         aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
@@ -2091,12 +1933,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               })}
             </>
           ) : ids.map((id) => (
-            <div key={`${modeLabel}-${id}`} className="grid gap-3 px-3 py-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center">
+            <div key={`${modeLabel}-${id}`} className="student-class-row grid min-w-0 gap-3 px-4 py-3">
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold">{resolveRelatedTitle(id)}</div>
-                <div className="mt-0.5 truncate text-xs text-muted-foreground">{relatedMeta(kind, resolveRelatedRecord(id)) || modeLabel}</div>
+                <div className="whitespace-normal break-words text-sm font-semibold leading-6">{resolveRelatedTitle(id)}</div>
+                <div className="mt-1 whitespace-normal break-words text-xs leading-5 text-muted-foreground">{relatedMeta(kind, resolveRelatedRecord(id)) || modeLabel}</div>
               </div>
-              <div className="flex flex-wrap justify-end gap-1">
+              <div className="student-class-actions flex flex-wrap gap-2">
                 <Button
                   type="button"
                   variant="outline"
@@ -2119,9 +1961,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 </Button>
                 <Button
                   type="button"
-                  variant="outline"
+                  variant="destructive-outline"
                   size="sm"
-                  className="h-7 px-2 text-destructive hover:text-destructive"
+                  className="h-7 px-2"
                   onClick={() => handleRelationRemove(id, selectedRow?.id || "")}
                   disabled={saving || !canMutateRows}
                   aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
@@ -2341,7 +2183,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     const slots = getClassScheduleSlotsFromForm();
 
     return (
-      <section data-testid="class-schedule-slot-editor" className="space-y-3 rounded-md border bg-background p-3 sm:col-span-2">
+      <section data-testid="class-schedule-slot-editor" className="class-schedule-fields space-y-3 rounded-md border bg-background p-3 sm:col-span-2">
+        <h3 className="text-sm font-semibold">기본 시간표</h3>
         <div
           data-testid="class-schedule-slot-header"
           className={cn("hidden px-2 text-[11px] font-medium text-muted-foreground md:grid", CLASS_SCHEDULE_SLOT_GRID_CLASS_NAME)}
@@ -2476,9 +2319,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                <div className="flex min-w-0 items-end justify-end">
                   <Button
                     type="button"
-                    variant="ghost"
+                    variant="destructive-ghost"
                     size="icon"
-                    className="h-10 w-10 text-muted-foreground hover:text-destructive"
+                    className="h-10 w-10"
                     onClick={() => removeClassScheduleSlot(index)}
                     disabled={!canMutateRows || slots.length <= 1}
                     aria-label="시간표 행 삭제"
@@ -2527,43 +2370,34 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   };
 
   const renderEditableFields = (scope: "detail" | "form" | "quick", fieldNames?: string[]) => {
-    const selectedClassGroupIds = new Set(parseClassGroupIds(form.classGroupIds));
-    const selectedClassGroups = classGroupOptions.filter((group) => selectedClassGroupIds.has(group.id));
-    const selectedClassGroupLabel =
-      selectedClassGroups.length === 0
-        ? "기간 선택"
-        : selectedClassGroups.length <= 2
-          ? selectedClassGroups.map((group) => group.name).join(", ")
-          : `${selectedClassGroups[0]?.name || "기간"} 외 ${selectedClassGroups.length - 1}개`;
-    const classGroupField: Field = { name: "classGroupIds", label: "기간", placeholder: "기간 선택" };
     const requestedFields = fieldNames
-      ? fieldNames.map((fieldName) => fieldName === "classGroupIds" ? classGroupField : FORM_FIELDS[kind].find((field) => field.name === fieldName)).filter((field): field is Field => Boolean(field))
-      : kind === "classes" ? [...FORM_FIELDS[kind], classGroupField] : FORM_FIELDS[kind];
+      ? fieldNames.map((fieldName) => FORM_FIELDS[kind].find((field) => field.name === fieldName)).filter((field): field is Field => Boolean(field))
+      : FORM_FIELDS[kind];
     const fieldsToRender = requestedFields.filter((field) => (
       kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject)
     ));
-    const toggleClassGroup = (groupId: string) => {
-      const nextIds = new Set(selectedClassGroupIds);
-      if (nextIds.has(groupId)) {
-        nextIds.delete(groupId);
-      } else {
-        nextIds.add(groupId);
-      }
-      setForm((current) => ({ ...current, classGroupIds: stringifyClassGroupIds([...nextIds]) }));
-    };
 
     return (
-      <div className="grid gap-3 sm:grid-cols-2">
+      <div className={cn("grid gap-3", kind === "students" ? "student-fields" : kind === "classes" ? "class-fields sm:grid-cols-2" : "sm:grid-cols-2")}>
         {fieldsToRender.map((field) => {
           const id = `${kind}-${scope}-${field.name}`;
           const value = form[field.name] || "";
           const selectOptions = getEditableFieldOptions(field.name, value);
-          const fieldWrapperClassName = cn("space-y-2", field.multiline || (kind === "classes" && scope === "detail" && field.name === "name") ? "sm:col-span-2" : "");
+          const fieldWrapperClassName = cn(
+            "space-y-2",
+            field.multiline || (kind === "classes" && scope === "detail" && field.name === "name")
+              ? "sm:col-span-2"
+              : "",
+          );
           return (
-            <div key={field.name} className={fieldWrapperClassName}>
-              <Label htmlFor={id}>{field.label}</Label>
-              {kind === "classes" && field.name === "subjectAreaKey" ? (
-                <>
+            <Fragment key={field.name}>
+              {kind === "students" && (field.name === "school_category" || field.name === "contact") ? (
+                <div className="student-field-divider" role="separator" />
+              ) : null}
+              <div className={fieldWrapperClassName}>
+                <Label htmlFor={id}>{field.label}</Label>
+                {kind === "classes" && field.name === "subjectAreaKey" ? (
+                  <>
                   <Select
                     value={value || "__none__"}
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
@@ -2581,53 +2415,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   </Select>
                   {!value ? <p className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
                 </>
-              ) : kind === "classes" && field.name === "classGroupIds" ? (
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="h-10 w-full justify-between px-3 font-normal"
-                      disabled={!canMutateRows || classGroupOptions.length === 0}
-                    >
-                      <span className={cn("truncate", selectedClassGroups.length === 0 && "text-muted-foreground")}>
-                        {classGroupOptions.length === 0 ? "기간 없음" : selectedClassGroupLabel}
-                      </span>
-                      <ChevronDown className="ml-2 size-4 shrink-0 text-muted-foreground" aria-hidden="true" />
-                    </Button>
-	                  </PopoverTrigger>
-	                  <PopoverContent align="start" className="w-[--radix-popover-trigger-width] p-1">
-                    <div className="max-h-72 overflow-y-auto">
-                      {classGroupOptions.map((group) => {
-                        const checked = selectedClassGroupIds.has(group.id);
-                        return (
-                          <button
-                            key={group.id}
-                            type="button"
-                            className={cn(
-                              "flex w-full items-center gap-3 rounded-md px-2 py-2 text-left text-sm hover:bg-muted",
-                              checked && "bg-primary/10 text-primary hover:bg-primary/10",
-                            )}
-                            onClick={() => toggleClassGroup(group.id)}
-                            disabled={!canMutateRows}
-                          >
-                            <span
-                              aria-hidden="true"
-                              className={cn(
-                                "flex size-4 shrink-0 items-center justify-center rounded-[4px] border border-input bg-background",
-                                checked && "border-primary bg-primary text-primary-foreground",
-                              )}
-                            >
-                              {checked ? <Check className="size-3" /> : null}
-                            </span>
-                            <span className="min-w-0 flex-1 truncate font-medium">{group.name}</span>
-                            {group.subject ? <Badge variant="secondary" className="shrink-0">{group.subject}</Badge> : null}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </PopoverContent>
-                </Popover>
               ) : kind === "classes" && field.name === "capacity" ? (
                 <ClassCapacityInput
                   id={id}
@@ -2692,7 +2479,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               )}
-            </div>
+              </div>
+            </Fragment>
           );
         })}
 
@@ -2938,9 +2726,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setScheduleDefaultsRequestKey("");
         setScheduleDefaultsSaving(false);
         const nextForm = initialForm(kind);
-        if (kind === "classes" && defaultClassGroupIdsForCreate) {
-          nextForm.classGroupIds = defaultClassGroupIdsForCreate;
-        }
         setForm(nextForm);
         setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
         setPendingClassScheduleInitialization(null);
@@ -2973,11 +2758,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         ...base,
         onOpenTeacherMaster: () => router.push("/admin/settings/teachers"),
         onOpenClassroomMaster: () => router.push("/admin/settings/classrooms"),
-        onOpenTermManager: () => router.push("/admin/settings/class-groups"),
       };
     }
     return base;
-  }, [beginDetailRequest, canMutateRows, defaultClassGroupIdsForCreate, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, router]);
+  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, router]);
 
   const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;
@@ -3027,7 +2811,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       } else if (kind === "classes") {
         const created = await service.createClass(payload, {
           candidateMembershipContext: classFormReferences,
-          groupIds: parseClassGroupIds(form.classGroupIds),
         });
         savedResult = created;
         const classId = getSavedClassId(created, payload.id);
@@ -3093,13 +2876,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           ...(normalizedScheduleDefaults ? { scheduleOwnership: "normalized" as const } : {}),
         });
         savedResult = updated;
-        const classId = getSavedClassId(updated, payload.id || selectedRow.id);
-        if (text((updated as Record<string, unknown>)?.status) !== "종강") {
-          await service.replaceClassGroupMemberships({
-            classId,
-            groupIds: parseClassGroupIds(form.classGroupIds),
-          });
-        }
       } else {
         savedResult = await service.updateTextbook(payload);
       }
@@ -3113,8 +2889,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           : kind === "students"
             ? text(payload.grade) || selectedRow.badge
             : text(payload.publisher) || selectedRow.badge;
-      const nextClassGroupIds = parseClassGroupIds(form.classGroupIds);
-      const nextClassGroups = classGroupOptions.filter((group) => nextClassGroupIds.includes(group.id));
 
       setSelectedRow((current) =>
         current && current.id === selectedRow.id
@@ -3125,17 +2899,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               raw: {
                 ...(current.raw || {}),
                 ...payload,
-                class_group_ids: nextClassGroupIds,
-                classGroupIds: nextClassGroupIds,
-                class_groups: nextClassGroups,
-                classGroups: nextClassGroups,
-                class_group_names: nextClassGroups.map((group) => group.name),
-                classGroupNames: nextClassGroups.map((group) => group.name),
-              },
-              metrics: {
-                ...current.metrics,
-                classGroupIds: nextClassGroupIds,
-                classGroupNames: nextClassGroups.map((group) => group.name),
               },
             }
           : current,
@@ -3305,43 +3068,16 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     return null;
   };
 
-	  const renderClassMobileActionBar = () => {
-	    if (kind !== "classes" || !selectedRow) return null;
-	    const mobileSaveStatus = renderSaveStatus();
-
-	    return (
-	      <div
-        data-testid="class-detail-mobile-action-bar"
-        className="sticky bottom-0 z-30 -mx-4 grid gap-1 border-t bg-background/95 p-2 shadow-[0_-8px_20px_-18px_rgba(15,23,42,0.65)] backdrop-blur md:hidden sm:-mx-6"
-	      >
-	        {mobileSaveStatus ? (
-	          <div
-	            data-testid="class-detail-mobile-save-status"
-            className="flex min-h-6 items-center justify-center rounded-sm bg-muted/40 px-2 py-1"
-	          >
-	            {mobileSaveStatus}
-	          </div>
-	        ) : null}
-	        <Button
-	          type="button"
-	          size="sm"
-	          variant="outline"
-	          data-testid="class-detail-mobile-save"
-	          className="h-11 min-w-0 rounded-sm px-3 text-sm"
-	          aria-label={saving ? "저장 중" : "저장"}
-	          title={saving ? "저장 중" : "저장"}
-	          onClick={handleDetailSave}
-	          disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}
-	        >
-	          <Save className="size-3.5" aria-hidden="true" />
-	          <span className="ml-1.5 max-w-full truncate">{saving ? "저장 중" : "저장"}</span>
-	        </Button>
-	      </div>
-	    );
-	  };
-
   const scrollClassRosterIntoView = () => {
-    document.getElementById("class-detail-students-section")?.scrollIntoView({ behavior: "smooth", block: "start" });
+    const section = document.getElementById("class-detail-students-section");
+    const scrollport = section?.closest<HTMLElement>('[data-slot="dialog-content"]');
+    if (!section || !scrollport) return;
+    const header = scrollport.querySelector<HTMLElement>('[data-testid="class-official-summary-bar"]');
+    const visibleTop = header?.getBoundingClientRect().bottom ?? scrollport.getBoundingClientRect().top;
+    scrollport.scrollBy({
+      top: section.getBoundingClientRect().top - visibleTop - 16,
+      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+    });
   };
 
   const renderClassSummaryBar = () => {
@@ -3365,12 +3101,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       : `${registeredCount}명 (${waitlistCount}명)`;
 
     return (
-      <div data-testid="class-official-summary-bar" className="sticky top-0 z-20 -mx-4 border-b bg-background px-4 py-3 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background sm:-mx-6 sm:px-6 sm:before:-top-6 sm:before:h-6">
+      <div data-testid="class-official-summary-bar" className="class-detail-header sticky top-0 z-20 -mx-4 border-b bg-background px-4 py-3 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background sm:-mx-6 sm:px-6 sm:before:-top-6 sm:before:h-6">
         <div className="flex items-start gap-3">
           <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="min-w-0 flex-1 truncate text-base font-semibold text-foreground">{selectedRow.title} 수업정보</div>
+                <div className="class-detail-header-title min-w-0 flex-1 whitespace-normal break-words font-semibold text-foreground">{selectedRow.title} 수업정보</div>
                 <div className="flex shrink-0 flex-wrap items-center gap-1.5">
                   {requestedClassReturnPath?.startsWith("/admin/students") ? (
                     <Button
@@ -3397,20 +3133,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   ) : null}
                 </div>
               </div>
-              <div className="mt-1.5 flex flex-wrap gap-1.5">
+              <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1">
                 {summaryMetaItems.map((item) => (
-                  <span key={item.label} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">
+                  <span key={item.label} className="inline-flex max-w-full items-baseline gap-1.5 text-xs leading-5 text-muted-foreground">
                     <span className="shrink-0">{item.label}</span>
-                    <span className="truncate font-medium text-foreground">{item.value}</span>
+                    <span className="min-w-0 whitespace-normal break-words font-medium text-foreground">{item.value}</span>
                   </span>
                 ))}
               </div>
             </div>
-            <div className="grid gap-2 lg:justify-self-end lg:min-w-56">
+            <div className="grid gap-2 lg:justify-self-end">
               <button
                 type="button"
                 data-testid="class-summary-roster-jump"
-                className="rounded-md border bg-muted/20 px-2.5 py-2 text-left text-sm transition hover:border-primary/40 hover:bg-primary/5 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+                className="-mx-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                 onClick={scrollClassRosterIntoView}
               >
                 <div className="text-xs text-muted-foreground">등록 (대기) / 정원</div>
@@ -3423,7 +3159,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             variant="ghost"
             size="icon"
             data-testid="class-detail-sticky-close"
-            className="size-8 shrink-0 text-muted-foreground hover:text-foreground"
+            className="size-9 shrink-0"
             aria-label="수업 상세 닫기"
             title="수업 상세 닫기"
             onClick={() => handleDialogOpenChange(false)}
@@ -3507,7 +3243,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 return (
                   <div key={id} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2.5">
                     <div className="min-w-0">
-                      <div className="truncate text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
+                      <div className="whitespace-normal break-words text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
                       {textbook ? (
                         <PickerMetaPills
                           className="mt-1"
@@ -3522,8 +3258,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     <Button
                       type="button"
                       size="icon"
-                      variant="ghost"
-                      className="size-8 shrink-0 text-muted-foreground hover:text-destructive"
+                      variant="destructive-ghost"
+                      className="size-8 shrink-0"
                       aria-label={`${textbook?.title || "교재"} 연결 해제`}
                       disabled={!canMutateRows}
                       onClick={() => updateSelectedIds(selectedIds.filter((selectedId) => selectedId !== id))}
@@ -3654,7 +3390,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         {kind !== "classes" ? (
           <div className="text-sm font-semibold">수업 연결</div>
         ) : null}
-        <div className="grid gap-3 rounded-md border bg-background p-3 lg:grid-cols-[minmax(16rem,1fr)_auto_auto]">
+        <div className={cn("grid gap-3 rounded-md border bg-background p-3", kind === "students" ? "student-class-picker" : "lg:grid-cols-[minmax(16rem,1fr)_auto_auto]")}>
           <div data-testid={kind === "classes" ? "class-relation-picker" : undefined} className="grid gap-1.5">
             <Label htmlFor={`${kind}-relation-picker-trigger`}>{relationLabel} 선택</Label>
             <ManagementRelationCombobox
@@ -3670,6 +3406,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               filters={relationPickerFilters}
               triggerId={`${kind}-relation-picker-trigger`}
               searchTestId={kind === "classes" ? "class-relation-picker-search" : undefined}
+              wrapLabels={kind === "students" || kind === "classes"}
               onSelect={(id) => {
                 setTargetId(id);
                 setRelationQuery("");
@@ -3684,7 +3421,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             <Button type="button" variant="outline" className="h-10 px-5" onClick={() => requestRelationSave("waitlist")} disabled={!canMutateRows || !targetId || saving}>대기 추가</Button>
           </div>
         </div>
-        <div className={cn("grid gap-3 text-sm", kind === "students" && "sm:grid-cols-2")}>
+        <div className={cn("grid gap-3 text-sm", kind === "students" && "student-related-lists")}>
           {kind === "students" ? (
             <>
               {renderRelationList("수강 수업", getStudentEnrolledClassIds(selectedRow), "수강", "enrollments")}
@@ -3719,7 +3456,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   });
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className={cn("flex flex-col gap-6", kind === "students" && "student-workspace", kind === "classes" && "class-workspace")}>
       {errorRecovery.visible ? (
         <div className="px-4 lg:px-6">
           <Alert variant="destructive">
@@ -3771,14 +3508,40 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
       <Dialog open={dialogMode !== null} onOpenChange={handleDialogOpenChange}>
         <DialogContent
-          className="z-[80] max-h-[92vh] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto p-4 sm:w-full sm:max-w-5xl sm:p-6"
-          showCloseButton={kind !== "classes" || !isDetail}
+          className={cn("z-[80] max-h-[92vh] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto p-4 sm:w-full sm:max-w-5xl sm:p-6", kind === "students" && "student-edit-sheet", kind === "classes" && "class-edit-sheet")}
+          overlayClassName={kind === "students" ? "student-edit-overlay" : kind === "classes" ? "class-edit-overlay" : undefined}
+          showCloseButton={kind !== "students" && (kind !== "classes" || !isDetail)}
+          onOpenAutoFocus={() => {
+            if (kind === "students" || kind === "classes") {
+              managementDialogOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              managementDialogRowIdRef.current = selectedRow?.id ?? null;
+            }
+          }}
+          onCloseAutoFocus={(event) => {
+            if (kind === "students" || kind === "classes") {
+              event.preventDefault();
+              const opener = managementDialogOpenerRef.current;
+              const triggerAttribute = kind === "students" ? "data-student-detail-trigger" : "data-class-detail-trigger";
+              const rowTrigger = Array.from(document.querySelectorAll<HTMLElement>(`[${triggerAttribute}]`))
+                .find((element) => element.getAttribute(triggerAttribute) === managementDialogRowIdRef.current && element.getClientRects().length > 0);
+              const target = opener?.isConnected && opener !== document.body ? opener : rowTrigger
+                ?? document.querySelector<HTMLElement>(kind === "students"
+                  ? '.student-workspace input[aria-label="학생 검색"]'
+                  : '.class-workspace input[aria-label="수업 검색"]');
+              target?.focus();
+            }
+          }}
         >
           <DialogHeader className={isDetail && kind === "classes" ? "sr-only" : "pr-10"}>
             <DialogTitle className={isDetail && kind === "classes" ? undefined : "break-keep pr-2 leading-6"}>{dialogTitle}</DialogTitle>
             <DialogDescription className="sr-only">
               선택한 데이터를 확인하고 필요한 항목을 입력하거나 수정합니다.
             </DialogDescription>
+            {kind === "students" ? (
+              <Button type="button" variant="ghost" size="icon" className="student-sheet-close" aria-label="학생 정보 닫기" onClick={() => handleDialogOpenChange(false)}>
+                <X className="size-4" aria-hidden="true" />
+              </Button>
+            ) : null}
           </DialogHeader>
 
           {operationError && !(isDetail && selectedRow && kind === "classes") ? (
@@ -3788,7 +3551,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           ) : null}
 
           {isDetail && selectedRow && kind === "classes" ? (
-            <div data-testid="class-official-detail" className="space-y-4 pb-28 md:pb-0">
+            <div data-testid="class-official-detail" className="class-detail-body space-y-4">
               {renderClassSummaryBar()}
               {operationError ? (
                 <Alert variant="destructive">
@@ -3804,7 +3567,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   "name",
                   "capacity",
                   "fee",
-                  "classGroupIds",
                   "status",
                 ])}
                 {renderClassScheduleSlotEditor()}
@@ -3813,15 +3575,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               <div id="class-detail-students-section" data-testid="class-detail-students-section" className="space-y-4">
                 {renderRelationManagementSection()}
               </div>
-              {renderClassMobileActionBar()}
-
-              <DialogFooter className="items-center gap-3">
+              <DialogFooter data-testid="class-detail-actions" className="class-sheet-actions">
                 {renderSaveStatus()}
-                <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button>
+                <Button type="button" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (
-            <div className="space-y-4">
+            <div className={cn("space-y-4", kind === "students" && "student-detail-body")}>
               {kind !== "students" || requestedStudentReturnPath ? (
                 <div className="flex flex-wrap items-center justify-between gap-3">
                   {kind !== "students" ? (
@@ -3894,18 +3655,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
               {kind === "students" ? renderStudentHistoryPanel(selectedRow) : null}
 
-              <DialogFooter className="items-center gap-3">
+              <DialogFooter className={cn("items-center gap-3", kind === "students" && "student-sheet-actions", kind === "classes" && "class-sheet-actions")}>
                 {renderSaveStatus()}
-                <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button>
-                <Button type="button" variant="destructive" onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving || !canMutateRows}>
-                  {deleteActionLabel}
+                {kind !== "students" ? <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button> : null}
+                <Button type="button" variant={kind === "students" ? "ghost" : "destructive"} className={kind === "students" ? "student-withdraw-action" : undefined} onClick={() => actions.onDeleteRow?.(selectedRow)} disabled={saving || !canMutateRows}>
+                  {kind === "students" ? "퇴원 처리" : deleteActionLabel}
                 </Button>
+                {kind === "students" ? <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button> : null}
+                {kind === "students" ? <Button type="button" onClick={handleDetailSave} disabled={saving || !canMutateRows}>{saving ? "저장 중" : "저장"}</Button> : null}
               </DialogFooter>
             </div>
           ) : (
             <form className="space-y-4" onSubmit={handleSubmit}>
               {renderEditableFields("form")}
-              <DialogFooter className="items-center gap-3">
+              <DialogFooter className={cn("items-center gap-3", kind === "students" && "student-sheet-actions", kind === "classes" && "class-sheet-actions")}>
                 {renderSaveStatus()}
                 <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>
                 {pendingClassScheduleInitialization ? (

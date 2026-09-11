@@ -1,17 +1,27 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { Settings2 } from "lucide-react";
+import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react";
 
-import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import {
+  DataTableColumnVisibilitySetting,
+  DataTableSettings,
+  DataTableSettingsSection,
+} from "@/components/data-table/data-table-settings";
 
 export type DataTableColumn = {
   id: string;
   label: string;
   required?: boolean;
 };
+
+export type DataTableColumnsOptions = {
+  ready?: boolean;
+  title?: string;
+};
+
+const subscribeToHydration = () => () => undefined;
+const getHydratedSnapshot = () => true;
+const getServerHydratedSnapshot = () => false;
 
 function buildDefaultVisibility(columns: DataTableColumn[]) {
   return Object.fromEntries(columns.map((column) => [column.id, true])) as Record<string, boolean>;
@@ -32,28 +42,47 @@ function sanitizeVisibility(columns: DataTableColumn[], value: unknown) {
   ) as Record<string, boolean>;
 }
 
-function readInitialVisibility(storageKey: string, columns: DataTableColumn[]) {
+function readInitialVisibility(storageKey: string, columns: DataTableColumn[]): Record<string, unknown> {
   if (typeof window === "undefined") {
     return buildDefaultVisibility(columns);
   }
 
   try {
     const rawValue = window.localStorage.getItem(storageKey);
-    return sanitizeVisibility(columns, rawValue ? JSON.parse(rawValue) : null);
+    if (!rawValue) {
+      return buildDefaultVisibility(columns);
+    }
+    const parsed = JSON.parse(rawValue);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? parsed as Record<string, unknown>
+      : buildDefaultVisibility(columns);
   } catch {
-    window.localStorage.removeItem(storageKey);
+    try {
+      window.localStorage.removeItem(storageKey);
+    } catch {
+      // Table settings are convenience state only.
+    }
     return buildDefaultVisibility(columns);
   }
 }
 
-export function useDataTableColumns(storageKey: string, columns: DataTableColumn[]) {
-  const [visibility, setVisibility] = useState<Record<string, boolean>>(() => readInitialVisibility(storageKey, columns));
+export function useDataTableColumns(
+  storageKey: string,
+  columns: DataTableColumn[],
+  { ready = true, title = "컬럼 구성" }: DataTableColumnsOptions = {},
+) {
+  const [visibility, setVisibility] = useState<Record<string, unknown>>(() => readInitialVisibility(storageKey, columns));
   const [open, setOpen] = useState(false);
+  const hydrated = useSyncExternalStore(subscribeToHydration, getHydratedSnapshot, getServerHydratedSnapshot);
   const columnById = useMemo(() => new Map(columns.map((column) => [column.id, column])), [columns]);
+  const defaultVisibility = useMemo(() => buildDefaultVisibility(columns), [columns]);
   const sanitizedVisibility = useMemo(() => sanitizeVisibility(columns, visibility), [columns, visibility]);
+  const exposedVisibility = hydrated ? sanitizedVisibility : defaultVisibility;
+  const requiredColumns = useMemo(() => columns.filter((column) => column.required), [columns]);
+  const optionalColumns = useMemo(() => columns.filter((column) => !column.required), [columns]);
 
   useEffect(() => {
-    if (typeof window === "undefined") {
+    if (!hydrated || !ready || typeof window === "undefined") {
       return;
     }
 
@@ -62,52 +91,63 @@ export function useDataTableColumns(storageKey: string, columns: DataTableColumn
     } catch {
       // Table settings are convenience state only.
     }
-  }, [sanitizedVisibility, storageKey]);
+  }, [hydrated, ready, sanitizedVisibility, storageKey]);
 
-  const isColumnVisible = (columnId: string) => Boolean(sanitizedVisibility[columnId]);
+  const isColumnVisible = useCallback(
+    (columnId: string) => Boolean(exposedVisibility[columnId]),
+    [exposedVisibility],
+  );
   const visibleColumnCount = columns.filter((column) => isColumnVisible(column.id)).length || 1;
-  const resetVisibility = () => setVisibility(buildDefaultVisibility(columns));
+  const resetVisibility = useCallback(() => setVisibility(buildDefaultVisibility(columns)), [columns]);
 
-  const toggleColumn = (columnId: string, checked: boolean) => {
+  const toggleColumn = useCallback((columnId: string, checked: boolean) => {
     const column = columnById.get(columnId);
     if (column?.required) {
       return;
     }
     setVisibility((current) => ({ ...current, [columnId]: checked }));
-  };
+  }, [columnById]);
+
+  const requiredColumnLabels = requiredColumns.map((column) => column.label).join(", ");
 
   const columnSettingsControl = (
-    <Popover open={open} onOpenChange={setOpen}>
-      <PopoverTrigger asChild>
-        <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0" aria-label="컬럼 구성" title="컬럼 구성">
-          <Settings2 className="size-4" />
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" sideOffset={8} className="w-64 rounded-lg p-2">
-        <div className="flex items-center justify-between gap-2 px-2 py-1.5">
-          <div className="text-sm font-semibold text-foreground">컬럼 구성</div>
-          <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={resetVisibility}>
-            초기화
-          </Button>
-        </div>
-        <div className="grid gap-0.5">
-          {columns.map((column) => (
-            <label
-              key={column.id}
-              className="flex h-9 cursor-pointer items-center gap-2 rounded-md px-2 text-sm hover:bg-muted/70"
-            >
-              <Checkbox
-                checked={isColumnVisible(column.id)}
-                disabled={column.required}
-                onCheckedChange={(checked) => toggleColumn(column.id, checked === true)}
+    <DataTableSettings
+      title={title}
+      triggerLabel="컬럼 구성"
+      triggerClassName="shrink-0 max-sm:size-11"
+      open={open}
+      onOpenChange={setOpen}
+      onReset={resetVisibility}
+    >
+      <DataTableSettingsSection
+        title="컬럼 표시"
+        meta={<span className="text-xs tabular-nums text-muted-foreground">{visibleColumnCount} / {columns.length} 표시</span>}
+      >
+        {requiredColumns.length > 0 ? (
+          <div
+            className="grid gap-0.5 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground"
+            aria-label={`필수 컬럼 ${requiredColumns.length}개 고정: ${requiredColumnLabels}`}
+          >
+            <span className="font-medium text-foreground">필수 {requiredColumns.length}개 고정</span>
+            <span className="break-words leading-5">{requiredColumnLabels}</span>
+          </div>
+        ) : null}
+        {optionalColumns.length > 0 ? (
+          <div className="-my-1 divide-y divide-border/40">
+            {optionalColumns.map((column) => (
+              <DataTableColumnVisibilitySetting
+                key={column.id}
+                label={column.label}
+                visible={isColumnVisible(column.id)}
+                onVisibleChange={(checked) => toggleColumn(column.id, checked)}
               />
-              <span className="min-w-0 flex-1 truncate">{column.label}</span>
-              {column.required ? <span className="text-[11px] text-muted-foreground">고정</span> : null}
-            </label>
-          ))}
-        </div>
-      </PopoverContent>
-    </Popover>
+            ))}
+          </div>
+        ) : (
+          <p className="py-2 text-sm text-muted-foreground">변경할 수 있는 컬럼이 없습니다.</p>
+        )}
+      </DataTableSettingsSection>
+    </DataTableSettings>
   );
 
   return { isColumnVisible, visibleColumnCount, columnSettingsControl };

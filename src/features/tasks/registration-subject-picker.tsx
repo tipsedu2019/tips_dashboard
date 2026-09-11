@@ -33,7 +33,6 @@ export function RegistrationSubjectPicker(props: RegistrationSubjectPickerProps)
               key={subject}
               type="button"
               variant={selected && locked ? "secondary" : selected ? "default" : "outline"}
-              className={locked ? "disabled:opacity-100" : undefined}
               aria-pressed={selected}
               aria-label={`${subject} 문의 과목 ${selected ? "선택됨" : "선택 안 됨"}`}
               disabled={props.disabled || locked || Boolean(disabledReason)}

@@ -122,6 +122,10 @@ jobs:
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
             --postdeploy-contract \
+            --test supabase/tests/class_period_membership_optional_test.sql \
+            --test supabase/tests/academic_curriculum_unscoped_period_test.sql \
+            --test supabase/tests/academic_scoped_reads_test.sql \
+            --test supabase/tests/academic_operations_numbered_pages_test.sql \
             --test supabase/tests/textbook_stock_count_atomic_test.sql \
             --probe tests/probe-textbook-stock-count-concurrency.mjs \
             --test supabase/tests/textbook_sale_transition_atomic_test.sql \

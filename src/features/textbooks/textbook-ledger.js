@@ -143,43 +143,117 @@ export function getTextbookActionErrorMessage(error) {
     textbook_sale_target_invalid: "지원하지 않는 출고 상태입니다.",
   };
   if (Object.hasOwn(saleErrors, message)) return saleErrors[message];
+
+  const legacyValidationMessages = {
+    "requested quantity required: 요청 수량을 입력하세요.": "요청 수량을 입력하세요.",
+    "ordered quantity required: 주문 수량을 입력하세요.": "주문 수량을 입력하세요.",
+    "received quantity required: 입고 수량을 입력하세요.": "입고 수량을 입력하세요.",
+    "statement number required: 거래명세표 번호를 입력하세요.": "거래명세표 번호를 입력하세요.",
+    "review memo required: 차이가 있으면 사유를 입력하세요.": "차이가 있으면 사유를 입력하세요.",
+    "unsupported sale status transition": "지원하지 않는 출고 상태입니다.",
+  };
+  if (Object.hasOwn(legacyValidationMessages, message)) return legacyValidationMessages[message];
+
+  // These messages are created by the textbook UI, taxonomy, and service after
+  // validation. Keep their actionable wording without allowing arbitrary server
+  // messages containing Korean to pass through to the screen.
+  const safeApplicationMessages = new Set([
+    "과목을 선택하세요.",
+    "과학 교재는 고1~고3 전체로 저장됩니다.",
+    "과학 교재는 고등만 선택할 수 있습니다.",
+    "과학 교재에서만 과학 영역을 선택할 수 있습니다.",
+    "과학 영역을 선택하세요.",
+    "교사용 교재를 받을 선생님을 선택하세요.",
+    "교사용으로 출고할 교재를 선택하세요.",
+    "교재명을 입력하세요.",
+    "구매 입력이 변경되었습니다. 다시 시도하세요.",
+    "구매 작업 대상을 찾을 수 없습니다.",
+    "기존 요청 건과 교재를 확인하세요.",
+    "내보낼 영역을 찾을 수 없습니다.",
+    "반품할 입고 건을 확인하세요.",
+    "삭제할 요청 건을 확인하세요.",
+    "삭제할 재고 이력을 선택하세요.",
+    "선택한 모든 구매 작업 대상을 찾을 수 없습니다.",
+    "선택한 모든 재고 수량을 확인할 수 없습니다.",
+    "세부과목을 선택하세요.",
+    "수업과 교재를 선택하세요.",
+    "실사 대상과 수량을 확인하고 다시 시도하세요.",
+    "실사 저장 결과를 확인할 수 없습니다. 같은 입력으로 다시 시도하세요.",
+    "요청 교재명을 입력하세요.",
+    "이미 같은 월에 같은 수업·교재 출고가 있습니다.",
+    "작업 대상이 변경되었습니다. 다시 시도하세요.",
+    "재고 수량을 확인할 수 없습니다.",
+    "재고 이력 삭제 결과를 확인할 수 없습니다. 다시 시도하세요.",
+    "재고 작업 계정이 변경되었습니다.",
+    "재고 작업 대상이 변경되었습니다.",
+    "정리 대상이 변경되었습니다. 다시 확인하세요.",
+    "정산 항목을 선택하세요.",
+    "주문 입력이 변경되었습니다. 다시 시도하세요.",
+    "주문할 등록 교재를 선택하세요.",
+    "지원하는 교재 과목만 저장할 수 있습니다.",
+    "지원하지 않는 출고 상태입니다.",
+    "출고 라인과 상태를 확인하세요.",
+    "출고 위치와 교재를 확인할 수 없습니다.",
+    "출고 입력이 변경되었습니다. 다시 시도하세요.",
+    "출고 작업 대상을 찾을 수 없습니다.",
+    "출고 작업 대상이 변경되었습니다.",
+    "출고 재고를 확인할 수 없습니다.",
+    "출고 처리 결과를 확인할 수 없습니다. 새로고침 후 상태를 확인하세요.",
+    "출고 컨텍스트를 완성하지 못했습니다.",
+    "출고할 학생이 없습니다.",
+    "취소할 출고 건을 확인하세요.",
+    "클립보드 권한이 없어 복사하지 못했습니다.",
+    "학교 구분을 하나 이상 선택하세요.",
+    "학년을 하나 이상 선택하세요.",
+    "활성 과학 영역을 선택하세요.",
+  ]);
+  if (safeApplicationMessages.has(message)) return message;
+
   const combined = [message, details, hint].filter(Boolean).join(" ");
   const lowerCombined = combined.toLowerCase();
-  const missingColumnMatch =
-    combined.match(/could not find the '([^']+)' column of '([^']+)' in the schema cache/i) ||
-    combined.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+of\s+relation\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i) ||
-    combined.match(/column\s+"?([a-zA-Z0-9_]+)"?\s+does not exist/i);
+  const upperCode = code.toUpperCase();
+  const errorName = text(error?.name).toLowerCase();
 
   if (
-    code === "42703" ||
-    code === "PGRST204" ||
-    (lowerCombined.includes("could not find") && lowerCombined.includes("column")) ||
-    (lowerCombined.includes("column") && lowerCombined.includes("does not exist"))
+    ["42501", "401", "403", "PGRST301"].includes(upperCode) ||
+    /permission denied|row-level security|not authorized|unauthorized|forbidden|jwt/.test(lowerCombined)
   ) {
-    const column = text(missingColumnMatch?.[1]) || "unknown_column";
-    const table = text(missingColumnMatch?.[2]);
-    const schemaItem = table ? `${table}.${column}` : column;
-    return `교재 관리 DB 스키마가 최신이 아닙니다. 누락 컬럼: ${schemaItem}. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.`;
+    return "교재 관리 권한이 없습니다. 계정 권한을 확인하거나 관리자에게 문의하세요.";
   }
 
   if (
-    code === "42P01" ||
-    code === "PGRST205" ||
+    ["57014", "ETIMEDOUT", "ECONNRESET", "ECONNREFUSED", "NETWORK_ERROR", "TIMEOUT"].includes(upperCode) ||
+    errorName === "aborterror" ||
+    errorName === "timeouterror" ||
+    /failed to fetch|fetch failed|network (?:error|request failed|response lost)|offline|timed?\s*out|statement timeout/.test(lowerCombined)
+  ) {
+    return "네트워크 연결을 확인한 뒤 다시 시도하세요.";
+  }
+
+  if (
+    ["42703", "42P01", "42883", "PGRST202", "PGRST204", "PGRST205", "TEXTBOOK_READ_RPC_UNAVAILABLE"].includes(upperCode) ||
+    lowerCombined.includes("schema cache") ||
+    lowerCombined.includes("could not find the function") ||
     lowerCombined.includes("could not find the table") ||
-    lowerCombined.includes("relation") && lowerCombined.includes("does not exist")
+    (lowerCombined.includes("could not find") && lowerCombined.includes("column")) ||
+    (lowerCombined.includes("column") && lowerCombined.includes("does not exist")) ||
+    (lowerCombined.includes("relation") && lowerCombined.includes("does not exist")) ||
+    lowerCombined.includes("교재 읽기 api가 아직 적용되지 않았습니다") ||
+    lowerCombined.includes("missing supabase environment variables") ||
+    lowerCombined.includes("supabase 연결 설정")
   ) {
-    return "교재 관리 DB 마이그레이션이 아직 적용되지 않았습니다. Supabase SQL 마이그레이션을 적용한 뒤 새로고침하세요.";
+    return "교재 관리 기능을 불러오지 못했습니다. 관리자에게 문의한 뒤 새로고침하세요.";
   }
 
-  if (message) {
-    return message;
+  if (
+    ["22023", "22P02"].includes(upperCode) ||
+    lowerCombined.includes("invalid input syntax") ||
+    lowerCombined.includes("invalid uuid")
+  ) {
+    return "입력값을 확인한 뒤 다시 시도하세요.";
   }
 
-  if (error instanceof Error) {
-    return error.message;
-  }
-
-  return "처리 중 오류가 발생했습니다.";
+  return "처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.";
 }
 
 export function getTextbookTitle(row = {}) {

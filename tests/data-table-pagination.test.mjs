@@ -34,6 +34,7 @@ async function loadTypeScript(url, localModules = new Map()) {
   }).outputText
   const runtimeModule = { exports: {} }
   const runtimeRequire = (specifier) => {
+    if (specifier === "@/lib/utils") return { cn: require("clsx").clsx };
     if (specifier === "react" || specifier === "react/jsx-runtime") return require(specifier)
     if (localModules.has(specifier)) return localModules.get(specifier)
     return require(specifier)

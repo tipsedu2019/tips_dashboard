@@ -676,7 +676,7 @@ export function AcademicTimetableWorkspace() {
                   title="이미지 저장"
                   disabled={Boolean(savingPanelId)}
                   onClick={() => handleSavePanelImage(panel.id, panel.title)}
-                  className="absolute right-3 top-3 size-9 rounded-md border border-border/70 bg-background/95 text-muted-foreground shadow-sm hover:bg-primary/5 hover:text-primary disabled:opacity-60"
+                  className="absolute right-3 top-3 size-9 rounded-md border border-border/70 bg-background/95 shadow-sm"
                 >
                   {isSavingPanel ? (
                     <Loader2 className="size-4 animate-spin" />

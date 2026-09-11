@@ -349,7 +349,8 @@ test("class detail shows basic information and student management in one continu
   assert.doesNotMatch(detailSource, /<TabsList/);
   assert.doesNotMatch(detailSource, /<TabsTrigger/);
   assert.doesNotMatch(detailSource, /<TabsContent/);
-  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"classGroupIds"[\s\S]*\]\)/);
+  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"status"[\s\S]*\]\)/);
+  assert.doesNotMatch(detailSource, /"classGroupIds"/);
   assert.doesNotMatch(detailSource, /수업 빠른 이동/);
   assert.doesNotMatch(detailSource, />기본 정보<\/div>/);
   assert.doesNotMatch(detailSource, /\{renderClassAuditTimeline\(\)\}/);
@@ -496,35 +497,32 @@ test("class detail no longer renders operational warning panels", async () => {
   assert.doesNotMatch(pageSource, /handleClassWarningAction/);
 });
 
-test("class detail keeps mobile primary actions reachable at the bottom", async () => {
+test("class detail shares one reachable save area across desktop and mobile", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
+  const styleSource = await readFile(new URL("src/features/management/class-workspace.css", root), "utf8");
+  const actionsStart = pageSource.indexOf('<DialogFooter data-testid="class-detail-actions"');
+  const actionsEnd = pageSource.indexOf("</DialogFooter>", actionsStart);
+  const actions = pageSource.slice(actionsStart, actionsEnd);
 
-  assert.doesNotMatch(pageSource, /const CLASS_MOBILE_ACTION_TABS = CLASS_DETAIL_TABS/);
-  assert.match(pageSource, /const renderClassMobileActionBar = \(\) =>/);
-  assert.match(pageSource, /data-testid="class-detail-mobile-action-bar"/);
-  assert.match(pageSource, /sticky bottom-0/);
-  assert.doesNotMatch(pageSource, /fixed inset-x-4 bottom-4/);
-  assert.match(pageSource, /md:hidden/);
-  assert.doesNotMatch(pageSource, /CLASS_MOBILE_ACTION_TABS\.map\(\(tab\) =>/);
-  assert.doesNotMatch(pageSource, /data-testid=\{`class-detail-mobile-tab-\$\{tab\.value\}`\}/);
-  assert.doesNotMatch(pageSource, /handleClassDetailTabChange/);
-  assert.doesNotMatch(pageSource, /grid-cols-\[repeat\(3,minmax\(0,1fr\)\)\]/);
-  assert.match(pageSource, /const mobileSaveStatus = renderSaveStatus\(\)/);
-  assert.match(pageSource, /data-testid="class-detail-mobile-save-status"/);
-  assert.match(pageSource, /\{mobileSaveStatus\}/);
-  assert.match(pageSource, /data-testid="class-detail-mobile-save"/);
-  assert.match(pageSource, /onClick=\{handleDetailSave\}/);
-  assert.match(pageSource, /<span className="ml-1\.5 max-w-full truncate">\{saving \? "저장 중" : "저장"\}<\/span>/);
-  assert.match(pageSource, /pb-28 md:pb-0/);
-  assert.doesNotMatch(pageSource, /pb-24 md:pb-0/);
-  assert.match(pageSource, /\{renderClassMobileActionBar\(\)\}/);
+  assert.ok(actionsStart >= 0 && actionsEnd > actionsStart);
+  assert.equal((pageSource.match(/data-testid="class-detail-save"/g) || []).length, 1);
+  assert.doesNotMatch(pageSource, /renderClassMobileActionBar|class-detail-mobile-save|pb-28 md:pb-0/);
+  assert.match(actions, /\{renderSaveStatus\(\)\}/);
+  assert.match(actions, /onClick=\{handleDetailSave\}/);
+  assert.match(actions, /disabled=\{saving \|\| !canMutateRows \|\| scienceClassCandidateSelectionBlocked\}/);
+  assert.match(actions, /onClick=\{\(\) => handleDialogOpenChange\(false\)\}/);
+  assert.match(styleSource, /\.class-sheet-actions\s*\{[^}]*position: sticky;[^}]*bottom: 0;/);
+  assert.doesNotMatch(actions, /md:hidden|hidden md:/);
+  // Schedule defaults retain a separate save contract.
+  assert.match(pageSource, /onClick=\{\(\) => void handleClassScheduleDefaultsSave\(\)\}/);
+  assert.match(pageSource, /disabled=\{!canMutateRows \|\| !classScheduleDefaultsDirty \|\| scheduleDefaultsSaving\}/);
 });
 
 test("class official detail dialog stacks above sticky database headers", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(pageSource, /<DialogContent[\s\S]*className="[^"]*z-\[80\][^"]*"/);
-  assert.match(pageSource, /showCloseButton=\{kind !== "classes" \|\| !isDetail\}/);
+  assert.match(pageSource, /<DialogContent[\s\S]*className=\{cn\("[^"]*z-\[80\][^"]*"/);
+  assert.match(pageSource, /showCloseButton=\{kind !== "students" && \(kind !== "classes" \|\| !isDetail\)\}/);
   assert.match(pageSource, /<DialogHeader className=\{isDetail && kind === "classes" \? "sr-only" : "pr-10"\}>/);
   assert.match(pageSource, /<DialogTitle className=\{isDetail && kind === "classes" \? undefined : "break-keep pr-2 leading-6"\}>/);
   assert.match(pageSource, /data-testid="class-official-detail"/);
@@ -542,7 +540,7 @@ test("class detail summary replaces the visible dialog title and keeps close act
   assert.ok(dialogStart >= 0 && detailStart > dialogStart);
   assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
   assert.match(pageSource, /<DialogHeader className=\{isDetail && kind === "classes" \? "sr-only" : "pr-10"\}>/);
-  assert.match(pageSource, /showCloseButton=\{kind !== "classes" \|\| !isDetail\}/);
+  assert.match(pageSource, /showCloseButton=\{kind !== "students" && \(kind !== "classes" \|\| !isDetail\)\}/);
   assert.match(detailSource, /\{renderClassSummaryBar\(\)\}[\s\S]*<section data-testid="class-detail-basic-section"/);
   assert.match(summarySource, /data-testid="class-detail-sticky-close"/);
   assert.match(summarySource, /aria-label="수업 상세 닫기"/);
@@ -558,7 +556,7 @@ test("class management database keeps list filters in the URL for cross-view ret
   assert.match(tableSource, /const CLASS_LIST_QUERY_PARAM_KEYS =/);
   assert.match(tableSource, /function getClassListQueryState/);
   assert.match(tableSource, /q: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.q\)\)/);
-  assert.match(tableSource, /period: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.period\)\)/);
+  assert.doesNotMatch(tableSource, /CLASS_LIST_QUERY_PARAM_KEYS\.period/);
   assert.match(tableSource, /status: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.status\)\)/);
   assert.doesNotMatch(tableSource, /classType: normalizeScalar\(params\.get\(CLASS_LIST_QUERY_PARAM_KEYS\.classType\)\)/);
   assert.match(tableSource, /function buildClassListHref/);
@@ -566,7 +564,7 @@ test("class management database keeps list filters in the URL for cross-view ret
   assert.match(tableSource, /replaceManagementListUrl\(window\.history, nextHref\)/);
   assert.match(tableSource, /current: currentClassListQueryState,[\s\S]*?pending: pendingClassListQueryStateRef\.current/);
   assert.match(tableSource, /syncClassListQueryState\(\{ q: debouncedGlobalFilter \}\)/);
-  assert.match(tableSource, /syncClassListQueryState\(\{ period: value \}, true\)/);
+  assert.match(tableSource, /params\.delete\("period"\)/);
   assert.match(tableSource, /syncClassListQueryState\(\{ status: value \}, true\)/);
   assert.match(tableSource, /syncClassListQueryState\(\{ \[filter\.id\]: nextFilterValue \}, true\)/);
 });
@@ -588,13 +586,13 @@ test("class official summary removes redundant identity and state badges", async
   assert.doesNotMatch(summarySource, /\{subject \? <Badge/);
   assert.doesNotMatch(summarySource, /<Badge variant="secondary">\{periodLabel\}<\/Badge>/);
   assert.match(pageSource, /\{summaryMetaItems\.map\(\(item\) => \(/);
-  assert.match(pageSource, /<span key=\{item\.label\} className="inline-flex max-w-full items-center gap-1 rounded-full border bg-background px-2 py-1 text-xs text-muted-foreground">/);
-  assert.match(pageSource, /<span className="truncate font-medium text-foreground">\{item\.value\}<\/span>/);
+  assert.match(pageSource, /<span key=\{item\.label\} className="inline-flex max-w-full items-baseline gap-1\.5 text-xs leading-5 text-muted-foreground">/);
+  assert.match(pageSource, /<span className="min-w-0 whitespace-normal break-words font-medium text-foreground">\{item\.value\}<\/span>/);
   assert.match(pageSource, /\{ label: "요일\/시간", value: scheduleSummary \}/);
   assert.match(pageSource, /\{ label: "선생님", value: teacher \}/);
   assert.match(pageSource, /\{ label: "강의실", value: classroom \}/);
-  assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"classGroupIds"[\s\S]*"status"[\s\S]*\]\)/);
-  assert.match(pageSource, /data-testid="class-official-summary-bar" className="sticky top-0 z-20 -mx-4 border-b bg-background px-4 py-3 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background sm:-mx-6 sm:px-6 sm:before:-top-6 sm:before:h-6"/);
+  assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
+  assert.match(pageSource, /data-testid="class-official-summary-bar" className="class-detail-header sticky top-0 z-20 -mx-4 border-b bg-background px-4 py-3 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background sm:-mx-6 sm:px-6 sm:before:-top-6 sm:before:h-6"/);
   assert.match(pageSource, /const capacitySummary = capacity > 0[\s\S]*\? `\$\{registeredCount\}명 \(\$\{waitlistCount\}명\) \/ \$\{capacity\}명`[\s\S]*: `\$\{registeredCount\}명 \(\$\{waitlistCount\}명\)`/);
   assert.match(pageSource, />등록 \(대기\) \/ 정원<\/div>/);
   assert.match(pageSource, /\{capacitySummary\}/);
@@ -617,7 +615,9 @@ test("class official summary roster count jumps to the student roster section", 
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
   assert.match(pageSource, /const scrollClassRosterIntoView = \(\) => \{/);
-  assert.match(pageSource, /document\.getElementById\("class-detail-students-section"\)\?\.scrollIntoView\(\{ behavior: "smooth", block: "start" \}\)/);
+  assert.match(pageSource, /document\.getElementById\("class-detail-students-section"\)/);
+  assert.match(pageSource, /top: section\.getBoundingClientRect\(\)\.top - visibleTop - 16/);
+  assert.match(pageSource, /behavior: window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches \? "instant" : "smooth"/);
   assert.match(pageSource, /data-testid="class-summary-roster-jump"/);
   assert.match(pageSource, /onClick=\{scrollClassRosterIntoView\}/);
   assert.match(pageSource, /<div id="class-detail-students-section" data-testid="class-detail-students-section" className="space-y-4">/);
@@ -630,13 +630,13 @@ test("class detail basic fields use the requested operator order", async () => {
   const detailSource = pageSource.slice(detailStart, detailEnd);
 
   assert.ok(detailStart >= 0 && detailEnd > detailStart);
-  assert.match(pageSource, /const classGroupField: Field = \{ name: "classGroupIds", label: "기간", placeholder: "기간 선택" \}/);
-  assert.match(pageSource, /fieldName === "classGroupIds" \? classGroupField : FORM_FIELDS\[kind\]\.find\(\(field\) => field\.name === fieldName\)/);
-  assert.match(pageSource, /kind === "classes" \? \[\.\.\.FORM_FIELDS\[kind\], classGroupField\] : FORM_FIELDS\[kind\]/);
+  assert.doesNotMatch(pageSource, /const classGroupField|defaultClassGroupIdsForCreate|replaceClassGroupMemberships/);
+  assert.match(pageSource, /FORM_FIELDS\[kind\]\.find\(\(field\) => field\.name === fieldName\)/);
   assert.match(pageSource, /fieldsToRender\.map\(\(field\) => \{/);
   assert.doesNotMatch(pageSource, /FORM_FIELDS\[kind\]\.filter\(\(field\) => !fieldNames \|\| fieldNames\.includes\(field\.name\)\)\.map/);
-  assert.match(pageSource, /const fieldWrapperClassName = cn\("space-y-2", field\.multiline \|\| \(kind === "classes" && scope === "detail" && field\.name === "name"\) \? "sm:col-span-2" : ""\)/);
-  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"grade"[\s\S]*"subject"[\s\S]*"name"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"classGroupIds"[\s\S]*"status"[\s\S]*\]\)/);
+  assert.match(pageSource, /const fieldWrapperClassName = cn\([\s\S]*?"space-y-2",[\s\S]*?field\.multiline \|\| \(kind === "classes" && scope === "detail" && field\.name === "name"\)[\s\S]*?\? "sm:col-span-2"[\s\S]*?: "",[\s\S]*?\);/);
+  assert.doesNotMatch(pageSource, /kind === "students" && \(field\.name === "school"/);
+  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"grade"[\s\S]*"subject"[\s\S]*"name"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
   assert.doesNotMatch(detailSource, /renderEditableFields\("detail", \[[\s\S]*"name"[\s\S]*"status"[\s\S]*"subject"[\s\S]*"grade"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"classGroupIds"[\s\S]*\]\)/);
 });
 
@@ -860,7 +860,7 @@ test("class management ends classes through the status field and keeps audit dat
   assert.doesNotMatch(pageSource, /종강 처리/);
   assert.match(pageSource, /disabled=\{saving \|\| !canMutateRows\}/);
 
-  assert.match(tableSource, /kind === "classes" \? null : \(/);
+  assert.match(tableSource, /cell: \(\{ row \}\) => kind === "classes" \? null :/);
   assert.doesNotMatch(tableSource, /종강 처리/);
   assert.doesNotMatch(tableSource, /일괄 종강/);
   assert.match(serviceSource, /const ARCHIVED_CLASS_STATUS = "종강"/);

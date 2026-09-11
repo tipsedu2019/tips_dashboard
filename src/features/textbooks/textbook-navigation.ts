@@ -1,5 +1,4 @@
 import type {
-  ClosingFilters,
   InventoryFilters,
   MasterFilters,
   PurchaseBoardScope,
@@ -12,17 +11,16 @@ import type {
 } from "./textbook-read-types"
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
 
-export const textbookTabs = ["master", "requests", "purchase", "sales", "inventory", "closing"] as const
+export const textbookTabs = ["master", "requests", "purchase", "sales", "inventory"] as const
 export type TextbookTab = (typeof textbookTabs)[number]
-export const textbookDetailKinds = ["master", "purchase", "sale", "closing"] as const
+export const textbookDetailKinds = ["master", "purchase", "sale"] as const
 export type TextbookDetailKind = (typeof textbookDetailKinds)[number]
 
-type PrimaryFilters = MasterFilters | Omit<InventoryFilters, "locationId" | "audit"> | Omit<import("./textbook-read-types").PurchaseFilters, "mode"> | SaleFilters | ClosingFilters
+type PrimaryFilters = MasterFilters | Omit<InventoryFilters, "locationId" | "audit"> | Omit<import("./textbook-read-types").PurchaseFilters, "mode"> | SaleFilters
 export type TextbookNavigationState = {
   tab: TextbookTab
   primary: { page: number; pageSize: DataTablePageSize; filters: PrimaryFilters }
   history: { page: number; pageSize: DataTablePageSize; filters: SaleHistoryFilters }
-  movements: { page: number; pageSize: DataTablePageSize; search: string }
   detail: { kind: TextbookDetailKind; id: string } | null
 }
 
@@ -31,7 +29,6 @@ const masterDefaults: MasterFilters = {
 }
 const purchaseDefaults = { search: "", boardScope: "active" as PurchaseBoardScope, requestFilter: "all" as PurchaseRequestFilter, orderFilter: "all" as PurchaseOrderFilter }
 const saleDefaults: SaleFilters = { search: "", status: "all" }
-const closingDefaults: ClosingFilters = { month: "all", subject: "all", status: "all" }
 const historyDefaults: SaleHistoryFilters = { search: "", year: "all", month: "all", classId: "all" }
 const quality = new Set<TextbookQualityFilter>(["all", "attention", "duplicate", "missingCode", "missingPublisher", "missingCategory", "missingPrice", "subjectMismatch", "inactive"])
 const inventory = new Set(["all", "shortage", "surplus", "unused", "negative"])
@@ -39,7 +36,6 @@ const boardScopes = new Set<PurchaseBoardScope>(["active", "recent", "all"])
 const requestFilters = new Set<PurchaseRequestFilter>(["all", "unregistered", "orderable"])
 const orderFilters = new Set<PurchaseOrderFilter>(["all", "waiting", "partial", "returnable", "returned"])
 const saleStatuses = new Set<SalesProcessFilter>(["all", "waiting", "issued", "returned", "cancelled"])
-const closingStatuses = new Set(["all", "draft", "locked"])
 const subjects = new Set(["all", "english", "math", "science", "other"])
 const schoolLevels = new Set(["all", "elementary", "middle", "high"])
 const gradeLevels = new Set(["all", "e1", "e2", "e3", "e4", "e5", "e6", "m1", "m2", "m3", "h1", "h2", "h3"])
@@ -79,7 +75,6 @@ function boundedText(value: unknown, maximum = 120, allowEmpty = true) {
 function primaryDefaults(tab: TextbookTab): PrimaryFilters {
   if (tab === "requests" || tab === "purchase") return { ...purchaseDefaults }
   if (tab === "sales") return { ...saleDefaults }
-  if (tab === "closing") return { ...closingDefaults }
   return { ...masterDefaults }
 }
 function parsePrimary(tab: TextbookTab, raw: string | null): PrimaryFilters {
@@ -104,15 +99,29 @@ function parsePrimary(tab: TextbookTab, raw: string | null): PrimaryFilters {
     return exactKeys(value, keys) && strings(value, keys) && boundedText(value.search) !== null && saleStatuses.has(value.status as SalesProcessFilter)
       ? { ...value, search: boundedText(value.search) as string } as SaleFilters : primaryDefaults(tab)
   }
-  const keys = ["month", "subject", "status"]
-  return exactKeys(value, keys) && strings(value, keys) && (value.month === "all" || month.test(value.month as string)) && subjects.has(value.subject as string) && closingStatuses.has(value.status as string)
-    ? value as ClosingFilters : primaryDefaults(tab)
+  return primaryDefaults(tab)
 }
 function parseHistory(raw: string | null): SaleHistoryFilters {
   const value = record(raw)
   const keys = ["search", "year", "month", "classId"]
   return value && exactKeys(value, keys) && strings(value, keys) && value.search === "" && (value.year === "all" || year.test(value.year as string))
     && (value.month === "all" || month.test(value.month as string)) && (value.classId === "all" || uuid.test(value.classId as string)) ? value as SaleHistoryFilters : { ...historyDefaults }
+}
+
+// Accept old bookmarks, but never keep a removed catalog filter active invisibly.
+function normalizeCatalogPrimary(tab: TextbookTab, primary: TextbookNavigationState["primary"]): TextbookNavigationState["primary"] {
+  if (tab !== "master" && tab !== "inventory") return primary
+  const filters = primary.filters as MasterFilters
+  const quality = tab === "master" && filters.quality === "inactive" ? "inactive" : "all"
+  const changed = filters.quality !== quality || filters.inventory !== "all"
+  return {
+    ...primary,
+    page: changed ? 1 : primary.page,
+    filters: {
+      search: filters.search, subject: filters.subject, schoolLevel: filters.schoolLevel,
+      gradeLevel: filters.gradeLevel, subSubject: filters.subSubject, quality, inventory: "all",
+    },
+  }
 }
 
 export function parseTextbookNavigation(params: URLSearchParams): TextbookNavigationState {
@@ -122,10 +131,9 @@ export function parseTextbookNavigation(params: URLSearchParams): TextbookNaviga
   const id = params.get("textbookDetail") || ""
   return {
     tab,
-    primary: { page: page(params.get("textbookPage")), pageSize: pageSize(params.get("textbookPageSize")), filters: parsePrimary(tab, params.get("textbookFilters")) },
+    primary: normalizeCatalogPrimary(tab, { page: candidate === "closing" ? 1 : page(params.get("textbookPage")), pageSize: pageSize(params.get("textbookPageSize")), filters: parsePrimary(tab, params.get("textbookFilters")) }),
     history: { page: page(params.get("textbookHistoryPage")), pageSize: pageSize(params.get("textbookHistoryPageSize")), filters: parseHistory(params.get("textbookHistoryFilters")) },
-    movements: { page: page(params.get("textbookMovementPage")), pageSize: pageSize(params.get("textbookMovementPageSize")), search: boundedText(params.get("textbookMovementSearch") || "") || "" },
-    detail: textbookDetailKinds.includes(kind as TextbookDetailKind) && uuid.test(id) ? { kind: kind as TextbookDetailKind, id } : null,
+    detail: candidate !== "closing" && textbookDetailKinds.includes(kind as TextbookDetailKind) && uuid.test(id) ? { kind: kind as TextbookDetailKind, id } : null,
   }
 }
 
@@ -134,17 +142,15 @@ const privateKeys = ["selectedIds", "selectedTextbookIds", "selectedPurchaseLine
 
 export function serializeTextbookNavigation(current: URLSearchParams, state: TextbookNavigationState) {
   const next = new URLSearchParams(current)
+  const primary = normalizeCatalogPrimary(state.tab, state.primary)
   for (const key of [...canonicalKeys, ...privateKeys]) next.delete(key)
   next.set("textbookTab", state.tab)
-  next.set("textbookPage", String(state.primary.page))
-  next.set("textbookPageSize", String(state.primary.pageSize))
-  next.set("textbookFilters", JSON.stringify(state.primary.filters))
+  next.set("textbookPage", String(primary.page))
+  next.set("textbookPageSize", String(primary.pageSize))
+  next.set("textbookFilters", JSON.stringify(primary.filters))
   next.set("textbookHistoryPage", String(state.history.page))
   next.set("textbookHistoryPageSize", String(state.history.pageSize))
   next.set("textbookHistoryFilters", JSON.stringify(state.history.filters))
-  next.set("textbookMovementPage", String(state.movements.page))
-  next.set("textbookMovementPageSize", String(state.movements.pageSize))
-  if (state.movements.search) next.set("textbookMovementSearch", state.movements.search)
   if (state.detail) {
     next.set("textbookDetailKind", state.detail.kind)
     next.set("textbookDetail", state.detail.id)

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { CheckCircle2, Plus, Trash2 } from "lucide-react";
+import { Plus, Trash2 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { supabase } from "@/lib/supabase";
 
 import { createId, managementService } from "./management-service.js";
-import { readDefaultPeriodPreference, writeDefaultPeriodPreference } from "./period-preferences";
+import { collectClassGroupPages, sortClassGroupRows } from "./class-group-pagination";
 import {
   SettingsMasterHeader,
   SettingsTableFrame,
@@ -33,10 +33,12 @@ type ClassGroupRecord = {
 };
 
 const CLASS_GROUP_TABLE_COLUMNS = [
-  { id: "name", label: "기간명" },
-  { id: "default", label: "기본값" },
+  { id: "name", label: "그룹명" },
+  { id: "subject", label: "과목" },
   { id: "action", label: "작업", required: true },
 ] satisfies SettingsTableColumn[];
+
+const CLASS_GROUP_PAGE_SIZE = 30;
 
 function text(value: unknown) {
   return String(value || "").trim();
@@ -63,22 +65,6 @@ function createEmptyClassGroup(nextSortOrder: number): ClassGroupRecord {
   };
 }
 
-function applyDefaultPreference(rows: ClassGroupRecord[]) {
-  if (rows.some((row) => row.isDefault)) {
-    return rows;
-  }
-
-  const preference = readDefaultPeriodPreference();
-  if (!preference.id && !preference.name) {
-    return rows;
-  }
-
-  return rows.map((row) => ({
-    ...row,
-    isDefault: row.id === preference.id || row.name === preference.name,
-  }));
-}
-
 export function ClassGroupMasterWorkspace() {
   const [rows, setRows] = useState<ClassGroupRecord[]>([]);
   const [loading, setLoading] = useState(true);
@@ -87,7 +73,7 @@ export function ClassGroupMasterWorkspace() {
   const [deletedIds, setDeletedIds] = useState<string[]>([]);
   const [isDirty, setIsDirty] = useState(false);
   const { isColumnVisible, visibleColumnCount, columnSettingsControl } = useSettingsTableColumns(
-    "tips-settings-table:periods:v2",
+    "tips-settings-table:class-groups:v3",
     CLASS_GROUP_TABLE_COLUMNS,
   );
 
@@ -98,16 +84,22 @@ export function ClassGroupMasterWorkspace() {
       setLoading(false);
       return;
     }
+    const client = supabase;
 
     setLoading(true);
     setError(null);
 
     try {
-      const { data, error: queryError } = await supabase
-        .from("class_schedule_sync_groups")
-        .select("id, name, subject, sort_order, is_default")
-        .order("sort_order", { ascending: true })
-        .order("name", { ascending: true });
+      const { data, error: queryError } = await collectClassGroupPages(async (afterId) => {
+        return client
+          .from("class_schedule_sync_groups")
+          .select("id, name, subject, sort_order, is_default")
+          .or(afterId ? `id.gt.${afterId}` : "id.not.is.null")
+          .order("id", { ascending: true })
+          .limit(30)
+          .abortSignal(AbortSignal.timeout(8_000))
+          .retry(false);
+      }, CLASS_GROUP_PAGE_SIZE);
 
       if (queryError) {
         const message = String(queryError.message || "");
@@ -115,27 +107,33 @@ export function ClassGroupMasterWorkspace() {
           throw queryError;
         }
 
-        const { data: fallbackData, error: fallbackError } = await supabase
-          .from("class_schedule_sync_groups")
-          .select("id, name, subject")
-          .order("name", { ascending: true });
+        const { data: fallbackData, error: fallbackError } = await collectClassGroupPages(async (afterId) => {
+          return client
+            .from("class_schedule_sync_groups")
+            .select("id, name, subject")
+            .or(afterId ? `id.gt.${afterId}` : "id.not.is.null")
+            .order("id", { ascending: true })
+            .limit(30)
+            .abortSignal(AbortSignal.timeout(8_000))
+            .retry(false);
+        }, CLASS_GROUP_PAGE_SIZE);
 
         if (fallbackError) {
           throw fallbackError;
         }
 
-        setRows(applyDefaultPreference((fallbackData || []).map((row, index) => toClassGroupRecord(row as Record<string, unknown>, index + 1))));
+        setRows(sortClassGroupRows(fallbackData || [], false).map((row, index) => toClassGroupRecord(row, index + 1)));
         setDeletedIds([]);
         setIsDirty(false);
         return;
       }
 
-      setRows(applyDefaultPreference((data || []).map((row, index) => toClassGroupRecord(row as Record<string, unknown>, index + 1))));
+      setRows(sortClassGroupRows(data || [], true).map((row, index) => toClassGroupRecord(row, index + 1)));
       setDeletedIds([]);
       setIsDirty(false);
     } catch (loadError) {
       setRows([]);
-      setError(loadError instanceof Error ? loadError.message : "기간 목록을 불러오지 못했습니다.");
+      setError(loadError instanceof Error ? loadError.message : "수업그룹 목록을 불러오지 못했습니다.");
     } finally {
       setLoading(false);
     }
@@ -144,13 +142,6 @@ export function ClassGroupMasterWorkspace() {
   useEffect(() => {
     void loadGroups();
   }, [loadGroups]);
-
-  useEffect(() => {
-    const defaultRow = rows.find((row) => row.isDefault);
-    if (defaultRow) {
-      writeDefaultPeriodPreference({ id: defaultRow.id, name: defaultRow.name });
-    }
-  }, [rows]);
 
   const nextSortOrder = useMemo(() => {
     const numericSortOrders = rows
@@ -176,7 +167,7 @@ export function ClassGroupMasterWorkspace() {
       sortOrder: String(index + 1),
     }));
     if (nextRows.some((row) => !row.name)) {
-      setError("기간명을 입력하지 않은 행이 있습니다.");
+      setError("그룹명을 입력하지 않은 행이 있습니다.");
       return;
     }
 
@@ -199,14 +190,9 @@ export function ClassGroupMasterWorkspace() {
         );
       }
 
-      const defaultRow = nextRows.find((row) => row.isDefault);
-      if (defaultRow) {
-        await managementService.setDefaultClassGroup(defaultRow.id);
-        writeDefaultPeriodPreference({ id: defaultRow.id, name: defaultRow.name });
-      }
       await loadGroups();
     } catch (saveError) {
-      setError(saveError instanceof Error ? saveError.message : "기간을 저장하지 못했습니다.");
+      setError(saveError instanceof Error ? saveError.message : "수업그룹을 저장하지 못했습니다.");
     } finally {
       setSaving(false);
     }
@@ -220,17 +206,6 @@ export function ClassGroupMasterWorkspace() {
     setIsDirty(true);
   };
 
-  const handleSetDefault = (row: ClassGroupRecord) => {
-    const name = row.name.trim();
-    if (!name) {
-      setError("기간명을 입력해 주세요.");
-      return;
-    }
-
-    setRows((current) => current.map((item) => ({ ...item, isDefault: item.id === row.id })));
-    setIsDirty(true);
-  };
-
   return (
     <SettingsWorkspaceShell>
       <SettingsMasterHeader
@@ -238,7 +213,7 @@ export function ClassGroupMasterWorkspace() {
           <>
             <Button type="button" size="sm" className="h-9" onClick={handleAdd}>
               <Plus className="mr-2 size-4" />
-              기간 추가
+              그룹 추가
             </Button>
             <Button type="button" size="sm" className="h-9" onClick={() => void handleSaveAll()} disabled={!isDirty || saving}>
               {saving ? "저장 중" : "변경 저장"}
@@ -263,7 +238,7 @@ export function ClassGroupMasterWorkspace() {
           ))
         ) : rows.length === 0 ? (
           <div className="rounded-md border border-dashed px-4 py-8 text-center text-sm text-muted-foreground">
-            등록된 기간이 없습니다.
+            등록된 수업그룹이 없습니다.
           </div>
         ) : (
           rows.map((row) => (
@@ -280,24 +255,20 @@ export function ClassGroupMasterWorkspace() {
                       className="h-9"
                       value={row.name}
                       onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
-                      placeholder="2026 1학기"
+                      placeholder="예: 중2 수학 진도 그룹"
                     />
                   </div>
-                  <Button type="button" variant="ghost" size="icon" className="size-8 shrink-0 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="기간 삭제">
+                  <Button type="button" variant="destructive-ghost" size="icon" className="size-8 shrink-0" onClick={() => handleDelete(row)} disabled={saving} aria-label="수업그룹 삭제">
                     <Trash2 className="size-4" />
                   </Button>
                 </div>
-                <Button
-                  type="button"
-                  variant={row.isDefault ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 w-full justify-center"
-                  onClick={() => handleSetDefault(row)}
-                  disabled={saving}
-                >
-                  {row.isDefault ? <CheckCircle2 className="mr-1.5 size-3.5" /> : null}
-                  {row.isDefault ? "기본" : "기본값으로 설정"}
-                </Button>
+                <Input
+                  name="class-group-subject"
+                  className="h-9"
+                  value={row.subject}
+                  onChange={(event) => handleFieldChange(row.id, "subject", event.target.value)}
+                  placeholder="과목 (선택)"
+                />
               </div>
             </article>
           ))
@@ -307,12 +278,12 @@ export function ClassGroupMasterWorkspace() {
       <div className="hidden md:block">
       <SettingsTableFrame>
         <Table className="table-fixed">
-          <caption className="sr-only">기간 목록</caption>
+          <caption className="sr-only">수업그룹 목록</caption>
           <TableHeader>
             <TableRow>
-              {isColumnVisible("name") ? <TableHead className={`w-[52%] ${settingsTableHeadClass}`}>기간명</TableHead> : null}
-              {isColumnVisible("default") ? <TableHead className={`w-[16%] ${settingsTableHeadClass}`}>기본값</TableHead> : null}
-              {isColumnVisible("action") ? <TableHead className={`w-[32%] ${settingsTableActionHeadClass}`}>작업</TableHead> : null}
+              {isColumnVisible("name") ? <TableHead className={`w-[46%] ${settingsTableHeadClass}`}>그룹명</TableHead> : null}
+              {isColumnVisible("subject") ? <TableHead className={`w-[34%] ${settingsTableHeadClass}`}>과목</TableHead> : null}
+              {isColumnVisible("action") ? <TableHead className={`w-[20%] ${settingsTableActionHeadClass}`}>작업</TableHead> : null}
             </TableRow>
           </TableHeader>
           <TableBody>
@@ -327,7 +298,7 @@ export function ClassGroupMasterWorkspace() {
             ) : rows.length === 0 ? (
               <TableRow>
                 <TableCell colSpan={visibleColumnCount} className="px-3 py-10 text-center text-sm text-muted-foreground">
-                  등록된 기간이 없습니다.
+                  등록된 수업그룹이 없습니다.
                 </TableCell>
               </TableRow>
             ) : (
@@ -340,25 +311,21 @@ export function ClassGroupMasterWorkspace() {
                         className="h-9"
                         value={row.name}
                         onChange={(event) => handleFieldChange(row.id, "name", event.target.value)}
-                        placeholder="2026 1학기"
+                        placeholder="예: 중2 수학 진도 그룹"
                       />
                     </TableCell> : null}
-                    {isColumnVisible("default") ? <TableCell className={settingsTableCellClass}>
-                      <Button
-                        type="button"
-                        variant={row.isDefault ? "default" : "outline"}
-                        size="sm"
-                        className="h-8 w-full justify-center"
-                        onClick={() => handleSetDefault(row)}
-                        disabled={saving}
-                      >
-                        {row.isDefault ? <CheckCircle2 className="mr-1.5 size-3.5" /> : null}
-                        {row.isDefault ? "기본" : "설정"}
-                      </Button>
+                    {isColumnVisible("subject") ? <TableCell className={settingsTableCellClass}>
+                      <Input
+                        name="class-group-subject"
+                        className="h-9"
+                        value={row.subject}
+                        onChange={(event) => handleFieldChange(row.id, "subject", event.target.value)}
+                        placeholder="과목 (선택)"
+                      />
                     </TableCell> : null}
                     {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="ghost" size="icon" className="size-8 text-destructive hover:text-destructive" onClick={() => handleDelete(row)} disabled={saving} aria-label="기간 삭제">
+                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={saving} aria-label="수업그룹 삭제">
                           <Trash2 className="size-4" />
                         </Button>
                       </div>

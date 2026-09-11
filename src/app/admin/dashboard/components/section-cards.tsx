@@ -1105,7 +1105,7 @@ export function ConflictWarning({
             aria-expanded={showAllConflicts}
             aria-controls="dashboard-conflict-rows"
             onClick={() => setShowAllConflicts((current) => !current)}
-            className="h-8 text-amber-950 hover:bg-amber-100 hover:text-amber-950 dark:text-amber-100 dark:hover:bg-amber-950"
+            className="h-8"
           >
             <ChevronDown
               className={cn("size-4 transition-transform", showAllConflicts && "rotate-180")}

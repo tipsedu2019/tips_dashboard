@@ -52,8 +52,8 @@ test("school settings table keeps actions reachable in dense lists", async () =>
   assert.match(source, /aria-label=\{`\$\{row\.name \|\| "새 학교"\} 학교명`\}/);
   assert.match(source, /aria-label="학교명 검색 초기화"/);
   assert.match(columnSource, /useDataTableColumns as useSettingsTableColumns/);
-  assert.match(commonColumnSource, /aria-label="컬럼 구성"/);
-  assert.match(commonColumnSource, /초기화/);
+  assert.match(commonColumnSource, /triggerLabel="컬럼 구성"/);
+  assert.match(commonColumnSource, /onReset=\{resetVisibility\}/);
   assert.doesNotMatch(commonColumnSource, /而щ읆|珥덇린|怨좎젙/);
 });
 

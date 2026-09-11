@@ -104,16 +104,8 @@ const workspaceMetaEntries: Array<{
     match: "/admin/settings/class-groups",
     meta: {
       section: "설정",
-      title: "기간 설정",
-      summary: "시간표와 수업관리에 쓰는 기간 기준을 바로 수정합니다.",
-    },
-  },
-  {
-    match: "/admin/settings/terms",
-    meta: {
-      section: "설정",
-      title: "기간 설정",
-      summary: "시간표와 수업관리에 쓰는 기간 기준을 바로 수정합니다.",
+      title: "수업그룹 설정",
+      summary: "같은 진도로 운영하는 수업을 묶을 그룹 기준을 관리합니다.",
     },
   },
   {
@@ -153,7 +145,7 @@ const workspaceMetaEntries: Array<{
     meta: {
       section: "수업일정",
       title: "수업일정",
-      summary: "반 진행 상황, 기간, 최근 기록 메모를 빠르게 확인합니다.",
+      summary: "반 진행 상황과 최근 기록 메모를 빠르게 확인합니다.",
     },
   },
   {
@@ -218,14 +210,6 @@ const workspaceMetaEntries: Array<{
       section: "설정",
       title: "강의실 설정",
       summary: "수업 배정에 쓰는 강의실 기준 정보를 바로 수정합니다.",
-    },
-  },
-  {
-    match: "/admin/terms",
-    meta: {
-      section: "설정",
-      title: "기간 설정",
-      summary: "시간표와 수업관리에 쓰는 기간 기준을 바로 수정합니다.",
     },
   },
   {
@@ -407,7 +391,7 @@ export function buildAdminNavGroups({
             { title: "과목 설정", url: "/admin/settings/subjects" },
             { title: "선생님 설정", url: "/admin/settings/teachers" },
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
-            { title: "기간 설정", url: "/admin/settings/class-groups" },
+            { title: "수업그룹 설정", url: "/admin/settings/class-groups" },
             { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
             { title: "알림 설정", url: "/admin/settings/notifications" },
           ],

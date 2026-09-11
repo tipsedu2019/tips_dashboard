@@ -1,0 +1,85 @@
+/* Class-specific composition using the same control tokens as the student sheet. */
+.class-workspace > .\@container\/main { margin-top: 0; }
+.class-edit-sheet {
+  display: block;
+  width: min(1024px, calc(100vw - 32px));
+  max-width: 1024px;
+  max-height: min(900px, calc(100dvh - 64px));
+  padding: 28px 32px 0;
+  border-radius: 16px;
+  border-color: color-mix(in oklch, var(--border), transparent 50%);
+  box-shadow: 0 20px 64px -16px color-mix(in oklch, var(--foreground), transparent 78%);
+  overscroll-behavior: contain;
+  scroll-padding-block: 150px 100px;
+  animation-duration: 180ms;
+}
+.class-edit-sheet[data-state="open"] { animation: student-sheet-enter 180ms var(--student-motion-ease); }
+.class-edit-sheet > [data-slot="dialog-header"]:not(.sr-only) { margin-bottom: 28px; text-align: left; }
+.class-edit-sheet > [data-slot="dialog-header"] [data-slot="dialog-title"] { font-size: 20px; line-height: 28px; }
+.class-edit-sheet > [data-slot="alert"] { margin-bottom: 24px; }
+.class-fields { gap: 20px; }
+.class-fields > div { min-width: 0; }
+.class-fields [data-slot="label"] { font-size: 13px; line-height: 18px; font-weight: 550; }
+.class-fields [aria-haspopup="dialog"] { min-height: 42px; border-radius: 6px; box-shadow: none; }
+.class-schedule-fields [data-slot="button"][aria-haspopup="dialog"] { height: 42px; border-radius: 6px; box-shadow: none; }
+.class-detail-body > section + section,
+.class-detail-body > #class-detail-students-section { margin-top: 28px; }
+.class-detail-header {
+  margin: -4px -32px 24px;
+  padding: 0 32px 20px;
+  top: 0;
+}
+.class-detail-header::before { top: -28px; height: 28px; }
+.class-detail-header-title { font-size: 20px; line-height: 28px; }
+.class-sheet-actions {
+  position: sticky;
+  bottom: 0;
+  z-index: 30;
+  display: flex;
+  flex-flow: row wrap;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 12px;
+  margin: 28px -32px 0;
+  padding: 20px 32px 28px;
+  border-top: 1px solid var(--border);
+  background: var(--background);
+}
+.class-sheet-actions > [data-slot="button"] { min-width: 76px; height: 42px; }
+.class-sheet-actions [data-testid="management-save-status"] { flex: 1 1 auto; }
+.class-edit-sheet [data-testid="class-schedule-slot-editor"] { margin-top: 24px; padding: 16px; }
+.class-edit-sheet [data-testid="class-roster-student-row"] { scroll-margin-top: 150px; }
+.class-edit-sheet [data-testid="class-roster-student-row"] [data-slot="button"] { min-height: 36px; height: auto; }
+.class-edit-sheet [data-testid="class-relation-picker"] { min-width: 0; }
+.class-edit-sheet [data-testid="class-textbook-picker-panel"] { padding: 16px; }
+
+@media (max-width: 1023px) {
+  .class-edit-sheet [data-testid="class-schedule-slot-header"] { display: none; }
+  .class-edit-sheet [data-testid="class-schedule-slot-row"] { grid-template-columns: repeat(2, minmax(0, 1fr)); row-gap: 12px; padding: 12px 0; }
+  .class-edit-sheet [data-testid="class-schedule-slot-row"] + [data-testid="class-schedule-slot-row"] { border-top: 1px solid var(--border); }
+  .class-edit-sheet [data-testid="class-schedule-slot-row"] > div:first-child { grid-column: 1 / -1; }
+  .class-edit-sheet [data-testid="class-schedule-slot-row"] > div:last-child { grid-column: 2; }
+  .class-edit-sheet [data-testid="class-schedule-slot-row"] [data-slot="label"] { position: static; width: auto; height: auto; margin: 0; overflow: visible; clip: auto; white-space: normal; }
+  .class-edit-sheet [data-testid="class-roster-student-row"] { grid-template-columns: repeat(2, minmax(0, 1fr)); padding: 16px; }
+  .class-edit-sheet [data-testid="class-roster-student-row"] > div:first-child,
+  .class-edit-sheet [data-testid="class-roster-student-row"] > div:last-child { grid-column: 1 / -1; }
+}
+
+@media (max-width: 639px) {
+  .class-edit-sheet { width: calc(100vw - 24px); max-height: calc(100dvh - 24px); padding: 20px 16px 0; border-radius: 12px; }
+  .class-fields { gap: 16px; }
+  .class-detail-header { margin: -4px -16px 20px; padding: 0 16px 16px; }
+  .class-detail-header::before { top: -20px; height: 20px; }
+  .class-detail-header-title { font-size: 18px; line-height: 26px; }
+  .class-sheet-actions { margin: 24px -16px 0; padding: 16px; gap: 8px; }
+  .class-sheet-actions [data-testid="management-save-status"] { flex-basis: 100%; }
+  .class-sheet-actions > [data-slot="button"],
+  .class-schedule-fields [data-slot="button"][aria-haspopup="dialog"],
+  .class-fields [aria-haspopup="dialog"] { min-height: 44px; height: 44px; }
+  .class-edit-sheet [data-testid="class-schedule-slot-editor"] { padding: 12px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .class-edit-sheet, .class-edit-overlay { animation: none !important; }
+  .class-edit-sheet *, .class-edit-sheet *::before { scroll-behavior: auto !important; transition-duration: 0s !important; }
+}

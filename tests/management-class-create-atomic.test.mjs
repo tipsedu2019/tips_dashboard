@@ -9,29 +9,36 @@ const GROUP_IDS = [
   "20000000-0000-4000-8000-000000000102",
 ];
 
-function makeAtomicClassCreateClient() {
+function makeAtomicClassCreateClient({ error = null } = {}) {
   const calls = [];
+  const requestControls = [];
 
   return {
     calls,
+    requestControls,
     from() {
       throw new Error("direct class write invoked");
     },
-    async rpc(name, args) {
+    rpc(name, args) {
       calls.push([name, args]);
-      return {
+      const result = {
         data: {
           id: CLASS_ID,
           name: "초6 중등과정반",
           status: "수강",
         },
-        error: null,
+        error,
+      };
+      return {
+        abortSignal(signal) { requestControls.push(["signal", signal]); return this; },
+        retry(value) { requestControls.push(["retry", value]); return this; },
+        then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); },
       };
     },
   };
 }
 
-test("class creation commits the class and its period memberships through one atomic RPC", async () => {
+test("class creation commits any explicit group memberships through one atomic RPC", async () => {
   const client = makeAtomicClassCreateClient();
   const service = createManagementService({
     supabase: client,
@@ -76,23 +83,28 @@ test("class creation commits the class and its period memberships through one at
     },
     p_group_ids: GROUP_IDS,
   }]]);
+  assert.equal(client.requestControls[0][0], "signal");
+  assert.ok(client.requestControls[0][1] instanceof AbortSignal);
+  assert.equal(client.requestControls[0][1].aborted, false);
+  assert.deepEqual(client.requestControls[1], ["retry", false]);
 });
 
-test("class creation rejects a missing period before any mutation can begin", async () => {
+test("class creation accepts no period and sends an empty group list through the same atomic RPC", async () => {
   const client = makeAtomicClassCreateClient();
   const service = createManagementService({
     supabase: client,
     probeRegistrationRuntime: async () => ({ mode: "legacy", version: 0 }),
   });
 
-  await assert.rejects(
-    () => service.createClass({ id: CLASS_ID, name: "초6 중등과정반" }),
-    /기간을 하나 이상 선택하세요/,
-  );
-  assert.deepEqual(client.calls, []);
+  const result = await service.createClass({ id: CLASS_ID, name: "초6 중등과정반" });
+  assert.equal(result.id, CLASS_ID);
+  assert.equal(client.calls.length, 1);
+  assert.equal(client.calls[0][0], "create_class_with_group_memberships_v1");
+  assert.deepEqual(client.calls[0][1].p_group_ids, []);
+  assert.equal(client.calls[0][1].p_class.status, "수강");
 });
 
-test("class period replacement is atomic so a failed insert cannot erase the existing period", async () => {
+test("explicit class group replacement continues to use the atomic membership RPC", async () => {
   const client = makeAtomicClassCreateClient();
   const service = createManagementService({ supabase: client });
 
@@ -110,4 +122,13 @@ test("class period replacement is atomic so a failed insert cannot erase the exi
     p_class_id: CLASS_ID,
     p_group_ids: GROUP_IDS,
   }]]);
+});
+
+test("class creation surfaces a failed response without starting a second write", async () => {
+  const error = new Error("response unavailable");
+  const client = makeAtomicClassCreateClient({ error });
+  const service = createManagementService({ supabase: client });
+  await assert.rejects(service.createClass({ id: CLASS_ID, name: "수업" }), (actual) => actual === error);
+  assert.equal(client.calls.length, 1);
+  assert.deepEqual(client.requestControls[1], ["retry", false]);
 });

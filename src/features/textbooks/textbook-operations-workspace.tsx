@@ -1,6 +1,6 @@
 "use client";
 import { compactUniqueLabels, buildTextbookCleanupPreviewRows, getTeacherName, doesSearchOptionMatchFilters, buildSearchSelectCommandValue, buildSearchSelectFilterGroups, buildVisibleSearchSelectFilterGroups, buildTextbookReferenceOptions, buildTextbookClassReferenceOptions } from "./textbook-reference-model";
-import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, getSaleLineQuantity, getSaleLineMonth, getSaleLineStatus, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
+import { saleStatusLabels, TEXTBOOK_HANDOFF_BUSINESS_NAME, getKnownPublisherLabel, normalizeMonthInput, formatCurrency, getTextbookHandoffDocumentMeta, formatPurchaseUnitCost, getStudentGradeLabel, getSupplierName, getConfiguredSupplierIdForTextbook, getConfiguredTextbookPurchaseUnitCost, getSaleLineRecipientName, purchaseStatusLabel } from "./textbook-handoff-model";
 import type { TextbookHandoffLine, TextbookHandoffGroup } from "./textbook-handoff-model";
 
 import { Fragment, FormEvent, useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -12,9 +12,9 @@ import {
   ChevronDown,
   ChevronRight,
   ChevronsUpDown,
-  ClipboardCheck,
   Copy,
   FileImage,
+  Loader2,
   PackageCheck,
   Plus,
   Pencil,
@@ -22,13 +22,13 @@ import {
   RefreshCw,
   Save,
   Search,
-  SlidersHorizontal,
   Trash2,
   Truck,
   X,
 } from "lucide-react";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { ActionFeedback } from "@/components/ui/action-feedback";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -40,15 +40,10 @@ import {
   CommandItem,
   CommandList,
 } from "@/components/ui/command";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogFooter,
-  DialogHeader,
-  DialogTitle,
-} from "@/components/ui/dialog";
+import { Dialog } from "@/components/ui/dialog";
+import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
+import { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent } from "@/components/ui/form-dialog";
 import { Label } from "@/components/ui/label";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
@@ -66,8 +61,16 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
-import { useDataTableColumns, type DataTableColumn } from "@/components/data-table/data-table-columns";
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field";
+import { DataTableSelectFilter } from "@/components/data-table/data-table-select-filter";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
+import {
+  DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME,
+  DATA_TABLE_MOBILE_LIST_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME, DataTableToolbar, DataTableWorkspaceToolbar, DataTableFilters, DataTableViewport,
+  DataTableHeaderCell, DataTableHeaderRow, DataTableBodyCell, DataTableBodyRow, DataTableReadFeedback,
+} from "@/components/data-table/data-table-surface";
+import { DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection";
+import { DataTableDetailButton, DataTableRowActions } from "@/components/data-table/data-table-row-actions";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { captureElementAsPdfBlob, captureElementAsPngBlob, downloadBlob } from "@/lib/export-as-image";
@@ -79,7 +82,6 @@ import { parseTextbookNavigation, serializeTextbookNavigation, type TextbookNavi
 
 import {
   buildTeacherTextbookIssueDraft,
-  buildTextbookMonthlyClosing,
   buildTextbookSaleDraft,
   getRecordId,
   getTextbookCopyScope,
@@ -88,23 +90,19 @@ import {
   getTextbookTitle,
   groupPurchaseLinesByStatus,
   groupSaleLinesByStatus,
-  listIds,
   normalizeBarcodeValue,
 } from "./textbook-ledger.js";
 import { textbookService } from "./textbook-service";
-import { getTextbookClosingDetail, getTextbookInventoryBalance, getTextbookPurchaseDetail, getTextbookSaleDetail } from "./textbook-read-service";
+import { getTextbookInventoryBalance, getTextbookPurchaseDetail, getTextbookSaleDetail } from "./textbook-read-service";
 import { getTextbookInactiveCleanupContext } from "./textbook-reference-service";
-import { getClassTextbookSaleContext, getTextbookBillingHandoff, getTextbookClosingMovementExport, getTextbookClosingSaveContext, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
-import { getClosingStoredMetrics, type ClosingStoredMetrics } from "./textbook-closing-model";
+import { getClassTextbookSaleContext, getTextbookBillingHandoff, getTextbookPurchaseHandoff } from "./textbook-work-context-service";
 import {
   subjectOptions,
-  INVENTORY_LOW_STOCK_THRESHOLD,
   text,
   textPreservingZero,
   getRowFieldText,
   getSubjectLabel,
   getPublisherLabel,
-  getTextbookQualityIssues,
   normalizeStatusValue,
   numberValue,
   formatQuantity,
@@ -126,9 +124,6 @@ import type {
   SearchSelectFilterLayout,
   SearchSelectFilterGroup,
   Row,
-  InventoryFilter,
-  InventoryAuditFilter,
-  TextbookQualityFilter,
   PurchaseBoardScope,
   PurchaseRequestFilter,
   PurchaseOrderFilter,
@@ -146,13 +141,8 @@ import type {
   TextbookPurchaseSummary,
   SaleLineRow,
   TextbookSaleSummary,
-  ClosingRow,
-  ClosingMovementRow,
-  TextbookClosingDetail,
   PurchaseFilters,
   SaleFilters,
-  TextbookOperationsSummary,
-  ClosingFilters,
 } from "./textbook-read-types";
 import {
   SCIENCE_TEXTBOOK_TAXONOMY,
@@ -178,7 +168,6 @@ import {
 } from "./textbook-taxonomy";
 
 type TextbookAmountMode = "salePrice" | "stockValue";
-type TextbookOpsQueueKey = "unregistered" | "order" | "partial" | "issue" | "stockRisk";
 type PreparedHandoffDownload = {
   id: string;
   label: string;
@@ -216,7 +205,8 @@ type TextbookConfirmationRequest = {
   description: string;
   confirmLabel: string;
   items?: TextbookConfirmationPreviewItem[];
-  onConfirm: () => void;
+  totalCount?: number;
+  onConfirm: () => Promise<boolean>;
 };
 
 const statusOptions = [
@@ -230,20 +220,23 @@ const textbookCopyScopeOptions = [
 ] as const;
 
 const purchaseProcessQuantityColumns = [
-  { id: "studentRequested", label: "학생용 요청", scope: "student", kind: "requested", required: true },
-  { id: "studentOrdered", label: "학생용 주문", scope: "student", kind: "ordered", orderOnly: true, required: true },
-  { id: "studentReceived", label: "학생용 입고", scope: "student", kind: "received", orderOnly: true, required: true },
-  { id: "teacherRequested", label: "교사용 요청", scope: "teacher", kind: "requested", required: true },
-  { id: "teacherOrdered", label: "교사용 주문", scope: "teacher", kind: "ordered", orderOnly: true, required: true },
-  { id: "teacherReceived", label: "교사용 입고", scope: "teacher", kind: "received", orderOnly: true, required: true },
-] satisfies Array<{
-  id: string;
-  label: string;
-  scope: TextbookCopyScope;
-  kind: PurchaseQuantityKind;
-  orderOnly?: boolean;
-  required?: boolean;
-}>;
+  { id: "requested", label: "요청", kind: "requested", orderOnly: false },
+  { id: "ordered", label: "주문", kind: "ordered", orderOnly: true },
+  { id: "received", label: "입고", kind: "received", orderOnly: true },
+] as const;
+
+function PurchaseQuantityPair({ student, teacher, label }: { student: number | null; teacher: number | null; label: string }) {
+  return (
+    <div className="grid min-w-20 gap-1 text-xs tabular-nums">
+      {([ ["student", "학생용", student], ["teacher", "교사용", teacher] ] as const).map(([scope, scopeLabel, value]) => (
+        <div key={scope} data-copy-scope={scope} aria-label={`${scopeLabel} ${label} ${value === null ? "집계 확인 필요" : formatQuantity(value)}`} className="flex items-baseline justify-between gap-2">
+          <span className="text-[11px] font-normal text-muted-foreground">{scopeLabel}</span>
+          <span className="font-medium text-foreground">{value === null ? "—" : formatQuantity(value)}</span>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 const emptyMasterForm = {
   id: "",
@@ -306,81 +299,15 @@ const emptySaleForm = {
   memo: "",
 };
 
-const inventoryFilterLabels: Record<InventoryFilter, string> = {
-  all: "전체",
-  shortage: "부족",
-  surplus: "과잉",
-  unused: "재고 없음",
-  negative: "마이너스",
-};
-
 const textbookHistoryDeleteAdminEmails = new Set(["yeoyuasset@naver.com"]);
 
-const inventoryAuditFilterLabels: Record<InventoryAuditFilter, string> = {
-  recommended: "할 일",
-  pending: "대기",
-  done: "완료",
-  all: "전체",
-};
-
-const textbookQualityFilterLabels: Record<TextbookQualityFilter, string> = {
-  all: "사용중",
-  attention: "정리 필요",
-  duplicate: "중복",
-  missingCode: "코드 없음",
-  missingPublisher: "출판사 없음",
-  missingCategory: "분류 없음",
-  missingPrice: "가격 없음",
-  subjectMismatch: "과목 확인",
-  inactive: "미사용 보관함",
-};
-
 const textbookTabTriggerClassName =
-  "gap-2 data-[state=active]:bg-primary data-[state=active]:text-primary-foreground data-[state=active]:shadow-sm";
-const dialogFooterClassName =
-  "sticky bottom-0 z-20 mt-1 flex w-full min-w-0 max-w-full justify-self-stretch flex-col gap-2 border-t bg-background/95 px-0 py-4 backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:justify-end [&>button]:w-full sm:[&>button]:w-auto";
+  "min-h-9 gap-1.5 rounded-md border border-transparent text-xs text-muted-foreground data-[state=active]:border-border/70 data-[state=active]:bg-background data-[state=active]:text-foreground data-[state=active]:shadow-xs motion-reduce:transition-none";
+const TEXTBOOK_RESULTS_CLASS_NAME = "min-w-0 md:h-[min(42rem,max(20rem,calc(100dvh-20.25rem)))] md:overflow-y-auto [scrollbar-gutter:stable]";
 const stickyActionHeadClassName =
-  "sticky right-0 bg-muted/30 shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
+  "sticky right-0 z-20 bg-muted shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.45)]";
 const stickyActionCellClassName =
-  "sticky right-0 bg-background shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)]";
-
-function purchaseQuantityHeaderPillClassName(scope: TextbookCopyScope) {
-  return cn(
-    "inline-flex h-6 items-center justify-center rounded-full px-2 text-[11px] font-semibold leading-none ring-1",
-    scope === "student"
-      ? "bg-sky-100 text-sky-800 ring-sky-200"
-      : "bg-amber-100 text-amber-800 ring-amber-200",
-  );
-}
-
-function purchaseQuantityCellClassName(scope: TextbookCopyScope) {
-  return cn(
-    "text-right font-medium tabular-nums",
-    scope === "student"
-      ? "bg-sky-50/70 text-sky-950"
-      : "bg-amber-50/70 text-amber-950",
-  );
-}
-
-
-function buildPurchaseProcessColumns(mode: "request" | "order", showSelection: boolean) {
-  return [
-    showSelection ? { id: "select", label: "선택", required: true } : null,
-    { id: "status", label: "진행상태", required: true },
-    mode === "order" ? { id: "supplier", label: "총판" } : null,
-    mode === "order" ? { id: "unitCost", label: "단가" } : null,
-    { id: "eventAt", label: "처리일시" },
-    { id: "requester", label: "요청자" },
-    { id: "textbook", label: "교재명", required: true },
-    { id: "location", label: "위치" },
-    { id: "class", label: "수업" },
-    ...purchaseProcessQuantityColumns
-      .filter((column) => mode === "order" || !column.orderOnly)
-      .map((column) => ({ id: column.id, label: column.label, required: column.required })),
-    { id: "decision", label: "판단" },
-    { id: "action", label: "작업", required: true },
-  ].filter(Boolean) as DataTableColumn[];
-}
+  "sticky right-0 bg-background group-hover/data-table-row:bg-muted group-data-[state=selected]/data-table-row:bg-accent shadow-[-8px_0_12px_-12px_rgba(15,23,42,0.35)]";
 
 const purchaseStageLabels: Record<string, string> = {
   request: "요청 접수",
@@ -436,7 +363,6 @@ function getCanonicalTextbookDetail(state: TextbookNavigationState) {
   if (detail.kind === "master" && state.tab === "master") return detail;
   if (detail.kind === "purchase" && (state.tab === "requests" || state.tab === "purchase")) return detail;
   if (detail.kind === "sale" && state.tab === "sales") return detail;
-  if (detail.kind === "closing" && state.tab === "closing") return detail;
   return null;
 }
 
@@ -453,7 +379,6 @@ function uniqueSortedLabels(values: unknown[]) {
   return [...labelsByKey.values()].sort((left, right) => left.localeCompare(right, "ko", { numeric: true }));
 }
 
-
 function getTextbookIdentityLabel(row: Row) {
   return compactUniqueLabels([
     getTextbookTitle(row),
@@ -465,24 +390,8 @@ function getTextbookIdentityLabel(row: Row) {
   ]).join(" · ");
 }
 
-function getQualityIssueSummary(labels: Array<{ label: string }>) {
-  return labels.map((issue) => issue.label).join(", ") || "정리 완료";
-}
-
 function getCategoryLabel(row: Row) {
   return getTextbookCategoryLabel(row);
-}
-
-function getTextbookQualityIssueLabels(issues: ReturnType<typeof getTextbookQualityIssues>) {
-  const labels: Array<{ label: string; tone: "default" | "warning" | "danger" | "muted" }> = [];
-  if (issues.subjectMismatch) labels.push({ label: "과목 확인", tone: "danger" });
-  if (issues.duplicate) labels.push({ label: "중복", tone: "warning" });
-  if (issues.missingPrice) labels.push({ label: "가격 없음", tone: "muted" });
-  if (issues.missingPublisher) labels.push({ label: "출판사 없음", tone: "muted" });
-  if (issues.missingCategory) labels.push({ label: "분류 없음", tone: "muted" });
-  if (issues.missingCode) labels.push({ label: "코드 없음", tone: "muted" });
-  if (issues.inactive) labels.push({ label: "미사용", tone: "default" });
-  return labels;
 }
 
 function getTextbookGroupLabel(row: Row) {
@@ -545,17 +454,12 @@ function normalizeStoredTextInput(value: unknown) {
 
 
 
-
-
-
-
 function formatPurchaseScopeQuantityMetric(studentQuantity: number, teacherQuantity: number) {
   return [
     studentQuantity > 0 ? `학생용 ${formatQuantity(studentQuantity)}권` : "",
     teacherQuantity > 0 ? `교사용 ${formatQuantity(teacherQuantity)}권` : "",
   ].filter(Boolean).join(" · ") || "0권";
 }
-
 
 function getTextbookDeleteResultMessage(
   result: { deletedIds?: string[]; archivedIds?: string[] } | undefined,
@@ -575,7 +479,6 @@ function getTextbookDeleteResultMessage(
   }
   return `${formatQuantity(deletedCount)}개 교재를 삭제했습니다.`;
 }
-
 
 function getSavedPurchaseRequestFilter(stage: string, hasCatalogTextbook: boolean): PurchaseRequestFilter {
   if (stage !== "request") return "all";
@@ -602,37 +505,8 @@ function getTextbookCopyScopeLabel(value: unknown) {
   return getTextbookCopyScope({ copyScope: value }) === "teacher" ? "교사용" : "학생용";
 }
 
-
 function buildKyoboSearchUrl(title: string) {
   return `https://search.kyobobook.co.kr/search?keyword=${encodeURIComponent(title)}`;
-}
-
-function getStudentsByClass(classRecord: Row | undefined, students: Row[]) {
-  if (!classRecord) return [];
-  const studentIds = listIds(classRecord.student_ids || classRecord.studentIds);
-  const studentsById = new Map(students.map((student) => [getRecordId(student), student]));
-  return studentIds.map((id) => studentsById.get(id) || { id, name: id });
-}
-
-
-
-function getClassStudentCount(classRecord: Row | undefined, students: Row[]) {
-  return getStudentsByClass(classRecord, students).length;
-}
-
-function getPurchaseQuantityClassFit(requestedQuantity: unknown, studentCount: number) {
-  const requested = numberValue(requestedQuantity);
-  const difference = requested - studentCount;
-  if (!studentCount) {
-    return { label: "수업 미선택", tone: "default" as const, difference };
-  }
-  if (difference < 0) {
-    return { label: `${formatQuantity(Math.abs(difference))}권 부족`, tone: "danger" as const, difference };
-  }
-  if (difference > Math.max(2, Math.ceil(studentCount * 0.15))) {
-    return { label: `${formatQuantity(difference)}권 여유`, tone: "warning" as const, difference };
-  }
-  return { label: difference > 0 ? `${formatQuantity(difference)}권 여유` : "적정", tone: "good" as const, difference };
 }
 
 function getInventoryCountDraftKey(textbookId: string, locationId: string) {
@@ -646,7 +520,6 @@ function getInventoryCurrentQuantityDraft(row: InventoryCountRow) {
 function inventoryQuantityTone(totalQuantity: number) {
   if (totalQuantity < 0) return "text-red-700";
   if (totalQuantity === 0) return "text-zinc-500";
-  if (totalQuantity <= INVENTORY_LOW_STOCK_THRESHOLD) return "text-amber-700";
   return "text-foreground";
 }
 
@@ -785,25 +658,38 @@ function createPreparedHandoffDownload(blob: Blob, filename: string, extension: 
   };
 }
 
-async function downloadHandoffImage(element: HTMLElement, filename: string) {
-  const blob = await captureElementAsPngBlob(element, {
-    width: Math.max(720, Math.ceil(element.scrollWidth)),
-    padding: 0,
-    scale: 2,
-    backgroundColor: "#ffffff",
-  });
+async function captureHandoffDocument(element: HTMLElement, capture: typeof captureElementAsPngBlob, signal?: AbortSignal) {
+  signal?.throwIfAborted();
+  const tableOverflow = Math.max(0, ...Array.from(element.querySelectorAll("table"), (table) =>
+    table.scrollWidth - (table.parentElement?.clientWidth || 0),
+  ));
+  const width = Math.max(720, Math.ceil(element.scrollWidth + tableOverflow));
+  const surface = element.cloneNode(true) as HTMLElement;
+  // Export a separate surface so capture sizing never reflows the visible preview.
+  surface.querySelectorAll("[data-handoff-toolbar]").forEach((toolbar) => toolbar.remove());
+  surface.removeAttribute("id");
+  surface.querySelectorAll("[id]").forEach((node) => node.removeAttribute("id"));
+  const host = document.createElement("div");
+  host.setAttribute("aria-hidden", "true");
+  Object.assign(host.style, { position: "fixed", left: "-100000px", top: "0", width: `${width}px`, pointerEvents: "none" });
+  host.appendChild(surface);
+  document.body.appendChild(host);
+  try {
+    const blob = await capture(surface, { width, padding: 0, scale: 2, backgroundColor: "#ffffff" });
+    signal?.throwIfAborted();
+    return blob;
+  } finally {
+    host.remove();
+  }
+}
 
+async function downloadHandoffImage(element: HTMLElement, filename: string, signal?: AbortSignal) {
+  const blob = await captureHandoffDocument(element, captureElementAsPngBlob, signal);
   return createPreparedHandoffDownload(blob, filename, "png", "이미지");
 }
 
-async function downloadHandoffPdf(element: HTMLElement, filename: string) {
-  const blob = await captureElementAsPdfBlob(element, {
-    width: Math.max(720, Math.ceil(element.scrollWidth)),
-    padding: 0,
-    scale: 2,
-    backgroundColor: "#ffffff",
-  });
-
+async function downloadHandoffPdf(element: HTMLElement, filename: string, signal?: AbortSignal) {
+  const blob = await captureHandoffDocument(element, captureElementAsPdfBlob, signal);
   return createPreparedHandoffDownload(blob, filename, "pdf", "PDF");
 }
 
@@ -872,7 +758,6 @@ function getPurchaseFieldVisibility(stage: unknown) {
     orderedQuantity: normalizedStage === "order" || normalizedStage === "receive",
     receivedQuantity: normalizedStage === "receive",
     statementNumber: normalizedStage === "receive",
-    classFit: normalizedStage === "request" || normalizedStage === "order",
   };
 }
 
@@ -896,11 +781,6 @@ function getOrderablePurchaseRequestTextbook(line: Row, order: Row | undefined, 
 function isOrderablePurchaseRequestLine(line: Row, order: Row | undefined, textbooks: Row[]) {
   return Boolean(getOrderablePurchaseRequestTextbook(line, order, textbooks));
 }
-
-
-
-
-
 
 
 
@@ -960,83 +840,6 @@ function buildPurchaseStatusPayload(line: Row, order: Row | undefined, targetSta
   );
 }
 
-function TextbookOpsCommandCenter({
-  metrics,
-  activeQueueKey,
-  onSelectQueue,
-}: {
-  metrics: TextbookOperationsSummary;
-  activeQueueKey: TextbookOpsQueueKey | "";
-  onSelectQueue: (key: TextbookOpsQueueKey | "") => void;
-}) {
-  const actionItems = [
-    { key: "unregistered", label: "미등록 요청", value: metrics.unregisteredRequestCount, tone: "text-amber-700" },
-    { key: "order", label: "주문 필요", value: metrics.orderNeededCount, tone: "text-blue-700" },
-    { key: "partial", label: "부분입고", value: metrics.partialReceiptCount, tone: "text-orange-700" },
-    { key: "issue", label: "출고 대기", value: metrics.issueWaitingCount, tone: "text-emerald-700" },
-    { key: "stockRisk", label: "재고 부족", value: metrics.stockRiskCount, tone: "text-red-700" },
-  ] satisfies Array<{ key: TextbookOpsQueueKey; label: string; value: number; tone: string }>;
-  const activeQueueTotal = actionItems.reduce((sum, item) => sum + item.value, 0);
-  const activeQueueItem = actionItems.find((item) => item.key === activeQueueKey);
-  const queueBadgeValue = activeQueueItem ? activeQueueItem.value : activeQueueTotal;
-  const visibleActionItems = actionItems.filter((item) => item.value > 0 || item.key === activeQueueKey);
-
-  if (activeQueueTotal <= 0) {
-    return null;
-  }
-
-  return (
-    <Popover>
-      <PopoverTrigger asChild>
-        <Button
-            type="button"
-            variant={activeQueueKey ? "default" : "outline"}
-            size="sm"
-            className="h-8 max-w-full gap-2 rounded-md px-3"
-            aria-label="교재관리 할 일 보기"
-            title={activeQueueItem ? `${activeQueueItem.label} 보기` : `할 일 ${formatQuantity(activeQueueTotal)}건`}
-          >
-            <SlidersHorizontal className="size-3.5" />
-            <span className="max-w-[7rem] truncate">{activeQueueItem ? activeQueueItem.label : "할 일"}</span>
-            <Badge
-              variant={activeQueueKey ? "secondary" : "outline"}
-              className={cn("h-5 rounded px-1.5 tabular-nums", activeQueueKey && "bg-primary-foreground text-primary")}
-            >
-              {formatQuantity(queueBadgeValue)}
-            </Badge>
-        </Button>
-      </PopoverTrigger>
-      <PopoverContent align="end" className="w-[min(20rem,calc(100vw-2rem))] p-2">
-        <div className="grid gap-1" aria-label="교재관리 할 일 목록">
-          {visibleActionItems.map((item) => (
-            <button
-              key={item.key}
-              type="button"
-              className={cn(
-                "flex h-9 items-center justify-between rounded-md px-2 text-left text-sm transition-colors hover:bg-muted",
-                activeQueueKey === item.key && "bg-primary text-primary-foreground hover:bg-primary",
-              )}
-              aria-current={activeQueueKey === item.key ? "true" : undefined}
-              title={`${item.label} ${formatQuantity(item.value)}건`}
-              onClick={() => onSelectQueue(item.key)}
-            >
-              <span className="truncate">{item.label}</span>
-              <span className={cn("ml-3 font-semibold tabular-nums", activeQueueKey === item.key ? "text-primary-foreground" : item.tone)}>
-                {formatQuantity(item.value)}
-              </span>
-            </button>
-          ))}
-          {activeQueueKey ? (
-            <Button type="button" variant="ghost" size="sm" className="mt-1 h-8 justify-start rounded-md px-2" onClick={() => onSelectQueue("")}>
-              전체 보기
-            </Button>
-          ) : null}
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
 function getOperationSearchPlaceholder(activeTab: string) {
   if (activeTab === "requests") {
     return "요청 교재명, 수업, 요청자";
@@ -1078,6 +881,8 @@ function TextbookOperationsWorkspaceContent() {
   const [saving, setSaving] = useState("");
   const [message, setMessage] = useState("");
   const [actionErrorMessage, setActionErrorMessage] = useState("");
+  const [actionErrorOwner, setActionErrorOwner] = useState("");
+  const pendingActionsRef = useRef(new Set<string>());
   const [query, setQuery] = useState(() => text(initialPrimaryFilters.search));
   const [operationQuery, setOperationQuery] = useState(() => text(initialPrimaryFilters.search));
   const deferredQuery = useDeferredValue(query);
@@ -1085,19 +890,25 @@ function TextbookOperationsWorkspaceContent() {
   const masterSearchRef = useRef<HTMLInputElement>(null);
   const operationSearchRef = useRef<HTMLInputElement>(null);
   const [activeTab, setActiveTab] = useState<TextbookTab>(initialNavigationRef.current.tab);
-  const [inventoryFilter, setInventoryFilter] = useState<InventoryFilter>(() => (text(initialPrimaryFilters.inventory) || "all") as InventoryFilter);
-  const [textbookQualityFilter, setTextbookQualityFilter] = useState<TextbookQualityFilter>(() => (text(initialPrimaryFilters.quality) || "all") as TextbookQualityFilter);
+  const [textbookQualityFilter, setTextbookQualityFilter] = useState<"all" | "inactive">(() => initialPrimaryFilters.quality === "inactive" ? "inactive" : "all");
   const [subjectGroupFilter, setSubjectGroupFilter] = useState(() => text(initialPrimaryFilters.subject) || "all");
   const [schoolLevelGroupFilter, setSchoolLevelGroupFilter] = useState(() => text(initialPrimaryFilters.schoolLevel) || "all");
   const [gradeLevelGroupFilter, setGradeLevelGroupFilter] = useState(() => text(initialPrimaryFilters.gradeLevel) || "all");
   const [categoryGroupFilter, setCategoryGroupFilter] = useState(() => text(initialPrimaryFilters.subSubject) || "all");
   const [collapsedTextbookGroups, setCollapsedTextbookGroups] = useState<string[]>([]);
+  const [masterBulkControlsOpen, setMasterBulkControlsOpen] = useState(false);
+  const masterBulkDialogRevisionRef = useRef(0);
   const [selectedTextbookIds, setSelectedTextbookIds] = useState<string[]>([]);
   const [bulkTextbookPatch, setBulkTextbookPatch] = useState(emptyBulkTextbookPatch);
   const [masterForm, setMasterForm] = useState(emptyMasterForm);
   const [masterDialogOpen, setMasterDialogOpen] = useState(false);
+  const dialogOpenerRef = useRef<HTMLElement | null>(null);
   const [textbookDeleteDialogOpen, setTextbookDeleteDialogOpen] = useState(false);
+  const textbookCleanupPreviewRef = useRef<TextbookConfirmationPreviewItem[]>([]);
   const [confirmationRequest, setConfirmationRequest] = useState<TextbookConfirmationRequest | null>(null);
+  const [confirmationBusy, setConfirmationBusy] = useState(false);
+  const [confirmationError, setConfirmationError] = useState("");
+  const confirmationPendingRef = useRef(false);
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
   const [purchaseDialogOpen, setPurchaseDialogOpen] = useState(false);
   const [purchaseRequestInputMode, setPurchaseRequestInputMode] = useState<"catalog" | "manual">("catalog");
@@ -1110,7 +921,6 @@ function TextbookOperationsWorkspaceContent() {
   const [purchaseBoardScope, setPurchaseBoardScope] = useState<PurchaseBoardScope>(() => (text(initialPrimaryFilters.boardScope) || "active") as PurchaseBoardScope);
   const [purchaseRequestFilter, setPurchaseRequestFilter] = useState<PurchaseRequestFilter>(() => (text(initialPrimaryFilters.requestFilter) || "all") as PurchaseRequestFilter);
   const [purchaseOrderFilter, setPurchaseOrderFilter] = useState<PurchaseOrderFilter>(() => (text(initialPrimaryFilters.orderFilter) || "all") as PurchaseOrderFilter);
-  const [inventoryAuditFilter, setInventoryAuditFilter] = useState<InventoryAuditFilter>("recommended");
   const [inventoryCountLocationId, setInventoryCountLocationId] = useState("");
   const [inventoryCountDrafts, setInventoryCountDrafts] = useState<Record<string, string>>({});
   const [inventoryCountMemoDrafts, setInventoryCountMemoDrafts] = useState<Record<string, string>>({});
@@ -1120,8 +930,6 @@ function TextbookOperationsWorkspaceContent() {
   const [saleForm, setSaleForm] = useState(emptySaleForm);
   const saleAutoDefaultsRef = useRef({ locationId: "" });
   const [salesProcessFilter, setSalesProcessFilter] = useState<SalesProcessFilter>(() => (text(initialPrimaryFilters.status) || "all") as SalesProcessFilter);
-  const [closingFilters, setClosingFilters] = useState<ClosingFilters>(() => initialNavigationRef.current.tab === "closing"
-    ? initialNavigationRef.current.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
   const [saleHistoryFilters, setSaleHistoryFilters] = useState(initialNavigationRef.current.history.filters);
   const [observedQuery, setObservedQuery] = useState(searchParamString);
   const [navigationKey, setNavigationKey] = useState(searchParamString);
@@ -1141,20 +949,17 @@ function TextbookOperationsWorkspaceContent() {
     setSchoolLevelGroupFilter(text(filters.schoolLevel) || "all");
     setGradeLevelGroupFilter(text(filters.gradeLevel) || "all");
     setCategoryGroupFilter(text(filters.subSubject) || "all");
-    setTextbookQualityFilter((text(filters.quality) || "all") as TextbookQualityFilter);
-    setInventoryFilter((text(filters.inventory) || "all") as InventoryFilter);
+    setTextbookQualityFilter(filters.quality === "inactive" ? "inactive" : "all");
     setPurchaseBoardScope((text(filters.boardScope) || "active") as PurchaseBoardScope);
     setPurchaseRequestFilter((text(filters.requestFilter) || "all") as PurchaseRequestFilter);
     setPurchaseOrderFilter((text(filters.orderFilter) || "all") as PurchaseOrderFilter);
     setSalesProcessFilter((text(filters.status) || "all") as SalesProcessFilter);
-    setClosingFilters(restored.tab === "closing" ? restored.primary.filters as ClosingFilters : { month: "all", subject: "all", status: "all" });
     setSaleHistoryFilters(restored.history.filters);
     const nextMasterDetailId = restoredDetail?.kind === "master" ? restoredDetail.id : "";
     const nextPurchaseDetail = restoredDetail?.kind === "purchase" ? { anchorLineId: restoredDetail.id, mode: restored.tab === "requests" ? "request" as const : "order" as const } : null;
     setSelectedMasterDetailId(nextMasterDetailId);
     setSelectedPurchaseDetail(nextPurchaseDetail);
     setSelectedSaleDetailId(restoredDetail?.kind === "sale" ? restoredDetail.id : "");
-    setSelectedClosingDetailId(restoredDetail?.kind === "closing" ? restoredDetail.id : "");
     setMasterDialogOpen(false);
     setMasterForm(emptyMasterForm);
     setPurchaseDialogOpen(false);
@@ -1163,13 +968,9 @@ function TextbookOperationsWorkspaceContent() {
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm(emptyPurchaseForm);
     setPurchaseRequestInputMode("catalog");
-    setSelectedClosingScope(null);
-    setClosingMovementSearch(restored.movements.search);
-    setClosingDetailResource({ value: null, loading: false, error: "" });
     setSelectedTextbookIds([]);
     setSelectedPurchaseLineIds([]);
     setSelectedSaleLineIds([]);
-    setSelectedClosingIds([]);
   }, []);
   if (observedQuery !== searchParamString) {
     setObservedQuery(searchParamString);
@@ -1182,8 +983,6 @@ function TextbookOperationsWorkspaceContent() {
   }, [adoptLocationQuery]);
   const [selectedSaleLineIds, setSelectedSaleLineIds] = useState<string[]>([]);
   const [saleDialogOpen, setSaleDialogOpen] = useState(false);
-  const [closingDialogOpen, setClosingDialogOpen] = useState(false);
-  const [selectedClosingIds, setSelectedClosingIds] = useState<string[]>([]);
   const [selectedMasterDetailId, setSelectedMasterDetailId] = useState(() => {
     const detail = getCanonicalTextbookDetail(initialNavigationRef.current);
     return detail?.kind === "master" ? detail.id : "";
@@ -1198,22 +997,8 @@ function TextbookOperationsWorkspaceContent() {
     const detail = getCanonicalTextbookDetail(initialNavigationRef.current);
     return detail?.kind === "sale" ? detail.id : "";
   });
-  const [selectedClosingDetailId, setSelectedClosingDetailId] = useState(() => {
-    const detail = getCanonicalTextbookDetail(initialNavigationRef.current);
-    return detail?.kind === "closing" ? detail.id : "";
-  });
-  const [selectedClosingScope, setSelectedClosingScope] = useState<{ closingMonth: string; subject: string } | null>(null);
-  const [closingMovementSearch, setClosingMovementSearch] = useState(() => initialNavigationRef.current.movements.search);
-  const [closingDetailResource, setClosingDetailResource] = useState<{ value: TextbookClosingDetail | null; loading: boolean; error: string }>({ value: null, loading: false, error: "" });
   const [excludedStudentIds, setExcludedStudentIds] = useState<string[]>([]);
   const [saleStudentQuery, setSaleStudentQuery] = useState("");
-  const [closingForm, setClosingForm] = useState({
-    closingMonth: currentMonth(),
-    subject: "all",
-    openingQuantity: "0",
-    openingAmount: "0",
-    memo: "",
-  });
 
   const masterFilters = useMemo(() => ({
     search: deferredQuery,
@@ -1222,8 +1007,8 @@ function TextbookOperationsWorkspaceContent() {
     gradeLevel: gradeLevelGroupFilter,
     subSubject: categoryGroupFilter,
     quality: textbookQualityFilter,
-    inventory: inventoryFilter,
-  }), [categoryGroupFilter, deferredQuery, gradeLevelGroupFilter, inventoryFilter, schoolLevelGroupFilter, subjectGroupFilter, textbookQualityFilter]);
+    inventory: "all" as const,
+  }), [categoryGroupFilter, deferredQuery, gradeLevelGroupFilter, schoolLevelGroupFilter, subjectGroupFilter, textbookQualityFilter]);
   const purchaseFilters = useMemo(() => ({
     search: deferredOperationQuery,
     boardScope: purchaseBoardScope,
@@ -1288,11 +1073,6 @@ function TextbookOperationsWorkspaceContent() {
     && isTextbookUuid(purchaseForm.textbookId) && isTextbookUuid(purchaseForm.locationId)
     ? { textbookIds: [purchaseForm.textbookId], locationId: purchaseForm.locationId }
     : null;
-  const normalizedClosingMonth = normalizeMonthInput(closingForm.closingMonth);
-  const closingPreviewInput = closingDialogOpen && /^\d{4}-(0[1-9]|1[0-2])$/.test(normalizedClosingMonth) ? {
-    closingMonth: normalizedClosingMonth, subject: closingForm.subject,
-    openingQuantity: numberValue(closingForm.openingQuantity), openingAmount: numberValue(closingForm.openingAmount),
-  } : null;
   const referenceData = useTextbookReferenceData({
     viewerId: text(user?.id), viewerRole: text(role), authReady: Boolean(user?.id && role), managementEnabled,
     bookOptions: { enabled: purchaseDialogOpen || saleDialogOpen },
@@ -1310,8 +1090,7 @@ function TextbookOperationsWorkspaceContent() {
     classSalePreviewInput,
     teacherSaleBalanceInput,
     purchaseBalanceInput,
-    closingPreviewInput,
-  });
+    });
   const acceptedSelectedBook = isExactAcceptedInput(referenceData.selectedBook.acceptedInput, selectedBookInput)
     ? referenceData.selectedBook.value?.row || null : null;
   const acceptedSelectedClass = isExactAcceptedInput(referenceData.selectedClass.acceptedInput, selectedClassInput)
@@ -1334,8 +1113,6 @@ function TextbookOperationsWorkspaceContent() {
     ? referenceData.teacherSaleBalance.value : null;
   const acceptedPurchaseBalance = isExactAcceptedInput(referenceData.purchaseBalance.acceptedInput, purchaseBalanceInput)
     ? referenceData.purchaseBalance.value : null;
-  const acceptedClosingPreview = isExactAcceptedInput(referenceData.closingPreview.acceptedInput, closingPreviewInput)
-    ? referenceData.closingPreview.value : null;
   const purchaseReferenceError = referenceData.selectedBook.error
     ? referenceData.selectedBook : referenceData.selectedClass.error
       ? referenceData.selectedClass : referenceData.selectedLocation.error
@@ -1453,10 +1230,8 @@ function TextbookOperationsWorkspaceContent() {
     purchase: { enabled: activeTab === "purchase", filters: purchaseFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
     sales: { enabled: activeTab === "sales", filters: salesFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
     saleHistory: { enabled: activeTab === "sales", filters: saleHistoryFilters, restoredPage: initialNavigationRef.current.history.page, restoredPageSize: initialNavigationRef.current.history.pageSize, restorationKey: navigationKey },
-    inventory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { ...masterFilters, locationId: preparedInventoryLocationId, audit: inventoryAuditFilter }, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
+    inventory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { ...masterFilters, quality: "all", locationId: preparedInventoryLocationId, audit: "all" }, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
     inventoryHistory: { enabled: activeTab === "inventory" && inventoryLocationReference.ready, filters: { textbookId: null, locationId: preparedInventoryLocationId || null }, restoredPage: initialNavigationRef.current.history.page, restoredPageSize: initialNavigationRef.current.history.pageSize, restorationKey: navigationKey },
-    closing: { enabled: activeTab === "closing", filters: closingFilters, restoredPage: primaryRestoredPage, restoredPageSize: primaryRestoredPageSize, restorationKey: navigationKey },
-    closingMovements: { enabled: Boolean(selectedClosingDetailId && selectedClosingScope), filters: { closingMonth: selectedClosingScope?.closingMonth || "", subject: selectedClosingScope?.subject || "all", search: closingMovementSearch }, restoredPage: initialNavigationRef.current.movements.page, restoredPageSize: initialNavigationRef.current.movements.pageSize, restorationKey: navigationKey },
   });
   const actorKey = `${user?.id || ""}:${role || ""}`;
   const actionLifetimeRef = useRef({ actorKey, mounted: false });
@@ -1479,16 +1254,16 @@ function TextbookOperationsWorkspaceContent() {
     patch: bulkTextbookPatch,
   });
   const liveActionInputsRef = useRef({
-    master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
+    master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
-    inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
+    inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds),
     purchaseDirect: purchaseDirectIdentity, saleRecipients: JSON.stringify(excludedStudentIds),
     bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity, masterBulk: masterBulkIdentity,
   });
   liveActionInputsRef.current = {
-    master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm), closing: JSON.stringify(closingForm),
+    master: JSON.stringify(masterForm), purchase: JSON.stringify(purchaseForm), sale: JSON.stringify(saleForm),
     purchaseSelection: JSON.stringify(selectedPurchaseLineIds), saleSelection: JSON.stringify(selectedSaleLineIds),
-    inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds), closingSelection: JSON.stringify(selectedClosingIds),
+    inventorySelection: JSON.stringify(selectedTextbookIds), masterSelection: JSON.stringify(selectedTextbookIds),
     purchaseDirect: purchaseDirectIdentity, saleRecipients: JSON.stringify(excludedStudentIds),
     bulkOrder: JSON.stringify({ selection: selectedPurchaseLineIds, quantities: bulkOrderQuantities }), inventory: inventoryActionIdentity, masterBulk: masterBulkIdentity,
   };
@@ -1511,14 +1286,11 @@ function TextbookOperationsWorkspaceContent() {
   const invalidateInventory = useCallback(async () => {
     await Promise.all([numbered.inventory.refresh(), numbered.inventory.summary.retry(), numbered.inventoryHistory.refresh(), numbered.operations.retry()]);
   }, [numbered.inventory, numbered.inventoryHistory, numbered.operations]);
-  const invalidateClosing = useCallback(async () => {
-    await Promise.all([numbered.closing.refresh(), numbered.operations.retry(), referenceData.closingPreview.retry()]);
-  }, [numbered.closing, numbered.operations, referenceData.closingPreview]);
   const requestRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.requests.rows), [numbered.requests.rows]);
   const purchaseRendererData = useMemo(() => buildPreparedPurchaseRendererData(numbered.purchase.rows), [numbered.purchase.rows]);
   const saleRendererData = useMemo(() => buildPreparedSaleRendererData(numbered.sales.rows), [numbered.sales.rows]);
   const activePrimaryState = activeTab === "master" ? numbered.master : activeTab === "requests" ? numbered.requests : activeTab === "purchase" ? numbered.purchase
-    : activeTab === "sales" ? numbered.sales : activeTab === "inventory" ? numbered.inventory : numbered.closing;
+    : activeTab === "sales" ? numbered.sales : numbered.inventory;
   const activeSummaryResource = activeTab === "master" ? numbered.master.summary : activeTab === "requests" ? numbered.requests.summary : activeTab === "purchase" ? numbered.purchase.summary
     : activeTab === "sales" ? numbered.sales.summary : activeTab === "inventory" ? numbered.inventory.summary : null;
   useEffect(() => {
@@ -1534,37 +1306,6 @@ function TextbookOperationsWorkspaceContent() {
     handledQuery.current = queryString;
     window.history.replaceState(null, "", `${window.location.pathname}?${queryString}`);
   }, [activeTab, numbered.saleHistory.acceptedFilters, numbered.saleHistory.error, numbered.saleHistory.loading, numbered.saleHistory.page, numbered.saleHistory.pageSize, numbered.saleHistory.totalCount]);
-  useEffect(() => {
-    if (!selectedClosingDetailId || numbered.closingMovements.loading || numbered.closingMovements.error || !numbered.closingMovements.acceptedFilters || numbered.closingMovements.totalCount === null) return;
-    const current = new URLSearchParams(window.location.search);
-    const parsed = parseTextbookNavigation(current);
-    const next = serializeTextbookNavigation(current, { ...parsed,
-      movements: { page: numbered.closingMovements.page, pageSize: numbered.closingMovements.pageSize, search: numbered.closingMovements.acceptedFilters.search },
-      detail: { kind: "closing", id: selectedClosingDetailId },
-    });
-    const queryString = next.toString();
-    handledQuery.current = queryString;
-    window.history.replaceState(null, "", `${window.location.pathname}?${queryString}`);
-  }, [numbered.closingMovements.acceptedFilters, numbered.closingMovements.error, numbered.closingMovements.loading, numbered.closingMovements.page, numbered.closingMovements.pageSize, numbered.closingMovements.totalCount, selectedClosingDetailId]);
-
-  useEffect(() => {
-    if (!selectedClosingDetailId || !user?.id || !role) {
-      setClosingDetailResource({ value: null, loading: false, error: "" });
-      return;
-    }
-    const abort = new AbortController();
-    const actorKey = `${user.id}:${role}`;
-    setClosingDetailResource({ value: null, loading: true, error: "" });
-    void getTextbookClosingDetail(selectedClosingDetailId, { signal: abort.signal }).then((value) => {
-      if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) {
-        setClosingDetailResource({ value, loading: false, error: "" });
-        if (value.row) setSelectedClosingScope({ closingMonth: text(value.row.closing_month), subject: text(value.row.subject) || "all" });
-      }
-    }, (error) => {
-      if (!abort.signal.aborted && actorKey === `${user.id}:${role}`) setClosingDetailResource({ value: null, loading: false, error: getTextbookActionErrorMessage(error) });
-    });
-    return () => abort.abort();
-  }, [role, selectedClosingDetailId, user?.id]);
 
   const locations = useMemo<Row[]>(() => {
     const direct = acceptedSelectedLocation;
@@ -1581,7 +1322,6 @@ function TextbookOperationsWorkspaceContent() {
     masterDialogOpen && referenceData.masterDuplicate.error ? referenceData.masterDuplicate : null,
     purchaseDialogOpen && purchaseReferenceError ? purchaseReferenceError : null,
     saleDialogOpen && saleReferenceError ? saleReferenceError : null,
-    closingDialogOpen && referenceData.closingPreview.error ? referenceData.closingPreview : null,
     activeTab === "inventory" && referenceData.locationOptions.error ? referenceData.locationOptions : null,
   ].find((owner) => owner && isPreparedSchemaError(owner.error)) || null;
   const preparedSchemaOwner = [
@@ -1631,15 +1371,12 @@ function TextbookOperationsWorkspaceContent() {
     [schoolLevelGroupFilter],
   );
   const acceptedMasterSummary = numbered.master.summary.value;
-  const acceptedInventorySummary = numbered.inventory.summary.value;
-  const acceptedCatalogSummary = activeTab === "inventory" ? acceptedInventorySummary : acceptedMasterSummary;
   const categoryGroupOptions = useMemo(
     () => acceptedMasterOptions?.categoryOptions || [],
     [acceptedMasterOptions],
   );
   const activeTextbookQualityFilter = activeTab === "master" ? textbookQualityFilter : "all";
   const textbookQualityFilterCounts = acceptedMasterSummary?.qualityCounts || null;
-  const inventoryFilterCounts = acceptedCatalogSummary?.inventoryCounts || null;
   const filteredInventory = numbered.master.rows;
   const masterVisibleInventory = numbered.master.rows;
   const inventoryById = useMemo(
@@ -1658,12 +1395,13 @@ function TextbookOperationsWorkspaceContent() {
       .filter((row): row is NonNullable<typeof row> => Boolean(row)),
     [inventoryById, selectedTextbookIds],
   );
+  useEffect(() => {
+    if (selectedTextbookRows.length === 0) setMasterBulkControlsOpen(false);
+  }, [selectedTextbookRows.length]);
   const selectedTextbookCleanupRows = useMemo(
     () => buildTextbookCleanupPreviewRows(selectedTextbookRows),
     [selectedTextbookRows],
   );
-  const selectedTextbookCleanupPreviewRows = selectedTextbookCleanupRows.slice(0, 5);
-  const selectedTextbookCleanupMoreCount = Math.max(0, selectedTextbookCleanupRows.length - selectedTextbookCleanupPreviewRows.length);
   const selectedVisibleTextbookCount = useMemo(
     () => visibleTextbookIds.filter((id) => selectedTextbookIdSet.has(id)).length,
     [selectedTextbookIdSet, visibleTextbookIds],
@@ -1672,21 +1410,11 @@ function TextbookOperationsWorkspaceContent() {
   const someVisibleTextbooksSelected = selectedVisibleTextbookCount > 0 && !allVisibleTextbooksSelected;
   const hasTextbookListFilter =
     Boolean(query) ||
-    inventoryFilter !== "all" ||
     activeTextbookQualityFilter !== "all" ||
     subjectGroupFilter !== "all" ||
     schoolLevelGroupFilter !== "all" ||
     gradeLevelGroupFilter !== "all" ||
     categoryGroupFilter !== "all";
-  const textbookListFilterCount = [
-    query,
-    inventoryFilter !== "all" ? inventoryFilter : "",
-    activeTextbookQualityFilter !== "all" ? activeTextbookQualityFilter : "",
-    subjectGroupFilter !== "all" ? subjectGroupFilter : "",
-    schoolLevelGroupFilter !== "all" ? schoolLevelGroupFilter : "",
-    gradeLevelGroupFilter !== "all" ? gradeLevelGroupFilter : "",
-    categoryGroupFilter !== "all" ? categoryGroupFilter : "",
-  ].filter(Boolean).length;
   const textbookEmptyLabel = hasTextbookListFilter ? "조건에 맞는 교재가 없습니다" : "교재가 없습니다";
   useEffect(() => {
     if (activeTab !== "master") return;
@@ -1697,16 +1425,6 @@ function TextbookOperationsWorkspaceContent() {
     });
   }, [activeTab, filteredInventory]);
 
-  useEffect(() => {
-  }, [
-    activeTextbookQualityFilter,
-    categoryGroupFilter,
-    gradeLevelGroupFilter,
-    inventoryFilter,
-    query,
-    schoolLevelGroupFilter,
-    subjectGroupFilter,
-  ]);
   const masterDuplicateRows = acceptedMasterDuplicate?.previewRows || [];
   const masterDuplicateTotalCount = acceptedMasterDuplicate?.totalCount || 0;
 
@@ -1730,22 +1448,12 @@ function TextbookOperationsWorkspaceContent() {
   }, [activeTab, numbered.sales.rows]);
 
   useEffect(() => {
-    if (activeTab !== "closing") return;
-    const existingIds = new Set(numbered.closing.rows.map((row) => row.id));
-    setSelectedClosingIds((current) => {
-      const next = current.filter((id) => existingIds.has(id));
-      return next.length === current.length ? current : next;
-    });
-  }, [activeTab, numbered.closing.rows]);
-
-  useEffect(() => {
     if (!canManageTextbookOperations && activeTab !== "requests") {
       setActiveTab("requests");
       updateOperationSearchQuery("");
       setSelectedPurchaseLineIds([]);
       setSelectedSaleLineIds([]);
       setSelectedTextbookIds([]);
-      setSelectedClosingIds([]);
     }
   }, [activeTab, canManageTextbookOperations]);
 
@@ -1869,8 +1577,6 @@ function TextbookOperationsWorkspaceContent() {
   const configuredPurchaseSupplierLabel = configuredPurchaseSupplierId
     ? selectedBookReference?.supplier?.name || configuredPurchaseSupplierId
     : "-";
-  const selectedPurchaseClassReference = acceptedSelectedClass;
-  const purchaseClassStudentCount = selectedPurchaseClassReference?.enrolledStudentCount || 0;
   const purchaseStudentRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "requested"));
   const purchaseTeacherRequestedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "requested"));
   const purchaseRequestedTotalQuantity = purchaseStudentRequestedQuantity + purchaseTeacherRequestedQuantity;
@@ -1881,7 +1587,6 @@ function TextbookOperationsWorkspaceContent() {
   const purchaseStudentReceivedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "student", "received"));
   const purchaseTeacherReceivedQuantity = numberValue(getPurchaseScopeQuantity(purchaseForm, "teacher", "received"));
   const purchaseReceivedTotalQuantity = purchaseStudentReceivedQuantity + purchaseTeacherReceivedQuantity;
-  const purchaseQuantityFit = getPurchaseQuantityClassFit(String(purchaseStudentRequestedQuantity), purchaseClassStudentCount);
   const selectedPurchaseBalance = acceptedPurchaseBalance?.rows.find((row) => row.textbookId === purchaseForm.textbookId);
   const purchaseCurrentLocationQuantity = selectedPurchaseBalance?.currentQuantity || 0;
   const purchaseProjectedLocationQuantity = purchaseForm.requestStage === "receive"
@@ -1965,17 +1670,16 @@ function TextbookOperationsWorkspaceContent() {
       !classSalePreviewAccepted ||
       saleDraft.lines.length === 0 ||
       saleDuplicateLines.length > 0);
-  const saleSubmitHint = !selectedSaleClass ? "수업을 선택하세요" : !selectedSaleTextbook ? "교재를 선택하세요" : saleDraft.lines.length === 0
-    ? "출고 대상 학생이 없습니다"
-    : saleDuplicateLines.length > 0
-      ? "이미 같은 월 출고가 있습니다"
-      : "출고 대기 저장";
-  const teacherSaleSubmitHint = !selectedSaleTextbook
-    ? "교재를 선택하세요"
-    : !saleTeacherName
-      ? "선생님을 선택하세요"
-      : "교사용 출고 대기 저장";
-  const effectiveSaleSubmitHint = isTeacherSale ? teacherSaleSubmitHint : saleSubmitHint;
+  const effectiveSaleSubmitHint = schemaDisabled ? "교재 정보를 다시 불러온 뒤 저장하세요."
+    : !saleForm.textbookId ? "교재를 선택하세요."
+    : isTeacherSale && !saleTeacherName ? "선생님을 선택하세요."
+    : !isTeacherSale && !saleForm.classId ? "수업을 선택하세요."
+    : !saleLocationId ? "위치를 선택하세요."
+    : saleReferenceError ? "조회 오류를 해결한 뒤 저장하세요."
+    : !saleReferencesAccepted || (isTeacherSale ? !teacherSalePreviewAccepted : !classSalePreviewAccepted) ? "선택한 대상과 재고를 확인하고 있습니다."
+    : saleDuplicateLines.length > 0 ? "이미 같은 월 출고가 있습니다."
+    : !isTeacherSale && saleDraft.lines.length === 0 ? "출고 대상 학생을 선택하세요."
+    : "";
   const selectedSaleStudentCount = selectedClassStudents.length;
   const includedSaleStudentCount = selectedClassStudents
     .filter((student) => !excludedStudentIds.includes(getRecordId(student)))
@@ -1990,61 +1694,12 @@ function TextbookOperationsWorkspaceContent() {
   const operationMetrics = numbered.operations.value || {
     requestCount: 0, unregisteredRequestCount: 0, orderNeededCount: 0, receivingBacklogCount: 0, partialReceiptCount: 0, issueWaitingCount: 0, stockRiskCount: 0,
   };
-  const operationQueueTotal =
-    operationMetrics.unregisteredRequestCount +
-    operationMetrics.orderNeededCount +
-    operationMetrics.partialReceiptCount +
-    operationMetrics.issueWaitingCount +
-    operationMetrics.stockRiskCount;
-  const showsInventoryTools = activeTab === "master" || activeTab === "inventory";
-  const activeProcessHasRows =
-    activeTab === "requests" ? operationMetrics.requestCount > 0 :
-    activeTab === "purchase" ? (numbered.purchase.totalCount || 0) > 0 :
-    activeTab === "sales" ? (numbered.sales.totalCount || 0) > 0 :
-    false;
-  const showsProcessSearch = activeProcessHasRows || Boolean(text(operationQuery));
-  const showsProcessCommandCenter =
-    canManageTextbookOperations &&
-    activeTab !== "requests" &&
-    operationQueueTotal > 0 &&
-    (activeTab === "purchase" || activeTab === "sales");
-  const showsProcessToolbar =
-    (activeTab === "requests" ||
-      activeTab === "purchase" ||
-      activeTab === "sales") &&
-    (showsProcessSearch || showsProcessCommandCenter);
-  const activeOperationSearchQuery = text(operationQuery);
-  const activeWorkflowSelectionCount =
-    activeTab === "purchase" || activeTab === "requests" ? selectedPurchaseLineIds.length :
-    activeTab === "sales" ? selectedSaleLineIds.length :
-    activeTab === "closing" ? selectedClosingIds.length :
-    selectedTextbookRows.length;
+  const showsProcessToolbar = activeTab === "requests" || activeTab === "purchase" || activeTab === "sales";
   const operationSearchLabel = getOperationSearchLabel(activeTab);
   const operationSearchPlaceholder = getOperationSearchPlaceholder(activeTab);
-  const activeQueueKey: TextbookOpsQueueKey | "" =
-    activeTab === "purchase" && purchaseRequestFilter === "unregistered" ? "unregistered" :
-    activeTab === "purchase" && purchaseOrderFilter === "waiting" ? "order" :
-    activeTab === "purchase" && purchaseOrderFilter === "partial" ? "partial" :
-    activeTab === "sales" && salesProcessFilter === "waiting" ? "issue" :
-    activeTab === "inventory" && inventoryFilter === "shortage" ? "stockRisk" :
-    "";
-  const activeTabResultCount =
-    activeTab === "master" ? numbered.master.totalCount || 0 :
-    activeTab === "inventory" ? numbered.inventory.totalCount || 0 :
-    activeTab === "requests" ? numbered.requests.totalCount || 0 :
-    activeTab === "purchase" ? numbered.purchase.totalCount || 0 :
-    activeTab === "sales" ? numbered.sales.totalCount || 0 :
-    numbered.closing.totalCount || 0;
-  const workspaceStatusItems: TextbookOperationsStatusItem[] = [
-    { id: "result", label: "표시", value: `${formatQuantity(activeTabResultCount)}건` },
-    { id: "filters", label: "필터", value: `${formatQuantity(textbookListFilterCount)}개`, hidden: textbookListFilterCount <= 0 },
-    { id: "selection", label: "선택", value: `${formatQuantity(activeWorkflowSelectionCount)}건`, hidden: activeWorkflowSelectionCount <= 0 },
-    { id: "search", label: "검색", value: activeTab === "master" || activeTab === "inventory" ? query : activeOperationSearchQuery, hidden: !(activeTab === "master" || activeTab === "inventory" ? text(query) : activeOperationSearchQuery) },
-    { id: "schema", label: "DB", value: "확인 필요", tone: "danger" as const, hidden: !schemaDisabled },
-  ].filter((item) => !item.hidden);
-
   useEffect(() => {
     const handleSearchShortcut = (event: KeyboardEvent) => {
+      if (event.defaultPrevented) return;
       if (event.key === "Escape") {
         if (document.activeElement === masterSearchRef.current && query) {
           event.preventDefault();
@@ -2089,6 +1744,13 @@ function TextbookOperationsWorkspaceContent() {
   const masterTaxonomyValidation = validateTextbookTaxonomyForWrite(masterForm);
   const masterSubmitDisabled = schemaDisabled || saving === "master" || !masterTitleValue || !masterTaxonomyValidation.valid || isNewMasterDuplicate
     || !masterOptionsAccepted || referenceData.masterDuplicate.loading || Boolean(referenceData.masterDuplicate.error) || !masterDuplicateAccepted;
+  const masterSubmitHint = referenceData.masterOptions.error || referenceData.masterDuplicate.error ? "조회 오류를 해결한 뒤 저장하세요."
+    : schemaDisabled ? "교재 정보를 다시 불러온 뒤 저장하세요."
+    : !masterTitleValue ? "교재명을 입력하세요."
+    : !masterTaxonomyValidation.valid ? masterTaxonomyValidation.message
+    : isNewMasterDuplicate ? "이미 등록된 교재입니다. 기존 교재를 열어 수정하세요."
+    : !masterOptionsAccepted || !masterDuplicateAccepted || referenceData.masterDuplicate.loading ? "교재 분류와 중복 여부를 확인하고 있습니다."
+    : "";
   const purchaseBookAccepted = purchaseRequestInputMode === "manual" && purchaseForm.requestStage === "request"
     ? true : Boolean(acceptedSelectedBook && getRecordId(acceptedSelectedBook.textbook) === purchaseForm.textbookId);
   const purchaseClassAccepted = !purchaseForm.classId || acceptedSelectedClass?.id === purchaseForm.classId;
@@ -2102,13 +1764,15 @@ function TextbookOperationsWorkspaceContent() {
     (purchaseForm.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId) ||
     (purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity) ||
     (purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity);
-  const closingPreview = acceptedClosingPreview?.closing || null;
-  const closingNeedsMemo = Boolean(closingPreview?.needsReview) && !text(closingForm.memo);
-  const closingTeamMarginMetrics = ((closingPreview?.teamMargins || []) as Array<{ team: string; marginAmount: number; saleQuantity: number }>)
-    .filter((item) => item.team === "english" || item.team === "math" || item.team === "science")
-    .filter((item) => closingForm.subject === "all" || item.team === closingForm.subject);
-  // Pre-science closing contract: const closingTargetSubjects = closingForm.subject === "all" ? ["all", "english", "math"] : [closingForm.subject]
-  const closingTargetSubjects = closingForm.subject === "all" ? ["all", "english", "math", "science"] : [closingForm.subject];
+  const purchaseSubmitHint = schemaDisabled ? "교재 정보를 다시 불러온 뒤 저장하세요."
+    : !purchaseRequestTitle ? (purchaseForm.requestStage === "request" ? "교재를 선택하거나 교재명을 입력하세요." : "교재를 선택하세요.")
+    : !purchaseForm.locationId ? "위치를 선택하세요."
+    : purchaseReferenceError ? "조회 오류를 해결한 뒤 저장하세요."
+    : !purchaseBookAccepted || !purchaseClassAccepted || !purchaseLocationAccepted || !purchaseBalanceAccepted ? "선택한 교재와 위치를 확인하고 있습니다."
+    : purchaseForm.requestStage === "request" && !purchaseRequestedTotalQuantity && !selectedPurchaseLineId ? "요청 수량을 입력하세요."
+    : purchaseForm.requestStage !== "request" && !purchaseOrderedTotalQuantity ? "주문 수량을 입력하세요."
+    : purchaseForm.requestStage === "receive" && !purchaseReceivedTotalQuantity ? "입고 수량을 입력하세요."
+    : "";
   function setPurchaseField(name: string, value: string) {
     setPurchaseForm((current) => {
       if (name === "textbookId") {
@@ -2292,12 +1956,14 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openNewMasterDialog() {
+    clearTransientTextbookFeedback();
     setMasterForm(emptyMasterForm);
     setMessage("");
     setMasterDialogOpen(true);
   }
 
   function selectMasterTextbook(row: Row) {
+    clearTransientTextbookFeedback();
     const rowId = getRecordId(row);
     if (rowId !== selectedMasterDetailId) {
       navigateToTextbookDetail("master", rowId);
@@ -2324,6 +1990,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openMasterFromPurchaseRequest(line: Row) {
+    clearTransientTextbookFeedback();
     const prepared = preparedPurchaseRows.find((row) => row.memberLineIds.includes(getRecordId(line)));
     const title = getPurchaseTextbookTitle(line, prepared?.references.textbook || undefined);
     const taxonomy = getTextbookTaxonomySelection(line);
@@ -2357,6 +2024,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openNewPurchaseDialog() {
+    clearTransientTextbookFeedback();
     setSelectedPurchaseLineId("");
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm({ ...emptyPurchaseForm, requestStage: "order" });
@@ -2366,6 +2034,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openNewRequestDialog() {
+    clearTransientTextbookFeedback();
     setSelectedPurchaseLineId("");
     setSelectedPurchaseScopeLineIds({ student: "", teacher: "" });
     setPurchaseForm({ ...emptyPurchaseForm, requestStage: "request", requestBy: currentUserLabel });
@@ -2375,24 +2044,14 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function openNewSaleDialog() {
+    clearTransientTextbookFeedback();
     resetSaleForm();
     setMessage("");
     setSaleDialogOpen(true);
   }
 
-  function openClosingDialog() {
-    setClosingForm({
-      closingMonth: currentMonth(),
-      subject: "all",
-      openingQuantity: "0",
-      openingAmount: "0",
-      memo: "",
-    });
-    setMessage("");
-    setClosingDialogOpen(true);
-  }
-
   function closeMasterDialog() {
+    clearTransientTextbookFeedback();
     setMasterDialogOpen(false);
     setMasterForm(emptyMasterForm);
     setMessage("");
@@ -2401,6 +2060,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function closePurchaseDialog() {
+    clearTransientTextbookFeedback();
     setPurchaseDialogOpen(false);
     resetPurchaseForm();
     closeTextbookDetail("purchase");
@@ -2408,16 +2068,11 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function closeSaleDialog() {
+    clearTransientTextbookFeedback();
     setSaleDialogOpen(false);
     resetSaleForm();
     setMessage("");
     window.setTimeout(() => setSaleDialogOpen(false), 0);
-  }
-
-  function closeClosingDialog() {
-    setClosingDialogOpen(false);
-    setMessage("");
-    window.setTimeout(() => setClosingDialogOpen(false), 0);
   }
 
   function clearMasterSelection() {
@@ -2425,9 +2080,23 @@ function TextbookOperationsWorkspaceContent() {
     setBulkTextbookPatch(emptyBulkTextbookPatch);
   }
 
+  function openMasterBulkDialog() {
+    masterBulkDialogRevisionRef.current += 1;
+    clearTransientTextbookFeedback();
+    setMasterBulkControlsOpen(true);
+  }
+
+  function closeMasterBulkDialog() {
+    masterBulkDialogRevisionRef.current += 1;
+    clearTransientTextbookFeedback();
+    setMasterBulkControlsOpen(false);
+    setBulkTextbookPatch(emptyBulkTextbookPatch);
+  }
+
   function clearTransientTextbookFeedback() {
     setMessage("");
     setActionErrorMessage("");
+    setActionErrorOwner("");
   }
 
   function updateMasterSearchQuery(value: string) {
@@ -2436,13 +2105,7 @@ function TextbookOperationsWorkspaceContent() {
     clearMasterSelection();
   }
 
-  function changeInventoryFilter(value: InventoryFilter) {
-    clearTransientTextbookFeedback();
-    setInventoryFilter(value);
-    clearMasterSelection();
-  }
-
-  function changeTextbookQualityFilter(value: TextbookQualityFilter) {
+  function changeTextbookQualityFilter(value: "all" | "inactive") {
     clearTransientTextbookFeedback();
     setTextbookQualityFilter(value);
     clearMasterSelection();
@@ -2475,13 +2138,46 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function requestTextbookConfirmation(request: TextbookConfirmationRequest) {
+    clearTransientTextbookFeedback();
+    setConfirmationError("");
     setConfirmationRequest(request);
   }
 
   function confirmTextbookAction() {
     const request = confirmationRequest;
+    if (request) void executeTextbookConfirmation(request.onConfirm, () => setConfirmationRequest(null));
+  }
+
+  function closeTextbookConfirmation() {
+    if (confirmationPendingRef.current) return;
+    clearTransientTextbookFeedback();
+    setConfirmationError("");
     setConfirmationRequest(null);
-    request?.onConfirm();
+    setTextbookDeleteDialogOpen(false);
+  }
+
+  async function executeTextbookConfirmation(action: () => Promise<boolean>, onSuccess: () => void) {
+    if (confirmationPendingRef.current) return;
+    const expectedActorKey = actorKey;
+    confirmationPendingRef.current = true;
+    setConfirmationBusy(true);
+    setConfirmationError("");
+    clearTransientTextbookFeedback();
+    try {
+      const ok = await action();
+      if (!isCurrentActionActor(expectedActorKey)) return;
+      if (ok) {
+        dialogOpenerRef.current = activeTab === "master" || activeTab === "inventory" ? masterSearchRef.current : operationSearchRef.current;
+        onSuccess();
+      } else {
+        setConfirmationError("처리하지 못했습니다. 대상을 확인한 뒤 다시 시도하세요.");
+      }
+    } catch (error) {
+      if (isCurrentActionActor(expectedActorKey)) setConfirmationError(getTextbookActionErrorMessage(error));
+    } finally {
+      confirmationPendingRef.current = false;
+      if (isCurrentActionActor(expectedActorKey)) setConfirmationBusy(false);
+    }
   }
 
   function changeActiveTab(value: string) {
@@ -2496,7 +2192,6 @@ function TextbookOperationsWorkspaceContent() {
       clearMasterSelection();
       setSelectedPurchaseLineIds([]);
       setSelectedSaleLineIds([]);
-      setSelectedClosingIds([]);
       const params = new URLSearchParams(window.location.search);
       params.set("textbookTab", value);
       params.set("textbookPage", "1");
@@ -2524,7 +2219,6 @@ function TextbookOperationsWorkspaceContent() {
 
   function clearTextbookListFilters(nextQuery = "") {
     updateMasterSearchQuery(nextQuery);
-    setInventoryFilter("all");
     setTextbookQualityFilter("all");
     setSubjectGroupFilter("all");
     setSchoolLevelGroupFilter("all");
@@ -2552,60 +2246,6 @@ function TextbookOperationsWorkspaceContent() {
     setPurchaseRequestFilter(canManageTextbookOperations ? getSavedPurchaseRequestFilter(stage, hasCatalogTextbook) : "all");
     setPurchaseOrderFilter(getSavedPurchaseOrderFilter(stage, hasCatalogTextbook));
     window.setTimeout(() => operationSearchRef.current?.select(), 0);
-  }
-
-  function openInventoryShortageQueue() {
-    changeActiveTab("inventory");
-    changeInventoryFilter("shortage");
-  }
-
-  function openTextbookOpsQueue(key: TextbookOpsQueueKey | "") {
-    setMessage("");
-    updateOperationSearchQuery("");
-    if (!key) {
-      setPurchaseRequestFilter("all");
-      setPurchaseOrderFilter("all");
-      setSalesProcessFilter("all");
-      changeInventoryFilter("all");
-      setPurchaseBoardScope("active");
-      return;
-    }
-    if (key !== "stockRisk") {
-      changeInventoryFilter("all");
-    }
-    if (key === "unregistered") {
-      setActiveTab("purchase");
-      setPurchaseRequestFilter("unregistered");
-      setPurchaseOrderFilter("all");
-      setSalesProcessFilter("all");
-      setPurchaseBoardScope("active");
-      return;
-    }
-    if (key === "order") {
-      setActiveTab("purchase");
-      setPurchaseRequestFilter("all");
-      setPurchaseOrderFilter("waiting");
-      setSalesProcessFilter("all");
-      setPurchaseBoardScope("active");
-      return;
-    }
-    if (key === "partial") {
-      setActiveTab("purchase");
-      setPurchaseRequestFilter("all");
-      setPurchaseOrderFilter("partial");
-      setSalesProcessFilter("all");
-      setPurchaseBoardScope("active");
-      return;
-    }
-    if (key === "issue") {
-      setActiveTab("sales");
-      setPurchaseRequestFilter("all");
-      setPurchaseOrderFilter("all");
-      setSalesProcessFilter("waiting");
-      return;
-    }
-    setPurchaseOrderFilter("all");
-    openInventoryShortageQueue();
   }
 
   function toggleTextbookGroup(label: string) {
@@ -2697,27 +2337,8 @@ function TextbookOperationsWorkspaceContent() {
     });
   }
 
-  function toggleClosingSelection(id: string, checked: boolean) {
-    setSelectedClosingIds((current) => {
-      if (!id) return current;
-      if (checked) {
-        return current.includes(id) ? current : [...current, id];
-      }
-      return current.filter((item) => item !== id);
-    });
-  }
-
-  function toggleVisibleClosingSelection(ids: string[], checked: boolean) {
-    setSelectedClosingIds((current) => {
-      const idSet = new Set(ids);
-      if (!checked) {
-        return current.filter((id) => !idSet.has(id));
-      }
-      return [...new Set([...current, ...idSet])];
-    });
-  }
-
   function openBulkOrderDialog() {
+    clearTransientTextbookFeedback();
     if (selectedBulkOrderLines.length === 0) {
       return;
     }
@@ -2747,6 +2368,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function closeBulkOrderDialog() {
+    clearTransientTextbookFeedback();
     setBulkOrderDialogOpen(false);
     setBulkOrderQuantities({});
     setMessage("");
@@ -2991,6 +2613,7 @@ function TextbookOperationsWorkspaceContent() {
       gradeLevels: bulkTextbookPatch.gradeLevels && [...bulkTextbookPatch.gradeLevels],
     };
     const isCurrentMasterBulk = createMasterBulkActionGuard();
+    const dialogRevision = masterBulkDialogRevisionRef.current;
 
     void runAction(
       "textbook-bulk-edit",
@@ -3010,8 +2633,8 @@ function TextbookOperationsWorkspaceContent() {
       },
       `${formatQuantity(selectedRows.length)}개 교재를 수정했습니다.`,
       invalidateMaster,
-      isCurrentMasterBulk,
-    ).then((ok) => { if (ok) { setSelectedTextbookIds([]); setBulkTextbookPatch(emptyBulkTextbookPatch); } });
+      () => masterBulkDialogRevisionRef.current === dialogRevision && isCurrentMasterBulk(),
+    ).then((ok) => { if (ok) { dialogOpenerRef.current = masterSearchRef.current; setMasterBulkControlsOpen(false); setSelectedTextbookIds([]); setBulkTextbookPatch(emptyBulkTextbookPatch); } });
   }
 
   function applyBulkTextbookStatus(status: string) {
@@ -3048,13 +2671,16 @@ function TextbookOperationsWorkspaceContent() {
       return;
     }
 
+    clearTransientTextbookFeedback();
+    setConfirmationError("");
+    textbookCleanupPreviewRef.current = selectedTextbookCleanupRows;
     setTextbookDeleteDialogOpen(true);
   }
 
-  function confirmDeleteSelectedTextbooks() {
+  async function confirmDeleteSelectedTextbooks() {
     if (selectedTextbookRows.length === 0) {
       setTextbookDeleteDialogOpen(false);
-      return;
+      return false;
     }
 
     let deleteResult: Awaited<ReturnType<typeof textbookService.deleteTextbookMasters>> | undefined;
@@ -3064,9 +2690,7 @@ function TextbookOperationsWorkspaceContent() {
       filteredInventory.length > 0 &&
       filteredInventory.every((row) => targetIds.includes(getRecordId(row)));
     const isCurrentMasterBulk = createMasterBulkActionGuard();
-    setTextbookDeleteDialogOpen(false);
-
-    void runAction(
+    return runAction(
       "textbook-bulk-delete",
       async () => {
         deleteResult = await textbookService.deleteTextbookMasters(targetIds);
@@ -3075,8 +2699,9 @@ function TextbookOperationsWorkspaceContent() {
       invalidateMaster,
       isCurrentMasterBulk,
     ).then((ok) => {
-      if (!ok) return;
+      if (!ok) return false;
       if (shouldClearSearchAfterDelete) updateMasterSearchQuery(""); else clearMasterSelection();
+      return true;
     });
   }
 
@@ -3096,8 +2721,9 @@ function TextbookOperationsWorkspaceContent() {
         description: `${formatQuantity(context.totalCount)}개 미사용 교재를 영구 삭제합니다. 이 작업은 되돌릴 수 없습니다.`,
         confirmLabel: "영구 삭제",
         items: context.previewRows.slice(0, 5),
+        totalCount: context.totalCount,
         onConfirm: () => {
-          void runAction(
+          return runAction(
             "textbook-trash-empty",
             async () => {
               const recheck = await getTextbookInactiveCleanupContext();
@@ -3107,7 +2733,7 @@ function TextbookOperationsWorkspaceContent() {
             },
             () => `${formatQuantity(deleteResult?.deletedIds.length || targetIds.length)}개 미사용 교재를 영구 삭제했습니다.`,
             invalidateMaster,
-          ).then((ok) => { if (ok) { clearMasterSelection(); setBulkTextbookPatch(emptyBulkTextbookPatch); setTextbookQualityFilter("all"); } });
+          ).then((ok) => { if (ok) { clearMasterSelection(); setBulkTextbookPatch(emptyBulkTextbookPatch); setTextbookQualityFilter("all"); } return ok; });
         },
       });
     } catch (contextError) {
@@ -3118,6 +2744,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function selectPurchaseLine(line: Row, order: Row | undefined, stageOverride?: string, fromDirectDetail = false, directDetail?: TextbookPurchaseCaseRow) {
+    clearTransientTextbookFeedback();
     const scopeLines = getPurchaseScopeLines(line);
     const primaryLine = scopeLines.find((scopeLine) => getRecordId(scopeLine) === getRecordId(line)) || scopeLines[0];
     if (!fromDirectDetail) {
@@ -3202,14 +2829,19 @@ function TextbookOperationsWorkspaceContent() {
     isCurrentInput: () => boolean = () => true,
   ) {
     if (schemaDisabledRef.current) return false;
+    const actionKey = `${actorKey}:${name}`;
+    if (pendingActionsRef.current.has(actionKey)) return false;
+    pendingActionsRef.current.add(actionKey);
     const expectedActorKey = actorKey;
     const actionSequence = actionSequenceRef.current + 1;
     actionSequenceRef.current = actionSequence;
     const canPublish = () => isCurrentActionActor(expectedActorKey) && isCurrentInput() && !schemaDisabledRef.current;
     const clearOwnSaving = () => {
+      pendingActionsRef.current.delete(actionKey);
       if (isCurrentActionActor(expectedActorKey) && actionSequenceRef.current === actionSequence) setSaving("");
     };
     setSaving(name);
+    setActionErrorOwner(name);
     setMessage("");
     setActionErrorMessage("");
     let result: unknown;
@@ -3250,6 +2882,7 @@ function TextbookOperationsWorkspaceContent() {
 
   function submitMaster(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    setActionErrorOwner("master");
     if (!masterTaxonomyValidation.valid) {
       setActionErrorMessage(masterTaxonomyValidation.message);
       return;
@@ -3296,6 +2929,7 @@ function TextbookOperationsWorkspaceContent() {
   function submitPurchase(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (purchaseSubmitDisabled) return;
+    setActionErrorOwner("purchase");
     const completedPurchaseStage = purchaseForm.requestStage;
     const completedPurchaseTitle = purchaseRequestTitle;
     const completedPurchaseHasCatalogTextbook = Boolean(selectedPurchaseTextbookId);
@@ -3434,6 +3068,8 @@ function TextbookOperationsWorkspaceContent() {
 
   function submitSale(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (saving === "sale" || saleSubmitDisabled) return;
+    setActionErrorOwner("sale");
     if (!isTeacherSale && saleDuplicateLines.length > 0) {
       setActionErrorMessage("이미 같은 월에 같은 수업·교재 출고가 있습니다. 기존 출고 내역을 먼저 확인하세요.");
       return;
@@ -3557,7 +3193,7 @@ function TextbookOperationsWorkspaceContent() {
   }
 
   function updateSaleLineStatus(line: Row, status: "issued" | "returned") {
-    void runAction(
+    return runAction(
       `sale-line-${getRecordId(line)}`,
       async () => {
         const detail = await getTextbookSaleDetail(getRecordId(line));
@@ -3579,6 +3215,7 @@ function TextbookOperationsWorkspaceContent() {
       if (ok) {
         showUpdatedSaleLine(line, status);
       }
+      return ok;
     });
   }
 
@@ -3605,37 +3242,15 @@ function TextbookOperationsWorkspaceContent() {
     }];
   }
 
-  function getSaleConfirmationItems(lines: Row[]): TextbookConfirmationPreviewItem[] {
-    return lines.map((line, index) => {
-      const prepared = numbered.sales.rows.find((row) => row.id === getRecordId(line));
-      const sale = prepared?.sale;
-      const textbook = prepared?.textbook;
-      const studentId = text(line.student_id || line.studentId);
-      const studentName = text(line.student_name || prepared?.student?.name || studentId) || "학생 미지정";
-      const classRecord = prepared?.class;
-      const status = getSaleLineStatus(line, sale || undefined);
-      const textbookTitle = textbook ? getTextbookTitle(textbook) : text(line.textbook_id || line.textbookId) || "교재 미지정";
-      return {
-        id: getRecordId(line) || `${studentId || textbookTitle}-confirmation-${index}`,
-        title: textbookTitle,
-        detail: [
-          studentName,
-          classRecord ? getClassName(classRecord) : "수업 미지정",
-          `${formatQuantity(getSaleLineQuantity(line))}권`,
-          saleStatusLabels[status] || status,
-          getSaleLineMonth(line, sale || undefined),
-        ].filter(Boolean).join(" · "),
-      };
-    });
-  }
-
   function getSaleDetailConfirmationItems(rows: SaleLineRow[]): TextbookConfirmationPreviewItem[] {
     return rows.map((row, index) => ({
       id: row.id || `${row.recipientName}-${index}`,
       title: getTextbookTitle(row.textbook),
       detail: [
         row.recipientName || "대상 미지정",
+        getTextbookCopyScopeLabel(row.line.copy_scope),
         row.class ? getClassName(row.class) : "수업 미지정",
+        row.location?.name || "위치 미지정",
         `${formatQuantity(row.quantity)}권`,
         saleStatusLabels[row.status] || row.status,
         row.sale?.charge_month || row.line.charge_month,
@@ -3658,9 +3273,9 @@ function TextbookOperationsWorkspaceContent() {
         title: isHistory ? "출고 이력 삭제" : "출고 대기 취소",
         description: isHistory ? "선택한 출고 이력과 연결된 재고 이동 기록을 삭제합니다." : "출고 대기 건을 취소하고 삭제합니다.",
         confirmLabel: isHistory ? "이력 삭제" : "취소 삭제",
-        items: getSaleConfirmationItems([detail.line]),
+        items: getSaleDetailConfirmationItems([detail]),
         onConfirm: () => {
-          void runAction(
+          return runAction(
             `sale-delete-${detail.id}`,
             async () => {
               const [rechecked] = await readFreshSaleDetails([detail.line]);
@@ -3738,7 +3353,7 @@ function TextbookOperationsWorkspaceContent() {
         confirmLabel: "취소 삭제",
         items: getSaleDetailConfirmationItems(details),
         onConfirm: () => {
-        void runAction(
+        return runAction(
           "sale-bulk-cancel",
           async () => {
             const rechecked = await readFreshSaleDetails(details.map((detail) => detail.line), expectedSelection);
@@ -3752,7 +3367,7 @@ function TextbookOperationsWorkspaceContent() {
           `${formatQuantity(details.length)}건을 출고 전 취소했습니다.`,
           invalidateSales,
           () => liveActionInputsRef.current.saleSelection === expectedSelection,
-        ).then((ok) => { if (ok) setSelectedSaleLineIds([]); });
+        ).then((ok) => { if (ok) setSelectedSaleLineIds([]); return ok; });
         },
       });
     }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
@@ -3777,7 +3392,7 @@ function TextbookOperationsWorkspaceContent() {
         confirmLabel: "반품 처리",
         items: getSaleDetailConfirmationItems(initialContexts.map((context) => context.row)),
         onConfirm: () => {
-        void runAction(
+        return runAction(
           "sale-bulk-return",
           async () => {
             const contexts = await readFreshSaleActionContexts(initialContexts.map((context) => context.row.line), expectedSelection);
@@ -3789,10 +3404,11 @@ function TextbookOperationsWorkspaceContent() {
           invalidateSales,
           () => liveActionInputsRef.current.saleSelection === expectedSelection,
         ).then((ok) => {
-          if (!ok) return;
+          if (!ok) return false;
           setSelectedSaleLineIds([]);
           setSalesProcessFilter("returned");
           if (returnedTextbookTitles.length === 1) updateOperationSearchQuery(returnedTextbookTitles[0]);
+          return true;
         });
         },
       });
@@ -3815,7 +3431,7 @@ function TextbookOperationsWorkspaceContent() {
         confirmLabel: "이력 삭제",
         items: getSaleDetailConfirmationItems(details),
         onConfirm: () => {
-        void runAction(
+        return runAction(
           "sale-bulk-delete-history",
           async () => {
             const rechecked = await readFreshSaleDetails(details.map((detail) => detail.line), expectedSelection);
@@ -3824,7 +3440,7 @@ function TextbookOperationsWorkspaceContent() {
           `${formatQuantity(details.length)}건의 출고/반품 이력을 삭제했습니다.`,
           invalidateSales,
           () => liveActionInputsRef.current.saleSelection === expectedSelection,
-        ).then((ok) => { if (ok) setSelectedSaleLineIds([]); });
+        ).then((ok) => { if (ok) setSelectedSaleLineIds([]); return ok; });
         },
       });
     }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
@@ -3876,7 +3492,7 @@ function TextbookOperationsWorkspaceContent() {
         confirmLabel: "삭제",
         items: scopeLines.flatMap((scopeLine) => getPurchaseConfirmationItems(scopeLine, (scopeLine.order as Row | null) || order, detail.references)),
         onConfirm: () => {
-          void runAction(
+          return runAction(
             `purchase-delete-${getRecordId(line)}`,
             async () => {
               const [rechecked] = await readFreshPurchaseMembers([line], mode);
@@ -3909,7 +3525,7 @@ function TextbookOperationsWorkspaceContent() {
         confirmLabel: "반품 처리",
         items: detail.lines.flatMap((member) => getPurchaseConfirmationItems(member, (member.order as Row | null) || order, detail.references)),
         onConfirm: () => {
-        void runAction(
+        return runAction(
           `purchase-return-${getRecordId(line)}`,
           async () => {
             const [rechecked] = await readFreshPurchaseMembers([detail.line], "order");
@@ -3944,7 +3560,7 @@ function TextbookOperationsWorkspaceContent() {
         confirmLabel: "반품 처리",
         items: details.flatMap((detail) => detail.lines.flatMap((member) => getPurchaseConfirmationItems(member, (member.order as Row | null) || undefined, detail.references))),
         onConfirm: () => {
-        void runAction(
+        return runAction(
           "purchase-bulk-return",
           async () => {
             const rechecked = await readFreshPurchaseMembers(details.map((detail) => detail.line), "order", expectedSelection);
@@ -3958,7 +3574,7 @@ function TextbookOperationsWorkspaceContent() {
           `${formatQuantity(details.length)}건을 공급처 반품으로 처리했습니다.`,
           invalidatePurchase,
           () => liveActionInputsRef.current.purchaseSelection === expectedSelection,
-        ).then((ok) => { if (ok) setSelectedPurchaseLineIds([]); });
+        ).then((ok) => { if (ok) setSelectedPurchaseLineIds([]); return ok; });
         },
       });
     }, (contextError) => { if (isCurrentActionActor(expectedActorKey)) setActionErrorMessage(getTextbookActionErrorMessage(contextError)); })
@@ -4059,7 +3675,6 @@ function TextbookOperationsWorkspaceContent() {
       isCurrentCountAction,
     ).then((ok) => {
       if (ok) {
-        setInventoryAuditFilter("done");
         updateMasterSearchQuery(row.title);
         if ((inventoryCountDraftRevisionsRef.current[draftKey] || 0) !== submittedRevision) return;
         setInventoryCountDrafts((current) => {
@@ -4136,7 +3751,6 @@ function TextbookOperationsWorkspaceContent() {
       const acknowledgedRowIds = new Set(acknowledged.map((snapshot) => snapshot.row.id));
       setSelectedTextbookIds((current) => current.filter((id) => !acknowledgedRowIds.has(id)));
       if (!ok) return;
-      setInventoryAuditFilter("done");
       if (readyRows.length === 1) updateMasterSearchQuery(readyRows[0].title);
     });
   }
@@ -4150,8 +3764,9 @@ function TextbookOperationsWorkspaceContent() {
       title: "재고 이력 삭제",
       description: "선택한 재고 이력을 삭제합니다. 재고 수량도 즉시 다시 계산됩니다.",
       confirmLabel: "이력 삭제",
+      items: [{ id: row.id, title: row.textbookTitle, detail: [row.locationName, row.action, row.change, row.at].filter(Boolean).join(" · ") }],
       onConfirm: () => {
-        void runAction(
+        return runAction(
           `inventory-history-delete-${row.id}`,
           () => textbookService.deleteInventoryHistory({
             kind: row.kind,
@@ -4165,85 +3780,47 @@ function TextbookOperationsWorkspaceContent() {
     });
   }
 
-  function lockSelectedClosings() {
-    if (selectedClosingIds.length === 0) {
-      return;
-    }
-
-    const expectedSelection = JSON.stringify(selectedClosingIds);
-    void runAction(
-      "closing-bulk-lock",
-      async () => textbookService.updateMonthlyClosingStatus({ ids: selectedClosingIds, status: "locked" }),
-      `${formatQuantity(selectedClosingIds.length)}건을 확정했습니다.`,
-      invalidateClosing,
-      () => liveActionInputsRef.current.closingSelection === expectedSelection,
-    ).then((ok) => {
-      if (ok) {
-        setSelectedClosingIds([]);
-      }
-    });
+  function rememberTextbookDialogOpener(event: React.SyntheticEvent) {
+    if (masterDialogOpen || masterBulkControlsOpen || purchaseDialogOpen || bulkOrderDialogOpen || saleDialogOpen || textbookDeleteDialogOpen || confirmationRequest) return;
+    if (!(event.target instanceof Element) || event.target.closest('[role="dialog"], [role="alertdialog"]')) return;
+    const button = event.target.closest<HTMLButtonElement>("button");
+    if (button) dialogOpenerRef.current = button;
   }
 
-  function submitClosing(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (closingNeedsMemo) {
-      setMessage("차이가 있으면 사유를 입력하세요.");
-      return;
-    }
-    const expectedClosingForm = JSON.stringify(closingForm);
-    const expectedActorKey = actorKey;
-    void runAction(
-      "closing",
-      async () => {
-        const contexts = await Promise.all(closingTargetSubjects.map((subject) => getTextbookClosingSaveContext(normalizedClosingMonth, subject)));
-        assertLivePreparedSchemaReady();
-        if (!isCurrentActionActor(expectedActorKey) || liveActionInputsRef.current.closing !== expectedClosingForm) throw new Error("월마감 입력이 변경되었습니다. 다시 시도하세요.");
-        for (let index = 0; index < closingTargetSubjects.length; index += 1) {
-          await textbookService.upsertMonthlyClosing({ ...closingForm, subject: closingTargetSubjects[index] }, contexts[index] as unknown as Row);
-        }
-      },
-      "월마감 초안이 저장되었습니다.",
-      invalidateClosing,
-      () => liveActionInputsRef.current.closing === expectedClosingForm,
-    ).then((ok) => {
-      if (ok) {
-        setClosingDialogOpen(false);
-      }
-    });
-  }
+  const listReadIssue = preparedSchemaOwner ? {
+    label: "운영 정보 확인 필요", message: getTextbookActionErrorMessage(preparedSchemaOwner.error),
+    retryLabel: "교재 운영 API 다시 시도", onRetry: preparedSchemaOwner.retry,
+  } : activeTab === "inventory" && inventoryLocationReference.error ? {
+    label: "위치 조회 실패", message: inventoryLocationReference.error,
+    retryLabel: "재고 위치 다시 시도", onRetry: referenceData.locationOptions.retry,
+  } : activePrimaryState.error ? {
+    label: "목록 조회 실패", message: getTextbookActionErrorMessage(activePrimaryState.error),
+    retryLabel: "교재 목록 다시 시도", onRetry: activePrimaryState.retry,
+  } : activeSummaryResource?.error ? {
+    label: "집계 조회 실패", message: getTextbookActionErrorMessage(activeSummaryResource.error),
+    retryLabel: "교재 집계 다시 시도", onRetry: activeSummaryResource.retry,
+  } : !masterDialogOpen && !masterBulkControlsOpen && masterOptionsInput && referenceData.masterOptions.error ? {
+    label: "분류 조회 실패", message: getTextbookActionErrorMessage(referenceData.masterOptions.error),
+    retryLabel: "교재 분류 다시 시도", onRetry: referenceData.masterOptions.retry,
+  } : null;
+  const listReadFeedback = listReadIssue ? <DataTableReadFeedback {...listReadIssue} returnFocusRef={activeTab === "master" || activeTab === "inventory" ? masterSearchRef : operationSearchRef} /> : null;
 
   return (
-    <div className="flex min-h-[calc(100dvh-5rem)] flex-col gap-4 px-4 py-4 lg:px-6">
-      {preparedSchemaOwner ? (
-        <Alert role="alert" variant="destructive">
-          <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span>{getTextbookActionErrorMessage(preparedSchemaOwner.error)}</span>
-            <Button
-              type="button"
-              variant="outline"
-              size="sm"
-              aria-label="교재 운영 API 다시 시도"
-              onClick={() => { void preparedSchemaOwner.retry(); }}
-            >
-              다시 시도
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {actionErrorMessage || message ? (
-        <Alert variant={actionErrorMessage ? "destructive" : "default"}>
-          <AlertDescription className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <span>{actionErrorMessage || message}</span>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-      {masterOptionsInput && referenceData.masterOptions.error ? (
-        <Alert role="alert" variant="destructive">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{getTextbookActionErrorMessage(referenceData.masterOptions.error)}</span>
-            <Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.masterOptions.retry(); }}>다시 시도</Button>
-          </AlertDescription>
-        </Alert>
+    <div data-slot="textbook-workspace" onClickCapture={rememberTextbookDialogOpener} onFocusCapture={rememberTextbookDialogOpener} className="flex min-h-[calc(100dvh-5rem)] min-w-0 flex-col gap-3 px-4 md:min-h-[calc(100dvh-7.25rem)] lg:px-6">
+      {(actionErrorMessage || message) && !(
+        (masterDialogOpen && actionErrorOwner === "master")
+        || (purchaseDialogOpen && actionErrorOwner === "purchase")
+        || (saleDialogOpen && actionErrorOwner === "sale")
+        || (bulkOrderDialogOpen && actionErrorOwner === "purchase-bulk-order")
+        || (masterBulkControlsOpen && actionErrorOwner === "textbook-bulk-edit")
+        || textbookDeleteDialogOpen || Boolean(confirmationRequest)
+      ) ? (
+        <ActionFeedback
+          message={actionErrorMessage || message}
+          error={Boolean(actionErrorMessage)}
+          onDismiss={clearTransientTextbookFeedback}
+          returnFocusRef={activeTab === "master" || activeTab === "inventory" ? masterSearchRef : operationSearchRef}
+        />
       ) : null}
       <datalist id="textbook-category-options">
         {categoryGroupOptions.map((option) => (
@@ -4256,78 +3833,58 @@ function TextbookOperationsWorkspaceContent() {
         ))}
       </datalist>
 
-      <Dialog open={textbookDeleteDialogOpen} onOpenChange={setTextbookDeleteDialogOpen}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>선택 교재 정리</DialogTitle>
-            <DialogDescription>
-              {formatQuantity(selectedTextbookRows.length)}개 교재를 삭제하거나 미사용으로 전환합니다. 재고·주문·출고 이력이 있으면 기록 보존을 위해 미사용으로 전환됩니다.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="grid gap-2" aria-label="정리 대상 교재">
-            {selectedTextbookCleanupPreviewRows.map((item) => (
-              <div key={item.id} className="flex min-w-0 items-center justify-between gap-3 rounded-md border bg-muted/20 px-3 py-2 text-sm">
-                <span className="min-w-0 truncate font-medium">{item.title}</span>
-                <span className="shrink-0 truncate text-xs text-muted-foreground">{item.detail || "상세 없음"}</span>
-              </div>
-            ))}
-            {selectedTextbookCleanupMoreCount > 0 ? (
-              <div className="rounded-md border border-dashed px-3 py-2 text-center text-xs text-muted-foreground">
-                외 {formatQuantity(selectedTextbookCleanupMoreCount)}개
-              </div>
-            ) : null}
-          </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setTextbookDeleteDialogOpen(false)} disabled={saving === "textbook-bulk-delete"}>
-              취소
-            </Button>
-            <Button type="button" variant="destructive" onClick={confirmDeleteSelectedTextbooks} disabled={saving === "textbook-bulk-delete"}>
-              {saving === "textbook-bulk-delete" ? "정리 중" : "정리 실행"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {textbookDeleteDialogOpen ? <Dialog open={textbookDeleteDialogOpen} onOpenChange={(open) => { if (!open) closeTextbookConfirmation(); }}>
+        <ConfirmationDialogContent
+          title="선택 교재 정리"
+          description={`${formatQuantity(textbookCleanupPreviewRef.current.length)}개 교재를 삭제하거나 미사용으로 전환합니다. 재고·주문·출고 이력이 있으면 기록 보존을 위해 미사용으로 전환됩니다.`}
+          items={textbookCleanupPreviewRef.current}
+          itemsLabel="정리 대상 교재"
+          confirmLabel="정리 실행"
+          onConfirm={() => { void executeTextbookConfirmation(confirmDeleteSelectedTextbooks, () => setTextbookDeleteDialogOpen(false)); }}
+          onCancel={closeTextbookConfirmation}
+          busy={confirmationBusy}
+          error={actionErrorMessage || confirmationError}
+          returnFocusRef={dialogOpenerRef}
+        />
+      </Dialog> : null}
 
-      <Dialog open={Boolean(confirmationRequest)} onOpenChange={(open) => !open && setConfirmationRequest(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle>{confirmationRequest?.title || "확인"}</DialogTitle>
-            <DialogDescription>{confirmationRequest?.description}</DialogDescription>
-          </DialogHeader>
-          {confirmationRequest?.items?.length ? (
-            <div className="grid gap-2" aria-label="확인 대상">
-              {confirmationRequest.items.slice(0, 5).map((item) => (
-                <div key={item.id} className="min-w-0 rounded-md border bg-muted/30 px-3 py-2">
-                  <p className="truncate font-medium text-foreground">{item.title}</p>
-                  <p className="truncate text-xs text-muted-foreground">{item.detail || "상세 없음"}</p>
-                </div>
-              ))}
-              {confirmationRequest.items.length > 5 ? (
-                <div className="text-xs text-muted-foreground">
-                  외 {formatQuantity(confirmationRequest.items.length - 5)}건 더
-                </div>
-              ) : null}
-            </div>
-          ) : null}
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setConfirmationRequest(null)}>
-              취소
-            </Button>
-            <Button type="button" variant="destructive" onClick={confirmTextbookAction}>
-              {confirmationRequest?.confirmLabel || "확인"}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      {confirmationRequest ? <Dialog open={Boolean(confirmationRequest)} onOpenChange={(open) => { if (!open) closeTextbookConfirmation(); }}>
+        <ConfirmationDialogContent
+          title={confirmationRequest.title}
+          description={confirmationRequest.description}
+          items={confirmationRequest.items}
+          totalCount={confirmationRequest.totalCount}
+          confirmLabel={confirmationRequest.confirmLabel}
+          onConfirm={confirmTextbookAction}
+          onCancel={closeTextbookConfirmation}
+          busy={confirmationBusy}
+          error={actionErrorMessage || confirmationError}
+          returnFocusRef={dialogOpenerRef}
+        />
+      </Dialog> : null}
 
       {masterDialogOpen ? (
       <Dialog open={masterDialogOpen} onOpenChange={(open) => (open ? setMasterDialogOpen(true) : closeMasterDialog())}>
-        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-x-hidden overflow-y-auto p-4 sm:max-w-3xl sm:p-6">
-          <DialogHeader>
-            <DialogTitle>{masterForm.id ? "교재 수정" : "교재 신규 등록"}</DialogTitle>
-            <DialogDescription className="sr-only">교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitMaster} className="grid min-w-0 gap-3" aria-busy={saving === "master"}>
+        <FormDialogContent
+          returnFocusRef={dialogOpenerRef}
+          title={masterForm.id ? "교재 수정" : "교재 신규 등록"}
+          description="교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다."
+          onSubmit={submitMaster}
+          onCancel={closeMasterDialog}
+          cancelLabel="교재 등록 취소"
+          submitLabel={masterForm.id ? "변경 저장" : "교재 등록"}
+          submitAriaLabel="교재 저장"
+          submitDisabled={masterSubmitDisabled}
+          busy={saving === "master"}
+          error={actionErrorOwner === "master" ? actionErrorMessage : ""}
+          hint={masterSubmitHint}
+        >
+            {referenceData.masterOptions.error ? (
+              <Alert role="alert"><AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+                <span>{getTextbookActionErrorMessage(referenceData.masterOptions.error)}</span>
+                <Button type="button" variant="outline" size="sm" aria-label="교재 분류 설정 다시 시도" onClick={() => { void referenceData.masterOptions.retry(); }}>다시 시도</Button>
+              </AlertDescription></Alert>
+            ) : null}
             {referenceData.masterDuplicate.error ? (
               <Alert role="alert">
                 <AlertDescription className="flex items-center justify-between gap-3">
@@ -4336,8 +3893,8 @@ function TextbookOperationsWorkspaceContent() {
                 </AlertDescription>
               </Alert>
             ) : null}
-            <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1fr)_140px_140px]">
-              <Field label="교재명" required>
+            <div className="grid min-w-0 gap-4 sm:grid-cols-2">
+              <div className="sm:col-span-2"><Field label="교재명" required>
                 <Input
                   name="title"
                   value={masterForm.title}
@@ -4349,7 +3906,7 @@ function TextbookOperationsWorkspaceContent() {
                   autoFocus
                   required
                 />
-              </Field>
+              </Field></div>
               <Field label="과목" required>
                 <Select
                   value={masterForm.subject}
@@ -4383,9 +3940,7 @@ function TextbookOperationsWorkspaceContent() {
                     ))}
                   </SelectContent>
                 </Select>
-                {!masterTaxonomyValidation.valid && masterTaxonomyValidation.field === "subject" ? (
-                  <p className="text-xs text-destructive" role="alert">{masterTaxonomyValidation.message}</p>
-                ) : null}
+
               </Field>
               <Field label="상태">
                 <Select
@@ -4402,36 +3957,37 @@ function TextbookOperationsWorkspaceContent() {
               </Field>
             </div>
             {masterDuplicateRows.length > 0 ? (
-              <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50 p-2 text-sm text-amber-900" role="alert">
+              <div className="grid gap-2 rounded-md border bg-muted/30 p-3 text-sm" role="alert">
                 <div className="flex min-w-0 items-center justify-between gap-2">
                   <span className="font-medium">이미 등록된 교재 {formatQuantity(masterDuplicateTotalCount)}건</span>
-                  <Badge variant="outline" className="rounded-md border-amber-300 bg-white text-amber-700">저장 잠김</Badge>
+                  {isNewMasterDuplicate ? <Badge variant="outline" className="shrink-0 rounded-md">저장 잠김</Badge> : null}
                 </div>
                 <div className="grid gap-1">
                   {masterDuplicatePreviewRows.map((row) => {
                     const rowId = getRecordId(row);
                     const duplicateLabel = [getPublisherLabel(row), getCategoryLabel(row)].filter(Boolean).join(" · ");
                     return (
-                      <button
+                      <Button
+                        variant="outline"
                         key={rowId}
                         type="button"
-                        className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-white px-2 py-1.5 text-left text-amber-950 shadow-sm transition hover:bg-amber-100"
+                        className="h-auto min-w-0 flex-col items-start whitespace-normal py-2 text-left"
                         onClick={() => openDuplicateMaster(row)}
                         aria-label={`${getTextbookTitle(row)} 기존 교재 열기`}
                       >
-                        <span className="min-w-0 truncate">{getTextbookTitle(row)}</span>
-                        <span className="shrink-0 text-xs text-amber-700">{duplicateLabel || "기존 교재"}</span>
-                      </button>
+                        <span className="min-w-0 break-words">{getTextbookTitle(row)}</span>
+                        <span className="text-xs text-muted-foreground">{duplicateLabel || "기존 교재"}</span>
+                      </Button>
                     );
                   })}
                 </div>
               </div>
             ) : null}
-            <div className="grid min-w-0 gap-3 sm:grid-cols-[220px_minmax(0,1fr)]">
+            <div className="grid min-w-0 gap-4">
               <Field label="학교 구분" required>
                 <div className="grid grid-cols-3 gap-2" role="group" aria-label="학교 구분 선택">
                   {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
-                    <Label key={option.value} className="flex h-9 items-center gap-2 rounded-md border px-2 text-sm font-normal">
+                    <Label key={option.value} className="flex min-h-9 items-center gap-2 whitespace-nowrap rounded-md border px-3 text-sm font-normal">
                       <Checkbox
                         checked={masterForm.schoolLevels.includes(option.value)}
                         disabled={masterForm.subject === "science"}
@@ -4453,14 +4009,12 @@ function TextbookOperationsWorkspaceContent() {
                     </Label>
                   ))}
                 </div>
-                {masterForm.schoolLevels.length === 0 ? (
-                  <p className="text-xs text-destructive" role="alert">학교 구분을 하나 이상 선택하세요.</p>
-                ) : null}
+
               </Field>
               <Field label="학년" required>
                 <div className="grid grid-cols-3 gap-2 sm:grid-cols-6" role="group" aria-label="학년 선택">
                   {masterGradeOptions.map((option) => (
-                    <Label key={option.value} className="flex h-9 items-center gap-2 rounded-md border px-2 text-sm font-normal">
+                    <Label key={option.value} className="flex min-h-9 items-center gap-2 whitespace-nowrap rounded-md border px-3 text-sm font-normal">
                       <Checkbox
                         checked={masterForm.gradeLevels.includes(option.value)}
                         disabled={masterForm.subject === "science"}
@@ -4482,13 +4036,11 @@ function TextbookOperationsWorkspaceContent() {
                     </Label>
                   ))}
                 </div>
-                {masterForm.gradeLevels.length === 0 ? (
-                  <p className="text-xs text-destructive" role="alert">학년을 하나 이상 선택하세요.</p>
-                ) : null}
+
               </Field>
             </div>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-3">
-              <Field label={masterForm.subject === "science" ? "과학 영역" : "세부과목"} required>
+            <div className="grid min-w-0 gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
+              <div className="sm:col-span-2"><Field label={masterForm.subject === "science" ? "과학 영역" : "세부과목"} required>
                 {masterForm.subject === "science" ? (
                   <SearchCombobox
                     options={scienceSubjectAreaOptions}
@@ -4513,12 +4065,8 @@ function TextbookOperationsWorkspaceContent() {
                     ariaLabel="세부과목 선택"
                   />
                 )}
-                {masterForm.subject === "science" ? (
-                  !masterForm.subjectAreaKey ? <p className="text-xs text-destructive" role="alert">과학 영역을 선택하세요.</p> : null
-                ) : !masterForm.subSubject ? (
-                  <p className="text-xs text-destructive" role="alert">세부과목을 선택하세요.</p>
-                ) : null}
-              </Field>
+
+              </Field></div>
               <Field label="출판사">
                 <SearchCombobox
                   options={masterPublisherOptions}
@@ -4548,7 +4096,7 @@ function TextbookOperationsWorkspaceContent() {
                 />
               </Field>
             </div>
-            <div className="grid min-w-0 gap-3 sm:grid-cols-2">
+            <div className="grid min-w-0 gap-4 border-t border-border/60 pt-4 sm:grid-cols-2">
               <Field label="ISBN">
                 <Input
                   name="isbn13"
@@ -4576,33 +4124,25 @@ function TextbookOperationsWorkspaceContent() {
                 </div>
               </Field>
             </div>
-            <div className={dialogFooterClassName}>
-              <Button type="button" variant="outline" onClick={closeMasterDialog} aria-label="교재 등록 취소" title="취소">
-                취소
-              </Button>
-              <Button
-                type="submit"
-                disabled={masterSubmitDisabled}
-                aria-label={saving === "master" ? "교재 저장 중" : "교재 저장"}
-                title={!masterTitleValue ? "교재명을 입력하세요" : isNewMasterDuplicate ? "이미 등록된 교재입니다" : "교재 저장"}
-              >
-                <Save className="mr-2 size-4" />
-                {saving === "master" ? "저장 중" : masterForm.id ? "수정 저장" : "저장"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
       ) : null}
 
       {purchaseDialogOpen ? (
       <Dialog open={purchaseDialogOpen} onOpenChange={(open) => (open ? setPurchaseDialogOpen(true) : closePurchaseDialog())}>
-        <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>{getPurchaseDialogTitle(purchaseForm.requestStage, Boolean(selectedPurchaseLineId))}</DialogTitle>
-            <DialogDescription className="sr-only">교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitPurchase} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "purchase"}>
+        <FormDialogContent
+          returnFocusRef={dialogOpenerRef}
+          title={getPurchaseDialogTitle(purchaseForm.requestStage, Boolean(selectedPurchaseLineId))}
+          description="교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다."
+          onSubmit={submitPurchase}
+          onCancel={closePurchaseDialog}
+          cancelLabel="교재 요청·주문 창 닫기"
+          submitLabel={selectedPurchaseLineId ? "변경 저장" : purchaseActionLabel(purchaseForm.requestStage)}
+          submitDisabled={purchaseSubmitDisabled}
+          busy={saving === "purchase"}
+          error={actionErrorOwner === "purchase" ? actionErrorMessage : ""}
+          hint={purchaseSubmitHint}
+        >
             {purchaseReferenceError ? (
               <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
                 <span>{getTextbookActionErrorMessage(purchaseReferenceError.error)}</span>
@@ -4628,7 +4168,7 @@ function TextbookOperationsWorkspaceContent() {
                         type="button"
                         variant={purchaseRequestUsesCatalog ? "default" : "ghost"}
                         size="sm"
-                        className="h-7 rounded"
+                        className="rounded"
                         aria-pressed={purchaseRequestUsesCatalog}
                         onClick={() => {
                           setPurchaseRequestInputMode("catalog");
@@ -4641,7 +4181,7 @@ function TextbookOperationsWorkspaceContent() {
                         type="button"
                         variant={!purchaseRequestUsesCatalog ? "default" : "ghost"}
                         size="sm"
-                        className="h-7 rounded"
+                        className="rounded"
                         aria-pressed={!purchaseRequestUsesCatalog}
                         onClick={() => {
                           setPurchaseRequestInputMode("manual");
@@ -4653,7 +4193,7 @@ function TextbookOperationsWorkspaceContent() {
                     </div>
                   </div>
                   {purchaseRequestUsesCatalog ? (
-                    <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_2.5rem]">
+                    <div className="grid grid-cols-[minmax(0,1fr)_2.25rem] gap-2">
                       <TextbookSelect
                         value={purchaseForm.textbookId}
                         serverState={referenceData.bookOptions}
@@ -4711,10 +4251,10 @@ function TextbookOperationsWorkspaceContent() {
                     </div>
                   ) : null}
                 </section>
-                <div className="grid gap-3 sm:grid-cols-3">
-                  <Field label="수업">
+                <div className="grid gap-4 sm:grid-cols-2">
+                  <div className="sm:col-span-2"><Field label="수업">
                     <ClassSelect value={purchaseForm.classId} serverState={referenceData.classOptions} selectedDisplayOption={acceptedSelectedClass?.option || null} onValueChange={(value) => setPurchaseField("classId", value)} />
-                  </Field>
+                  </Field></div>
                   <Field label="학생용 요청">
                     <Input value={purchaseForm.studentRequestedQuantity} onChange={(event) => setPurchaseField("studentRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 요청 수량" />
                   </Field>
@@ -4734,19 +4274,19 @@ function TextbookOperationsWorkspaceContent() {
                       </Field>
                     ) : (
                       <Field label="요청자">
-                        <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-foreground">
+                        <div className="flex min-h-9 items-center break-all px-0 text-sm text-foreground">
                           {currentUserLabel || "-"}
                         </div>
                       </Field>
                     )
                   ) : (
                     <Field label="요청자">
-                      <div className="flex h-10 items-center rounded-md border bg-muted/30 px-3 text-sm text-foreground">
+                      <div className="flex min-h-9 items-center break-all px-0 text-sm text-foreground">
                         {currentUserLabel || "-"}
                       </div>
                     </Field>
                   )}
-                  <div className="sm:col-span-2">
+                  <div>
                     <Field label="위치">
                       <LocationSelect
                         locations={locations}
@@ -4761,7 +4301,15 @@ function TextbookOperationsWorkspaceContent() {
                 </div>
               </div>
             ) : (
-              <div className="grid gap-3 sm:grid-cols-[150px_minmax(220px,1fr)_minmax(180px,0.8fr)]">
+              <div className="grid gap-4 sm:grid-cols-2">
+                <div className="sm:col-span-2"><Field label="등록 교재" required>
+                  <TextbookSelect
+                    value={purchaseForm.textbookId}
+                    serverState={referenceData.bookOptions}
+                    selectedDisplayOption={acceptedSelectedBook?.option || null}
+                    onValueChange={(value) => setPurchaseField("textbookId", value)}
+                  />
+                </Field></div>
                 <Field label="단계">
                   <Select value={purchaseForm.requestStage} onValueChange={(value) => setPurchaseField("requestStage", value)}>
                     <SelectTrigger className="w-full" aria-label="처리 단계 선택"><SelectValue /></SelectTrigger>
@@ -4772,40 +4320,19 @@ function TextbookOperationsWorkspaceContent() {
                     </SelectContent>
                   </Select>
                 </Field>
-                <Field label="등록 교재" required>
-                  <TextbookSelect
-                    value={purchaseForm.textbookId}
-                    serverState={referenceData.bookOptions}
-                    selectedDisplayOption={acceptedSelectedBook?.option || null}
-                    onValueChange={(value) => setPurchaseField("textbookId", value)}
-                  />
-                </Field>
+
                 <Field label="수업">
                   <ClassSelect value={purchaseForm.classId} serverState={referenceData.classOptions} selectedDisplayOption={acceptedSelectedClass?.option || null} onValueChange={(value) => setPurchaseField("classId", value)} />
                 </Field>
               </div>
             )}
             {purchaseForm.requestStage !== "request" && purchaseForm.requestedTextbookTitle ? (
-              <Badge variant="outline" className="w-fit rounded-md">
+              <Badge variant="outline" className="w-fit max-w-full whitespace-normal break-words rounded-md">
                 요청 교재명 {purchaseForm.requestedTextbookTitle}
               </Badge>
             ) : null}
-            {purchaseForm.requestStage !== "request" ? (
-              <div className="grid gap-2 text-sm sm:grid-cols-2 lg:grid-cols-6">
-                <Metric label="총판" value={configuredPurchaseSupplierLabel} />
-                <Metric label="요청" value={purchaseRequestedScopeSummary} />
-                <Metric label="단가" value={formatPurchaseUnitCost(configuredPurchaseUnitCost, selectedPurchaseTextbook)} />
-                <Metric label="합계" value={configuredPurchaseTotalCost > 0 ? formatCurrency(configuredPurchaseTotalCost) : "-"} />
-                <Metric
-                  label="입고 후"
-                  value={purchaseForm.requestStage === "receive" ? `${formatQuantity(purchaseProjectedLocationQuantity)}권` : "-"}
-                  tone={purchaseProjectedLocationQuantity < 0 ? "danger" : "default"}
-                />
-                <Metric label="위치" value={getLocationName(locations, selectedLocationId) || "-"} />
-              </div>
-            ) : null}
-            {purchaseForm.requestStage !== "request" && purchaseFieldVisibility.requester ? (
-              <div className="grid gap-3 sm:grid-cols-2">
+            {purchaseForm.requestStage !== "request" && (purchaseFieldVisibility.requester || purchaseFieldVisibility.location) ? (
+              <div className="grid gap-4 sm:grid-cols-2">
                 {purchaseFieldVisibility.requester ? (
                   <Field label="선생님">
                     <TeacherSelect
@@ -4817,10 +4344,6 @@ function TextbookOperationsWorkspaceContent() {
                     />
                   </Field>
                 ) : null}
-              </div>
-            ) : null}
-            {purchaseForm.requestStage !== "request" && (purchaseFieldVisibility.location || purchaseFieldVisibility.requestedQuantity) ? (
-              <div className="grid gap-3 sm:grid-cols-3">
                 {purchaseFieldVisibility.location ? (
                   <Field label="위치">
                     <LocationSelect
@@ -4833,26 +4356,19 @@ function TextbookOperationsWorkspaceContent() {
                     />
                   </Field>
                 ) : null}
-                {purchaseFieldVisibility.requestedQuantity ? (
-                  <>
+              </div>
+            ) : null}
+            {purchaseForm.requestStage !== "request" && purchaseFieldVisibility.requestedQuantity ? (
+              <div className="grid gap-4 sm:grid-cols-2">
                   <Field label="학생용 요청">
                     <Input value={purchaseForm.studentRequestedQuantity} onChange={(event) => setPurchaseField("studentRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="학생용 요청 수량" />
                   </Field>
                   <Field label="교사용 요청">
                     <Input value={purchaseForm.teacherRequestedQuantity} onChange={(event) => setPurchaseField("teacherRequestedQuantity", event.target.value)} inputMode="numeric" min="0" aria-label="교사용 요청 수량" />
                   </Field>
-                  </>
-                ) : null}
               </div>
             ) : null}
-            {purchaseFieldVisibility.classFit ? (
-              <div className="grid grid-cols-4 gap-2 text-sm">
-                <Metric label="학생" value={`학생 ${formatQuantity(purchaseClassStudentCount)}명`} />
-                <Metric label="학생용" value={`${formatQuantity(purchaseStudentRequestedQuantity)}권`} />
-                <Metric label="교사용" value={`${formatQuantity(purchaseTeacherRequestedQuantity)}권`} />
-                <Metric label="판단" value={purchaseQuantityFit.label} tone={purchaseQuantityFit.tone} />
-              </div>
-            ) : null}
+
             {purchaseFieldVisibility.orderedQuantity || purchaseFieldVisibility.receivedQuantity ? (
               <div className="grid gap-3 sm:grid-cols-2">
                 {purchaseFieldVisibility.orderedQuantity ? (
@@ -4894,6 +4410,20 @@ function TextbookOperationsWorkspaceContent() {
                 </div>
               </div>
             ) : null}
+            {purchaseForm.requestStage !== "request" ? (
+              <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-3">
+                <Metric label="총판" value={configuredPurchaseSupplierLabel} />
+                <Metric label="요청" value={purchaseRequestedScopeSummary} />
+                <Metric label="단가" value={formatPurchaseUnitCost(configuredPurchaseUnitCost, selectedPurchaseTextbook)} />
+                <Metric label="합계" value={configuredPurchaseTotalCost > 0 ? formatCurrency(configuredPurchaseTotalCost) : "-"} />
+                <Metric
+                  label="입고 후"
+                  value={purchaseForm.requestStage === "receive" ? `${formatQuantity(purchaseProjectedLocationQuantity)}권` : "-"}
+                  tone={purchaseProjectedLocationQuantity < 0 ? "danger" : "default"}
+                />
+                <Metric label="위치" value={getLocationName(locations, selectedLocationId) || "-"} />
+              </div>
+            ) : null}
             <Field label="메모">
               <Textarea
                 value={purchaseForm.memo}
@@ -4902,119 +4432,84 @@ function TextbookOperationsWorkspaceContent() {
                 aria-label="요청 메모"
               />
             </Field>
-            <div className={dialogFooterClassName}>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closePurchaseDialog}
-                aria-label="교재 요청·주문 창 닫기"
-                title="닫기"
-              >
-                닫기
-              </Button>
-              {selectedPurchaseLineId ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  onClick={purchaseForm.requestStage === "request" ? openNewRequestDialog : openNewPurchaseDialog}
-                >
-                  <Plus className="mr-2 size-4" />
-                  {purchaseForm.requestStage === "request" ? "새 요청" : "새 주문"}
-                </Button>
-              ) : null}
-              <Button
-                type="submit"
-                disabled={purchaseSubmitDisabled}
-                title={purchaseSubmitDisabled ? "필수 항목을 확인하세요" : purchaseActionLabel(purchaseForm.requestStage)}
-              >
-                <Truck className="mr-2 size-4" />
-                {saving === "purchase" ? "저장 중" : selectedPurchaseLineId ? "선택 건 저장" : purchaseActionLabel(purchaseForm.requestStage)}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
       ) : null}
 
       {bulkOrderDialogOpen ? (
       <Dialog open={bulkOrderDialogOpen} onOpenChange={(open) => (open ? setBulkOrderDialogOpen(true) : closeBulkOrderDialog())}>
-        <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>선택 요청 일괄 주문</DialogTitle>
-            <DialogDescription className="sr-only">선택한 요청을 공급처 주문 단계로 한꺼번에 전환합니다.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitBulkOrder} className="grid min-w-0 gap-3">
-            <div className="overflow-hidden rounded-lg border">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/30">
-                    <TableHead>교재</TableHead>
-                    <TableHead className="w-20 text-right">요청</TableHead>
-                    <TableHead className="w-32">주문</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {selectedBulkOrderLines.map((line) => {
-                    const lineId = getRecordId(line);
-                    const order = getPurchaseLineOrder(line, purchaseOrdersById);
-                    const draft = buildPurchaseCardDraft(line, order);
-                    const textbook = preparedPurchaseRows.find((row) => row.memberLineIds.includes(lineId))?.references.textbook;
-                    const defaultOrderQuantity = getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1";
-                    return (
-                      <TableRow key={lineId}>
-                        <TableCell className="min-w-0">
-                          <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-                            <div className="min-w-0 truncate font-medium">{getPurchaseTextbookTitle(line, textbook || undefined)}</div>
-                            <Badge variant="outline" className="w-fit rounded-md">
-                              {getTextbookCopyScopeLabel(draft.copyScope)}
-                            </Badge>
-                          </div>
-                          <div className="text-xs text-muted-foreground">{getPublisherLabel(textbook || {})}</div>
-                        </TableCell>
-                        <TableCell className="text-right">{formatQuantity(draft.requestedQuantity)}</TableCell>
-                        <TableCell>
-                          <Input
-                            value={bulkOrderQuantities[lineId] ?? defaultOrderQuantity}
-                            onChange={(event) => setBulkOrderQuantity(lineId, event.target.value)}
-                            inputMode="numeric"
-                            min="1"
-                            aria-label={`${getPurchaseTextbookTitle(line, textbook || undefined)} ${getTextbookCopyScopeLabel(draft.copyScope)} 주문 수량`}
-                          />
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </TableBody>
-              </Table>
+        <FormDialogContent
+          returnFocusRef={dialogOpenerRef}
+          title="선택 요청 일괄 주문"
+          description="선택한 요청을 공급처 주문 단계로 한꺼번에 전환합니다."
+          onSubmit={submitBulkOrder}
+          onCancel={closeBulkOrderDialog}
+          cancelLabel="선택 요청 일괄 주문 창 닫기"
+          submitLabel="일괄 주문"
+          submitDisabled={schemaDisabled || selectedBulkOrderLines.length === 0}
+          busy={saving === "purchase-bulk-order"}
+          error={actionErrorOwner === "purchase-bulk-order" ? actionErrorMessage : ""}
+        >
+            <div data-slot="bulk-order-editor" className="min-w-0">
+              <div aria-hidden="true" className="hidden grid-cols-[minmax(0,1fr)_4rem_6rem] items-center gap-4 border-b border-border/80 pb-3 text-xs font-medium text-muted-foreground sm:grid">
+                <span>교재</span><span className="text-right">요청</span><span className="text-right">주문 수량</span>
+              </div>
+              <ul aria-label="일괄 주문 수량" className="divide-y divide-border/70">
+                {selectedBulkOrderLines.map((line) => {
+                  const lineId = getRecordId(line);
+                  const order = getPurchaseLineOrder(line, purchaseOrdersById);
+                  const draft = buildPurchaseCardDraft(line, order);
+                  const references = preparedPurchaseRows.find((row) => row.memberLineIds.includes(lineId))?.references;
+                  const textbook = references?.textbook;
+                  const title = getPurchaseTextbookTitle(line, textbook || undefined);
+                  const scopeLabel = getTextbookCopyScopeLabel(draft.copyScope);
+                  const metadata = compactUniqueLabels([scopeLabel, getPublisherLabel(textbook || {}), text(references?.class?.name), text(references?.location?.name)]).join(" · ");
+                  const defaultOrderQuantity = getPositivePurchaseQuantityText(draft.orderedQuantity) || draft.requestedQuantity || "1";
+                  return (
+                    <li key={lineId} className="grid grid-cols-[minmax(0,1fr)_7rem] items-center gap-x-4 gap-y-3 py-4 first:pt-0 sm:grid-cols-[minmax(0,1fr)_4rem_6rem] sm:first:pt-4">
+                      <div className="col-span-2 min-w-0 sm:col-span-1">
+                        <p className="break-words text-sm font-medium leading-relaxed [overflow-wrap:anywhere]">{title}</p>
+                        <p className="mt-1 break-words text-xs leading-relaxed text-muted-foreground">{metadata}</p>
+                      </div>
+                      <div className="flex h-11 items-center self-end gap-2 text-sm tabular-nums sm:h-9 sm:self-center sm:justify-end" aria-label={`${title} ${scopeLabel} 요청 수량 ${formatQuantity(draft.requestedQuantity)}`}>
+                        <span aria-hidden="true" className="text-xs text-muted-foreground sm:sr-only">요청</span>
+                        <span>{formatQuantity(draft.requestedQuantity)}</span>
+                      </div>
+                      <label className="grid min-w-0 gap-1.5">
+                        <span className="text-xs text-muted-foreground sm:sr-only">주문 수량</span>
+                        <Input
+                          value={bulkOrderQuantities[lineId] ?? defaultOrderQuantity}
+                          onChange={(event) => setBulkOrderQuantity(lineId, event.target.value)}
+                          inputMode="numeric"
+                          min="1"
+                          className="h-11 text-right tabular-nums sm:h-9"
+                          aria-label={`${title} ${scopeLabel} 주문 수량`}
+                        />
+                      </label>
+                    </li>
+                  );
+                })}
+              </ul>
             </div>
-            <div className={dialogFooterClassName}>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeBulkOrderDialog}
-                aria-label="선택 요청 일괄 주문 창 닫기"
-                title="닫기"
-              >
-                닫기
-              </Button>
-              <Button type="submit" disabled={saving === "purchase-bulk-order" || selectedBulkOrderLines.length === 0}>
-                <Truck className="mr-2 size-4" />
-                일괄 주문
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
       ) : null}
 
       {saleDialogOpen ? (
       <Dialog open={saleDialogOpen} onOpenChange={(open) => (open ? setSaleDialogOpen(true) : closeSaleDialog())}>
-        <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle>출고 추가</DialogTitle>
-            <DialogDescription className="sr-only">수업 또는 선생님과 교재를 선택해 출고 대기 내역을 생성합니다.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitSale} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "sale"}>
+        <FormDialogContent
+          returnFocusRef={dialogOpenerRef}
+          title="출고 추가"
+          description="수업 또는 선생님과 교재를 선택해 출고 대기 내역을 생성합니다."
+          onSubmit={submitSale}
+          onCancel={closeSaleDialog}
+          cancelLabel="교재 출고 창 닫기"
+          submitLabel="출고 대기 저장"
+          submitDisabled={saleSubmitDisabled}
+          busy={saving === "sale"}
+          error={actionErrorOwner === "sale" ? actionErrorMessage : ""}
+          hint={saleSubmitDisabled ? effectiveSaleSubmitHint : ""}
+        >
             {saleReferenceError ? (
               <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
                 <span>{getTextbookActionErrorMessage(saleReferenceError.error)}</span>
@@ -5211,226 +4706,58 @@ function TextbookOperationsWorkspaceContent() {
                 <Metric label="부족" value={`${formatQuantity(saleDraft.stockShortage)}권`} tone={saleDraft.hasStockShortage ? "danger" : "default"} />
               </div>
             ) : null}
-            <div className={dialogFooterClassName}>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeSaleDialog}
-                aria-label="교재 출고 창 닫기"
-                title="닫기"
-              >
-                닫기
-              </Button>
-              <Button
-                type="submit"
-                disabled={schemaDisabled || saving === "sale" || saleSubmitDisabled}
-                title={saleSubmitDisabled ? effectiveSaleSubmitHint : "출고 대기 저장"}
-              >
-                <Check className="mr-2 size-4" />
-                {saving === "sale" ? "저장 중" : "출고 대기 저장"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
+        </FormDialogContent>
       </Dialog>
       ) : null}
 
-      {closingDialogOpen ? (
-      <Dialog open={closingDialogOpen} onOpenChange={(open) => (open ? setClosingDialogOpen(true) : closeClosingDialog())}>
-        <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-xl">
-          <DialogHeader>
-            <DialogTitle>월마감</DialogTitle>
-            <DialogDescription className="sr-only">월별 입고, 출고, 기말 수량과 금액 차이를 정산합니다.</DialogDescription>
-          </DialogHeader>
-          <form onSubmit={submitClosing} className="grid min-w-0 max-w-full gap-3 [&>*]:min-w-0 [&>*]:max-w-full" aria-busy={saving === "closing"}>
-            {referenceData.closingPreview.error ? (
-              <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3">
-                <span>{getTextbookActionErrorMessage(referenceData.closingPreview.error)}</span>
-                <Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.closingPreview.retry(); }}>다시 시도</Button>
-              </AlertDescription></Alert>
-            ) : null}
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="월" required>
-                <Input type="month" value={closingForm.closingMonth} onChange={(event) => setClosingForm((current) => ({ ...current, closingMonth: event.target.value }))} aria-label="마감 월" />
-              </Field>
-              <Field label="과목">
-                <Select value={closingForm.subject} onValueChange={(value) => setClosingForm((current) => ({ ...current, subject: value }))}>
-                  <SelectTrigger className="w-full" aria-label="마감 과목 선택"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">전체</SelectItem>
-                    <SelectItem value="english">영어</SelectItem>
-                    <SelectItem value="math">수학</SelectItem>
-                    <SelectItem value="science">과학</SelectItem>
-                  </SelectContent>
-                </Select>
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-3">
-              <Field label="기초 수량">
-                <Input value={closingForm.openingQuantity} onChange={(event) => setClosingForm((current) => ({ ...current, openingQuantity: event.target.value }))} inputMode="numeric" aria-label="기초 수량" />
-              </Field>
-              <Field label="기초 금액">
-                <Input value={closingForm.openingAmount} onChange={(event) => setClosingForm((current) => ({ ...current, openingAmount: event.target.value }))} inputMode="numeric" aria-label="기초 금액" />
-              </Field>
-            </div>
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <Metric label="저장" value={`${formatQuantity(closingTargetSubjects.length)}건`} />
-              <Metric label="입고" value={closingPreview ? `${formatQuantity(closingPreview.purchaseQuantity)}권` : "—"} />
-              <Metric label="출고" value={closingPreview ? `${formatQuantity(closingPreview.saleQuantity)}권` : "—"} />
-              <Metric label="기말" value={closingPreview ? `${formatQuantity(closingPreview.endingQuantity)}권` : "—"} />
-              <Metric label="마진" value={!closingPreview ? "—" : closingNeedsMemo ? "사유 필요" : formatCurrency(closingPreview.textbookMarginAmount)} tone={closingPreview?.needsReview ? "danger" : "default"} />
-            </div>
-            {closingTeamMarginMetrics.length > 0 ? (
-              <div className="grid grid-cols-2 gap-2 text-sm">
-                {closingTeamMarginMetrics.map((item) => (
-                  <Metric
-                    key={item.team}
-                    label={`${getSubjectLabel(item.team)}팀`}
-                    value={formatCurrency(item.marginAmount)}
-                  />
-                ))}
-              </div>
-            ) : null}
-            <Field label="메모">
-              <Textarea value={closingForm.memo} onChange={(event) => setClosingForm((current) => ({ ...current, memo: event.target.value }))} rows={3} aria-label="마감 메모" />
-            </Field>
-            <div className={dialogFooterClassName}>
-              <Button
-                type="button"
-                variant="outline"
-                onClick={closeClosingDialog}
-                aria-label="월마감 창 닫기"
-                title="닫기"
-              >
-                닫기
-              </Button>
-              <Button
-                type="submit"
-                disabled={schemaDisabled || saving === "closing" || closingNeedsMemo || !closingPreview || referenceData.closingPreview.loading || Boolean(referenceData.closingPreview.error)}
-                title={closingNeedsMemo ? "차이 사유를 메모에 입력하세요" : "월마감 저장"}
-              >
-                <ClipboardCheck className="mr-2 size-4" />
-                {saving === "closing" ? "저장 중" : "마감 저장"}
-              </Button>
-            </div>
-          </form>
-        </DialogContent>
-      </Dialog>
-      ) : null}
 
       <Dialog open={Boolean(selectedMasterDetailId && !masterDialogOpen)} onOpenChange={(open) => { if (!open) closeTextbookDetail("master"); }}>
-        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
-          <DialogHeader><DialogTitle>교재 상세</DialogTitle><DialogDescription className="sr-only">선택한 교재의 직접 조회 결과입니다.</DialogDescription></DialogHeader>
-          {referenceData.masterDetail.loading ? <div role="status">교재 상세를 불러오는 중입니다.</div> : referenceData.masterDetail.error ? (
-            <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3"><span>{getTextbookActionErrorMessage(referenceData.masterDetail.error)}</span><Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.masterDetail.retry(); }}>다시 시도</Button></AlertDescription></Alert>
-          ) : isExactAcceptedInput(referenceData.masterDetail.acceptedInput, selectedMasterDetailId) ? <div className="text-sm text-muted-foreground">교재를 찾을 수 없습니다.</div> : null}
-          <DialogFooter><Button type="button" variant="outline" onClick={() => closeTextbookDetail("master")}>닫기</Button></DialogFooter>
-        </DialogContent>
+        <DetailDialogContent title="교재 상세" description="선택한 교재의 직접 조회 결과입니다." compact={false} onClose={() => closeTextbookDetail("master")}>
+          <TextbookDetailState loading={referenceData.masterDetail.loading || (!referenceData.masterDetail.error && !isExactAcceptedInput(referenceData.masterDetail.acceptedInput, selectedMasterDetailId))} error={referenceData.masterDetail.error} onRetry={referenceData.masterDetail.retry} emptyLabel="교재를 찾을 수 없습니다." />
+        </DetailDialogContent>
       </Dialog>
 
       <Dialog open={Boolean(selectedPurchaseDetail && !purchaseDialogOpen)} onOpenChange={(open) => { if (!open) closeTextbookDetail("purchase"); }}>
-        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
-          <DialogHeader><DialogTitle>구매 상세</DialogTitle><DialogDescription className="sr-only">선택한 구매 건의 직접 조회 결과입니다.</DialogDescription></DialogHeader>
-          {referenceData.purchaseDetail.loading ? <div role="status">구매 상세를 불러오는 중입니다.</div> : referenceData.purchaseDetail.error ? (
-            <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3"><span>{getTextbookActionErrorMessage(referenceData.purchaseDetail.error)}</span><Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.purchaseDetail.retry(); }}>다시 시도</Button></AlertDescription></Alert>
-          ) : isExactAcceptedInput(referenceData.purchaseDetail.acceptedInput, selectedPurchaseDetail) ? <div className="text-sm text-muted-foreground">구매 내역을 찾을 수 없습니다.</div> : null}
-          <DialogFooter><Button type="button" variant="outline" onClick={() => closeTextbookDetail("purchase")}>닫기</Button></DialogFooter>
-        </DialogContent>
+        <DetailDialogContent title="구매 상세" description="선택한 구매 건의 직접 조회 결과입니다." compact={false} onClose={() => closeTextbookDetail("purchase")}>
+          <TextbookDetailState loading={referenceData.purchaseDetail.loading || (!referenceData.purchaseDetail.error && !isExactAcceptedInput(referenceData.purchaseDetail.acceptedInput, selectedPurchaseDetail))} error={referenceData.purchaseDetail.error} onRetry={referenceData.purchaseDetail.retry} emptyLabel="구매 내역을 찾을 수 없습니다." />
+        </DetailDialogContent>
       </Dialog>
 
       <Dialog open={Boolean(selectedSaleDetailId)} onOpenChange={(open) => { if (!open) closeTextbookDetail("sale"); }}>
-        <DialogContent className="w-[calc(100vw-2rem)] sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle>출고 상세</DialogTitle>
-            <DialogDescription className="sr-only">선택한 출고 한 건의 직접 조회 결과입니다.</DialogDescription>
-          </DialogHeader>
-          {referenceData.saleDetail.loading ? <div role="status">출고 상세를 불러오는 중입니다.</div> : referenceData.saleDetail.error ? (
-            <Alert role="alert"><AlertDescription className="flex items-center justify-between gap-3"><span>{getTextbookActionErrorMessage(referenceData.saleDetail.error)}</span><Button type="button" variant="outline" size="sm" onClick={() => { void referenceData.saleDetail.retry(); }}>다시 시도</Button></AlertDescription></Alert>
-          ) : acceptedSaleDetail?.row ? (
-            <div className="grid grid-cols-2 gap-2 text-sm">
-              <Metric label="대상" value={acceptedSaleDetail.row.recipientName} />
-              <Metric label="교재" value={getTextbookTitle(acceptedSaleDetail.row.textbook)} />
-              <Metric label="수량" value={`${formatQuantity(acceptedSaleDetail.row.quantity)}권`} />
-              <Metric label="금액" value={formatCurrency(acceptedSaleDetail.row.amount)} />
-            </div>
-          ) : <div className="text-sm text-muted-foreground">출고 내역을 찾을 수 없습니다.</div>}
-          <DialogFooter><Button type="button" variant="outline" onClick={() => closeTextbookDetail("sale")}>닫기</Button></DialogFooter>
-        </DialogContent>
+        <DetailDialogContent title="출고 상세" description="선택한 출고 한 건의 직접 조회 결과입니다." onClose={() => closeTextbookDetail("sale")}>
+          <TextbookDetailState loading={referenceData.saleDetail.loading || (!referenceData.saleDetail.error && !isExactAcceptedInput(referenceData.saleDetail.acceptedInput, selectedSaleDetailId))} error={referenceData.saleDetail.error} onRetry={referenceData.saleDetail.retry} emptyLabel="출고 내역을 찾을 수 없습니다.">
+            {acceptedSaleDetail?.row ? (
+              <dl className="grid min-w-0 grid-cols-2 gap-x-6 gap-y-4 text-sm">
+                <TextbookDetailField label="교재" value={getTextbookTitle(acceptedSaleDetail.row.textbook)} wide />
+                <TextbookDetailField label="대상" value={acceptedSaleDetail.row.recipientName} wide />
+                <TextbookDetailField label="구분" value={getTextbookCopyScopeLabel(getTextbookCopyScope(acceptedSaleDetail.row.line))} />
+                <TextbookDetailField label="상태" value={saleStatusLabels[acceptedSaleDetail.row.status] || acceptedSaleDetail.row.status} />
+                <TextbookDetailField label="수업" value={acceptedSaleDetail.row.class?.name || "—"} />
+                <TextbookDetailField label="위치" value={acceptedSaleDetail.row.location?.name || "—"} />
+                <TextbookDetailField label="출고월" value={acceptedSaleDetail.row.line.charge_month || "—"} />
+                <TextbookDetailField label="처리일시" value={formatCompactDateTime(acceptedSaleDetail.row.eventAt)} />
+                <TextbookDetailField label="수량" value={`${formatQuantity(acceptedSaleDetail.row.quantity)}권`} />
+                <TextbookDetailField label="금액" value={formatCurrency(acceptedSaleDetail.row.amount)} />
+                {acceptedSaleDetail.row.line.memo ? <TextbookDetailField label="메모" value={acceptedSaleDetail.row.line.memo} wide /> : null}
+              </dl>
+            ) : null}
+          </TextbookDetailState>
+        </DetailDialogContent>
       </Dialog>
 
-      <ClosingDetailDialog
-        open={Boolean(selectedClosingDetailId)}
-        actorKey={`${user?.id || ""}:${role || ""}`}
-        detail={closingDetailResource.value}
-        loading={closingDetailResource.loading}
-        error={closingDetailResource.error}
-        rows={numbered.closingMovements.rows}
-        movementSearch={closingMovementSearch}
-        onMovementSearchChange={setClosingMovementSearch}
-        movementPage={numbered.closingMovements.page}
-        movementPageSize={numbered.closingMovements.pageSize}
-        movementTotalCount={numbered.closingMovements.totalCount}
-        movementLoading={numbered.closingMovements.loading}
-        onMovementPageChange={(page) => { void numbered.closingMovements.goToPage(page); }}
-        onMovementPageSizeChange={numbered.closingMovements.setPageSizePreference}
-        onOpenChange={(open) => {
-          if (!open) {
-            setSelectedClosingDetailId("");
-            setSelectedClosingScope(null);
-            setClosingMovementSearch("");
-          }
-        }}
-      />
-
-      {activeTab === "inventory" && inventoryLocationReference.error ? (
-        <Alert role="alert">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{inventoryLocationReference.error}</span>
-            <Button type="button" size="sm" variant="outline" aria-label="재고 위치 다시 시도" onClick={() => { void referenceData.locationOptions.retry(); }}>다시 시도</Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {activePrimaryState.error ? (
-        <Alert role="alert">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>{getTextbookActionErrorMessage(activePrimaryState.error)}</span>
-            <Button type="button" size="sm" variant="outline" onClick={() => { void activePrimaryState.retry(); }}>다시 시도</Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {activeSummaryResource?.error ? (
-        <Alert role="alert">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>집계 정보를 불러오지 못했습니다.</span>
-            <Button type="button" size="sm" variant="outline" aria-label="교재 집계 다시 시도" onClick={() => { void activeSummaryResource.retry(); }}>다시 시도</Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {activeTab === "sales" && numbered.saleHistory.summary.error ? (
-        <Alert role="alert">
-          <AlertDescription className="flex items-center justify-between gap-3">
-            <span>출고 이력 집계 정보를 불러오지 못했습니다.</span>
-            <Button type="button" size="sm" variant="outline" aria-label="출고 이력 집계 다시 시도" onClick={() => { void numbered.saleHistory.summary.retry(); }}>다시 시도</Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      <Tabs value={activeTab} onValueChange={changeActiveTab} className="min-h-0 min-w-0 flex-1">
+      <Tabs value={activeTab} onValueChange={changeActiveTab} activationMode="manual" className="min-h-0 min-w-0 flex-1">
+        <div className="flex min-w-0 items-start gap-2">
         <TabsList
           className={cn(
-            "grid h-auto w-full rounded-md border bg-background p-1 shadow-sm",
-            canManageTextbookOperations ? "grid-cols-2 sm:grid-cols-3 lg:grid-cols-6" : "grid-cols-1",
+            "grid h-auto min-w-0 flex-1 rounded-lg bg-muted/50 p-1",
+            canManageTextbookOperations ? "grid-cols-3 lg:grid-cols-6" : "grid-cols-1",
           )}
           aria-label="교재관리 업무 탭"
         >
           {canManageTextbookOperations ? (
-            <TabsTrigger value="master" className={textbookTabTriggerClassName} aria-label="마스터">
+            <TabsTrigger value="master" className={textbookTabTriggerClassName} aria-label="교재 재고">
               <BookOpen className="size-4" />
-              마스터
-              <TabCountBadge value={numbered.master.totalCount || 0} />
+              교재 재고
             </TabsTrigger>
           ) : null}
           <TabsTrigger value="requests" className={textbookTabTriggerClassName} aria-label="요청">
@@ -5450,191 +4777,42 @@ function TextbookOperationsWorkspaceContent() {
                 출고
                 <TabCountBadge value={operationMetrics.issueWaitingCount} />
               </TabsTrigger>
-              <TabsTrigger value="inventory" className={textbookTabTriggerClassName} aria-label="재고">
+              <TabsTrigger value="inventory" className={textbookTabTriggerClassName} aria-label="재고 실사">
                 <PackageCheck className="size-4" />
-                재고
-                <TabCountBadge value={numbered.inventory.totalCount || 0} />
+                재고 실사
               </TabsTrigger>
-              <TabsTrigger value="closing" className={textbookTabTriggerClassName} aria-label="정산">
-                <ClipboardCheck className="size-4" />
-                정산
-                <TabCountBadge value={numbered.closing.totalCount || 0} />
-              </TabsTrigger>
+
             </>
           ) : null}
         </TabsList>
+        <Button type="button" variant="ghost" size="icon" className="mt-1 size-9 shrink-0" aria-label="교재관리 새로고침" title="새로고침" onClick={refreshTextbookData} disabled={activePrimaryState.loading}>
+          <RefreshCw className={cn("size-4", activePrimaryState.loading && "animate-spin motion-reduce:animate-none")} aria-hidden="true" />
+        </Button>
+        </div>
 
-        <TextbookOperationsStatusBar
-          items={workspaceStatusItems}
-          loading={activePrimaryState.loading}
-          onRefresh={refreshTextbookData}
-        />
-
-        {activePrimaryState.loading && activePrimaryState.totalCount === null ? (
-          <TextbookLoadingState />
-        ) : (
-          <>
-        {showsProcessToolbar ? (
-          <div className={cn("mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center", !showsProcessSearch && "sm:justify-end")}>
-            {showsProcessSearch ? (
-              <div className="relative min-w-0 flex-1" role="search" aria-label={operationSearchLabel}>
-                <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
-                <Input
-                  ref={operationSearchRef}
-                  type="search"
-                  value={operationQuery}
-                  onChange={(event) => updateOperationSearchQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") updateOperationSearchQuery("");
-                  }}
-                  className="pl-9 pr-9"
-                  placeholder={operationSearchPlaceholder}
-                  aria-label={operationSearchLabel}
-                  aria-keyshortcuts="/"
-                  autoComplete="off"
-                  enterKeyHint="search"
-                />
-                {operationQuery ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="absolute right-1 top-1 size-8"
-                    aria-label={`${operationSearchLabel} 초기화`}
-                    onClick={() => updateOperationSearchQuery("")}
-                  >
-                    <X className="size-4" />
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
-            {canManageTextbookOperations && activeTab !== "requests" ? (
-              <TextbookOpsCommandCenter
-                metrics={operationMetrics}
-                activeQueueKey={activeQueueKey}
-                onSelectQueue={openTextbookOpsQueue}
-              />
-            ) : null}
-          </div>
-        ) : null}
-
-        {showsInventoryTools ? (
-          <div className="mt-3 flex min-w-0 flex-col gap-2 sm:flex-row sm:items-center">
-            <div className="relative min-w-0 flex-1" role="search" aria-label="교재 검색">
-              <Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted-foreground" />
-              <Input
-                ref={masterSearchRef}
-                type="search"
-                value={query}
-                onChange={(event) => updateMasterSearchQuery(event.target.value)}
-                onKeyDown={(event) => {
-                  if (event.key === "Escape") updateMasterSearchQuery("");
-                }}
-                className="pl-9 pr-9"
-                placeholder="교재명, 출판사, ISBN, 바코드"
-                aria-label="교재 검색"
-                aria-keyshortcuts="/"
-                autoComplete="off"
-                enterKeyHint="search"
-              />
-              {query ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="absolute right-1 top-1 size-8"
-                  aria-label="검색 초기화"
-                  onClick={() => updateMasterSearchQuery("")}
-                >
-                  <X className="size-4" />
+        <div className={cn("min-w-0", activeTab === "master" && DATA_TABLE_LAYOUT_CLASS_NAME)}>
+        {activeTab === "master" ? (
+          <DataTableWorkspaceToolbar
+            search={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
+              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" shortcut="/" />}
+            feedback={listReadFeedback}
+            actions={<div data-slot="textbook-master-actions" className="flex min-w-0 flex-1 items-center justify-end gap-1">{selectedTextbookRows.length > 0 ? (
+              <TextbookSelectionActions selectedCount={selectedTextbookRows.length} saving={saving} metadataReady={masterOptionsAccepted}
+                controlsOpen={masterBulkControlsOpen} onToggleControls={openMasterBulkDialog}
+                onSetStatus={applyBulkTextbookStatus} onDelete={deleteSelectedTextbooks} onClear={() => { clearMasterSelection(); setMasterBulkControlsOpen(false); masterSearchRef.current?.focus({ preventScroll: true }); }} />
+            ) : (
+            <div className="flex min-w-0 items-center justify-end gap-1">
+              {activeTab === "master" ? (
+                <Button type="button" variant={textbookQualityFilter === "inactive" ? "secondary" : "ghost"} size="sm" className="h-11 sm:h-9" aria-label="미사용 교재 보기" aria-pressed={textbookQualityFilter === "inactive"} onClick={() => changeTextbookQualityFilter(textbookQualityFilter === "inactive" ? "all" : "inactive")}>
+                  미사용 교재
                 </Button>
               ) : null}
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center gap-2">
-              {selectedTextbookRows.length > 0 ? (
-                <Badge variant="default" className="h-8 rounded-md px-2 tabular-nums">
-                  선택 {formatQuantity(selectedTextbookRows.length)}
-                </Badge>
-              ) : null}
-              {canManageTextbookOperations ? (
-                <TextbookOpsCommandCenter
-                  metrics={operationMetrics}
-                  activeQueueKey={activeQueueKey}
-                  onSelectQueue={openTextbookOpsQueue}
-                />
-              ) : null}
-              <Popover>
-                <PopoverTrigger asChild>
-                  <Button type="button" variant="outline" size="sm" className="h-9 rounded-md" aria-label="교재 상태 필터 열기">
-                    <SlidersHorizontal className="mr-2 size-3.5" />
-                    상태
-                    <span className="ml-2 max-w-[10rem] truncate rounded bg-muted px-1.5 text-[11px] font-semibold text-muted-foreground">
-                      {inventoryFilterLabels[inventoryFilter]}
-                      {activeTab === "master" ? ` · ${textbookQualityFilterLabels[textbookQualityFilter]}` : ""}
-                    </span>
-                  </Button>
-                </PopoverTrigger>
-                <PopoverContent align="end" className="w-[min(32rem,calc(100vw-2rem))] p-3">
-                  <div className="grid gap-3">
-                    <div className="grid gap-1.5">
-                      <p className="text-xs font-medium text-muted-foreground">재고 상태</p>
-                      <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                        {(Object.keys(inventoryFilterLabels) as InventoryFilter[]).map((filter) => (
-                          <Button
-                            key={filter}
-                            type="button"
-                            variant={inventoryFilter === filter ? "default" : "outline"}
-                            size="sm"
-                            className="h-8 justify-start rounded-md"
-                            aria-pressed={inventoryFilter === filter}
-                            onClick={() => changeInventoryFilter(filter)}
-                          >
-                            <span className="min-w-0 truncate">{inventoryFilterLabels[filter]}</span>
-                            <span className={cn(
-                              "ml-auto rounded px-1.5 text-[11px] font-semibold",
-                              inventoryFilter === filter ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                            )}>
-                              {inventoryFilterCounts ? formatQuantity(inventoryFilterCounts[filter]) : "—"}
-                            </span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                    {activeTab === "master" ? (
-                      <div className="grid gap-1.5">
-                        <p className="text-xs font-medium text-muted-foreground">정리 상태</p>
-                        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-3">
-                          {(Object.keys(textbookQualityFilterLabels) as TextbookQualityFilter[]).map((filter) => (
-                            <Button
-                              key={filter}
-                              type="button"
-                              variant={textbookQualityFilter === filter ? "default" : "outline"}
-                              size="sm"
-                              className="h-8 justify-start rounded-md"
-                              aria-pressed={textbookQualityFilter === filter}
-                              onClick={() => changeTextbookQualityFilter(filter)}
-                            >
-                              <span className="min-w-0 truncate">{textbookQualityFilterLabels[filter]}</span>
-                              <span className={cn(
-                                "ml-auto rounded px-1.5 text-[11px] font-semibold",
-                                textbookQualityFilter === filter ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                              )}>
-                                {textbookQualityFilterCounts ? formatQuantity(textbookQualityFilterCounts[filter]) : "—"}
-                              </span>
-                            </Button>
-                          ))}
-                        </div>
-                      </div>
-                    ) : null}
-                  </div>
-                </PopoverContent>
-              </Popover>
               {activeTab === "master" && textbookQualityFilter === "inactive" && (textbookQualityFilterCounts?.inactive || 0) > 0 ? (
                 <Button
                   type="button"
                   variant="destructive"
                   size="sm"
-                  className="h-9 rounded-md"
+                  className="h-11 rounded-md sm:h-9"
                   onClick={emptyInactiveTextbookTrash}
                   disabled={saving === "textbook-trash-empty"}
                 >
@@ -5642,46 +4820,15 @@ function TextbookOperationsWorkspaceContent() {
                   비우기
                 </Button>
               ) : null}
-              {activeTab === "master" && (textbookQualityFilterCounts?.inactive || 0) > 0 ? (
-                <Button
-                  type="button"
-                  variant={textbookQualityFilter === "inactive" ? "default" : "outline"}
-                  size="icon"
-                  className="relative size-9 rounded-md"
-                  aria-pressed={textbookQualityFilter === "inactive"}
-                  aria-label="미사용 교재 보관함 열기"
-                  title="미사용 교재 보관함"
-                  onClick={() => {
-                    changeInventoryFilter("all");
-                    changeTextbookQualityFilter(textbookQualityFilter === "inactive" ? "all" : "inactive");
-                  }}
-                >
-                  <Trash2 className="size-4" />
-                  <span className="sr-only">미사용 교재 보관함 {formatQuantity(textbookQualityFilterCounts?.inactive || 0)}개</span>
-                  <span className={cn(
-                    "absolute -right-1 -top-1 rounded-full px-1.5 py-0.5 text-[10px] font-semibold leading-none tabular-nums",
-                    textbookQualityFilter === "inactive" ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                  )}>
-                    {formatQuantity(textbookQualityFilterCounts?.inactive || 0)}
-                  </span>
-                </Button>
-              ) : null}
-              {hasTextbookListFilter ? (
-                <Button type="button" variant="ghost" size="icon" className="size-9 rounded-md" aria-label="교재 필터 초기화" onClick={resetTextbookListFilters}>
-                  <X className="size-4" />
-                </Button>
-              ) : null}
               {activeTab === "master" ? (
-                <Button type="button" className="h-9 shrink-0" aria-label="신규 등록" onClick={openNewMasterDialog}>
+                <Button type="button" className="h-11 shrink-0 sm:h-9" aria-label="신규 등록" onClick={openNewMasterDialog}>
                   <Plus className="mr-2 size-4" />
                   신규 등록
                 </Button>
               ) : null}
             </div>
-          </div>
-        ) : null}
-        {showsInventoryTools ? (
-          <TextbookListControls
+            )}</div>}
+            filters={<TextbookListControls
             subjectFilter={subjectGroupFilter}
             onSubjectFilterChange={(value) => {
               changeSubjectGroupFilter(value);
@@ -5696,11 +4843,22 @@ function TextbookOperationsWorkspaceContent() {
             categoryFilter={categoryGroupFilter}
             onCategoryFilterChange={changeCategoryGroupFilter}
             categoryOptions={categoryGroupOptions}
+          >
+            <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="교재 필터 초기화" title="필터 초기화" disabled={!hasTextbookListFilter} onClick={resetTextbookListFilters}>
+              <RefreshCw className="size-4" aria-hidden="true" />
+            </Button>
+          </TextbookListControls>}
           />
         ) : null}
 
-        <TabsContent value="master" className="mt-3 grid min-w-0 content-start gap-4">
-          <TextbookBulkActionBar
+        <TabsContent value="master" aria-busy={numbered.master.loading} className="m-0 grid min-w-0 content-start gap-0">
+          <TextbookBulkEditDialog
+            controlsOpen={masterBulkControlsOpen}
+            onClose={closeMasterBulkDialog}
+            returnFocusRef={dialogOpenerRef}
+            error={actionErrorOwner === "textbook-bulk-edit" ? actionErrorMessage : ""}
+            metadataError={referenceData.masterOptions.error ? getTextbookActionErrorMessage(referenceData.masterOptions.error) : ""}
+            onRetryMetadata={() => { void referenceData.masterOptions.retry(); }}
             selectedCount={selectedTextbookRows.length}
             patch={bulkTextbookPatch}
             categoryOptions={bulkCategoryOptions}
@@ -5713,9 +4871,6 @@ function TextbookOperationsWorkspaceContent() {
             onSchoolLevelChange={toggleBulkTextbookSchoolLevel}
             onGradeLevelChange={toggleBulkTextbookGradeLevel}
             onApply={applyBulkTextbookEdit}
-            onSetStatus={applyBulkTextbookStatus}
-            onDelete={deleteSelectedTextbooks}
-            onClear={clearMasterSelection}
           />
 
           <TextbookTable
@@ -5731,27 +4886,35 @@ function TextbookOperationsWorkspaceContent() {
             someVisibleSelected={someVisibleTextbooksSelected}
             onToggleAllVisible={toggleAllVisibleTextbooks}
             onBulkSelectionChange={toggleTextbookSelection}
-            emptyLabel={textbookEmptyLabel}
-            emptyActionLabel={hasTextbookListFilter ? "필터 초기화" : "신규 등록"}
-            onEmptyAction={hasTextbookListFilter ? resetTextbookListFilters : openNewMasterDialog}
+            emptyLabel={numbered.master.loading ? "교재 재고 불러오는 중…" : numbered.master.error ? "교재 재고를 불러오지 못했습니다." : textbookEmptyLabel}
+            emptyActionLabel={numbered.master.loading || numbered.master.error ? undefined : hasTextbookListFilter ? "필터 초기화" : "신규 등록"}
+            onEmptyAction={numbered.master.error ? undefined : hasTextbookListFilter ? resetTextbookListFilters : openNewMasterDialog}
           />
+          <div className={cn(DATA_TABLE_PAGER_CLASS_NAME, "[&>div]:w-full")}>
           <DataTablePagination
+            stableDesktopLayout
             page={numbered.master.page}
             pageSize={numbered.master.pageSize}
             totalCount={numbered.master.totalCount}
             loading={numbered.master.loading}
             onPageChange={(page) => { void numbered.master.goToPage(page); }}
             onPageSizeChange={numbered.master.setPageSizePreference}
-            ariaLabel="교재 목록 페이지 탐색"
+            ariaLabel="교재 재고 페이지 탐색"
           />
+          </div>
         </TabsContent>
 
-        <TabsContent value="requests" className="mt-4 grid min-w-0 content-start gap-4">
+        <TabsContent value="requests" className="m-0 grid min-w-0 content-start gap-4">
+          <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <PurchaseProcessTable
+            readFeedback={listReadFeedback}
+            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} shortcut="/" />}
             mode="request"
             preparedRows={numbered.requests.rows}
             summary={numbered.requests.summary.value}
             acceptedFilters={numbered.requests.acceptedFilters}
+            loading={numbered.requests.loading}
+            readError={Boolean(numbered.requests.error)}
             canManageRequestLines={canManageTextbookOperations}
             orders={requestRendererData.orders}
             lines={requestRendererData.lines}
@@ -5778,17 +4941,25 @@ function TextbookOperationsWorkspaceContent() {
             onDeleteLine={deletePurchaseLine}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
-          <DataTablePagination page={numbered.requests.page} pageSize={numbered.requests.pageSize} totalCount={numbered.requests.totalCount} loading={numbered.requests.loading}
+          <div className={cn(DATA_TABLE_PAGER_CLASS_NAME, "[&>div]:w-full")}>
+          <DataTablePagination stableDesktopLayout page={numbered.requests.page} pageSize={numbered.requests.pageSize} totalCount={numbered.requests.totalCount} loading={numbered.requests.loading}
             onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.requests.goToPage(page); }}
             onPageSizeChange={numbered.requests.setPageSizePreference} ariaLabel="교재 요청 페이지 탐색" />
+          </div>
+          </div>
         </TabsContent>
 
-        <TabsContent value="purchase" className="mt-4 grid min-w-0 content-start gap-4">
+        <TabsContent value="purchase" className="m-0 grid min-w-0 content-start gap-4">
+          <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <PurchaseProcessTable
+            readFeedback={listReadFeedback}
+            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} shortcut="/" />}
             mode="order"
             preparedRows={numbered.purchase.rows}
             summary={numbered.purchase.summary.value}
             acceptedFilters={numbered.purchase.acceptedFilters}
+            loading={numbered.purchase.loading}
+            readError={Boolean(numbered.purchase.error)}
             orders={purchaseRendererData.orders}
             lines={purchaseRendererData.lines}
             textbooks={purchaseRendererData.textbooks}
@@ -5821,24 +4992,23 @@ function TextbookOperationsWorkspaceContent() {
             onReturnLine={returnPurchaseLine}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
-          <DataTablePagination page={numbered.purchase.page} pageSize={numbered.purchase.pageSize} totalCount={numbered.purchase.totalCount} loading={numbered.purchase.loading}
+          <div className={cn(DATA_TABLE_PAGER_CLASS_NAME, "[&>div]:w-full")}>
+          <DataTablePagination stableDesktopLayout page={numbered.purchase.page} pageSize={numbered.purchase.pageSize} totalCount={numbered.purchase.totalCount} loading={numbered.purchase.loading}
             onPageChange={(page) => { setSelectedPurchaseLineIds([]); void numbered.purchase.goToPage(page); }}
             onPageSizeChange={numbered.purchase.setPageSizePreference} ariaLabel="주문 입고 페이지 탐색" />
+          </div>
+          </div>
         </TabsContent>
 
-        <TabsContent value="sales" className="mt-4 grid min-w-0 content-start gap-4">
-          <SalesHistoryLedger
-            rows={numbered.saleHistory.rows}
-            summary={numbered.saleHistory.summary.value}
-            filters={saleHistoryFilters}
-            onFiltersChange={setSaleHistoryFilters}
-          />
-          <DataTablePagination page={numbered.saleHistory.page} pageSize={numbered.saleHistory.pageSize} totalCount={numbered.saleHistory.totalCount} loading={numbered.saleHistory.loading}
-            onPageChange={(page) => { void numbered.saleHistory.goToPage(page); }}
-            onPageSizeChange={numbered.saleHistory.setPageSizePreference} ariaLabel="출고 이력 페이지 탐색" />
+        <TabsContent value="sales" className="m-0 grid min-w-0 content-start gap-4">
+          <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <SalesProcessTable
+            readFeedback={listReadFeedback}
+            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} shortcut="/" />}
             summary={numbered.sales.summary.value}
             acceptedFilters={numbered.sales.acceptedFilters}
+            loading={numbered.sales.loading}
+            readError={Boolean(numbered.sales.error)}
             sales={saleRendererData.sales}
             lines={saleRendererData.lines}
             textbooks={saleRendererData.textbooks}
@@ -5865,18 +5035,63 @@ function TextbookOperationsWorkspaceContent() {
             onInspectSale={(line) => navigateToTextbookDetail("sale", getRecordId(line))}
             onClearSearch={() => updateOperationSearchQuery("")}
           />
-          <DataTablePagination page={numbered.sales.page} pageSize={numbered.sales.pageSize} totalCount={numbered.sales.totalCount} loading={numbered.sales.loading}
+          <div className={cn(DATA_TABLE_PAGER_CLASS_NAME, "[&>div]:w-full")}>
+          <DataTablePagination stableDesktopLayout page={numbered.sales.page} pageSize={numbered.sales.pageSize} totalCount={numbered.sales.totalCount} loading={numbered.sales.loading}
             onPageChange={(page) => { setSelectedSaleLineIds([]); void numbered.sales.goToPage(page); }}
             onPageSizeChange={numbered.sales.setPageSizePreference} ariaLabel="교재 출고 페이지 탐색" />
+          </div>
+          </div>
+          {numbered.saleHistory.summary.value?.sourceTotalCount !== 0 || numbered.saleHistory.error || numbered.saleHistory.summary.error ? <>
+          <SalesHistoryLedger
+            loading={numbered.saleHistory.loading}
+            readError={Boolean(numbered.saleHistory.error || numbered.saleHistory.summary.error)}
+            readFeedback={numbered.saleHistory.error || numbered.saleHistory.summary.error ? <DataTableReadFeedback label="출고 이력 조회 실패"
+              message={getTextbookActionErrorMessage(numbered.saleHistory.error || numbered.saleHistory.summary.error)} retryLabel="출고 이력 다시 시도"
+              onRetry={() => Promise.all([numbered.saleHistory.retry(), numbered.saleHistory.summary.retry()])} /> : null}
+            rows={numbered.saleHistory.rows}
+            summary={numbered.saleHistory.summary.value}
+            filters={saleHistoryFilters}
+            onFiltersChange={setSaleHistoryFilters}
+          />
+          <DataTablePagination page={numbered.saleHistory.page} pageSize={numbered.saleHistory.pageSize} totalCount={numbered.saleHistory.totalCount} loading={numbered.saleHistory.loading}
+            onPageChange={(page) => { void numbered.saleHistory.goToPage(page); }}
+            onPageSizeChange={numbered.saleHistory.setPageSizePreference} ariaLabel="출고 이력 페이지 탐색" />
+          </> : null}
+
         </TabsContent>
 
-        <TabsContent value="inventory" className="mt-4 grid min-w-0 content-start gap-4">
+        <TabsContent value="inventory" className="m-0 grid min-w-0 content-start gap-4">
+          <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <InventoryCountWorkspace
+            readFeedback={listReadFeedback}
+            searchControl={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
+              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" shortcut="/" />}
+            classificationControls={(locationControl) => <TextbookListControls extraFilters={locationControl}
+            subjectFilter={subjectGroupFilter}
+            onSubjectFilterChange={(value) => {
+              changeSubjectGroupFilter(value);
+            }}
+            schoolLevelFilter={schoolLevelGroupFilter}
+            onSchoolLevelFilterChange={(value) => {
+              changeSchoolLevelGroupFilter(value);
+            }}
+            gradeLevelFilter={gradeLevelGroupFilter}
+            onGradeLevelFilterChange={changeGradeLevelGroupFilter}
+            gradeLevelOptions={gradeLevelGroupOptions}
+            categoryFilter={categoryGroupFilter}
+            onCategoryFilterChange={changeCategoryGroupFilter}
+            categoryOptions={categoryGroupOptions}
+          >
+            <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="교재 필터 초기화" title="필터 초기화" disabled={!hasTextbookListFilter} onClick={resetTextbookListFilters}>
+              <RefreshCw className="size-4" aria-hidden="true" />
+            </Button>
+          </TextbookListControls>}
             rows={numbered.inventory.rows}
+            loading={numbered.inventory.loading || (!inventoryLocationReference.ready && !inventoryLocationReference.error)}
+            readError={Boolean(numbered.inventory.error || inventoryLocationReference.error)}
             summary={numbered.inventory.summary.value}
             locations={numbered.inventory.summary.value?.locations || inventoryLocationReference.locations}
             locationId={selectedInventoryCountLocationId}
-            auditFilter={inventoryAuditFilter}
             countDrafts={inventoryCountDrafts}
             memoDrafts={inventoryCountMemoDrafts}
             selectedIds={selectedTextbookIds}
@@ -5885,7 +5100,6 @@ function TextbookOperationsWorkspaceContent() {
             collapsedGroups={collapsedTextbookGroups}
             onToggleGroup={toggleTextbookGroup}
             onLocationChange={selectInventoryCountLocation}
-            onFilterChange={setInventoryAuditFilter}
             onDraftChange={setInventoryCountDraft}
             onMemoChange={setInventoryCountMemoDraft}
             onClearDraft={clearInventoryCountDraft}
@@ -5895,6 +5109,7 @@ function TextbookOperationsWorkspaceContent() {
             onSubmitBulkCount={submitBulkInlineStockCounts}
             emptyLabel={textbookEmptyLabel}
           />
+          <div className={cn(DATA_TABLE_PAGER_CLASS_NAME, "[&>div]:w-full")}>
           <DataTablePagination
             page={numbered.inventory.page}
             pageSize={numbered.inventory.pageSize}
@@ -5904,14 +5119,22 @@ function TextbookOperationsWorkspaceContent() {
             onPageSizeChange={numbered.inventory.setPageSizePreference}
             ariaLabel="재고 실사 페이지 탐색"
           />
+          </div>
+          </div>
+          <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <InventoryHistoryPanel
+            readFeedback={numbered.inventoryHistory.error ? <DataTableReadFeedback label="재고 이력 조회 실패"
+              message={getTextbookActionErrorMessage(numbered.inventoryHistory.error)} retryLabel="재고 이력 다시 시도" onRetry={numbered.inventoryHistory.retry} /> : null}
             rows={numbered.inventoryHistory.rows}
+            loading={numbered.inventoryHistory.loading || (!inventoryLocationReference.ready && !inventoryLocationReference.error)}
+            readError={Boolean(numbered.inventoryHistory.error || inventoryLocationReference.error)}
             currentUserId={currentUserId}
             currentUserLabel={currentUserLabel}
             canDeleteHistory={canDeleteTextbookHistory}
             saving={saving}
             onDeleteHistory={deleteInventoryHistory}
           />
+          <div className={cn(DATA_TABLE_PAGER_CLASS_NAME, "[&>div]:w-full")}>
           <DataTablePagination
             page={numbered.inventoryHistory.page}
             pageSize={numbered.inventoryHistory.pageSize}
@@ -5921,42 +5144,32 @@ function TextbookOperationsWorkspaceContent() {
             onPageSizeChange={numbered.inventoryHistory.setPageSizePreference}
             ariaLabel="재고 이력 페이지 탐색"
           />
+          </div>
+          </div>
         </TabsContent>
 
-            <TabsContent value="closing" className="mt-4 grid min-w-0 content-start gap-4">
-              <div className="flex flex-wrap items-center justify-between gap-2">
-                <div className="flex flex-wrap gap-2">
-                  <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-                    마감 {formatQuantity(numbered.closing.totalCount ?? 0)}건
-                  </Badge>
-                </div>
-                <Button type="button" onClick={openClosingDialog} aria-label="월마감 추가" title="월마감 추가">
-                  <ClipboardCheck className="mr-2 size-4" />
-                  월마감 추가
-                </Button>
-              </div>
-              <MonthlyClosingTable
-                rows={numbered.closing.rows}
-                selectedIds={selectedClosingIds}
-                saving={saving}
-                onToggleRow={toggleClosingSelection}
-                onToggleVisibleRows={toggleVisibleClosingSelection}
-                onBulkLock={lockSelectedClosings}
-                onInspectRow={(row) => {
-                  setSelectedClosingDetailId(getRecordId(row));
-                  setSelectedClosingScope(null);
-                  setClosingMovementSearch("");
-                }}
-              />
-              <DataTablePagination page={numbered.closing.page} pageSize={numbered.closing.pageSize} totalCount={numbered.closing.totalCount} loading={numbered.closing.loading}
-                onPageChange={(page) => { setSelectedClosingIds([]); void numbered.closing.goToPage(page); }}
-                onPageSizeChange={numbered.closing.setPageSizePreference} ariaLabel="월마감 페이지 탐색" />
-            </TabsContent>
-          </>
-        )}
+        </div>
       </Tabs>
     </div>
   );
+}
+
+function TextbookDetailState({ loading, error, onRetry, emptyLabel, children }: {
+  loading: boolean; error: unknown; onRetry: () => unknown; emptyLabel: string; children?: React.ReactNode;
+}) {
+  if (loading) return <p role="status" className="text-sm text-muted-foreground">상세 정보를 불러오는 중입니다.</p>;
+  if (error) return <Alert role="alert"><AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+    <span className="min-w-0 break-words">{getTextbookActionErrorMessage(error)}</span>
+    <Button type="button" variant="outline" size="sm" onClick={() => { void onRetry(); }}>다시 시도</Button>
+  </AlertDescription></Alert>;
+  return children || <p className="text-sm text-muted-foreground">{emptyLabel}</p>;
+}
+
+function TextbookDetailField({ label, value, wide = false }: { label: string; value: string; wide?: boolean }) {
+  return <div className={cn("min-w-0 space-y-1.5", wide && "col-span-2")}>
+    <dt className="text-xs text-muted-foreground">{label}</dt>
+    <dd className="whitespace-pre-wrap break-words font-medium">{value}</dd>
+  </div>;
 }
 
 function Field({ label, children, required = false }: { label: string; children: React.ReactNode; required?: boolean }) {
@@ -5996,65 +5209,6 @@ function TabCountBadge({ value }: { value: number }) {
   );
 }
 
-type TextbookOperationsStatusItem = {
-  id: string;
-  label: string;
-  value: string;
-  hidden?: boolean;
-  tone?: "default" | "danger";
-};
-
-function TextbookOperationsStatusBar({
-  items,
-  loading,
-  onRefresh,
-}: {
-  items: TextbookOperationsStatusItem[];
-  loading: boolean;
-  onRefresh: () => void;
-}) {
-  return (
-    <div className="mt-2 flex min-w-0 flex-wrap items-center gap-2 text-xs text-muted-foreground" role="status" aria-live="polite" aria-label="교재관리 현재 상태">
-      {items.map((item) => (
-        <Badge
-          key={item.id}
-          variant={item.tone === "danger" ? "destructive" : "outline"}
-          className="h-7 max-w-full rounded-md px-2 font-normal"
-        >
-          <span className="shrink-0 text-muted-foreground">{item.label}</span>
-          <span className="ml-1 max-w-[12rem] truncate font-semibold text-foreground tabular-nums">{item.value}</span>
-        </Badge>
-      ))}
-      <Button
-        type="button"
-        variant="ghost"
-        size="sm"
-        className="ml-auto h-7 rounded-md px-2"
-        onClick={onRefresh}
-        disabled={loading}
-        aria-label="교재관리 새로고침"
-        title="새로고침"
-      >
-        <RefreshCw className={cn("mr-1 size-3.5", loading && "animate-spin")} />
-        새로고침
-      </Button>
-    </div>
-  );
-}
-
-function TextbookLoadingState() {
-  return (
-    <div className="mt-3 grid gap-2 rounded-lg border bg-muted/10 p-3" role="status" aria-live="polite" aria-label="교재관리 로딩">
-      <span className="sr-only">교재관리 로딩 중</span>
-      <div className="h-8 w-48 animate-pulse rounded-md bg-muted" />
-      <div className="grid gap-2 md:grid-cols-3">
-        <div className="h-16 animate-pulse rounded-md bg-muted" />
-        <div className="h-16 animate-pulse rounded-md bg-muted" />
-        <div className="h-16 animate-pulse rounded-md bg-muted" />
-      </div>
-    </div>
-  );
-}
 
 const PURCHASE_ORDER_STANDARD_LOCATIONS = ["본관", "별관"];
 
@@ -6098,6 +5252,7 @@ function TextbookHandoffDialog({
   format = "default",
   loadState = "",
   sourceLineCount = 0,
+  onRetry,
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
@@ -6109,7 +5264,11 @@ function TextbookHandoffDialog({
   format?: "default" | "purchase-order" | "purchase-return";
   loadState?: string;
   sourceLineCount?: number;
+  onRetry?: () => void;
 }) {
+  const [busy, setBusy] = useState(false);
+  const exportAbortRef = useRef<AbortController | null>(null);
+  const copyEpochRef = useRef(0);
   const [status, setStatus] = useState("");
   const [manualCopyText, setManualCopyText] = useState("");
   const [preparedDownload, setPreparedDownload] = useState<PreparedHandoffDownload | null>(null);
@@ -6132,20 +5291,39 @@ function TextbookHandoffDialog({
     });
   }, [manualCopyText]);
 
-  useEffect(() => () => {
-    if (preparedDownloadRef.current) {
-      URL.revokeObjectURL(preparedDownloadRef.current.url);
-    }
-  }, []);
+  function resetFeedback() {
+    copyEpochRef.current += 1;
+    exportAbortRef.current?.abort();
+    exportAbortRef.current = null;
+    if (preparedDownloadRef.current) URL.revokeObjectURL(preparedDownloadRef.current.url);
+    preparedDownloadRef.current = null;
+    setPreparedDownload(null);
+    setBusy(false);
+    setStatus("");
+    setManualCopyText("");
+  }
+
+  useEffect(() => {
+    resetFeedback();
+    return () => {
+      copyEpochRef.current += 1;
+      exportAbortRef.current?.abort();
+      if (preparedDownloadRef.current) URL.revokeObjectURL(preparedDownloadRef.current.url);
+      preparedDownloadRef.current = null;
+    };
+  }, [open, groups]);
 
   async function runCopyAction(value: string, successStatus: string) {
+    const epoch = copyEpochRef.current;
     try {
       await writeClipboardText(value);
+      if (copyEpochRef.current !== epoch) return;
       setManualCopyText("");
       setStatus(successStatus);
     } catch {
+      if (copyEpochRef.current !== epoch) return;
       setManualCopyText(value);
-      setStatus("복사 권한 없음 · 주문 메시지 선택됨");
+      setStatus("자동 복사가 제한되어 메시지를 선택했습니다.");
     }
   }
 
@@ -6157,199 +5335,111 @@ function TextbookHandoffDialog({
     setPreparedDownload(download);
   }
 
-  async function runDownloadAction(action: () => Promise<PreparedHandoffDownload>, successStatus: string) {
+  async function runDownloadAction(action: (signal: AbortSignal) => Promise<PreparedHandoffDownload>, successStatus: string) {
+    if (exportAbortRef.current) return;
+    const abort = new AbortController();
+    exportAbortRef.current = abort;
+    setBusy(true);
+    setStatus("파일을 준비하고 있습니다.");
     try {
-      const download = await action();
+      const download = await action(abort.signal);
+      if (abort.signal.aborted) { URL.revokeObjectURL(download.url); return; }
       setNextPreparedDownload(download);
       setStatus(successStatus);
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : "처리 중 오류가 발생했습니다.");
+    } catch {
+      if (!abort.signal.aborted) setStatus("파일을 만들지 못했습니다. 저장 메뉴에서 다시 시도하세요.");
+    } finally {
+      if (exportAbortRef.current === abort) {
+        exportAbortRef.current = null;
+        setBusy(false);
+      }
     }
   }
 
+  function closeDialog() {
+    resetFeedback();
+    onOpenChange(false);
+  }
+
   return (
-    <Dialog open={open} onOpenChange={(nextOpen) => {
-      onOpenChange(nextOpen);
-      if (!nextOpen) {
-        setStatus("");
-        setManualCopyText("");
-        if (preparedDownloadRef.current) {
-          URL.revokeObjectURL(preparedDownloadRef.current.url);
-          preparedDownloadRef.current = null;
-        }
-        setPreparedDownload(null);
-      }
-    }}>
-      <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-hidden sm:max-w-5xl xl:max-w-6xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="sr-only">{description}</DialogDescription>
-        </DialogHeader>
-
-        <div className="grid min-h-0 gap-3">
-          {loadState ? <Alert role="status"><AlertDescription>{loadState}</AlertDescription></Alert> : null}
-          <div className="flex flex-wrap items-center justify-between gap-2 border-b pb-3">
-            <div className="flex flex-wrap gap-2">
-              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-                {formatQuantity(sourceLineCount)}건
-              </Badge>
-              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-                {formatQuantity(groups.length)}묶음
-              </Badge>
-              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-                {formatQuantity(totalQuantity)}권
-              </Badge>
-              {status ? (
-                <Badge variant="secondary" className="h-8 rounded-md px-2">
-                  {status}
-                </Badge>
-              ) : null}
-            </div>
-            <div className="flex flex-wrap justify-end gap-2" data-handoff-toolbar>
+    <Dialog open={open} onOpenChange={(nextOpen) => nextOpen ? onOpenChange(true) : closeDialog()}>
+      <DocumentDialogContent
+        title={title}
+        description={description}
+        onClose={closeDialog}
+        toolbar={(
+          <div className="flex flex-wrap items-center justify-between gap-3" data-handoff-toolbar>
+            <p className="text-sm text-muted-foreground tabular-nums">
+              {formatQuantity(sourceLineCount)}건 · {formatQuantity(groups.length)}묶음 · {formatQuantity(totalQuantity)}권
+            </p>
+            <div className="flex items-center gap-2">
               {allowsTextCopy ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  disabled={groups.length === 0}
-                  onClick={() => runCopyAction(allText, "전체 복사됨")}
-                >
-                  <Copy className="mr-2 size-3.5" />
-                  전체 복사
+                <Button type="button" size="sm" variant="outline" disabled={groups.length === 0 || busy} onClick={() => runCopyAction(allText, "전체 복사됨")}>
+                  <Copy />전체 복사
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={groups.length === 0}
-                onClick={() => runDownloadAction(
-                  () => downloadHandoffImage(getHandoffCaptureElement(allDomId), title),
-                  "전체 이미지 저장됨",
-                )}
-              >
-                <FileImage className="mr-2 size-3.5" />
-                전체 이미지
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                disabled={groups.length === 0}
-                onClick={() => runDownloadAction(
-                  () => downloadHandoffPdf(getHandoffCaptureElement(allDomId), title),
-                  "PDF 저장됨",
-                )}
-              >
-                <Printer className="mr-2 size-3.5" />
-                전체 PDF
-              </Button>
-            </div>
-          </div>
-
-          {allowsTextCopy && manualCopyText ? (
-            <div className="grid gap-2 rounded-md border border-amber-200 bg-amber-50 p-3">
-              <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-medium text-amber-800">
-                <span>자동 복사 제한 · 주문 메시지</span>
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="h-7 bg-white"
-                  onClick={() => {
-                    manualCopyTextareaRef.current?.focus();
-                    manualCopyTextareaRef.current?.select();
-                  }}
-                >
-                  전체 선택
-                </Button>
-              </div>
-              <Textarea
-                ref={manualCopyTextareaRef}
-                readOnly
-                aria-label="복사할 주문 메시지"
-                className="max-h-40 min-h-24 resize-y bg-white font-mono text-xs"
-                value={manualCopyText}
+              <HandoffExportMenu label="전체 저장" ariaLabel="전체 문서 저장 메뉴" disabled={groups.length === 0 || busy} busy={busy}
+                onImage={() => runDownloadAction((signal) => downloadHandoffImage(getHandoffCaptureElement(allDomId), title, signal), "전체 이미지 저장됨")}
+                onPdf={() => runDownloadAction((signal) => downloadHandoffPdf(getHandoffCaptureElement(allDomId), title, signal), "PDF 저장됨")}
               />
             </div>
-          ) : null}
-
-          {preparedDownload ? (
-            <div className="flex flex-wrap items-center justify-between gap-2 rounded-md border border-sky-200 bg-sky-50 p-3 text-sm">
-              <div className="min-w-0">
-                <div className="font-medium text-sky-900">{preparedDownload.label} 파일 준비됨</div>
-                <div className="truncate text-xs text-sky-700">{preparedDownload.filename}</div>
+          </div>
+        )}
+        feedback={status || (groups.length ? loadState : "")}
+        actions={preparedDownload ? (
+          <Button type="button" asChild>
+            <a href={preparedDownload.url} download={preparedDownload.filename} title={`${preparedDownload.label} 파일 준비됨 · ${preparedDownload.filename}`}>
+              <Save />파일 다시 저장
+            </a>
+          </Button>
+        ) : null}
+      >
+        <div className="grid min-w-0 gap-4">
+          {allowsTextCopy && manualCopyText ? (
+            <div className="grid min-w-0 gap-2 rounded-md border bg-muted/30 p-3">
+              <div className="flex items-center justify-between gap-2">
+                <label htmlFor={`${idPrefix}-manual-copy`} className="text-sm font-medium">복사할 메시지</label>
+                <Button type="button" size="sm" variant="outline" onClick={() => {
+                  manualCopyTextareaRef.current?.focus();
+                  manualCopyTextareaRef.current?.select();
+                }}>전체 선택</Button>
               </div>
-              <Button type="button" size="sm" variant="outline" className="bg-white" asChild>
-                <a href={preparedDownload.url} download={preparedDownload.filename}>
-                  <Save className="mr-1 size-3.5" />
-                  저장
-                </a>
-              </Button>
+              <Textarea ref={manualCopyTextareaRef} id={`${idPrefix}-manual-copy`} readOnly aria-label="복사할 청구 메시지"
+                className="max-h-40 min-h-24 resize-y font-mono text-xs" value={manualCopyText} />
             </div>
           ) : null}
-
           {groups.length === 0 ? (
-            <div className="rounded-md border py-12 text-center text-sm font-medium text-muted-foreground">
-              {emptyLabel}
+            <div className="grid justify-items-center gap-4 py-12 text-center text-sm text-muted-foreground">
+              <p role="status">{loadState || emptyLabel}</p>
+              {onRetry ? <Button type="button" size="sm" variant="outline" onClick={onRetry}><RefreshCw />다시 불러오기</Button> : null}
             </div>
           ) : (
-            <div id={allDomId} data-handoff-scroll className="max-h-[62dvh] min-h-0 overflow-y-auto pr-1">
+            <div id={allDomId} data-handoff-scroll className="min-w-0 overflow-x-auto overscroll-contain">
               <div data-handoff-capture-target data-handoff-print-root className="grid gap-3 bg-white">
                 {groups.map((group) => {
                   const groupDomId = getHandoffDomId(idPrefix, group.id);
                   const filename = `${title}-${group.title}`;
                   const purchaseOrderLocations = isPurchaseDocument ? getPurchaseOrderLocations(group) : [];
                   return (
-                    <section key={group.id} className="grid gap-2 rounded-md border bg-background p-3">
-                      <div className="flex flex-wrap items-center justify-between gap-2" data-handoff-toolbar>
-                        <div className="min-w-0">
-                          <div className="truncate text-sm font-semibold">{group.title}</div>
-                          <div className="truncate text-xs text-muted-foreground">{group.summary.join(" · ")}</div>
+                    <section key={group.id} className="grid min-w-0 gap-2 rounded-md border bg-background p-3">
+                      <div className="flex flex-wrap items-center justify-between gap-3" data-handoff-toolbar>
+                        <div className="min-w-0 flex-1">
+                          <div className="break-words text-sm font-semibold">{group.title}</div>
+                          <div className="break-words text-xs text-muted-foreground">{group.summary.join(" · ")}</div>
                         </div>
-                        <div className="flex shrink-0 flex-wrap gap-1">
+                        <div className="flex shrink-0 gap-2">
                           {allowsTextCopy ? (
-                            <Button
-                              type="button"
-                              size="sm"
-                              variant="outline"
-                              className="h-8"
-                              onClick={() => runCopyAction(group.message, "복사됨")}
-                            >
-                              <Copy className="mr-1 size-3.5" />
-                              복사
-                            </Button>
+                            <Button type="button" size="sm" variant="outline" disabled={busy} aria-label={`${group.title} 메시지 복사`}
+                              onClick={() => runCopyAction(group.message, "복사됨")}><Copy />복사</Button>
                           ) : null}
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            onClick={() => runDownloadAction(
-                              () => downloadHandoffImage(getHandoffCaptureElement(groupDomId), filename),
-                              "이미지 저장됨",
-                            )}
-                          >
-                            <FileImage className="mr-1 size-3.5" />
-                            이미지 저장
-                          </Button>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant="outline"
-                            className="h-8"
-                            onClick={() => runDownloadAction(
-                              () => downloadHandoffPdf(getHandoffCaptureElement(groupDomId), filename),
-                              "PDF 저장됨",
-                            )}
-                          >
-                            <Printer className="mr-1 size-3.5" />
-                            PDF 저장
-                          </Button>
+                          <HandoffExportMenu label="저장" ariaLabel={`${group.title} 문서 저장 메뉴`} disabled={busy}
+                            onImage={() => runDownloadAction((signal) => downloadHandoffImage(getHandoffCaptureElement(groupDomId), filename, signal), "이미지 저장됨")}
+                            onPdf={() => runDownloadAction((signal) => downloadHandoffPdf(getHandoffCaptureElement(groupDomId), filename, signal), "PDF 저장됨")}
+                          />
                         </div>
                       </div>
 
-                      <div id={groupDomId} data-handoff-card data-handoff-capture-target data-handoff-print-root className="rounded-md bg-white p-4 text-slate-950">
+                      <div id={groupDomId} data-handoff-card data-handoff-capture-target data-handoff-print-root className="min-w-0 rounded-md bg-white p-4 text-slate-950">
                         <div className="flex flex-wrap items-start justify-between gap-3 border-b pb-3">
                           <div className="min-w-0">
                             {isPurchaseDocument ? (
@@ -6386,7 +5476,7 @@ function TextbookHandoffDialog({
                             </div>
                           </div>
                         ) : null}
-                        <div className="mt-3 overflow-hidden rounded-md border border-slate-200">
+                        <div role="region" aria-label={`${group.title} 문서 표`} tabIndex={0} className="mt-3 overflow-x-auto rounded-md border border-slate-200 outline-none focus-visible:ring-2 focus-visible:ring-ring [&>[data-slot=table-container]]:overflow-visible">
                           <Table>
                             {isPurchaseDocument ? (
                               <>
@@ -6503,8 +5593,27 @@ function TextbookHandoffDialog({
             </div>
           )}
         </div>
-      </DialogContent>
+      </DocumentDialogContent>
     </Dialog>
+  );
+}
+
+function HandoffExportMenu({ label, ariaLabel, disabled, busy = false, onImage, onPdf }: {
+  label: string; ariaLabel: string; disabled: boolean; busy?: boolean; onImage: () => void; onPdf: () => void;
+}) {
+  return (
+    <DropdownMenu modal={false}>
+      <DropdownMenuTrigger asChild>
+        <Button type="button" size="sm" variant="outline" disabled={disabled} aria-label={ariaLabel}>
+          {busy ? <Loader2 className="animate-spin motion-reduce:animate-none" /> : <Save />}
+          {label}<ChevronDown />
+        </Button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end">
+        <DropdownMenuItem onSelect={onImage}><FileImage />이미지 저장</DropdownMenuItem>
+        <DropdownMenuItem onSelect={onPdf}><Printer />PDF 저장</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -6517,6 +5626,7 @@ function SearchCombobox({
   emptyLabel,
   ariaLabel,
   triggerLabel,
+  triggerId,
   triggerClassName,
   contentClassName,
   allowDeselect = false,
@@ -6533,6 +5643,7 @@ function SearchCombobox({
   emptyLabel: string;
   ariaLabel: string;
   triggerLabel?: string;
+  triggerId?: string;
   triggerClassName?: string;
   contentClassName?: string;
   allowDeselect?: boolean;
@@ -6564,6 +5675,7 @@ function SearchCombobox({
           type="button"
           variant="outline"
           role="combobox"
+          id={triggerId}
           aria-expanded={open}
           aria-label={ariaLabel}
           className={cn("w-full justify-between gap-2 px-3 font-normal", triggerClassName)}
@@ -6883,6 +5995,8 @@ function TextbookListControls({
   categoryFilter,
   onCategoryFilterChange,
   categoryOptions,
+  children,
+  extraFilters,
 }: {
   subjectFilter: string;
   onSubjectFilterChange: (value: string) => void;
@@ -6894,6 +6008,8 @@ function TextbookListControls({
   categoryFilter: string;
   onCategoryFilterChange: (value: string) => void;
   categoryOptions: string[];
+  children?: React.ReactNode;
+  extraFilters?: React.ReactNode;
 }) {
   const subjectSelectOptions = [
     { value: "all", label: "전체 과목" },
@@ -6913,68 +6029,62 @@ function TextbookListControls({
   ];
 
   return (
-    <div className="mt-2 grid min-w-0 grid-cols-2 gap-2 lg:grid-cols-4" aria-label="교재 마스터 필터">
-      <div className="min-w-0">
-        <SearchCombobox
-          options={subjectSelectOptions}
-          value={subjectFilter}
-          onValueChange={onSubjectFilterChange}
-          placeholder="전체 과목"
-          searchPlaceholder="과목 검색"
-          emptyLabel="과목이 없습니다"
-          ariaLabel="교재 과목 필터"
-          triggerLabel="과목"
-          triggerClassName="h-8 rounded-md"
-          contentClassName="w-[min(18rem,calc(100vw-2rem))]"
-        />
+    <div className="flex min-w-0 items-end gap-1 lg:items-center">
+    <DataTableFilters aria-label="교재 분류 필터" className="min-w-0 flex-1 sm:grid sm:grid-cols-2 lg:flex lg:flex-nowrap">
+      <DataTableSelectFilter inline id="textbook-subject-filter" label="과목" ariaLabel="교재 과목 필터"
+        value={subjectFilter} options={subjectSelectOptions} onValueChange={onSubjectFilterChange} />
+      <div className="grid min-w-0 gap-1.5 lg:flex lg:flex-1 lg:items-center lg:gap-2">
+        <Label htmlFor="textbook-category-filter" className="shrink-0 text-xs text-muted-foreground">세부과목</Label>
+        <SearchCombobox options={categorySelectOptions} value={categoryFilter} onValueChange={onCategoryFilterChange}
+          placeholder="전체 세부과목" searchPlaceholder="세부과목 검색" emptyLabel="세부과목이 없습니다"
+          ariaLabel="교재 세부과목 필터" triggerId="textbook-category-filter"
+          triggerClassName="h-11 min-w-0 flex-1 rounded-md sm:h-9" contentClassName="w-[min(22rem,calc(100vw-2rem))]" />
       </div>
-      <div className="min-w-0">
-        <SearchCombobox
-          options={categorySelectOptions}
-          value={categoryFilter}
-          onValueChange={onCategoryFilterChange}
-          placeholder="전체 세부과목"
-          searchPlaceholder="세부과목 검색"
-          emptyLabel="세부과목이 없습니다"
-          ariaLabel="교재 세부과목 필터"
-          triggerLabel="세부과목"
-          triggerClassName="h-8 rounded-md"
-          contentClassName="w-[min(22rem,calc(100vw-2rem))]"
-        />
-      </div>
-      <div className="min-w-0">
-        <SearchCombobox
-          options={schoolLevelSelectOptions}
-          value={schoolLevelFilter}
-          onValueChange={onSchoolLevelFilterChange}
-          placeholder="전체 학교 구분"
-          searchPlaceholder="학교 구분 검색"
-          emptyLabel="학교 구분이 없습니다"
-          ariaLabel="교재 학교 구분 필터"
-          triggerLabel="학교"
-          triggerClassName="h-8 rounded-md"
-          contentClassName="w-[min(18rem,calc(100vw-2rem))]"
-        />
-      </div>
-      <div className="min-w-0">
-        <SearchCombobox
-          options={gradeLevelSelectOptions}
-          value={gradeLevelFilter}
-          onValueChange={onGradeLevelFilterChange}
-          placeholder="전체 학년"
-          searchPlaceholder="학년 검색"
-          emptyLabel="학년이 없습니다"
-          ariaLabel="교재 학년 필터"
-          triggerLabel="학년"
-          triggerClassName="h-8 rounded-md"
-          contentClassName="w-[min(18rem,calc(100vw-2rem))]"
-        />
-      </div>
+      <DataTableSelectFilter inline id="textbook-school-level-filter" label="학교" ariaLabel="교재 학교 구분 필터"
+        value={schoolLevelFilter} options={schoolLevelSelectOptions} onValueChange={onSchoolLevelFilterChange} />
+      <DataTableSelectFilter inline id="textbook-grade-level-filter" label="학년" ariaLabel="교재 학년 필터"
+        value={gradeLevelFilter} options={gradeLevelSelectOptions} onValueChange={onGradeLevelFilterChange} />
+      {extraFilters}
+    </DataTableFilters>
+    {children}
     </div>
   );
 }
 
-function TextbookBulkActionBar({
+function TextbookSelectionActions({ selectedCount, saving, metadataReady, controlsOpen, onToggleControls, onSetStatus, onDelete, onClear }: {
+  selectedCount: number;
+  saving: string;
+  metadataReady: boolean;
+  controlsOpen: boolean;
+  onToggleControls: () => void;
+  onSetStatus: (status: string) => void;
+  onDelete: () => void;
+  onClear: () => void;
+}) {
+  return (
+    <div role="region" aria-label="선택한 교재 일괄 작업" className="flex min-w-0 flex-1 items-center justify-end gap-1">
+      <span className="mr-auto whitespace-nowrap text-sm font-medium tabular-nums" role="status">{formatQuantity(selectedCount)}개 선택</span>
+      <Button type="button" size="sm" variant={controlsOpen ? "secondary" : "outline"} className="h-11 shrink-0 sm:h-9"
+        aria-expanded={controlsOpen} aria-haspopup="dialog" disabled={!metadataReady} onClick={onToggleControls}>속성 변경</Button>
+      <DataTableRowActions label="선택 교재 작업">
+        <DropdownMenuItem disabled={saving === "textbook-bulk-status"} aria-label="선택 교재 사용 전환" onSelect={() => onSetStatus("active")}><Check />사용 전환</DropdownMenuItem>
+        <DropdownMenuItem disabled={saving === "textbook-bulk-status"} aria-label="선택 교재 미사용 처리" onSelect={() => onSetStatus("inactive")}><X />미사용 처리</DropdownMenuItem>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" disabled={saving === "textbook-bulk-delete"} aria-label="선택 교재 삭제"
+          title="이력이 없는 교재는 삭제, 이력이 있는 교재는 미사용 전환" onSelect={onDelete}><Trash2 />삭제</DropdownMenuItem>
+      </DataTableRowActions>
+      <Button type="button" size="icon" variant="ghost" className="size-11 shrink-0 sm:size-9" aria-label="선택 교재 선택 해제" title="선택 해제" onClick={onClear}><X className="size-4" /></Button>
+    </div>
+  );
+}
+
+function TextbookBulkEditDialog({
+  controlsOpen,
+  onClose,
+  returnFocusRef,
+  error,
+  metadataError,
+  onRetryMetadata,
   selectedCount,
   patch,
   categoryOptions,
@@ -6987,10 +6097,13 @@ function TextbookBulkActionBar({
   onSchoolLevelChange,
   onGradeLevelChange,
   onApply,
-  onSetStatus,
-  onDelete,
-  onClear,
 }: {
+  controlsOpen: boolean;
+  onClose: () => void;
+  returnFocusRef: React.RefObject<HTMLElement | null>;
+  error: string;
+  metadataError: string;
+  onRetryMetadata: () => void;
   selectedCount: number;
   patch: typeof emptyBulkTextbookPatch;
   categoryOptions: string[];
@@ -7003,13 +6116,8 @@ function TextbookBulkActionBar({
   onSchoolLevelChange: (value: TextbookSchoolLevel, checked: boolean) => void;
   onGradeLevelChange: (value: TextbookGradeLevel, checked: boolean) => void;
   onApply: () => void;
-  onSetStatus: (status: string) => void;
-  onDelete: () => void;
-  onClear: () => void;
 }) {
-  const [bulkPatchControlsOpen, setBulkPatchControlsOpen] = useState(false);
-
-  if (selectedCount === 0) {
+  if (selectedCount === 0 || !controlsOpen) {
     return null;
   }
 
@@ -7022,8 +6130,6 @@ function TextbookBulkActionBar({
     Boolean(text(patch.publisher)) ||
     Boolean(text(patch.price)) ||
     patch.status !== "keep";
-  const showPatchControls = bulkPatchControlsOpen || hasPatch;
-  const patchControlsId = "textbook-bulk-patch-controls";
   const taxonomyEnabled = patch.schoolLevels !== null && patch.gradeLevels !== null;
   const taxonomyValid = (!taxonomyEnabled || Boolean(patch.schoolLevels?.length && patch.gradeLevels?.length))
     && (patch.subject !== "science" || Boolean(patch.subjectAreaKey));
@@ -7032,70 +6138,30 @@ function TextbookBulkActionBar({
     : [];
 
   return (
-    <div
-      className="sticky bottom-3 z-20 grid gap-2 rounded-lg border bg-background/95 p-2 shadow-lg backdrop-blur"
-      role="region"
-      aria-label="선택한 교재 일괄 작업"
-      aria-live="polite"
-    >
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <div className="flex h-9 items-center gap-2 text-sm font-medium">
-          <Badge variant="secondary" className="tabular-nums" title="현재 목록에서 선택한 교재 수">{formatQuantity(selectedCount)}개 선택</Badge>
-          {hasPatch ? <Badge variant="outline" className="tabular-nums">변경 준비</Badge> : null}
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          <Button
-            type="button"
-            size="sm"
-            variant={showPatchControls ? "default" : "outline"}
-            className="h-9"
-            aria-expanded={showPatchControls}
-            aria-controls={patchControlsId}
-            disabled={!metadataReady}
-            onClick={() => setBulkPatchControlsOpen((current) => !current)}
-          >
-            <Pencil className="mr-2 size-4" />
-            속성 변경
-          </Button>
-          <Button type="button" size="sm" variant="outline" className="h-9" disabled={saving === "textbook-bulk-status"} aria-label="선택 교재 사용 전환" onClick={() => onSetStatus("active")}>
-            <Check className="mr-2 size-4" />
-            사용 전환
-          </Button>
-          <Button type="button" size="sm" variant="outline" className="h-9" disabled={saving === "textbook-bulk-status"} aria-label="선택 교재 미사용 처리" onClick={() => onSetStatus("inactive")}>
-            <X className="mr-2 size-4" />
-            미사용 처리
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="destructive"
-            className="h-9"
-            disabled={saving === "textbook-bulk-delete"}
-            aria-label="선택 교재 삭제"
-            title="이력이 없는 교재는 삭제, 이력이 있는 교재는 미사용 전환"
-            onClick={onDelete}
-          >
-            <Trash2 className="mr-2 size-4" />
-            삭제
-          </Button>
-          <Button
-            type="button"
-            size="sm"
-            variant="ghost"
-            className="h-9"
-            aria-label="선택 교재 선택 해제"
-            title="선택 해제"
-            onClick={onClear}
-          >
-            선택 해제
-          </Button>
-        </div>
-      </div>
-      {showPatchControls ? (
-        <div id={patchControlsId} className="grid min-w-0 gap-2 border-t pt-2 sm:grid-cols-2 lg:grid-cols-4">
+    <Dialog open={controlsOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
+      <FormDialogContent
+        title="선택 교재 속성 변경"
+        description="선택한 교재에 입력한 속성만 적용합니다. 유지한 항목은 바뀌지 않습니다."
+        returnFocusRef={returnFocusRef}
+        onSubmit={(event) => { event.preventDefault(); onApply(); }}
+        onCancel={onClose}
+        cancelLabel="선택 교재 속성 변경 취소"
+        submitLabel="변경 저장"
+        submitAriaLabel="선택 교재 변경 저장"
+        submitDisabled={!metadataReady || !hasPatch || !taxonomyValid}
+        busy={saving === "textbook-bulk-edit"}
+        error={error}
+        hint={!metadataReady ? "교재 분류를 불러온 뒤 변경할 수 있습니다." : !hasPatch ? "변경할 항목을 입력하세요." : patch.subject === "science" && !patch.subjectAreaKey ? "과학 영역을 선택하세요." : !taxonomyValid ? "학교 구분과 학년을 하나 이상 선택하세요." : `${formatQuantity(selectedCount)}개 교재에 입력한 변경사항을 적용합니다.`}
+      >
+        <p className="text-sm font-medium tabular-nums">{formatQuantity(selectedCount)}개 교재 선택</p>
+        {metadataError ? <Alert variant="destructive"><AlertDescription className="flex min-w-0 items-center justify-between gap-3">
+          <span className="min-w-0 break-words">{metadataError}</span>
+          <Button type="button" variant="outline" size="sm" className="shrink-0" onClick={onRetryMetadata}>다시 시도</Button>
+        </AlertDescription></Alert> : null}
+        <div className="grid min-w-0 gap-4 sm:grid-cols-2">
           <Field label="과목">
             <Select value={patch.subject} onValueChange={(value) => onPatchChange("subject", value)}>
-              <SelectTrigger className="h-9" aria-label="일괄 과목 선택"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full data-[size=default]:h-11 sm:data-[size=default]:h-9" aria-label="일괄 과목 선택"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="keep">과목 유지</SelectItem>
                 {subjectOptions.map((option) => (
@@ -7104,55 +6170,10 @@ function TextbookBulkActionBar({
               </SelectContent>
             </Select>
           </Field>
-          <div className="grid gap-2 sm:col-span-2 lg:col-span-3">
-            <Label className="flex h-9 items-center gap-2 rounded-md border px-3 text-sm font-normal">
-              <Checkbox
-                checked={taxonomyEnabled}
-                disabled={patch.subject === "science"}
-                onCheckedChange={(checked) => onTaxonomyEnabledChange(checked === true)}
-              />
-              학교·학년 변경
-            </Label>
-            {taxonomyEnabled ? (
-              <div className="grid gap-2 rounded-md border p-2 sm:grid-cols-[220px_minmax(0,1fr)]">
-                <div className="grid gap-1" role="group" aria-label="일괄 학교 구분 선택">
-                  <span className="text-xs font-medium">학교 구분</span>
-                  <div className="grid grid-cols-3 gap-1">
-                    {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
-                      <Label key={option.value} className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-normal">
-                        <Checkbox
-                          checked={patch.schoolLevels?.includes(option.value)}
-                          disabled={patch.subject === "science"}
-                          onCheckedChange={(checked) => onSchoolLevelChange(option.value as TextbookSchoolLevel, checked === true)}
-                        />
-                        {option.label}
-                      </Label>
-                    ))}
-                  </div>
-                  {patch.schoolLevels?.length === 0 ? <p className="text-xs text-destructive">학교 구분을 하나 이상 선택하세요.</p> : null}
-                </div>
-                <div className="grid gap-1" role="group" aria-label="일괄 학년 선택">
-                  <span className="text-xs font-medium">학년</span>
-                  <div className="grid grid-cols-3 gap-1 sm:grid-cols-6">
-                    {bulkGradeOptions.map((option) => (
-                      <Label key={option.value} className="flex h-8 items-center gap-1.5 rounded-md border px-2 text-xs font-normal">
-                        <Checkbox
-                          checked={patch.gradeLevels?.includes(option.value)}
-                          disabled={patch.subject === "science"}
-                          onCheckedChange={(checked) => onGradeLevelChange(option.value as TextbookGradeLevel, checked === true)}
-                        />
-                        {option.label}
-                      </Label>
-                    ))}
-                  </div>
-                  {patch.gradeLevels?.length === 0 ? <p className="text-xs text-destructive">학년을 하나 이상 선택하세요.</p> : null}
-                </div>
-              </div>
-            ) : null}
-          </div>
           <Field label={patch.subject === "science" ? "과학 영역" : "세부과목"}>
             {patch.subject === "science" ? (
               <SearchCombobox
+                triggerClassName="h-11 sm:h-9"
                 options={scienceAreaOptions}
                 value={patch.subjectAreaKey}
                 onValueChange={(value) => onPatchChange("subjectAreaKey", value)}
@@ -7163,6 +6184,7 @@ function TextbookBulkActionBar({
               />
             ) : (
               <SearchCombobox
+                triggerClassName="h-11 sm:h-9"
                 options={[
                   { value: "", label: "세부과목 유지" },
                   ...categoryOptions.map((category) => ({ value: category, label: category })),
@@ -7182,16 +6204,16 @@ function TextbookBulkActionBar({
               onChange={(event) => onPatchChange("publisher", event.target.value)}
               list="textbook-publisher-options"
               placeholder={publisherOptions.length > 0 ? "유지 또는 선택" : "유지"}
-              className="h-9"
+              className="h-11 w-full sm:h-9"
               aria-label="일괄 출판사"
             />
           </Field>
           <Field label="판매가">
-            <Input value={patch.price} onChange={(event) => onPatchChange("price", normalizeMoneyInput(event.target.value))} placeholder="예: 12000" className="h-9" inputMode="numeric" pattern="[0-9]*" aria-label="일괄 판매가" />
+            <Input value={patch.price} onChange={(event) => onPatchChange("price", normalizeMoneyInput(event.target.value))} placeholder="예: 12000" className="h-11 w-full sm:h-9" inputMode="numeric" pattern="[0-9]*" aria-label="일괄 판매가" />
           </Field>
           <Field label="상태">
             <Select value={patch.status} onValueChange={(value) => onPatchChange("status", value)}>
-              <SelectTrigger className="h-9" aria-label="일괄 상태 선택"><SelectValue /></SelectTrigger>
+              <SelectTrigger className="w-full data-[size=default]:h-11 sm:data-[size=default]:h-9" aria-label="일괄 상태 선택"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="keep">상태 유지</SelectItem>
                 {statusOptions.map((option) => (
@@ -7200,27 +6222,61 @@ function TextbookBulkActionBar({
               </SelectContent>
             </Select>
           </Field>
-          <div className="flex items-end">
-            <Button type="button" size="sm" className="h-9 w-full" title={hasPatch ? "선택 교재에 변경사항 적용" : "변경할 값을 먼저 선택하세요"} disabled={!metadataReady || !hasPatch || !taxonomyValid || saving === "textbook-bulk-edit"} onClick={onApply}>
-              <Save className="mr-2 size-4" />
-              적용
-            </Button>
-          </div>
+          <fieldset className="grid min-w-0 gap-3 border-t pt-4 sm:col-span-2">
+            <Label className="flex min-h-11 items-center gap-2 text-sm font-medium sm:min-h-9">
+              <Checkbox
+                checked={taxonomyEnabled}
+                disabled={patch.subject === "science"}
+                onCheckedChange={(checked) => onTaxonomyEnabledChange(checked === true)}
+              />
+              학교·학년 변경
+            </Label>
+            {taxonomyEnabled ? (
+              <div className="grid min-w-0 gap-4">
+                <div className="grid gap-1" role="group" aria-label="일괄 학교 구분 선택">
+                  <span className="text-xs font-medium">학교 구분</span>
+                  <div className="grid grid-cols-3 gap-2">
+                    {TEXTBOOK_SCHOOL_LEVEL_OPTIONS.map((option) => (
+                      <Label key={option.value} className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border px-3 text-sm font-normal has-[[data-state=checked]]:border-primary/40 has-[[data-state=checked]]:bg-accent sm:min-h-9">
+                        <Checkbox
+                          checked={patch.schoolLevels?.includes(option.value)}
+                          disabled={patch.subject === "science"}
+                          onCheckedChange={(checked) => onSchoolLevelChange(option.value as TextbookSchoolLevel, checked === true)}
+                        />
+                        {option.label}
+                      </Label>
+                    ))}
+                  </div>
+                  {patch.schoolLevels?.length === 0 ? <p className="text-xs text-destructive">학교 구분을 하나 이상 선택하세요.</p> : null}
+                </div>
+                <div className="grid gap-1" role="group" aria-label="일괄 학년 선택">
+                  <span className="text-xs font-medium">학년</span>
+                  <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
+                    {bulkGradeOptions.map((option) => (
+                      <Label key={option.value} className="flex min-h-11 min-w-0 items-center gap-2 rounded-md border px-3 text-sm font-normal has-[[data-state=checked]]:border-primary/40 has-[[data-state=checked]]:bg-accent sm:min-h-9">
+                        <Checkbox
+                          checked={patch.gradeLevels?.includes(option.value)}
+                          disabled={patch.subject === "science"}
+                          onCheckedChange={(checked) => onGradeLevelChange(option.value as TextbookGradeLevel, checked === true)}
+                        />
+                        {option.label}
+                      </Label>
+                    ))}
+                  </div>
+                  {patch.gradeLevels?.length === 0 ? <p className="text-xs text-destructive">학년을 하나 이상 선택하세요.</p> : null}
+                </div>
+              </div>
+            ) : null}
+          </fieldset>
         </div>
-      ) : null}
-    </div>
+      </FormDialogContent>
+    </Dialog>
   );
-}
-
-function getInventoryCountStatusClassName(row: InventoryCountRow) {
-  if (row.status === "done") return "border-emerald-200 bg-emerald-50 text-emerald-700";
-  if (row.isRecommended) return "border-blue-200 bg-blue-50 text-blue-700";
-  return "border-amber-200 bg-amber-50 text-amber-700";
 }
 
 function getInventoryCountReasonLabel(row: InventoryCountRow) {
   const latestLabel = row.latestCountAt ? `최근 실사 ${formatCompactDateTime(row.latestCountAt)}` : "실사 이력 없음";
-  return compactUniqueLabels([latestLabel, row.reason, row.dueLabel]).join(" · ");
+  return latestLabel;
 }
 
 function getInventoryCountSubmitLabel({
@@ -7242,11 +6298,13 @@ function getInventoryCountSubmitLabel({
 }
 
 function InventoryCountWorkspace({
+  searchControl,
+  readFeedback,
+  classificationControls,
   rows,
   summary,
   locations,
   locationId,
-  auditFilter,
   countDrafts,
   memoDrafts,
   selectedIds = [],
@@ -7255,7 +6313,6 @@ function InventoryCountWorkspace({
   collapsedGroups = [],
   onToggleGroup,
   onLocationChange,
-  onFilterChange,
   onDraftChange,
   onMemoChange,
   onClearDraft,
@@ -7263,13 +6320,17 @@ function InventoryCountWorkspace({
   onToggleSelection,
   onToggleVisibleSelection,
   onSubmitBulkCount,
+  loading = false,
+  readError = false,
   emptyLabel = "교재가 없습니다",
 }: {
+  searchControl?: React.ReactNode;
+  readFeedback?: React.ReactNode;
+  classificationControls?: (locationControl: React.ReactNode) => React.ReactNode;
   rows: InventoryCountRow[];
   summary: TextbookInventorySummary | null;
   locations: Row[];
   locationId: string;
-  auditFilter: InventoryAuditFilter;
   countDrafts: Record<string, string>;
   memoDrafts: Record<string, string>;
   selectedIds?: string[];
@@ -7278,7 +6339,6 @@ function InventoryCountWorkspace({
   collapsedGroups?: string[];
   onToggleGroup?: (label: string) => void;
   onLocationChange: (value: string) => void;
-  onFilterChange: (value: InventoryAuditFilter) => void;
   onDraftChange: (row: InventoryCountRow, value: string) => void;
   onMemoChange: (row: InventoryCountRow, value: string) => void;
   onClearDraft: (row: InventoryCountRow) => void;
@@ -7286,14 +6346,12 @@ function InventoryCountWorkspace({
   onToggleSelection?: (id: string, checked: boolean) => void;
   onToggleVisibleSelection?: (ids: string[], checked: boolean) => void;
   onSubmitBulkCount?: (rows: InventoryCountRow[]) => void;
+  loading?: boolean;
+  readError?: boolean;
   emptyLabel?: string;
 }) {
-  const filterCounts = summary?.auditCounts || null;
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const visibleRows = rows;
-  const visibleAuditFilterOptions = (Object.keys(inventoryAuditFilterLabels) as InventoryAuditFilter[]).filter(
-    (filter) => auditFilter === filter || Boolean(filterCounts && filterCounts[filter] > 0),
-  );
   const displayRows = visibleRows;
   const displayRowIds = useMemo(() => displayRows.map((row) => row.id).filter(Boolean), [displayRows]);
   const selectedDisplayRows = useMemo(
@@ -7306,7 +6364,6 @@ function InventoryCountWorkspace({
   );
   const allDisplayRowsSelected = displayRowIds.length > 0 && displayRowIds.every((id) => selectedIdSet.has(id));
   const someDisplayRowsSelected = displayRowIds.some((id) => selectedIdSet.has(id)) && !allDisplayRowsSelected;
-  const visibleRowSummary = summary ? `${formatQuantity(summary.totalCount)}종` : "집계 확인 필요";
   const groupedRows = useMemo(() => {
     const groups: Array<{ label: string; rows: InventoryCountRow[] }> = [];
     for (const row of displayRows) {
@@ -7320,394 +6377,165 @@ function InventoryCountWorkspace({
     }
     return groups;
   }, [displayRows]);
-  const currentLocation = getLocationName(locations, locationId) || "위치";
+  const noRowsLabel = loading ? "재고 목록을 불러오는 중…" : readError ? "재고 목록을 불러오지 못했습니다" : emptyLabel;
+
+  const locationControl = <DataTableSelectFilter inline id="inventory-location-filter" label="위치" ariaLabel="실사 위치 선택"
+    value={locationId} onValueChange={onLocationChange}
+    options={locations.map((location) => ({ value: getRecordId(location), label: text(location.name || location.code) }))} />;
 
   return (
-    <section className="grid w-full min-w-0 max-w-[calc(100vw-2rem)] gap-3 overflow-hidden md:max-w-none">
-      <div className="flex flex-col gap-2 rounded-lg border bg-background p-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="grid gap-2 sm:flex sm:items-center">
-          <LocationSelect
-            locations={locations}
-            value={locationId}
-            onValueChange={onLocationChange}
-            ariaLabel="실사 위치 선택"
-          />
-          <Badge variant="secondary" className="h-9 justify-center rounded-md px-3 sm:justify-start">
-            {currentLocation} {visibleRowSummary}
-          </Badge>
-          <Badge
-            variant="outline"
-            className="h-9 justify-center rounded-md px-3 text-xs font-normal text-muted-foreground sm:justify-start"
-            title="추천 기준: 한 달에 한 번, 실사 이력 없음, 또는 재고 3권 이하"
-          >
-            실사 기준
-          </Badge>
-        </div>
-        <div className="grid grid-cols-4 gap-1 sm:flex sm:flex-wrap">
-          {visibleAuditFilterOptions.map((filter) => (
-            <Button
-              key={filter}
-              type="button"
-              size="sm"
-              variant={auditFilter === filter ? "default" : "outline"}
-              className="h-9 justify-center gap-1 px-2"
-              aria-pressed={auditFilter === filter}
-              onClick={() => onFilterChange(filter)}
-            >
-              <span>{inventoryAuditFilterLabels[filter]}</span>
-              <span className={cn(
-                "rounded bg-muted px-1.5 text-xs",
-                auditFilter === filter && "bg-primary-foreground/20",
-              )}>
-                {filterCounts ? formatQuantity(filterCounts[filter]) : "—"}
-              </span>
+    <section className="min-w-0" aria-label="재고 실사 입력" aria-busy={loading} data-total-count={summary?.totalCount}>
+      <DataTableWorkspaceToolbar feedback={readFeedback} search={searchControl}
+        actions={
+            <Button type="button" size="sm" className="col-span-2 sm:ml-1" disabled={schemaDisabled || saving === "count-inline-bulk" || selectedDraftRows.length === 0}
+              aria-busy={saving === "count-inline-bulk"} aria-label="선택 재고 실사 일괄 반영" title="선택 재고 실사 일괄 반영"
+              onClick={() => onSubmitBulkCount?.(selectedDisplayRows)}>
+              선택 반영
             </Button>
-          ))}
-          {selectedDisplayRows.length > 0 ? (
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              className="h-9 justify-center gap-1 px-2"
-              disabled={selectedDraftRows.length === 0}
-              aria-label="선택 재고 실사 일괄 반영"
-              title="선택 재고 실사 일괄 반영"
-              onClick={() => onSubmitBulkCount?.(selectedDisplayRows)}
-            >
-              선택 반영 {formatQuantity(selectedDraftRows.length)}
-            </Button>
-          ) : null}
-        </div>
-      </div>
-
-      <div className="grid gap-3 md:hidden">
+        }
+        filters={classificationControls ? classificationControls(locationControl) : <DataTableFilters aria-label="재고 실사 위치 필터">{locationControl}</DataTableFilters>}
+      />
+      <div className={DATA_TABLE_MOBILE_LIST_CLASS_NAME}>
         {displayRows.map((row) => {
           const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
-          return (
-            <InventoryCountMobileCard
-              key={draftKey}
-              row={row}
-              value={countDrafts[draftKey] || ""}
-              memoValue={memoDrafts[draftKey] || ""}
-              saving={saving === `count-inline-${draftKey}`}
-              disabled={schemaDisabled}
-              onChange={(value) => onDraftChange(row, value)}
-              onMemoChange={(value) => onMemoChange(row, value)}
-              onClear={() => onClearDraft(row)}
-              onSubmit={(value, memo) => onSubmitCount(row, value, memo)}
-            />
-          );
+          return <InventoryCountMobileCard key={draftKey} row={row} value={countDrafts[draftKey] || ""} memoValue={memoDrafts[draftKey] || ""}
+            selected={selectedIdSet.has(row.id)} onSelectionChange={(checked) => onToggleSelection?.(row.id, checked)}
+            saving={saving === `count-inline-${draftKey}`} disabled={schemaDisabled}
+            onChange={(value) => onDraftChange(row, value)} onMemoChange={(value) => onMemoChange(row, value)} onClear={() => onClearDraft(row)}
+            onSubmit={(value, memo) => onSubmitCount(row, value, memo)} />;
         })}
-        {visibleRows.length === 0 ? (
-          <div className="rounded-lg border py-8 text-center text-sm text-muted-foreground">{emptyLabel}</div>
-        ) : null}
+        {visibleRows.length === 0 ? <div role="status" className="py-8 text-center text-sm text-muted-foreground">{noRowsLabel}</div> : null}
       </div>
-
-      <div
-        className="hidden overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto] md:block"
-        aria-label="재고 실사 목록"
-      >
-        <Table className="min-w-[1260px] table-fixed">
+      <DataTableViewport className={cn(TEXTBOOK_RESULTS_CLASS_NAME, "hidden md:block [&>[data-slot=table-container]]:overflow-visible")} role="region" tabIndex={0} aria-label="재고 실사 목록">
+        <Table className="min-w-[1164px] table-fixed">
           <caption className="sr-only">재고 실사 입력 목록</caption>
-          <TableHeader className="sticky top-0 z-10 bg-background">
-            <TableRow>
-              <TableHead className="w-10">
-                <Checkbox
-                  checked={allDisplayRowsSelected || (someDisplayRowsSelected && "indeterminate")}
-                  onCheckedChange={(value) => onToggleVisibleSelection?.(displayRowIds, value === true)}
-                  title="표시된 재고 행 전체 선택"
-                  aria-label="표시된 재고 행 전체 선택"
-                />
-              </TableHead>
-              <TableHead className="w-[32%]">교재</TableHead>
-              <TableHead className="w-24">위치</TableHead>
-              <TableHead className="w-20 text-right">현재</TableHead>
-              <TableHead className="w-36">실사</TableHead>
-              <TableHead className="w-20 text-right">차이</TableHead>
-              <TableHead className="w-24">상태</TableHead>
-              <TableHead className="w-40">최종 실사</TableHead>
-              <TableHead className="w-56">메모</TableHead>
-              <TableHead className={cn("w-24 text-right", stickyActionHeadClassName)}>작업</TableHead>
-            </TableRow>
+          <TableHeader>
+            <DataTableHeaderRow>
+              <DataTableHeaderCell className="w-10 px-0"><DataTableSelectionCheckbox checked={allDisplayRowsSelected || (someDisplayRowsSelected && "indeterminate")}
+                onCheckedChange={(value) => onToggleVisibleSelection?.(displayRowIds, value === true)} aria-label="표시된 재고 행 전체 선택" title="표시된 재고 행 전체 선택" /></DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[260px]">교재</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[72px] text-right">현재</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[180px]">실사</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[72px] text-right">차이</DataTableHeaderCell>
+
+              <DataTableHeaderCell className="w-[168px]">최종 실사</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[184px]">메모</DataTableHeaderCell>
+              <DataTableHeaderCell className={cn("w-[88px] text-right", stickyActionHeadClassName)}>작업</DataTableHeaderCell>
+            </DataTableHeaderRow>
           </TableHeader>
           <TableBody>
             {groupedRows.map((group) => {
               const isCollapsed = collapsedGroups.includes(group.label);
               const GroupIcon = isCollapsed ? ChevronRight : ChevronDown;
-              const groupRecommendedCount = group.rows.filter((row) => row.isRecommended).length;
-              return (
-                <Fragment key={group.label}>
-                  <TableRow>
-                    <TableCell colSpan={10} className="bg-muted/40 p-0 text-xs font-semibold text-muted-foreground">
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="sm"
-                        className="h-9 w-full justify-start rounded-none px-3 text-xs font-semibold text-muted-foreground hover:bg-muted"
-                        aria-expanded={!isCollapsed}
-                        aria-label={`${group.label} 그룹 ${isCollapsed ? "펼치기" : "접기"}`}
-                        onClick={() => onToggleGroup?.(group.label)}
-                      >
-                        <GroupIcon className="mr-2 size-3.5" />
-                        <span>{group.label} · {formatQuantity(group.rows.length)}종</span>
-                        <span className="ml-auto flex items-center gap-2">
-                          {groupRecommendedCount > 0 ? (
-                            <Badge
-                              variant="outline"
-                              className="rounded-md border-blue-200 bg-blue-50 text-blue-700 tabular-nums"
-                              title="이번 달 실사를 먼저 진행할 교재"
-                            >
-                              할 일 {formatQuantity(groupRecommendedCount)}
-                            </Badge>
-                          ) : null}
-                        </span>
-                      </Button>
-                    </TableCell>
-                  </TableRow>
-                  {isCollapsed ? null : group.rows.map((row) => {
-                    const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
-                    const draftValue = countDrafts[draftKey] || "";
-                    const memoValue = memoDrafts[draftKey] || "";
-                    const hasDraft = text(draftValue);
-                    const hasDraftContent = Boolean(hasDraft || text(memoValue));
-                    const difference = text(draftValue) ? numberValue(draftValue) - row.currentQuantity : 0;
-                    const isSaving = saving === `count-inline-${draftKey}`;
-                    return (
-                      <TableRow key={draftKey} data-prepared-surface="inventory-desktop" data-prepared-row-id={row.id} className={cn(hasDraft && "bg-blue-50/40")}>
-                        <TableCell>
-                          <Checkbox
-                            checked={selectedIdSet.has(row.id)}
-                            onCheckedChange={(value) => onToggleSelection?.(row.id, value === true)}
-                            title={`${row.title} ${row.locationName} 재고 선택`}
-                            aria-label={`${row.title} ${row.locationName} 재고 선택`}
-                          />
-                        </TableCell>
-                        <TableCell className="min-w-0">
-                          <div className="truncate font-medium">{row.title}</div>
-                          <div className="truncate text-xs text-muted-foreground">{row.publisher}</div>
-                        </TableCell>
-                        <TableCell>{row.locationName}</TableCell>
-                        <TableCell className="text-right font-mono">{formatQuantity(row.currentQuantity)}</TableCell>
-                        <TableCell className="space-y-1">
-                          <Input
-                            value={draftValue}
-                            onChange={(event) => onDraftChange(row, event.target.value)}
-                            onKeyDown={(event) => {
-                              if (event.key === "Enter" && hasDraft) {
-                                event.preventDefault();
-                                onSubmitCount(row, draftValue, memoValue);
-                              }
-                            }}
-                            inputMode="numeric"
-                            pattern="[0-9]*"
-                            autoComplete="off"
-                            enterKeyHint="done"
-                            aria-label={`${row.title} ${row.locationName} 실사 수량`}
-                            placeholder={`${formatQuantity(row.currentQuantity)}`}
-                            className="h-9 text-right font-mono"
-                          />
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            className="h-7 w-full px-2 text-xs"
-                            title={hasDraftContent ? "실사 입력 초기화" : "현재 수량 입력"}
-                            aria-label={hasDraftContent ? `${row.title} ${row.locationName} 실사 입력 초기화` : `${row.title} ${row.locationName} 현재 수량 입력`}
-                            onClick={() => {
-                              if (hasDraftContent) {
-                                onClearDraft(row);
-                                return;
-                              }
-                              onDraftChange(row, getInventoryCurrentQuantityDraft(row));
-                            }}
-                          >
-                            {hasDraftContent ? "초기화" : "현재"}
-                          </Button>
-                        </TableCell>
-                        <TableCell className={cn("text-right font-mono", difference < 0 && "text-red-600", difference > 0 && "text-emerald-700")}>
-                          {text(draftValue) ? `${difference > 0 ? "+" : ""}${formatQuantity(difference)}` : "-"}
-                        </TableCell>
-                        <TableCell>
-                          <Badge
-                            variant="outline"
-                            className={cn("rounded-md", getInventoryCountStatusClassName(row))}
-                            title={getInventoryCountReasonLabel(row)}
-                          >
-                            {inventoryAuditFilterLabels[row.status]}
-                          </Badge>
-                        </TableCell>
-                        <TableCell className="text-xs text-muted-foreground">
-                          <div>{row.latestCountAt ? formatCompactDateTime(row.latestCountAt) : "실사 없음"}</div>
-                          <div className="truncate" title={getInventoryCountReasonLabel(row)}>{getInventoryCountReasonLabel(row)}</div>
-                        </TableCell>
-                        <TableCell>
-                          <Input
-                            value={memoValue}
-                            onChange={(event) => onMemoChange(row, event.target.value)}
-                            onBlur={(event) => onMemoChange(row, normalizeStoredTextInput(event.target.value))}
-                            aria-label={`${row.title} ${row.locationName} 실사 메모`}
-                            placeholder="메모"
-                            className="h-9"
-                          />
-                        </TableCell>
-                        <TableCell className={cn("text-right", stickyActionCellClassName)}>
-                          <Button
-                            type="button"
-                            size="sm"
-                            variant={hasDraft ? "default" : "outline"}
-                            title={getInventoryCountSubmitLabel({ row, draftValue, isSaving, schemaDisabled })}
-                            aria-label={getInventoryCountSubmitLabel({ row, draftValue, isSaving, schemaDisabled })}
-                            disabled={schemaDisabled || isSaving || !text(draftValue)}
-                            aria-busy={isSaving}
-                            onClick={() => onSubmitCount(row, draftValue, memoValue)}
-                          >
-                            <PackageCheck className="mr-2 size-3.5" />
-                            반영
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    );
-                  })}
-                </Fragment>
-              );
+              return <Fragment key={`${group.label}:${group.rows[0].id}`}>
+                <DataTableBodyRow>
+                  <DataTableBodyCell colSpan={8} className="bg-muted/40 p-0">
+                    <Button type="button" variant="ghost" size="sm" className="h-9 w-full justify-start rounded-none px-3 text-xs font-semibold"
+                      aria-expanded={!isCollapsed} aria-label={`${group.label} 그룹 ${isCollapsed ? "펼치기" : "접기"}`} onClick={() => onToggleGroup?.(group.label)}>
+                      <GroupIcon className="size-3.5" aria-hidden="true" />{group.label} · {formatQuantity(group.rows.length)}종
+                    </Button>
+                  </DataTableBodyCell>
+                </DataTableBodyRow>
+                {isCollapsed ? null : group.rows.map((row) => {
+                  const draftKey = getInventoryCountDraftKey(row.id, row.locationId);
+                  const draftValue = countDrafts[draftKey] || "";
+                  const memoValue = memoDrafts[draftKey] || "";
+                  const isSaving = saving === `count-inline-${draftKey}`;
+                  return <DataTableBodyRow key={draftKey} data-prepared-surface="inventory-desktop" data-prepared-row-id={row.id} data-state={selectedIdSet.has(row.id) ? "selected" : undefined}>
+                    <DataTableBodyCell className="px-0 py-1"><DataTableSelectionCheckbox checked={selectedIdSet.has(row.id)} onCheckedChange={(value) => onToggleSelection?.(row.id, value === true)} title={`${row.title} ${row.locationName} 재고 선택`} aria-label={`${row.title} ${row.locationName} 재고 선택`} /></DataTableBodyCell>
+                    <DataTableBodyCell wrap><div className="font-medium">{row.title}</div><div className="mt-1 text-xs text-muted-foreground">{compactUniqueLabels([row.publisher, row.locationName]).join(" · ")}</div></DataTableBodyCell>
+                    <DataTableBodyCell className="text-right tabular-nums">{formatQuantity(row.currentQuantity)}</DataTableBodyCell>
+                    <DataTableBodyCell><InventoryCountQuantityInput row={row} value={draftValue} memoValue={memoValue} saving={isSaving} disabled={schemaDisabled}
+                      onChange={(value) => onDraftChange(row, value)} onClear={() => onClearDraft(row)} onSubmit={(value, memo) => onSubmitCount(row, value, memo)} /></DataTableBodyCell>
+                    <DataTableBodyCell className="text-right"><InventoryCountDifference row={row} value={draftValue} /></DataTableBodyCell>
+
+                    <DataTableBodyCell wrap className="text-xs text-muted-foreground">{getInventoryCountReasonLabel(row)}</DataTableBodyCell>
+                    <DataTableBodyCell><Input value={memoValue} onChange={(event) => onMemoChange(row, event.target.value)} onBlur={(event) => onMemoChange(row, normalizeStoredTextInput(event.target.value))} aria-label={`${row.title} ${row.locationName} 실사 메모`} placeholder="메모" /></DataTableBodyCell>
+                    <DataTableBodyCell className={cn("text-right group-hover/data-table-row:bg-muted group-data-[state=selected]/data-table-row:bg-accent", stickyActionCellClassName)}><InventoryCountSubmitButton row={row} value={draftValue} saving={isSaving} disabled={schemaDisabled} onSubmit={() => onSubmitCount(row, draftValue, memoValue)} /></DataTableBodyCell>
+                  </DataTableBodyRow>;
+                })}
+              </Fragment>;
             })}
-            {visibleRows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={10} className="h-28 text-center text-muted-foreground">
-                  {emptyLabel}
-                </TableCell>
-              </TableRow>
-            ) : null}
+            {visibleRows.length === 0 ? <DataTableBodyRow><DataTableBodyCell colSpan={8} className="h-28 text-center text-muted-foreground"><span role="status">{noRowsLabel}</span></DataTableBodyCell></DataTableBodyRow> : null}
           </TableBody>
         </Table>
-      </div>
+      </DataTableViewport>
     </section>
   );
 }
 
-function InventoryCountMobileCard({
-  row,
-  value,
-  memoValue,
-  saving,
-  disabled,
-  onChange,
-  onMemoChange,
-  onClear,
-  onSubmit,
-}: {
+type InventoryCountInputProps = {
   row: InventoryCountRow;
   value: string;
   memoValue: string;
   saving: boolean;
   disabled: boolean;
   onChange: (value: string) => void;
-  onMemoChange: (value: string) => void;
   onClear: () => void;
   onSubmit: (value: string, memo: string) => void;
-}) {
-  const difference = text(value) ? numberValue(value) - row.currentQuantity : 0;
-  const hasDraftContent = Boolean(text(value) || text(memoValue));
-  const submitLabel = getInventoryCountSubmitLabel({
-    row,
-    draftValue: value,
-    isSaving: saving,
-    schemaDisabled: disabled,
-  });
+};
 
-  return (
-    <form
-      data-prepared-surface="inventory-mobile"
-      data-prepared-row-id={row.id}
-      className={cn("min-w-0 max-w-full overflow-hidden rounded-lg border bg-background p-3 shadow-sm active:scale-[0.99]", text(value) && "border-blue-200 bg-blue-50/30")}
-      onSubmit={(event) => {
+function InventoryCountQuantityInput({ row, value, memoValue, saving, disabled, onChange, onClear, onSubmit }: InventoryCountInputProps) {
+  const hasDraftContent = Boolean(text(value) || text(memoValue));
+  return <div className="flex min-w-0 items-center gap-1">
+    <Input value={value} onChange={(event) => onChange(event.target.value)} onKeyDown={(event) => {
+      if (event.key === "Enter") {
         event.preventDefault();
-        onSubmit(value, memoValue);
-      }}
-    >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <div className="truncate text-sm font-semibold">{row.title}</div>
-          <div className="mt-0.5 truncate text-xs text-muted-foreground">{row.publisher}</div>
-        </div>
-        <Badge
-          variant="outline"
-          className={cn("shrink-0 rounded-md", getInventoryCountStatusClassName(row))}
-          title={getInventoryCountReasonLabel(row)}
-        >
-          {inventoryAuditFilterLabels[row.status]}
-        </Badge>
+        if (!disabled && !saving && text(value)) onSubmit(value, memoValue);
+      }
+    }} inputMode="numeric" pattern="[0-9]*" autoComplete="off" enterKeyHint="done" aria-label={`${row.title} ${row.locationName} 실사 수량`}
+      placeholder={`${formatQuantity(row.currentQuantity)}`} className="h-10 text-right tabular-nums md:h-9" />
+    <Button type="button" variant="ghost" size="sm" className="h-10 px-2 md:h-9" title={hasDraftContent ? "실사 입력 초기화" : "현재 수량 입력"}
+      aria-label={hasDraftContent ? `${row.title} ${row.locationName} 실사 입력 초기화` : `${row.title} ${row.locationName} 현재 수량 입력`}
+      onClick={() => hasDraftContent ? onClear() : onChange(getInventoryCurrentQuantityDraft(row))}>
+      {hasDraftContent ? "초기화" : "현재"}
+    </Button>
+  </div>;
+}
+
+function InventoryCountSubmitButton({ row, value, saving, disabled, onSubmit }: Pick<InventoryCountInputProps, "row" | "value" | "saving" | "disabled"> & { onSubmit: () => void }) {
+  return <Button type="button" size="sm" variant={text(value) ? "default" : "outline"} className="h-10 md:h-8"
+    title={getInventoryCountSubmitLabel({ row, draftValue: value, isSaving: saving, schemaDisabled: disabled })}
+    aria-label={getInventoryCountSubmitLabel({ row, draftValue: value, isSaving: saving, schemaDisabled: disabled })}
+    disabled={disabled || saving || !text(value)} aria-busy={saving} onClick={onSubmit}>{saving ? "반영 중…" : "반영"}</Button>;
+}
+
+function InventoryCountDifference({ row, value }: Pick<InventoryCountInputProps, "row" | "value">) {
+  const difference = text(value) ? numberValue(value) - row.currentQuantity : 0;
+  return <span className={cn("tabular-nums", difference < 0 && "text-destructive", difference > 0 && "text-primary")}>
+    {text(value) ? `${difference > 0 ? "+" : ""}${formatQuantity(difference)}` : "—"}
+  </span>;
+}
+
+function InventoryCountMobileCard({ row, value, memoValue, saving, disabled, selected, onSelectionChange, onChange, onMemoChange, onClear, onSubmit }: InventoryCountInputProps & {
+  selected: boolean;
+  onSelectionChange: (checked: boolean) => void;
+  onMemoChange: (value: string) => void;
+}) {
+  return <form data-prepared-surface="inventory-mobile" data-prepared-row-id={row.id}
+    className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME} data-state={selected ? "selected" : undefined}
+    onSubmit={(event) => { event.preventDefault(); if (!disabled && !saving && text(value)) onSubmit(value, memoValue); }}>
+    <div className="flex items-start gap-2">
+      <DataTableSelectionCheckbox checked={selected} onCheckedChange={(checked) => onSelectionChange(checked === true)} aria-label={`${row.title} ${row.locationName} 재고 선택`} />
+      <div className="min-w-0 flex-1">
+        <div className="whitespace-normal break-words text-sm font-medium">{row.title}</div>
+        <div className="mt-1 break-words text-xs text-muted-foreground">{compactUniqueLabels([row.publisher, row.locationName]).join(" · ")}</div>
       </div>
-      <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-        <div className="rounded-md bg-muted/50 px-2 py-2">
-          <div className="text-muted-foreground">위치</div>
-          <div className="mt-1 font-medium">{row.locationName}</div>
-        </div>
-        <div className="rounded-md bg-muted/50 px-2 py-2">
-          <div className="text-muted-foreground">현재</div>
-          <div className="mt-1 font-mono font-semibold">{formatQuantity(row.currentQuantity)}</div>
-        </div>
-        <div className="rounded-md bg-muted/50 px-2 py-2">
-          <div className="text-muted-foreground">차이</div>
-          <div className={cn("mt-1 font-mono font-semibold", difference < 0 && "text-red-600", difference > 0 && "text-emerald-700")}>
-            {text(value) ? `${difference > 0 ? "+" : ""}${formatQuantity(difference)}` : "-"}
-          </div>
-        </div>
+    </div>
+    <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-y border-border/60 py-2 text-xs">
+      <span className="tabular-nums">현재 {formatQuantity(row.currentQuantity)}권 · 차이 <InventoryCountDifference row={row} value={value} /></span>
+
+    </div>
+    <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
+      <div className="grid min-w-0 gap-1"><span className="text-xs text-muted-foreground">실사 수량</span>
+        <InventoryCountQuantityInput row={row} value={value} memoValue={memoValue} saving={saving} disabled={disabled} onChange={onChange} onClear={onClear} onSubmit={onSubmit} />
       </div>
-      <Input
-        value={memoValue}
-        onChange={(event) => onMemoChange(event.target.value)}
-        onBlur={(event) => onMemoChange(normalizeStoredTextInput(event.target.value))}
-        aria-label={`${row.title} ${row.locationName} 실사 메모`}
-        placeholder="메모"
-        className="mt-3 h-11"
-      />
-      <div className="mt-3 grid grid-cols-[minmax(0,1fr)_88px] gap-2">
-        <Input
-          value={value}
-          onChange={(event) => onChange(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && text(value)) {
-              event.preventDefault();
-              onSubmit(value, memoValue);
-            }
-          }}
-          inputMode="numeric"
-          pattern="[0-9]*"
-          autoComplete="off"
-          enterKeyHint="done"
-          aria-label={`${row.title} ${row.locationName} 실사 수량`}
-          placeholder={`${formatQuantity(row.currentQuantity)}`}
-          className="h-12 text-right font-mono text-base"
-        />
-        <Button type="submit" className="h-12" title={submitLabel} aria-label={submitLabel} disabled={disabled || saving || !text(value)}>
-          반영
-        </Button>
-      </div>
-      <Button
-        type="button"
-        variant="outline"
-        size="sm"
-        className="mt-2 h-9 w-full"
-        title={hasDraftContent ? "실사 입력 초기화" : "현재 수량 입력"}
-        aria-label={hasDraftContent ? `${row.title} ${row.locationName} 실사 입력 초기화` : `${row.title} ${row.locationName} 현재 수량 입력`}
-        onClick={() => {
-          if (hasDraftContent) {
-            onClear();
-            return;
-          }
-          onChange(getInventoryCurrentQuantityDraft(row));
-        }}
-      >
-        {hasDraftContent ? "실사 입력 초기화" : "현재 수량 입력"}
-      </Button>
-      <div className="mt-2 text-xs text-muted-foreground">
-        {row.latestCountAt
-          ? `최종 ${formatCompactDateTime(row.latestCountAt)} · ${getInventoryCountReasonLabel(row)}`
-          : getInventoryCountReasonLabel(row)}
-      </div>
-    </form>
-  );
+      <InventoryCountSubmitButton row={row} value={value} saving={saving} disabled={disabled} onSubmit={() => onSubmit(value, memoValue)} />
+    </div>
+    <Input value={memoValue} onChange={(event) => onMemoChange(event.target.value)} onBlur={(event) => onMemoChange(normalizeStoredTextInput(event.target.value))}
+      aria-label={`${row.title} ${row.locationName} 실사 메모`} placeholder="메모" className="mt-2 h-10" />
+    <p className="mt-2 break-words text-xs text-muted-foreground">{getInventoryCountReasonLabel(row)}</p>
+  </form>;
 }
 
 function TextbookTable({
@@ -7752,7 +6580,7 @@ function TextbookTable({
     })),
     [locations],
   );
-  const columnSpan = locationColumns.length + 7 + (onSelectTextbook ? 1 : 0) + (hasSelection ? 1 : 0);
+  const columnSpan = locationColumns.length + 2 + 2 + (onSelectTextbook ? 1 : 0) + (hasSelection ? 1 : 0);
   const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
   const sortedGroupedRows = useMemo(() => {
     const groups: Array<{ label: string; rows: Row[] }> = [];
@@ -7774,20 +6602,20 @@ function TextbookTable({
   } : null;
 
   return (
-    <div className="space-y-2" aria-label="교재 목록">
-      <div data-testid="textbook-master-mobile-list" className="grid gap-2 md:hidden">
+    <div className="min-w-0" aria-label="교재 재고">
+      <div data-testid="textbook-master-mobile-list" className={DATA_TABLE_MOBILE_LIST_CLASS_NAME}>
         {sortedGroupedRows.map((group) => {
           const isCollapsed = collapsedGroups.includes(group.label);
           const GroupIcon = isCollapsed ? ChevronRight : ChevronDown;
           const groupTotalQuantity = group.rows.reduce((sum, row) => sum + numberValue(row.totalQuantity), 0);
 
           return (
-            <section key={`mobile-${group.label}`} className="overflow-hidden rounded-md border bg-background">
+            <section key={`mobile-${getRecordId(group.rows[0])}`} className="min-w-0">
               <Button
                 type="button"
                 variant="ghost"
                 size="sm"
-                className="h-auto w-full justify-start rounded-none border-b px-3 py-2 text-left"
+                className="h-10 w-full justify-start rounded-md px-2 text-left"
                 aria-expanded={!isCollapsed}
                 onClick={() => onToggleGroup?.(group.label)}
               >
@@ -7798,7 +6626,7 @@ function TextbookTable({
                 </span>
               </Button>
               {isCollapsed ? null : (
-                <div className="grid min-w-0 gap-2 p-2">
+                <div className="grid min-w-0 gap-2">
                   {group.rows.map((row) => {
                     const rowId = getRecordId(row);
                     const rowA11yLabel = getTextbookIdentityLabel(row);
@@ -7811,8 +6639,6 @@ function TextbookTable({
                     const gradeLabel = getTextbookGradeSummary(row) || "-";
                     const subSubjectLabel = getTextbookSubSubject(row) || "-";
                     const categorySummary = compactUniqueLabels([getSubjectLabel(row.subject), schoolLevelLabel, gradeLabel, subSubjectLabel]).join(" · ") || "-";
-                    const qualityIssues = row.qualityIssues as ReturnType<typeof getTextbookQualityIssues>;
-                    const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
                     const locationSummary = locationColumns
                       .map((location) => ({
                         label: location.label,
@@ -7828,18 +6654,19 @@ function TextbookTable({
                         data-prepared-surface="master-mobile"
                         data-prepared-row-id={rowId}
                         className={cn(
-                          "min-w-0 rounded-md border bg-background p-3 shadow-xs",
-                          qualityIssues.inactive && "bg-muted/20 text-muted-foreground",
+                          DATA_TABLE_MOBILE_ITEM_CLASS_NAME,
+                          selectedIdSet.has(rowId) && "border-primary/40 bg-accent",
+                          row.status === "inactive" && "bg-muted/20 text-muted-foreground",
                         )}
                       >
                         <div className="flex min-w-0 items-start gap-3">
                           {hasSelection ? (
-                            <Checkbox
+                            <DataTableSelectionCheckbox
                               checked={selectedIdSet.has(rowId)}
                               onCheckedChange={(value) => onBulkSelectionChange?.(rowId, !!value)}
                               title={`${rowA11yLabel} 선택`}
                               aria-label={`${rowA11yLabel} 선택`}
-                              className="mt-1 shrink-0"
+                              className="-ml-2 -mt-1"
                             />
                           ) : null}
                           <div className="min-w-0 flex-1 space-y-2">
@@ -7850,15 +6677,15 @@ function TextbookTable({
                                     type="button"
                                     aria-label={`${rowA11yLabel} 열기`}
                                     title={rowA11yLabel}
-                                    className="block max-w-full truncate text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                                    className="block max-w-full whitespace-normal break-words text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                                     onClick={() => onSelectTextbook(row)}
                                   >
                                     {getTextbookTitle(row)}
                                   </button>
                                 ) : (
-                                  <p className="truncate text-sm font-semibold">{getTextbookTitle(row)}</p>
+                                  <p className="break-words text-sm font-semibold">{getTextbookTitle(row)}</p>
                                 )}
-                                {publisherLabel ? <p className="truncate text-xs text-muted-foreground">{publisherLabel}</p> : null}
+                                {publisherLabel ? <p className="break-words text-xs text-muted-foreground">{publisherLabel}</p> : null}
                               </div>
                               {onSelectTextbook ? (
                                 <Button
@@ -7876,16 +6703,11 @@ function TextbookTable({
                             </div>
 
                             <div className="flex flex-wrap gap-1.5">
-                              <Badge variant="secondary" className="rounded px-1.5 text-[11px]">{categorySummary}</Badge>
-                              {qualityIssueLabels.length > 0 ? (
-                                <Badge variant="outline" className="rounded px-1.5 text-[11px] text-amber-700">
-                                  정리 {formatQuantity(qualityIssueLabels.length)}
-                                </Badge>
-                              ) : null}
+                              <span className="break-words text-xs leading-5 text-muted-foreground">{categorySummary}</span>
                             </div>
 
                             <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="rounded-md bg-muted/40 px-2 py-1.5">
+                              <div className="py-1">
                                 <p className="text-muted-foreground">합계</p>
                                 <p className={cn("font-semibold tabular-nums", inventoryQuantityTone(totalQuantity))}>
                                   {formatQuantity(totalQuantity)}
@@ -7894,7 +6716,7 @@ function TextbookTable({
                                   <p className="text-[11px] text-muted-foreground">교사용 {formatQuantity(teacherQuantity)}</p>
                                 ) : null}
                               </div>
-                              <div className="rounded-md bg-muted/40 px-2 py-1.5 text-right">
+                              <div className="py-1 text-right">
                                 <p className="text-muted-foreground">{amountHeader}</p>
                                 <p className="font-semibold tabular-nums">{formatCurrency(amountValue)}</p>
                               </div>
@@ -7903,7 +6725,7 @@ function TextbookTable({
                             {locationSummary.length > 0 ? (
                               <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
                                 {locationSummary.map((location) => (
-                                  <span key={`${rowId}-${location.label}`} className="rounded border px-1.5 py-0.5 tabular-nums">
+                                  <span key={`${rowId}-${location.label}`} className="tabular-nums">
                                     {location.label} {formatQuantity(location.quantity)}
                                   </span>
                                 ))}
@@ -7931,58 +6753,57 @@ function TextbookTable({
         ) : null}
       </div>
 
-      <div className="hidden overflow-x-auto rounded-lg border [contain-intrinsic-size:720px] [content-visibility:auto] md:block">
-      <Table className="min-w-[1080px] table-fixed">
-        <caption className="sr-only">교재 마스터 목록</caption>
-        <TableHeader className="sticky top-0 z-10 bg-background">
-          <TableRow>
+      <DataTableViewport className={cn(TEXTBOOK_RESULTS_CLASS_NAME, "hidden md:block [&>[data-slot=table-container]]:overflow-visible")} role="region" aria-label="교재 재고 스크롤" tabIndex={0}>
+      <Table className="min-w-[760px] table-fixed" style={{ minWidth: 720 + locationColumns.length * 80 }}>
+        <caption className="sr-only">교재 재고</caption>
+        <colgroup>{hasSelection ? <col style={{ width: 40 }} /> : null}<col /><col style={{ width: 144 }} />
+          {locationColumns.map(location => <col key={location.id} style={{ width: 80 }} />)}
+          <col style={{ width: 80 }} /><col style={{ width: 112 }} />{onSelectTextbook ? <col style={{ width: 48 }} /> : null}
+        </colgroup>
+        <TableHeader>
+          <DataTableHeaderRow>
             {hasSelection ? (
-              <TableHead className="w-10">
-                <Checkbox
+              <DataTableHeaderCell className="z-10 w-10 px-0">
+                <DataTableSelectionCheckbox
                   checked={allVisibleSelected || (someVisibleSelected && "indeterminate")}
                   onCheckedChange={(value) => onToggleAllVisible?.(!!value)}
                   title="현재 교재 전체 선택"
                   aria-label="현재 교재 전체 선택"
                 />
-              </TableHead>
+              </DataTableHeaderCell>
             ) : null}
-            <TableHead className="w-[30%] min-w-64">교재</TableHead>
-            <TableHead className="w-24">과목</TableHead>
-            <TableHead className="w-32">세부과목</TableHead>
-            <TableHead className="w-28">학교 구분</TableHead>
-            <TableHead className="w-24">학년</TableHead>
+            <DataTableHeaderCell className="z-10 min-w-72">교재</DataTableHeaderCell>
+            <DataTableHeaderCell className="z-10 w-36">분류</DataTableHeaderCell>
             {locationColumns.map((location) => (
-              <TableHead key={location.id} className="w-20 text-right">{location.label}</TableHead>
+              <DataTableHeaderCell key={location.id} className="z-10 w-20 text-right">{location.label}</DataTableHeaderCell>
             ))}
-            <TableHead className="w-20 text-right">합계</TableHead>
-            <TableHead className="w-24 text-right">{amountHeader}</TableHead>
-            {onSelectTextbook ? <TableHead className={cn("w-12 text-right", stickyActionHeadClassName)}>관리</TableHead> : null}
-          </TableRow>
+            <DataTableHeaderCell className="z-10 w-20 text-right">합계</DataTableHeaderCell>
+            <DataTableHeaderCell className="z-10 w-28 text-right">{amountHeader}</DataTableHeaderCell>
+            {onSelectTextbook ? <DataTableHeaderCell className={cn("z-20 w-12 text-right", stickyActionHeadClassName)}>관리</DataTableHeaderCell> : null}
+          </DataTableHeaderRow>
         </TableHeader>
         <TableBody>
           {sortedGroupedRows.map((group) => (
-            <Fragment key={group.label}>
+            <Fragment key={getRecordId(group.rows[0])}>
               {(() => {
                 const isCollapsed = collapsedGroups.includes(group.label);
                 const GroupIcon = isCollapsed ? ChevronRight : ChevronDown;
                 const groupTotalQuantity = group.rows.reduce((sum, row) => sum + numberValue(row.totalQuantity), 0);
-                const groupQualityIssueCount = group.rows.filter((row) => Number(row.qualityScore) > 0).length;
                 const groupCountLabel = `${formatQuantity(group.rows.length)}종`;
                 const groupDetailText = [
                   `${formatQuantity(group.rows.length)}종`,
-                  groupQualityIssueCount > 0 ? `정리 ${formatQuantity(groupQualityIssueCount)}건` : "",
                   `재고 ${formatQuantity(groupTotalQuantity)}권`,
                 ].filter(Boolean).join(" · ");
 
                 return (
                   <>
-                    <TableRow>
-                      <TableCell colSpan={columnSpan} className="bg-muted/40 p-0 text-xs font-semibold text-muted-foreground">
+                    <DataTableBodyRow>
+                      <DataTableBodyCell colSpan={columnSpan} className="bg-muted/40 p-0 text-xs font-semibold text-muted-foreground">
                         <Button
                           type="button"
                           variant="ghost"
                           size="sm"
-                          className="h-9 w-full justify-start rounded-none px-3 text-xs font-semibold text-muted-foreground hover:bg-muted"
+                          className="h-9 w-full justify-start rounded-none px-3 text-xs font-semibold"
                           aria-expanded={!isCollapsed}
                           aria-label={`${group.label} 그룹 ${isCollapsed ? "펼치기" : "접기"} · ${groupDetailText}`}
                           title={groupDetailText}
@@ -7992,15 +6813,10 @@ function TextbookTable({
                           <span>{group.label}</span>
                           <span className="ml-auto flex min-w-0 items-center gap-1.5">
                             <span className="tabular-nums text-muted-foreground">{groupCountLabel}</span>
-                            {groupQualityIssueCount > 0 ? (
-                              <Badge variant="outline" className="h-5 rounded px-1.5 text-[11px] text-amber-700 tabular-nums" title="분류, 가격, ISBN 등 정리가 필요한 교재 수">
-                                정리 {formatQuantity(groupQualityIssueCount)}
-                              </Badge>
-                            ) : null}
                           </span>
                         </Button>
-                      </TableCell>
-                    </TableRow>
+                      </DataTableBodyCell>
+                    </DataTableBodyRow>
                     {isCollapsed ? null : group.rows.map((row) => {
                 const rowId = getRecordId(row);
                 const rowA11yLabel = getTextbookIdentityLabel(row);
@@ -8009,32 +6825,28 @@ function TextbookTable({
                 const publisherLabel = getKnownPublisherLabel(row);
                 const locationQuantities = (row.locationQuantities || {}) as Record<string, unknown>;
                 const amountValue = amountMode === "salePrice" ? getTextbookSalePrice(row) : row.stockValue;
-                const subjectLabel = getSubjectLabel(row.subject) || "-";
                 const gradeLabel = getTextbookGradeSummary(row) || "-";
                 const schoolLevelLabel = getTextbookSchoolLevelSummary(row) || "-";
                 const subSubjectLabel = getTextbookSubSubject(row) || "-";
-                const qualityIssues = row.qualityIssues as ReturnType<typeof getTextbookQualityIssues>;
-                const qualityIssueLabels = getTextbookQualityIssueLabels(qualityIssues);
-                const qualityIssueSummary = getQualityIssueSummary(qualityIssueLabels);
                 return (
-                  <TableRow data-testid={`textbook-master-desktop-row-${rowId}`} data-prepared-surface="master-desktop" data-prepared-row-id={rowId} key={rowId} className={cn(qualityIssues.inactive && "bg-muted/20 text-muted-foreground")}>
+                  <DataTableBodyRow data-testid={`textbook-master-desktop-row-${rowId}`} data-prepared-surface="master-desktop" data-prepared-row-id={rowId} data-state={selectedIdSet.has(rowId) ? "selected" : undefined} key={rowId} className={cn(row.status === "inactive" && "bg-muted/20 text-muted-foreground")}>
                     {hasSelection ? (
-                      <TableCell className="w-10">
-                        <Checkbox
+                      <DataTableBodyCell className="w-10 px-0 py-1">
+                        <DataTableSelectionCheckbox
                           checked={selectedIdSet.has(rowId)}
                           onCheckedChange={(value) => onBulkSelectionChange?.(rowId, !!value)}
                           title={`${rowA11yLabel} 선택`}
                           aria-label={`${rowA11yLabel} 선택`}
                         />
-                      </TableCell>
+                      </DataTableBodyCell>
                     ) : null}
-                    <TableCell className="min-w-0">
+                    <DataTableBodyCell wrap className="min-w-0 py-2">
                       {onSelectTextbook ? (
                         <button
                           type="button"
                           aria-label={`${rowA11yLabel} 열기`}
                           title={rowA11yLabel}
-                          className="block max-w-full truncate text-left font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                          className="block max-w-full whitespace-normal break-words text-left font-medium underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                           onClick={() => onSelectTextbook(row)}
                         >
                           {getTextbookTitle(row)}
@@ -8045,41 +6857,31 @@ function TextbookTable({
                       {publisherLabel ? (
                         <div className="text-xs text-muted-foreground">{publisherLabel}</div>
                       ) : null}
-                      {qualityIssueLabels.length > 0 ? (
-                        <Badge
-                          variant="outline"
-                          className="mt-1 h-5 rounded px-1.5 text-[11px] text-amber-700"
-                          title={qualityIssueSummary}
-                          aria-label={`정리 필요: ${qualityIssueSummary}`}
-                        >
-                          정리 {formatQuantity(qualityIssueLabels.length)}
-                        </Badge>
-                      ) : null}
-                    </TableCell>
-                    <TableCell className="max-w-[96px] truncate" title={subjectLabel}>{subjectLabel}</TableCell>
-                    <TableCell className="max-w-[128px] truncate" title={subSubjectLabel}>{subSubjectLabel}</TableCell>
-                    <TableCell className="max-w-[112px] truncate" title={schoolLevelLabel}>{schoolLevelLabel}</TableCell>
-                    <TableCell className="max-w-[96px] truncate" title={gradeLabel}>{gradeLabel}</TableCell>
+                    </DataTableBodyCell>
+                    <DataTableBodyCell wrap className="text-xs leading-5">
+                      <div>{schoolLevelLabel} · {gradeLabel}</div>
+                      <div className="text-muted-foreground">{subSubjectLabel}</div>
+                    </DataTableBodyCell>
                     {locationColumns.map((location) => (
-                      <TableCell key={location.id} className="text-right tabular-nums">
+                      <DataTableBodyCell key={location.id} className="text-right tabular-nums">
                         {formatQuantity(locationQuantities[location.id])}
-                      </TableCell>
+                      </DataTableBodyCell>
                     ))}
-                    <TableCell className={cn("text-right font-medium tabular-nums", inventoryQuantityTone(totalQuantity))}>
+                    <DataTableBodyCell className={cn("text-right font-medium tabular-nums", inventoryQuantityTone(totalQuantity))}>
                       {formatQuantity(totalQuantity)}
                       {teacherQuantity > 0 ? (
                         <div className="text-[11px] font-normal text-muted-foreground">교사용 {formatQuantity(teacherQuantity)}</div>
                       ) : null}
-                    </TableCell>
-                    <TableCell className="text-right tabular-nums">{formatCurrency(amountValue)}</TableCell>
+                    </DataTableBodyCell>
+                    <DataTableBodyCell className="text-right tabular-nums">{formatCurrency(amountValue)}</DataTableBodyCell>
                     {onSelectTextbook ? (
-                      <TableCell className={cn("text-right", stickyActionCellClassName)}>
+                      <DataTableBodyCell className={cn("text-right group-hover/data-table-row:bg-muted group-data-[state=selected]/data-table-row:bg-accent", stickyActionCellClassName)}>
                         <Button type="button" variant="ghost" size="icon" className="size-8 rounded-md" aria-label={`${rowA11yLabel} 편집`} title={`${getTextbookTitle(row)} 편집`} onClick={() => onSelectTextbook(row)}>
                           <Pencil className="size-3.5" />
                         </Button>
-                      </TableCell>
+                      </DataTableBodyCell>
                     ) : null}
-                  </TableRow>
+                  </DataTableBodyRow>
                 );
                     })}
                   </>
@@ -8088,26 +6890,23 @@ function TextbookTable({
             </Fragment>
           ))}
 	          {rows.length > 0 ? (
-	            <TableRow className="bg-muted/30 text-xs font-semibold text-muted-foreground">
-	              {hasSelection ? <TableCell /> : null}
-	              <TableCell>{tableTotals ? "합계" : "집계 확인 필요"}</TableCell>
-	              <TableCell />
-	              <TableCell />
-	              <TableCell />
-	              <TableCell />
+	            <DataTableBodyRow className="bg-muted/30 text-xs font-semibold text-muted-foreground">
+	              {hasSelection ? <DataTableBodyCell /> : null}
+	              <DataTableBodyCell>{tableTotals ? "합계" : "집계 확인 필요"}</DataTableBodyCell>
+	              <DataTableBodyCell />
 	              {locationColumns.map((location) => (
-                <TableCell key={location.id} className="text-right tabular-nums">
+                <DataTableBodyCell key={location.id} className="text-right tabular-nums">
                   {tableTotals ? formatQuantity(tableTotals.locationQuantities[location.id]) : "—"}
-                </TableCell>
+                </DataTableBodyCell>
               ))}
-              <TableCell className="text-right tabular-nums">{tableTotals ? formatQuantity(tableTotals.totalQuantity) : "—"}</TableCell>
-              <TableCell className="text-right tabular-nums">{tableTotals ? formatCurrency(tableTotals.amountValue) : "—"}</TableCell>
-              {onSelectTextbook ? <TableCell /> : null}
-            </TableRow>
+              <DataTableBodyCell className="text-right tabular-nums">{tableTotals ? formatQuantity(tableTotals.totalQuantity) : "—"}</DataTableBodyCell>
+              <DataTableBodyCell className="text-right tabular-nums">{tableTotals ? formatCurrency(tableTotals.amountValue) : "—"}</DataTableBodyCell>
+              {onSelectTextbook ? <DataTableBodyCell /> : null}
+            </DataTableBodyRow>
           ) : null}
           {rows.length === 0 ? (
-            <TableRow>
-              <TableCell colSpan={columnSpan} className="h-28 text-center text-muted-foreground">
+            <DataTableBodyRow>
+              <DataTableBodyCell colSpan={columnSpan} className="h-28 text-center text-muted-foreground">
                 <div className="flex flex-col items-center justify-center gap-2">
                   <span>{emptyLabel}</span>
                   {emptyActionLabel && onEmptyAction ? (
@@ -8116,26 +6915,31 @@ function TextbookTable({
                     </Button>
                   ) : null}
                 </div>
-              </TableCell>
-            </TableRow>
+              </DataTableBodyCell>
+            </DataTableBodyRow>
           ) : null}
         </TableBody>
       </Table>
-      </div>
+      </DataTableViewport>
     </div>
   );
 }
 
-
 function InventoryHistoryPanel({
+  readFeedback,
   rows: transportRows,
+  loading = false,
+  readError = false,
   currentUserId,
   currentUserLabel,
   canDeleteHistory,
   saving,
   onDeleteHistory,
 }: {
+  readFeedback?: React.ReactNode;
   rows: TextbookInventoryHistoryTransport[];
+  loading?: boolean;
+  readError?: boolean;
   currentUserId: string;
   currentUserLabel: string;
   canDeleteHistory: boolean;
@@ -8146,34 +6950,34 @@ function InventoryHistoryPanel({
     ...row,
     actor: row.actorLabel || (row.actorId === currentUserId ? currentUserLabel : row.actorId) || "-",
   })), [currentUserId, currentUserLabel, transportRows]);
+  const emptyLabel = loading ? "재고 이력을 불러오는 중…" : readError ? "재고 이력을 불러오지 못했습니다" : "재고 이력이 없습니다";
 
   return (
-    <section className="overflow-hidden rounded-lg border bg-background">
-      <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-        <h3 className="text-sm font-semibold">재고 이력</h3>
-        <Badge variant="secondary" className="rounded-md">최근 {formatQuantity(rows.length)}건</Badge>
-      </div>
-      <div className="grid gap-2 p-2 md:hidden">
+    <section className="min-w-0" aria-label="재고 이력" aria-busy={loading}>
+      <DataTableToolbar>
+        <div className="flex min-h-9 items-center justify-between gap-2"><h3 className="text-sm font-semibold">재고 이력</h3>{readFeedback}</div>
+      </DataTableToolbar>
+      <div className={DATA_TABLE_MOBILE_LIST_CLASS_NAME}>
         {rows.map((row) => (
           <div key={row.id} data-prepared-surface="inventory-history-mobile" data-prepared-row-id={row.id} className="grid min-w-0 gap-2 rounded-md border bg-background p-3">
             <div className="flex min-w-0 items-start justify-between gap-2">
               <div className="min-w-0">
-                <div className="truncate text-sm font-medium">{row.textbookTitle}</div>
+                <div className="whitespace-normal break-words text-sm font-medium">{row.textbookTitle}</div>
                 <div className="mt-0.5 text-xs text-muted-foreground">{formatCompactDateTime(row.at)} · {row.locationName}</div>
               </div>
-              <Badge variant="outline" className="shrink-0 rounded-md font-mono">{row.change}</Badge>
+              <Badge variant="outline" className="shrink-0 rounded-md tabular-nums">{row.change}</Badge>
             </div>
             <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
-              <div className="min-w-0 truncate">{row.action}</div>
-              <div className="min-w-0 truncate text-right">{row.actor}</div>
+              <div className="min-w-0 whitespace-normal break-words">{row.action}</div>
+              <div className="min-w-0 whitespace-normal break-words text-right">{row.actor}</div>
             </div>
-            {row.memo ? <div className="truncate text-xs text-muted-foreground">{row.memo}</div> : null}
+            {row.memo ? <div className="whitespace-normal break-words text-xs text-muted-foreground">{row.memo}</div> : null}
             {canDeleteHistory ? (
               <Button
                 type="button"
-                variant="outline"
+                variant="destructive-outline"
                 size="sm"
-                className="h-8 w-full text-muted-foreground hover:text-destructive"
+                className="h-8 w-full"
                 disabled={saving === `inventory-history-delete-${row.id}`}
                 aria-label={`${row.textbookTitle} 재고 이력 삭제`}
                 title="재고 이력 삭제"
@@ -8186,40 +6990,41 @@ function InventoryHistoryPanel({
           </div>
         ))}
         {rows.length === 0 ? (
-          <div className="rounded-md border py-6 text-center text-sm text-muted-foreground">재고 이력이 없습니다</div>
+          <div role="status" className="py-6 text-center text-sm text-muted-foreground">{emptyLabel}</div>
         ) : null}
       </div>
-      <div className="hidden overflow-x-auto md:block">
-        <Table className="min-w-[920px]">
+      <DataTableViewport className="hidden max-h-[480px] md:block [&>[data-slot=table-container]]:overflow-visible" role="region" tabIndex={0} aria-label="재고 이력 스크롤">
+        <Table className="min-w-[1120px] table-fixed">
+          <caption className="sr-only">재고 이력 목록</caption>
           <TableHeader>
-            <TableRow className="bg-muted/30">
-              <TableHead className="w-[120px]">일시</TableHead>
-              <TableHead>교재</TableHead>
-              <TableHead className="w-[96px]">위치</TableHead>
-              <TableHead className="w-[88px] text-right">변경</TableHead>
-              <TableHead className="w-[140px]">작업</TableHead>
-              <TableHead className="w-[160px]">실행자</TableHead>
-              <TableHead className="w-[220px]">메모</TableHead>
-              {canDeleteHistory ? <TableHead className="w-[72px] text-right">삭제</TableHead> : null}
-            </TableRow>
+            <DataTableHeaderRow>
+              <DataTableHeaderCell className="w-[120px]">일시</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[260px]">교재</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[96px]">위치</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[88px] text-right">변경</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[140px]">작업</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[160px]">실행자</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[220px]">메모</DataTableHeaderCell>
+              {canDeleteHistory ? <DataTableHeaderCell className="w-[72px] text-right">삭제</DataTableHeaderCell> : null}
+            </DataTableHeaderRow>
           </TableHeader>
           <TableBody>
             {rows.map((row) => (
-              <TableRow key={row.id} data-prepared-surface="inventory-history-desktop" data-prepared-row-id={row.id}>
-                <TableCell className="text-muted-foreground">{formatCompactDateTime(row.at)}</TableCell>
-                <TableCell className="max-w-[320px] truncate font-medium">{row.textbookTitle}</TableCell>
-                <TableCell className="truncate">{row.locationName}</TableCell>
-                <TableCell className="text-right font-medium">{row.change}</TableCell>
-                <TableCell>{row.action}</TableCell>
-                <TableCell className="max-w-[160px] truncate">{row.actor}</TableCell>
-                <TableCell className="max-w-[220px] truncate text-muted-foreground">{row.memo || "-"}</TableCell>
+              <DataTableBodyRow key={row.id} data-prepared-surface="inventory-history-desktop" data-prepared-row-id={row.id}>
+                <DataTableBodyCell wrap className="text-muted-foreground">{formatCompactDateTime(row.at)}</DataTableBodyCell>
+                <DataTableBodyCell wrap className="max-w-[320px] whitespace-normal break-words font-medium">{row.textbookTitle}</DataTableBodyCell>
+                <DataTableBodyCell wrap className="whitespace-normal break-words">{row.locationName}</DataTableBodyCell>
+                <DataTableBodyCell wrap className="text-right font-medium">{row.change}</DataTableBodyCell>
+                <DataTableBodyCell wrap>{row.action}</DataTableBodyCell>
+                <DataTableBodyCell wrap className="max-w-[160px] whitespace-normal break-words">{row.actor}</DataTableBodyCell>
+                <DataTableBodyCell wrap className="max-w-[220px] whitespace-normal break-words text-muted-foreground">{row.memo || "-"}</DataTableBodyCell>
                 {canDeleteHistory ? (
-                  <TableCell className="text-right">
+                  <DataTableBodyCell wrap className="text-right">
                     <Button
                       type="button"
-                      variant="ghost"
+                      variant="destructive-ghost"
                       size="icon"
-                      className="size-8 text-muted-foreground hover:text-destructive"
+                      className="size-8"
                       disabled={saving === `inventory-history-delete-${row.id}`}
                       aria-label={`${row.textbookTitle} 재고 이력 삭제`}
                       title="재고 이력 삭제"
@@ -8227,267 +7032,21 @@ function InventoryHistoryPanel({
                     >
                       <Trash2 className="size-4" />
                     </Button>
-                  </TableCell>
+                  </DataTableBodyCell>
                 ) : null}
-              </TableRow>
+              </DataTableBodyRow>
             ))}
             {rows.length === 0 ? (
-              <TableRow>
-                <TableCell colSpan={canDeleteHistory ? 8 : 7} className="h-20 text-center text-muted-foreground">
-                  재고 이력이 없습니다
-                </TableCell>
-              </TableRow>
+              <DataTableBodyRow>
+                <DataTableBodyCell wrap colSpan={canDeleteHistory ? 8 : 7} className="h-20 text-center text-muted-foreground">
+                  <span role="status">{emptyLabel}</span>
+                </DataTableBodyCell>
+              </DataTableBodyRow>
             ) : null}
           </TableBody>
         </Table>
-      </div>
+      </DataTableViewport>
     </section>
-  );
-}
-
-
-function buildClosingDetailClipboardText({
-  title,
-  storedClosingMetrics,
-  detailClosing,
-  filteredDetailRows,
-  closingMetricMismatchCount,
-}: {
-  title: string;
-  storedClosingMetrics: ClosingStoredMetrics;
-  detailClosing: ReturnType<typeof buildTextbookMonthlyClosing>;
-  filteredDetailRows: Array<{
-    at: string;
-    typeLabel: string;
-    textbookTitle: string;
-    locationName: string;
-    quantity: number;
-    amount: number;
-    marginAmount: number;
-  }>;
-  closingMetricMismatchCount: number;
-}) {
-  const lines = [
-    `[교재 정산 상세] ${title}`,
-    `저장 입고 ${formatQuantity(storedClosingMetrics.purchaseQuantity)}권 / 저장 출고 ${formatQuantity(storedClosingMetrics.saleQuantity)}권 / 저장 기말 ${formatQuantity(storedClosingMetrics.endingQuantity)}권 / 저장 마진 ${formatCurrency(storedClosingMetrics.marginAmount)}`,
-    `현재 상세 입고 ${formatQuantity(detailClosing.purchaseQuantity)}권 / 현재 상세 출고 ${formatQuantity(detailClosing.saleQuantity)}권 / 현재 상세 기말 ${formatQuantity(detailClosing.endingQuantity)}권 / 현재 상세 마진 ${formatCurrency(detailClosing.textbookMarginAmount)}`,
-    `상태 ${storedClosingMetrics.status}${closingMetricMismatchCount > 0 ? ` / 차이 ${formatQuantity(closingMetricMismatchCount)}개` : ""}`,
-  ];
-
-  if (storedClosingMetrics.memo) {
-    lines.push(`메모 ${storedClosingMetrics.memo}`);
-  }
-
-  lines.push(
-    "",
-    "일시\t구분\t교재\t위치\t수량\t금액\t마진",
-    ...filteredDetailRows.map((item) => [
-      formatCompactDateTime(item.at),
-      item.typeLabel,
-      item.textbookTitle,
-      item.locationName,
-      `${item.quantity > 0 ? "+" : ""}${formatQuantity(item.quantity)}`,
-      formatCurrency(item.amount),
-      item.marginAmount > 0 ? formatCurrency(item.marginAmount) : "-",
-    ].join("\t")),
-  );
-
-  return lines.join("\n");
-}
-
-function ClosingDetailDialog({
-  open,
-  actorKey,
-  detail,
-  loading,
-  error,
-  rows,
-  movementSearch,
-  onMovementSearchChange,
-  movementPage,
-  movementPageSize,
-  movementTotalCount,
-  movementLoading,
-  onMovementPageChange,
-  onMovementPageSizeChange,
-  onOpenChange,
-}: {
-  open: boolean;
-  actorKey: string;
-  detail: TextbookClosingDetail | null;
-  loading: boolean;
-  error: string;
-  rows: ClosingMovementRow[];
-  movementSearch: string;
-  onMovementSearchChange: (value: string) => void;
-  movementPage: number;
-  movementPageSize: 10 | 15 | 20;
-  movementTotalCount: number | null;
-  movementLoading: boolean;
-  onMovementPageChange: (page: number) => void;
-  onMovementPageSizeChange: (value: 10 | 15 | 20) => void;
-  onOpenChange: (open: boolean) => void;
-}) {
-  const [copyStatus, setCopyStatus] = useState("");
-  const [isCopyingDetail, setIsCopyingDetail] = useState(false);
-  const copyAbortRef = useRef<AbortController | null>(null);
-  const copyLifetimeRef = useRef({ mounted: true, actorKey });
-  useEffect(() => {
-    copyLifetimeRef.current = { mounted: true, actorKey };
-    return () => {
-      copyLifetimeRef.current.mounted = false;
-      copyAbortRef.current?.abort();
-    };
-  }, [actorKey]);
-  const row = detail?.row;
-  const closingMonth = text(row?.closing_month);
-  const subject = text(row?.subject) || "all";
-  const storedClosingMetrics = detail?.storedMetrics || getClosingStoredMetrics(row || {});
-  useEffect(() => {
-    if (!open) {
-      setCopyStatus("");
-      return;
-    }
-    setCopyStatus("");
-  }, [open, row]);
-  const detailClosing = detail?.preview?.closing || buildTextbookMonthlyClosing({ openingQuantity: 0, openingAmount: 0, stockMoves: [] });
-  const detailRows = rows;
-  const title = `${closingMonth || "정산"} · ${subject === "all" ? "전체" : getSubjectLabel(subject)}`;
-  const closingMetricMismatches = detail?.metricMismatches || { purchase: false, sale: false, ending: false, margin: false };
-  const closingMetricMismatchCount = detail?.metricMismatchCount || 0;
-  const closingDetailStatus = storedClosingMetrics.status;
-  const closingDetailMemo = storedClosingMetrics.memo;
-  const filteredDetailRows = detailRows;
-  const copyClosingDetail = useCallback(async () => {
-    if (!closingMonth) return;
-    copyAbortRef.current?.abort();
-    const abort = new AbortController();
-    copyAbortRef.current = abort;
-    const isCurrent = () => !abort.signal.aborted && copyAbortRef.current === abort && copyLifetimeRef.current.mounted && copyLifetimeRef.current.actorKey === actorKey;
-    setIsCopyingDetail(true);
-    try {
-      const exported = await getTextbookClosingMovementExport({ closingMonth, subject, search: movementSearch }, { signal: abort.signal });
-      if (!isCurrent()) return;
-      await writeClipboardText(buildClosingDetailClipboardText({ title, storedClosingMetrics, detailClosing, filteredDetailRows: exported.rows, closingMetricMismatchCount }));
-      if (isCurrent()) setCopyStatus("복사됨");
-    } catch {
-      if (isCurrent()) setCopyStatus("복사 실패");
-    } finally {
-      if (isCurrent()) setIsCopyingDetail(false);
-    }
-  }, [actorKey, closingMetricMismatchCount, closingMonth, detailClosing, movementSearch, storedClosingMetrics, subject, title]);
-
-  return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-h-[90dvh] w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto sm:max-w-4xl">
-        <DialogHeader>
-          <DialogTitle>{title}</DialogTitle>
-          <DialogDescription className="sr-only">저장된 월마감값과 현재 재고 이동 재계산값을 함께 확인합니다.</DialogDescription>
-        </DialogHeader>
-        {loading ? <div className="py-6 text-center text-sm text-muted-foreground">정산 상세 불러오는 중</div> : null}
-        {error ? <Alert role="alert"><AlertDescription>{error}</AlertDescription></Alert> : null}
-        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-          <Badge variant="secondary" className="h-7 rounded-md px-2">저장값</Badge>
-          <Badge variant="outline" className="h-7 rounded-md px-2">상태 {closingDetailStatus}</Badge>
-          <Badge variant={closingMetricMismatchCount > 0 ? "destructive" : "outline"} className="h-7 rounded-md px-2 tabular-nums">
-            차이 {formatQuantity(closingMetricMismatchCount)}개
-          </Badge>
-          {closingDetailMemo ? <span className="min-w-0 truncate">메모 {closingDetailMemo}</span> : null}
-        </div>
-        {closingMetricMismatchCount > 0 ? (
-          <Alert role="alert" className="border-amber-200 bg-amber-50 text-amber-900">
-            <AlertDescription>
-              저장된 정산값과 현재 상세 내역이 다릅니다. 정산 재생성이 필요한지 확인하세요.
-            </AlertDescription>
-          </Alert>
-        ) : null}
-        <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4">
-          <Metric label="저장 입고" value={`${formatQuantity(storedClosingMetrics.purchaseQuantity)}권`} tone={closingMetricMismatches.purchase ? "warning" : "default"} />
-          <Metric label="저장 출고" value={`${formatQuantity(storedClosingMetrics.saleQuantity)}권`} tone={closingMetricMismatches.sale ? "warning" : "default"} />
-          <Metric label="저장 기말" value={`${formatQuantity(storedClosingMetrics.endingQuantity)}권`} tone={closingMetricMismatches.ending ? "warning" : "default"} />
-          <Metric label="저장 마진" value={formatCurrency(storedClosingMetrics.marginAmount)} tone={closingMetricMismatches.margin ? "warning" : "default"} />
-        </div>
-        <div className="grid grid-cols-2 gap-2 text-sm sm:grid-cols-4" aria-label="현재 상세 재계산">
-          <Metric label="상세 입고" value={`${formatQuantity(detailClosing.purchaseQuantity)}권`} tone={closingMetricMismatches.purchase ? "warning" : "default"} />
-          <Metric label="상세 출고" value={`${formatQuantity(detailClosing.saleQuantity)}권`} tone={closingMetricMismatches.sale ? "warning" : "default"} />
-          <Metric label="상세 기말" value={`${formatQuantity(detailClosing.endingQuantity)}권`} tone={closingMetricMismatches.ending ? "warning" : "default"} />
-          <Metric label="상세 마진" value={formatCurrency(detailClosing.textbookMarginAmount)} tone={closingMetricMismatches.margin ? "warning" : "default"} />
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-          <div className="relative min-w-0 flex-1">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-            <Input
-              type="search"
-              value={movementSearch}
-              onChange={(event) => {
-                onMovementSearchChange(event.target.value);
-                setCopyStatus("");
-              }}
-              onBlur={(event) => onMovementSearchChange(normalizeStoredTextInput(event.target.value))}
-              placeholder="교재·구분·위치 검색"
-              aria-label="정산 상세 검색"
-              autoComplete="off"
-              enterKeyHint="search"
-              className="h-9 pl-9"
-            />
-          </div>
-          <div className="flex shrink-0 items-center gap-2 text-xs text-muted-foreground">
-            <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">
-              상세 {formatQuantity(filteredDetailRows.length)}/{formatQuantity(detailRows.length)}
-            </Badge>
-            <Button type="button" variant="outline" size="sm" className="h-8" onClick={copyClosingDetail} disabled={isCopyingDetail}>
-              <Copy className="mr-2 size-3.5" />
-              {copyStatus || "복사"}
-            </Button>
-          </div>
-        </div>
-        <div className="overflow-hidden rounded-lg border">
-          <div className="overflow-x-auto">
-            <Table className="min-w-[820px]">
-              <TableHeader>
-                <TableRow className="bg-muted/30">
-                  <TableHead className="w-[120px]">일시</TableHead>
-                  <TableHead className="w-[120px]">구분</TableHead>
-                  <TableHead>교재</TableHead>
-                  <TableHead className="w-[96px]">위치</TableHead>
-                  <TableHead className="w-[88px] text-right">수량</TableHead>
-                  <TableHead className="w-[112px] text-right">금액</TableHead>
-                  <TableHead className="w-[112px] text-right">마진</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredDetailRows.map((item) => (
-                  <TableRow key={item.id} data-prepared-surface="closing-movement" data-prepared-row-id={item.id}>
-                    <TableCell className="text-muted-foreground">{formatCompactDateTime(item.at)}</TableCell>
-                    <TableCell>{item.typeLabel}</TableCell>
-                    <TableCell className="max-w-[320px] truncate font-medium">{item.textbookTitle}</TableCell>
-                    <TableCell className="truncate">{item.locationName}</TableCell>
-                    <TableCell className="text-right tabular-nums">{`${item.quantity > 0 ? "+" : ""}${formatQuantity(item.quantity)}`}</TableCell>
-                    <TableCell className="text-right tabular-nums">{formatCurrency(item.amount)}</TableCell>
-                    <TableCell className="text-right tabular-nums">{item.marginAmount > 0 ? formatCurrency(item.marginAmount) : "-"}</TableCell>
-                  </TableRow>
-                ))}
-                {filteredDetailRows.length === 0 ? (
-                  <EmptyRow
-                    colSpan={7}
-                    label={detailRows.length === 0 ? "정산 상세 내역이 없습니다" : "검색 조건에 맞는 정산 상세가 없습니다"}
-                    compact
-                  />
-                ) : null}
-              </TableBody>
-            </Table>
-          </div>
-        </div>
-        <DataTablePagination page={movementPage} pageSize={movementPageSize} totalCount={movementTotalCount} loading={movementLoading}
-          onPageChange={onMovementPageChange} onPageSizeChange={onMovementPageSizeChange}
-          ariaLabel="월마감 상세 이동 페이지 탐색" />
-        <div className={dialogFooterClassName}>
-          <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-            닫기
-          </Button>
-        </div>
-      </DialogContent>
-    </Dialog>
   );
 }
 
@@ -8568,7 +7127,7 @@ function getPurchaseProcessEmptyHint(
   if (orderFilter === "waiting" || groupId === "ordered") {
     return "주문 완료 건은 입고 수량을 입력하면 다음 단계로 이동합니다.";
   }
-  return "입고 완료 건은 재고와 정산에서 이어서 확인합니다.";
+  return "입고 완료 건은 교재 재고에서 확인할 수 있습니다.";
 }
 
 function getSalesProcessEmptyLabel(groupId: string, statusFilter: SalesProcessFilter, searchQuery = "") {
@@ -8607,7 +7166,7 @@ function getSalesProcessEmptyHint(groupId: string, statusFilter: SalesProcessFil
     return "수업과 학생이 확정된 교재만 출고 대기 목록에 올라옵니다.";
   }
   if (statusFilter === "issued" || groupId === "issued") {
-    return "출고 처리된 교재는 재고 이동과 정산에서 이어서 확인합니다.";
+    return "출고 처리된 교재는 재고 이력에서 확인할 수 있습니다.";
   }
   if (statusFilter === "returned" || groupId === "returned") {
     return "반품 이력은 최고관리자가 테스트 기록까지 선택해 정리할 수 있습니다.";
@@ -8646,10 +7205,14 @@ function ProcessGroupEmptyState({
 }
 
 function PurchaseProcessTable({
+  searchControl,
+  readFeedback,
   mode,
   preparedRows,
   summary,
   acceptedFilters,
+  loading = false,
+  readError = false,
   canManageRequestLines = true,
   orders,
   lines,
@@ -8659,7 +7222,6 @@ function PurchaseProcessTable({
   suppliers,
   publisherSupplierLinks,
   classes,
-  students,
   selectedLineId,
   selectedLineIds = [],
   boardScope,
@@ -8683,10 +7245,14 @@ function PurchaseProcessTable({
   onReturnLine,
   onClearSearch,
 }: {
+  searchControl?: React.ReactNode;
+  readFeedback?: React.ReactNode;
   mode: "request" | "order";
   preparedRows: TextbookPurchaseCaseRow[];
   summary: TextbookPurchaseSummary | null;
   acceptedFilters: PurchaseFilters | null;
+  loading?: boolean;
+  readError?: boolean;
   canManageRequestLines?: boolean;
   orders: Row[];
   lines: Row[];
@@ -8735,7 +7301,7 @@ function PurchaseProcessTable({
   const ordersById = useMemo(() => new Map(orders.map((order) => [getRecordId(order), order])), [orders]);
   const requestFilterOptions = useMemo(
     () => [
-    { value: "all", label: "검토 전체" },
+    { value: "all", label: "전체 교재" },
     { value: "unregistered", label: "미등록 요청" },
     { value: "orderable", label: "등록 교재" },
     ] satisfies Array<{ value: PurchaseRequestFilter; label: string }>,
@@ -8751,34 +7317,26 @@ function PurchaseProcessTable({
         { id: "returned", title: "반품" },
         { id: "cancelled", title: "취소" },
       ], [mode]);
+  const displayedFilter = acceptedFilters?.orderFilter ?? orderFilter;
   const visibleGroups = useMemo(() => {
     if (mode === "request") {
       return groups;
     }
-    if (orderFilter === "waiting") {
+    if (displayedFilter === "waiting") {
       return groups.filter((group) => group.id === "requested" || group.id === "ordered" || group.id === "partially_received");
     }
-    if (orderFilter === "partial") {
+    if (displayedFilter === "partial") {
       return groups.filter((group) => group.id === "partially_received");
     }
-    if (orderFilter === "returnable") {
+    if (displayedFilter === "returnable") {
       return groups.filter((group) => group.id === "partially_received" || group.id === "received");
     }
-    if (orderFilter === "returned") {
+    if (displayedFilter === "returned") {
       return groups.filter((group) => group.id === "returned");
     }
     return groups;
-  }, [groups, mode, orderFilter]);
+  }, [groups, mode, displayedFilter]);
   const showBulkPurchaseSelection = mode === "order" && Boolean(onToggleLine && onToggleVisibleLines);
-  const purchaseProcessColumns = useMemo(
-    () => buildPurchaseProcessColumns(mode, showBulkPurchaseSelection),
-    [mode, showBulkPurchaseSelection],
-  );
-  const {
-    isColumnVisible: isPurchaseColumnVisible,
-    visibleColumnCount: visiblePurchaseColumnCount,
-    columnSettingsControl,
-  } = useDataTableColumns(`textbook-purchase-process-${mode}`, purchaseProcessColumns);
   const selectedLineIdSet = useMemo(() => new Set(selectedLineIds), [selectedLineIds]);
 
   function toggleGroup(id: string) {
@@ -8813,10 +7371,6 @@ function PurchaseProcessTable({
     [getCurrentVisiblePurchaseRows, visibleGroups],
   );
 
-  const visibleRowCount = summary?.totalCount ?? null;
-  const visibleRequestedTotal = summary?.quantities.requested ?? null;
-  const visibleOrderedTotal = summary?.quantities.ordered ?? null;
-  const visibleReceivedTotal = summary?.quantities.received ?? null;
   const hasVisiblePurchaseRows = visiblePurchaseRows.length > 0;
   const renderedGroups = visibleGroups.filter((group) => getCurrentVisiblePurchaseRows(group.id).length > 0);
   const emptyGroupId = visibleGroups[0]?.id || (mode === "request" ? "requested" : "ordered");
@@ -8833,7 +7387,8 @@ function PurchaseProcessTable({
       return { orderable, receivable, returnable };
     }
 
-    for (const line of visiblePurchaseRows) {
+    // A displayed row can contain both student and teacher copies; select its actual members.
+    for (const line of visiblePurchaseRows.flatMap(getPurchaseScopeLines)) {
       const lineId = getRecordId(line);
       if (!lineId) {
         continue;
@@ -8879,37 +7434,13 @@ function PurchaseProcessTable({
     () => visibleActionablePurchaseLineIds.filter((id) => selectedLineIdSet.has(id)).length,
     [selectedLineIdSet, visibleActionablePurchaseLineIds],
   );
+  const purchaseBatchBusy = saving.startsWith("purchase-bulk-");
   const hasProcessSearchQuery = Boolean(text(searchQuery));
   const totalProcessRowCount = summary?.totalCount ?? null;
-  const showProcessControls = Boolean(totalProcessRowCount && totalProcessRowCount > 0) || hasProcessSearchQuery || boardScope !== "active" || requestFilter !== "all" || orderFilter !== "all";
   const hasHiddenProcessRows =
     mode === "order" && Boolean(totalProcessRowCount && totalProcessRowCount > 0) && !hasVisiblePurchaseRows && !hasProcessSearchQuery;
-  const showProcessSummary = Boolean(summary);
-  const visibleBoardScopeOptions = (Object.keys(purchaseBoardScopeLabels) as PurchaseBoardScope[]).filter(
-    (scope) => boardScope === scope || Boolean(purchaseProcessFilterCounts && purchaseProcessFilterCounts.boardScope[scope] > 0),
-  );
-  const visibleOrderFilterOptions = (Object.keys(purchaseOrderFilterLabels) as PurchaseOrderFilter[]).filter(
-    (filter) => orderFilter === filter || Boolean(purchaseProcessFilterCounts && purchaseProcessFilterCounts.order[filter] > 0),
-  );
-  const visibleRequestFilterOptions = mode === "order"
-    ? requestFilterOptions.filter((option) => requestFilter === option.value || Boolean(purchaseProcessFilterCounts && purchaseProcessFilterCounts.request[option.value] > 0))
-    : [];
-  const activeRequestFilterLabel = requestFilterOptions.find((option) => option.value === requestFilter)?.label || "";
-  const activePurchaseFilterCount = mode === "order"
-    ? Number(boardScope !== "active") + Number(orderFilter !== "all") + Number(requestFilter !== "all")
-    : 0;
-  const activePurchaseFilterLabel = [
-    boardScope !== "active" ? purchaseBoardScopeLabels[boardScope] : "",
-    orderFilter !== "all" ? purchaseOrderFilterLabels[orderFilter] : "",
-    requestFilter !== "all" ? activeRequestFilterLabel : "",
-  ].filter(Boolean).join(" · ") || "기본";
-  const processSummaryParts = [
-    summary ? `표시 ${formatQuantity(visibleRowCount)}건` : "",
-    visibleRequestedTotal !== null && visibleRequestedTotal > 0 ? `요청 ${formatQuantity(visibleRequestedTotal)}` : "",
-    mode === "order" && visibleOrderedTotal !== null && visibleOrderedTotal > 0 ? `주문 ${formatQuantity(visibleOrderedTotal)}` : "",
-    mode === "order" && visibleReceivedTotal !== null && visibleReceivedTotal > 0 ? `입고 ${formatQuantity(visibleReceivedTotal)}` : "",
-  ].filter(Boolean);
-  const processSummaryText = processSummaryParts.join(" · ");
+  const purchaseFiltersAreDefault = boardScope === "active" && orderFilter === "all" && requestFilter === "all";
+  const filtersChanging = Boolean(acceptedFilters && (acceptedFilters.boardScope !== boardScope || acceptedFilters.orderFilter !== orderFilter || acceptedFilters.requestFilter !== requestFilter || acceptedFilters.search !== searchQuery));
   const openPurchaseHandoff = useCallback((kind: "order" | "return") => {
     if (kind === "order") setHandoffDialogOpen(true); else setReturnHandoffDialogOpen(true);
     const setGroups = kind === "order" ? setPurchaseHandoffGroups : setReturnHandoffGroups;
@@ -8934,7 +7465,7 @@ function PurchaseProcessTable({
     ? "검색 초기화"
     : hasHiddenProcessRows
       ? "전체 보기"
-      : mode === "request" ? "요청 바로 추가" : "주문 바로 추가";
+      : undefined;
   const handleEmptyAction = () => {
     if (hasProcessSearchQuery) {
       onClearSearch();
@@ -8949,6 +7480,38 @@ function PurchaseProcessTable({
     onAddLine();
   };
 
+  function renderRowActions(line: Row, order: Row, displayLines: Row[], textbookTitle: string, status: PurchaseKanbanStatus, textbook: Row | undefined) {
+    const lineId = getRecordId(line);
+    const received = getPurchaseDisplayQuantity(displayLines, "received");
+    const nextStatus = purchaseNextStatus(status);
+    const processAction = purchaseProcessAction(status);
+    const isMissingTextbookRequest = status === "requested" && !textbook;
+    const isReturnablePurchaseLine = mode === "order" && received > 0 && status !== "returned" && status !== "cancelled";
+    const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
+    const busy = [`purchase-move-${lineId}`, `purchase-return-${lineId}`, `purchase-delete-${lineId}`].includes(saving);
+    if (!canManageRequestLines) return null;
+    return (
+      <DataTableRowActions label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 더보기`} disabled={busy} primaryAction={
+        mode === "request" ? (
+          <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>수정</Button>
+        ) : isMissingTextbookRequest ? (
+          <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 마스터 등록`} onClick={() => onRegisterTextbook(line, order)}>교재 등록</Button>
+        ) : nextStatus ? (
+          <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} ${processAction?.label || "이동"}`} disabled={busy} onClick={() => {
+            if (processAction) { onSelectLine(line, order, processAction.stage); return; }
+            onMoveLine(line, order, nextStatus as PurchaseKanbanStatus);
+          }}>{processAction?.label || "이동"}</Button>
+        ) : null}>
+            <DropdownMenuItem aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 수정`} onSelect={() => onSelectLine(line, order)}><Pencil />수정</DropdownMenuItem>
+            {isReturnablePurchaseLine && onReturnLine ? <DropdownMenuItem aria-label={`${textbookTitle} 공급처 반품`} onSelect={() => onReturnLine(line, order)}><Truck />공급처 반품</DropdownMenuItem> : null}
+            {mode === "order" && isMissingTextbookRequest && textbookTitle !== "-" ? (
+              <DropdownMenuItem asChild><a href={buildKyoboSearchUrl(textbookTitle)} target="_blank" rel="noreferrer" aria-label={`${textbookTitle} 교보문고 검색`}><Search />교보문고 검색</a></DropdownMenuItem>
+            ) : null}
+            {isCancelablePurchaseLine ? <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 건 삭제`} onSelect={() => onDeleteLine({ ...line, purchaseScopeLines: displayLines }, order)}><Trash2 />삭제</DropdownMenuItem></> : null}
+      </DataTableRowActions>
+    );
+  }
+
   return (
     <>
       {mode === "order" ? (
@@ -8961,6 +7524,7 @@ function PurchaseProcessTable({
             groups={purchaseHandoffGroups}
             sourceLineCount={purchaseHandoffSourceLineCount}
             loadState={purchaseHandoffState}
+            onRetry={() => openPurchaseHandoff("order")}
             emptyLabel="전달할 주문 건이 없습니다"
             idPrefix="purchase-handoff"
             format="purchase-order"
@@ -8973,6 +7537,7 @@ function PurchaseProcessTable({
             groups={returnHandoffGroups}
             sourceLineCount={returnHandoffSourceLineCount}
             loadState={returnHandoffState}
+            onRetry={() => openPurchaseHandoff("return")}
             emptyLabel="반품 요청할 입고 건이 없습니다"
             idPrefix="purchase-return-handoff"
             format="purchase-return"
@@ -8980,190 +7545,36 @@ function PurchaseProcessTable({
         </>
       ) : null}
       <div
-        className="min-w-0 overflow-hidden rounded-lg border bg-background max-w-[calc(100vw-2rem)] md:max-w-none"
+        className="min-w-0"
         aria-label={mode === "request" ? "교재 요청 목록" : "교재 주문·입고 목록"}
       >
-      {showProcessControls ? (
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b p-3">
-        <div className="flex min-w-0 flex-wrap items-center gap-2">
-          {mode === "order" ? (
-            <Popover>
-              <PopoverTrigger asChild>
-                <Button
-                  type="button"
-                  variant={activePurchaseFilterCount > 0 ? "default" : "outline"}
-                  size="sm"
-                  className="h-8 max-w-full rounded-md"
-                  aria-label="주문·입고 보기 필터"
-                >
-                  <SlidersHorizontal className="mr-2 size-3.5" />
-                  <span className="shrink-0">필터</span>
-                  <span className="min-w-0 max-w-[14rem] truncate text-xs opacity-80">{activePurchaseFilterLabel}</span>
-                  {activePurchaseFilterCount > 0 ? (
-                    <span className="ml-1 rounded bg-primary-foreground/20 px-1.5 text-[11px] font-semibold">
-                      {formatQuantity(activePurchaseFilterCount)}
-                    </span>
-                  ) : null}
-                </Button>
-              </PopoverTrigger>
-              <PopoverContent align="start" className="w-[min(24rem,calc(100vw-2rem))] p-3">
-                <div className="grid gap-3">
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">범위</div>
-                    <div className="grid grid-cols-3 gap-1">
-                      {visibleBoardScopeOptions.map((scope) => (
-                        <Button
-                          key={scope}
-                          type="button"
-                          variant={boardScope === scope ? "default" : "outline"}
-                          size="sm"
-                          className="h-8 justify-between rounded-md px-2"
-                          aria-pressed={boardScope === scope}
-                          onClick={() => onScopeChange(scope)}
-                        >
-                          <span className="truncate">{purchaseBoardScopeLabels[scope]}</span>
-                          <span className={cn(
-                            "ml-2 rounded px-1.5 text-[11px] font-semibold",
-                            boardScope === scope ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                          )}>
-                            {purchaseProcessFilterCounts ? formatQuantity(purchaseProcessFilterCounts.boardScope[scope]) : "—"}
-                          </span>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <div className="text-xs font-medium text-muted-foreground">단계</div>
-                    <div className="grid grid-cols-3 gap-1">
-                      {visibleOrderFilterOptions.map((filter) => (
-                        <Button
-                          key={filter}
-                          type="button"
-                          variant={orderFilter === filter ? "default" : "outline"}
-                          size="sm"
-                          className="h-8 justify-between rounded-md px-2"
-                          aria-pressed={orderFilter === filter}
-                          onClick={() => onOrderFilterChange(filter)}
-                        >
-                          <span className="truncate">{purchaseOrderFilterLabels[filter]}</span>
-                          <span className={cn(
-                            "ml-2 rounded px-1.5 text-[11px] font-semibold",
-                            orderFilter === filter ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                          )}>
-                            {purchaseProcessFilterCounts ? formatQuantity(purchaseProcessFilterCounts.order[filter]) : "—"}
-                          </span>
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                  {visibleRequestFilterOptions.length > 0 ? (
-                    <div className="space-y-2">
-                      <div className="text-xs font-medium text-muted-foreground">검토</div>
-                      <div className="grid grid-cols-3 gap-1">
-                        {visibleRequestFilterOptions.map((option) => (
-                          <Button
-                            key={option.value}
-                            type="button"
-                            variant={requestFilter === option.value ? "default" : "outline"}
-                            size="sm"
-                            className="h-8 justify-between rounded-md px-2"
-                            aria-pressed={requestFilter === option.value}
-                            onClick={() => onRequestFilterChange(option.value)}
-                          >
-                            <span className="truncate">{option.label}</span>
-                            <span className={cn(
-                              "ml-2 rounded px-1.5 text-[11px] font-semibold",
-                              requestFilter === option.value ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-                            )}>
-                              {purchaseProcessFilterCounts ? formatQuantity(purchaseProcessFilterCounts.request[option.value]) : "—"}
-                            </span>
-                          </Button>
-                        ))}
-                      </div>
-                    </div>
-                  ) : null}
-                  {activePurchaseFilterCount > 0 ? (
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-8 justify-self-start rounded-md px-2"
-                      onClick={() => {
-                        onScopeChange("active");
-                        onOrderFilterChange("all");
-                        onRequestFilterChange("all");
-                      }}
-                    >
-                      기본 보기
-                    </Button>
-                  ) : null}
-                </div>
-              </PopoverContent>
-            </Popover>
-          ) : null}
-          {showProcessSummary ? (
-            <div className="min-w-0 truncate text-sm text-muted-foreground" aria-live="polite">
-              {processSummaryText}
-            </div>
-          ) : null}
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          {hasVisiblePurchaseRows ? (
-            <div role="group" aria-label="교재 처리표 컬럼 구성" className="shrink-0">
-              {columnSettingsControl}
-            </div>
-          ) : null}
-          {mode === "order" && selectedProcessLineCount > 0 ? (
-            <>
-              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-                선택 {formatQuantity(selectedProcessLineCount)}
-              </Badge>
-              {selectedOrderableRequestCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  disabled={selectedOrderableRequestCount === 0}
-                  aria-label="선택 요청 일괄 주문"
-                  title="선택 요청 일괄 주문"
-                  onClick={onBulkOrder}
-                >
-                  선택 주문
-                </Button>
-              ) : null}
-              {selectedReceivableCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  disabled={selectedReceivableCount === 0}
-                  aria-label="선택 주문 일괄 입고"
-                  title="선택 주문 일괄 입고"
-                  onClick={onBulkReceive}
-                >
-                  선택 입고
-                </Button>
-              ) : null}
-              {selectedReturnableCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  disabled={selectedReturnableCount === 0}
-                  aria-label="선택 입고 건 공급처 반품"
-                  title="선택 입고 건 공급처 반품"
-                  onClick={onBulkReturn}
-                >
-                  선택 반품
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-          {hasVisiblePurchaseRows ? (
-            mode === "request" ? (
+      <DataTableWorkspaceToolbar feedback={readFeedback} search={searchControl}
+        filters={mode === "order" ? (          <DataTableFilters aria-label="주문·입고 필터">
+            <DataTableSelectFilter inline id="purchase-scope-filter" label="범위" ariaLabel="주문·입고 범위" value={boardScope} onValueChange={onScopeChange}
+              options={(Object.keys(purchaseBoardScopeLabels) as PurchaseBoardScope[]).map((value) => ({ value, label: purchaseBoardScopeLabels[value], count: purchaseProcessFilterCounts?.boardScope[value] ?? null }))} />
+            <DataTableSelectFilter inline id="purchase-stage-filter" label="단계" ariaLabel="주문·입고 단계" value={orderFilter} onValueChange={onOrderFilterChange}
+              options={(Object.keys(purchaseOrderFilterLabels) as PurchaseOrderFilter[]).map((value) => ({ value, label: purchaseOrderFilterLabels[value], count: purchaseProcessFilterCounts?.order[value] ?? null }))} />
+            <DataTableSelectFilter inline id="purchase-registration-filter" label="교재 등록" ariaLabel="주문·입고 교재 등록" value={requestFilter} onValueChange={onRequestFilterChange}
+              options={requestFilterOptions.map((option) => ({ ...option, count: purchaseProcessFilterCounts?.request[option.value] ?? null }))} />
+            <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" disabled={purchaseFiltersAreDefault} aria-label="주문·입고 필터 초기화" onClick={() => {
+              onScopeChange("active"); onOrderFilterChange("all"); onRequestFilterChange("all");
+            }}><RefreshCw className="size-4" aria-hidden="true" /></Button>
+          </DataTableFilters>) : (
+          <DataTableFilters aria-label="교재 요청 필터">
+            <DataTableSelectFilter inline id="request-registration-filter" label="교재 등록" ariaLabel="요청 교재 등록"
+              value={requestFilter} onValueChange={onRequestFilterChange} options={requestFilterOptions} />
+            <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" disabled={requestFilter === "all"} aria-label="교재 요청 필터 초기화" onClick={() => onRequestFilterChange("all")}><RefreshCw className="size-4" aria-hidden="true" /></Button>
+          </DataTableFilters>
+        )}
+        actions={<>
+          <span role="status" className="sr-only">{purchaseBatchBusy ? "선택한 교재 처리 중…" : loading ? "목록 불러오는 중…" : filtersChanging ? "이전 조건의 결과 표시 중" : ""}</span>
+          {mode === "order" && selectedProcessLineCount > 0 ? (<>
+            <span className="mr-auto whitespace-nowrap text-sm font-medium tabular-nums">{formatQuantity(selectedProcessLineCount)}개 선택</span>
+            {selectedOrderableRequestCount > 0 ? <Button type="button" size="sm" variant="outline" aria-label="선택 요청 일괄 주문" disabled={purchaseBatchBusy} onClick={onBulkOrder}>선택 주문</Button> : null}
+            {selectedReceivableCount > 0 ? <Button type="button" size="sm" variant="outline" aria-label="선택 주문 일괄 입고" disabled={purchaseBatchBusy} aria-busy={saving === "purchase-bulk-receive"} onClick={onBulkReceive}>선택 입고</Button> : null}
+            {selectedReturnableCount > 0 ? <DataTableRowActions label="선택 주문·입고 작업" disabled={purchaseBatchBusy}><DropdownMenuItem aria-label="선택 입고 건 공급처 반품" onSelect={onBulkReturn}>선택 반품</DropdownMenuItem></DataTableRowActions> : null}
+            <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="주문·입고 선택 해제" disabled={purchaseBatchBusy} onClick={() => onToggleVisibleLines?.(selectedLineIds, false)}><X className="size-4" /></Button>
+          </>) : (<>{mode === "request" ? (
               <Button type="button" size="sm" className="shrink-0" aria-label="교재 요청 추가" title="교재 요청 추가" onClick={onAddLine}>
                 <Plus className="mr-2 size-4" />
                 요청 추가
@@ -9171,49 +7582,33 @@ function PurchaseProcessTable({
             ) : (
               <>
                 {acceptedFilters ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    aria-label="공급처별 주문 전달 열기"
-                    title="공급처별 주문 전달"
-                    onClick={() => openPurchaseHandoff("order")}
-                  >
-                    <Copy className="mr-2 size-3.5" />
-                    전달
-                  </Button>
-                ) : null}
-                {acceptedFilters ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="outline"
-                    className="shrink-0"
-                    aria-label="공급처 반품 요청서 열기"
-                    title="공급처 반품 요청서"
-                    onClick={() => openPurchaseHandoff("return")}
-                  >
-                    <Truck className="mr-2 size-3.5" />
-                    반품 요청서
-                  </Button>
+                  <DropdownMenu>
+                    <DropdownMenuTrigger asChild>
+                      <Button type="button" variant="outline" size="sm" aria-label="주문 문서 메뉴" disabled={loading || filtersChanging || !hasVisiblePurchaseRows} className="gap-1.5">
+                        <Copy className="size-3.5" aria-hidden="true" />주문서<ChevronDown className="size-3.5" aria-hidden="true" />
+                      </Button>
+                    </DropdownMenuTrigger>
+                    <DropdownMenuContent align="end" className="min-w-48 motion-reduce:animate-none">
+                      <DropdownMenuItem aria-label="공급처별 주문 전달 열기" onSelect={() => openPurchaseHandoff("order")}><Copy />공급처별 주문서</DropdownMenuItem>
+                      <DropdownMenuItem aria-label="공급처 반품 요청서 열기" onSelect={() => openPurchaseHandoff("return")}><Truck />반품 요청서</DropdownMenuItem>
+                    </DropdownMenuContent>
+                  </DropdownMenu>
                 ) : null}
                 <Button type="button" size="sm" className="shrink-0" aria-label="교재 주문 추가" title="교재 주문 추가" onClick={onAddLine}>
                   <Plus className="mr-2 size-4" />
                   주문 추가
                 </Button>
               </>
-            )
-          ) : null}
-        </div>
-      </div>
-      ) : null}
+            )}</>)}
+        </>}
+      />
 
+      <div data-slot="data-table-results" className={TEXTBOOK_RESULTS_CLASS_NAME}>
       {!hasVisiblePurchaseRows ? (
         <ProcessGroupEmptyState
-          label={getPurchaseProcessEmptyLabel(mode, emptyGroupId, requestFilter, orderFilter, searchQuery)}
-          hint={showProcessControls && !hasHiddenProcessRows ? getPurchaseProcessEmptyHint(mode, emptyGroupId, requestFilter, orderFilter, searchQuery) : undefined}
-          actionLabel={emptyActionLabel}
+          label={loading ? "목록 불러오는 중…" : readError ? "교재 목록을 불러오지 못했습니다" : getPurchaseProcessEmptyLabel(mode, emptyGroupId, requestFilter, orderFilter, searchQuery)}
+          hint={!readError && !hasHiddenProcessRows ? getPurchaseProcessEmptyHint(mode, emptyGroupId, requestFilter, orderFilter, searchQuery) : undefined}
+          actionLabel={loading || readError ? undefined : emptyActionLabel}
           onAction={handleEmptyAction}
         />
       ) : (
@@ -9225,17 +7620,11 @@ function PurchaseProcessTable({
             : buildPurchaseDisplayRows(rows, ordersById, textbooks);
           const collapsed = Boolean(collapsedGroups[group.id]);
           const aggregateGroup = summary?.groups.find((item) => item.status === group.id) || null;
-          const studentRequestedTotal = aggregateGroup?.quantities.student.requested ?? null;
-          const studentOrderedTotal = aggregateGroup?.quantities.student.ordered ?? null;
-          const studentReceivedTotal = aggregateGroup?.quantities.student.received ?? null;
-          const teacherRequestedTotal = aggregateGroup?.quantities.teacher.requested ?? null;
-          const teacherOrderedTotal = aggregateGroup?.quantities.teacher.ordered ?? null;
-          const teacherReceivedTotal = aggregateGroup?.quantities.teacher.received ?? null;
           const requestedTotal = aggregateGroup?.quantities.requested ?? null;
           const orderedTotal = aggregateGroup?.quantities.ordered ?? null;
           const receivedTotal = aggregateGroup?.quantities.received ?? null;
           const groupActionableLineIds: string[] = [];
-          for (const line of rows) {
+          for (const line of rows.flatMap(getPurchaseScopeLines)) {
             const lineId = getRecordId(line);
             if (lineId && visibleActionablePurchaseLineIdSet.has(lineId)) {
               groupActionableLineIds.push(lineId);
@@ -9272,12 +7661,11 @@ function PurchaseProcessTable({
               </button>
               {!collapsed && rows.length > 0 ? (
                 <>
-                <div data-testid="textbook-purchase-process-mobile-list" className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden">
+                <div data-testid="textbook-purchase-process-mobile-list" className={cn(DATA_TABLE_MOBILE_LIST_CLASS_NAME, "min-w-0 max-w-full overflow-hidden")}>
                   {displayRows.map((displayRow) => {
                     const line = displayRow.line;
                     const displayLines = displayRow.lines;
                     const order = ((line.order || getPurchaseLineOrder(line, ordersById)) || {}) as Row;
-                    const lineId = getRecordId(line);
                     const displayLineIds = displayLines.map((scopeLine) => getRecordId(scopeLine)).filter(Boolean);
                     const displayActionableLineIds = displayLineIds.filter((id) => visibleActionablePurchaseLineIdSet.has(id));
                     const displayAllActionableSelected =
@@ -9292,21 +7680,14 @@ function PurchaseProcessTable({
                     const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, configuredSupplierId, suppliers, draft.unitCost, draft.copyScope);
                     const locationName = getLocationName(locations, draft.locationId) || "-";
                     const classRecord = getClassById(classes, draft.classId);
-                    const classStudentCount = getClassStudentCount(classRecord, students);
-                    const quantityFit = getPurchaseQuantityClassFit(String(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested")), classStudentCount);
                     const ordered = getPurchaseDisplayQuantity(displayLines, "ordered");
                     const received = getPurchaseDisplayQuantity(displayLines, "received");
-                    const nextStatus = purchaseNextStatus(status);
-                    const processAction = purchaseProcessAction(status);
-                    const isMissingTextbookRequest = status === "requested" && !textbook;
-                    const isReturnablePurchaseLine = mode === "order" && received > 0 && status !== "returned" && status !== "cancelled";
-                    const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
 
                     return (
-                      <article key={`mobile-${displayRow.id}`} data-prepared-surface={`${mode === "request" ? "requests" : "purchase"}-mobile`} data-prepared-row-id={displayRow.id} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
+                      <article key={`mobile-${displayRow.id}`} data-prepared-surface={`${mode === "request" ? "requests" : "purchase"}-mobile`} data-prepared-row-id={displayRow.id} className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME} data-state={displayAllActionableSelected || displaySomeActionableSelected ? "selected" : undefined}>
                         <div className="flex min-w-0 items-start gap-3">
-                          {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
-                            <Checkbox
+                          {showBulkPurchaseSelection ? (
+                            <DataTableSelectionCheckbox
                               checked={displayAllActionableSelected || (displaySomeActionableSelected && "indeterminate")}
                               disabled={displayActionableLineIds.length === 0}
                               onCheckedChange={(value) => onToggleVisibleLines?.(displayActionableLineIds, value === true)}
@@ -9318,17 +7699,9 @@ function PurchaseProcessTable({
                           <div className="min-w-0 flex-1">
                             <div className="flex min-w-0 items-start justify-between gap-2">
                               {canManageRequestLines && onSelectLine ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onSelectLine(line, order)}
-                                  aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
-                                  title={textbookTitle}
-                                  className="min-w-0 flex-1 truncate text-left text-sm font-semibold underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                                >
-                                  {textbookTitle}
-                                </button>
+                                <DataTableDetailButton label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`} onClick={() => onSelectLine(line, order)}>{textbookTitle}</DataTableDetailButton>
                               ) : (
-                                <span className="min-w-0 flex-1 truncate text-sm font-semibold" title={textbookTitle}>
+                                <span className="min-w-0 flex-1 whitespace-normal break-words text-sm font-semibold" title={textbookTitle}>
                                   {textbookTitle}
                                 </span>
                               )}
@@ -9347,190 +7720,56 @@ function PurchaseProcessTable({
                             </div>
                           </div>
                         </div>
-                        <div className={cn("mt-3 grid gap-2 text-center text-xs", mode === "order" ? "grid-cols-2 sm:grid-cols-3" : "grid-cols-2")}>
-                          {isPurchaseColumnVisible("studentRequested") ? (
-                            <div className="rounded-md bg-sky-50/70 px-2 py-2 ring-1 ring-sky-100">
-                              <div className="text-muted-foreground">학생용 요청</div>
-                              <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested"))}</div>
+                        <div className={cn("mt-3 grid gap-3 border-y border-border/60 py-3", mode === "order" ? "grid-cols-3" : "grid-cols-1")}>
+                          {purchaseProcessQuantityColumns.filter(column => mode === "order" || !column.orderOnly).map(column => (
+                            <div key={column.id} data-quantity-stage={column.kind} className="min-w-0 space-y-2">
+                              <p className="text-xs font-medium text-muted-foreground">{column.label}</p>
+                              <PurchaseQuantityPair label={column.label} student={getPurchaseDisplayScopeQuantity(displayLines, "student", column.kind)} teacher={getPurchaseDisplayScopeQuantity(displayLines, "teacher", column.kind)} />
                             </div>
-                          ) : null}
-                          {mode === "order" && isPurchaseColumnVisible("studentOrdered") ? (
-                            <div className="rounded-md bg-sky-50/70 px-2 py-2 ring-1 ring-sky-100">
-                              <div className="text-muted-foreground">학생용 주문</div>
-                              <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "ordered"))}</div>
-                            </div>
-                          ) : null}
-                          {mode === "order" && isPurchaseColumnVisible("studentReceived") ? (
-                            <div className="rounded-md bg-sky-50/70 px-2 py-2 ring-1 ring-sky-100">
-                              <div className="text-muted-foreground">학생용 입고</div>
-                              <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "received"))}</div>
-                            </div>
-                          ) : null}
-                          {isPurchaseColumnVisible("teacherRequested") ? (
-                            <div className="rounded-md bg-amber-50/70 px-2 py-2 ring-1 ring-amber-100">
-                              <div className="text-muted-foreground">교사용 요청</div>
-                              <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "requested"))}</div>
-                            </div>
-                          ) : null}
-                          {mode === "order" && isPurchaseColumnVisible("teacherOrdered") ? (
-                            <div className="rounded-md bg-amber-50/70 px-2 py-2 ring-1 ring-amber-100">
-                              <div className="text-muted-foreground">교사용 주문</div>
-                              <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "ordered"))}</div>
-                            </div>
-                          ) : null}
-                          {mode === "order" && isPurchaseColumnVisible("teacherReceived") ? (
-                            <div className="rounded-md bg-amber-50/70 px-2 py-2 ring-1 ring-amber-100">
-                              <div className="text-muted-foreground">교사용 입고</div>
-                              <div className="mt-1 text-right font-medium tabular-nums">{formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "received"))}</div>
-                            </div>
-                          ) : null}
+                          ))}
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                          {displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === "student") ? (
-                            <Badge variant="outline" className="rounded-md">학생용</Badge>
-                          ) : null}
-                          {displayLines.some((scopeLine) => getTextbookCopyScope(scopeLine) === "teacher") ? (
-                            <Badge variant="outline" className="rounded-md">교사용</Badge>
-                          ) : null}
-                          <Badge
-                            variant="outline"
-                            className={cn(
-                              "ml-auto rounded-md tabular-nums",
-                              quantityFit.tone === "danger" && "border-red-300 bg-red-50 text-red-700",
-                              quantityFit.tone === "warning" && "border-amber-300 bg-amber-50 text-amber-700",
-                              quantityFit.tone === "good" && "border-emerald-300 bg-emerald-50 text-emerald-700",
-                            )}
-                            title={quantityFit.label}
-                          >
-                            {quantityFit.label}
-                          </Badge>
-                        </div>
-                        <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 [&>button]:w-full">
-                          {mode === "request" ? (
-                            canManageRequestLines && onSelectLine ? (
-                              <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>
-                                <Pencil className="mr-1 size-3.5" />
-                                수정
-                              </Button>
-                            ) : null
-                          ) : (
-                            <>
-                              <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 주문·입고 수정`} onClick={() => onSelectLine(line, order)}>
-                                <Pencil className="mr-1 size-3.5" />
-                                수정
-                              </Button>
-                              {mode === "order" && isMissingTextbookRequest ? (
-                                <>
-                                  <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 마스터 등록`} onClick={() => onRegisterTextbook(line, order)}>
-                                    마스터 등록
-                                  </Button>
-                                  {textbookTitle !== "-" ? (
-                                    <Button type="button" variant="outline" size="sm" asChild>
-                                      <a href={buildKyoboSearchUrl(textbookTitle)} target="_blank" rel="noreferrer" aria-label={`${textbookTitle} 교보문고 검색`} title={`${textbookTitle} 교보문고 검색`}>
-                                        <Search className="mr-1 size-3.5" />
-                                        교보 검색
-                                      </a>
-                                    </Button>
-                                  ) : null}
-                                </>
-                              ) : null}
-                              {canManageRequestLines && nextStatus && !isMissingTextbookRequest ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  aria-label={`${textbookTitle} ${processAction?.label || "이동"}`}
-                                  disabled={saving === `purchase-move-${lineId}`}
-                                  onClick={() => {
-                                    if (processAction) {
-                                      onSelectLine(line, order, processAction.stage);
-                                      return;
-                                    }
-                                    onMoveLine(line, order, nextStatus as PurchaseKanbanStatus);
-                                  }}
-                                >
-                                  {processAction?.label || "이동"}
-                                </Button>
-                              ) : null}
-                              {canManageRequestLines && isReturnablePurchaseLine && onReturnLine ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  aria-label={`${textbookTitle} 공급처 반품`}
-                                  disabled={saving === `purchase-return-${lineId}`}
-                                  onClick={() => onReturnLine(line, order)}
-                                >
-                                  반품
-                                </Button>
-                              ) : null}
-                            </>
-                          )}
-                          {canManageRequestLines && isCancelablePurchaseLine ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="icon"
-                              aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 건 삭제`}
-                              disabled={saving === `purchase-delete-${lineId}`}
-                              onClick={() => onDeleteLine({ ...line, purchaseScopeLines: displayLines }, order)}
-                            >
-                              <Trash2 className="size-4" />
-                            </Button>
-                          ) : null}
-                        </div>
+
+                        <div className="mt-3">{renderRowActions(line, order, displayLines, textbookTitle, status, textbook)}</div>
                       </article>
                     );
                   })}
                 </div>
-                <div className="hidden max-w-full overflow-x-auto md:block">
+                <DataTableViewport className="hidden [scrollbar-gutter:auto] md:block [&>[data-slot=table-container]]:overflow-visible" role="region" aria-label={`${group.title} 처리표 스크롤`} tabIndex={0}>
                   <Table
-                    className={mode === "request" ? "w-full min-w-[1120px]" : "w-full min-w-[1440px]"}
-                    aria-colcount={visiblePurchaseColumnCount}
+                    className={mode === "request" ? "w-full min-w-[812px] table-fixed" : "w-full min-w-[1188px] table-fixed"}
+                    aria-colcount={mode === "request" ? 5 : 8 + Number(showBulkPurchaseSelection)}
                   >
                     <caption className="sr-only">{mode === "request" ? "교재 요청 처리 목록" : "교재 주문·입고 처리 목록"}</caption>
+                    <colgroup>
+                      {showBulkPurchaseSelection ? <col style={{ width: 40 }} /> : null}
+                      <col />
+                      {mode === "order" ? <col style={{ width: 104 }} /> : null}
+                      {purchaseProcessQuantityColumns.filter(column => mode === "order" || !column.orderOnly).map(column => <col key={column.id} style={{ width: 104 }} />)}
+                      <col style={{ width: mode === "order" ? 128 : 104 }} />
+                      <col style={{ width: 184 }} /><col style={{ width: 132 }} />
+                    </colgroup>
                     <TableHeader className="sticky top-0 z-10 bg-background">
-                      <TableRow className="bg-muted/30">
-                        {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
-                          <TableHead className="w-10">
-                            <Checkbox
+                      <DataTableHeaderRow>
+                        {showBulkPurchaseSelection ? (
+                          <DataTableHeaderCell className="w-10 px-0">
+                            <DataTableSelectionCheckbox
                               checked={groupAllActionableSelected || (groupSomeActionableSelected && "indeterminate")}
                               disabled={groupActionableLineIds.length === 0}
                               onCheckedChange={(value) => onToggleVisibleLines?.(groupActionableLineIds, value === true)}
                               title="일괄 처리 가능한 행 전체 선택"
                               aria-label="일괄 처리 가능한 행 전체 선택"
                             />
-                          </TableHead>
+                          </DataTableHeaderCell>
                         ) : null}
-                        {isPurchaseColumnVisible("status") ? <TableHead className="w-[104px]">진행상태</TableHead> : null}
-                        {mode === "order" ? (
-                          <>
-                            {isPurchaseColumnVisible("supplier") ? <TableHead className="w-[120px]">총판</TableHead> : null}
-                            {isPurchaseColumnVisible("unitCost") ? <TableHead className="w-[96px] text-right">단가</TableHead> : null}
-                          </>
-                        ) : null}
-                        {isPurchaseColumnVisible("eventAt") ? <TableHead className="w-[118px]">처리일시</TableHead> : null}
-                        {isPurchaseColumnVisible("requester") ? <TableHead className="w-[104px]">요청자</TableHead> : null}
-                        {isPurchaseColumnVisible("textbook") ? <TableHead>교재명</TableHead> : null}
-                        {isPurchaseColumnVisible("location") ? <TableHead className="w-[88px]">위치</TableHead> : null}
-                        {isPurchaseColumnVisible("class") ? <TableHead className="w-[140px]">수업</TableHead> : null}
-                        {isPurchaseColumnVisible("studentRequested") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("student")}>학생용 요청</span></TableHead> : null}
-                        {mode === "order" ? (
-                          <>
-                            {isPurchaseColumnVisible("studentOrdered") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("student")}>학생용 주문</span></TableHead> : null}
-                            {isPurchaseColumnVisible("studentReceived") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("student")}>학생용 입고</span></TableHead> : null}
-                          </>
-                        ) : null}
-                        {isPurchaseColumnVisible("teacherRequested") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("teacher")}>교사용 요청</span></TableHead> : null}
-                        {mode === "order" ? (
-                          <>
-                            {isPurchaseColumnVisible("teacherOrdered") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("teacher")}>교사용 주문</span></TableHead> : null}
-                            {isPurchaseColumnVisible("teacherReceived") ? <TableHead className="w-[96px] whitespace-nowrap text-right"><span className={purchaseQuantityHeaderPillClassName("teacher")}>교사용 입고</span></TableHead> : null}
-                          </>
-                        ) : null}
-                        {isPurchaseColumnVisible("decision") ? <TableHead className="w-[96px]">판단</TableHead> : null}
-                        {isPurchaseColumnVisible("action") ? <TableHead className={cn(mode === "request" ? "w-[160px]" : "w-[260px]", "text-right", stickyActionHeadClassName)}>작업</TableHead> : null}
-                      </TableRow>
+                        <DataTableHeaderCell className="min-w-[288px]">교재</DataTableHeaderCell>
+                        {(mode === "order") ? <DataTableHeaderCell className="w-[104px]">진행상태</DataTableHeaderCell> : null}
+                        {purchaseProcessQuantityColumns.filter(column => mode === "order" || !column.orderOnly).map(column => (
+                          <DataTableHeaderCell key={column.id} className="w-[104px]">{column.label}</DataTableHeaderCell>
+                        ))}
+                        <DataTableHeaderCell>{mode === "order" ? "총판 · 단가" : "요청자"}</DataTableHeaderCell>
+                        <DataTableHeaderCell>수업 · 위치</DataTableHeaderCell>
+                        <DataTableHeaderCell className={cn("w-[132px] min-w-[132px]", "text-right", stickyActionHeadClassName)}>작업</DataTableHeaderCell>
+                      </DataTableHeaderRow>
                     </TableHeader>
                     <TableBody>
                       {displayRows.map((displayRow) => {
@@ -9552,251 +7791,84 @@ function PurchaseProcessTable({
                         const unitCost = getConfiguredTextbookPurchaseUnitCost(textbook, configuredSupplierId, suppliers, draft.unitCost, draft.copyScope);
                         const locationName = getLocationName(locations, draft.locationId) || "-";
                         const classRecord = getClassById(classes, draft.classId);
-                        const classStudentCount = getClassStudentCount(classRecord, students);
-                        const quantityFit = getPurchaseQuantityClassFit(String(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested")), classStudentCount);
                         const ordered = getPurchaseDisplayQuantity(displayLines, "ordered");
                         const received = getPurchaseDisplayQuantity(displayLines, "received");
-                        const nextStatus = purchaseNextStatus(status);
-                        const processAction = purchaseProcessAction(status);
-                        const isMissingTextbookRequest = status === "requested" && !textbook;
-                        const isReturnablePurchaseLine = mode === "order" && received > 0 && status !== "returned" && status !== "cancelled";
-                        const isCancelablePurchaseLine = mode === "request" || (status !== "returned" && status !== "cancelled" && !isReturnablePurchaseLine);
                         return (
-                          <TableRow key={displayRow.id} data-prepared-surface={`${mode === "request" ? "requests" : "purchase"}-desktop`} data-prepared-row-id={displayRow.id} className={cn((selectedLineId === lineId || displayLineIds.includes(selectedLineId)) && "bg-primary/5")}>
-                            {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? (
-                              <TableCell>
-                                <Checkbox
+                          <DataTableBodyRow key={displayRow.id} data-prepared-surface={`${mode === "request" ? "requests" : "purchase"}-desktop`} data-prepared-row-id={displayRow.id} data-state={displayAllActionableSelected || displaySomeActionableSelected || selectedLineId === lineId || displayLineIds.includes(selectedLineId) ? "selected" : undefined}>
+                            {showBulkPurchaseSelection ? (
+                              <DataTableBodyCell className="px-0 py-1">
+                                <DataTableSelectionCheckbox
                                   checked={displayAllActionableSelected || (displaySomeActionableSelected && "indeterminate")}
                                   disabled={displayActionableLineIds.length === 0}
                                   onCheckedChange={(value) => onToggleVisibleLines?.(displayActionableLineIds, value === true)}
                                   title={`${textbookTitle} 일괄 처리 선택`}
                                   aria-label={`${textbookTitle} 일괄 처리 선택`}
                                 />
-                              </TableCell>
+                              </DataTableBodyCell>
                             ) : null}
-                            {isPurchaseColumnVisible("status") ? (
-                            <TableCell>
-                              <Badge variant="outline" className={cn("rounded-md", processStatusPillClass(status))}>
-                                {purchaseStatusLabel(status, ordered, received)}
-                              </Badge>
-                            </TableCell>
-                            ) : null}
-                            {mode === "order" ? (
-                              <>
-                                {isPurchaseColumnVisible("supplier") ? (
-                                  <TableCell className="max-w-[120px] truncate" title={getSupplierName(suppliers, configuredSupplierId) || "-"}>
-                                    {getSupplierName(suppliers, configuredSupplierId) || "-"}
-                                  </TableCell>
-                                ) : null}
-                                {isPurchaseColumnVisible("unitCost") ? (
-                                  <TableCell className="text-right tabular-nums">{formatPurchaseUnitCost(unitCost, textbook)}</TableCell>
-                                ) : null}
-                              </>
-                            ) : null}
-                            {isPurchaseColumnVisible("eventAt") ? (
-                              <TableCell className="text-muted-foreground">{formatCompactDateTime(getPurchaseEventAt(line, order, status))}</TableCell>
-                            ) : null}
-                            {isPurchaseColumnVisible("requester") ? <TableCell className="max-w-[104px] truncate">{draft.requestBy || "-"}</TableCell> : null}
-                            {isPurchaseColumnVisible("textbook") ? (
-                            <TableCell>
+                            <DataTableBodyCell className="whitespace-normal break-words">
                               {canManageRequestLines && onSelectLine ? (
-                                <button
-                                  type="button"
-                                  onClick={() => onSelectLine(line, order)}
-                                  aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`}
-                                  title={textbookTitle}
-                                  className="max-w-[360px] truncate text-left font-medium hover:underline"
-                                >
-                                  {textbookTitle}
-                                </button>
+                                <DataTableDetailButton label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 상세 열기`} onClick={() => onSelectLine(line, order)}>{textbookTitle}</DataTableDetailButton>
                               ) : (
-                                <span className="block max-w-[360px] truncate font-medium" title={textbookTitle}>
+                                <span className="block whitespace-normal break-words font-medium" title={textbookTitle}>
                                   {textbookTitle}
                                 </span>
                               )}
                               {!textbook ? (
                                 <div className="text-xs text-amber-700">미등록</div>
                               ) : null}
-                            </TableCell>
-                            ) : null}
-                            {isPurchaseColumnVisible("location") ? <TableCell className="max-w-[88px] truncate" title={locationName}>{locationName}</TableCell> : null}
-                            {isPurchaseColumnVisible("class") ? (
-                              <TableCell className="max-w-[140px] truncate" title={classRecord ? getClassName(classRecord) : "수업 미지정"}>
-                                {classRecord ? getClassName(classRecord) : "수업 미지정"}
-                              </TableCell>
-                            ) : null}
-                            {isPurchaseColumnVisible("studentRequested") ? (
-                              <TableCell className={purchaseQuantityCellClassName("student")}>
-                                {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "requested"))}
-                              </TableCell>
-                            ) : null}
-                            {mode === "order" ? (
-                              <>
-                                {isPurchaseColumnVisible("studentOrdered") ? (
-                                  <TableCell className={purchaseQuantityCellClassName("student")}>
-                                    {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "ordered"))}
-                                  </TableCell>
-                                ) : null}
-                                {isPurchaseColumnVisible("studentReceived") ? (
-                                  <TableCell className={purchaseQuantityCellClassName("student")}>
-                                    {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "student", "received"))}
-                                  </TableCell>
-                                ) : null}
-                              </>
-                            ) : null}
-                            {isPurchaseColumnVisible("teacherRequested") ? (
-                              <TableCell className={purchaseQuantityCellClassName("teacher")}>
-                                {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "requested"))}
-                              </TableCell>
-                            ) : null}
-                            {mode === "order" ? (
-                              <>
-                                {isPurchaseColumnVisible("teacherOrdered") ? (
-                                  <TableCell className={purchaseQuantityCellClassName("teacher")}>
-                                    {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "ordered"))}
-                                  </TableCell>
-                                ) : null}
-                                {isPurchaseColumnVisible("teacherReceived") ? (
-                                  <TableCell className={purchaseQuantityCellClassName("teacher")}>
-                                    {formatQuantity(getPurchaseDisplayScopeQuantity(displayLines, "teacher", "received"))}
-                                  </TableCell>
-                                ) : null}
-                              </>
-                            ) : null}
-                            {isPurchaseColumnVisible("decision") ? (
-                            <TableCell>
-                              <Badge
-                                variant="outline"
-                                className={cn(
-                                  "rounded-md tabular-nums",
-                                  quantityFit.tone === "danger" && "border-red-300 bg-red-50 text-red-700",
-                                  quantityFit.tone === "warning" && "border-amber-300 bg-amber-50 text-amber-700",
-                                  quantityFit.tone === "good" && "border-emerald-300 bg-emerald-50 text-emerald-700",
-                                )}
-                                title={quantityFit.label}
-                              >
-                                {quantityFit.label}
+                              <div className="text-xs text-muted-foreground">{formatCompactDateTime(getPurchaseEventAt(line, order, status))}</div>
+                            </DataTableBodyCell>
+                            {(mode === "order") ? (
+                            <DataTableBodyCell>
+                              <Badge variant="outline" className={cn("rounded-md", processStatusPillClass(status))}>
+                                {purchaseStatusLabel(status, ordered, received)}
                               </Badge>
-                            </TableCell>
+                            </DataTableBodyCell>
                             ) : null}
-                            {isPurchaseColumnVisible("action") ? (
-                            <TableCell className={stickyActionCellClassName}>
-                              <div className="flex justify-end gap-1">
-                                {mode === "request" ? (
-                                  canManageRequestLines && onSelectLine ? (
-                                    <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 요청 수정`} onClick={() => onSelectLine(line, order)}>
-                                      <Pencil className="mr-1 size-3.5" />
-                                      수정
-                                    </Button>
-                                  ) : null
-                                ) : (
-                                  <>
-                                    <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 주문·입고 수정`} onClick={() => onSelectLine(line, order)}>
-                                      <Pencil className="mr-1 size-3.5" />
-                                      수정
-                                    </Button>
-                                    {mode === "order" && isMissingTextbookRequest ? (
-                                      <>
-                                        <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 마스터 등록`} onClick={() => onRegisterTextbook(line, order)}>
-                                          마스터 등록
-                                        </Button>
-                                        {textbookTitle !== "-" ? (
-                                          <Button type="button" variant="outline" size="sm" asChild>
-                                            <a href={buildKyoboSearchUrl(textbookTitle)} target="_blank" rel="noreferrer" aria-label={`${textbookTitle} 교보문고 검색`} title={`${textbookTitle} 교보문고 검색`}>
-                                              <Search className="mr-1 size-3.5" />
-                                              교보 검색
-                                            </a>
-                                          </Button>
-                                        ) : null}
-                                      </>
-                                    ) : null}
-                                    {canManageRequestLines && nextStatus && !isMissingTextbookRequest ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        aria-label={`${textbookTitle} ${processAction?.label || "이동"}`}
-                                        disabled={saving === `purchase-move-${lineId}`}
-                                        onClick={() => {
-                                          if (processAction) {
-                                            onSelectLine(line, order, processAction.stage);
-                                            return;
-                                          }
-                                          onMoveLine(line, order, nextStatus as PurchaseKanbanStatus);
-                                        }}
-                                      >
-                                        {processAction?.label || "이동"}
-                                      </Button>
-                                    ) : null}
-                                    {canManageRequestLines && isReturnablePurchaseLine && onReturnLine ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        aria-label={`${textbookTitle} 공급처 반품`}
-                                        disabled={saving === `purchase-return-${lineId}`}
-                                        onClick={() => onReturnLine(line, order)}
-                                      >
-                                        반품
-                                      </Button>
-                                    ) : null}
-                                  </>
-                                )}
-                                {canManageRequestLines && isCancelablePurchaseLine ? (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="icon"
-                                    aria-label={`${textbookTitle} ${mode === "request" ? "요청" : "주문·입고"} 건 삭제`}
-                                    disabled={saving === `purchase-delete-${lineId}`}
-                                    onClick={() => onDeleteLine({ ...line, purchaseScopeLines: displayLines }, order)}
-                                  >
-                                    <Trash2 className="size-4" />
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                            ) : null}
-                          </TableRow>
+                            {purchaseProcessQuantityColumns.filter(column => mode === "order" || !column.orderOnly).map(column => (
+                              <DataTableBodyCell key={column.id} data-quantity-stage={column.kind}>
+                                <PurchaseQuantityPair label={column.label} student={getPurchaseDisplayScopeQuantity(displayLines, "student", column.kind)} teacher={getPurchaseDisplayScopeQuantity(displayLines, "teacher", column.kind)} />
+                              </DataTableBodyCell>
+                            ))}
+                            <DataTableBodyCell className="whitespace-normal break-words">
+                              {mode === "order" ? <>
+                                <div>{getSupplierName(suppliers, configuredSupplierId) || "-"}</div>
+                                <div className="text-xs tabular-nums text-muted-foreground">{formatPurchaseUnitCost(unitCost, textbook)}</div>
+                              </> : draft.requestBy || "-"}
+                            </DataTableBodyCell>
+                            <DataTableBodyCell className="whitespace-normal break-words">
+                              <div>{classRecord ? getClassName(classRecord) : "수업 미지정"}</div>
+                              <div className="text-xs text-muted-foreground">{locationName}{mode === "order" && draft.requestBy ? ` · ${draft.requestBy}` : ""}</div>
+                            </DataTableBodyCell>
+                            <DataTableBodyCell className={stickyActionCellClassName}>
+                              {renderRowActions(line, order, displayLines, textbookTitle, status, textbook)}
+                            </DataTableBodyCell>
+                          </DataTableBodyRow>
                         );
                       })}
-                      <TableRow className="bg-muted/20 text-xs text-muted-foreground">
-                        {showBulkPurchaseSelection && isPurchaseColumnVisible("select") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("status") ? <TableCell className="font-medium text-foreground">합계</TableCell> : null}
-                        {mode === "order" && isPurchaseColumnVisible("supplier") ? <TableCell /> : null}
-                        {mode === "order" && isPurchaseColumnVisible("unitCost") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("eventAt") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("requester") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("textbook") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("location") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("class") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("studentRequested") ? <TableCell className={purchaseQuantityCellClassName("student")}>{studentRequestedTotal === null ? "—" : formatQuantity(studentRequestedTotal)}</TableCell> : null}
-                        {mode === "order" ? (
-                          <>
-                            {isPurchaseColumnVisible("studentOrdered") ? <TableCell className={purchaseQuantityCellClassName("student")}>{studentOrderedTotal === null ? "—" : formatQuantity(studentOrderedTotal)}</TableCell> : null}
-                            {isPurchaseColumnVisible("studentReceived") ? <TableCell className={purchaseQuantityCellClassName("student")}>{studentReceivedTotal === null ? "—" : formatQuantity(studentReceivedTotal)}</TableCell> : null}
-                          </>
-                        ) : null}
-                        {isPurchaseColumnVisible("teacherRequested") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{teacherRequestedTotal === null ? "—" : formatQuantity(teacherRequestedTotal)}</TableCell> : null}
-                        {mode === "order" ? (
-                          <>
-                            {isPurchaseColumnVisible("teacherOrdered") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{teacherOrderedTotal === null ? "—" : formatQuantity(teacherOrderedTotal)}</TableCell> : null}
-                            {isPurchaseColumnVisible("teacherReceived") ? <TableCell className={purchaseQuantityCellClassName("teacher")}>{teacherReceivedTotal === null ? "—" : formatQuantity(teacherReceivedTotal)}</TableCell> : null}
-                          </>
-                        ) : null}
-                        {isPurchaseColumnVisible("decision") ? <TableCell /> : null}
-                        {isPurchaseColumnVisible("action") ? <TableCell className={stickyActionCellClassName} /> : null}
-                      </TableRow>
+                      <DataTableBodyRow className="bg-muted/20 text-xs text-muted-foreground">
+                        {showBulkPurchaseSelection ? <DataTableBodyCell /> : null}
+                        <DataTableBodyCell className="font-medium text-foreground">합계</DataTableBodyCell>
+                        {(mode === "order") ? <DataTableBodyCell /> : null}
+                        {purchaseProcessQuantityColumns.filter(column => mode === "order" || !column.orderOnly).map(column => (
+                          <DataTableBodyCell key={column.id} data-quantity-stage={column.kind}>
+                            <PurchaseQuantityPair label={`${column.label} 합계`} student={aggregateGroup?.quantities.student[column.kind] ?? null} teacher={aggregateGroup?.quantities.teacher[column.kind] ?? null} />
+                          </DataTableBodyCell>
+                        ))}
+                        <DataTableBodyCell /><DataTableBodyCell />
+                        <DataTableBodyCell className={stickyActionCellClassName} />
+                      </DataTableBodyRow>
                     </TableBody>
                   </Table>
-                </div>
+                </DataTableViewport>
                 </>
               ) : null}
               {!collapsed && rows.length === 0 ? (
                 <ProcessGroupEmptyState
                   label={getPurchaseProcessEmptyLabel(mode, group.id, requestFilter, orderFilter, searchQuery)}
                   hint={getPurchaseProcessEmptyHint(mode, group.id, requestFilter, orderFilter, searchQuery)}
-                  actionLabel={emptyActionLabel}
+                  actionLabel={loading || readError ? undefined : emptyActionLabel}
                   onAction={handleEmptyAction}
                 />
               ) : null}
@@ -9806,16 +7878,23 @@ function PurchaseProcessTable({
         </div>
       )}
       </div>
+      </div>
     </>
   );
 }
 
 function SalesHistoryLedger({
+  readFeedback,
+  loading = false,
+  readError = false,
   rows,
   summary,
   filters,
   onFiltersChange,
 }: {
+  readFeedback?: React.ReactNode;
+  loading?: boolean;
+  readError?: boolean;
   rows: import("./textbook-read-types").SaleHistorySummaryRow[];
   summary: import("./textbook-read-types").TextbookSaleHistorySummary | null;
   filters: import("./textbook-read-types").SaleHistoryFilters;
@@ -9834,7 +7913,7 @@ function SalesHistoryLedger({
   const totalIssuedQuantity = summary?.totalIssuedQuantity ?? null;
   const totalWaitingQuantity = summary?.totalWaitingQuantity ?? null;
 
-  if (summary?.sourceTotalCount === 0) {
+  if (summary?.sourceTotalCount === 0 && !readError) {
     return null;
   }
 
@@ -9843,6 +7922,7 @@ function SalesHistoryLedger({
       <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b p-3">
         <div className="flex min-w-0 items-center gap-2">
           <span className="font-medium">출고 이력</span>
+          {readFeedback}
           {summary ? (
             <>
               <Badge variant="secondary" className="rounded-md tabular-nums">{formatQuantity(summary.totalCount)}건</Badge>
@@ -9916,7 +7996,7 @@ function SalesHistoryLedger({
                 <TableCell className="text-right tabular-nums">{formatQuantity(row.totalQuantity)}</TableCell>
               </TableRow>
             ))}
-            {filteredRows.length === 0 ? <EmptyRow colSpan={6} label="출고 이력이 없습니다" compact /> : null}
+            {filteredRows.length === 0 ? <EmptyRow colSpan={6} label={loading ? "출고 이력을 불러오는 중…" : readError ? "출고 이력을 불러오지 못했습니다" : "출고 이력이 없습니다"} compact /> : null}
           </TableBody>
         </Table>
       </div>
@@ -9925,8 +8005,12 @@ function SalesHistoryLedger({
 }
 
 function SalesProcessTable({
+  searchControl,
+  readFeedback,
   summary,
   acceptedFilters,
+  loading = false,
+  readError = false,
   sales,
   lines,
   textbooks,
@@ -9953,8 +8037,12 @@ function SalesProcessTable({
   onInspectSale,
   onClearSearch,
 }: {
+  searchControl?: React.ReactNode;
+  readFeedback?: React.ReactNode;
   summary: TextbookSaleSummary | null;
   acceptedFilters: SaleFilters | null;
+  loading?: boolean;
+  readError?: boolean;
   sales: Row[];
   lines: Row[];
   textbooks: Row[];
@@ -9992,19 +8080,41 @@ function SalesProcessTable({
   const studentsById = useMemo(() => new Map(students.map((student) => [getRecordId(student), student])), [students]);
   const grouped = useMemo(() => groupSaleLinesByStatus({ lines }) as Record<string, Row[]>, [lines]);
   const selectedLineIdSet = useMemo(() => new Set(selectedLineIds), [selectedLineIds]);
+  const saleRowViews = useMemo(() => {
+    const views = new Map<string, { textbookTitle: string; studentName: string; className: string; locationName: string; copyScope: TextbookCopyScope; quantity: number; month: string; eventLabel: string }>();
+    for (const line of lines) {
+      const sale = salesById.get(text(line.sale_id || line.saleId));
+      const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
+      const classItem = getClassById(classes, text(line.class_id || sale?.class_id));
+      const rawStatus = text(line.status || sale?.status) || "charged";
+      const status = rawStatus === "paid" ? "charged" : rawStatus;
+      views.set(getRecordId(line), {
+        textbookTitle: textbook ? getTextbookTitle(textbook) : text(line.textbook_id),
+        studentName: getSaleLineRecipientName(line, studentsById),
+        className: classItem ? getClassName(classItem) : "-",
+        locationName: getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)) || "-",
+        copyScope: getTextbookCopyScope(line), quantity: numberValue(line.quantity) || 1,
+        month: text(line.charge_month || sale?.charge_month) || "-",
+        eventLabel: formatCompactDateTime(getSaleEventAt(line, sale, status)),
+      });
+    }
+    return views;
+  }, [lines, salesById, textbooks, classes, studentsById, locations]);
+
   const groups = useMemo(() => [
     { id: "charged", title: "출고 대기" },
     { id: "issued", title: "출고 완료" },
     { id: "cancelled", title: "취소" },
     { id: "returned", title: "반품" },
   ], []);
+  const displayedFilter = acceptedFilters?.status ?? statusFilter;
   const visibleGroups = useMemo(() => (
-    statusFilter === "waiting" ? groups.filter((group) => group.id === "charged") :
-    statusFilter === "issued" ? groups.filter((group) => group.id === "issued") :
-    statusFilter === "returned" ? groups.filter((group) => group.id === "returned") :
-    statusFilter === "cancelled" ? groups.filter((group) => group.id === "cancelled") :
+    displayedFilter === "waiting" ? groups.filter((group) => group.id === "charged") :
+    displayedFilter === "issued" ? groups.filter((group) => group.id === "issued") :
+    displayedFilter === "returned" ? groups.filter((group) => group.id === "returned") :
+    displayedFilter === "cancelled" ? groups.filter((group) => group.id === "cancelled") :
     groups
-  ), [groups, statusFilter]);
+  ), [groups, displayedFilter]);
   const salesFilterOptions = useMemo(
     () => [
       { value: "all", label: "전체 출고" },
@@ -10062,10 +8172,7 @@ function SalesProcessTable({
     [visibleSaleRowsWithGroup],
   );
 
-  const visibleRowCount = summary?.totalCount ?? null;
   const visibleTotalQuantity = summary?.totalQuantity ?? null;
-  const visibleStudentCount = summary?.studentCount ?? null;
-  const visibleClassCount = summary?.classCount ?? null;
   const visibleTotalAmount = summary?.totalAmount ?? null;
   const hasVisibleSaleRows = visibleSaleRows.length > 0;
   const saleProcessActionIds = useMemo(() => {
@@ -10132,13 +8239,13 @@ function SalesProcessTable({
       : visibleActionableLineIds.filter((id) => selectedLineIdSet.has(id)).length,
     [canDeleteHistory, selectedDeletableCount, selectedLineIdSet, visibleActionableLineIds],
   );
+  const saleProcessBusy = saving === "sale" || saving.startsWith("sale-");
   const renderedGroups = visibleGroups.filter((group) => getCurrentVisibleSaleRows(group.id).length > 0);
   const emptyGroupId = visibleGroups[0]?.id || "charged";
   const salesProcessFilterCounts = summary?.statusCounts || null;
   const hasProcessSearchQuery = Boolean(text(searchQuery));
-  const showSalesControls = hasVisibleSaleRows || hasProcessSearchQuery || statusFilter !== "all" || Boolean(summary && summary.statusCounts.all > 0);
+  const filtersChanging = Boolean(acceptedFilters && (acceptedFilters.status !== statusFilter || acceptedFilters.search !== searchQuery));
   const showSalesGroupToggleControls = renderedGroups.length > 1;
-  const makeEduBillingTotalAmount = makeEduBillingGroups.reduce((sum, group) => sum + group.totalAmount, 0);
   const openBillingHandoff = useCallback(() => {
     setBillingDialogOpen(true);
     setMakeEduBillingGroups([]);
@@ -10156,8 +8263,23 @@ function SalesProcessTable({
       setBillingHandoffState(result.groups.length ? "전체 필터 범위 준비 완료" : "전체 필터 범위에 청구할 항목이 없습니다.");
     }, (error) => { if (!abort.signal.aborted) setBillingHandoffState(getTextbookActionErrorMessage(error)); });
   }, [acceptedFilters]);
-  const emptyActionLabel = hasProcessSearchQuery ? "검색 초기화" : "출고 바로 추가";
+  const emptyActionLabel = hasProcessSearchQuery ? "검색 초기화" : undefined;
   const emptyAction = hasProcessSearchQuery ? onClearSearch : onAddSale;
+
+  function renderSaleActions(line: Row, status: string, studentName: string, textbookTitle: string) {
+    const terminal = status === "issued" || status === "cancelled" || status === "returned";
+    const busy = saleProcessBusy;
+    return (
+      <DataTableRowActions label={`${studentName} ${textbookTitle} 출고 더보기`} disabled={busy} primaryAction={
+        !terminal ? <Button type="button" variant="outline" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 완료 처리`} disabled={busy} onClick={() => onUpdateStatus(line, "issued")}>출고</Button> : undefined
+      }>
+        {onInspectSale ? <DropdownMenuItem aria-label={`${studentName} ${textbookTitle} 출고 상세 열기`} onSelect={() => onInspectSale(line)}>상세</DropdownMenuItem> : null}
+        {!terminal ? <DropdownMenuItem aria-label={`${studentName} ${textbookTitle} 출고 전 취소`} onSelect={() => onCancelLine(line)}>출고 전 취소</DropdownMenuItem> : null}
+        {status === "issued" ? <DropdownMenuItem aria-label={`${studentName} ${textbookTitle} 고객 반품`} onSelect={() => onReturnLine(line)}>고객 반품</DropdownMenuItem> : null}
+        {terminal && canDeleteHistory && onDeleteLine ? <><DropdownMenuSeparator /><DropdownMenuItem variant="destructive" aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`} onSelect={() => onDeleteLine(line)}>이력 삭제</DropdownMenuItem></> : null}
+      </DataTableRowActions>
+    );
+  }
 
   return (
     <>
@@ -10169,130 +8291,34 @@ function SalesProcessTable({
         groups={makeEduBillingGroups}
         sourceLineCount={billingHandoffSourceLineCount}
         loadState={billingHandoffState}
+        onRetry={openBillingHandoff}
         emptyLabel="청구할 출고 건이 없습니다"
         idPrefix="makeedu-billing"
       />
-      <div className="min-w-0 overflow-hidden rounded-lg border bg-background max-w-[calc(100vw-2rem)] md:max-w-none" aria-label="교재 출고 목록">
-      {showSalesControls ? (
-      <div className="flex min-w-0 flex-wrap items-center justify-between gap-2 border-b p-3">
-        <div className="flex flex-wrap gap-1">
-          {salesFilterOptions.map((option) => (
-            <Button
-              key={option.value}
-              type="button"
-              size="sm"
-              variant={statusFilter === option.value ? "default" : "outline"}
-              className="h-8 rounded-md"
-              aria-pressed={statusFilter === option.value}
-              onClick={() => onStatusFilterChange(option.value as SalesProcessFilter)}
-            >
-              <span>{option.label}</span>
-              <span className={cn(
-                "ml-2 rounded px-1.5 text-[11px] font-semibold",
-                statusFilter === option.value ? "bg-primary-foreground/20" : "bg-muted text-muted-foreground",
-              )}>
-                {salesProcessFilterCounts ? formatQuantity(salesProcessFilterCounts[option.value as SalesProcessFilter]) : "—"}
-              </span>
-            </Button>
-          ))}
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          {summary ? (
-            <>
-              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">표시 {formatQuantity(visibleRowCount)}건</Badge>
-              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">수량 {formatQuantity(visibleTotalQuantity)}</Badge>
-              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">수업 {formatQuantity(visibleClassCount)}</Badge>
-              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">학생 {formatQuantity(visibleStudentCount)}</Badge>
-              <Badge variant="outline" className="h-8 rounded-md px-2 tabular-nums">청구 {formatCurrency(visibleTotalAmount)}</Badge>
-            </>
-          ) : <Badge variant="outline" className="h-8 rounded-md px-2">집계 확인 필요</Badge>}
-          {selectedActionableCount > 0 ? (
-            <>
-              <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-                선택 {formatQuantity(selectedActionableCount)}
-              </Badge>
-              {selectedIssuableCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  aria-label="선택 출고 일괄 완료"
-                  title="선택 출고 일괄 완료"
-                  onClick={onBulkIssue}
-                >
-                  선택 출고
-                </Button>
-              ) : null}
-              {selectedCancelableCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  aria-label="선택 출고 전 취소"
-                  title="선택 출고 전 취소"
-                  onClick={onBulkCancel}
-                >
-                  선택 취소
-                </Button>
-              ) : null}
-              {selectedReturnableCount > 0 ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0"
-                  aria-label="선택 고객 반품"
-                  title="선택 고객 반품"
-                  onClick={onBulkReturn}
-                >
-                  선택 반품
-                </Button>
-              ) : null}
-              {canDeleteHistory && selectedDeletableCount > 0 && onBulkDelete ? (
-                <Button
-                  type="button"
-                  size="sm"
-                  variant="outline"
-                  className="shrink-0 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                  aria-label="선택 출고 이력 삭제"
-                  title="선택 출고 이력 삭제"
-                  onClick={onBulkDelete}
-                >
-                  선택 삭제
-                </Button>
-              ) : null}
-            </>
-          ) : null}
-          {hasVisibleSaleRows && showSalesGroupToggleControls ? (
-            <>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="shrink-0"
-                aria-label="출고 그룹 전체 접기"
-                title="출고 그룹 전체 접기"
-                onClick={collapseAllGroups}
-              >
-                전체 접기
-              </Button>
-              <Button
-                type="button"
-                size="sm"
-                variant="outline"
-                className="shrink-0"
-                aria-label="출고 그룹 전체 펼치기"
-                title="출고 그룹 전체 펼치기"
-                onClick={expandAllGroups}
-              >
-                전체 펼치기
-              </Button>
-            </>
-          ) : null}
-          {hasVisibleSaleRows ? (
-            <>
+      <div className="min-w-0" aria-label="교재 출고 목록">
+      <DataTableWorkspaceToolbar feedback={readFeedback} search={searchControl}
+        filters={<DataTableFilters aria-label="출고 필터">
+          <DataTableSelectFilter inline id="sale-status-filter" label="상태" ariaLabel="출고 상태" value={statusFilter} onValueChange={onStatusFilterChange}
+            options={salesFilterOptions.map((option) => ({ ...option, count: salesProcessFilterCounts?.[option.value] ?? null }))} />
+          <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="출고 필터 초기화" disabled={statusFilter === "all"} onClick={() => onStatusFilterChange("all")}><RefreshCw className="size-4" aria-hidden="true" /></Button>
+          <span role="status" className="sr-only">{saleProcessBusy ? "출고 작업 처리 중…" : loading ? "목록 불러오는 중…" : filtersChanging ? "이전 조건의 결과 표시 중" : ""}</span>
+        </DataTableFilters>}
+        summary={summary ? <>수량 {formatQuantity(visibleTotalQuantity)} · 청구 {formatCurrency(visibleTotalAmount)}</> : "집계 확인 필요"}
+        actions={selectedActionableCount > 0 ? (<>
+          <span className="mr-auto whitespace-nowrap text-sm font-medium tabular-nums">{formatQuantity(selectedActionableCount)}개 선택</span>
+          {selectedIssuableCount > 0 ? <Button type="button" size="sm" variant="outline" aria-label="선택 출고 일괄 완료" disabled={saleProcessBusy} aria-busy={saving === "sale-bulk-issue"} onClick={onBulkIssue}>선택 출고</Button> : null}
+          <DataTableRowActions label="선택 출고 작업" disabled={saleProcessBusy}>
+            {selectedCancelableCount > 0 ? <DropdownMenuItem aria-label="선택 출고 전 취소" onSelect={onBulkCancel}>선택 취소</DropdownMenuItem> : null}
+            {selectedReturnableCount > 0 ? <DropdownMenuItem aria-label="선택 고객 반품" onSelect={onBulkReturn}>선택 반품</DropdownMenuItem> : null}
+            {canDeleteHistory && selectedDeletableCount > 0 && onBulkDelete ? <DropdownMenuItem variant="destructive" aria-label="선택 출고 이력 삭제" onSelect={onBulkDelete}>선택 삭제</DropdownMenuItem> : null}
+          </DataTableRowActions>
+          <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="출고 선택 해제" disabled={saleProcessBusy} onClick={() => onToggleVisibleLines?.(selectedLineIds, false)}><X className="size-4" /></Button>
+        </>) : (<>
+          {hasVisibleSaleRows && showSalesGroupToggleControls ? <DataTableRowActions label="출고 그룹 보기">
+            <DropdownMenuItem aria-label="출고 그룹 전체 접기" onSelect={collapseAllGroups}>전체 접기</DropdownMenuItem>
+            <DropdownMenuItem aria-label="출고 그룹 전체 펼치기" onSelect={expandAllGroups}>전체 펼치기</DropdownMenuItem>
+          </DataTableRowActions> : null}
+          <>
               {acceptedFilters ? (
                 <Button
                   type="button"
@@ -10300,11 +8326,12 @@ function SalesProcessTable({
                   variant="outline"
                   className="shrink-0"
                   aria-label="메이크에듀 청구 준비 열기"
+                  disabled={loading || filtersChanging || !hasVisibleSaleRows}
                   title="메이크에듀 청구 준비"
                   onClick={openBillingHandoff}
                 >
                   <Copy className="mr-2 size-3.5" />
-                  청구 준비{makeEduBillingGroups.length ? ` ${formatQuantity(makeEduBillingGroups.length)}건 · ${formatCurrency(makeEduBillingTotalAmount)}` : ""}
+                  청구 준비
                 </Button>
               ) : null}
               <Button type="button" size="sm" className="shrink-0" aria-label="교재 출고 추가" title="교재 출고 추가" onClick={onAddSale}>
@@ -10312,16 +8339,16 @@ function SalesProcessTable({
                 출고 추가
               </Button>
             </>
-          ) : null}
-        </div>
-      </div>
-      ) : null}
 
+        </>)}
+      />
+
+      <div data-slot="data-table-results" className={TEXTBOOK_RESULTS_CLASS_NAME}>
       {!hasVisibleSaleRows ? (
         <ProcessGroupEmptyState
-          label={getSalesProcessEmptyLabel(emptyGroupId, statusFilter, searchQuery)}
-          hint={showSalesControls ? getSalesProcessEmptyHint(emptyGroupId, statusFilter, searchQuery) : undefined}
-          actionLabel={emptyActionLabel}
+          label={loading ? "목록 불러오는 중…" : readError ? "출고 목록을 불러오지 못했습니다" : getSalesProcessEmptyLabel(emptyGroupId, statusFilter, searchQuery)}
+          hint={readError ? undefined : getSalesProcessEmptyHint(emptyGroupId, displayedFilter, searchQuery)}
+          actionLabel={loading || readError ? undefined : emptyActionLabel}
           onAction={emptyAction}
         />
       ) : (
@@ -10363,286 +8390,87 @@ function SalesProcessTable({
               </button>
               {!collapsed && totalCount > 0 ? (
                 <>
-                <div data-testid="textbook-sales-process-mobile-list" className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden">
+
+                <div data-testid="textbook-sales-process-mobile-list" className={DATA_TABLE_MOBILE_LIST_CLASS_NAME}>
                   {rows.map((line) => {
                     const lineId = getRecordId(line);
-                    const sale = salesById.get(text(line.sale_id || line.saleId));
-                    const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
-                    const classItem = getClassById(classes, text(line.class_id || sale?.class_id));
-                    const rawStatus = text(line.status || sale?.status) || group.id;
-                    const status = rawStatus === "paid" ? "charged" : rawStatus;
-                    const quantity = numberValue(line.quantity) || 1;
-                    const textbookTitle = textbook ? getTextbookTitle(textbook) : text(line.textbook_id);
-                    const copyScope = getTextbookCopyScope(line);
-                    const studentName = getSaleLineRecipientName(line, studentsById);
-                    const locationName = getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)) || "-";
-                    const isTerminalSaleStatus = status === "issued" || status === "cancelled" || status === "returned";
-                    const canDeleteThisLine = canDeleteHistory && Boolean(onDeleteLine);
-                    const canSelectThisLine = canDeleteHistory || !isTerminalSaleStatus;
-
+                    const view = saleRowViews.get(lineId)!;
+                    const status = text(line.status) || group.id;
+                    const { textbookTitle, studentName } = view;
+                    const canSelectThisLine = canDeleteHistory || !["issued", "cancelled", "returned"].includes(status);
                     return (
-                      <article key={`mobile-${lineId}`} data-prepared-surface="sales-process-mobile" data-prepared-row-id={lineId} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
-                        <div className="flex min-w-0 items-start gap-3">
-                          <Checkbox
-                            checked={selectedLineIdSet.has(lineId)}
-                            disabled={!canSelectThisLine}
-                            onCheckedChange={(value) => onToggleLine?.(lineId, value === true)}
-                            title={`${studentName} ${textbookTitle} 출고 선택`}
-                            aria-label={`${studentName} ${textbookTitle} 출고 선택`}
-                            className="mt-1 shrink-0"
-                          />
-                          <div className="min-w-0 flex-1">
-                            <div className="flex min-w-0 items-start justify-between gap-2">
-                              <div className="min-w-0">
-                                <div className="truncate text-sm font-semibold" title={textbookTitle}>{textbookTitle}</div>
-                                <div className="mt-0.5 truncate text-xs text-muted-foreground">{studentName} · {getTextbookCopyScopeLabel(copyScope)}</div>
-                              </div>
-                              <Badge variant="outline" className={cn("shrink-0 rounded-md", processStatusPillClass(status))}>
-                                {saleStatusLabels[status] || status}
-                              </Badge>
-                            </div>
-                            <div className="mt-2 grid grid-cols-3 gap-2 text-center text-xs">
-                              <div className="rounded-md bg-muted/50 px-2 py-2">
-                                <div className="text-muted-foreground">출고월</div>
-                                <div className="mt-1 font-medium tabular-nums">{text(line.charge_month || sale?.charge_month) || "-"}</div>
-                              </div>
-                              <div className="rounded-md bg-muted/50 px-2 py-2">
-                                <div className="text-muted-foreground">위치</div>
-                                <div className="mt-1 truncate font-medium">{locationName}</div>
-                              </div>
-                              <div className="rounded-md bg-muted/50 px-2 py-2">
-                                <div className="text-muted-foreground">수량</div>
-                                <div className="mt-1 font-mono font-semibold">{formatQuantity(quantity)}</div>
-                              </div>
-                            </div>
-                            <div className="mt-2 truncate text-xs text-muted-foreground" title={classItem ? getClassName(classItem) : "-"}>
-                              {classItem ? getClassName(classItem) : "-"} · {formatCompactDateTime(getSaleEventAt(line, sale, status))}
-                            </div>
+                      <article key={lineId} data-prepared-surface="sales-process-mobile" data-prepared-row-id={lineId} className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME} data-state={selectedLineIdSet.has(lineId) ? "selected" : undefined}>
+                        <div className="flex min-w-0 items-start gap-2">
+                          <DataTableSelectionCheckbox checked={selectedLineIdSet.has(lineId)} disabled={!canSelectThisLine} onCheckedChange={value => onToggleLine?.(lineId, value === true)} aria-label={`${studentName} ${textbookTitle} 출고 선택`} />
+                          <div className="min-w-0 flex-1 space-y-1">
+                            {onInspectSale ? <DataTableDetailButton label={`${studentName} ${textbookTitle} 출고 상세 열기`} onClick={() => onInspectSale(line)}>{textbookTitle}</DataTableDetailButton> : <p className="whitespace-normal break-words text-sm font-semibold">{textbookTitle}</p>}
+                            <p className="break-words text-xs text-muted-foreground">{studentName} · {getTextbookCopyScopeLabel(view.copyScope)}</p>
                           </div>
+                          <Badge variant="outline" className={cn("shrink-0 rounded-md", processStatusPillClass(status))}>{saleStatusLabels[status] || status}</Badge>
                         </div>
-                        <div className="mt-3 grid min-w-0 grid-cols-2 gap-2 [&>button]:w-full">
-                          {onInspectSale ? <Button type="button" variant="outline" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 상세 열기`} onClick={() => onInspectSale(line)}>상세</Button> : null}
-                          {status !== "issued" && status !== "cancelled" && status !== "returned" ? (
-                            <>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                aria-label={`${studentName} ${textbookTitle} 출고 완료 처리`}
-                                disabled={saving === `sale-line-${lineId}`}
-                                onClick={() => onUpdateStatus(line, "issued")}
-                              >
-                                출고
-                              </Button>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                aria-label={`${studentName} ${textbookTitle} 출고 전 취소`}
-                                disabled={saving === `sale-delete-${lineId}`}
-                                onClick={() => onCancelLine(line)}
-                              >
-                                취소
-                              </Button>
-                            </>
-                          ) : status === "issued" ? (
-                            <>
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                aria-label={`${studentName} ${textbookTitle} 고객 반품`}
-                                disabled={saving === `sale-line-${lineId}`}
-                                onClick={() => onReturnLine(line)}
-                              >
-                                반품
-                              </Button>
-                              {canDeleteThisLine ? (
-                                <Button
-                                  type="button"
-                                  variant="outline"
-                                  size="sm"
-                                  className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                  aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`}
-                                  disabled={saving === `sale-delete-${lineId}`}
-                                  onClick={() => onDeleteLine?.(line)}
-                                >
-                                  삭제
-                                </Button>
-                              ) : null}
-                            </>
-                          ) : canDeleteThisLine ? (
-                            <Button
-                              type="button"
-                              variant="outline"
-                              size="sm"
-                              className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                              aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`}
-                              disabled={saving === `sale-delete-${lineId}`}
-                              onClick={() => onDeleteLine?.(line)}
-                            >
-                              삭제
-                            </Button>
-                          ) : null}
+                        <div className="my-3 space-y-1 border-y py-3 text-xs text-muted-foreground">
+                          <p className="break-words">{view.className} · {view.locationName}</p>
+                          <div className="flex flex-wrap justify-between gap-2"><span className="tabular-nums">{view.month} · {view.eventLabel}</span><span className="font-medium text-foreground tabular-nums">{formatQuantity(view.quantity)}권</span></div>
                         </div>
+                        {renderSaleActions(line, status, studentName, textbookTitle)}
                       </article>
                     );
                   })}
                 </div>
-                <div className="hidden max-w-full overflow-x-auto md:block">
-                  <Table className="w-full min-w-[980px]">
+                <DataTableViewport className="hidden [scrollbar-gutter:auto] md:block [&>[data-slot=table-container]]:overflow-visible" role="region" aria-label={`${group.title} 출고표 스크롤`} tabIndex={0}>
+                  <Table className="w-full min-w-[944px] table-fixed">
                     <caption className="sr-only">교재 출고 처리 목록</caption>
-                    <TableHeader className="sticky top-0 z-10 bg-background">
-                      <TableRow className="bg-muted/30">
-                        <TableHead className="w-10">
-                          <Checkbox
-                            checked={groupAllSelectableSelected || (groupSomeSelectableSelected && "indeterminate")}
-                            disabled={groupSelectableLineIds.length === 0}
-                            onCheckedChange={(value) => onToggleVisibleLines?.(groupSelectableLineIds, value === true)}
-                            title={canDeleteHistory ? "표시된 출고 이력 전체 선택" : "출고 대기 전체 선택"}
-                            aria-label={canDeleteHistory ? "표시된 출고 이력 전체 선택" : "출고 대기 전체 선택"}
-                          />
-                        </TableHead>
-                        <TableHead className="w-[112px]">진행상태</TableHead>
-                        <TableHead className="w-[96px]">출고월</TableHead>
-                        <TableHead className="w-[132px]">대상</TableHead>
-                        <TableHead className="w-[150px]">수업</TableHead>
-                        <TableHead>교재명</TableHead>
-                        <TableHead className="w-[88px]">위치</TableHead>
-                        <TableHead className="w-[72px] text-right">수량</TableHead>
-                        <TableHead className={cn("w-[120px] text-right", stickyActionHeadClassName)}>작업</TableHead>
-                      </TableRow>
+                    <colgroup><col style={{ width: 40 }} /><col /><col style={{ width: 120 }} /><col style={{ width: 104 }} /><col style={{ width: 72 }} /><col style={{ width: 176 }} /><col style={{ width: 132 }} /></colgroup>
+                    <TableHeader>
+                      <DataTableHeaderRow>
+                        <DataTableHeaderCell className="w-10 px-0"><DataTableSelectionCheckbox checked={groupAllSelectableSelected || (groupSomeSelectableSelected && "indeterminate")} disabled={!groupSelectableLineIds.length} onCheckedChange={value => onToggleVisibleLines?.(groupSelectableLineIds, value === true)} aria-label={canDeleteHistory ? "표시된 출고 이력 전체 선택" : "출고 대기 전체 선택"} /></DataTableHeaderCell>
+                        <DataTableHeaderCell className="min-w-[240px]">교재</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[136px]">대상</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[110px]">진행상태</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[72px] text-right">수량</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[184px]">수업 · 위치</DataTableHeaderCell>
+                        <DataTableHeaderCell className={cn("w-[132px] text-right", stickyActionHeadClassName)}>작업</DataTableHeaderCell>
+                      </DataTableHeaderRow>
                     </TableHeader>
                     <TableBody>
                       {rows.map((line) => {
                         const lineId = getRecordId(line);
-                        const sale = salesById.get(text(line.sale_id || line.saleId));
-                        const textbook = getTextbookById(textbooks, text(line.textbook_id || line.textbookId));
-                        const classItem = getClassById(classes, text(line.class_id || sale?.class_id));
-                        const rawStatus = text(line.status || sale?.status) || group.id;
-                        const status = rawStatus === "paid" ? "charged" : rawStatus;
-                        const quantity = numberValue(line.quantity) || 1;
-                        const textbookTitle = textbook ? getTextbookTitle(textbook) : text(line.textbook_id);
-                        const copyScope = getTextbookCopyScope(line);
-                        const studentName = getSaleLineRecipientName(line, studentsById);
-                        const locationName = getLocationName(locations, text(line.location_id || line.locationId || sale?.location_id || sale?.locationId)) || "-";
-                        const isTerminalSaleStatus = status === "issued" || status === "cancelled" || status === "returned";
-                        const canDeleteThisLine = canDeleteHistory && Boolean(onDeleteLine);
-                        const canSelectThisLine = canDeleteHistory || !isTerminalSaleStatus;
-
+                        const view = saleRowViews.get(lineId)!;
+                        const { textbookTitle, studentName } = view;
+                        const status = text(line.status) || group.id;
+                        const canSelectThisLine = canDeleteHistory || !["issued", "cancelled", "returned"].includes(status);
                         return (
-                          <TableRow key={lineId} data-prepared-surface="sales-process-desktop" data-prepared-row-id={lineId}>
-                            <TableCell>
-                              <Checkbox
-                                checked={selectedLineIdSet.has(lineId)}
-                                disabled={!canSelectThisLine}
-                                onCheckedChange={(value) => onToggleLine?.(lineId, value === true)}
-                                title={`${studentName} ${textbookTitle} 출고 선택`}
-                                aria-label={`${studentName} ${textbookTitle} 출고 선택`}
-                              />
-                            </TableCell>
-                            <TableCell>
-                              <Badge variant="outline" className={cn("rounded-md", processStatusPillClass(status))}>
-                                {saleStatusLabels[status] || status}
-                              </Badge>
-                            </TableCell>
-                            <TableCell className="tabular-nums">{text(line.charge_month || sale?.charge_month) || "-"}</TableCell>
-                            <TableCell className="max-w-[132px]" title={studentName}>
-                              <div className="min-w-0 truncate">{studentName}</div>
-                              <div className="text-xs text-muted-foreground">{getTextbookCopyScopeLabel(copyScope)}</div>
-                            </TableCell>
-                            <TableCell className="max-w-[150px] truncate" title={classItem ? getClassName(classItem) : "-"}>{classItem ? getClassName(classItem) : "-"}</TableCell>
-                            <TableCell>
-                              <div className="max-w-[360px] truncate font-medium" title={textbookTitle}>{textbookTitle}</div>
-                              <div className="text-xs text-muted-foreground">{formatCompactDateTime(getSaleEventAt(line, sale, status))}</div>
-                            </TableCell>
-                            <TableCell className="max-w-[88px] truncate" title={locationName}>{locationName}</TableCell>
-                            <TableCell className="text-right tabular-nums">{formatQuantity(quantity)}</TableCell>
-                            <TableCell className={stickyActionCellClassName}>
-                              <div className="flex justify-end gap-1">
-                                {onInspectSale ? <Button type="button" variant="ghost" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 상세 열기`} onClick={() => onInspectSale(line)}>상세</Button> : null}
-                                {status !== "issued" && status !== "cancelled" && status !== "returned" ? (
-                                  <>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      aria-label={`${studentName} ${textbookTitle} 출고 완료 처리`}
-                                      disabled={saving === `sale-line-${lineId}`}
-                                      onClick={() => onUpdateStatus(line, "issued")}
-                                    >
-                                      출고
-                                    </Button>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      aria-label={`${studentName} ${textbookTitle} 출고 전 취소`}
-                                      disabled={saving === `sale-delete-${lineId}`}
-                                      onClick={() => onCancelLine(line)}
-                                    >
-                                      취소
-                                    </Button>
-                                  </>
-                                ) : status === "issued" ? (
-                                  <>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="sm"
-                                      aria-label={`${studentName} ${textbookTitle} 고객 반품`}
-                                      disabled={saving === `sale-line-${lineId}`}
-                                      onClick={() => onReturnLine(line)}
-                                    >
-                                      반품
-                                    </Button>
-                                    {canDeleteThisLine ? (
-                                      <Button
-                                        type="button"
-                                        variant="outline"
-                                        size="sm"
-                                        className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                        aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`}
-                                        disabled={saving === `sale-delete-${lineId}`}
-                                        onClick={() => onDeleteLine?.(line)}
-                                      >
-                                        삭제
-                                      </Button>
-                                    ) : null}
-                                  </>
-                                ) : canDeleteThisLine ? (
-                                  <Button
-                                    type="button"
-                                    variant="outline"
-                                    size="sm"
-                                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                                    aria-label={`${studentName} ${textbookTitle} 출고 이력 삭제`}
-                                    disabled={saving === `sale-delete-${lineId}`}
-                                    onClick={() => onDeleteLine?.(line)}
-                                  >
-                                    삭제
-                                  </Button>
-                                ) : null}
-                              </div>
-                            </TableCell>
-                          </TableRow>
+                          <DataTableBodyRow key={lineId} data-state={selectedLineIdSet.has(lineId) ? "selected" : undefined} data-prepared-surface="sales-process-desktop" data-prepared-row-id={lineId}>
+                            <DataTableBodyCell className="px-0 py-1"><DataTableSelectionCheckbox checked={selectedLineIdSet.has(lineId)} disabled={!canSelectThisLine} onCheckedChange={value => onToggleLine?.(lineId, value === true)} aria-label={`${studentName} ${textbookTitle} 출고 선택`} /></DataTableBodyCell>
+                            <DataTableBodyCell wrap>
+                              {onInspectSale ? <DataTableDetailButton label={`${studentName} ${textbookTitle} 출고 상세 열기`} onClick={() => onInspectSale(line)}>{textbookTitle}</DataTableDetailButton> : <div className="max-w-[360px] break-words font-medium">{textbookTitle}</div>}
+                              <p className="text-xs text-muted-foreground">{view.eventLabel}</p>
+                            </DataTableBodyCell>
+                            <DataTableBodyCell wrap><div>{studentName}</div><div className="text-xs text-muted-foreground">{getTextbookCopyScopeLabel(view.copyScope)}</div></DataTableBodyCell>
+                            <DataTableBodyCell><Badge variant="outline" className={cn("rounded-md", processStatusPillClass(status))}>{saleStatusLabels[status] || status}</Badge></DataTableBodyCell>
+                            <DataTableBodyCell className="text-right tabular-nums">{formatQuantity(view.quantity)}</DataTableBodyCell>
+                            <DataTableBodyCell wrap><div>{view.className}</div><div className="text-xs text-muted-foreground">{view.locationName} · {view.month}</div></DataTableBodyCell>
+
+
+                            <DataTableBodyCell className={cn(stickyActionCellClassName, "group-hover/data-table-row:bg-muted group-data-[state=selected]/data-table-row:bg-accent")}>{renderSaleActions(line, status, studentName, textbookTitle)}</DataTableBodyCell>
+                          </DataTableBodyRow>
                         );
                       })}
                       <TableRow className="bg-muted/20 text-xs text-muted-foreground">
-                        <TableCell colSpan={7} className="text-right">합계</TableCell>
+                        <TableCell colSpan={4} className="text-right">이 페이지 합계</TableCell>
                         <TableCell className="text-right tabular-nums">{formatQuantity(totalQuantity)}</TableCell>
-                        <TableCell />
+                        <TableCell colSpan={2} />
                       </TableRow>
                     </TableBody>
                   </Table>
-                </div>
+                </DataTableViewport>
                 </>
               ) : null}
               {!collapsed && totalCount === 0 ? (
                 <ProcessGroupEmptyState
                   label={getSalesProcessEmptyLabel(group.id, statusFilter, searchQuery)}
                   hint={getSalesProcessEmptyHint(group.id, statusFilter, searchQuery)}
-                  actionLabel={emptyActionLabel}
+                  actionLabel={loading || readError ? undefined : emptyActionLabel}
                   onAction={emptyAction}
                 />
               ) : null}
@@ -10652,216 +8480,8 @@ function SalesProcessTable({
         </div>
       )}
       </div>
+      </div>
     </>
-  );
-}
-
-function MonthlyClosingTable({
-  rows,
-  selectedIds = [],
-  saving = "",
-  onToggleRow,
-  onToggleVisibleRows,
-  onBulkLock,
-  onInspectRow,
-}: {
-  rows: ClosingRow[];
-  selectedIds?: string[];
-  saving?: string;
-  onToggleRow?: (id: string, checked: boolean) => void;
-  onToggleVisibleRows?: (ids: string[], checked: boolean) => void;
-  onBulkLock?: () => void;
-  onInspectRow?: (row: ClosingRow) => void;
-}) {
-  const recentRows = rows;
-  const visibleIds = useMemo(() => rows.map(getRecordId).filter(Boolean), [rows]);
-  const selectedIdSet = useMemo(() => new Set(selectedIds), [selectedIds]);
-  const selectedVisibleCount = visibleIds.filter((id) => selectedIdSet.has(id)).length;
-  const allVisibleSelected = visibleIds.length > 0 && selectedVisibleCount === visibleIds.length;
-  const someVisibleSelected = selectedVisibleCount > 0 && !allVisibleSelected;
-  return (
-    <div className="overflow-hidden rounded-lg border" aria-label="월마감 정산 이력">
-      {selectedVisibleCount > 0 ? (
-        <div className="flex flex-wrap items-center justify-end gap-2 border-b bg-muted/20 p-2">
-          <Badge variant="secondary" className="h-8 rounded-md px-2 tabular-nums">
-            선택 {formatQuantity(selectedVisibleCount)}
-          </Badge>
-          <Button
-            type="button"
-            size="sm"
-            variant="outline"
-            disabled={saving === "closing-bulk-lock"}
-            aria-label="선택 정산 확정"
-            title="선택 정산 확정"
-            onClick={onBulkLock}
-          >
-            선택 확정
-          </Button>
-        </div>
-      ) : null}
-      <div data-testid="textbook-closing-mobile-list" className="grid min-w-0 max-w-full gap-2 overflow-hidden p-2 md:hidden">
-        {recentRows.length > 0 ? (
-          <div className="flex items-center justify-between gap-2 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
-            <div className="flex min-w-0 items-center gap-2">
-              <Checkbox
-                checked={allVisibleSelected || (someVisibleSelected && "indeterminate")}
-                onCheckedChange={(value) => onToggleVisibleRows?.(visibleIds, value === true)}
-                title="정산 행 전체 선택"
-                aria-label="정산 행 전체 선택"
-                className="shrink-0"
-              />
-              <span className="truncate">현재 페이지 {formatQuantity(visibleIds.length)}건</span>
-            </div>
-            <span className="shrink-0 tabular-nums">선택 {formatQuantity(selectedVisibleCount)}</span>
-          </div>
-        ) : null}
-        {recentRows.map((row) => {
-          const rowId = getRecordId(row);
-          const subjectLabel = text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject);
-          const closingA11yLabel = `${text(row.closing_month)} ${subjectLabel}`;
-
-          return (
-            <article key={`mobile-${rowId || closingA11yLabel}`} data-prepared-surface="closing-mobile" data-prepared-row-id={rowId} className="min-w-0 rounded-md border bg-background p-3 shadow-xs">
-              <div className="flex min-w-0 items-start gap-3">
-                <Checkbox
-                  checked={selectedIdSet.has(rowId)}
-                  disabled={!rowId}
-                  onCheckedChange={(value) => onToggleRow?.(rowId, value === true)}
-                  title={`${closingA11yLabel} 정산 선택`}
-                  aria-label={`${closingA11yLabel} 정산 선택`}
-                  className="mt-1 shrink-0"
-                />
-                <div className="min-w-0 flex-1">
-                  <div className="flex min-w-0 items-start justify-between gap-2">
-                    <button
-                      type="button"
-                      className="min-w-0 flex-1 truncate text-left text-sm font-semibold tabular-nums underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-                      aria-label={`${closingA11yLabel} 정산 상세 열기`}
-                      title={`${closingA11yLabel} 정산 상세`}
-                      onClick={() => onInspectRow?.(row)}
-                    >
-                      {text(row.closing_month)} · {subjectLabel}
-                    </button>
-                    <Badge variant="outline" className="shrink-0 rounded-md">
-                      {text(row.status) || "대기"}
-                    </Badge>
-                  </div>
-                </div>
-              </div>
-              <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs sm:grid-cols-4">
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <div className="text-muted-foreground">입고</div>
-                  <div className="mt-1 font-medium tabular-nums">{formatQuantity(row.purchase_quantity)}</div>
-                </div>
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <div className="text-muted-foreground">출고</div>
-                  <div className="mt-1 font-medium tabular-nums">{formatQuantity(row.sale_quantity)}</div>
-                </div>
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <div className="text-muted-foreground">기말</div>
-                  <div className="mt-1 font-medium tabular-nums">{formatQuantity(row.ending_quantity)}</div>
-                </div>
-                <div className="rounded-md bg-muted/50 px-2 py-2">
-                  <div className="text-muted-foreground">마진</div>
-                  <div className="mt-1 font-medium tabular-nums">{formatCurrency(row.settlement_difference)}</div>
-                </div>
-              </div>
-              <div className="mt-3 flex justify-end">
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  aria-label={`${closingA11yLabel} 정산 상세 열기`}
-                  title={`${closingA11yLabel} 정산 상세`}
-                  onClick={() => onInspectRow?.(row)}
-                >
-                  상세
-                </Button>
-              </div>
-            </article>
-          );
-        })}
-        {recentRows.length === 0 ? (
-          <div className="rounded-md border border-dashed p-6 text-center text-sm text-muted-foreground">마감 이력이 없습니다</div>
-        ) : null}
-      </div>
-      <div className="hidden max-w-full overflow-x-auto md:block">
-      <Table className="min-w-[760px]">
-        <TableHeader className="sticky top-0 z-10 bg-background">
-          <TableRow>
-            <TableHead className="w-10">
-              <Checkbox
-                checked={allVisibleSelected || (someVisibleSelected && "indeterminate")}
-                onCheckedChange={(value) => onToggleVisibleRows?.(visibleIds, value === true)}
-                title="정산 행 전체 선택"
-                aria-label="정산 행 전체 선택"
-              />
-            </TableHead>
-            <TableHead>월</TableHead>
-            <TableHead>과목</TableHead>
-            <TableHead className="text-right">입고</TableHead>
-            <TableHead className="text-right">출고</TableHead>
-            <TableHead className="text-right">기말</TableHead>
-            <TableHead className="text-right">마진</TableHead>
-            <TableHead>상태</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {recentRows.map((row) => (
-            <TableRow
-              key={getRecordId(row)}
-              data-prepared-surface="closing-desktop"
-              data-prepared-row-id={getRecordId(row)}
-              className="cursor-pointer"
-              tabIndex={0}
-              onClick={() => onInspectRow?.(row)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" || event.key === " ") {
-                  event.preventDefault();
-                  onInspectRow?.(row);
-                }
-              }}
-            >
-              <TableCell onClick={(event) => event.stopPropagation()}>
-                <Checkbox
-                  checked={selectedIdSet.has(getRecordId(row))}
-                  onCheckedChange={(value) => onToggleRow?.(getRecordId(row), value === true)}
-                  title={`${text(row.closing_month)} 정산 선택`}
-                  aria-label={`${text(row.closing_month)} 정산 선택`}
-                />
-              </TableCell>
-              <TableCell className="tabular-nums">{text(row.closing_month)}</TableCell>
-              <TableCell>{text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatQuantity(row.purchase_quantity)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatQuantity(row.sale_quantity)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatQuantity(row.ending_quantity)}</TableCell>
-              <TableCell className="text-right tabular-nums">{formatCurrency(row.settlement_difference)}</TableCell>
-              <TableCell>
-                <div className="flex items-center gap-2">
-                  <Badge variant="outline" className="rounded-md">{text(row.status) || "대기"}</Badge>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    className="h-7 rounded-md px-2 text-xs"
-                    aria-label={`${text(row.closing_month)} ${text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject)} 정산 상세 열기`}
-                    title={`${text(row.closing_month)} ${text(row.subject) === "all" ? "전체" : getSubjectLabel(row.subject)} 정산 상세`}
-                    onClick={(event) => {
-                      event.stopPropagation();
-                      onInspectRow?.(row);
-                    }}
-                  >
-                    상세
-                  </Button>
-                </div>
-              </TableCell>
-            </TableRow>
-          ))}
-          {recentRows.length === 0 ? <EmptyRow colSpan={8} label="마감 이력이 없습니다" /> : null}
-        </TableBody>
-      </Table>
-      </div>
-    </div>
   );
 }
 
