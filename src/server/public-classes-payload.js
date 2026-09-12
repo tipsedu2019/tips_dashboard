@@ -4,6 +4,7 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 
 import { createClient } from "@supabase/supabase-js";
+import { createPublicClassesDiagnosticFetch, reportPublicClassesFailure } from "./public-classes-diagnostics.js";
 import { publicClassSchedule, publicLessons } from "../lib/public-class-schedule.js";
 
 import {
@@ -93,7 +94,10 @@ export function isFallbackPublicClassesPayload(payload) {
   return payload?.source !== "supabase";
 }
 
-export function createPublicClassesSupabaseClient(env = process.env) {
+export function createPublicClassesSupabaseClient(env = process.env, {
+  fetch: fetchImpl = globalThis.fetch,
+  onFailure = reportPublicClassesFailure,
+} = {}) {
   const url = String(
     env.SUPABASE_URL || env.NEXT_PUBLIC_SUPABASE_URL || env.VITE_SUPABASE_URL || "",
   ).trim();
@@ -104,16 +108,24 @@ export function createPublicClassesSupabaseClient(env = process.env) {
       "",
   ).trim();
 
+  const diagnosticFetch = createPublicClassesDiagnosticFetch(fetchImpl, onFailure);
   if (!url || !apiKey) {
+    diagnosticFetch.unconfigured();
     return null;
   }
 
-  return createClient(url, apiKey, {
-    auth: {
-      autoRefreshToken: false,
-      persistSession: false,
-    },
-  });
+  try {
+    return createClient(url, apiKey, {
+      auth: {
+        autoRefreshToken: false,
+        persistSession: false,
+      },
+      global: { fetch: diagnosticFetch.fetch },
+    });
+  } catch {
+    diagnosticFetch.unconfigured();
+    return null;
+  }
 }
 
 function getClassStatus(row) {
