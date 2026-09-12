@@ -33,6 +33,8 @@ jobs:
             tests/textbook-numbered-read-service.test.mjs
       - name: Verify class detail and schedule request ownership
         run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
+      - name: Verify dialog and sidebar focus restoration
+        run: node --test --experimental-strip-types tests/dialog-opener-focus.test.mjs tests/sidebar-focus-return.test.mjs
       - name: Verify public class schedule parity and privacy
         run: |
           node --test --experimental-strip-types \
