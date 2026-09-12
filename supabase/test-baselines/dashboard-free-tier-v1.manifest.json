@@ -439,6 +439,16 @@
       "fileName": "20260909153611_remove_academic_curriculum_default_period_scope.sql",
       "status": "final",
       "sha256": "9135a5684b62fb9e11712182eb28e01f83532f3cd2eccbb626b66603ae81e7c8"
+    },
+    {
+      "fileName": "20260911102816_recruiting_applications_private_intake.sql",
+      "status": "final",
+      "sha256": "e0b8d2c7b917bc9ecb47b2be57b55c4f5b0e4f0b40bbf83c97559cbefdc0e39c"
+    },
+    {
+      "fileName": "20260912074228_public_site_content_management.sql",
+      "status": "final",
+      "sha256": "522a4fdd7050ed745ea9c234a33fa0bd6963aab309a80ee7a829b3ace960ef87"
     }
   ]
 }
