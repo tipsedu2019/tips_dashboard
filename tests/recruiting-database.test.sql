@@ -11,7 +11,7 @@ select ok(not has_function_privilege('authenticated', 'public.purge_expired_recr
 select ok(not has_table_privilege('anon', 'public.recruiting_applications', 'select'), 'anonymous has no application read grant');
 select ok(not has_table_privilege('authenticated', 'public.recruiting_application_receipts', 'select'), 'request receipts are private');
 select ok(not has_table_privilege('authenticated', 'public.recruiting_application_rate_limits', 'select'), 'fingerprints are private');
-select is((select count(*)::integer from cron.job where jobname='recruiting-retention-cleanup' and active and schedule='13 * * * *'), 1, 'hourly cleanup installed and active');
+select is((select count(*)::integer from cron.job where jobname='recruiting-retention-cleanup' and active and schedule='13 * * * *'), 1, 'explicit operational activation enabled one hourly cleanup job');
 
 set local role service_role;
 insert into recruiting_qa_results values ('first', public.recruiting_fixture_submit('a0000000-0000-4000-8000-000000000001'));

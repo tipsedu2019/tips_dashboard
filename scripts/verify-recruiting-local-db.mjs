@@ -34,6 +34,16 @@ try {
   await sql(await readFile(new URL("supabase/migrations/20260911102816_recruiting_applications_private_intake.sql", root), "utf8"));
   await sql(`create function public.recruiting_fixture_submit(p_id uuid, p_contact text default 'contact', p_ip text default 'ip', p_hash text default 'same') returns jsonb language sql as $$
     select public.submit_recruiting_application_v1(p_id, repeat(md5(p_hash),2), repeat(md5(p_ip),2), repeat(md5(p_contact),2), repeat(md5('global'),2), '모의 지원자', '01000000000', '과학', '모의 경력', '실제 지원서가 아닌 모의 지원 동기입니다.', null, 'talent-pool-v1',365)$$;`);
+  assert.equal(await sql("select count(*) from cron.job where jobname='recruiting-retention-cleanup';"), "0", "migration does not activate cron");
+  assert.equal(await sql("select count(*) from public.recruiting_retention_status;"), "0", "migration does not run the initial purge");
+  const beforeActivation = await sql(`set role service_role; select public.recruiting_fixture_submit('${randomUUID()}')->>'status';`);
+  assert.equal(beforeActivation.split("\n").at(-1), "unavailable", "intake is closed before operational activation");
+  assert.equal(await sql("select count(*) from public.recruiting_applications;"), "0", "closed intake stores nothing");
+  const activation = await readFile(new URL("scripts/operations/activate-recruiting-retention.sql", root), "utf8");
+  await sql(activation);
+  await sql(activation);
+  assert.equal(await sql("select count(*) from cron.job where jobname='recruiting-retention-cleanup' and active and schedule='13 * * * *';"), "1", "explicit activation retries preserve one hourly job");
+  assert.equal(await sql("select last_succeeded_at > now() - interval '1 minute' from public.recruiting_retention_status;"), "t", "explicit activation initializes cleanup health");
   const tap = await sql(await readFile(new URL("tests/recruiting-database.test.sql", root), "utf8"));
   assert.equal(/^not ok /m.test(tap), false, tap); assert.equal((tap.match(/^ok /gm) || []).length, 39, tap);
   const requestId = randomUUID();
@@ -58,6 +68,6 @@ try {
   assert.equal(jobs, "succeeded");
   await mkdir(artifact, { recursive: true });
   await writeFile(new URL("database-pgtap.txt", artifact), `${tap}\n`);
-  const result = { ok: true, database: image, pgTapAssertions: 39, concurrentDuplicateRequests: 8, duplicateApplicationsStored: 1, concurrentIpRequests: 10, concurrentIpAccepted: 5, realPgCronWorker: jobs, remoteDatabaseContacted: false, roleResolver: "isolated fixture; existing production resolver unchanged" };
+  const result = { ok: true, database: image, migrationSchedulesOrPurges: false, intakeClosedBeforeActivation: true, explicitActivationRetries: 2, activationJobCount: 1, pgTapAssertions: 39, concurrentDuplicateRequests: 8, duplicateApplicationsStored: 1, concurrentIpRequests: 10, concurrentIpAccepted: 5, realPgCronWorker: jobs, remoteDatabaseContacted: false, roleResolver: "isolated fixture; existing production resolver unchanged" };
   await writeFile(new URL("database-results.json", artifact), `${JSON.stringify(result, null, 2)}\n`); console.log(JSON.stringify(result, null, 2));
 } finally { await exec("docker", ["stop", name]).catch(() => {}); }

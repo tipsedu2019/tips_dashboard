@@ -71,9 +71,11 @@ DB의 원자적 quota는 전체 100회/시간, IP fingerprint 5회/시간, 연�
 
 ## 자동 파기와 복구
 
-CLI로 생성한 `supabase/migrations/20260911102816_recruiting_applications_private_intake.sql`을 승인된 배포 절차에서 적용해야 합니다. 기존 `pg_cron`이 없으면 migration은 `recruiting_requires_pg_cron`으로 실패합니다. cron 예약 실패도 트랜잭션을 롤백하여 미완성 설정을 남기지 않습니다.
+CLI로 생성한 `supabase/migrations/20260911102816_recruiting_applications_private_intake.sql`을 승인된 배포 절차에서 적용해야 합니다. 기존 `pg_cron`이 없으면 migration은 `recruiting_requires_pg_cron`으로 실패합니다. Migration은 테이블·권한·함수만 설치하며 작업 예약이나 초기 파기를 실행하지 않습니다. 설치 직후에는 정리 성공 시각이 없으므로 접수가 unavailable로 닫혀 있습니다.
 
-마이그레이션은 `recruiting-retention-cleanup`을 매시 13분(`13 * * * *`)에 예약하고 초기 파기를 한 번 실행합니다. 함수 `public.purge_expired_recruiting_applications_v1()`은 만료 지원서, receipt, quota를 삭제한 후 `recruiting_retention_status.last_succeeded_at`을 갱신합니다. 정상 작동 시 물리 삭제는 만료 후 다음 실행(최대 약 1시간)입니다. RLS는 만료 즉시 조회에서 제외합니다.
+Migration 성공 후 승인된 DB 운영자가 `scripts/operations/activate-recruiting-retention.sql`을 명시적으로 실행합니다. 이 파일은 자동 migration chain 밖에 있으며 `RECRUITING_APPLICATIONS_ENABLED=false`인 상태에서 적용합니다. `recruiting-retention-cleanup`을 매시 13분(`13 * * * *`)에 예약하고 초기 파기를 한 번 실행합니다. 예약과 초기 파기는 한 transaction이며 어느 쪽이든 실패하면 롤백합니다. 같은 DB 운영자 재실행은 동일한 이름의 작업 하나를 유지합니다.
+
+함수 `public.purge_expired_recruiting_applications_v1()`은 만료 지원서, receipt, quota를 삭제한 후 `recruiting_retention_status.last_succeeded_at`을 갱신합니다. 정상 작동 시 물리 삭제는 만료 후 다음 실행(최대 약 1시간)입니다. RLS는 만료 즉시 조회에서 제외합니다.
 
 정리 성공이 3시간 이상 오래되면 관리자 화면에 경고하고 새 접수 RPC는 unavailable(공개 API 503)을 반환합니다. 이것은 운영자에게 알림을 보내는 기능이 아니므로 DB 모니터링에서 해당 상태를 확인해야 합니다.
 
@@ -88,13 +90,7 @@ where jobid = (select jobid from cron.job where jobname='recruiting-retention-cl
 order by runid desc limit 5;
 ```
 
-실패하면 접수 활성화를 끄고 DB/pg_cron 가용성, 작업 활성 상태, 권한, lock/statement timeout을 먼저 해결합니다. **실제 삭제를 수행하는 복구 명령**은 운영 승인 범위에서 다음과 같이 실행합니다.
-
-```sql
-select cron.schedule('recruiting-retention-cleanup', '13 * * * *',
-  'select public.purge_expired_recruiting_applications_v1();');
-select public.purge_expired_recruiting_applications_v1();
-```
+실패하면 접수 활성화를 끄고 DB/pg_cron 가용성, 작업 활성 상태, 권한, lock/statement timeout을 먼저 해결합니다. **실제 삭제를 수행하는 복구**도 운영 승인 범위에서 같은 `scripts/operations/activate-recruiting-retention.sql` 파일을 실행합니다. 설치용 migration을 재실행하거나 다른 cron 작업을 제거하지 않습니다.
 
 성공 시각과 다음 예정 작업의 성공을 확인한 후 접수를 다시 엽니다. 타임아웃이 반복되면 만료 행 규모/잠금을 확인하고 정리 배치를 조정합니다. 만료 행은 일반 관리자 조회에서 숨겨지므로 장애 중 수동 정리는 승인된 DB 운영자가 파기 함수로 수행합니다. 이 코드가 공급자 백업·PITR 사본까지 삭제하는 것은 아닙니다. 공급자의 백업 보존 정책을 별도로 관리하고, 백업 복원 시 만료 정리를 실행한 후에 사이트/접수를 다시 공개합니다.
 
@@ -105,4 +101,4 @@ node --test --experimental-strip-types tests/recruiting-intake.test.mjs
 node scripts/verify-recruiting-local-db.mjs
 ```
 
-첫 명령은 네트워크를 모의 처리합니다. 두 번째는 별도 이름의 임시 Docker DB를 만들며 host 포트를 열지 않고 외부 DB URL을 받지 않습니다. 테스트 종료 시 컨테이너를 제거합니다. 기존 운영 역할 해석 함수는 로컬 fixture로 대체하되 실제 새 테이블/RLS/RPC와 pg_cron 확장을 검증합니다. 결과는 `artifacts/recruiting-20260911`에 기록합니다. 기존 관리자 로그인/원격 전체 migration chain/실제 고객 데이터의 운영 검증과는 별개입니다.
+첫 명령은 네트워크를 모의 처리합니다. 두 번째는 별도 이름의 임시 Docker DB를 만들며 host 포트를 열지 않고 외부 DB URL을 받지 않습니다. Migration 직후 cron/정리 성공 기록이 없고 접수가 닫혀 있음을 확인한 뒤 활성화 SQL을 명시적으로 두 번 적용하여 작업이 하나만 유지되는지 검증합니다. 이후 실제 새 테이블/RLS/RPC와 pg_cron 확장을 검증하고 컨테이너를 제거합니다. 기존 운영 역할 해석 함수는 로컬 fixture로 대체합니다. 결과는 `artifacts/recruiting-20260911`에 기록합니다. 기존 관리자 로그인/원격 전체 migration chain/실제 고객 데이터의 운영 검증과는 별개입니다.

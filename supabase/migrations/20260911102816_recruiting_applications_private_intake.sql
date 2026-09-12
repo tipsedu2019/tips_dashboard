@@ -2,7 +2,7 @@ begin;
 set local lock_timeout = '5s';
 set local statement_timeout = '120s';
 
--- Fail closed: intake must not launch without the retention scheduler installed.
+-- Require the scheduler dependency; operational scheduling is activated separately.
 do $$ begin
   if to_regclass('cron.job') is null then
     raise exception 'recruiting_requires_pg_cron' using errcode = '55000';
@@ -174,6 +174,6 @@ $$;
 revoke all on function public.submit_recruiting_application_v1(uuid, text, text, text, text, text, text, text, text, text, text, text, integer) from public, anon, authenticated;
 grant execute on function public.submit_recruiting_application_v1(uuid, text, text, text, text, text, text, text, text, text, text, text, integer) to service_role;
 
-select cron.schedule('recruiting-retention-cleanup', '13 * * * *', 'select public.purge_expired_recruiting_applications_v1();');
-select public.purge_expired_recruiting_applications_v1();
+-- Installation does not schedule jobs or purge rows. Intake stays unavailable until
+-- scripts/operations/activate-recruiting-retention.sql is explicitly executed.
 commit;
