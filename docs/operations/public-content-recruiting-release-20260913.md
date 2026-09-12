@@ -6,7 +6,7 @@
 
 이 기능의 원본 범위는 37개 파일이다. `src/features/public-content/**`, `src/features/recruiting/**`, 관리자 페이지 2개, 해당 관리자/공개 API route 7개, 기존 migration 2개, 전용 테스트 4개와 DB/browser 검증 스크립트 4개, 운영 문서 2개, 메뉴 관련 4개 파일이다. `app-sidebar.tsx`, `command-search.tsx`, `navigation.ts`, `admin-shell.test.mjs`는 이전 파일 전체를 덮지 않고 최신 main에 검토한 최소 diff를 적용했다. 추가로 메뉴 회귀 테스트를 채용과 CMS 양쪽 경로로 확장했고, CMS 문서에 공개 `/admin` 프록시의 허용 Origin 설정을 보충했다. 이 릴리스 기록은 새 문서다.
 
-기존 마이그레이션 파일과 승인 seed는 원본 바이트를 유지했다. 새 migration, 운영 teacher 계정 변경, 자동 seed 실행, 이메일·메시지 발송 기능은 추가하지 않았다.
+기존 main의 마이그레이션 이력과 승인 seed는 원본 바이트를 유지했다. 이번에 처음 배포하는 두 migration은 SQL 검사에서 요구하는 transaction-local lock/statement timeout을 추가했고, CMS migration을 명시적 transaction으로 묶었다. 범위가 제한된 integer 열에는 해당 범위와 함께 좁은 Squawk 예외 주석을 달았다. 함수 본문·스키마 타입·권한·보관 기간은 바꾸지 않았다. 별도 migration, 운영 teacher 계정 변경, 자동 seed 실행, 이메일·메시지 발송 기능은 추가하지 않았다.
 
 ## 로컬 검증 완료
 
@@ -16,6 +16,18 @@
 - `scripts/verify-public-content-local-db.mjs`: 격리 Supabase PostgreSQL 17.6.1.159의 14개 검증 그룹 통과. 실제 migration/RLS/ACL/SQLSTATE, 원자 저장·실패 롤백·재시도·버전 충돌·생성/수정 동시성, 초기 3,921건 보존을 검증했다.
 - `scripts/verify-recruiting-local-db.mjs`: pgTAP 39개, 중복 요청 8회에 지원서 1개, 동일 IP 동시 10건 중 5건 허용, 실제 pg_cron worker 성공 확인. 새 730일/v2 정책과 이전 365일/v1 보존을 포함한다.
 - DB 컨테이너는 외부 URL이나 host port를 받지 않으며 종료 시 제거했다. 각각 `artifacts/public-content-20260912/database-results.json`, `artifacts/recruiting-20260911/database-results.json`에 기록했다.
+- 위 DB 검증은 최종 SQL transaction/timeout 변경 후 다시 통과했다. 공식 Squawk 2.63.0으로 신규 SQL 두 파일만 PostgreSQL 17 대상으로 검사한 결과는 0건이다. 전역 lint 제외 목록과 기존 migration은 수정하지 않았다.
+
+## 마이그레이션 CI 준비
+
+`supabase/test-baselines/dashboard-free-tier-v1.manifest.json`에 아래 두 항목을 `final`로 추가했다. canonical runner의 `validateBaselineManifest`와 `validateManifestMigrations`로 순서·전체 89개 파일·SHA를 확인했고, 기존 87개 항목과 SQL 바이트 및 baseline 메타데이터는 main과 같다. 기존 capture·active pointer·baseline SQL을 재생성하지 않았다.
+
+| 신규 migration | SHA-256 |
+| --- | --- |
+| `20260911102816_recruiting_applications_private_intake.sql` | `54c6f9f18eac3c92bd1189d5a3f58eea30b7220cf1b5c303d84e856cc3079026` |
+| `20260912074228_public_site_content_management.sql` | `522a4fdd7050ed745ea9c234a33fa0bd6963aab309a80ee7a829b3ace960ef87` |
+
+`scripts/run-isolated-supabase-db-tests.mjs --review-head --require-final`, migration layout와 domain SQLSTATE 검사가 통과했다. 커밋 후 총괄이 동일 runner에 실제 `--review-base-sha`와 `--review-head-sha`를 지정해 immutable Git 이력 경계를 검증한다. 커밋 전 작업 파일 검사는 이 최종 revision 검사를 대신하지 않는다. 전체 baseline부터의 isolated schema-contract 실행과 원격 ledger/배포 검증도 별도 단계다.
 
 이 검증의 auth 역할과 Storage 스키마는 격리 fixture다. 운영 사용자 로그인, Storage HTTP 업로드, 전체 운영 migration chain, 공개→dashboard rewrite의 IP 전파, 실제 지원서 제출·삭제 또는 발송을 증명하지 않는다. 통합 build와 후보/운영 URL 검증은 배포 총괄이 별도로 수행한다.
 
