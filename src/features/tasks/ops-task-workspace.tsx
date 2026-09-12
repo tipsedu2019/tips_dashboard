@@ -13751,6 +13751,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       >
         <DialogContent
           data-registration-application-host=""
+          restoreFocusToOpener
           data-registration-application-mode={registrationApplicationHost.kind}
           data-registration-state={registrationApplicationHost.kind === "detail"
             ? "saved"

@@ -56,6 +56,9 @@ function DialogContent({
   layer = "default",
   showCloseButton = true,
   showCloseButtonText = false,
+  restoreFocusToOpener = false,
+  onOpenAutoFocus,
+  onCloseAutoFocus,
   ...props
 }: React.ComponentProps<typeof DialogPrimitive.Content> & {
   closeButtonLabel?: string
@@ -64,7 +67,10 @@ function DialogContent({
   layer?: "default" | "nested"
   showCloseButton?: boolean
   showCloseButtonText?: boolean
+  /** Controlled dialogs opened from rows/cards without a DialogTrigger. */
+  restoreFocusToOpener?: boolean
 }) {
+  const openerRef = React.useRef<{ element: HTMLElement; pathname: string } | null>(null)
   const closeButtonClassName = cn(
     buttonVariants({ variant: showCloseButtonText ? "outline" : "ghost", size: showCloseButtonText ? "sm" : "icon" }),
     "z-30 text-muted-foreground",
@@ -91,6 +97,25 @@ function DialogContent({
           className
         )}
         {...props}
+        onOpenAutoFocus={(event) => {
+          const active = document.activeElement
+          openerRef.current = restoreFocusToOpener && active instanceof HTMLElement && active !== document.body
+            ? { element: active, pathname: window.location.pathname }
+            : null
+          onOpenAutoFocus?.(event)
+        }}
+        onCloseAutoFocus={(event) => {
+          onCloseAutoFocus?.(event)
+          if (event.defaultPrevented || !restoreFocusToOpener) return
+          const opener = openerRef.current
+          openerRef.current = null
+          if (!opener || opener.pathname !== window.location.pathname) return
+          const element = opener.element
+          if (element.isConnected && !element.matches(':disabled, [aria-disabled="true"]') && !element.closest('[hidden], [inert]') && element.getClientRects().length > 0) {
+            event.preventDefault()
+            element.focus({ preventScroll: true })
+          }
+        }}
       >
         {children}
         {showCloseButton && (
