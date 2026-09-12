@@ -89,7 +89,7 @@ test("todo navigation stays undiscoverable while legacy direct links keep query 
   ]);
 
   for (const role of ["admin", "staff", "teacher", "assistant", "viewer"]) {
-    const groups = buildAdminNavGroups(getRoleCapabilities(role));
+    const groups = buildAdminNavGroups({ ...getRoleCapabilities(role), isAdmin: role === "admin" });
     const navigationUrls = groups.flatMap(({ items }) =>
       items.flatMap(({ url, items: childItems = [] }) => [
         url,
@@ -737,8 +737,18 @@ test("assistant navigation only exposes allowed operation surfaces", async () =>
   assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);
   assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/dashboard"/);
   assert.match(navigationSource, /canUseAssistantOperations \? assistantOverviewItems : fullOverviewItems/);
-  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations \}\)/);
-  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations \}\)/);
+  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin \}\)/);
+  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin \}\)/);
+});
+
+test("homepage content and recruiting navigation are discoverable only to the actual admin role", () => {
+  for (const role of ["admin", "staff", "teacher", "assistant", "viewer"]) {
+    const groups = buildAdminNavGroups({ ...getRoleCapabilities(role), isAdmin: role === "admin" });
+    const entries = groups.flatMap(group => group.items).flatMap(item => [item, ...(item.items ?? [])]);
+    for (const path of ["/admin/public-content", "/admin/recruiting"]) {
+      assert.equal(entries.some(item => item.url === path), role === "admin", `${role}: ${path}`);
+    }
+  }
 });
 
 test("global shell exposes stable browser-use targets", async () => {

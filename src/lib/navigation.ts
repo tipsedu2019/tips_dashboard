@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   LayoutGrid,
   NotebookPen,
+  PanelsTopLeft,
   Repeat2,
   Settings2,
   SpellCheck,
@@ -52,6 +53,14 @@ const workspaceMetaEntries: Array<{
   match: string
   meta: AdminWorkspaceMeta
 }> = [
+  {
+    match: "/admin/public-content",
+    meta: { section: "관리", title: "홈페이지 관리", summary: "선생님 소개, 공개 후기와 성적을 관리합니다." },
+  },
+  {
+    match: "/admin/recruiting",
+    meta: { section: "관리", title: "채용 지원서", summary: "인재풀 지원서를 확인하고 삭제 요청을 처리합니다." },
+  },
   {
     match: "/admin/statistics",
     meta: {
@@ -298,10 +307,12 @@ export function buildAdminNavGroups({
   canManageAll,
   canEditCurriculumPlanning,
   canUseAssistantOperations = false,
+  isAdmin = false,
 }: {
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
   canUseAssistantOperations?: boolean
+  isAdmin?: boolean
 }): NavGroup[] {
   const assistantOverviewItems: NavItem[] = [
     { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
@@ -368,6 +379,11 @@ export function buildAdminNavGroups({
       },
     )
   }
+
+  if (isAdmin) managementItems.push(
+    { title: "홈페이지 관리", url: "/admin/public-content", icon: PanelsTopLeft },
+    { title: "채용 지원서", url: "/admin/recruiting", icon: UserPlus },
+  )
 
   const groups: NavGroup[] = [overview]
 
