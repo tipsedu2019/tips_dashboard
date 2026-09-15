@@ -417,7 +417,7 @@ export function AcademicCalendarWorkspace() {
     <div className="flex flex-col gap-6">
 
       {error || mutationError ? (
-        <div className="px-4 lg:px-6">
+        <div className="px-4 sm:px-5 lg:px-6">
           <Alert variant="destructive">
             <AlertDescription>{error || mutationError}</AlertDescription>
           </Alert>
@@ -425,7 +425,7 @@ export function AcademicCalendarWorkspace() {
       ) : null}
 
       {densityError?.code === "visible_range_too_dense" ? (
-        <div className="px-4 lg:px-6">
+        <div className="px-4 sm:px-5 lg:px-6">
           <Alert>
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>선택한 기간의 일정이 너무 많아 이전 달력을 유지합니다.</span>
@@ -436,7 +436,7 @@ export function AcademicCalendarWorkspace() {
       ) : null}
 
       {isSeedCalendar || !canManageAll ? (
-        <div className="px-4 lg:px-6">
+        <div className="px-4 sm:px-5 lg:px-6">
           <div className="flex flex-wrap items-center gap-2 rounded-lg border border-border/70 bg-muted/20 px-3 py-2 text-sm text-muted-foreground">
             {isSeedCalendar ? <Badge variant="outline">기본 일정 세트</Badge> : null}
             {!canManageAll ? <Badge variant="outline">읽기 전용</Badge> : null}
@@ -451,7 +451,7 @@ export function AcademicCalendarWorkspace() {
         </div>
       ) : null}
 
-      <div className="px-4 lg:px-6">
+      <div className="px-4 sm:px-5 lg:px-6">
         {isConfirmedSevenDayRange ? (
           <section data-testid="operations-seven-day-agenda" className="space-y-4">
             <div className="flex items-center justify-between gap-3">

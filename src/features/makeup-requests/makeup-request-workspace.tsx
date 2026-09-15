@@ -1727,6 +1727,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const [finalCancelRequest, setFinalCancelRequest] = useState<MakeupRequest | null>(null)
   const [finalCancelNote, setFinalCancelNote] = useState("")
   const [requestDialogOpen, setRequestDialogOpen] = useState(false)
+  const requestDialogOpener = useRef<HTMLElement | null>(null)
+  const requestCreateButton = useRef<HTMLButtonElement | null>(null)
   const draftNavigation = useDraftNavigation({ dirty:
     requestDialogOpen && JSON.stringify([input, selectedSubject, selectedTeacherKey]) !== requestDraftBaseline
       || Boolean(approvalRequest && approvalNote.trim())
@@ -2094,6 +2096,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [])
 
   const openRequestDialog = useCallback(() => {
+    requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     resetForm()
     setRequestDialogOpen(true)
@@ -2296,6 +2299,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [closeDetailRequest, currentUserId, finalCancelNote, finalCancelRequest, runAction])
 
   const handleEditForRevision = useCallback((request: MakeupRequest) => {
+    requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
     setEditingRequestId(request.id)
@@ -2325,6 +2329,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [data.classes, selectedSubject, selectedTeacherKey, setView])
 
   const handleSchedulePendingMakeup = useCallback((request: MakeupRequest) => {
+    requestDialogOpener.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setFormCatalogReady(false)
     const requestClass = data.classes.find((classItem) => classItem.id === request.classId) || null
     closeDetailRequest()
@@ -2353,7 +2358,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   return (
-    <WorkspaceTabs value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+    <WorkspaceTabs value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       <div className="grid min-w-0 gap-2">
         <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
           <WorkspaceTabsList aria-label="휴보강 흐름" className="lg:w-auto">
@@ -2368,7 +2373,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
             })}
           </WorkspaceTabsList>
           <div className="flex items-center justify-end gap-2">
-            <Button type="button" size="sm" onClick={openRequestDialog}>
+            <Button ref={requestCreateButton} type="button" size="sm" onClick={openRequestDialog}>
               <Plus className="size-4" aria-hidden="true" />
               휴보강 신청
             </Button>
@@ -2403,6 +2408,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           <DialogContent
             className="max-h-[86vh] overflow-y-auto sm:max-w-4xl"
             closeButtonLabel="저장하지 않고 닫기"
+            onCloseAutoFocus={(event) => {
+              event.preventDefault()
+              const opener = requestDialogOpener.current
+              const canRestoreOpener = opener?.isConnected && opener !== document.body && opener.getClientRects().length > 0
+                && !opener.closest('[inert], [aria-hidden="true"]') && !opener.matches(':disabled, [aria-disabled="true"]')
+              const target = canRestoreOpener ? opener : requestCreateButton.current
+              target?.focus({ preventScroll: true })
+            }}
             onCloseButtonClick={closeRequestDialog}
             showCloseButtonText
           >

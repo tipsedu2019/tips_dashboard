@@ -959,7 +959,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
     }
   }
 
-  if (!actorScope) return <div className="p-6 text-sm text-muted-foreground">로그인 확인 중</div>
+  if (!actorScope) return <div className="px-4 py-6 text-sm text-muted-foreground sm:px-5 lg:px-6">로그인 확인 중</div>
 
   const renderRequest = (request: ApprovalRequest, highlighted = request.id === deepLinkedApprovalId) => (
     <ApprovalRequestRow key={request.id} request={request} canApprove={canApprove} userId={userId} saving={saving}
@@ -969,7 +969,7 @@ function ApprovalWorkspaceSession({ actorScope }: { actorScope: string | null })
   )
 
   return (
-    <div className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+    <div className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       {confirmation}
       <div className="grid gap-4 xl:grid-cols-[420px_minmax(0,1fr)]">
         <form onSubmit={submit} className="self-start rounded-lg border bg-card p-4 shadow-xs">

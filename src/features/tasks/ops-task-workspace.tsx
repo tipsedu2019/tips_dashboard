@@ -12259,7 +12259,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
 
   return (
-    <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+    <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0 && (
         <div className={HORIZONTAL_CHIP_BAR_CLASS}>
           {visibleOperationMetrics.map((metric) => (

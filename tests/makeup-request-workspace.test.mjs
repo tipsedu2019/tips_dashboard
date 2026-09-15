@@ -1160,7 +1160,7 @@ for (const [view,status] of [['approvalPending','approval_pending'],['makeupPend
 
 test("makeup workspace avoids browser prompt and fills wide screens", () => {
   assert.doesNotMatch(workspaceSource, /window\.prompt/);
-  assert.match(workspaceSource, /className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6"/);
+  assert.match(workspaceSource, /className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6"/);
   assert.doesNotMatch(workspaceSource, /className="mx-auto flex w-full max-w-none flex-col gap-4 px-4 py-5 md:px-6"/);
   assert.doesNotMatch(workspaceSource, /max-w-7xl/);
   assert.match(workspaceSource, /className="w-full overflow-x-auto"/);

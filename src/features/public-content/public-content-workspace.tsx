@@ -607,7 +607,7 @@ export function PublicContentWorkspace({
     setDialogError("");
   };
   return (
-    <div className="space-y-5 px-4 md:px-6">
+    <div className="space-y-5 px-4 sm:px-5 lg:px-6">
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
           value={kind}

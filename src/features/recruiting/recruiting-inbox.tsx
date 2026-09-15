@@ -86,7 +86,7 @@ export function RecruitingInbox({ accessToken }: { accessToken: string }) {
   }
   const retentionStale = list && (!list.retentionLastSucceededAt || Date.now() - Date.parse(list.retentionLastSucceededAt) >= 3 * 60 * 60 * 1000);
   const portfolio = safePortfolio(detail?.portfolioUrl ?? null);
-  return <div className="space-y-5 px-4 md:px-6">
+  return <div className="space-y-5 px-4 sm:px-5 lg:px-6">
     <div className="flex items-center justify-between gap-4"><h1 className="text-2xl font-semibold">채용 지원서</h1><Button variant="outline" disabled={loading} onClick={() => setRevision((value) => value + 1)}>새로고침</Button></div>
     {notice && <p role="status" className="text-sm">{notice}</p>}
     {retentionStale && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">자동 파기 작업을 확인해야 합니다. 새 지원서 접수는 일시 중단됩니다. 운영 담당자가 보관기간 정리 작업을 복구해 주세요.</p>}
