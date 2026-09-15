@@ -7957,6 +7957,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ))
   const registrationPersistence = FACT_ONLY_REGISTRATION_PERSISTENCE
   const formBaselineRef = useRef(serializeOpsTaskInput(form))
+  const formOpenerRef = useRef<{ element: HTMLElement; pathname: string } | null>(null)
+  const taskSearchInputRef = useRef<HTMLInputElement>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [formCompletionBlockers, setFormCompletionBlockers] = useState<string[]>([])
@@ -9513,6 +9515,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   async function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
     if (type === "registration" && !canManageRegistrationWorkflow) return
+    // Capture before option loading and input autofocus can move focus.
+    formOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? { element: document.activeElement, pathname: window.location.pathname }
+      : null
     const taskOptions = type === "registration" ? null : await ensureTaskOptions()
     if (type === "registration") void ensureRegistrationOptions(true)
     else if (!taskOptions) return
@@ -9615,6 +9621,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
     if (task.type === "registration" && !canManageRegistrationWorkflow) return
+    formOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? { element: document.activeElement, pathname: window.location.pathname }
+      : null
     if (task.type === "registration") void ensureRegistrationOptions(true)
     else void ensureTaskOptions()
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
@@ -9644,6 +9653,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [canManageRegistrationWorkflow, ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
 
   const openWordRetestRetryForm = useCallback((task: OpsTask, retryReason: WordRetestRetryReason) => {
+    formOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? { element: document.activeElement, pathname: window.location.pathname }
+      : null
     const baseForm = formFromTask(task)
     const wordRetest = baseForm.wordRetest || {}
     const nextForm = cloneForm({
@@ -12539,6 +12551,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   autoComplete="off"
                   enterKeyHint="search"
                   data-testid="task-search-input"
+                  ref={taskSearchInputRef}
                   onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") setQuery("")
@@ -12550,7 +12563,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   <button
                     type="button"
                     aria-label="검색 지우기"
-                    onClick={() => setQuery("")}
+                    onClick={() => {
+                      setQuery("")
+                      taskSearchInputRef.current?.focus()
+                    }}
                     className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     <X className="size-4" />
@@ -12892,6 +12908,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
         ].join(" ")}
           closeButtonLabel={formCloseLabel}
+          onCloseAutoFocus={(event) => {
+            const opener = formOpenerRef.current
+            formOpenerRef.current = null
+            if (!opener || opener.pathname !== window.location.pathname) return
+            const element = opener.element
+            if (element.isConnected && !element.matches(':disabled, [aria-disabled="true"]') && !element.closest('[hidden], [inert]') && element.getClientRects().length > 0) {
+              event.preventDefault()
+              element.focus({ preventScroll: true })
+            }
+          }}
           onCloseButtonClick={closeForm}
           showCloseButton={!registrationCreateApplicationRendered}
         >
