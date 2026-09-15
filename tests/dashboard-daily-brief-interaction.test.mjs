@@ -174,6 +174,7 @@ test("daily brief renders dated counts, real timestamps, full source links, empt
   assert.deepEqual([...container.querySelectorAll("dd")].map((item) => item.textContent), ["0건", "0건", "0건"])
   assert.match(container.textContent, /오늘 예정된 레벨테스트·방문상담·청강이 없습니다\./)
   assert.equal([...container.querySelectorAll("a")].filter((link) => link.textContent === "등록 일정 보기").length, 1)
+  assert.equal([...container.querySelectorAll("a")].find((link) => link.textContent === "등록 일정 보기").getAttribute("href"), "/admin/registration?view=calendar")
   assert.match(container.textContent, /14:30 기준/)
   assert.doesNotMatch(container.textContent, /99/)
 
@@ -193,7 +194,7 @@ test("daily brief renders dated counts, real timestamps, full source links, empt
     assert.ok(link.textContent.includes("영어 · 수학 · 본관 아주 긴 교실 이름"))
   }
   assert.equal(links[0].querySelector("time").textContent, "09:00") // Past scheduled rows remain present.
-  assert.ok([...container.querySelectorAll("a")].some((link) => link.textContent === "등록 일정 보기"))
+  assert.equal([...container.querySelectorAll("a")].find((link) => link.textContent === "등록 일정 보기").getAttribute("href"), "/admin/registration?view=calendar")
   state = { ...state, loading: true }
   await render()
   assert.equal(container.querySelectorAll("ul li").length, 5)

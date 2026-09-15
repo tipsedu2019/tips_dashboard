@@ -115,10 +115,10 @@ export function DashboardDailyBrief() {
         ) : brief ? (
           <div className="rounded-xl border bg-card px-4 py-5">
             <p className="text-sm text-muted-foreground">오늘 예정된 레벨테스트·방문상담·청강이 없습니다.</p>
-            <Link href="/admin/registration" className={registrationLinkClass}>등록 일정 보기</Link>
+            <Link href="/admin/registration?view=calendar" className={registrationLinkClass}>등록 일정 보기</Link>
           </div>
         ) : null}
-        {brief && total > 5 && brief.upcoming.length > 0 ? <Link href="/admin/registration" className={`${registrationLinkClass} justify-self-start`}>등록 일정 보기</Link> : null}
+        {brief && total > 5 && brief.upcoming.length > 0 ? <Link href="/admin/registration?view=calendar" className={`${registrationLinkClass} justify-self-start`}>등록 일정 보기</Link> : null}
       </div>
 
       <nav className="flex flex-wrap gap-x-6" aria-label="바로가기">
