@@ -45,3 +45,16 @@ Additional captured assertions/states: `after-loading`, `after-retry`, `after-re
 ## Limits
 
 All API/auth/DB transports are synthetic and strict: unknown API calls fail 501; other origins abort; app-origin writes abort; WebSockets close; service workers are blocked. No real saves, data edits, provider actions, messages or deployment occurred. The browser data is one synthetic school event with a long title, plus empty seven-day recovery; mounted tests separately preserve a nonempty seven-day result. These tests are not real-device, production, saved-data or dense-volume performance evidence. Full-repository type/lint/build checks belong to root integration. Other academic menu branches, drag/drop writes, dirty-draft save/cancel branches, exports and actual persistence were not newly exercised by this bounded fix.
+
+## Final scoped review follow-up: form opener ownership
+
+Implementation commit: `bae83ea9b9c34c46084b2e7178cc10758e3e740b` (`fix(calendar): scope focus restoration to each form opener`). Only `calendar.tsx` and its existing mounted regression test changed.
+
+The final reviewer reproduced one P2: failed/pending event detail left its opener reference behind, so a subsequent new-event form could restore focus to the old event. The fix stores the pending detail opener separately from the active form opener. New single-date and range forms capture their own opener; successful detail requests promote their original opener into the form session. Request invalidation discards the pending detail opener, while retrying the same failed detail preserves its original opener. Close restores focus only when the form's opener is connected, on the same URL, visible, enabled and not inert; otherwise ordinary dialog restoration remains in control.
+
+Evidence:
+
+- The expanded mounted test executed against the pre-fix committed Calendar source fails specifically with `failed detail then new must restore its own opener`. Log: `/tmp/tips-calendar-focus-before.log`. The temporary baseline test file was removed after execution.
+- The fixed code passes failed and pending detail → new single-date/range form → close; late detail cannot replace the new form; same-detail retry success restores the original detail opener. Additional assertions cover hidden attribute, CSS visibility, zero layout, inert, disabled, aria-disabled, detached and changed-URL targets.
+- Same 52 focused tests pass, 0 failed: `/tmp/tips-calendar-focus-after.log`. Owned-file ESLint: 0 errors/warnings (`/tmp/tips-calendar-focus-lint.log`). `git diff --check` passed.
+- This follow-up used source and mounted tests only. Port 3216 was left on root's immutable local production build `42567d74`; no rebuild/restart/browser claim is made for the opener follow-up. Root owns the next scoped review, rebuild and actual calendar browser verification.
