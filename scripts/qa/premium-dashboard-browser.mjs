@@ -64,7 +64,7 @@ for (const id of ids) for (const width of [1440, 390]) for (const name of routes
     if (id === 'D' && name === 'students') {
       await page.getByRole('button', { name: '다음 페이지', exact: true }).click();
       await page.getByText('합성학생11', { exact: true }).filter({ visible: true }).first().waitFor();
-      const search = page.getByRole('textbox', { name: '학생 검색', exact: true });
+      const search = page.locator('input[aria-label="학생 검색"]');
       await search.fill('일치하지않는합성검색');
       await page.getByText('0건 · 0–0번째', { exact: true }).waitFor();
       await search.fill('');
