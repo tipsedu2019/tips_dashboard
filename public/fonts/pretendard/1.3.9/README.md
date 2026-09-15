@@ -10,6 +10,7 @@ The92 WOFF2 files are unmodified upstream variable dynamic subsets. `manifest.js
 - Total font assets:2,957,724 bytes. Individual assets:8,252–43,920 bytes. Local CSS:55,852 bytes uncompressed. Total stored size is not a page's transfer size.
 - `font-display: swap`, `unicode-range`, no preload. The browser selects the blocks needed by rendered text; no runtime CDN dependency.
 - `globals.css` bundles the declarations. The root's existing `font-sans` uses `"Pretendard Variable"` first, then Pretendard, Noto Sans KR, Apple SD Gothic Neo, Malgun Gothic, system-ui and sans-serif.
+- Font URLs use relative imports so Next emits hashed files under `/_next/static/media/`. This also works through the public site's existing `/admin` and `/_next` proxy; root `/fonts` URLs are not proxied there.
 - No `local()` source lets an installed older Pretendard override the pinned supply. If downloads fail, the existing system fallback still renders text.
 - Do not add a full Korean font preload or a second font loader. Changes to source files require refreshing the manifest and preserving the OFL notice.
 

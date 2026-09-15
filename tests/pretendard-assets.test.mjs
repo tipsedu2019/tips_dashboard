@@ -9,7 +9,10 @@ const stylesheet = readFileSync(new URL("../src/lib/fonts/pretendard.css", impor
 const hash = (bytes) => createHash("sha256").update(bytes).digest("hex");
 
 test("every self-hosted unicode subset is the intact licensed upstream WOFF2", () => {
-  const references = [...stylesheet.matchAll(/url\(\/fonts\/pretendard\/1\.3\.9\/([^)]*)\)/g)].map((m) => m[1]);
+  // The public site's /admin proxy forwards /_next assets, but not /fonts.
+  // Relative imports let Next emit the licensed files into /_next/static/media.
+  assert.doesNotMatch(stylesheet, /url\(\s*\/fonts\//);
+  const references = [...stylesheet.matchAll(/url\(\.\.\/\.\.\/\.\.\/public\/fonts\/pretendard\/1\.3\.9\/([^)]*)\)/g)].map((m) => m[1]);
   assert.equal(references.length, 92);
   assert.deepEqual(new Set(references), new Set(manifest.assets.map((asset) => asset.file)));
   for (const asset of manifest.assets) {
