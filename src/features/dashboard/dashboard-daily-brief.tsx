@@ -1,16 +1,16 @@
 "use client"
 
 import Link from "next/link"
-import { RefreshCw } from "lucide-react"
+import { ChevronRight, RefreshCw } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { useDashboardDailyBrief } from "./use-dashboard-daily-brief"
 
 const countItems = [
-  { key: "levelTests", label: "레벨테스트" },
-  { key: "visitConsultations", label: "방문상담" },
-  { key: "observationClasses", label: "청강" },
+  { key: "levelTests", label: "레벨테스트", kind: "level_test" },
+  { key: "visitConsultations", label: "방문상담", kind: "visit_consultation" },
+  { key: "observationClasses", label: "청강", kind: "observation" },
 ] as const
 
 const shortcuts = [
@@ -67,7 +67,11 @@ export function DashboardDailyBrief() {
             <div key={item.key} className="min-w-0 px-3 sm:px-5">
               <dt className="text-xs font-medium text-muted-foreground sm:text-sm">{item.label}</dt>
               <dd className="mt-2 flex min-h-8 items-baseline gap-1 tabular-nums">
-                {initialLoading ? <Skeleton className="h-8 w-16" /> : <><span className="text-2xl font-semibold">{brief ? brief.counts[item.key] : "—"}</span>{brief ? <span className="text-sm text-muted-foreground">건</span> : <span className="sr-only">미조회</span>}</>}
+                {initialLoading ? <Skeleton className="h-8 w-16" /> : brief ? (
+                  <Link href={`/admin/registration?view=calendar&kind=${item.kind}`} prefetch={false} aria-label={`${item.label} ${brief.counts[item.key]}건 · 등록 일정 보기`} className="group flex min-h-11 w-full items-baseline gap-1 rounded-md text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <span className="text-2xl font-semibold group-hover:underline">{brief.counts[item.key]}</span><span className="text-sm">건</span><ChevronRight aria-hidden="true" className="ml-auto size-4 self-center" />
+                  </Link>
+                ) : <><span className="text-2xl font-semibold">—</span><span className="sr-only">미조회</span></>}
               </dd>
             </div>
           ))}

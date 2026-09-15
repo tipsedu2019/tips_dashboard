@@ -23,8 +23,22 @@ function WorkspaceTabs({ value, className, ...props }: Omit<React.ComponentProps
   )
 }
 
-function WorkspaceTabsList({ className, ...props }: React.ComponentProps<typeof TabsList>) {
-  return <TabsList {...props} className={cn("h-auto min-w-0 w-full max-w-full flex-nowrap justify-start gap-1 overflow-x-auto p-1", className)} />
+function WorkspaceTabsList({ className, ref, ...props }: React.ComponentProps<typeof TabsList>) {
+  const { value } = useWorkspaceTabs()
+  const listRef = React.useRef<HTMLDivElement>(null)
+  React.useImperativeHandle(ref, () => listRef.current!)
+  React.useEffect(() => {
+    const list = listRef.current
+    const selected = list?.querySelector<HTMLElement>('[role="tab"][aria-selected="true"]')
+    if (!list || !selected) return
+    const viewport = list.getBoundingClientRect()
+    const tab = selected.getBoundingClientRect()
+    // Deep links can select an offscreen tab without focusing it. Move only
+    // this horizontal strip; keep the page position and active input intact.
+    if (tab.left < viewport.left) list.scrollLeft += tab.left - viewport.left
+    else if (tab.right > viewport.right) list.scrollLeft += tab.right - viewport.right
+  }, [value])
+  return <TabsList {...props} ref={listRef} className={cn("h-auto min-w-0 w-full max-w-full flex-nowrap justify-start gap-1 overflow-x-auto p-1", className)} />
 }
 
 function WorkspaceTabsTrigger({ className, onFocus, ...props }: React.ComponentProps<typeof TabsTrigger>) {

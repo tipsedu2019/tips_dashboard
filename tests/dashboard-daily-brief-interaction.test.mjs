@@ -147,7 +147,7 @@ test("daily brief renders dated counts, real timestamps, full source links, empt
   const { dom, container, reactRoot } = installDom(t)
   let retries = 0
   let state = { brief: null, localDate: "2026-09-12", loading: true, error: null, retry: () => { retries += 1 } }
-  const Link = forwardRef(function Link({ href, children, ...props }, ref) { return createElement("a", { ...props, href, ref }, children) })
+  const Link = forwardRef(function Link({ href, children, prefetch: _prefetch, ...props }, ref) { void _prefetch; return createElement("a", { ...props, href, ref }, children) })
   const { DashboardDailyBrief } = load(new URL("src/features/dashboard/dashboard-daily-brief.tsx", root), new Map([
     ["next/link", Link],
     ["./use-dashboard-daily-brief", { useDashboardDailyBrief: () => state }],
@@ -172,6 +172,8 @@ test("daily brief renders dated counts, real timestamps, full source links, empt
   state = { ...state, brief: empty, error: null }
   await render()
   assert.deepEqual([...container.querySelectorAll("dd")].map((item) => item.textContent), ["0건", "0건", "0건"])
+  assert.deepEqual([...container.querySelectorAll("dd a")].map(link => new URL(link.href).searchParams.get("kind")), ["level_test", "visit_consultation", "observation"])
+  assert.ok([...container.querySelectorAll("dd a")].every(link => new URL(link.href).searchParams.get("view") === "calendar" && link.getAttribute("aria-label").includes("0건")))
   assert.match(container.textContent, /오늘 예정된 레벨테스트·방문상담·청강이 없습니다\./)
   assert.equal([...container.querySelectorAll("a")].filter((link) => link.textContent === "등록 일정 보기").length, 1)
   assert.equal([...container.querySelectorAll("a")].find((link) => link.textContent === "등록 일정 보기").getAttribute("href"), "/admin/registration?view=calendar")
