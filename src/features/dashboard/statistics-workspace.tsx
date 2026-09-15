@@ -41,6 +41,7 @@ function PanelState({
   generatedAt,
   onRefresh,
   controls,
+  snapshot,
   renderOnError = false,
   children,
 }: {
@@ -49,20 +50,23 @@ function PanelState({
   generatedAt: string | null
   onRefresh: () => void
   controls?: ReactNode
+  snapshot: unknown
   renderOnError?: boolean
   children: ReactNode
 }) {
+  const hasSnapshot = snapshot != null
   const updated = generatedAt ? new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short" }).format(new Date(generatedAt)) : "-"
   return <div className="grid gap-4">
     <div className="flex flex-wrap items-center justify-between gap-2 px-1">
       <span className="text-xs text-muted-foreground">마지막 갱신 {updated}</span>
-      <Button type="button" size="sm" variant="outline" onClick={onRefresh}>새로고침</Button>
+      <Button type="button" size="sm" variant="outline" disabled={loading} onClick={onRefresh}>새로고침</Button>
     </div>
     {controls ? <div className="min-w-0">{controls}</div> : null}
     <div role="region" aria-label="통계 결과" aria-busy={loading} className="grid gap-4">
-      {loading ? <Card role="status"><CardContent className="py-10 text-sm text-muted-foreground">통계를 불러오는 중입니다.</CardContent></Card> : null}
-      {error && !renderOnError ? <Card role="alert"><CardContent className="flex items-center justify-between gap-3 py-6 text-sm"><span>{error}</span><Button type="button" size="sm" onClick={onRefresh}>다시 시도</Button></CardContent></Card> : null}
-      {!loading && (!error || renderOnError) ? children : null}
+      {loading && hasSnapshot ? <p role="status" className="text-sm text-muted-foreground">통계를 갱신하는 중입니다.</p> : null}
+      {loading && !hasSnapshot ? <Card role="status"><CardContent className="py-10 text-sm text-muted-foreground">통계를 불러오는 중입니다.</CardContent></Card> : null}
+      {error && (!renderOnError || hasSnapshot) ? <Card role="alert"><CardContent className="flex items-center justify-between gap-3 py-6 text-sm"><span>{hasSnapshot ? `갱신 실패 · ${error} 이전 통계를 표시합니다.` : error}</span><Button type="button" size="sm" onClick={onRefresh}>다시 시도</Button></CardContent></Card> : null}
+      {hasSnapshot || (!loading && (!error || renderOnError)) ? children : null}
     </div>
   </div>
 }
@@ -142,7 +146,7 @@ function ScheduleConflictsPanel() {
   const state = useStatisticsSnapshot({ tab: "schedule_conflicts" })
   const data = object(state.data)
   const rows = [...list(data.teacherConflicts), ...list(data.classroomConflicts), ...list(data.examConflicts)]
-  const sourceStatus: "loading" | "ready" | "error" = state.loading
+  const sourceStatus: "loading" | "ready" | "error" = state.snapshot ? "ready" : state.loading
     ? "loading"
     : state.error
       ? "error"

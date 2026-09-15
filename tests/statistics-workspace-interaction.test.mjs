@@ -117,11 +117,11 @@ function createSnapshotHook() {
     calls.push({ ...input, range })
     const response = responses.get(key) ?? { data: {} }
     return {
-      snapshot: null,
+      snapshot: response.accepted || (!response.loading && !response.error) ? { data: response.data } : null,
       data: response.data ?? null,
       loading: response.loading ?? false,
       error: response.error ?? null,
-      generatedAt: null,
+      generatedAt: response.accepted ? "2026-09-15T00:00:00.000Z" : null,
       expiresAt: null,
       cacheStatus: null,
       range,
@@ -387,5 +387,29 @@ test("schedule and textbook ranges remain operable and focused while their resul
   assert.match(container.querySelector("[role=alert]")?.textContent ?? "", /교재 통계를 불러오지 못했습니다/)
   assert.doesNotMatch(container.textContent, /95건/)
 
+  await act(async () => reactRoot.unmount())
+})
+
+ test("same-key refresh and refresh failure retain accepted content and timestamp", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const snapshot = createSnapshotHook()
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  for (const response of [
+    { loading: true, accepted: true, data: { summary: summary(42) } },
+    { error: "통계를 불러오지 못했습니다.", accepted: true, data: { summary: summary(42) } },
+  ]) {
+    snapshot.responses.set("overview", response)
+    await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+    assert.match(container.textContent, /42명/)
+    assert.match(container.textContent, /26\. 9\. 15/)
+    assert.equal(container.querySelector('[aria-label="통계 결과"]').getAttribute("aria-busy"), String(Boolean(response.loading)))
+    if (response.error) assert.match(container.querySelector('[role="alert"]').textContent, /갱신 실패.*이전 통계/)
+    else assert.match(container.querySelector('[role="status"]').textContent, /갱신하는 중/)
+  }
   await act(async () => reactRoot.unmount())
 })

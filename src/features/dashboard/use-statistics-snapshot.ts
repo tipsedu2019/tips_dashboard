@@ -144,7 +144,7 @@ export function useStatisticsSnapshot(input: StatisticsSnapshotInput): Statistic
         setLoading(false)
       } catch (loadError: unknown) {
         if (controller.signal.aborted) return
-        setSnapshotResult(null)
+        // Keep the accepted result; the key guard hides it for every other query or identity.
         setLoading(false)
         setError(
           loadError instanceof Error && loadError.message === "statistics_cache_busy"
