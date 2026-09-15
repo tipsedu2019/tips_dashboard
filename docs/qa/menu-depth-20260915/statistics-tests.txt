@@ -1,0 +1,19 @@
+✔ statistics drilldowns are action-only, bounded, and append without duplicate rows (1.453791ms)
+✔ drilldown route validates bearer JWT and invokes only security-invoker roster RPCs (0.721834ms)
+✔ dashboard renders the statistics shortcut to its statistics route (109.989084ms)
+✔ Radix tabs use manual keyboard activation, linked panels, and mount only the active request (105.420333ms)
+✔ student filters remain selected and focused through initial loading, refresh, and error (50.502709ms)
+✔ schedule and textbook ranges remain operable and focused while their result state changes (32.829958ms)
+✔ same-key refresh and refresh failure retain accepted content and timestamp (24.301ms)
+✔ distribution shows top eight of fifty schools with exact keys, readable totals and expansion (37.3615ms)
+✔ deep links, filter replace, tab push and browser history restore only the active tab (93.387167ms)
+✔ real distribution buttons expose the displayed count and unit in their accessible names (30.63025ms)
+✔ drilldown collapses without losing focus or refetching and retries only the failed next page (23.901125ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 11
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 806.430625

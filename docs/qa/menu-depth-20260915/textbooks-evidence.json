@@ -1,0 +1,2710 @@
+{
+  "sourceSha": null,
+  "captureCheckoutSha": "a20a58caa79a60d5b702cf2dcbff5ded65e2fb0c",
+  "buildId": "live-dev",
+  "base": "http://127.0.0.1:3216",
+  "fixedNow": "2026-09-15T05:30:00.000Z",
+  "data": "synthetic only",
+  "network": "Every API/Supabase request fulfilled or aborted; other external requests aborted; WebSockets closed",
+  "captures": [
+    {
+      "route": "/admin/textbooks?textbookTab=master",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_options_v1",
+          "args": {
+            "p_filters": {
+              "subject": "english",
+              "listSubject": "all",
+              "bulkSubject": "keep"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            },
+            "p_sort": "quality-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            },
+            "p_sort": "quality-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            },
+            "p_sort": "quality-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            }
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "master",
+      "buttons": [
+        {
+          "text": "",
+          "label": "학사일정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "",
+          "label": "환경 설정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "합성 관리자fixture@example.invalid",
+          "label": "합성 관리자 계정 메뉴 열기"
+        },
+        {
+          "text": "",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "사이드바 접기",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "미사용 교재",
+          "label": "미사용 교재 보기"
+        },
+        {
+          "text": "신규 등록",
+          "label": "신규 등록"
+        },
+        {
+          "text": "",
+          "label": "교재 필터 초기화"
+        },
+        {
+          "text": "영어1종",
+          "label": "영어 그룹 접기 · 1종 · 재고 0권"
+        },
+        {
+          "text": "교재 1",
+          "label": "교재 1 · 출판사 · 영어 · 중등 · 중1–중3 · 문법 열기"
+        },
+        {
+          "text": "",
+          "label": "교재 1 · 출판사 · 영어 · 중등 · 중1–중3 · 문법 편집"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "교재 검색",
+          "placeholder": "교재명, 출판사, ISBN, 바코드"
+        }
+      ],
+      "dialog": "교재 신규 등록\n\n교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다.\n\n교재명\n*\n과목\n*\n영어\n영어\n수학\n과학\n기타\n상태\n사용중\n사용중\n미사용\n학교 구분\n*\n초등\n중등\n고등\n학년\n*\n세부과목\n*\n세부과목 선택\n출판사\n선택\n판매가\nISBN\n바코드\n\n교재명을 입력하세요.\n\n취소\n교재 등록\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=master&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22subject%22%3A%22all%22%2C%22schoolLevel%22%3A%22all%22%2C%22gradeLevel%22%3A%22all%22%2C%22subSubject%22%3A%22all%22%2C%22quality%22%3A%22all%22%2C%22inventory%22%3A%22all%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n관리\n\n/\n교재관리\n빠른 이동\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n미사용 교재\n신규 등록\n과목\n전체 과목\n세부과목\n전체 세부과목\n학교\n전체 학교 구분\n학년\n전체 학년\n교재 재고\n\t교재\t분류\t본관권\t별관권\t합계권\t판매가\t관리\n\n영어\n1종\n\n\n\t\n교재 1\n출판사\n\t\n중등 · 중1–중3\n문법\n\t0\t0\t0\t12,000원\t\n\n\t합계\t\t0\t0\t0\t-\t\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-master-1440.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=requests",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_detail_v1",
+          "args": {
+            "p_anchor_line_id": "a2000000-0000-4000-8000-000000000300",
+            "p_mode": "request"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-title",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_class_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_teacher_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_location_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-order",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/resolve_textbook_reference_v1",
+          "args": {
+            "p_reference": "a2000000-0000-4000-8000-000000000101",
+            "p_active_only": true,
+            "p_scope": "request",
+            "p_fallback_supplier": ""
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_class_reference_v1",
+          "args": {
+            "p_class_id": "a2000000-0000-4000-8000-000000000800"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_location_reference_v1",
+          "args": {
+            "p_location_id": "a2000000-0000-4000-8000-000000000900"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "requests",
+      "buttons": [
+        {
+          "text": "",
+          "label": "학사일정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "",
+          "label": "환경 설정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "합성 관리자fixture@example.invalid",
+          "label": "합성 관리자 계정 메뉴 열기"
+        },
+        {
+          "text": "",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "사이드바 접기",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "요청 추가",
+          "label": "교재 요청 추가"
+        },
+        {
+          "text": "",
+          "label": "교재 요청 필터 초기화"
+        },
+        {
+          "text": "요청대기1건 · 요청 4",
+          "label": "요청대기 그룹 접기 · 1건 · 요청 4"
+        },
+        {
+          "text": "교재 101",
+          "label": "교재 101 요청 상세 열기"
+        },
+        {
+          "text": "수정",
+          "label": "교재 101 요청 수정"
+        },
+        {
+          "text": "",
+          "label": "교재 101 요청 더보기"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "요청 검색",
+          "placeholder": "요청 교재명, 수업, 요청자"
+        }
+      ],
+      "dialog": "교재 요청 수정\n\n교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.\n\n교재명\n등록 교재\n직접 입력\n교재 101\n수업\n중2반\n학생용 요청\n교사용 요청\n선생님\n선생님\n위치\n본관\n메모\n취소\n변경 저장\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=requests&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22boardScope%22%3A%22active%22%2C%22requestFilter%22%3A%22all%22%2C%22orderFilter%22%3A%22all%22%2C%22mode%22%3A%22request%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n관리\n\n/\n교재관리\n빠른 이동\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n요청 추가\n교재 등록\n전체 교재\n요청대기\n1건 · 요청 4\n교재 요청 처리 목록\n교재\t요청\t요청자\t수업 · 위치\t작업\n교재 101\n8. 1. 오전 09:00\n\t\n학생용\n2권\n교사용\n2권\n\t선생님\t\n중2반\n본관\n\t\n수정\n\n합계\t\n학생용\n2권\n교사용\n2권\n\t\t\t\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-requests-1440.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=purchase",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_detail_v1",
+          "args": {
+            "p_anchor_line_id": "a2000000-0000-4000-8000-000000000300",
+            "p_mode": "order"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-title",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_class_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_teacher_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_location_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-order",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/resolve_textbook_reference_v1",
+          "args": {
+            "p_reference": "a2000000-0000-4000-8000-000000000101",
+            "p_active_only": true,
+            "p_scope": "management",
+            "p_fallback_supplier": ""
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_class_reference_v1",
+          "args": {
+            "p_class_id": "a2000000-0000-4000-8000-000000000800"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_location_reference_v1",
+          "args": {
+            "p_location_id": "a2000000-0000-4000-8000-000000000900"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_inventory_balance_v1",
+          "args": {
+            "p_input": {
+              "textbookIds": [
+                "a2000000-0000-4000-8000-000000000101"
+              ],
+              "locationId": "a2000000-0000-4000-8000-000000000900"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "purchase",
+      "buttons": [
+        {
+          "text": "",
+          "label": "학사일정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "",
+          "label": "환경 설정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "합성 관리자fixture@example.invalid",
+          "label": "합성 관리자 계정 메뉴 열기"
+        },
+        {
+          "text": "",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "사이드바 접기",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "주문서",
+          "label": "주문 문서 메뉴"
+        },
+        {
+          "text": "주문 추가",
+          "label": "교재 주문 추가"
+        },
+        {
+          "text": "",
+          "label": "주문·입고 필터 초기화"
+        },
+        {
+          "text": "부분입고1건 · 요청 4 · 주문 10 · 입고 4",
+          "label": "부분입고 그룹 접기 · 1건 · 요청 4 · 주문 10 · 입고 4"
+        },
+        {
+          "text": "교재 101",
+          "label": "교재 101 주문·입고 상세 열기"
+        },
+        {
+          "text": "입고",
+          "label": "교재 101 입고"
+        },
+        {
+          "text": "",
+          "label": "교재 101 주문·입고 더보기"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "주문·입고 검색",
+          "placeholder": "주문 교재명, 총판, 수업"
+        }
+      ],
+      "dialog": "교재 주문 수정\n\n교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.\n\n등록 교재\n*\n교재 101\n단계\n공급처 주문\n요청 접수\n공급처 주문\n입고 처리\n수업\n중2반\n요청 교재명 교재 101\n선생님\n선생님\n위치\n본관\n학생용 요청\n교사용 요청\n학생용 주문\n교사용 주문\n총판\n-\n요청\n학생용 2권 · 교사용 2권\n단가\n9,001원\n합계\n45,005원\n입고 후\n-\n위치\n본관\n메모\n취소\n변경 저장\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=purchase&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22boardScope%22%3A%22active%22%2C%22requestFilter%22%3A%22all%22%2C%22orderFilter%22%3A%22all%22%2C%22mode%22%3A%22order%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n관리\n\n/\n교재관리\n빠른 이동\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n주문서\n주문 추가\n범위\n진행중\n단계\n전체\n교재 등록\n전체 교재\n부분입고\n1건 · 요청 4 · 주문 10 · 입고 4\n교재 주문·입고 처리 목록\n\t교재\t진행상태\t요청\t주문\t입고\t총판 · 단가\t수업 · 위치\t작업\n\n\t교재 101\n-\n\t부분 입고\t\n학생용\n2권\n교사용\n2권\n\t\n학생용\n5권\n교사용\n5권\n\t\n학생용\n2권\n교사용\n2권\n\n남음 6권\n\n\t\n-\n9,000원\n\t\n중2반\n본관 · 선생님\n\t\n입고\n\n\t합계\t\t\n학생용\n2권\n교사용\n2권\n\t\n학생용\n5권\n교사용\n5권\n\t\n학생용\n2권\n교사용\n2권\n\t\t\t\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-purchase-1440.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=sales",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_history_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            },
+            "p_sort": "month-class-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_history_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "status": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_history_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            },
+            "p_sort": "month-class-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_detail_v1",
+          "args": {
+            "p_id": "a2000000-0000-4000-8000-000000000400"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_history_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            },
+            "p_sort": "month-class-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "sales",
+      "buttons": [
+        {
+          "text": "",
+          "label": "학사일정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "",
+          "label": "환경 설정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "합성 관리자fixture@example.invalid",
+          "label": "합성 관리자 계정 메뉴 열기"
+        },
+        {
+          "text": "",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "사이드바 접기",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "청구 준비",
+          "label": "메이크에듀 청구 준비 열기"
+        },
+        {
+          "text": "출고 추가",
+          "label": "교재 출고 추가"
+        },
+        {
+          "text": "",
+          "label": "출고 필터 초기화"
+        },
+        {
+          "text": "출고 대기1수량 2권",
+          "label": "출고 대기 그룹 접기"
+        },
+        {
+          "text": "교재 101",
+          "label": "김선생 교재 101 출고 상세 열기"
+        },
+        {
+          "text": "출고",
+          "label": "김선생 교재 101 출고 완료 처리"
+        },
+        {
+          "text": "",
+          "label": "김선생 교재 101 출고 더보기"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "출고 검색",
+          "placeholder": "출고 교재명, 학생, 수업"
+        }
+      ],
+      "dialog": "출고 상세\n\n선택한 출고 한 건의 직접 조회 결과입니다.\n\n교재\n교재 101\n대상\n김선생\n구분\n교사용\n상태\n출고 대기\n수업\n중2반\n위치\n본관\n출고월\n2026-08\n처리일시\n8. 1. 오전 09:00\n수량\n2권\n금액\n20,000원\n닫기\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=sales&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22status%22%3A%22all%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n관리\n\n/\n교재관리\n빠른 이동\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n청구 준비\n출고 추가\n상태\n전체 출고\n수량 2 · 청구 20,000원\n출고 대기\n1\n수량 2권\n교재 출고 처리 목록\n\t교재\t대상\t진행상태\t수량권\t수업 · 위치\t작업\n\n\t교재 101\n\n8. 1. 오전 09:00\n\n\t\n김선생\n교사용\n\t출고 대기\t2\t\n중2반\n본관 · 2026-08\n\t\n출고\n\n이 페이지 합계\t2\t\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-sales-1440.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=inventory",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_location_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-order",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_options_v1",
+          "args": {
+            "p_filters": {
+              "subject": "english",
+              "listSubject": "all",
+              "bulkSubject": "keep"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_inventory_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all",
+              "locationId": "a2000000-0000-4000-8000-000000000900",
+              "audit": "all"
+            },
+            "p_sort": "audit-priority",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_inventory_history_page_v1",
+          "args": {
+            "p_filters": {
+              "textbookId": null,
+              "locationId": "a2000000-0000-4000-8000-000000000900"
+            },
+            "p_sort": "event-desc",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_inventory_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all",
+              "locationId": "a2000000-0000-4000-8000-000000000900",
+              "audit": "all"
+            }
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "inventory",
+      "buttons": [
+        {
+          "text": "",
+          "label": "학사일정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "",
+          "label": "환경 설정 하위 메뉴 펼치기"
+        },
+        {
+          "text": "합성 관리자fixture@example.invalid",
+          "label": "합성 관리자 계정 메뉴 열기"
+        },
+        {
+          "text": "",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "사이드바 접기",
+          "label": "사이드바 접기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "선택 반영",
+          "label": "선택 재고 실사 일괄 반영"
+        },
+        {
+          "text": "",
+          "label": "교재 필터 초기화"
+        },
+        {
+          "text": "영어 · 1종",
+          "label": "영어 그룹 접기"
+        },
+        {
+          "text": "현재",
+          "label": "교재 1 본관 현재 수량 입력"
+        },
+        {
+          "text": "반영",
+          "label": "교재 1 본관 실사 수량 입력 필요"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "교재 검색",
+          "placeholder": "교재명, 출판사, ISBN, 바코드"
+        },
+        {
+          "name": "교재 1 본관 실사 수량",
+          "placeholder": "7"
+        },
+        {
+          "name": "교재 1 본관 실사 메모",
+          "placeholder": "메모"
+        }
+      ],
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=inventory&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22subject%22%3A%22all%22%2C%22schoolLevel%22%3A%22all%22%2C%22gradeLevel%22%3A%22all%22%2C%22subSubject%22%3A%22all%22%2C%22quality%22%3A%22all%22%2C%22inventory%22%3A%22all%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n관리\n\n/\n교재관리\n빠른 이동\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n선택 반영\n과목\n전체 과목\n세부과목\n전체 세부과목\n학교\n전체 학교 구분\n학년\n전체 학년\n위치\n본관\n재고 실사 입력 목록\n\t교재\t장부(권)\t실사(권)\t차이(권)\t최종 실사\t메모\t작업\n\n영어 · 1종\n\n\t\n교재 1\n출판사 · 본관\n\t7\t\n초기화\n\t-2\t실사 이력 없음\t\n\t반영\n\n1건 · 1–1번째\n\n10개씩 보기\n1\n재고 이력\n재고 이력 목록\n일시\t교재\t위치\t변경\t작업\t실행자\t메모\t삭제\n재고 이력이 없습니다\n\n0건 · 0–0번째\n\n10개씩 보기",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-inventory-1440.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=master",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_options_v1",
+          "args": {
+            "p_filters": {
+              "subject": "english",
+              "listSubject": "all",
+              "bulkSubject": "keep"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            },
+            "p_sort": "quality-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            },
+            "p_sort": "quality-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            },
+            "p_sort": "quality-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all"
+            }
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "master",
+      "buttons": [
+        {
+          "text": "사이드바 열기",
+          "label": "사이드바 열기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "필터 0",
+          "label": "교재 분류 필터 0"
+        },
+        {
+          "text": "",
+          "label": "모바일 교재 필터 초기화"
+        },
+        {
+          "text": "미사용 교재",
+          "label": "미사용 교재 보기"
+        },
+        {
+          "text": "신규 등록",
+          "label": "신규 등록"
+        },
+        {
+          "text": "영어1종 · 재고 0권",
+          "label": null
+        },
+        {
+          "text": "교재 1",
+          "label": "교재 1 · 출판사 · 영어 · 중등 · 중1–중3 · 문법 열기"
+        },
+        {
+          "text": "",
+          "label": "교재 1 · 출판사 · 영어 · 중등 · 중1–중3 · 문법 편집"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "교재 검색",
+          "placeholder": "교재명, 출판사, ISBN, 바코드"
+        }
+      ],
+      "dialog": "교재 신규 등록\n\n교재명, 학년, 세부과목, 출판사, 판매가, ISBN, 바코드를 등록하거나 수정합니다.\n\n교재명\n*\n과목\n*\n영어\n영어\n수학\n과학\n기타\n상태\n사용중\n사용중\n미사용\n학교 구분\n*\n초등\n중등\n고등\n학년\n*\n세부과목\n*\n세부과목 선택\n출판사\n선택\n판매가\nISBN\n바코드\n\n교재명을 입력하세요.\n\n취소\n교재 등록\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=master&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22subject%22%3A%22all%22%2C%22schoolLevel%22%3A%22all%22%2C%22gradeLevel%22%3A%22all%22%2C%22subSubject%22%3A%22all%22%2C%22quality%22%3A%22all%22%2C%22inventory%22%3A%22all%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "사이드바 열기\n교재관리\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n필터 0\n미사용 교재\n신규 등록\n영어\n1종 · 재고 0권\n교재 1\n\n출판사\n\n영어 · 중등 · 중1–중3 · 문법\n\n합계\n\n0권\n\n판매가\n\n12,000원\n\n본관\n0권\n별관\n0권\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-master-390.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=requests",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_detail_v1",
+          "args": {
+            "p_anchor_line_id": "a2000000-0000-4000-8000-000000000300",
+            "p_mode": "request"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-title",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_class_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_teacher_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_location_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-order",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/resolve_textbook_reference_v1",
+          "args": {
+            "p_reference": "a2000000-0000-4000-8000-000000000101",
+            "p_active_only": true,
+            "p_scope": "request",
+            "p_fallback_supplier": ""
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_class_reference_v1",
+          "args": {
+            "p_class_id": "a2000000-0000-4000-8000-000000000800"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_location_reference_v1",
+          "args": {
+            "p_location_id": "a2000000-0000-4000-8000-000000000900"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "request"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "requests",
+      "buttons": [
+        {
+          "text": "사이드바 열기",
+          "label": "사이드바 열기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "요청 추가",
+          "label": "교재 요청 추가"
+        },
+        {
+          "text": "",
+          "label": "교재 요청 필터 초기화"
+        },
+        {
+          "text": "요청대기1건 · 요청 4",
+          "label": "요청대기 그룹 접기 · 1건 · 요청 4"
+        },
+        {
+          "text": "교재 101",
+          "label": "교재 101 요청 상세 열기"
+        },
+        {
+          "text": "수정",
+          "label": "교재 101 요청 수정"
+        },
+        {
+          "text": "",
+          "label": "교재 101 요청 더보기"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "요청 검색",
+          "placeholder": "요청 교재명, 수업, 요청자"
+        }
+      ],
+      "dialog": "교재 요청 수정\n\n교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.\n\n교재명\n등록 교재\n직접 입력\n교재 101\n수업\n중2반\n학생용 요청\n교사용 요청\n선생님\n선생님\n위치\n본관\n메모\n취소\n변경 저장\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=requests&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22boardScope%22%3A%22active%22%2C%22requestFilter%22%3A%22all%22%2C%22orderFilter%22%3A%22all%22%2C%22mode%22%3A%22request%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "사이드바 열기\n교재관리\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n요청 추가\n교재 등록\n전체 교재\n요청대기\n1건 · 요청 4\n교재 101\n요청\n총판 미지정\n·\n9,000원\n·\n본관\n·\n중2반\n\n요청\n\n학생용\n2권\n교사용\n2권\n수정\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-requests-390.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=purchase",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_purchase_detail_v1",
+          "args": {
+            "p_anchor_line_id": "a2000000-0000-4000-8000-000000000300",
+            "p_mode": "order"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-title",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_class_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "selectedFilters": {}
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_teacher_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-name",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_location_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-order",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/resolve_textbook_reference_v1",
+          "args": {
+            "p_reference": "a2000000-0000-4000-8000-000000000101",
+            "p_active_only": true,
+            "p_scope": "management",
+            "p_fallback_supplier": ""
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_class_reference_v1",
+          "args": {
+            "p_class_id": "a2000000-0000-4000-8000-000000000800"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_location_reference_v1",
+          "args": {
+            "p_location_id": "a2000000-0000-4000-8000-000000000900"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_inventory_balance_v1",
+          "args": {
+            "p_input": {
+              "textbookIds": [
+                "a2000000-0000-4000-8000-000000000101"
+              ],
+              "locationId": "a2000000-0000-4000-8000-000000000900"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_purchase_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "boardScope": "active",
+              "requestFilter": "all",
+              "orderFilter": "all",
+              "mode": "order"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "purchase",
+      "buttons": [
+        {
+          "text": "사이드바 열기",
+          "label": "사이드바 열기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "주문서",
+          "label": "주문 문서 메뉴"
+        },
+        {
+          "text": "주문 추가",
+          "label": "교재 주문 추가"
+        },
+        {
+          "text": "",
+          "label": "주문·입고 필터 초기화"
+        },
+        {
+          "text": "부분입고1건 · 요청 4 · 주문 10 · 입고 4",
+          "label": "부분입고 그룹 접기 · 1건 · 요청 4 · 주문 10 · 입고 4"
+        },
+        {
+          "text": "교재 101",
+          "label": "교재 101 주문·입고 상세 열기"
+        },
+        {
+          "text": "입고",
+          "label": "교재 101 입고"
+        },
+        {
+          "text": "",
+          "label": "교재 101 주문·입고 더보기"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "주문·입고 검색",
+          "placeholder": "주문 교재명, 총판, 수업"
+        }
+      ],
+      "dialog": "교재 주문 수정\n\n교재 요청, 주문, 입고 단계에 필요한 수량과 연결 정보를 저장합니다.\n\n등록 교재\n*\n교재 101\n단계\n공급처 주문\n요청 접수\n공급처 주문\n입고 처리\n수업\n중2반\n요청 교재명 교재 101\n선생님\n선생님\n위치\n본관\n학생용 요청\n교사용 요청\n학생용 주문\n교사용 주문\n총판\n-\n요청\n학생용 2권 · 교사용 2권\n단가\n9,001원\n합계\n45,005원\n입고 후\n-\n위치\n본관\n메모\n취소\n변경 저장\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=purchase&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22boardScope%22%3A%22active%22%2C%22requestFilter%22%3A%22all%22%2C%22orderFilter%22%3A%22all%22%2C%22mode%22%3A%22order%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "사이드바 열기\n교재관리\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n주문서\n주문 추가\n범위\n진행중\n단계\n전체\n교재 등록\n전체 교재\n부분입고\n1건 · 요청 4 · 주문 10 · 입고 4\n교재 101\n부분 입고\n총판 미지정\n·\n9,000원\n·\n본관\n·\n중2반\n\n요청\n\n학생용\n2권\n교사용\n2권\n\n주문\n\n학생용\n5권\n교사용\n5권\n\n입고\n\n학생용\n2권\n교사용\n2권\n\n남음 6권\n\n입고\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-purchase-390.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=sales",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_history_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            },
+            "p_sort": "month-class-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_history_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "일치하지않는검색",
+              "status": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_history_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            },
+            "p_sort": "month-class-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_sale_detail_v1",
+          "args": {
+            "p_id": "a2000000-0000-4000-8000-000000000400"
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "status": "all"
+            },
+            "p_sort": "status-event",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_sale_history_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "year": "all",
+              "month": "all",
+              "classId": "all"
+            },
+            "p_sort": "month-class-title",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "sales",
+      "buttons": [
+        {
+          "text": "사이드바 열기",
+          "label": "사이드바 열기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "청구 준비",
+          "label": "메이크에듀 청구 준비 열기"
+        },
+        {
+          "text": "출고 추가",
+          "label": "교재 출고 추가"
+        },
+        {
+          "text": "",
+          "label": "출고 필터 초기화"
+        },
+        {
+          "text": "출고 대기1수량 2권",
+          "label": "출고 대기 그룹 접기"
+        },
+        {
+          "text": "교재 101",
+          "label": "김선생 교재 101 출고 상세 열기"
+        },
+        {
+          "text": "출고",
+          "label": "김선생 교재 101 출고 완료 처리"
+        },
+        {
+          "text": "",
+          "label": "김선생 교재 101 출고 더보기"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "출고 검색",
+          "placeholder": "출고 교재명, 학생, 수업"
+        }
+      ],
+      "dialog": "출고 상세\n\n선택한 출고 한 건의 직접 조회 결과입니다.\n\n교재\n교재 101\n대상\n김선생\n구분\n교사용\n상태\n출고 대기\n수업\n중2반\n위치\n본관\n출고월\n2026-08\n처리일시\n8. 1. 오전 09:00\n수량\n2권\n금액\n20,000원\n닫기\n모달 닫기",
+      "closeFocus": true,
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=sales&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22status%22%3A%22all%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "사이드바 열기\n교재관리\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n청구 준비\n출고 추가\n상태\n전체 출고\n수량 2 · 청구 20,000원\n출고 대기\n1\n수량 2권\n교재 101\n\n김선생 · 교사용\n\n출고 대기\n\n중2반 · 본관\n\n2026-08 · 8. 1. 오전 09:00\n대기 2권\n출고\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-sales-390.png"
+    },
+    {
+      "route": "/admin/textbooks?textbookTab=inventory",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_location_reference_page_v1",
+          "args": {
+            "p_filters": {
+              "search": ""
+            },
+            "p_sort": "match-order",
+            "p_page": 1,
+            "p_page_size": 20
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_master_options_v1",
+          "args": {
+            "p_filters": {
+              "subject": "english",
+              "listSubject": "all",
+              "bulkSubject": "keep"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_inventory_page_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all",
+              "locationId": "a2000000-0000-4000-8000-000000000900",
+              "audit": "all"
+            },
+            "p_sort": "audit-priority",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_textbook_inventory_history_page_v1",
+          "args": {
+            "p_filters": {
+              "textbookId": null,
+              "locationId": "a2000000-0000-4000-8000-000000000900"
+            },
+            "p_sort": "event-desc",
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_textbook_inventory_summary_v1",
+          "args": {
+            "p_filters": {
+              "search": "",
+              "subject": "all",
+              "schoolLevel": "all",
+              "gradeLevel": "all",
+              "subSubject": "all",
+              "quality": "all",
+              "inventory": "all",
+              "locationId": "a2000000-0000-4000-8000-000000000900",
+              "audit": "all"
+            }
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "stage": "inventory",
+      "buttons": [
+        {
+          "text": "사이드바 열기",
+          "label": "사이드바 열기"
+        },
+        {
+          "text": "빠른 이동",
+          "label": "빠른 이동 열기"
+        },
+        {
+          "text": "다크 모드로 전환",
+          "label": "다크 모드로 전환"
+        },
+        {
+          "text": "",
+          "label": "교재관리 새로고침"
+        },
+        {
+          "text": "선택 반영",
+          "label": "선택 재고 실사 일괄 반영"
+        },
+        {
+          "text": "",
+          "label": "교재 필터 초기화"
+        },
+        {
+          "text": "현재",
+          "label": "교재 1 본관 현재 수량 입력"
+        },
+        {
+          "text": "반영",
+          "label": "교재 1 본관 실사 수량 입력 필요"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "1",
+          "label": "1 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        },
+        {
+          "text": "",
+          "label": "첫 페이지"
+        },
+        {
+          "text": "",
+          "label": "이전 페이지"
+        },
+        {
+          "text": "",
+          "label": "다음 페이지"
+        },
+        {
+          "text": "",
+          "label": "마지막 페이지"
+        }
+      ],
+      "inputs": [
+        {
+          "name": "교재 검색",
+          "placeholder": "교재명, 출판사, ISBN, 바코드"
+        },
+        {
+          "name": null,
+          "placeholder": ""
+        },
+        {
+          "name": "교재 1 본관 실사 수량",
+          "placeholder": "7"
+        },
+        {
+          "name": "교재 1 본관 실사 메모",
+          "placeholder": "메모"
+        }
+      ],
+      "performance": {
+        "navigation": [],
+        "resourceCount": 0,
+        "transferredBytes": 0
+      },
+      "finalUrl": "http://127.0.0.1:3216/admin/textbooks?textbookTab=inventory&textbookPage=1&textbookPageSize=10&textbookFilters=%7B%22search%22%3A%22%22%2C%22subject%22%3A%22all%22%2C%22schoolLevel%22%3A%22all%22%2C%22gradeLevel%22%3A%22all%22%2C%22subSubject%22%3A%22all%22%2C%22quality%22%3A%22all%22%2C%22inventory%22%3A%22all%22%7D&textbookHistoryPage=1&textbookHistoryPageSize=10&textbookHistoryFilters=%7B%22search%22%3A%22%22%2C%22year%22%3A%22all%22%2C%22month%22%3A%22all%22%2C%22classId%22%3A%22all%22%7D",
+      "text": "사이드바 열기\n교재관리\n다크 모드로 전환\n교재 재고\n요청\n주문·입고\n출고\n재고 실사\n선택 반영\n과목\n전체 과목\n세부과목\n전체 세부과목\n학교\n전체 학교 구분\n학년\n전체 학년\n위치\n본관\n교재 1\n출판사 · 본관\n장부 7권 · 차이 -2권\n실사 수량(권)\n초기화\n반영\n\n실사 이력 없음\n\n1건 · 1–1번째\n\n10개씩 보기\n1\n재고 이력\n재고 이력이 없습니다\n\n0건 · 0–0번째\n\n10개씩 보기",
+      "bodyOverflow": 0,
+      "state": "rendered",
+      "screenshot": "A-textbooks-inventory-390.png"
+    }
+  ],
+  "browser": "151.0.7922.34"
+}
