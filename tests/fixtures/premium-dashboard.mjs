@@ -27,7 +27,7 @@ export function dailyBriefFor(id) {
       sourceKind, sourceId: `synthetic-event-${i}`, scheduledAt: `2026-09-15T0${6+i}:00:00.000Z`,
       title: id === 'B' ? '합성긴수업명'.repeat(12) : `합성학생0${i+1} ${['레벨테스트', '방문상담', '청강'][i]}`,
       subjectLabels: [['영어'], ['수학'], ['과학']][i], placeLabel: ['본관 101호', '별관 상담실', '본관 202호'][i],
-      href: `/admin/registration?caseId=synthetic-case-${i}`,
+      href: `/admin/registration?taskId=00000000-0000-4000-8000-${String(i + 100).padStart(12, '0')}`,
     })),
   };
 }
