@@ -1368,6 +1368,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
+  const [validationAttempted, setValidationAttempted] = useState(false);
   const [savedForm, setSavedForm] = useState<FormState>(() => initialForm(kind));
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const discardReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -2455,6 +2456,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     );
   };
 
+  const validateRequiredFields = (scope: "detail" | "form") => {
+    setValidationAttempted(true);
+    const missing = FORM_FIELDS[kind].find((field) => (
+      field.required
+      && (kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject))
+      && !text(form[field.name])
+    ));
+    if (!missing) return true;
+    setOperationError(null);
+    setSaveNotice("");
+    document.getElementById(`${kind}-${scope}-${missing.name}`)?.focus();
+    return false;
+  };
+
   const renderEditableFields = (scope: "detail" | "form" | "quick", fieldNames?: string[]) => {
     const fieldsDisabled = !canMutateRows || (scope === "form" && saving);
     const requestedFields = fieldNames
@@ -2469,6 +2484,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         {fieldsToRender.map((field) => {
           const id = `${kind}-${scope}-${field.name}`;
           const value = form[field.name] || "";
+          const invalid = validationAttempted && Boolean(field.required) && !text(value);
+          const errorId = `${id}-error`;
           const selectOptions = getEditableFieldOptions(field.name, value);
           const fieldWrapperClassName = cn(
             "space-y-2",
@@ -2490,7 +2507,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                     disabled={fieldsDisabled || scienceSubjectAreaOptions.length === 0}
                   >
-                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택">
+                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택" aria-invalid={invalid || undefined} aria-describedby={!value ? errorId : undefined}>
                       <SelectValue placeholder={field.placeholder} />
                     </SelectTrigger>
                     <SelectContent>
@@ -2500,7 +2517,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       ))}
                     </SelectContent>
                   </Select>
-                  {!value ? <p className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
+                  {!value ? <p id={errorId} className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
                 </>
               ) : kind === "classes" && field.name === "capacity" ? (
                 <ClassCapacityInput
@@ -2556,6 +2573,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   id={id}
                   name={field.name}
                   type={field.type || "text"}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={invalid ? errorId : undefined}
                   inputMode={field.inputMode}
                   autoComplete={field.autoComplete || "off"}
                   autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
@@ -2566,6 +2585,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               )}
+              {invalid && field.name !== "subjectAreaKey" ? (
+                <p id={errorId} role="alert" className="text-xs text-destructive">{field.label} 항목을 입력하세요.</p>
+              ) : null}
               </div>
             </Fragment>
           );
@@ -2597,6 +2619,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       : Promise.resolve(null);
     setSelectedRow(activeRow);
     setForm(nextForm);
+    setValidationAttempted(false);
     setSavedForm(nextForm);
     setDiscardConfirmationOpen(false);
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
@@ -2825,6 +2848,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setScheduleDefaultsRequestKey("");
         const nextForm = initialForm(kind);
         setForm(nextForm);
+        setValidationAttempted(false);
         setSavedForm(nextForm);
         setDiscardConfirmationOpen(false);
         setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
@@ -2899,6 +2923,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
+    if (!validateRequiredFields("form")) return;
     const isCurrent = beginSaving({ form: formDraft, schedule: scheduleDraft });
     if (!isCurrent) return;
     setOperationError(null);
@@ -2974,6 +2999,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
+    if (!validateRequiredFields("detail")) return;
     const isCurrent = beginSaving({ form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
     if (!isCurrent) return;
     setOperationError(null);
