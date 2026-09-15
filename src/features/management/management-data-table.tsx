@@ -63,6 +63,7 @@ import {
   TableHeader,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
 import { formatStudentContact } from "@/lib/student-contact-display";
 import { DataTableSettings, DataTableSettingsSection, DataTableSettingsSelect, DataTableColumnSetting } from "@/components/data-table/data-table-settings";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
@@ -127,11 +128,11 @@ const STUDENT_TABLE_COLUMN_IDS = [
 
 const CLASS_TABLE_COLUMN_IDS = [
   "select",
+  "title",
   "subject",
   "grade",
-  "title",
-  "schedule",
   "teacher",
+  "schedule",
   "classroom",
   "enrollmentStatus",
   "capacity",
@@ -779,15 +780,16 @@ function normalizeClassScheduleMeta(value: unknown) {
 }
 
 function formatClassScheduleLineForList(line: string, row: ManagementRow) {
+  const displayLine = formatScheduleTimeRange(line);
   const raw = row.raw || {};
   const teacher = normalizeClassScheduleMeta(raw.teacher || raw.teacher_name || raw.teacherName);
   const classroom = normalizeClassScheduleMeta(raw.classroom || raw.room);
   const expectedScheduleMeta = [teacher, classroom].filter(Boolean).join(", ");
   if (!expectedScheduleMeta) {
-    return line;
+    return displayLine;
   }
 
-  return line.replace(/\s*\(([^()]*)\)\s*$/, (match, slotMeta) => {
+  return displayLine.replace(/\s*\(([^()]*)\)\s*$/, (match, slotMeta) => {
     if (normalizeClassScheduleMeta(slotMeta) !== normalizeClassScheduleMeta(expectedScheduleMeta)) {
       return match;
     }
@@ -811,7 +813,7 @@ function renderClassScheduleCell(row: ManagementRow) {
   return (
     <div className="grid min-w-[11rem] gap-1 py-0.5 text-sm text-foreground">
       {lines.map((line, index) => (
-        <span key={`${row.id}-schedule-${index}`} className="leading-5">
+        <span key={`${row.id}-schedule-${index}`} className="whitespace-normal break-words leading-5">
           {formatClassScheduleLineForList(line, row)}
         </span>
       ))}
@@ -1390,7 +1392,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
               type="button"
               className={cn(
                 "-mx-1.5 inline-flex min-h-6 max-w-full cursor-pointer rounded-md px-1.5 py-0.5 text-left text-sm font-semibold leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0",
-                kind === "classes" ? "text-blue-600 dark:text-blue-400" : "text-foreground",
+                "text-foreground",
               )}
               onClick={() => openManagementRow(row.original)}
               data-student-detail-trigger={kind === "students" ? row.original.id : undefined}
@@ -1562,8 +1564,10 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         cell: ({ row }) =>
           kind === "students" ? (
             renderStudentClassStatusPopover(row.original)
+          ) : kind === "classes" ? (
+            <span className="text-sm leading-5">{row.original.status}</span>
           ) : (
-            <Badge variant="secondary" className={getStatusColor(kind === "classes" ? getClassStatusFilterValue(row.original) : row.original.statusValue)}>
+            <Badge variant="secondary" className={getStatusColor(row.original.statusValue)}>
               {row.original.status}
             </Badge>
         ),
@@ -2713,31 +2717,29 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                   className="-ml-2 -mt-1"
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    {subject ? <Badge className="rounded-md px-2 py-0.5">{subject}</Badge> : null}
-                    {grade ? <Badge variant="secondary" className="rounded-md px-2 py-0.5">{grade}</Badge> : null}
-                    <Badge variant="secondary" className={cn("rounded-md px-2 py-0.5", getStatusColor(getClassStatusFilterValue(record)))}>
-                      {record.status}
-                    </Badge>
-                  </div>
                   <button
                     type="button"
-                    className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-class-detail-trigger={record.id}
                   >
                     {record.title}
                   </button>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm leading-5">
+                    {subject ? <span>{subject}</span> : null}
+                    {grade ? <span>{grade}</span> : null}
+                    <span className="text-muted-foreground">{record.status}</span>
+                  </div>
                   <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                    {teacher ? <span className="min-w-0 break-keep">{teacher}</span> : null}
-                    {classroom ? <span className="min-w-0 break-keep">{classroom}</span> : null}
+                    {teacher ? <span className="min-w-0 whitespace-normal break-words">{teacher}</span> : null}
+                    {classroom ? <span className="min-w-0 whitespace-normal break-words">{classroom}</span> : null}
                   </div>
                 </div>
               </div>
               <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">요일/시간</dt>
-                  <dd className="min-w-0 text-foreground [&>div]:min-w-0 [&_span]:break-keep">
+                  <dd className="min-w-0 text-foreground [&>div]:min-w-0 [&_span]:break-words">
                     {renderClassScheduleCell(row.original)}
                   </dd>
                 </div>
@@ -2753,7 +2755,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 </div>
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">운영</dt>
-                  <dd className="min-w-0 break-keep text-foreground">
+                  <dd className="min-w-0 whitespace-normal break-words text-foreground">
                     {[capacity > 0 ? `정원 ${capacity}` : "", weeklyHours, tuition].filter(Boolean).join(" · ") || "-"}
                   </dd>
                 </div>

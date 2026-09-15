@@ -34,6 +34,8 @@ import {
   normalizeStudentStatus,
 } from "@/lib/student-status";
 import { cn } from "@/lib/utils";
+import { formatStudentContact } from "@/lib/student-contact-display";
+import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
 import {
   ACADEMIC_SUBJECT_VALUES,
   isScienceGrade,
@@ -1925,7 +1927,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                      <button
 	                        type="button"
 	                        data-testid="class-roster-student-name-link"
-	                        className="block max-w-full whitespace-normal break-words text-left text-sm font-semibold underline-offset-2 transition hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+	                        className="block max-w-full whitespace-normal break-words text-left text-sm font-semibold leading-5 underline-offset-2 transition hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	                        onClick={() => setPendingClassStudentDetailId(id)}
 	                      >
 	                        {resolveRelatedTitle(id)}
@@ -1933,19 +1935,19 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                    </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학교</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{school || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{school || "—"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학년</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{grade || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{grade || "—"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학생 연락처</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{studentContact || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(studentContact)}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학부모 연락처</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{parentContact || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(parentContact)}</div>
                     </div>
 	                    <div className="flex flex-wrap justify-end gap-1">
 	                      {modeLabel !== "수강" ? (
@@ -3264,7 +3266,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 {summaryMetaItems.map((item) => (
                   <span key={item.label} className="inline-flex max-w-full items-baseline gap-1.5 text-xs leading-5 text-muted-foreground">
                     <span className="shrink-0">{item.label}</span>
-                    <span className="min-w-0 whitespace-normal break-words font-medium text-foreground">{item.value}</span>
+                    <span className="grid min-w-0 gap-1 whitespace-normal break-words font-normal text-foreground">
+                      {item.label === "요일/시간"
+                        ? formatClassScheduleDisplayLines(item.value).map((line, index) => <span key={index}>{formatScheduleTimeRange(line)}</span>)
+                        : item.value}
+                    </span>
                   </span>
                 ))}
               </div>
@@ -3370,7 +3376,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 return (
                   <div key={id} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2.5">
                     <div className="min-w-0">
-                      <div className="whitespace-normal break-words text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
+                      <div className="whitespace-normal break-words text-sm font-semibold leading-5">{textbook?.title || "교재 정보 확인 필요"}</div>
                       {textbook ? (
                         <PickerMetaPills
                           className="mt-1"
