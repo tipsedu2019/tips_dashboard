@@ -1,7 +1,9 @@
 // Actual local management UI; synthetic transport only. Every unknown API or external request is aborted.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { chromium } from '/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import { createRequire } from 'node:module';
+const require = createRequire(process.env.PLAYWRIGHT_PACKAGE || import.meta.url);
+const { chromium } = require('playwright');
 import { FIXED_NOW, resolveFixtureRequest } from '../../tests/fixtures/premium-dashboard.mjs';
 const base='http://127.0.0.1:3216',out='/tmp/tips-premium-dashboard-20260915/classes';
 const className='합성긴수업명'.repeat(10),classId='00000000-0000-4000-8000-000000000201';

@@ -2398,9 +2398,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
               const currentColumnWidth = column.getSize();
               return <DataTableColumnSetting key={columnId}
                 label={option.label} visible={column.getIsVisible()} canHide={column.getCanHide()}
-                width={currentColumnWidth} canMoveUp={currentColumnIndex !== 1} canMoveDown={currentColumnIndex !== columnOrder.length - 1}
+                width={currentColumnWidth} minWidth={kind === "students" ? 44 : 72} canMoveUp={currentColumnIndex !== 1} canMoveDown={currentColumnIndex !== columnOrder.length - 1}
                 onVisibleChange={(value) => column.toggleVisibility(value)}
-                onWidthChange={(value) => setColumnSizing((current) => ({ ...current, [columnId]: normalizeColumnWidth(value, currentColumnWidth) }))}
+                onWidthChange={(value) => setColumnSizing((current) => ({ ...current, [columnId]: normalizeColumnWidth(value, currentColumnWidth, kind === "students" ? 44 : 72) }))}
                 onMove={(direction) => setColumnOrder((current) => reorderColumns(current, columnId, direction))}
               />;
             })}

@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
-import { chromium } from '/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/index.mjs';
+import { createRequire } from 'node:module';
+const require = createRequire(process.env.PLAYWRIGHT_PACKAGE || import.meta.url);
+const { chromium } = require('playwright');
 import { FIXED_NOW, resolveFixtureRequest } from '../../tests/fixtures/premium-dashboard.mjs';
 const base=process.env.PREMIUM_BASE_URL||'http://127.0.0.1:3215',out='/tmp/tips-premium-dashboard-20260915/settings';
 assert.ok(['localhost','127.0.0.1'].includes(new URL(base).hostname));

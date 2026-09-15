@@ -152,6 +152,10 @@ test("calendar form sessions retain only their own usable opener and invalidate 
     await render(october)
     assert.equal(main.selectedDate.getTime(), october.getTime())
     assert.equal(sidebar.selectedDate.getTime(), october.getTime())
+    // CalendarMain's Today button calls onDateSelect; the parent owns navigation.
+    await act(async () => main.onDateSelect(september))
+    assert.equal(requestedDate, september)
+    await render(october)
     button.focus()
     await act(async () => button.click())
     await act(async () => detailLoads[1].resolve(event))

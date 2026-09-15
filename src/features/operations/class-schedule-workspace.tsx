@@ -6678,7 +6678,8 @@ export function ClassScheduleWorkspace() {
               <>
                 <div data-testid="class-schedule-mobile-list" className="grid gap-2 md:hidden">
                   {model.rows.map((row) => {
-                    const progress = formatClassScheduleProgress({ completedSessions: row.completedSessions, sessionCount: row.sessionCount, state: getClassScheduleProgressState(row.raw?.classItem, !actorScope ? "forbidden" : error ? "error" : loading || !dataMatchesCurrentScope ? "loading" : "accepted") });
+                    const scheduleProgressState = getClassScheduleProgressState(row.raw?.classItem, !actorScope ? "forbidden" : error ? "error" : loading || !dataMatchesCurrentScope ? "loading" : "accepted");
+                    const progress = formatClassScheduleProgress({ completedSessions: row.completedSessions, sessionCount: row.sessionCount, state: scheduleProgressState });
                     const isSelected = selectedClassId === row.id;
                     const snapshot = rowSnapshotById.get(row.id);
                     const nextSessionId = snapshot?.nextSessionId || row.nextActionSessionId || "";
@@ -6728,7 +6729,7 @@ export function ClassScheduleWorkspace() {
                           <div className="min-w-0 rounded-md bg-muted/40 px-3 py-2">
                             <p className="font-medium leading-5 break-keep">{row.scheduleLabel || "시간표 미정"}</p>
                             <p className="text-muted-foreground leading-5">
-                              {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? `계획 ${row.latestPlannedSessionIndex}회차 · 실제 ${row.latestActualSessionIndex}회차` : "회차는 상세에서 확인"}
+                              {scheduleProgressState === "accepted" ? `계획 ${row.latestPlannedSessionIndex}회차 · 실제 ${row.latestActualSessionIndex}회차` : "회차는 상세에서 확인"}
                             </p>
                           </div>
 
@@ -6738,7 +6739,7 @@ export function ClassScheduleWorkspace() {
                               {nextSessionId ? <Badge variant={snapshot?.nextSessionTone || "outline"}>{snapshot?.nextSessionMeta}</Badge> : null}
                             </div>
                             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                              {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다." : "상세에서 다음 회차 확인"}
+                              {scheduleProgressState === "accepted" ? snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다." : "상세에서 다음 회차 확인"}
                             </p>
                           </div>
 
@@ -6813,7 +6814,8 @@ export function ClassScheduleWorkspace() {
                   </TableHeader>
                   <TableBody>
                     {model.rows.map((row) => {
-                      const progress = formatClassScheduleProgress({ completedSessions: row.completedSessions, sessionCount: row.sessionCount, state: getClassScheduleProgressState(row.raw?.classItem, !actorScope ? "forbidden" : error ? "error" : loading || !dataMatchesCurrentScope ? "loading" : "accepted") });
+                      const scheduleProgressState = getClassScheduleProgressState(row.raw?.classItem, !actorScope ? "forbidden" : error ? "error" : loading || !dataMatchesCurrentScope ? "loading" : "accepted");
+                      const progress = formatClassScheduleProgress({ completedSessions: row.completedSessions, sessionCount: row.sessionCount, state: scheduleProgressState });
                       const snapshot = rowSnapshotById.get(row.id);
                       const isSelected = selectedClassId === row.id;
                       const nextSessionId = snapshot?.nextSessionId || row.nextActionSessionId || "";
@@ -6864,7 +6866,7 @@ export function ClassScheduleWorkspace() {
                             <div className="min-w-0 space-y-2 text-sm leading-5">
                               <p className="font-medium leading-5 break-keep">{row.scheduleLabel || "시간표 미정"}</p>
                               <p className="text-muted-foreground leading-5">
-                                {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? `계획 ${row.latestPlannedSessionIndex}회차 · 실제 ${row.latestActualSessionIndex}회차` : "회차는 상세에서 확인"}
+                                {scheduleProgressState === "accepted" ? `계획 ${row.latestPlannedSessionIndex}회차 · 실제 ${row.latestActualSessionIndex}회차` : "회차는 상세에서 확인"}
                               </p>
                             </div>
                           </TableCell>
@@ -6877,7 +6879,7 @@ export function ClassScheduleWorkspace() {
                                 ) : null}
                               </div>
                               <p className="line-clamp-2 text-xs text-muted-foreground">
-                                {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다." : "상세에서 다음 회차 확인"}
+                                {scheduleProgressState === "accepted" ? snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다." : "상세에서 다음 회차 확인"}
                               </p>
                             </div>
                           </TableCell>
@@ -6911,7 +6913,7 @@ export function ClassScheduleWorkspace() {
                             {row.warningText ? (
                               <span className="inline-flex items-center gap-1 text-sm text-destructive" title={row.warningText}><AlertTriangle className="size-4 shrink-0" aria-hidden="true" />점검</span>
                             ) : (
-                              <span className="text-sm text-muted-foreground">{getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? "정상" : "상세 확인"}</span>
+                              <span className="text-sm text-muted-foreground">{scheduleProgressState === "accepted" ? "정상" : "상세 확인"}</span>
                             )}
                           </TableCell>
                           <TableCell className="align-top">

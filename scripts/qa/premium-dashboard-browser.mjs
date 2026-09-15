@@ -3,7 +3,7 @@ import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { execFileSync } from 'node:child_process';
 import { FIXED_NOW, fixtureDefinitions, resolveFixtureRequest } from '../../tests/fixtures/premium-dashboard.mjs';
-const require = createRequire(process.env.PLAYWRIGHT_PACKAGE || '/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/package.json');
+const require = createRequire(process.env.PLAYWRIGHT_PACKAGE || import.meta.url);
 const { chromium } = require('playwright');
 const base = process.env.PREMIUM_BASE_URL || 'http://127.0.0.1:3215';
 assert.ok(['localhost', '127.0.0.1'].includes(new URL(base).hostname), 'Only loopback app servers are allowed');

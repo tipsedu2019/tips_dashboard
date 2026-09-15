@@ -2507,7 +2507,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                     disabled={fieldsDisabled || scienceSubjectAreaOptions.length === 0}
                   >
-                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택" aria-invalid={invalid || undefined} aria-describedby={!value ? errorId : undefined}>
+                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택" aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
                       <SelectValue placeholder={field.placeholder} />
                     </SelectTrigger>
                     <SelectContent>
@@ -2517,7 +2517,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       ))}
                     </SelectContent>
                   </Select>
-                  {!value ? <p id={errorId} className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
+                  {invalid ? <p id={errorId} role="alert" className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
                 </>
               ) : kind === "classes" && field.name === "capacity" ? (
                 <ClassCapacityInput

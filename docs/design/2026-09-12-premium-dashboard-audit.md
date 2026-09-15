@@ -19,7 +19,7 @@
 - 접근성 위험: 행 전체와 내부 여러 링크가 함께 노출된다. 실제 DOM 중첩 및 keyboard behavior는 추가 확인이 필요하며 AX만으로 위반 확정하지 않는다.
 - 연결 작업: T05/T15.
 
-![01 수업일정 현재 화면](/Users/hyunjun/Documents/Codex/tips_dashboard/output/premium-dashboard-audit-20260912/01-class-schedule.png)
+기존 검수 이미지: 01 수업일정 현재 화면 (당시 로컬 검수 자료; 저장소 배포 이미지에는 포함하지 않음).
 
 ## 2. 대시보드 — 첫 화면 우선 개선
 
@@ -32,7 +32,7 @@
 - 접근성 위험: loading/empty/error 의미를 전달하는 구성이 부족하다. live region/스크린리더 전체 검수는 하지 않았다.
 - 연결 작업: T02/T03.
 
-![02 대시보드 현재 빈 일정 화면](/Users/hyunjun/Documents/Codex/tips_dashboard/output/premium-dashboard-audit-20260912/02-dashboard.png)
+기존 검수 이미지: 02 대시보드 현재 빈 일정 화면 (당시 로컬 검수 자료; 저장소 배포 이미지에는 포함하지 않음).
 
 ## 3. 학생관리 — 공통 기준으로 삼을 기반 확보
 
@@ -45,7 +45,7 @@
 - 접근성 위험: 좁은 체크박스와 열 크기 조절 제어는 hit area/focus를 수치와 키보드로 추가 검수해야 한다. 이번에는 클릭·저장하지 않았다.
 - 연결 작업: T05/T10/T11.
 
-![03 학생관리 현재 화면](/Users/hyunjun/Documents/Codex/tips_dashboard/output/premium-dashboard-audit-20260912/03-students.png)
+기존 검수 이미지: 03 학생관리 현재 화면 (당시 로컬 검수 자료; 저장소 배포 이미지에는 포함하지 않음).
 
 ## 4. 등록 상담 목록 — 과목 표식 중복 개선 필요
 
@@ -58,7 +58,7 @@
 - 접근성 위험: row 열기와 내부 상태 combobox의 keyboard/event propagation은 별도 행동 검수 필요.
 - 연결 작업: T13/T14.
 
-![04 등록 상담 목록 현재 화면](/Users/hyunjun/Documents/Codex/tips_dashboard/output/premium-dashboard-audit-20260912/04-registration.png)
+기존 검수 이미지: 04 등록 상담 목록 현재 화면 (당시 로컬 검수 자료; 저장소 배포 이미지에는 포함하지 않음).
 
 ## 5. 교재 재고 desktop — 기존 개선 보존
 
@@ -70,7 +70,7 @@
 - 접근성 위험: 넓은 표의 내부 scroll과 page scroll, 긴 제목 전체 읽기를 keyboard/zoom 상태에서 추가 검수한다.
 - 연결 작업: T05/T08/T16.
 
-![05 교재 재고 desktop 현재 화면](/Users/hyunjun/Documents/Codex/tips_dashboard/output/premium-dashboard-audit-20260912/05-textbooks.png)
+기존 검수 이미지: 05 교재 재고 desktop 현재 화면 (당시 로컬 검수 자료; 저장소 배포 이미지에는 포함하지 않음).
 
 ## 6. 교재 재고 mobile — reflow 양호, 첫 내용 접근 개선 필요
 
@@ -84,7 +84,7 @@
 - 접근성 한계: 실제 스마트폰 touch/가상키보드/스크린리더를 검수한 것이 아니다.
 - 연결 작업: T05/T09.
 
-![06 교재 재고 mobile 현재 화면](/Users/hyunjun/Documents/Codex/tips_dashboard/output/premium-dashboard-audit-20260912/06-textbooks-mobile.png)
+기존 검수 이미지: 06 교재 재고 mobile 현재 화면 (당시 로컬 검수 자료; 저장소 배포 이미지에는 포함하지 않음).
 
 ## 최신 소스에서 확인한 추가 근거
 

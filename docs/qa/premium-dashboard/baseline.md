@@ -16,7 +16,7 @@
 The application must be built with the dummy public Supabase URL/key below. For this baseline use the existing `.next`; do not rebuild it to reproduce the old screen after source edits. To compare a later implementation, build its own output with the same dummy public values and record its actual source SHA.
 
 ```sh
-export PATH="/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH"
+export PATH="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH"
 NEXT_PUBLIC_SUPABASE_URL=https://tips-internal-fixture.supabase.co \
 NEXT_PUBLIC_SUPABASE_ANON_KEY=fixture-only-anon-key \
 node node_modules/next/dist/bin/next start -p 3215
@@ -25,13 +25,14 @@ node node_modules/next/dist/bin/next start -p 3215
 In another terminal, from the worktree:
 
 ```sh
-export PATH="/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH"
+export PATH="$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin:$PATH"
+export PLAYWRIGHT_PACKAGE="${PLAYWRIGHT_PACKAGE:-$HOME/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/node_modules/playwright/package.json}"
 PREMIUM_SOURCE_SHA=5e423390f4a27180d0771d2a48baf0873f5ca14f \
 PREMIUM_OUT=/tmp/tips-premium-dashboard-20260915/before/complete \
 node scripts/qa/premium-dashboard-browser.mjs
 ```
 
-`PREMIUM_BASE_URL` defaults to `http://127.0.0.1:3215` and rejects non-loopback hosts. `PREMIUM_ROUTES` accepts comma-separated page names; `PREMIUM_FIXTURES` defaults to `A`. `PLAYWRIGHT_PACKAGE` can point to another installed Playwright `package.json`; no dependency installation or package changes are required. `PREMIUM_SOURCE_SHA` is the SHA used to build the server, not necessarily current HEAD. If omitted, the manifest leaves rendered source unknown and separately records current checkout SHA.
+`PREMIUM_BASE_URL` defaults to `http://127.0.0.1:3215` and rejects non-loopback hosts. `PREMIUM_ROUTES` accepts comma-separated page names; `PREMIUM_FIXTURES` defaults to `A`. All three `premium-*-browser.mjs` scripts use `PLAYWRIGHT_PACKAGE` to select an installed Playwright `package.json` (set it as above); no dependency installation or package changes are required. `PREMIUM_SOURCE_SHA` is the SHA used to build the server, not necessarily current HEAD. If omitted, the manifest leaves rendered source unknown and separately records current checkout SHA.
 
 The script exits nonzero for unknown API contracts, missing ready content, runtime/console errors, or document overflow. Visible images must finish decoding. API and Supabase requests are fulfilled locally or rejected; all other external browser requests are aborted and WebSockets closed. The harness never forwards API calls to the application server. Read RPC POST requests are logged as reads, not treated as database mutations. This is a browser interception boundary, not an OS-level server egress sandbox.
 

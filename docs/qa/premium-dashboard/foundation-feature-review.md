@@ -17,7 +17,7 @@ These are source-review verdicts, supported by the existing validation records. 
 
 ### [P2] Include the displayed metric in distribution buttons' accessible names
 
-Location: [statistics-drilldown.tsx:80](/Users/hyunjun/Documents/Codex/tips_dashboard/.worktrees/internal-dashboard-only-20260915/src/features/dashboard/statistics-drilldown.tsx:80). Call sites: [statistics-workspace.tsx:126](/Users/hyunjun/Documents/Codex/tips_dashboard/.worktrees/internal-dashboard-only-20260915/src/features/dashboard/statistics-workspace.tsx:126) and [statistics-workspace.tsx:145](/Users/hyunjun/Documents/Codex/tips_dashboard/.worktrees/internal-dashboard-only-20260915/src/features/dashboard/statistics-workspace.tsx:145).
+Location: [statistics-drilldown.tsx:80](../../../src/features/dashboard/statistics-drilldown.tsx#L80). Call sites: [statistics-workspace.tsx:126](../../../src/features/dashboard/statistics-workspace.tsx#L126) and [statistics-workspace.tsx:145](../../../src/features/dashboard/statistics-workspace.tsx#L145).
 
 The new `trigger` branch assigns `aria-label={label}` to the button containing `DistributionBar`. The supplied labels contain only the school/grade/group name and the roster action, while the numeric student/class count and its unit now live inside the button. That explicit accessible name overrides the descendant label/count text: a visible row such as `가학교 · 42명` is announced as `가학교 학생 명단 보기`, without `42명`. Before this change, the count was standalone text beside the roster action. This prevents a screen-reader user from comparing the new student and class distributions before opening their rosters.
 
