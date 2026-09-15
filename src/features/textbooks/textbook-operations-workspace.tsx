@@ -232,9 +232,9 @@ function PurchaseQuantityPair({ student, teacher, label }: { student: number | n
   return (
     <div className="grid min-w-20 gap-1 text-xs tabular-nums">
       {([ ["student", "학생용", student], ["teacher", "교사용", teacher] ] as const).map(([scope, scopeLabel, value]) => (
-        <div key={scope} data-copy-scope={scope} aria-label={`${scopeLabel} ${label} ${value === null ? "집계 확인 필요" : formatQuantity(value)}`} className="flex items-baseline justify-between gap-2">
+        <div key={scope} data-copy-scope={scope} aria-label={`${scopeLabel} ${label} ${value === null ? "집계 확인 필요" : `${formatQuantity(value)}권`}`} className="flex items-baseline justify-between gap-2">
           <span className="text-[11px] font-normal text-muted-foreground">{scopeLabel}</span>
-          <span className="font-medium text-foreground">{value === null ? "—" : formatQuantity(value)}</span>
+          <span className="font-medium text-foreground">{value === null ? "—" : `${formatQuantity(value)}권`}</span>
         </div>
       ))}
     </div>
@@ -514,8 +514,8 @@ function getInventoryCurrentQuantityDraft(row: InventoryCountRow) {
 }
 
 function inventoryQuantityTone(totalQuantity: number) {
-  if (totalQuantity < 0) return "text-red-700";
-  if (totalQuantity === 0) return "text-zinc-500";
+  if (totalQuantity < 0) return "text-destructive";
+  if (totalQuantity === 0) return "text-muted-foreground";
   return "text-foreground";
 }
 
@@ -6479,9 +6479,9 @@ function InventoryCountWorkspace({
               <DataTableHeaderCell className="w-10 px-0"><DataTableSelectionCheckbox checked={allDisplayRowsSelected || (someDisplayRowsSelected && "indeterminate")}
                 onCheckedChange={(value) => onToggleVisibleSelection?.(displayRowIds, value === true)} aria-label="표시된 재고 행 전체 선택" title="표시된 재고 행 전체 선택" /></DataTableHeaderCell>
               <DataTableHeaderCell className="w-[260px]">교재</DataTableHeaderCell>
-              <DataTableHeaderCell className="w-[72px] text-right">현재</DataTableHeaderCell>
-              <DataTableHeaderCell className="w-[180px]">실사</DataTableHeaderCell>
-              <DataTableHeaderCell className="w-[72px] text-right">차이</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[72px] text-right">장부(권)</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[180px] text-right">실사(권)</DataTableHeaderCell>
+              <DataTableHeaderCell className="w-[72px] text-right">차이(권)</DataTableHeaderCell>
 
               <DataTableHeaderCell className="w-[168px]">최종 실사</DataTableHeaderCell>
               <DataTableHeaderCell className="w-[184px]">메모</DataTableHeaderCell>
@@ -6588,11 +6588,11 @@ function InventoryCountMobileCard({ row, value, memoValue, saving, disabled, sel
       </div>
     </div>
     <div className="mt-3 flex flex-wrap items-center justify-between gap-2 border-y border-border/60 py-2 text-xs">
-      <span className="tabular-nums">현재 {formatQuantity(row.currentQuantity)}권 · 차이 <InventoryCountDifference row={row} value={value} /></span>
+      <span className="tabular-nums">장부 {formatQuantity(row.currentQuantity)}권 · 차이 <InventoryCountDifference row={row} value={value} />{text(value) ? "권" : ""}</span>
 
     </div>
     <div className="mt-3 grid grid-cols-[minmax(0,1fr)_auto] items-end gap-2">
-      <div className="grid min-w-0 gap-1"><span className="text-xs text-muted-foreground">실사 수량</span>
+      <div className="grid min-w-0 gap-1"><span className="text-xs text-muted-foreground">실사 수량(권)</span>
         <InventoryCountQuantityInput row={row} value={value} memoValue={memoValue} saving={saving} disabled={disabled} onChange={onChange} onClear={onClear} onSubmit={onSubmit} />
       </div>
       <InventoryCountSubmitButton row={row} value={value} saving={saving} disabled={disabled} onSubmit={() => onSubmit(value, memoValue)} />
@@ -6687,7 +6687,7 @@ function TextbookTable({
                 <GroupIcon className="mr-2 size-3.5 shrink-0" />
                 <span className="min-w-0 flex-1 truncate text-sm font-semibold">{group.label}</span>
                 <span className="ml-2 shrink-0 text-xs font-medium text-muted-foreground">
-                  {formatQuantity(group.rows.length)}종 · 재고 {formatQuantity(groupTotalQuantity)}
+                  {formatQuantity(group.rows.length)}종 · 재고 {formatQuantity(groupTotalQuantity)}권
                 </span>
               </Button>
               {isCollapsed ? null : (
@@ -6708,9 +6708,7 @@ function TextbookTable({
                       .map((location) => ({
                         label: location.label,
                         quantity: numberValue(locationQuantities[location.id]),
-                      }))
-                      .filter((location) => location.quantity !== 0)
-                      .slice(0, 3);
+                      }));
 
                     return (
                       <article
@@ -6772,13 +6770,13 @@ function TextbookTable({
                             </div>
 
                             <div className="grid grid-cols-2 gap-2 text-xs">
-                              <div className="py-1">
+                              <div className="py-1 text-right">
                                 <p className="text-muted-foreground">합계</p>
                                 <p className={cn("font-semibold tabular-nums", inventoryQuantityTone(totalQuantity))}>
-                                  {formatQuantity(totalQuantity)}
+                                  {formatQuantity(totalQuantity)}권
                                 </p>
                                 {teacherQuantity > 0 ? (
-                                  <p className="text-[11px] text-muted-foreground">교사용 {formatQuantity(teacherQuantity)}</p>
+                                  <p className="text-[11px] text-muted-foreground">교사용 {formatQuantity(teacherQuantity)}권</p>
                                 ) : null}
                               </div>
                               <div className="py-1 text-right">
@@ -6788,10 +6786,10 @@ function TextbookTable({
                             </div>
 
                             {locationSummary.length > 0 ? (
-                              <div className="flex flex-wrap gap-1.5 text-[11px] text-muted-foreground">
+                              <div className="grid grid-cols-2 gap-x-3 gap-y-1 text-xs text-muted-foreground">
                                 {locationSummary.map((location) => (
-                                  <span key={`${rowId}-${location.label}`} className="tabular-nums">
-                                    {location.label} {formatQuantity(location.quantity)}
+                                  <span key={`${rowId}-${location.label}`} className="flex justify-between gap-2 tabular-nums">
+                                    <span>{location.label}</span><span>{formatQuantity(location.quantity)}권</span>
                                   </span>
                                 ))}
                               </div>
@@ -6840,9 +6838,9 @@ function TextbookTable({
             <DataTableHeaderCell className="z-10 min-w-72">교재</DataTableHeaderCell>
             <DataTableHeaderCell className="z-10 w-36">분류</DataTableHeaderCell>
             {locationColumns.map((location) => (
-              <DataTableHeaderCell key={location.id} className="z-10 w-20 text-right">{location.label}</DataTableHeaderCell>
+              <DataTableHeaderCell key={location.id} className="z-10 w-20 text-right">{location.label}<span className="ml-1 font-normal text-muted-foreground">권</span></DataTableHeaderCell>
             ))}
-            <DataTableHeaderCell className="z-10 w-20 text-right">합계</DataTableHeaderCell>
+            <DataTableHeaderCell className="z-10 w-20 text-right">합계<span className="ml-1 font-normal text-muted-foreground">권</span></DataTableHeaderCell>
             <DataTableHeaderCell className="z-10 w-28 text-right">{amountHeader}</DataTableHeaderCell>
             {onSelectTextbook ? <DataTableHeaderCell className={cn("z-20 w-12 text-right", stickyActionHeadClassName)}>관리</DataTableHeaderCell> : null}
           </DataTableHeaderRow>
@@ -7562,7 +7560,7 @@ function PurchaseProcessTable({
         ) : isMissingTextbookRequest ? (
           <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} 마스터 등록`} onClick={() => onRegisterTextbook(line, order)}>교재 등록</Button>
         ) : nextStatus ? (
-          <Button type="button" variant="outline" size="sm" aria-label={`${textbookTitle} ${processAction?.label || "이동"}`} disabled={busy} onClick={() => {
+          <Button type="button" size="sm" aria-label={`${textbookTitle} ${processAction?.label || "이동"}`} disabled={busy} onClick={() => {
             if (processAction) { onSelectLine(line, order, processAction.stage); return; }
             onMoveLine(line, order, nextStatus as PurchaseKanbanStatus);
           }}>{processAction?.label || "이동"}</Button>
@@ -7790,6 +7788,7 @@ function PurchaseProcessTable({
                             <div key={column.id} data-quantity-stage={column.kind} className="min-w-0 space-y-2">
                               <p className="text-xs font-medium text-muted-foreground">{column.label}</p>
                               <PurchaseQuantityPair label={column.label} student={getPurchaseDisplayScopeQuantity(displayLines, "student", column.kind)} teacher={getPurchaseDisplayScopeQuantity(displayLines, "teacher", column.kind)} />
+                              {column.kind === "received" && status !== "returned" && status !== "cancelled" ? <p data-quantity-remaining className="mt-2 text-right text-xs tabular-nums text-muted-foreground">남음 {formatQuantity(Math.max(0, ordered - received))}권</p> : null}
                             </div>
                           ))}
                         </div>
@@ -7894,6 +7893,7 @@ function PurchaseProcessTable({
                             {purchaseProcessQuantityColumns.filter(column => mode === "order" || !column.orderOnly).map(column => (
                               <DataTableBodyCell key={column.id} data-quantity-stage={column.kind}>
                                 <PurchaseQuantityPair label={column.label} student={getPurchaseDisplayScopeQuantity(displayLines, "student", column.kind)} teacher={getPurchaseDisplayScopeQuantity(displayLines, "teacher", column.kind)} />
+                              {column.kind === "received" && status !== "returned" && status !== "cancelled" ? <p data-quantity-remaining className="mt-2 text-right text-xs tabular-nums text-muted-foreground">남음 {formatQuantity(Math.max(0, ordered - received))}권</p> : null}
                               </DataTableBodyCell>
                             ))}
                             <DataTableBodyCell className="whitespace-normal break-words">
@@ -8336,7 +8336,7 @@ function SalesProcessTable({
     const busy = saleProcessBusy;
     return (
       <DataTableRowActions label={`${studentName} ${textbookTitle} 출고 더보기`} disabled={busy} primaryAction={
-        !terminal ? <Button type="button" variant="outline" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 완료 처리`} disabled={busy} onClick={() => onUpdateStatus(line, "issued")}>출고</Button> : undefined
+        !terminal ? <Button type="button" size="sm" aria-label={`${studentName} ${textbookTitle} 출고 완료 처리`} disabled={busy} onClick={() => onUpdateStatus(line, "issued")}>출고</Button> : undefined
       }>
         {onInspectSale ? <DropdownMenuItem aria-label={`${studentName} ${textbookTitle} 출고 상세 열기`} onSelect={() => onInspectSale(line)}>상세</DropdownMenuItem> : null}
         {!terminal ? <DropdownMenuItem aria-label={`${studentName} ${textbookTitle} 출고 전 취소`} onSelect={() => onCancelLine(line)}>출고 전 취소</DropdownMenuItem> : null}
@@ -8371,7 +8371,7 @@ function SalesProcessTable({
         summary={summary ? <>수량 {formatQuantity(visibleTotalQuantity)} · 청구 {formatCurrency(visibleTotalAmount)}</> : "집계 확인 필요"}
         actions={selectedActionableCount > 0 ? (<>
           <span className="mr-auto whitespace-nowrap text-sm font-medium tabular-nums">{formatQuantity(selectedActionableCount)}개 선택</span>
-          {selectedIssuableCount > 0 ? <Button type="button" size="sm" variant="outline" aria-label="선택 출고 일괄 완료" disabled={saleProcessBusy} aria-busy={saving === "sale-bulk-issue"} onClick={onBulkIssue}>선택 출고</Button> : null}
+          {selectedIssuableCount > 0 ? <Button type="button" size="sm" aria-label="선택 출고 일괄 완료" disabled={saleProcessBusy} aria-busy={saving === "sale-bulk-issue"} onClick={onBulkIssue}>선택 출고</Button> : null}
           <DataTableRowActions label="선택 출고 작업" disabled={saleProcessBusy}>
             {selectedCancelableCount > 0 ? <DropdownMenuItem aria-label="선택 출고 전 취소" onSelect={onBulkCancel}>선택 취소</DropdownMenuItem> : null}
             {selectedReturnableCount > 0 ? <DropdownMenuItem aria-label="선택 고객 반품" onSelect={onBulkReturn}>선택 반품</DropdownMenuItem> : null}
@@ -8450,7 +8450,7 @@ function SalesProcessTable({
                 <span>{group.title}</span>
                 <Badge variant="secondary" className="rounded-md tabular-nums">{formatQuantity(totalCount)}</Badge>
                 <Badge variant="outline" className="ml-auto rounded-md bg-background tabular-nums">
-                  수량 {formatQuantity(totalQuantity)}
+                  수량 {formatQuantity(totalQuantity)}권
                 </Badge>
               </button>
               {!collapsed && totalCount > 0 ? (
@@ -8475,7 +8475,7 @@ function SalesProcessTable({
                         </div>
                         <div className="my-3 space-y-1 border-y py-3 text-xs text-muted-foreground">
                           <p className="break-words">{view.className} · {view.locationName}</p>
-                          <div className="flex flex-wrap justify-between gap-2"><span className="tabular-nums">{view.month} · {view.eventLabel}</span><span className="font-medium text-foreground tabular-nums">{formatQuantity(view.quantity)}권</span></div>
+                          <div className="flex flex-wrap justify-between gap-2"><span className="tabular-nums">{view.month} · {view.eventLabel}</span><span className="font-medium text-foreground tabular-nums">{status === "returned" ? "반품" : status === "issued" ? "출고" : status === "cancelled" ? "취소" : "대기"} {formatQuantity(view.quantity)}권</span></div>
                         </div>
                         {renderSaleActions(line, status, studentName, textbookTitle)}
                       </article>
@@ -8492,7 +8492,7 @@ function SalesProcessTable({
                         <DataTableHeaderCell className="min-w-[240px]">교재</DataTableHeaderCell>
                         <DataTableHeaderCell className="w-[136px]">대상</DataTableHeaderCell>
                         <DataTableHeaderCell className="w-[110px]">진행상태</DataTableHeaderCell>
-                        <DataTableHeaderCell className="w-[72px] text-right">수량</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[72px] text-right">{group.id === "returned" ? "반품" : group.id === "issued" ? "출고" : "수량"}<span className="ml-1 font-normal text-muted-foreground">권</span></DataTableHeaderCell>
                         <DataTableHeaderCell className="w-[184px]">수업 · 위치</DataTableHeaderCell>
                         <DataTableHeaderCell className={cn("w-[132px] text-right", stickyActionHeadClassName)}>작업</DataTableHeaderCell>
                       </DataTableHeaderRow>

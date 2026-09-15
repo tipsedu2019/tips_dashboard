@@ -241,7 +241,7 @@ test("mounted master renderer keeps strict server order on desktop and mobile an
   assert.deepEqual(preparedRowIds("master-mobile"), expectedIds)
   assert.deepEqual(preparedRowIds("master-desktop"), expectedIds)
   const table = document.querySelector('[data-prepared-surface="master-desktop"]').closest("table")
-  assert.deepEqual([...table.querySelectorAll("thead th")].map((cell) => cell.textContent.trim()), ["", "교재", "분류", "합계", "판매가", "관리"])
+  assert.deepEqual([...table.querySelectorAll("thead th")].map((cell) => cell.textContent.trim()), ["", "교재", "분류", "합계권", "판매가", "관리"])
   assert.equal(renderedColumnCount(table.querySelector('[data-prepared-surface="master-desktop"]')), 6)
   assert.equal(renderedColumnCount(table.querySelector("tbody tr:last-child")), 6)
   assert.deepEqual(JSON.parse(window.localStorage.getItem("textbook-master-columns-v1")), retiredPreferences)
@@ -944,7 +944,7 @@ test("paired purchase columns preserve all six quantities, authoritative totals 
     for (const [stage, label] of [['requested', '요청'], ['ordered', '주문'], ['received', '입고']]) {
       const cell = rendered.querySelector(`[data-quantity-stage="${stage}"]`)
       for (const [scope, scopeLabel] of [['student', '학생용'], ['teacher', '교사용']]) {
-        assert.equal(cell.querySelector(`[data-copy-scope="${scope}"]`).getAttribute('aria-label'), `${scopeLabel} ${label} ${amounts[scope][stage]}`)
+        assert.equal(cell.querySelector(`[data-copy-scope="${scope}"]`).getAttribute('aria-label'), `${scopeLabel} ${label} ${amounts[scope][stage]}권`)
       }
     }
     assert.ok(rendered.querySelector('[aria-label="교재 101 주문"]'))
@@ -963,8 +963,8 @@ test("paired purchase columns preserve all six quantities, authoritative totals 
   const totals = { requested: 107, ordered: 94, received: 61, student: { requested: 100, ordered: 90, received: 60 }, teacher: { requested: 7, ordered: 4, received: 1 } }
   const summary = purchaseSummary('order', 9)
   await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_summary_v1'), { ...summary, quantities: totals, groups: [{ ...summary.groups[0], quantities: totals }] })
-  assert.ok(table.querySelector('[aria-label="학생용 요청 합계 100"]'))
-  assert.ok(table.querySelector('[aria-label="교사용 입고 합계 1"]'))
+  assert.ok(table.querySelector('[aria-label="학생용 요청 합계 100권"]'))
+  assert.ok(table.querySelector('[aria-label="교사용 입고 합계 1권"]'))
   assert.equal(renderedColumnCount(table.querySelector('tbody tr:last-child')), Number(table.getAttribute('aria-colcount')))
   await h.assertNoLegacyReads()
 })
@@ -1111,7 +1111,7 @@ test("mounted sales renderers consume independent prepared history and process p
   assert.deepEqual(preparedRowIds("sales-process-desktop"), rows.map((row) => row.id))
   assert.deepEqual(preparedRowIds("sales-history"), historyRows.map((row) => row.id))
   const processTable = document.querySelector('[data-prepared-surface="sales-process-desktop"]').closest("table")
-  assert.deepEqual([...processTable.querySelectorAll("thead th")].map((cell) => cell.textContent.trim()), ["", "교재", "대상", "진행상태", "수량", "수업 · 위치", "작업"])
+  assert.deepEqual([...processTable.querySelectorAll("thead th")].map((cell) => cell.textContent.trim()), ["", "교재", "대상", "진행상태", "수량권", "수업 · 위치", "작업"])
   assert.equal(renderedColumnCount(processTable.querySelector('[data-prepared-surface="sales-process-desktop"]')), 7)
   assert.equal(renderedColumnCount(processTable.querySelector("tbody tr:last-child")), 7)
   assert.ok(document.querySelector('[aria-label="출고 이력 페이지 탐색"]'))
@@ -1410,8 +1410,8 @@ test('request table ignores retired column preferences and keeps its fixed workf
   await h.resolve(h.requests.find(r=>r.name==='get_textbook_purchase_summary_v1'),purchaseSummary('request',1));
   for(const surface of ['requests-mobile','requests-desktop']){
     const element=document.querySelector(`[data-prepared-surface="${surface}"]`);
-    assert.ok(element.querySelector('[aria-label="학생용 요청 2"]'));
-    assert.ok(element.querySelector('[aria-label="교사용 요청 2"]'));
+    assert.ok(element.querySelector('[aria-label="학생용 요청 2권"]'));
+    assert.ok(element.querySelector('[aria-label="교사용 요청 2권"]'));
     assert.doesNotMatch(element.textContent,/판단|\d+권 부족|\d+권 여유|수량 일치/);
   }
   const table=document.querySelector('[data-prepared-surface="requests-desktop"]').closest('table');
