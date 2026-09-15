@@ -11,18 +11,18 @@ import { cn } from "@/lib/utils";
 export const DATA_TABLE_LAYOUT_CLASS_NAME =
   "w-full overflow-hidden rounded-[var(--radius-surface)] border border-border/70 bg-background shadow-none";
 export const DATA_TABLE_TOOLBAR_CLASS_NAME =
-  "flex flex-col gap-3 rounded-none border-x-0 border-t-0 border-b border-border/70 bg-background px-3 py-3 shadow-none sm:px-4";
-export const DATA_TABLE_FILTER_FIELD_CLASS_NAME = "grid min-w-0 gap-1.5 sm:w-40";
+  "flex flex-col gap-3 rounded-none border-x-0 border-t-0 border-b border-border/70 bg-background px-3 py-3 shadow-none sm:p-4";
+export const DATA_TABLE_FILTER_FIELD_CLASS_NAME = "grid min-w-0 gap-1.5 md:w-36";
 export const DATA_TABLE_VIEWPORT_CLASS_NAME =
   "overflow-auto [scrollbar-gutter:stable] rounded-none border-0 bg-background shadow-none focus-visible:outline-[3px] focus-visible:outline-offset-[-3px] focus-visible:outline-ring";
 export const DATA_TABLE_TABLE_CLASS_NAME = "min-w-[980px] table-fixed";
-export const DATA_TABLE_MOBILE_LIST_CLASS_NAME = "grid gap-2 p-3 md:hidden";
+export const DATA_TABLE_MOBILE_LIST_CLASS_NAME = "grid gap-2.5 bg-muted/50 p-3 md:hidden";
 export const DATA_TABLE_MOBILE_ITEM_CLASS_NAME =
-  "min-w-0 rounded-md border border-border/70 bg-background p-3 data-[state=selected]:border-primary/40 data-[state=selected]:bg-accent";
+  "min-w-0 rounded-[var(--radius-surface)] border border-border/70 bg-background p-4 transition-colors duration-[var(--motion-duration-control)] data-[state=selected]:border-primary/40 data-[state=selected]:bg-accent motion-reduce:transition-none";
 export const DATA_TABLE_PAGER_CLASS_NAME =
   "flex min-h-12 flex-col gap-2 border-x-0 border-b-0 border-t border-border/70 bg-background px-3 py-2 text-sm shadow-none sm:flex-row sm:items-center sm:justify-between sm:px-4";
 export const DATA_TABLE_HEADER_CELL_CLASS_NAME =
-  "sticky top-0 h-[var(--table-header-height)] border-b border-border/80 bg-muted px-[var(--table-cell-padding-inline)] py-1 text-xs font-semibold text-foreground";
+  "sticky top-0 h-[var(--table-header-height)] border-b border-border/80 bg-muted px-[var(--table-cell-padding-inline)] py-1 text-xs font-medium text-muted-foreground";
 export const DATA_TABLE_BODY_CELL_CLASS_NAME = "h-[var(--table-row-height)] px-[var(--table-cell-padding-inline)] py-2 align-middle";
 
 export type DataTablePinnedColumn = {
@@ -75,7 +75,7 @@ export function DataTableCommandRow({ search, actions, feedback, reserveActions 
 } & Omit<React.ComponentProps<"div">, "children">) {
   return (
     <div data-slot="data-table-command-row" className={cn("grid min-w-0 gap-2", reserveActions && "lg:grid-cols-[minmax(0,1fr)_340px] lg:items-center", className)} {...props}>
-      <div data-slot="data-table-search" className="min-w-0 lg:min-w-60 [&_input[type=search]]:h-11 sm:[&_input[type=search]]:h-9">{search}</div>
+      <div data-slot="data-table-search" className="min-w-0 lg:min-w-60 lg:max-w-xl [&_input[type=search]]:h-11 sm:[&_input[type=search]]:h-9">{search}</div>
       {reserveActions ? <div data-slot="data-table-actions" className="flex h-11 min-w-0 items-center justify-end gap-1 sm:h-9 sm:gap-2 [&_[data-slot=button]]:h-11 sm:[&_[data-slot=button]]:h-9 [&_[data-slot=button][data-size=icon]]:w-11 sm:[&_[data-slot=button][data-size=icon]]:w-9">
         {feedback ?? actions}
       </div> : null}
@@ -228,7 +228,7 @@ export function DataTableSortButton({
       type="button"
       data-state={direction ? "sorted" : "unsorted"}
       className={cn(
-        "flex h-8 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left font-semibold transition-colors duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] hover:bg-background data-[state=sorted]:bg-background data-[state=sorted]:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 motion-reduce:transition-none",
+        "group/sort flex h-8 w-full min-w-0 items-center gap-1.5 rounded-md px-1.5 text-left font-medium transition-colors duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] hover:bg-background data-[state=sorted]:bg-background data-[state=sorted]:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 motion-reduce:transition-none",
         className,
       )}
       aria-label={`${label} ${nextDirection} 정렬`}
@@ -240,7 +240,7 @@ export function DataTableSortButton({
       ) : direction === "desc" ? (
         <ArrowDown className="size-3.5 shrink-0" aria-hidden="true" />
       ) : (
-        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground/60" aria-hidden="true" />
+        <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground/40 group-hover/sort:text-muted-foreground group-focus-visible/sort:text-muted-foreground" aria-hidden="true" />
       )}
     </button>
   );

@@ -1,6 +1,8 @@
 "use client"
 
-import { DataTableCommandRow } from "@/components/data-table/data-table-surface"
+import { DataTableCommandRow, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel"
+import { useIsMobile } from "@/hooks/use-mobile"
 import { DataTableSelectionActions, DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
@@ -12602,7 +12604,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         )}
 
 	        {isWordRetestWorkspace && (
-	          <div className="grid gap-2">
+	          <DataTableFilterPanel label="단어 재시험 검색 조건" activeFilters={[
+                { label: "지점", value: wordRetestBranchFilter === "all" ? "" : wordRetestBranchFilter },
+                { label: "본시험일", value: wordRetestPeriodFilter === "all" ? "" : wordRetestPeriodFilter === "custom" ? `${wordRetestCustomStartDate || "시작일 미지정"} ~ ${wordRetestCustomEndDate || "종료일 미지정"}` : WORD_RETEST_PERIOD_FILTERS.find((filter) => filter.key === wordRetestPeriodFilter)?.label || "" },
+                { label: "담당선생님", value: wordRetestTeacherFilter === "all" ? "" : wordRetestFilterOptions.teacher.find((option) => option.value === wordRetestTeacherFilter)?.label || "선택한 선생님" },
+                { label: "수업", value: wordRetestClassFilter === "all" ? "" : wordRetestFilterOptions.class.find((option) => option.value === wordRetestClassFilter)?.label || "선택한 수업" },
+              ].filter((filter) => Boolean(filter.value))}>
+              <div className="grid gap-4 md:gap-3">
 	            <div className="flex flex-wrap gap-2">
 	              <div className="inline-flex w-fit rounded-md border bg-background p-1" aria-label="단어 재시험 지점">
 	                {WORD_RETEST_BRANCH_FILTERS.map((filter) => (
@@ -12613,8 +12621,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	                    aria-label={`${filter.label} 단어 재시험 보기`}
 	                    onClick={() => syncWordRetestBranchFilter(filter.key)}
 	                    className={[
-	                      "rounded px-3 py-1.5 text-sm font-medium",
-	                      wordRetestBranchFilter === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+	                      "h-11 rounded-md px-3 text-sm font-medium md:h-8",
+	                      wordRetestBranchFilter === filter.key ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:bg-muted",
 	                    ].join(" ")}
 	                  >
 	                    {filter.label}
@@ -12642,6 +12650,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              onFilterOpen={() => void ensureTaskOptions()}
 	            />
 	          </div>
+              </DataTableFilterPanel>
 	        )}
 
         {isTodoWorkspace && (
@@ -15115,8 +15124,8 @@ function WordRetestPeriodFilterBar({
             aria-label={`${filter.label} 단어 재시험 보기`}
             onClick={() => onChange(filter.key)}
             className={[
-              "shrink-0 rounded px-3 py-1.5 text-sm font-medium",
-              value === filter.key ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              "h-11 shrink-0 rounded-md px-3 text-sm font-medium md:h-8",
+              value === filter.key ? "bg-secondary text-secondary-foreground" : "text-muted-foreground hover:bg-muted",
             ].join(" ")}
           >
             {filter.label}
@@ -15355,12 +15364,14 @@ function WordRetestInlineScoreEditor({
   task,
   draft,
   disabled,
+  mobile = false,
   onDraftChange,
   onSave,
 }: {
   task: OpsTask
   draft: WordRetestScoreDraft
   disabled: boolean
+  mobile?: boolean
   onDraftChange: (task: OpsTask, key: keyof WordRetestScoreDraft, value: string) => void
   onSave: (task: OpsTask) => void
 }) {
@@ -15372,22 +15383,24 @@ function WordRetestInlineScoreEditor({
   }
 
   return (
-    <span className="grid min-w-[13.5rem] grid-cols-[repeat(3,minmax(2.5rem,1fr))_auto] items-center gap-1">
+    <span className="grid min-w-0 md:min-w-[13.5rem] grid-cols-[repeat(3,minmax(2.5rem,1fr))_auto] items-center gap-1">
       {([
         ["firstScore", "1차"],
         ["secondScore", "2차"],
         ["thirdScore", "3차"],
       ] as const).map(([key, label]) => (
+        <label key={key} className="grid min-w-0 gap-1">
+          <span className="text-xs text-muted-foreground md:sr-only">{label}</span>
         <Input
-          key={key}
           value={draft[key]}
           inputMode="numeric"
           aria-label={`${getWordRetestStudentLabel(task)} ${label} 점수`}
-          placeholder={label}
+          placeholder={mobile ? "—" : label}
           disabled={disabled}
           onChange={(event) => onDraftChange(task, key, event.target.value)}
-          className="h-8 min-w-0 px-2 text-xs"
+          className="h-11 min-w-0 px-2 text-base md:h-8 md:text-xs"
         />
+        </label>
       ))}
       <Button
         type="button"
@@ -15395,7 +15408,7 @@ function WordRetestInlineScoreEditor({
         size="sm"
         disabled={disabled || !dirty}
         onClick={() => onSave(task)}
-        className="h-8 px-2 text-xs"
+        className="h-11 self-end px-3 md:h-8 md:px-2 md:text-xs"
       >
         저장
       </Button>
@@ -15690,6 +15703,7 @@ function WordRetestTaskList({
   serverPaged?: boolean
   onPageSortChange?: (sort: { column: string | null; direction: "asc" | "desc" | null }) => void
 }) {
+  const mobile = useIsMobile()
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
   const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(() => initialSort?.column && initialSort.direction
     ? { columnKey: initialSort.column as WordRetestTableColumnKey, direction: initialSort.direction } : null)
@@ -15759,7 +15773,7 @@ function WordRetestTaskList({
   }
 
   return (
-    <div className="overflow-x-auto rounded-md border">
+    <div className="grid gap-2.5 bg-muted/50 p-3 md:block md:overflow-x-auto md:rounded-[var(--radius-surface)] md:border md:bg-background md:p-0">
       <div
         className="hidden min-h-[var(--table-header-height)] min-w-max border-b bg-muted/50 px-3 py-0.5 text-xs font-medium text-muted-foreground md:grid md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
         style={gridTemplateStyle}
@@ -15791,6 +15805,7 @@ function WordRetestTaskList({
         <WordRetestTaskRow
           key={task.id}
           task={task}
+          mobile={mobile}
           mode={mode}
           completionBlockers={completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS}
 	          onOpen={onOpen}
@@ -15867,6 +15882,7 @@ function shouldIgnoreWordRetestRowOpen(target: EventTarget | null) {
 
 const WordRetestTaskRow = memo(function WordRetestTaskRow({
   task,
+  mobile,
   mode,
   completionBlockers,
   onOpen,
@@ -15887,6 +15903,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   gridTemplateColumns,
 }: {
   task: OpsTask
+  mobile: boolean
   mode: WordRetestMode
   completionBlockers: string[]
   onOpen: (task: OpsTask) => void
@@ -15924,6 +15941,62 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   const resolvedScoreDraft = scoreDraft || getWordRetestScoreDraft(task)
   const scorePreviewWordRetest = { ...wordRetest, ...resolvedScoreDraft }
 
+  if (mobile) {
+    return (
+      <article data-word-retest-mobile-row={task.id} data-state={selected ? "selected" : undefined} className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME}>
+        <div className="flex items-start justify-between gap-3">
+          <div className="grid min-w-0 gap-1.5">
+            <button type="button" aria-label={`${studentLabel} 단어 재시험 수정`} onClick={() => onOpen(task)}
+              className="min-w-0 rounded-md text-left text-base font-semibold leading-6 [overflow-wrap:anywhere] hover:text-primary focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">{studentLabel}</button>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
+              <WordRetestLineageBadges wordRetest={wordRetest} />
+            </div>
+          </div>
+          <DataTableSelectionCheckbox aria-label={`${studentLabel} 단어 재시험 선택`} checked={selected}
+            disabled={!selectable || statusActionDisabled} onCheckedChange={(checked) => onSelectTask(task, checked === true)} className="-mr-2 -mt-1" />
+        </div>
+        <p className="mt-2 text-sm leading-5 text-muted-foreground [overflow-wrap:anywhere]">{classLabel} · {teacherLabel}</p>
+        {teacherAccountLinkRequired ? <p className="mt-1 text-xs text-destructive">담당선생님 계정 연결 필요</p> : null}
+        <button type="button" aria-label={`${studentLabel} 응시예정일시 ${expectedRetestLabel} 수정`} onClick={() => onExpectedQuickEdit(task)}
+          className="mt-2 flex min-h-11 w-full items-center justify-between gap-2 rounded-md text-left text-sm focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 hover:text-primary">
+          <span className="min-w-0"><span className="mr-2 text-xs text-muted-foreground">응시예정</span><span className="font-medium">{expectedRetestLabel}</span></span>
+          <span className="shrink-0 text-xs text-muted-foreground">{branch}</span>
+        </button>
+        <div className="mt-2 grid gap-2 border-t border-border/70 pt-3" data-word-retest-score-section="true">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <span className="text-xs text-muted-foreground">출제 {wordRetest.totalQuestionCount || "—"}개 · 커트라인 {wordRetest.cutoffQuestionCount || "—"}개</span>
+            {absent || getWordRetestScorePercent(scorePreviewWordRetest) !== null ? <WordRetestScoreResultCell wordRetest={scorePreviewWordRetest} /> : null}
+          </div>
+          {scoreEditingAllowed && !absent && !isClosedOpsTask(task) ? <WordRetestInlineScoreEditor task={task} draft={resolvedScoreDraft} mobile
+            disabled={statusActionDisabled || absent || isClosedOpsTask(task) || !scoreEditingAllowed}
+            onDraftChange={onScoreDraftChange} onSave={onScoreSave} /> : [resolvedScoreDraft.firstScore, resolvedScoreDraft.secondScore, resolvedScoreDraft.thirdScore].some((score) => score !== "") ? (
+              <dl className="grid grid-cols-3 gap-2 text-sm">
+                {[["1차", resolvedScoreDraft.firstScore], ["2차", resolvedScoreDraft.secondScore], ["3차", resolvedScoreDraft.thirdScore]].map(([label, score]) => (
+                  <div key={label}><dt className="text-xs text-muted-foreground">{label}</dt><dd className="mt-1 tabular-nums">{score || "—"}</dd></div>
+                ))}
+              </dl>
+            ) : null}
+          {primaryActions.length ? <div className="flex flex-wrap gap-2 [&_[data-slot=button]]:h-11 [&_[data-slot=button]]:flex-1">
+            {primaryActions.map((action) => <WordRetestRoleActionButton key={`${action.kind}-${action.label}`} task={task} action={action}
+              onEdit={onEdit} onStatusChange={onStatusChange} onComplete={onComplete} onRetry={onRetry} disabled={statusActionDisabled} />)}
+          </div> : null}
+        </div>
+        <details className="group/details mt-3 border-t border-border/70 pt-1">
+          <summary className="flex min-h-11 cursor-pointer list-none items-center justify-between gap-2 rounded-md text-xs font-medium text-muted-foreground focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 [&::-webkit-details-marker]:hidden">
+            <span className="min-w-0 truncate">시험 정보 · {unitLabel}</span>
+            <ChevronRight aria-hidden="true" className="size-4 shrink-0 group-open/details:rotate-90" />
+          </summary>
+          <dl className="grid gap-3 pb-2 text-sm">
+            {[["본시험일", dateOnlyLabel(wordRetest.testAt || task.dueAt || "")], ["교재", textbookLabel], ["시험범위", unitLabel], ["메모", note || "—"]].map(([label, value]) => (
+              <div key={label} className="grid grid-cols-[4rem_minmax(0,1fr)] gap-3"><dt className="text-xs text-muted-foreground">{label}</dt><dd className="min-w-0 whitespace-pre-wrap [overflow-wrap:anywhere]">{value}</dd></div>
+            ))}
+          </dl>
+        </details>
+      </article>
+    )
+  }
+
   return (
     <div
       onClick={(event) => {
@@ -15931,7 +16004,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         onOpen(task)
       }}
       data-state={selected ? "selected" : undefined}
-      className="relative grid cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 data-[state=selected]:bg-accent md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
+      className="relative hidden cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 data-[state=selected]:bg-accent md:grid md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
       style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
     >
       <span className="absolute right-3 top-3 flex min-w-0 items-center justify-end md:static md:justify-center">

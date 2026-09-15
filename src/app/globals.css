@@ -77,8 +77,8 @@
 
 :root {
   --radius: 0.375rem;
-  --radius-control: 6px;
-  --radius-surface: 8px;
+  --radius-control: 8px;
+  --radius-surface: 12px;
   --control-height: 36px;
   --field-height: 42px;
   --touch-target-height: 44px;

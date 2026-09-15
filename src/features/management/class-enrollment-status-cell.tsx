@@ -5,7 +5,6 @@ import { useRef, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
-import { cn } from "@/lib/utils";
 
 import type { ManagementRow } from "./use-management-records";
 
@@ -135,18 +134,15 @@ function ClassEnrollmentStatusCell({
     const label = mode === "registered" ? "등록" : "대기";
     const students = sortClassStudentSummariesAscending(loadedRosters[mode] ?? embeddedRosters[mode]);
     const count = Math.max(getRosterCount(row, mode), students.length);
-    const toneClassName = mode === "registered"
-      ? "bg-blue-50 text-blue-700 hover:bg-blue-100 dark:bg-blue-950/30 dark:text-blue-300 dark:hover:bg-blue-950/50"
-      : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50";
 
     return (
       <Popover open={openMode === mode} onOpenChange={(open) => handleOpenChange(mode, open)}>
         <PopoverTrigger asChild>
           <Button
             type="button"
-            variant="ghost"
+            variant={count > 0 ? "secondary" : "ghost"}
             size="sm"
-            className={cn("relative z-20 h-6 rounded-full px-2.5 text-xs font-medium", toneClassName)}
+            className="relative h-11 px-2 text-xs tabular-nums md:h-7"
             aria-label={`${label} 학생 ${count}명 보기`}
             onClick={(event) => event.stopPropagation()}
           >
@@ -184,7 +180,7 @@ function ClassEnrollmentStatusCell({
   };
 
   return (
-    <div className="flex min-w-[12rem] flex-wrap items-center gap-2 py-0.5">
+    <div className="flex min-w-0 flex-wrap items-center gap-1 py-0.5">
       {renderRosterPopover("registered")}
       {renderRosterPopover("waitlist")}
     </div>

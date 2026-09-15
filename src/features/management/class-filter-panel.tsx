@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import { DataTableCommandRow, DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME } from "@/components/data-table/data-table-surface";
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel";
 
 export type ClassFilterPanelOption = {
   value: string;
@@ -165,10 +166,16 @@ export function ClassFilterPanel({
         </>}
       />
 
+      <DataTableFilterPanel label={`${searchPlaceholder} 조건`} onReset={onReset} canReset={showReset}
+        activeFilters={selects.flatMap((select) => {
+          const value = select.value;
+          if (!value || value === (select.emptyValue || "all")) return [];
+          return [{ label: select.label, value: select.options.find((option) => option.value === value)?.label || value }];
+        })}>
       <DataTableFilters aria-label={`${searchPlaceholder} 조건`}>
         {selects.map(renderSelectField)}
         {showReset ? (
-          <div className="flex h-9 items-center sm:ml-auto">
+          <div className="hidden h-9 items-center md:ml-auto md:flex">
             <Button type="button" variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={onReset}>
               <X className="mr-1.5 size-3.5" />
               조건 초기화
@@ -176,6 +183,7 @@ export function ClassFilterPanel({
           </div>
         ) : null}
       </DataTableFilters>
+      </DataTableFilterPanel>
 
       {summaryLabel || footerAction ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">

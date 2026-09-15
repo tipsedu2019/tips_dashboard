@@ -65,6 +65,7 @@ function response(domain, request, totalCount = 260, patch = {}) {
 async function setup(t, domain, initial = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: `https://test.invalid/admin/${domain === 'academic' ? 'curriculum' : 'class-schedule'}${initial.search || ''}` });
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.self = dom.window;
+  window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
@@ -292,7 +293,11 @@ test('unchanged timetable, calendar and annual hooks keep their range readers an
 for (const domain of ['academic', 'operations']) test(`${domain}: displayed rows, totals and pager survive failed navigation and remain outside scrollport`, async (t) => {
   const page = await setup(t, domain, { workspace: true, search: '?page=11' });
   await act(async () => page.finish(page.numbered()[0]));
-  const content = [...document.querySelectorAll('tbody tr')].map((row) => row.textContent);
+  // The separate progress reader may change its loading label while the accepted rows remain.
+  const stableRowContents = () => [...document.querySelectorAll('tbody tr')].map((row) => (
+    domain === 'operations' ? row.textContent.replace(/진도 (?:미조회|확인 중|조회 실패)/g, '진도 조회 상태') : row.textContent
+  ));
+  const content = stableRowContents();
   const pager = document.querySelector('nav[aria-label="페이지 탐색"]');
   assert.ok(pager); assert.equal(pager.closest('[data-slot="scroll-area-viewport"], [data-slot="data-table-viewport"]'), null);
   assert.equal(document.querySelectorAll('[data-slot="pagination-number-group"] button').length, 10);
@@ -300,11 +305,13 @@ for (const domain of ['academic', 'operations']) test(`${domain}: displayed rows
   if (domain === 'academic') listViewport.scrollTop = 120;
   await act(async () => document.querySelector('button[aria-label="12 페이지"]').click());
   if (domain === 'academic') assert.equal(listViewport.scrollTop, 120, 'pending page preserves visible rows and position');
-  assert.deepEqual([...document.querySelectorAll('tbody tr')].map((row) => row.textContent), content);
+  if (domain === 'operations') assert.match(document.body.textContent, /진도 확인 중/);
+  assert.deepEqual(stableRowContents(), content);
   assert.ok(document.querySelector('button[aria-current="page"][aria-label="11 페이지"]'));
   await act(async () => page.numbered()[1].reject(new Error('PAGE FAILURE')));
   if (domain === 'academic') assert.equal(listViewport.scrollTop, 120, 'failed page preserves scroll position');
-  assert.deepEqual([...document.querySelectorAll('tbody tr')].map((row) => row.textContent), content);
+  if (domain === 'operations') assert.match(document.body.textContent, /진도 조회 실패/);
+  assert.deepEqual(stableRowContents(), content);
   assert.match(document.body.textContent, /260건/);
   assert.match(document.body.textContent, domain === 'academic' ? /수업계획을 불러오지 못했습니다/ : /PAGE FAILURE/);
   const retry = [...document.querySelectorAll('button')].find((button) => button.textContent === '다시 시도');

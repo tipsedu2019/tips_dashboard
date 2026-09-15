@@ -230,7 +230,8 @@ test("todo workspace supports team tabs sorting filters and legacy query links",
 	  assert.doesNotMatch(source, /todoView === "board"/);
 	  assert.doesNotMatch(source, /function TodoBoard/);
 	  assert.doesNotMatch(source, /confirmationByTaskId=\\{confirmationByTaskId\\}/);
-	  assert.doesNotMatch(source, /md:overflow-x-auto/);
+	  const todoList = source.slice(source.indexOf("function TodoTaskList("), source.indexOf("function WordRetestTaskList("));
+	  assert.doesNotMatch(todoList, /md:overflow-x-auto/);
 	  assert.doesNotMatch(source, /lg:grid-cols-6/);
 	});
 
@@ -3749,34 +3750,13 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     );
   }
 
-  const mobileRowOrder = [
-    ["진행상태", "order-1"],
-    ["담당선생님", "order-2"],
-    ["수업", "order-3"],
-    ["학생", "order-4"],
-    ["본시험일", "order-5"],
-    ["응시예정일시", "order-6"],
-    ["장소", "order-7"],
-    ["교재", "order-8"],
-    ["시험범위", "order-9"],
-    ["메모", "order-10"],
-    ["다음 액션", "order-last"],
-  ];
-  for (const [label, orderClass] of mobileRowOrder) {
-    const labelIndex = wordRetestRowSource.indexOf(`>${label}</span>`);
-    assert.ok(labelIndex > -1, `${label} mobile label should be present`);
-    const cellSource = wordRetestRowSource.slice(Math.max(0, labelIndex - 320), labelIndex);
-    assert.ok(cellSource.includes(orderClass), `${label} should use ${orderClass} on mobile`);
-    assert.ok(
-      cellSource.includes("md:order-none") || cellSource.includes("md:hidden") || orderClass === "order-last",
-      `${label} should keep desktop order`,
-    );
-  }
-  const mobileScoreGroupSource = wordRetestRowSource.slice(
-    wordRetestRowSource.indexOf('className="order-11 grid min-w-0 gap-2 md:contents"'),
-    wordRetestRowSource.indexOf('className="order-last flex flex-wrap'),
-  );
-  assertIncludesAll(mobileScoreGroupSource, ["출제 개수", "커트라인", "맞은 개수", "결과"]);
+  const mobileCardSource = wordRetestRowSource.slice(wordRetestRowSource.indexOf("if (mobile) {"), wordRetestRowSource.indexOf("onClick={(event) => {"));
+  assertIncludesAll(mobileCardSource, [
+    "data-word-retest-mobile-row", "DATA_TABLE_MOBILE_ITEM_CLASS_NAME", "studentLabel",
+    "onExpectedQuickEdit(task)", "data-word-retest-score-section", "scoreEditingAllowed",
+    "onScoreDraftChange", "onScoreSave", "WordRetestRoleActionButton", "<details", "시험 정보",
+  ]);
+  assert.ok(mobileCardSource.indexOf("data-word-retest-score-section") < mobileCardSource.indexOf("<details"), "score and next action precede secondary metadata");
 
   const wordRetestMainExamDateFieldSource = workspaceSource.slice(
     workspaceSource.indexOf("function WordRetestMainExamDateField"),

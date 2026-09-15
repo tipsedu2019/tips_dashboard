@@ -44,6 +44,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection";
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel";
 import { ManagementBulkActionBar, type BulkEditField } from "./management-bulk-actions";
 import { StudentRowActions } from "./student-row-actions";
 import { Input } from "@/components/ui/input";
@@ -64,12 +65,13 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
-import { formatStudentContact } from "@/lib/student-contact-display";
+import { formatStudentContact, getStudentContactHref } from "@/lib/student-contact-display";
 import { DataTableSettings, DataTableSettingsSection, DataTableSettingsSelect, DataTableColumnSetting } from "@/components/data-table/data-table-settings";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
   DATA_TABLE_LAYOUT_CLASS_NAME,
   DATA_TABLE_MOBILE_LIST_CLASS_NAME,
+  DATA_TABLE_MOBILE_ITEM_CLASS_NAME,
   DATA_TABLE_PAGER_CLASS_NAME,
   DATA_TABLE_TABLE_CLASS_NAME,
   DATA_TABLE_TOOLBAR_CLASS_NAME,
@@ -298,6 +300,17 @@ const STUDENT_COLUMN_WIDTHS: Record<string, number> = {
   action: 44,
 };
 
+const CLASS_COLUMN_WIDTHS: Record<string, number> = {
+  select: 40,
+  title: 220,
+  teacher: 104,
+  schedule: 196,
+  classroom: 100,
+  enrollmentStatus: 156,
+  capacity: 88,
+  tuition: 104,
+};
+
 const DEFAULT_TABLE_CONFIG: Record<
   ManagementKind,
   {
@@ -315,7 +328,7 @@ const DEFAULT_TABLE_CONFIG: Record<
     grouping: [],
   },
   classes: {
-    visibleColumnIds: [...CLASS_TABLE_COLUMN_IDS],
+    visibleColumnIds: ["select", "title", "teacher", "schedule", "classroom", "enrollmentStatus", "capacity", "tuition"],
     sorting: [
       { id: "title", desc: false },
     ],
@@ -1022,7 +1035,7 @@ function buildDefaultColumnOrder(kind: ManagementKind, columnIds: string[]) {
 
 function buildDefaultColumnSizing(columnIds: string[], kind: ManagementKind) {
   return Object.fromEntries(
-    columnIds.map((columnId) => [columnId, (kind === "students" ? STUDENT_COLUMN_WIDTHS[columnId] : undefined) || DEFAULT_COLUMN_WIDTHS[columnId] || 140]),
+    columnIds.map((columnId) => [columnId, (kind === "students" ? STUDENT_COLUMN_WIDTHS[columnId] : kind === "classes" ? CLASS_COLUMN_WIDTHS[columnId] : undefined) || DEFAULT_COLUMN_WIDTHS[columnId] || 140]),
   ) as ColumnSizingState;
 }
 
@@ -1282,7 +1295,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         id: "title",
         accessorFn: (row) => row.title,
         header: kind === "classes" ? "수업명" : "이름",
-        cell: ({ row }) => (
+        cell: ({ row, table }) => (
           <div className="grid min-w-0 gap-0.5 py-0.5">
             <button
               type="button"
@@ -1298,6 +1311,14 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             </button>
             {kind === "textbooks" ? (
               <span className="min-w-0 whitespace-normal break-words text-xs text-muted-foreground">{row.original.subtitle || "기본 정보 없음"}</span>
+            ) : null}
+            {kind === "classes" ? (
+              <span className="min-w-0 whitespace-normal break-words text-xs leading-5 text-muted-foreground">
+                {[
+                  !table.getColumn("subject")?.getIsVisible() ? normalizeScalar(row.original.raw?.subject || row.original.badge) : "",
+                  !table.getColumn("grade")?.getIsVisible() ? normalizeScalar(row.original.raw?.grade) : "",
+                ].filter(Boolean).join(" · ")}
+              </span>
             ) : null}
           </div>
         ),
@@ -2607,7 +2628,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           const tuition = normalizeScalar(raw.tuitionLabel || raw.tuition_label) || formatManagementCurrency(raw.fee || raw.tuition);
 
           return (
-            <article key={`class-mobile-${row.id}`} className="rounded-lg border border-border/70 bg-background p-3">
+            <article key={`class-mobile-${row.id}`} data-state={row.getIsSelected() ? "selected" : undefined} className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME}>
               <div className="flex items-start gap-3">
                 <DataTableSelectionCheckbox
                   checked={row.getIsSelected()}
@@ -2618,7 +2639,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
-                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-base font-semibold leading-6 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-class-detail-trigger={record.id}
                   >
@@ -2707,7 +2728,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             <article
               key={`student-mobile-${row.id}`}
               data-testid={`student-mobile-card-${row.id}`}
-              className="rounded-lg border border-border/70 bg-background p-3"
+              data-state={row.getIsSelected() ? "selected" : undefined}
+              className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME}
             >
               <div className="flex items-start gap-3">
                 <DataTableSelectionCheckbox
@@ -2719,7 +2741,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
-                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-base font-semibold leading-6 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-student-detail-trigger={record.id}
                   >
@@ -2737,16 +2759,20 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 />
               </div>
 
-              <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
-                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
-                  <dt className="text-muted-foreground">학생 연락처</dt>
-                  <dd className="min-w-0 break-keep text-foreground">{contact}</dd>
-                </div>
-                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
-                  <dt className="text-muted-foreground">학부모</dt>
-                  <dd className="min-w-0 break-keep text-foreground">{parentContact}</dd>
-                </div>
-              </dl>
+              {contact === "—" && parentContact === "—" ? (
+                <p className="mt-2 pl-11 text-xs text-muted-foreground">연락처 없음</p>
+              ) : (
+                <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-2 text-sm">
+                  {([["학생", raw.contact, contact], ["학부모", raw.parent_contact || raw.parentContact, parentContact]] as const).map(([label, value, display]) => (
+                    display !== "—" ? <div key={label} className="grid min-w-0 gap-0.5">
+                      <dt className="text-xs text-muted-foreground">{label}</dt>
+                      <dd className="min-w-0 tabular-nums [overflow-wrap:anywhere]">
+                        {getStudentContactHref(value) ? <a href={getStudentContactHref(value)} aria-label={`${record.title} ${label} ${display} 전화`} className="inline-flex min-h-11 items-center rounded-md text-foreground underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">{display}</a> : <span>{display}</span>}
+                      </dd>
+                    </div> : null
+                  ))}
+                </dl>
+              )}
             </article>
           );
         })
@@ -2794,7 +2820,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           createDisabled={!hasCreateAction}
           footerAction={null}
           selectionActions={bulkActionBar}
-          toolbarAction={<div className="ml-auto flex justify-end">{columnSettingsControl}</div>}
+          toolbarAction={columnSettingsControl}
         />
       ) : (
         <DataTableToolbar className={cn("gap-2", kind === "students" && "student-list-toolbar")}>
@@ -2859,13 +2885,20 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           ) : null}
 
           {kind === "students" ? (
+            <DataTableFilterPanel label="학생 검색 조건" onReset={resetFilters} activeFilters={[
+              { label: "재원 상태", value: statusFilter },
+              { label: "학교 구분", value: studentSchoolCategoryFilter },
+              { label: "학교", value: studentSchoolFilter },
+              { label: "학년", value: studentGradeFilter },
+            ].filter((filter) => Boolean(filter.value))}>
             <DataTableFilters data-testid="student-quick-filters" aria-label="학생 검색 조건">
               {renderStudentQuickFilter("재원 상태", renderStudentStatusSelect())}
               {renderStudentQuickFilter("학교 구분", renderStudentSchoolCategorySelect())}
               {renderStudentQuickFilter("학교", renderStudentSchoolSelect(), "sm:w-52")}
               {renderStudentQuickFilter("학년", renderStudentGradeSelect())}
-              {hasActiveFilters ? <div className="flex h-9 items-center sm:ml-auto">{resetControl}</div> : null}
+              {hasActiveFilters ? <div className="hidden h-9 items-center md:ml-auto md:flex">{resetControl}</div> : null}
             </DataTableFilters>
+            </DataTableFilterPanel>
           ) : null}
 
           <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", kind === "students" && "student-filter-status")} aria-live="polite">
