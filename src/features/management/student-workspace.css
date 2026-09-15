@@ -109,32 +109,7 @@
 }
 .student-edit-sheet > [data-slot="alert"] { margin-bottom: 24px; }
 
-/* Use the existing semantic theme and shell. Menu contents and preferences are unchanged. */
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-inset"] { margin: 0; border-radius: 0; box-shadow: none; }
-body:has(:is(.student-workspace, .class-workspace)) header { min-height: 72px; }
-body:has(:is(.student-workspace, .class-workspace)) header p { font-size: 14px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-header"] { padding: 20px 12px 16px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] > div:first-child {
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-  padding: 0;
-}
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] img { width: 48px; height: 48px; max-width: none; flex-shrink: 0; }
-.dark body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] > div:first-child { background: white; }
 .dark .student-fields input[type="date"] { color-scheme: dark; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-button"][data-size="default"] { min-height: 40px; font-size: 14px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub-button"] { min-height: 36px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-button"][data-active="true"],
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub-button"][data-active="true"] {
-  color: var(--primary);
-  background: color-mix(in oklch, var(--primary), transparent 91%);
-  font-weight: 600;
-}
-body:has(:is(.student-workspace, .class-workspace)) header [data-slot="button"],
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-quick-search-trigger"] {
-  height: 36px;
-}
 body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {
   border-radius: 8px;
   animation-duration: 120ms;
@@ -176,7 +151,5 @@ body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-conte
   body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {
     animation: none;
   }
-  .student-workspace *, .student-edit-sheet *,
-  body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar"] *,
-  body:has(:is(.student-workspace, .class-workspace)) header * { transition-duration: 0ms; scroll-behavior: auto; }
+  .student-workspace *, .student-edit-sheet * { transition-duration: 0ms; scroll-behavior: auto; }
 }

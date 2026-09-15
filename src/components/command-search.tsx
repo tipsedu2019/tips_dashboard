@@ -329,10 +329,10 @@ export function SearchTrigger({ onClick }: { onClick: React.MouseEventHandler<HT
       title="빠른 이동"
       data-testid="admin-quick-search-trigger"
       onClick={onClick}
-      className="inline-flex h-8 w-full items-center justify-start gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 py-1 text-sm font-medium text-muted-foreground shadow-sm transition-[background-color,color,box-shadow,transform] hover:bg-accent hover:text-accent-foreground active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 md:w-36 lg:w-56"
+      className="inline-flex size-[var(--touch-target-height)] items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent bg-background text-sm font-medium text-muted-foreground transition-[background-color,color,box-shadow] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none md:h-[var(--control-height)] md:w-36 md:justify-start md:border-input md:px-3 lg:w-56"
     >
-      <Search className="h-3.5 w-3.5 shrink-0" />
-      <span>빠른 이동</span>
+      <Search className="size-4 shrink-0" aria-hidden="true" />
+      <span className="hidden md:inline">빠른 이동</span>
     </button>
   )
 }

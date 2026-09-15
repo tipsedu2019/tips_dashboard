@@ -53,7 +53,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
 
   return (
     <Sidebar {...props}>
-      <SidebarHeader>
+      <SidebarHeader className="min-h-[var(--shell-header-height)] justify-center px-3 py-2 group-data-[collapsible=icon]:px-1">
         <SidebarMenu>
           <SidebarMenuItem>
             <SidebarMenuButton
@@ -67,14 +67,14 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                 title="대시보드"
                 data-testid="admin-sidebar-brand"
               >
-                <div className="flex aspect-square size-9 shrink-0 items-center justify-center overflow-hidden rounded-md border border-sidebar-border/60 bg-white p-1 shadow-sm">
+                <div className="flex aspect-square size-[var(--shell-logo-size)] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white">
                   <Image
                     src={sidebarBrand.src}
                     alt={sidebarBrand.alt}
-                    width={28}
-                    height={28}
+                    width={36}
+                    height={36}
                     priority
-                    className="object-contain"
+                    className="size-[var(--shell-logo-size)] object-contain"
                   />
                 </div>
                 <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
