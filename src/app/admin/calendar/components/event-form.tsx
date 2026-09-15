@@ -76,6 +76,7 @@ type ScienceCalendarEvent = Partial<CalendarEvent> & {
 }
 
 interface EventFormProps {
+  onCloseAutoFocus?: (event: Event) => void
   event?: CalendarEvent | null
   initialDraft?: Partial<CalendarEvent> | null
   open: boolean
@@ -274,6 +275,7 @@ function buildEventFormResetKey({
 }
 
 export function EventForm({
+  onCloseAutoFocus,
   event,
   initialDraft,
   open,
@@ -625,7 +627,7 @@ export function EventForm({
     <>
     {draftNavigation.confirmation}
     <Dialog open={open} onOpenChange={(nextOpen) => { if (nextOpen) onOpenChange(true); else requestClose() }}>
-      <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogContent onCloseAutoFocus={onCloseAutoFocus} className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
         <DialogHeader>
           <DialogTitle>
             {readOnly ? "학사 일정 상세" : isEditingPersistedEvent ? "학사 일정 수정" : "새 학사 일정 추가"}

@@ -1,7 +1,7 @@
-﻿"use client";
+"use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
@@ -111,49 +111,43 @@ export function AcademicCalendarWorkspace() {
   const initialDate = useMemo(() => parseSearchDate(searchParams.get("date")), [searchParams]);
   const initialEventId = useMemo(() => text(searchParams.get("eventId")), [searchParams]);
   const initialQuery = useMemo(() => text(searchParams.get("q")), [searchParams]);
-  const [visibleRange, setVisibleRange] = useState(() => {
-    const anchor = initialDate || new Date();
+  const [requestedDate, setRequestedDate] = useState(() => initialDate || new Date());
+  const visibleRange = useMemo(() => {
+    const anchor = requestedDate;
     const first = new Date(anchor.getFullYear(), anchor.getMonth(), 1, 12);
     const last = new Date(anchor.getFullYear(), anchor.getMonth() + 1, 0, 12);
     first.setDate(first.getDate() - first.getDay());
     last.setDate(last.getDate() + (6 - last.getDay()));
     return { dateFrom: toDateKey(first), dateTo: toDateKey(last) };
-  });
+  }, [requestedDate]);
   const [recoveryRange, setRecoveryRange] = useState<{ dateFrom: string; dateTo: string } | null>(null);
+  useEffect(() => {
+    if (initialDate) {
+      setRequestedDate(initialDate);
+      setRecoveryRange(null);
+    }
+  }, [initialDate]);
   const requestRange = recoveryRange || visibleRange;
   const request = useMemo(() => ({ mode: "calendar" as const, ...requestRange }), [requestRange]);
-  const { data, densityError, error, refresh, loadEventDetail } = useOperationsWorkspaceData(request);
+  const { data, successfulRequest, loading, densityError, error, refresh, loadEventDetail } = useOperationsWorkspaceData(request);
   const isSeedCalendar = false;
-  const lastMonthRowsRef = useRef<Array<Record<string, unknown>>>([]);
-  const responseRange = (data?.range || {}) as { dateFrom?: string; dateTo?: string };
-  const isConfirmedSevenDayRange = Boolean(
-    recoveryRange &&
-      data?.ok === true &&
-      responseRange.dateFrom === recoveryRange.dateFrom &&
-      responseRange.dateTo === recoveryRange.dateTo,
-  );
-  const isConfirmedMonthRange = Boolean(
-    data?.ok === true &&
-      responseRange.dateFrom === visibleRange.dateFrom &&
-      responseRange.dateTo === visibleRange.dateTo,
-  );
-  useEffect(() => {
-    if (!isConfirmedMonthRange || data?.ok !== true || !Array.isArray(data.rows)) return;
-    lastMonthRowsRef.current = data.rows as Array<Record<string, unknown>>;
-  }, [data, isConfirmedMonthRange]);
-  const calendarRows = useMemo(
-    () => {
-      if (isConfirmedSevenDayRange && data?.ok === true && Array.isArray(data.rows)) {
-        return data.rows as Array<Record<string, unknown>>;
-      }
-      if (isConfirmedMonthRange && data?.ok === true && Array.isArray(data.rows)) {
-        return data.rows as Array<Record<string, unknown>>;
-      }
-      if (lastMonthRowsRef.current.length > 0) return lastMonthRowsRef.current;
-      return [];
-    },
-    [data, isConfirmedMonthRange, isConfirmedSevenDayRange],
-  );
+  // The hook retains the last accepted response and rejects stale requests.
+  // Keep its data and range together, including when recovering to seven days.
+  const acceptedRange = successfulRequest?.mode === "calendar" ? successfulRequest : null;
+  const isConfirmedSevenDayRange = Boolean(acceptedRange &&
+    buildSevenDayRangeKeys(acceptedRange.dateFrom)[6] === acceptedRange.dateTo);
+  const displayedDate = useMemo(() => {
+    if (!acceptedRange) return initialDate || requestedDate;
+    if (acceptedRange.dateFrom === visibleRange.dateFrom && acceptedRange.dateTo === visibleRange.dateTo) return requestedDate;
+    const anchor = new Date(`${acceptedRange.dateFrom}T12:00:00`);
+    // The first full week of a month grid always belongs to that month.
+    anchor.setDate(anchor.getDate() + 7);
+    anchor.setDate(1);
+    return anchor;
+  }, [acceptedRange, initialDate, requestedDate, visibleRange]);
+  const calendarRows = useMemo(() => data?.ok === true && Array.isArray(data.rows)
+    ? data.rows as Array<Record<string, unknown>> : [], [data]);
+  const requestedRangeLabel = `${requestRange.dateFrom} ~ ${requestRange.dateTo}`;
 
   useEffect(() => {
     let cancelled = false;
@@ -235,10 +229,9 @@ export function AcademicCalendarWorkspace() {
     [activeScienceAreas, calendarRows],
   );
 
-  const handleVisibleRangeChange = useCallback((range: { start: Date; end: Date }) => {
-    const next = { dateFrom: toDateKey(range.start), dateTo: toDateKey(range.end) };
+  const handleNavigationDateChange = useCallback((date: Date) => {
     setRecoveryRange(null);
-    setVisibleRange((current) => current.dateFrom === next.dateFrom && current.dateTo === next.dateTo ? current : next);
+    setRequestedDate(date);
   }, []);
 
   const handleOneWeekView = useCallback(() => {
@@ -248,8 +241,8 @@ export function AcademicCalendarWorkspace() {
   }, [densityError]);
 
   const sevenDayKeys = useMemo(
-    () => recoveryRange ? buildSevenDayRangeKeys(recoveryRange.dateFrom) : [],
-    [recoveryRange],
+    () => isConfirmedSevenDayRange && acceptedRange ? buildSevenDayRangeKeys(acceptedRange.dateFrom) : [],
+    [acceptedRange, isConfirmedSevenDayRange],
   );
 
   const handleLoadEventDetail = useCallback(async (eventId: string) => {
@@ -419,16 +412,23 @@ export function AcademicCalendarWorkspace() {
       {error || mutationError ? (
         <div className="px-4 sm:px-5 lg:px-6">
           <Alert variant="destructive">
-            <AlertDescription>{error || mutationError}</AlertDescription>
+            <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
+              <span>{error ? `${requestedRangeLabel} 일정을 불러오지 못했습니다.` : mutationError}</span>
+              {error ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>다시 불러오기</Button> : null}
+            </AlertDescription>
           </Alert>
         </div>
+      ) : null}
+
+      {loading ? (
+        <p role="status" className="px-4 text-sm text-muted-foreground sm:px-5 lg:px-6">{requestedRangeLabel} 일정 불러오는 중…</p>
       ) : null}
 
       {densityError?.code === "visible_range_too_dense" ? (
         <div className="px-4 sm:px-5 lg:px-6">
           <Alert>
             <AlertDescription className="flex items-center justify-between gap-3">
-              <span>선택한 기간의 일정이 너무 많아 이전 달력을 유지합니다.</span>
+              <span>{requestedRangeLabel} 일정이 너무 많아 이전 달력을 유지합니다.</span>
               <Button type="button" variant="outline" size="sm" onClick={handleOneWeekView}>한 주 보기</Button>
             </AlertDescription>
           </Alert>
@@ -455,7 +455,7 @@ export function AcademicCalendarWorkspace() {
         {isConfirmedSevenDayRange ? (
           <section data-testid="operations-seven-day-agenda" className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">한 주 일정</h2>
+              <h2 className="text-base font-semibold">한 주 일정 <span className="text-sm font-normal">{acceptedRange?.dateFrom} ~ {acceptedRange?.dateTo}</span></h2>
               <Button type="button" variant="outline" size="sm" onClick={() => setRecoveryRange(null)}>월간 보기</Button>
             </div>
             <div className="grid gap-3 lg:grid-cols-7">
@@ -497,7 +497,7 @@ export function AcademicCalendarWorkspace() {
           onSaveEvent={handleSaveEvent}
           onDeleteEvent={handleDeleteEvent}
           onMoveEvent={handleSaveEvent}
-          onVisibleRangeChange={handleVisibleRangeChange}
+          navigation={{ displayedDate, requestedDate, onDateChange: handleNavigationDateChange }}
           onLoadEventDetail={handleLoadEventDetail}
         />
         )}

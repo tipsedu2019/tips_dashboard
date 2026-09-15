@@ -1,11 +1,13 @@
 "use client"
 
+import type { CalendarNavigation } from "../types"
 import { Calendars, type CalendarGroup } from "./calendars"
 import { DatePicker } from "./date-picker"
 import { Button } from "@/components/ui/button"
 import { Separator } from "@/components/ui/separator"
 
 interface CalendarSidebarProps {
+  navigation?: CalendarNavigation
   selectedDate?: Date
   onDateSelect?: (date: Date) => void
   onNewEvent?: () => void
@@ -17,7 +19,8 @@ interface CalendarSidebarProps {
   className?: string
 }
 
-export function CalendarSidebar({ 
+export function CalendarSidebar({
+  navigation,
   selectedDate,
   onDateSelect,
   onNewEvent,
@@ -39,6 +42,7 @@ export function CalendarSidebar({
       ) : null}
 
       <DatePicker
+        navigation={navigation}
         selectedDate={selectedDate}
         onDateSelect={onDateSelect}
         events={events}

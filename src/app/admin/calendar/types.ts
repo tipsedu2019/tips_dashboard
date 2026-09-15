@@ -41,3 +41,9 @@ export interface Calendar {
   visible: boolean
   type: "personal" | "work" | "shared"
 }
+
+export interface CalendarNavigation {
+  displayedDate: Date
+  requestedDate: Date
+  onDateChange: (date: Date) => void
+}

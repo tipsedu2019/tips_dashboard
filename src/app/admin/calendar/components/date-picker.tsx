@@ -1,15 +1,17 @@
 "use client"
 
+import type { CalendarNavigation } from "../types"
 import { useState } from "react"
 import { Calendar } from "@/components/ui/calendar"
 
 interface DatePickerProps {
+  navigation?: CalendarNavigation
   selectedDate?: Date
   onDateSelect?: (date: Date) => void
   events?: Array<{ date: Date; count: number }>
 }
 
-export function DatePicker({ selectedDate, onDateSelect, events = [] }: DatePickerProps) {
+export function DatePicker({ navigation, selectedDate, onDateSelect, events = [] }: DatePickerProps) {
   const [fallbackDate] = useState(() => new Date())
   const [uncontrolledDate, setUncontrolledDate] = useState<Date | undefined>(selectedDate || fallbackDate)
   const date = selectedDate || uncontrolledDate
@@ -31,6 +33,8 @@ export function DatePicker({ selectedDate, onDateSelect, events = [] }: DatePick
   return (
     <div className="flex justify-center">
       <Calendar 
+        month={navigation?.displayedDate}
+        onMonthChange={navigation?.onDateChange}
         mode="single"
         selected={date}
         onSelect={handleDateSelect}
