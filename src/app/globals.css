@@ -1,5 +1,6 @@
 @import "tailwindcss" source(none);
 @import "tw-animate-css";
+@import "../lib/fonts/pretendard.css";
 @import "../features/management/student-workspace.css";
 @import "../features/management/class-workspace.css";
 @source "../**/*.{js,jsx,ts,tsx}";
@@ -93,7 +94,7 @@
   --motion-duration-dialog: 200ms;
   --motion-easing-control: ease-out;
   --motion-easing-spatial: cubic-bezier(0.2, 0.8, 0.2, 1);
-  --font-sans-stack: Pretendard, "Pretendard Variable", "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
+  --font-sans-stack: "Pretendard Variable", Pretendard, "Noto Sans KR", "Apple SD Gothic Neo", "Malgun Gothic", system-ui, sans-serif;
   --background: oklch(1.0000 0 0);
   --foreground: oklch(0.3211 0 0);
   --card: oklch(1.0000 0 0);
