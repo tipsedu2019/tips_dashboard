@@ -31,6 +31,7 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
+import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
 import { ContentImportDialog } from "./content-import-dialog";
 import {
@@ -277,6 +278,11 @@ export function PublicContentWorkspace({
     [saving, setSaving] = useState(false),
     [uploading, setUploading] = useState<string | null>(null),
     [dialogError, setDialogError] = useState("");
+  const [initialDraft, setInitialDraft] = useState("");
+  const { requestLocalAction, confirmation: draftConfirmation } = useDraftNavigation({
+    dirty: Boolean(editing && JSON.stringify(editing.draft) !== initialDraft),
+    description: "작성 중인 홈페이지 내용을 버리고 닫을까요?",
+  });
   const mutationPending = useRef(false);
   const opener = useRef<HTMLElement | null>(null);
   const addButton = useRef<HTMLButtonElement | null>(null);
@@ -379,23 +385,25 @@ export function PublicContentWorkspace({
     rememberOpener();
     setFieldErrors({});
     setDialogError("");
+    const draft = entry ? {
+      kind: entry.kind,
+      data: { ...entry.data },
+      sortOrder: entry.sortOrder,
+      isPublished: entry.isPublished,
+    } : blank(kind);
+    setInitialDraft(JSON.stringify(draft));
     setEditing(
       entry
         ? {
             id: entry.id,
             version: entry.version,
-            draft: {
-              kind: entry.kind,
-              data: { ...entry.data },
-              sortOrder: entry.sortOrder,
-              isPublished: entry.isPublished,
-            },
+            draft,
             previewUrls: entry.previewUrls || {},
           }
         : {
             id: crypto.randomUUID(),
             version: 0,
-            draft: blank(kind),
+            draft,
             previewUrls: {},
           },
     );
@@ -602,12 +610,15 @@ export function PublicContentWorkspace({
   const modalOpen = Boolean(editing || review);
   const closeModal = () => {
     if (saving || uploading) return;
-    setEditing(null);
-    setReview(null);
-    setDialogError("");
+    requestLocalAction(() => {
+      setEditing(null);
+      setReview(null);
+      setDialogError("");
+    });
   };
   return (
     <div className="space-y-5 px-4 sm:px-5 lg:px-6">
+      {draftConfirmation}
       <div className="flex flex-wrap items-center justify-between gap-3">
         <Tabs
           value={kind}
