@@ -67,16 +67,19 @@ test("mobile sidebar Escape returns focus to the actual opening button", async t
   assert.ok(document.activeElement === trigger, "focus returns to opening button")
 })
 
-test("mobile sidebar opened by shortcut returns focus to the prior input", async t => {
+test("custom sidebar hotkeys leave the focused input and menu unchanged", async t => {
   const p = await setup(t)
   const input = document.querySelector('input[aria-label="검색"]')
-  await React.act(async () => {
-    input.focus()
-    window.dispatchEvent(new window.KeyboardEvent("keydown", { key: "b", ctrlKey: true, bubbles: true, cancelable: true }))
-  })
-  await p.settle()
+  for (const modifier of ["ctrlKey", "metaKey"]) {
+    const event = new window.KeyboardEvent("keydown", { key: "b", [modifier]: true, bubbles: true, cancelable: true })
+    await React.act(async () => { input.focus(); window.dispatchEvent(event) })
+    await p.settle()
+    assert.equal(event.defaultPrevented, false)
+    assert.equal(document.querySelector('[role="dialog"]'), null)
+    assert.ok(document.activeElement === input)
+  }
+  await p.open()
   await p.escape()
-  assert.ok(document.activeElement === input, "focus returns to shortcut input")
 })
 
 test("mobile sidebar navigation preserves the new route heading focus", async t => {

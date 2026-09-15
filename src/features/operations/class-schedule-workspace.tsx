@@ -402,12 +402,12 @@ function formatUpdatedDate(value: string) {
 function buildPublicClassHref(selectedRow: Record<string, unknown> | null) {
   const title = text(selectedRow?.title);
   if (!title) {
-    return "/classes";
+    return "https://tipsedu.co.kr/classes";
   }
 
   const params = new URLSearchParams();
   params.set("q", title);
-  return `/classes?${params.toString()}`;
+  return `https://tipsedu.co.kr/classes?${params.toString()}`;
 }
 
 function buildLessonDesignPageHref(

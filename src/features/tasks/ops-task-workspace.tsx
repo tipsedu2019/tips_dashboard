@@ -8024,7 +8024,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const attachmentNameId = useId()
   const attachmentLinkId = useId()
   const quickAddInputRef = useRef<HTMLInputElement | null>(null)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const autoAbsentWordRetestIdsRef = useRef<Set<string>>(new Set())
   const wordRetestTeacherFilterTouchedRef = useRef(false)
   const deferredQuery = useDeferredValue(query)
@@ -11579,13 +11578,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }
 
-  const handleFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      event.preventDefault()
-      event.currentTarget.requestSubmit()
-    }
-  }
-
   function focusRegistrationFormSection(blocker: string) {
     const nextStep = getCompletionBlockerFormStep(form.type, [blocker]) || activeFormDetailStep
     setFormDetailStep(nextStep)
@@ -12247,13 +12239,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const focusQuickAdd = useCallback(() => {
     quickAddInputRef.current?.focus()
   }, [])
-  const focusSearch = useCallback(() => {
-    if (searchInputRef.current) {
-      searchInputRef.current.focus()
-      return
-    }
-    if (isTodoWorkspace) focusQuickAdd()
-  }, [focusQuickAdd, isTodoWorkspace])
   const workspaceTab = isWordRetestWorkspace ? wordRetestMode
     : isRegistrationWorkspace ? registrationMode === "calendar" ? registrationCalendarKind : registrationView
     : isWithdrawalWorkspace || isTransferWorkspace ? withdrawalView
@@ -12272,36 +12257,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace
     ? "flex flex-col gap-2"
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
-
-  useEffect(() => {
-    if (!isTodoWorkspace) return
-
-    const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || formOpen || detailOpen || deleteTarget || bulkDeleteTargets.length > 0) return
-
-      const target = event.target as HTMLElement | null
-      const tagName = target?.tagName?.toLowerCase()
-      const isEditableTarget = Boolean(
-        target?.isContentEditable ||
-        tagName === "input" ||
-        tagName === "textarea" ||
-        tagName === "select",
-      )
-      if (isEditableTarget) return
-
-      if (event.key.toLowerCase() === "n") {
-        event.preventDefault()
-        focusQuickAdd()
-      }
-      if (event.key === "/") {
-        event.preventDefault()
-        focusSearch()
-      }
-    }
-
-    window.addEventListener("keydown", handleShortcut)
-    return () => window.removeEventListener("keydown", handleShortcut)
-  }, [bulkDeleteTargets.length, deleteTarget, detailOpen, focusQuickAdd, focusSearch, formOpen, isTodoWorkspace])
 
   return (
     <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
@@ -12578,7 +12533,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  ref={searchInputRef}
                   type="search"
                   value={query}
                   aria-label={`${workspaceLabel} 검색`}
@@ -12947,7 +12901,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               운영 업무를 입력하고 저장합니다.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
+          <form onSubmit={submitForm} className="grid gap-3">
             {form.type === "registration" && registrationOptionsLoading && (
               <div role="status" aria-live="polite" className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
                 상담 책임자·수업·교재 선택 정보를 불러오는 중입니다.
@@ -13770,7 +13724,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             <span data-registration-state="saved" className="sr-only">저장된 신청서</span>
           ) : null}
           {registrationApplicationHost.kind === "create" ? (
-            <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
+            <form onSubmit={submitForm} className="grid gap-3">
               <DialogTitle className="sr-only">등록 신청서</DialogTitle>
               <DialogDescription className="sr-only">새 등록 신청서 내용을 입력합니다.</DialogDescription>
               {message ? (

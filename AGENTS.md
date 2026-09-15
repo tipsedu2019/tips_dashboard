@@ -16,6 +16,12 @@
 
 ## Agent skills
 
+### Product boundaries
+
+- `tips_dashboard` is the internal operations dashboard. Public landing pages and public class-guide UI are owned by `tips_dashboard_public`; do not recreate them here.
+- Keep authenticated homepage management and the landing site's existing public data/content APIs in this repository, including their privacy, caching, and invalidation contracts.
+- Do not add custom keyboard shortcuts or shortcut hints. Preserve standard keyboard access, text input, dialog dismissal, and focus restoration.
+
 ### Issue tracker
 
 Issues, PRDs, and decomposed implementation tasks live in this repo's GitHub Issues. See `docs/agents/issue-tracker.md`.

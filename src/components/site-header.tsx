@@ -1,9 +1,7 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ExternalLink } from "lucide-react"
 
 import { CommandSearch, SearchTrigger } from "@/components/command-search"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -25,19 +23,6 @@ export function SiteHeader() {
     setSearchOpen(false)
   }, [pathname])
 
-  React.useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        if (searchOpen) setSearchOpen(false)
-        else openSearch(document.activeElement instanceof HTMLElement ? document.activeElement : null)
-      }
-    }
-
-    document.addEventListener("keydown", down)
-    return () => document.removeEventListener("keydown", down)
-  }, [openSearch, searchOpen])
-
   return (
     <>
       <header className="sticky top-0 z-30 flex h-auto shrink-0 items-center border-b bg-background/95 backdrop-blur transition-[width,height] ease-linear supports-[backdrop-filter]:bg-background/80 group-has-data-[collapsible=icon]/sidebar-wrapper:h-auto">
@@ -57,18 +42,6 @@ export function SiteHeader() {
             </div>
 
             <div className="flex min-w-0 items-center gap-2 sm:ml-4">
-              <Link
-                href="/"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="홈페이지를 새 화면에서 확인"
-                title="홈페이지 확인"
-                data-testid="admin-public-site-link"
-                className="hidden size-8 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
-              >
-                <ExternalLink className="size-3.5" aria-hidden="true" />
-                <span className="sr-only">홈페이지 확인</span>
-              </Link>
               <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
                 <SearchTrigger onClick={(event) => openSearch(event.currentTarget)} />
               </div>

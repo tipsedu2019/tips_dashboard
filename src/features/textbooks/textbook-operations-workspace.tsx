@@ -339,13 +339,6 @@ function firstNonBlankText(...values: unknown[]) {
   return "";
 }
 
-function isEditableShortcutTarget(target: EventTarget | null) {
-  const element = target instanceof HTMLElement ? target : null;
-  if (!element) return false;
-  if (element.isContentEditable) return true;
-  return ["INPUT", "TEXTAREA", "SELECT"].includes(element.tagName);
-}
-
 function normalizeEmailValue(value: unknown) {
   return text(value).replace(/\s+/g, "").toLowerCase();
 }
@@ -1727,43 +1720,8 @@ function TextbookOperationsWorkspaceContent() {
   const operationMetrics = numbered.operations.value || {
     requestCount: 0, unregisteredRequestCount: 0, orderNeededCount: 0, receivingBacklogCount: 0, partialReceiptCount: 0, issueWaitingCount: 0, stockRiskCount: 0,
   };
-  const showsProcessToolbar = activeTab === "requests" || activeTab === "purchase" || activeTab === "sales";
   const operationSearchLabel = getOperationSearchLabel(activeTab);
   const operationSearchPlaceholder = getOperationSearchPlaceholder(activeTab);
-  useEffect(() => {
-    const handleSearchShortcut = (event: KeyboardEvent) => {
-      if (event.defaultPrevented) return;
-      if (event.key === "Escape") {
-        if (document.activeElement === masterSearchRef.current && query) {
-          event.preventDefault();
-          setQuery("");
-          setSelectedTextbookIds([]);
-          setBulkTextbookPatch(emptyBulkTextbookPatch);
-          return;
-        }
-        if (document.activeElement === operationSearchRef.current && operationQuery) {
-          event.preventDefault();
-          updateOperationSearchQuery("");
-        }
-        return;
-      }
-
-      if (event.key !== "/" || event.metaKey || event.ctrlKey || event.altKey || isEditableShortcutTarget(event.target)) {
-        return;
-      }
-
-      const target = activeTab === "requests" || activeTab === "purchase" || activeTab === "sales"
-        ? operationSearchRef.current
-        : masterSearchRef.current;
-      if (!target) return;
-      event.preventDefault();
-      target.focus();
-    };
-
-    window.addEventListener("keydown", handleSearchShortcut);
-    return () => window.removeEventListener("keydown", handleSearchShortcut);
-  }, [activeTab, operationQuery, query, showsProcessToolbar]);
-
   const masterGradeOptions = TEXTBOOK_GRADE_OPTIONS.filter((option) =>
     masterForm.schoolLevels.includes(option.schoolLevel),
   );
@@ -4870,7 +4828,7 @@ function TextbookOperationsWorkspaceContent() {
         {activeTab === "master" ? (
           <DataTableWorkspaceToolbar
             search={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
-              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" shortcut="/" />}
+              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" />}
             feedback={listReadFeedback}
             actions={<div data-slot="textbook-master-actions" className="flex min-w-0 flex-1 items-center justify-end gap-1">{selectedTextbookRows.length > 0 ? (
               <TextbookSelectionActions selectedCount={selectedTextbookRows.length} saving={saving} metadataReady={masterOptionsAccepted}
@@ -4984,7 +4942,7 @@ function TextbookOperationsWorkspaceContent() {
           <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <PurchaseProcessTable
             readFeedback={listReadFeedback}
-            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} shortcut="/" />}
+            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} />}
             mode="request"
             preparedRows={numbered.requests.rows}
             summary={numbered.requests.summary.value}
@@ -5029,7 +4987,7 @@ function TextbookOperationsWorkspaceContent() {
           <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <PurchaseProcessTable
             readFeedback={listReadFeedback}
-            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} shortcut="/" />}
+            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} />}
             mode="order"
             preparedRows={numbered.purchase.rows}
             summary={numbered.purchase.summary.value}
@@ -5080,7 +5038,7 @@ function TextbookOperationsWorkspaceContent() {
           <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
           <SalesProcessTable
             readFeedback={listReadFeedback}
-            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} shortcut="/" />}
+            searchControl={<DataTableSearchField ref={operationSearchRef} value={operationQuery} onValueChange={updateOperationSearchQuery} label={operationSearchLabel} placeholder={operationSearchPlaceholder} />}
             summary={numbered.sales.summary.value}
             acceptedFilters={numbered.sales.acceptedFilters}
             loading={numbered.sales.loading}
@@ -5141,7 +5099,7 @@ function TextbookOperationsWorkspaceContent() {
           <InventoryCountWorkspace
             readFeedback={listReadFeedback}
             searchControl={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
-              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" shortcut="/" />}
+              label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" />}
             classificationControls={(locationControl) => <TextbookListControls extraFilters={locationControl}
             subjectFilter={subjectGroupFilter}
             onSubjectFilterChange={(value) => {

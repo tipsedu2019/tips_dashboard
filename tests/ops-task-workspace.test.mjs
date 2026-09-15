@@ -398,7 +398,7 @@ test("popover content can stay inside modal scroll containers", async () => {
   ]);
 });
 
-test("quick add keeps Todoist-like shortcuts and opens the structured form", async () => {
+test("quick add parses task text and opens the structured form", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
 
   assertIncludesAll(source, [
@@ -954,7 +954,7 @@ test("registration fact edits and status mutations never auto-dispatch legacy pr
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const submitForm = source.slice(
     source.indexOf("const submitForm = async"),
-    source.indexOf("const handleFormKeyDown", source.indexOf("const submitForm = async")),
+    source.indexOf("function focusRegistrationFormSection", source.indexOf("const submitForm = async")),
   );
   const legacyStatus = source.slice(
     source.indexOf("const changeStatus = async"),
@@ -1826,7 +1826,7 @@ test("registration create persists one flat fact row without runtime, workflow, 
   );
   const submitFormSource = source.slice(
     source.indexOf("const submitForm = async"),
-    source.indexOf("const handleFormKeyDown", source.indexOf("const submitForm = async")),
+    source.indexOf("function focusRegistrationFormSection", source.indexOf("const submitForm = async")),
   );
   const createBranchSource = submitFormSource.slice(
     submitFormSource.indexOf('if (createPayload.type === "registration")'),
@@ -1997,7 +1997,7 @@ test("fact-only registration workspace exposes no historical automatic visit not
   assert.doesNotMatch(source, /방문상담 알림 재시도/)
 
   const submitStart = source.indexOf("const submitForm = async")
-  const submitEnd = source.indexOf("const handleFormKeyDown", submitStart)
+  const submitEnd = source.indexOf("function focusRegistrationFormSection", submitStart)
   const submitSource = source.slice(submitStart, submitEnd)
   assert.match(submitSource, /await createRegistrationCase\(\{/)
   assert.doesNotMatch(submitSource, /createRegistrationCaseWithInitialWorkflow|dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/)
@@ -2062,7 +2062,7 @@ test("post-commit fact-only registration refresh rejects a viewer generation cha
 
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const submitStart = source.indexOf("const submitForm = async");
-  const submitEnd = source.indexOf("\n  const handleFormKeyDown", submitStart);
+  const submitEnd = source.indexOf("\n  function focusRegistrationFormSection", submitStart);
   const submit = source.slice(submitStart, submitEnd);
   const createStart = submit.indexOf('if (createPayload.type === "registration")');
   const createEnd = submit.indexOf('const receipt = createPayload.type === "transfer"', createStart);
@@ -2155,7 +2155,7 @@ test("an in-flight direct registration detail owns its link before stale workspa
 test("registration create has no legacy writer fallback", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const submitStart = source.indexOf("const submitForm = async");
-  const submitEnd = source.indexOf("const handleFormKeyDown", submitStart);
+  const submitEnd = source.indexOf("function focusRegistrationFormSection", submitStart);
   const submit = source.slice(submitStart, submitEnd);
   const createStart = submit.indexOf('if (createPayload.type === "registration")');
   const createEnd = submit.indexOf('const receipt = createPayload.type === "transfer"', createStart);
@@ -2288,7 +2288,7 @@ test("registration inquiry facts remain optional independently of workflow progr
   ]);
 
   const submitStart = workspaceSource.indexOf("const submitForm = async");
-  const submitEnd = workspaceSource.indexOf("const handleFormKeyDown", submitStart);
+  const submitEnd = workspaceSource.indexOf("function focusRegistrationFormSection", submitStart);
   const submit = workspaceSource.slice(submitStart, submitEnd);
   assert.doesNotMatch(submit, /getRegistrationCreateBlockers|getRegistrationCreateErrorMessage|assertRegistrationInquiryBaseReady/);
   assert.match(submit, /submissionForm\.type === "registration" \? "등록 신청"/);
@@ -5098,7 +5098,7 @@ test("registration dirty aggregation drives the application host close guard", a
 test("the canonical fact-only registration writer rehydrates its committed receipt in the same host", async () => {
   const source = await readSource("src/features/tasks/ops-task-workspace.tsx");
   const submitStart = source.indexOf("const submitForm = async");
-  const submitEnd = source.indexOf("const handleFormKeyDown", submitStart);
+  const submitEnd = source.indexOf("function focusRegistrationFormSection", submitStart);
   const submit = source.slice(submitStart, submitEnd);
   const canonicalStart = submit.indexOf('if (createPayload.type === "registration")');
   const canonicalEnd = submit.indexOf('const receipt = createPayload.type === "transfer"', canonicalStart);

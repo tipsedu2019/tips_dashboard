@@ -1007,3 +1007,35 @@ test('a new inline score draft uses the latest accepted server row after an earl
   assert.equal(editor().draft.firstScore, '23', 'an untouched score must not revert to the retired draft baseline');
   assert.equal(editor().draft.secondScore, '7');
 });
+
+
+test('retired task hotkeys do not move focus or request form submission', async (t) => {
+  const page = await workspace(t);
+  // React is imported before JSDOM in this harness; its input polyfill expects these legacy hooks.
+  window.HTMLElement.prototype.attachEvent = () => {};
+  window.HTMLElement.prototype.detachEvent = () => {};
+  const sentinel = document.createElement('button');
+  sentinel.textContent = '현재 작업 유지'; document.body.appendChild(sentinel); sentinel.focus();
+  t.after(() => sentinel.remove());
+  for (const key of ['n', '/']) {
+    const event = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
+    await act(async () => sentinel.dispatchEvent(event));
+    assert.equal(event.defaultPrevented, false);
+    assert.equal(document.activeElement, sentinel);
+  }
+  const opener = document.querySelector('[aria-label="입력창으로 할 일 요청"]');
+  assert.ok(opener);
+  await act(async () => opener.click());
+  const form = document.querySelector('[role="dialog"] form');
+  assert.ok(form, 'structured task entry is still reachable by click');
+  let submissions = 0;
+  form.requestSubmit = () => { submissions++; };
+  const before = page.requests.length;
+  for (const modifier of ['ctrlKey', 'metaKey']) {
+    const event = new window.KeyboardEvent('keydown', { key: 'Enter', [modifier]: true, bubbles: true, cancelable: true });
+    await act(async () => form.dispatchEvent(event));
+    assert.equal(event.defaultPrevented, false);
+  }
+  assert.equal(submissions, 0);
+  assert.equal(page.requests.length, before);
+});

@@ -1942,18 +1942,10 @@ test("textbook workspace reduces idle clutter and exposes group totals", async (
     "utf8",
   );
 
-  assert.match(workspaceSource, /const showsProcessToolbar = activeTab === "requests"/);
-  assert.match(workspaceSource, /activeTab === "purchase" \|\| activeTab === "sales"/);
-  assert.match(workspaceSource, /function isEditableShortcutTarget/);
   assert.match(workspaceSource, /masterSearchRef/);
   assert.match(workspaceSource, /operationSearchRef/);
   assert.match(workspaceSource, /const deferredQuery = useDeferredValue\(query\)/);
   assert.match(workspaceSource, /const deferredOperationQuery = useDeferredValue\(operationQuery\)/);
-  assert.match(workspaceSource, /shortcut="\/"/);
-  assert.match(dataTableSearchFieldSource, /aria-keyshortcuts=\{shortcut\}/);
-  assert.match(workspaceSource, /event\.key !== "\/"/);
-  assert.match(workspaceSource, /event\.key === "Escape"/);
-  assert.match(workspaceSource, /const showsProcessToolbar =/);
   assert.match(dataTableSearchFieldSource, /role="search" aria-label=\{label\}/);
   assert.match(workspaceSource, /<DataTableWorkspaceToolbar/);
   assert.match(workspaceSource, /searchControl=\{<DataTableSearchField ref=\{operationSearchRef\}/);
@@ -2203,8 +2195,6 @@ test("textbook workspace fourth-pass polish speeds empty flows and stock counts"
     "utf8",
   );
 
-  assert.match(workspaceSource, /activeTab === "requests" \|\|/);
-  assert.match(workspaceSource, /activeTab === "purchase" \|\|/);
   assert.match(workspaceSource, /activeTab === "sales"/);
   assert.match(workspaceSource, /function getPurchaseProcessEmptyHint/);
   assert.match(workspaceSource, /function getSalesProcessEmptyHint/);
@@ -2374,7 +2364,6 @@ test("textbook workspace preserves daily-operation safeguards with simpler navig
     /animate-spin/,
     /role="status"/,
     /aria-live="polite"/,
-    /aria-keyshortcuts=\{shortcut\}/,
     /enterKeyHint="search"/,
     /autoComplete="off"/,
     /function clearMasterSelection\(\)/,

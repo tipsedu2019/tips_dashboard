@@ -1,7 +1,7 @@
 import type {
   PublicClassCatalog,
   PublicClassItem,
-} from "../components/public/classes/types.ts";
+} from "./public-classes-types.ts";
 import { readPublicClassesSnapshot } from "../lib/public-classes-server.js";
 import {
   PUBLIC_CLASSES_SNAPSHOT_MAX_AGE_MS,

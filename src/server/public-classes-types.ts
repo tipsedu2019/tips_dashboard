@@ -1,3 +1,4 @@
+// Response contracts shared by the dashboard's landing-page data endpoints.
 export type PublicClassAvailability = "live" | "snapshot" | "unavailable";
 
 export interface PublicLesson {

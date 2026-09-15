@@ -19,19 +19,8 @@ test("project root is promoted to the v2 Next app", () => {
   assert.equal(packageJson.scripts.build, "next build --webpack");
 });
 
-test("public routes no longer redirect to legacy static bundles", () => {
-  for (const route of [
-    "src/app/page.tsx",
-    "src/app/classes/page.tsx",
-    "src/app/reviews/page.tsx",
-    "src/app/results/page.tsx",
-  ]) {
-    const source = read(route);
-    assert.equal(source.includes("legacy-public"), false, route);
-    assert.equal(source.includes("next/navigation"), false, route);
+test("legacy public bundles are absent", () => {
+  for (const directory of ["legacy-public", "assets", "embedded"]) {
+    assert.equal(fs.existsSync(path.join(repoRoot, "public", directory)), false);
   }
-
-  assert.equal(fs.existsSync(path.join(repoRoot, "public", "legacy-public")), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, "public", "assets")), false);
-  assert.equal(fs.existsSync(path.join(repoRoot, "public", "embedded")), false);
 });

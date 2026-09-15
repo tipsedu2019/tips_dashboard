@@ -34,7 +34,9 @@ jobs:
       - name: Verify class detail and schedule request ownership
         run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
       - name: Verify dialog and sidebar focus restoration
-        run: node --test --experimental-strip-types tests/dialog-opener-focus.test.mjs tests/sidebar-focus-return.test.mjs
+        run: node --test --experimental-strip-types tests/dialog-opener-focus.test.mjs tests/sidebar-focus-return.test.mjs tests/command-search-navigation.test.mjs
+      - name: Verify retired custom hotkeys preserve normal controls
+        run: node --test --experimental-strip-types --test-name-pattern="retired" tests/ops-task-numbered-pagination.test.mjs tests/textbook-no-shortcuts.test.mjs
       - name: Verify public class schedule parity and privacy
         run: |
           node --test --experimental-strip-types \
@@ -42,7 +44,7 @@ jobs:
             tests/public-classes-privacy.test.mjs \
             tests/public-classes-summary-loading.test.mjs \
             tests/public-class-renewal-data.test.mjs \
-            tests/public-class-detail-ui.test.mjs
+            tests/internal-dashboard-routes.test.mjs
       - run: node --test --experimental-strip-types tests/query-surface-budget.test.mjs tests/free-tier-operational-guardrails.test.mjs
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs

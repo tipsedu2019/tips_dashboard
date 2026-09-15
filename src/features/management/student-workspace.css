@@ -132,8 +132,7 @@ body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub
   font-weight: 600;
 }
 body:has(:is(.student-workspace, .class-workspace)) header [data-slot="button"],
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-quick-search-trigger"],
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-public-site-link"] {
+body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-quick-search-trigger"] {
   height: 36px;
 }
 body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {

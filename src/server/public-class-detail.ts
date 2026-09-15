@@ -7,7 +7,7 @@ import type {
   PublicClassItem,
   PublicProgressLog,
   PublicTextbook,
-} from "../components/public/classes/types.ts";
+} from "./public-classes-types.ts";
 import {
   PUBLIC_CLASSES_FULL_CACHE_TAG,
   PUBLIC_CLASSES_FULL_REVALIDATE_SECONDS,

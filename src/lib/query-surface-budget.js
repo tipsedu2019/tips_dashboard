@@ -340,7 +340,7 @@ const SURFACE_PREFIXES = Object.freeze({
   management: ["src/features/management/"],
   operations: ["src/features/operations/"],
   academic: ["src/features/academic/"],
-  public: ["src/server/public-", "src/app/api/public-classes/", "src/app/classes/"],
+  public: ["src/server/public-", "src/app/api/public-classes/"],
 })
 
 function queryBudgetError(code) {

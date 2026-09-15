@@ -3675,7 +3675,7 @@ test("canonical detail renders before option catalogs begin loading", async () =
 
 test("new registration always creates one fact-only row without runtime, workflow, or notification gates", async () => {
   const source = await readWorkspaceSource()
-  const submit = sourceBetween(source, "const submitForm = async", "const handleFormKeyDown")
+  const submit = sourceBetween(source, "const submitForm = async", "function focusRegistrationFormSection")
   const registrationCreate = sourceBetween(
     submit,
     'if (createPayload.type === "registration") {',
