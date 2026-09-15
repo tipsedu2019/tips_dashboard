@@ -1,6 +1,10 @@
 "use client"
 
-import { useState, type ReactNode } from "react"
+import { useEffect, useState, type ReactNode } from "react"
+
+import { useSearchParams } from "next/navigation"
+import { requestAppNavigation } from "@/lib/guarded-navigation"
+import { parseStatisticsRouteState, serializeStatisticsRouteState, type StatisticsRouteState } from "@/features/dashboard/statistics-route-state"
 
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
@@ -143,19 +147,20 @@ function ClassGroups({ data, subject, division }: { data: Data; subject: Subject
   }) : <p className="text-sm text-muted-foreground">수업 데이터 없음</p>}</CardContent></Card>
 }
 
-function StudentsClassesPanel() {
-  const [subject, setSubject] = useState<Subject>("all")
-  const [division, setDivision] = useState<Division>("all")
+type RoutePanelProps = { route: StatisticsRouteState; onFilter: (patch: Partial<StatisticsRouteState>) => void }
+
+function StudentsClassesPanel({ route, onFilter }: RoutePanelProps) {
+  const { subject, division } = route
   const state = useStatisticsSnapshot({ tab: "students_classes", subject, division })
   const data = object(state.data)
-  const controls = <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={setSubject} /><FilterButtons label="부서" values={divisions} active={division} onChange={setDivision} /></div>
+  const controls = <div className="flex flex-wrap gap-4"><FilterButtons label="과목" values={subjects} active={subject} onChange={subject => onFilter({ subject })} /><FilterButtons label="부서" values={divisions} active={division} onChange={division => onFilter({ division })} /></div>
   return <PanelState {...state} onRefresh={state.refresh} controls={controls}>
     <SummaryCards summary={object(data.summary)} /><StudentBreakdowns key={`students:${subject}:${division}`} data={data} subject={subject} division={division} /><ClassGroups key={`classes:${subject}:${division}`} data={data} subject={subject} division={division} />
   </PanelState>
 }
 
-function ScheduleConflictsPanel() {
-  const state = useStatisticsSnapshot({ tab: "schedule_conflicts" })
+function ScheduleConflictsPanel({ route, onFilter }: RoutePanelProps) {
+  const state = useStatisticsSnapshot({ tab: "schedule_conflicts", rangeQuery: String(route.range) })
   const data = object(state.data)
   const rows = [...list(data.teacherConflicts), ...list(data.classroomConflicts), ...list(data.examConflicts)]
   const sourceStatus: "loading" | "ready" | "error" = state.snapshot ? "ready" : state.loading
@@ -171,17 +176,17 @@ function ScheduleConflictsPanel() {
     },
     retryConflictSources: state.refresh,
   }
-  const controls = <div role="group" aria-label="일정 기간" className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.schedule_conflicts.map((preset) => <Button key={preset} type="button" size="sm" aria-pressed={state.range === preset} variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>앞으로 {preset}일</Button>)}</div>
+  const controls = <div role="group" aria-label="일정 기간" className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.schedule_conflicts.map((preset) => <Button key={preset} type="button" size="sm" aria-pressed={state.range === preset} variant={state.range === preset ? "default" : "outline"} onClick={() => onFilter({ range: preset })}>앞으로 {preset}일</Button>)}</div>
   return <PanelState {...state} onRefresh={state.refresh} controls={controls} renderOnError>
     <DashboardConflictWarning metrics={conflictMetrics} />
   </PanelState>
 }
 
-function TextbookStatisticsPanel() {
-  const state = useStatisticsSnapshot({ tab: "textbooks" })
+function TextbookStatisticsPanel({ route, onFilter }: RoutePanelProps) {
+  const state = useStatisticsSnapshot({ tab: "textbooks", rangeQuery: String(route.range) })
   const data = object(state.data)
   const progress = object(data.progressSessions)
-  const controls = <div role="group" aria-label="교재 기간" className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.textbooks.map((preset) => <Button key={preset} type="button" size="sm" aria-pressed={state.range === preset} variant={state.range === preset ? "default" : "outline"} onClick={() => state.setRange(preset)}>{preset}일</Button>)}</div>
+  const controls = <div role="group" aria-label="교재 기간" className="flex flex-wrap gap-1.5">{DASHBOARD_STATISTICS_RANGE_PRESETS.textbooks.map((preset) => <Button key={preset} type="button" size="sm" aria-pressed={state.range === preset} variant={state.range === preset ? "default" : "outline"} onClick={() => onFilter({ range: preset })}>{preset}일</Button>)}</div>
   return <PanelState {...state} onRefresh={state.refresh} controls={controls}>
     <section aria-label="교재 통계" className="grid items-start gap-4 md:grid-cols-2">
       {[
@@ -193,14 +198,25 @@ function TextbookStatisticsPanel() {
 }
 
 export function StatisticsWorkspace() {
-  const [activeTab, setActiveTab] = useState<DashboardStatisticsTab>("overview")
-  return <Tabs value={activeTab} onValueChange={(value) => setActiveTab(value as DashboardStatisticsTab)} activationMode="manual" className="min-w-0 gap-4 px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6">
+  const searchParams = useSearchParams()
+  const search = searchParams.toString()
+  const route = parseStatisticsRouteState(search)
+  const canonical = serializeStatisticsRouteState(route)
+  useEffect(() => {
+    if (search !== canonical) window.history.replaceState(null, "", `${window.location.pathname}${canonical ? `?${canonical}` : ""}${window.location.hash}`)
+  }, [canonical, search])
+  const navigate = (next: StatisticsRouteState, mode: "pushState" | "replaceState") => {
+    const query = serializeStatisticsRouteState(next)
+    requestAppNavigation(() => window.history[mode](null, "", `${window.location.pathname}${query ? `?${query}` : ""}${window.location.hash}`))
+  }
+  const onFilter = (patch: Partial<StatisticsRouteState>) => navigate({ ...route, ...patch }, "replaceState")
+  return <Tabs value={route.tab} onValueChange={(value) => navigate({ tab: value as DashboardStatisticsTab, subject: "all", division: "all", range: 90 }, "pushState")} activationMode="manual" className="min-w-0 gap-4 px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6">
     <TabsList aria-label="통계 탭" className="grid h-auto w-full grid-cols-4 gap-1 p-1">
       {STATISTICS_TABS.map((tab) => <TabsTrigger key={tab.key} value={tab.key} className="min-w-0 px-1.5 text-xs sm:px-3 sm:text-sm">{tab.label}</TabsTrigger>)}
     </TabsList>
     <TabsContent value="overview"><OverviewPanel /></TabsContent>
-    <TabsContent value="students_classes"><StudentsClassesPanel /></TabsContent>
-    <TabsContent value="schedule_conflicts"><ScheduleConflictsPanel /></TabsContent>
-    <TabsContent value="textbooks"><TextbookStatisticsPanel /></TabsContent>
+    <TabsContent value="students_classes"><StudentsClassesPanel route={route} onFilter={onFilter} /></TabsContent>
+    <TabsContent value="schedule_conflicts"><ScheduleConflictsPanel route={route} onFilter={onFilter} /></TabsContent>
+    <TabsContent value="textbooks"><TextbookStatisticsPanel route={route} onFilter={onFilter} /></TabsContent>
   </Tabs>
 }

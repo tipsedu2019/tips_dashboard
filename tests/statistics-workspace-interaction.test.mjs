@@ -5,7 +5,7 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { JSDOM } from "jsdom"
-import { act, createElement, forwardRef, useState } from "react"
+import { act, createElement, forwardRef, useSyncExternalStore, useState } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
@@ -108,7 +108,8 @@ function createSnapshotHook() {
   ])
 
   function useStatisticsSnapshot(input) {
-    const [range, setRange] = useState(90)
+    const [fallbackRange, setRange] = useState(90)
+    const range = input.rangeQuery ? Number(input.rangeQuery) : fallbackRange
     const key = input.tab === "students_classes"
       ? `${input.tab}:${input.subject}:${input.division}`
       : input.tab === "schedule_conflicts" || input.tab === "textbooks"
@@ -135,6 +136,17 @@ function createSnapshotHook() {
 
 async function loadWorkspace(snapshotHook) {
   const { button, card, tabs } = await loadUiModules()
+  const routeState = await import("../src/features/dashboard/statistics-route-state.ts")
+  const navigation = await import("../src/lib/guarded-navigation.ts")
+  // Model Next's native-history integration so focus and active-panel behavior stay real.
+  for (const method of ["pushState", "replaceState"]) {
+    const original = window.history[method].bind(window.history)
+    window.history[method] = (...args) => { original(...args); window.dispatchEvent(new window.Event("routechange")) }
+  }
+  const next = { useSearchParams: () => new URLSearchParams(useSyncExternalStore(
+    callback => { window.addEventListener("routechange", callback); window.addEventListener("popstate", callback); return () => { window.removeEventListener("routechange", callback); window.removeEventListener("popstate", callback) } },
+    () => window.location.search,
+  )) }
   const presentation = await import("../src/features/dashboard/statistics-presentation.ts")
   const statisticsContract = await import("../src/features/dashboard/statistics-contract.ts")
   const conflict = {
@@ -149,6 +161,9 @@ async function loadWorkspace(snapshotHook) {
   return loadTypeScript(
     new URL("src/features/dashboard/statistics-workspace.tsx", root),
     new Map([
+      ["next/navigation", next],
+      ["@/lib/guarded-navigation", navigation],
+      ["@/features/dashboard/statistics-route-state", routeState],
       ["@/components/ui/button", button],
       ["@/components/ui/card", card],
       ["@/components/ui/tabs", tabs],
@@ -436,5 +451,35 @@ test("distribution shows top eight of fifty schools with exact keys, readable to
   await click([...container.querySelectorAll('button')].find(button => button.textContent === "모두 보기 (50개 학교)"))
   assert.equal(container.querySelectorAll('[data-drilldown]').length, 50)
   assert.equal(container.querySelectorAll('[style="width: 100%;"]').length, 1)
+  await act(async () => reactRoot.unmount())
+})
+
+test("deep links, filter replace, tab push and browser history restore only the active tab", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  window.history.replaceState(null, "", "/admin/statistics?tab=students_classes&subject=english&division=high")
+  const snapshot = createSnapshotHook()
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  assert.equal(tab(container, "학생·수업").getAttribute("aria-selected"), "true")
+  assert.deepEqual(new Set(snapshot.calls.map(call => call.tab)), new Set(["students_classes"]))
+  const length = window.history.length
+  const math = [...container.querySelectorAll('[aria-label="과목"] button')].find(button => button.textContent === "수학")
+  await click(math)
+  assert.equal(window.history.length, length)
+  assert.equal(window.location.search, "?tab=students_classes&subject=math&division=high")
+  assert.equal(document.activeElement, math)
+  await click(tab(container, "교재"))
+  assert.equal(window.history.length, length + 1)
+  assert.equal(window.location.search, "?tab=textbooks")
+  await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 30)) })
+  assert.equal(tab(container, "학생·수업").getAttribute("aria-selected"), "true")
+  assert.equal(container.querySelector('[aria-label="과목"] [aria-pressed="true"]').textContent, "수학")
+  assert.equal(container.querySelector('[aria-label="부서"] [aria-pressed="true"]').textContent, "고등부")
+  await act(async () => { window.history.forward(); await new Promise(resolve => setTimeout(resolve, 30)) })
+  assert.equal(tab(container, "교재").getAttribute("aria-selected"), "true")
   await act(async () => reactRoot.unmount())
 })
