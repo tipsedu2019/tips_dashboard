@@ -1,10 +1,10 @@
 import assert from "node:assert/strict"
-import { readFileSync } from "node:fs"
+import { existsSync, readFileSync } from "node:fs"
 import { createRequire } from "node:module"
 import test from "node:test"
 import vm from "node:vm"
 import { JSDOM } from "jsdom"
-import { act, createElement, useLayoutEffect } from "react"
+import { act, createElement, forwardRef, useLayoutEffect } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
@@ -21,7 +21,7 @@ function load(url, mocks = new Map()) {
   vm.runInThisContext(`(function(require,module,exports){${output}\n})`, { filename: url.pathname })(
     (name) => mocks.has(name) ? mocks.get(name)
       : name.startsWith(".") ? load(new URL(name, url), mocks)
-      : name.startsWith("@/") ? load(new URL(`src/${name.slice(2)}.tsx`, root), mocks)
+      : name.startsWith("@/") ? load(new URL(`src/${name.slice(2)}.${existsSync(new URL(`src/${name.slice(2)}.tsx`, root)) ? "tsx" : "ts"}`, root), mocks)
       : require(name), runtimeModule, runtimeModule.exports)
   return runtimeModule.exports
 }
@@ -141,4 +141,69 @@ test("calendar boundary uses Seoul midnight independently of UTC date", () => {
   assert.equal(dashboardLocalDate(new Date("2026-09-12T14:59:59Z")), "2026-09-12")
   assert.equal(dashboardLocalDate(new Date("2026-09-12T15:00:00Z")), "2026-09-13")
   assert.equal(nextDashboardMidnight("2026-09-12"), Date.parse("2026-09-12T15:00:00Z"))
+})
+
+test("daily brief renders dated counts, real timestamps, full source links, empty/loading/error and refresh states", async (t) => {
+  const { dom, container, reactRoot } = installDom(t)
+  let retries = 0
+  let state = { brief: null, localDate: "2026-09-12", loading: true, error: null, retry: () => { retries += 1 } }
+  const Link = forwardRef(function Link({ href, children, ...props }, ref) { return createElement("a", { ...props, href, ref }, children) })
+  const { DashboardDailyBrief } = load(new URL("src/features/dashboard/dashboard-daily-brief.tsx", root), new Map([
+    ["next/link", Link],
+    ["./use-dashboard-daily-brief", { useDashboardDailyBrief: () => state }],
+  ]))
+  const render = () => act(async () => reactRoot.render(createElement(DashboardDailyBrief)))
+  await render()
+  assert.equal(container.querySelector("h1"), null)
+  assert.equal(container.querySelector("h2").textContent, "오늘의 일정")
+  assert.match(container.textContent, /9월 12일 토요일/)
+  assert.equal(container.querySelector("dl").getAttribute("aria-busy"), "true")
+  assert.equal(container.querySelectorAll("[aria-label='오늘 일정을 불러오는 중'] [aria-hidden='true']").length, 3)
+  assert.doesNotMatch(container.textContent, /예정된.*없습니다/)
+  state = { ...state, loading: false, error: "일정을 불러오지 못했습니다." }
+  await render()
+  assert.match(container.textContent, /불러오지 못했습니다/)
+  assert.equal(container.querySelectorAll("dd").length, 3)
+  assert.ok([...container.querySelectorAll("dd")].every((item) => item.textContent.includes("미조회")))
+  await act(async () => [...container.querySelectorAll("button")].find((button) => button.textContent === "다시 시도").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })))
+  assert.equal(retries, 1)
+
+  const empty = { ...fixture(), counts: { levelTests: 0, visitConsultations: 0, observationClasses: 0, openTasks: 99 } }
+  state = { ...state, brief: empty, error: null }
+  await render()
+  assert.deepEqual([...container.querySelectorAll("dd")].map((item) => item.textContent), ["0건", "0건", "0건"])
+  assert.match(container.textContent, /오늘 예정된 레벨테스트·방문상담·청강이 없습니다\./)
+  assert.equal([...container.querySelectorAll("a")].filter((link) => link.textContent === "등록 일정 보기").length, 1)
+  assert.match(container.textContent, /14:30 기준/)
+  assert.doesNotMatch(container.textContent, /99/)
+
+  const full = fixture("2026-09-12", 5)
+  full.upcoming = Array.from({ length: 5 }, (_, index) => ({
+    sourceKind: "level_test", sourceId: `source-${index}`, scheduledAt: `2026-09-12T0${index}:00:00Z`,
+    title: `긴 학생 이름 ${index} 및 원본 제목 끝까지 표시`, subjectLabels: ["영어", "수학"], placeLabel: "본관 아주 긴 교실 이름",
+    href: `/admin/registration?taskId=task-${index}&appointmentId=source-${index}`,
+  }))
+  state = { ...state, brief: full }
+  await render()
+  const links = [...container.querySelectorAll("ul[aria-label='오늘 일정'] a")]
+  assert.equal(links.length, 5)
+  assert.deepEqual(links.map((link) => link.getAttribute("href")), full.upcoming.map((item) => item.href))
+  for (const [index, link] of links.entries()) {
+    assert.ok(link.textContent.includes(full.upcoming[index].title))
+    assert.ok(link.textContent.includes("영어 · 수학 · 본관 아주 긴 교실 이름"))
+  }
+  assert.equal(links[0].querySelector("time").textContent, "09:00") // Past scheduled rows remain present.
+  assert.ok([...container.querySelectorAll("a")].some((link) => link.textContent === "등록 일정 보기"))
+  state = { ...state, loading: true }
+  await render()
+  assert.equal(container.querySelectorAll("ul li").length, 5)
+  assert.match(container.textContent, /새로고침하는 중/)
+  state = { ...state, loading: false, error: "일정을 불러오지 못했습니다." }
+  await render()
+  assert.equal(container.querySelectorAll("ul li").length, 5)
+  assert.match(container.textContent, /이전 조회 일정을 표시/)
+  assert.match(container.textContent, /14:30 기준/)
+  assert.deepEqual([...container.querySelectorAll("nav a")].map((link) => link.getAttribute("href")), ["/admin/registration", "/admin/academic-calendar", "/admin/statistics"])
+  await act(async () => container.querySelector("button[aria-label='일정 새로고침']").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })))
+  assert.equal(retries, 2)
 })

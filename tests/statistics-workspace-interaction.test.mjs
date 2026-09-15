@@ -67,12 +67,13 @@ function installDom() {
 async function loadUiModules() {
   const utils = await loadTypeScript(new URL("src/lib/utils.ts", root))
   const common = new Map([["@/lib/utils", utils]])
-  const [button, card, tabs] = await Promise.all([
+  const [button, card, tabs, skeleton] = await Promise.all([
     loadTypeScript(new URL("src/components/ui/button.tsx", root), common),
     loadTypeScript(new URL("src/components/ui/card.tsx", root), common),
     loadTypeScript(new URL("src/components/ui/tabs.tsx", root), common),
+    loadTypeScript(new URL("src/components/ui/skeleton.tsx", root), common),
   ])
-  return { button, card, tabs }
+  return { button, card, tabs, skeleton }
 }
 
 function summary(count) {
@@ -198,7 +199,7 @@ function assertActivePanelLinkage(container, activeTab) {
 test("dashboard renders the statistics shortcut to its statistics route", async (t) => {
   const dom = installDom()
   t.after(() => dom.window.close())
-  const { button } = await loadUiModules()
+  const { button, skeleton } = await loadUiModules()
   const Link = forwardRef(function Link({ href, children, ...props }, ref) {
     return createElement("a", { ...props, href, ref }, children)
   })
@@ -207,6 +208,7 @@ test("dashboard renders the statistics shortcut to its statistics route", async 
     new Map([
       ["next/link", Link],
       ["@/components/ui/button", button],
+      ["@/components/ui/skeleton", skeleton],
       ["./use-dashboard-daily-brief", {
         useDashboardDailyBrief: () => ({ brief: null, error: null, retry: () => undefined }),
       }],
