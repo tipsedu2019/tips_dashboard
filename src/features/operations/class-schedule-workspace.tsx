@@ -5,7 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { ArrowLeft, ArrowUpRight, BookOpen, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpRight, BookOpen, Plus, Trash2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -60,6 +60,7 @@ import {
   updateLessonProgressDraftEntry,
   type LessonProgressDraftEntry,
 } from "./lesson-progress-draft";
+import { formatClassScheduleProgress, getClassScheduleProgressState } from "./class-schedule-presentation.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import {
   buildClassLessonDesignRow,
@@ -376,14 +377,6 @@ function scoreLessonTextbookCandidate(
   }
 
   return score;
-}
-
-function formatProgress(completedSessions: number, sessionCount: number) {
-  if (!sessionCount) {
-    return 0;
-  }
-
-  return Math.round((completedSessions / sessionCount) * 100);
 }
 
 function formatUpdatedDate(value: string) {
@@ -2613,7 +2606,7 @@ function ClassScheduleSkeleton() {
         </div>
       </div>
 
-      <div className="px-4 lg:px-6">
+      <div className="px-4 sm:px-5 lg:px-6">
         <div className="border border-border/70 bg-background px-4 py-4">
           <div className="mb-3 flex items-center justify-between gap-3 border-b pb-3">
             <Skeleton className="h-6 w-32" />
@@ -6573,7 +6566,7 @@ export function ClassScheduleWorkspace() {
     <>
       <div className="flex flex-col gap-6">
       {error ? (
-        <div className="px-4 lg:px-6">
+        <div className="px-4 sm:px-5 lg:px-6">
           <Alert variant="destructive">
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{error}</span>
@@ -6583,7 +6576,7 @@ export function ClassScheduleWorkspace() {
         </div>
       ) : null}
 
-      <div className="px-4 lg:px-6">
+      <div className="px-4 sm:px-5 lg:px-6">
         <AcademicFilterToolbar
           searchValue={search}
           searchPlaceholder="반명, 선생님, 시간표로 검색"
@@ -6614,7 +6607,7 @@ export function ClassScheduleWorkspace() {
         />
       </div>
 
-      <div className="px-4 lg:px-6">
+      <div className="px-4 sm:px-5 lg:px-6">
         <section
           data-testid="class-schedule-database-view"
           className="overflow-hidden rounded-lg border border-border/70 bg-background shadow-[0_1px_2px_rgba(15,23,42,0.04)]"
@@ -6628,8 +6621,7 @@ export function ClassScheduleWorkspace() {
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>{model.syncGroupCards.length}개 동기 그룹</span>
-              <span aria-hidden="true">/</span>
-              <span>{model.rows.reduce((sum, row) => sum + Number(row.sessionCount || 0), 0)}회차</span>
+              
             </div>
           </div>
 
@@ -6686,7 +6678,7 @@ export function ClassScheduleWorkspace() {
               <>
                 <div data-testid="class-schedule-mobile-list" className="grid gap-2 md:hidden">
                   {model.rows.map((row) => {
-                    const progressPercent = formatProgress(row.completedSessions, row.sessionCount);
+                    const progress = formatClassScheduleProgress({ completedSessions: row.completedSessions, sessionCount: row.sessionCount, state: getClassScheduleProgressState(row.raw?.classItem, !actorScope ? "forbidden" : error ? "error" : loading || !dataMatchesCurrentScope ? "loading" : "accepted") });
                     const isSelected = selectedClassId === row.id;
                     const snapshot = rowSnapshotById.get(row.id);
                     const nextSessionId = snapshot?.nextSessionId || row.nextActionSessionId || "";
@@ -6729,40 +6721,38 @@ export function ClassScheduleWorkspace() {
                               {row.teacher || "선생님 미정"}
                             </p>
                           </div>
-                          <span className="shrink-0 text-sm font-semibold text-foreground">{progressPercent}%</span>
+                          <span className="shrink-0 text-sm font-semibold text-foreground">{progress.label}</span>
                         </div>
 
                         <div className="mt-3 grid gap-2">
                           <div className="min-w-0 rounded-md bg-muted/40 px-3 py-2">
                             <p className="font-medium leading-5 break-keep">{row.scheduleLabel || "시간표 미정"}</p>
                             <p className="text-muted-foreground leading-5">
-                              계획 {row.latestPlannedSessionIndex}회차 · 실제 {row.latestActualSessionIndex}회차
+                              {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? `계획 ${row.latestPlannedSessionIndex}회차 · 실제 ${row.latestActualSessionIndex}회차` : "회차는 상세에서 확인"}
                             </p>
                           </div>
 
                           <div className="min-w-0 rounded-md border bg-background px-3 py-2">
                             <div className="flex flex-wrap items-center justify-between gap-2">
                               <p className="font-medium leading-5">다음 작업</p>
-                              <Badge variant={nextSessionId ? snapshot?.nextSessionTone || "outline" : "outline"}>
-                                {snapshot?.nextSessionMeta || "기록 없음"}
-                              </Badge>
+                              {nextSessionId ? <Badge variant={snapshot?.nextSessionTone || "outline"}>{snapshot?.nextSessionMeta}</Badge> : null}
                             </div>
                             <p className="mt-1 line-clamp-2 text-xs leading-5 text-muted-foreground">
-                              {snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다."}
+                              {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다." : "상세에서 다음 회차 확인"}
                             </p>
                           </div>
 
-                          <div className="flex items-center gap-2">
+                          {progress.percent !== null ? <div className="flex items-center gap-2">
                             <div className="h-1.5 min-w-0 flex-1 overflow-hidden rounded-full bg-muted">
                               <div
                                 className="h-full rounded-full bg-primary"
-                                style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                                style={{ width: `${Math.min(progress.percent ?? 0, 100)}%` }}
                               />
                             </div>
                             <span className="shrink-0 text-xs text-muted-foreground">
-                              {row.completedSessions}/{row.sessionCount}회
+                              {progress.countLabel}
                             </span>
-                          </div>
+                          </div> : null}
 
                           {row.warningText ? (
                             <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 leading-5 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
@@ -6781,7 +6771,7 @@ export function ClassScheduleWorkspace() {
                                 홈페이지
                               </Link>
                             </Button>
-	                            <Button asChild type="button" size="sm" className="h-8 rounded-md px-2.5 text-xs">
+	                            <Button asChild type="button" size="sm" variant="outline" className="h-8 rounded-md px-2.5 text-xs">
 	                              <Link
 	                                href={buildLessonDesignPageHref(row, nextSessionId, designSectionId, classScheduleReturnPath)}
 	                                onClick={(event) => {
@@ -6823,10 +6813,7 @@ export function ClassScheduleWorkspace() {
                   </TableHeader>
                   <TableBody>
                     {model.rows.map((row) => {
-                      const progressPercent = formatProgress(
-                        row.completedSessions,
-                        row.sessionCount,
-                      );
+                      const progress = formatClassScheduleProgress({ completedSessions: row.completedSessions, sessionCount: row.sessionCount, state: getClassScheduleProgressState(row.raw?.classItem, !actorScope ? "forbidden" : error ? "error" : loading || !dataMatchesCurrentScope ? "loading" : "accepted") });
                       const snapshot = rowSnapshotById.get(row.id);
                       const isSelected = selectedClassId === row.id;
                       const nextSessionId = snapshot?.nextSessionId || row.nextActionSessionId || "";
@@ -6877,37 +6864,35 @@ export function ClassScheduleWorkspace() {
                             <div className="min-w-0 space-y-2 text-sm leading-5">
                               <p className="font-medium leading-5 break-keep">{row.scheduleLabel || "시간표 미정"}</p>
                               <p className="text-muted-foreground leading-5">
-                                계획 {row.latestPlannedSessionIndex}회차 · 실제 {row.latestActualSessionIndex}회차
+                                {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? `계획 ${row.latestPlannedSessionIndex}회차 · 실제 ${row.latestActualSessionIndex}회차` : "회차는 상세에서 확인"}
                               </p>
                             </div>
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
                             <div className="min-w-0 space-y-2 text-sm leading-5">
                               <div className="flex flex-wrap items-center gap-2">
-                                <Badge variant={nextSessionId ? snapshot?.nextSessionTone || "outline" : "outline"}>
-                                  {snapshot?.nextSessionMeta || "기록 없음"}
-                                </Badge>
+                                {nextSessionId ? <Badge variant={snapshot?.nextSessionTone || "outline"}>{snapshot?.nextSessionMeta}</Badge> : null}
                                 {snapshot?.pendingSessions.length ? (
                                   <Badge variant="outline">{snapshot.pendingSessions.length}건</Badge>
                                 ) : null}
                               </div>
                               <p className="line-clamp-2 text-xs text-muted-foreground">
-                                {snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다."}
+                                {getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? snapshot?.pendingSessionSummary || "업데이트 대기 회차가 없습니다." : "상세에서 다음 회차 확인"}
                               </p>
                             </div>
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
                             <div className="min-w-0 space-y-1.5 text-sm">
                               <div className="flex flex-wrap items-center justify-between gap-2">
-                                <span>{row.completedSessions}/{row.sessionCount}회</span>
-                                <span className="font-medium text-foreground">{progressPercent}%</span>
+                                <span>{progress.countLabel}</span>
+                                <span className="font-medium text-foreground">{progress.label}</span>
                               </div>
-                              <div className="h-1.5 overflow-hidden rounded-full bg-muted">
+                              {progress.percent !== null ? <div className="h-1.5 overflow-hidden rounded-full bg-muted">
                                 <div
                                   className="h-full rounded-full bg-primary"
-                                  style={{ width: `${Math.min(progressPercent, 100)}%` }}
+                                  style={{ width: `${Math.min(progress.percent ?? 0, 100)}%` }}
                                 />
-                              </div>
+                              </div> : null}
                               {snapshot?.textbookTitles.length ? (
                                 <p className="truncate text-xs text-muted-foreground">
                                   교재 {snapshot.textbookTitles.length}권
@@ -6924,9 +6909,9 @@ export function ClassScheduleWorkspace() {
                           </TableCell>
                           <TableCell className="align-top whitespace-normal">
                             {row.warningText ? (
-                              <Badge variant="destructive" className="max-w-full truncate">점검</Badge>
+                              <span className="inline-flex items-center gap-1 text-sm text-destructive" title={row.warningText}><AlertTriangle className="size-4 shrink-0" aria-hidden="true" />점검</span>
                             ) : (
-                              <Badge variant="outline">정상</Badge>
+                              <span className="text-sm text-muted-foreground">{getClassScheduleProgressState(row.raw?.classItem) === "accepted" ? "정상" : "상세 확인"}</span>
                             )}
                           </TableCell>
                           <TableCell className="align-top">
@@ -6941,7 +6926,7 @@ export function ClassScheduleWorkspace() {
                                   <ArrowUpRight className="size-4" />
                                 </Link>
                               </Button>
-	                              <Button asChild type="button" size="sm" className="h-8 rounded-md px-2 text-xs">
+	                              <Button asChild type="button" size="sm" variant="outline" className="h-8 rounded-md px-2 text-xs">
 	                                <Link
 	                                  href={buildLessonDesignPageHref(row, nextSessionId, designSectionId, classScheduleReturnPath)}
 	                                  onClick={(event) => {
