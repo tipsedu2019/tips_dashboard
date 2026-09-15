@@ -9411,7 +9411,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       : scopedTasks.some((task) => showClosed || isOpenTask(task))
   const showSearch = isRegistrationWorkspace
     ? registrationMode === "list"
-    : !isWithdrawalWorkspace && !isTransferWorkspace && (hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
+    : !isWithdrawalWorkspace && !isTransferWorkspace && (isTodoWorkspace || hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
   const emptyActionLabel = getWorkspaceCreateActionLabel(workspace, workspaceLabel)
   const emptyTaskLabel = isTodoWorkspace
     ? getTodoEmptyLabel(todoView, isFilteredEmpty)
