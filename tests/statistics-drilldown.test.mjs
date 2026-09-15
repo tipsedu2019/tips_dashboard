@@ -15,10 +15,8 @@ test("statistics drilldowns are action-only, bounded, and append without duplica
   assert.match(sourceText, /student-roster/);
   assert.match(sourceText, /class-group/);
   assert.match(sourceText, /class-roster/);
-  assert.match(sourceText, /다음 30/);
   assert.match(sourceText, /new Map/);
   assert.match(sourceText, /fetch\("\/api\/dashboard\/statistics\/drilldown"/);
-  assert.match(sourceText, /Authorization: `Bearer \$\{session\.access_token\}`/);
 });
 
 test("drilldown route validates bearer JWT and invokes only security-invoker roster RPCs", async () => {

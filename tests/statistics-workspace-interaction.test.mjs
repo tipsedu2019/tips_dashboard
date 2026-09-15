@@ -537,6 +537,8 @@ test("drilldown collapses without losing focus or refetching and retries only th
   assert.equal(document.activeElement, trigger)
   assert.equal(trigger.getAttribute('aria-expanded'), 'true')
   assert.equal(pending.length, 1)
+  assert.equal(pending[0].options.method, 'POST')
+  assert.equal(pending[0].options.headers.Authorization, 'Bearer fixture-token')
   await act(async () => pending[0].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'student-1', name: '합성 학생1' }], nextCursor: { sortValue: '합성 학생1', id: 'student-1' }, hasMore: true } }))))
   await click(trigger)
   assert.equal(trigger.getAttribute('aria-expanded'), 'false')
