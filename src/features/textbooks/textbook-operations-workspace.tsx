@@ -43,6 +43,7 @@ import {
   CommandList,
 } from "@/components/ui/command";
 import { Dialog } from "@/components/ui/dialog";
+import { TextbookMobileFilters, type TextbookClassificationFilters } from "./textbook-mobile-filters";
 import { DropdownMenu, DropdownMenuTrigger, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator } from "@/components/ui/dropdown-menu";
 import { Input } from "@/components/ui/input";
 import { FormDialogContent, DetailDialogContent, DocumentDialogContent, ConfirmationDialogContent } from "@/components/ui/form-dialog";
@@ -2125,6 +2126,17 @@ function TextbookOperationsWorkspaceContent() {
       setTextbookQualityFilter(value);
       clearMasterSelection();
     }, { skipConfirmation: !(masterBulkDraftDirty) });
+  }
+
+  function applyMobileClassificationFilters(filters: TextbookClassificationFilters) {
+    requestLocalAction(() => {
+      clearTransientTextbookFeedback();
+      setSubjectGroupFilter(filters.subject);
+      setCategoryGroupFilter(filters.category);
+      setSchoolLevelGroupFilter(filters.school);
+      setGradeLevelGroupFilter(filters.grade);
+      clearMasterSelection();
+    }, { skipConfirmation: !masterBulkDraftDirty });
   }
 
   function changeSubjectGroupFilter(value: string) {
@@ -4827,10 +4839,20 @@ function TextbookOperationsWorkspaceContent() {
         <div className={cn("min-w-0", activeTab === "master" && DATA_TABLE_LAYOUT_CLASS_NAME)}>
         {activeTab === "master" ? (
           <DataTableWorkspaceToolbar
+            className={cn("[&_[data-slot=data-table-condition-row]]:min-h-0 md:[&_[data-slot=data-table-condition-row]]:min-h-9", [subjectGroupFilter, categoryGroupFilter, schoolLevelGroupFilter, gradeLevelGroupFilter].every(value => value === "all") && "max-md:[&_[data-slot=data-table-condition-row]]:hidden")}
             search={<DataTableSearchField ref={masterSearchRef} value={query} onValueChange={updateMasterSearchQuery}
               label="교재 검색" clearLabel="검색 초기화" placeholder="교재명, 출판사, ISBN, 바코드" />}
-            feedback={listReadFeedback}
-            actions={<div data-slot="textbook-master-actions" className="flex min-w-0 flex-1 items-center justify-end gap-1">{selectedTextbookRows.length > 0 ? (
+            actions={<div data-slot="textbook-master-actions" className="flex min-w-0 flex-1 items-center justify-end gap-1">
+              <TextbookMobileFilters applied={{ subject: subjectGroupFilter, category: categoryGroupFilter, school: schoolLevelGroupFilter, grade: gradeLevelGroupFilter }} onApply={applyMobileClassificationFilters}>
+                {(draft, setDraft) => <TextbookListControls idPrefix="textbook-mobile"
+                  subjectFilter={draft.subject} onSubjectFilterChange={subject => setDraft({ ...draft, subject, category: "all" })}
+                  categoryFilter={draft.category} onCategoryFilterChange={category => setDraft({ ...draft, category })} categoryOptions={categoryGroupOptions}
+                  schoolLevelFilter={draft.school} onSchoolLevelFilterChange={school => setDraft({ ...draft, school, grade: "all" })}
+                  gradeLevelFilter={draft.grade} onGradeLevelFilterChange={grade => setDraft({ ...draft, grade })}
+                  gradeLevelOptions={getGradeOptionsForSchoolLevel(draft.school === "all" ? "" : draft.school)} />}
+              </TextbookMobileFilters>
+              <Button type="button" variant="ghost" size="icon" className="shrink-0 md:hidden" aria-label="모바일 교재 필터 초기화" title="필터 초기화" disabled={!hasTextbookListFilter} onClick={resetTextbookListFilters}><RefreshCw className="size-4" aria-hidden="true" /></Button>
+              {listReadFeedback ?? (selectedTextbookRows.length > 0 ? (
               <TextbookSelectionActions selectedCount={selectedTextbookRows.length} saving={saving} metadataReady={masterOptionsAccepted}
                 controlsOpen={masterBulkControlsOpen} onToggleControls={openMasterBulkDialog}
                 onSetStatus={applyBulkTextbookStatus} onDelete={deleteSelectedTextbooks} onClear={() => requestLocalAction(() => { clearMasterSelection(); setMasterBulkControlsOpen(false); masterSearchRef.current?.focus({ preventScroll: true }); }, { skipConfirmation: !masterBulkDraftDirty })} />
@@ -4861,8 +4883,15 @@ function TextbookOperationsWorkspaceContent() {
                 </Button>
               ) : null}
             </div>
-            )}</div>}
-            filters={<TextbookListControls
+            ))}</div>}
+            filters={<>
+              <p className="truncate text-xs text-muted-foreground md:hidden" aria-label="적용된 교재 분류 필터" aria-live="polite">{[
+                subjectGroupFilter !== "all" ? getSubjectLabel(subjectGroupFilter) : "",
+                categoryGroupFilter !== "all" ? categoryGroupFilter : "",
+                schoolLevelGroupFilter !== "all" ? TEXTBOOK_SCHOOL_LEVEL_OPTIONS.find(option => option.value === schoolLevelGroupFilter)?.label : "",
+                gradeLevelGroupFilter !== "all" ? gradeLevelGroupOptions.find(option => option.value === gradeLevelGroupFilter)?.label : "",
+              ].filter(Boolean).join(" · ")}</p>
+              <div className="hidden md:block"><TextbookListControls
             subjectFilter={subjectGroupFilter}
             onSubjectFilterChange={(value) => {
               changeSubjectGroupFilter(value);
@@ -4881,7 +4910,7 @@ function TextbookOperationsWorkspaceContent() {
             <Button type="button" variant="ghost" size="icon" className="size-11 shrink-0 sm:size-9" aria-label="교재 필터 초기화" title="필터 초기화" disabled={!hasTextbookListFilter} onClick={resetTextbookListFilters}>
               <RefreshCw className="size-4" aria-hidden="true" />
             </Button>
-          </TextbookListControls>}
+          </TextbookListControls></div></>}
           />
         ) : null}
 
@@ -6019,6 +6048,7 @@ function LocationSelect({
 }
 
 function TextbookListControls({
+  idPrefix = "textbook",
   subjectFilter,
   onSubjectFilterChange,
   schoolLevelFilter,
@@ -6032,6 +6062,7 @@ function TextbookListControls({
   children,
   extraFilters,
 }: {
+  idPrefix?: string;
   subjectFilter: string;
   onSubjectFilterChange: (value: string) => void;
   schoolLevelFilter: string;
@@ -6065,18 +6096,18 @@ function TextbookListControls({
   return (
     <div className="flex min-w-0 items-end gap-1 lg:items-center">
     <DataTableFilters aria-label="교재 분류 필터" className="min-w-0 flex-1 sm:grid sm:grid-cols-2 lg:flex lg:flex-nowrap">
-      <DataTableSelectFilter inline id="textbook-subject-filter" label="과목" ariaLabel="교재 과목 필터"
+      <DataTableSelectFilter inline id={`${idPrefix}-subject-filter`} label="과목" ariaLabel="교재 과목 필터"
         value={subjectFilter} options={subjectSelectOptions} onValueChange={onSubjectFilterChange} />
       <div className="grid min-w-0 gap-1.5 lg:flex lg:flex-1 lg:items-center lg:gap-2">
-        <Label htmlFor="textbook-category-filter" className="shrink-0 text-xs text-muted-foreground">세부과목</Label>
+        <Label htmlFor={`${idPrefix}-category-filter`} className="shrink-0 text-xs text-muted-foreground">세부과목</Label>
         <SearchCombobox options={categorySelectOptions} value={categoryFilter} onValueChange={onCategoryFilterChange}
           placeholder="전체 세부과목" searchPlaceholder="세부과목 검색" emptyLabel="세부과목이 없습니다"
-          ariaLabel="교재 세부과목 필터" triggerId="textbook-category-filter"
+          ariaLabel="교재 세부과목 필터" triggerId={`${idPrefix}-category-filter`}
           triggerClassName="h-11 min-w-0 flex-1 rounded-md sm:h-9" contentClassName="w-[min(22rem,calc(100vw-2rem))]" />
       </div>
-      <DataTableSelectFilter inline id="textbook-school-level-filter" label="학교" ariaLabel="교재 학교 구분 필터"
+      <DataTableSelectFilter inline id={`${idPrefix}-school-level-filter`} label="학교" ariaLabel="교재 학교 구분 필터"
         value={schoolLevelFilter} options={schoolLevelSelectOptions} onValueChange={onSchoolLevelFilterChange} />
-      <DataTableSelectFilter inline id="textbook-grade-level-filter" label="학년" ariaLabel="교재 학년 필터"
+      <DataTableSelectFilter inline id={`${idPrefix}-grade-level-filter`} label="학년" ariaLabel="교재 학년 필터"
         value={gradeLevelFilter} options={gradeLevelSelectOptions} onValueChange={onGradeLevelFilterChange} />
       {extraFilters}
     </DataTableFilters>

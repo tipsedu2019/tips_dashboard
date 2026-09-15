@@ -71,3 +71,7 @@ Primary and destructive foreground tokens are theme pairs. Use `text-destructive
 `DataTableSurface` exports compose one flat outer surface (8px radius), a44px header, minimum48px rows and12px cell side padding. Use wrapping `DataTableBodyCell` and `DataTableDetailButton` for full identities; the detail button uses neutral600-weight text. Hover uses `muted`, selection uses `accent` plus the existing checkbox, keyboard focus uses a3px ring. Do not encode selection by focus color.
 
 `DataTableWorkspaceToolbar` keeps the search, action/feedback and condition rows mounted in stable slots. Desktop search has a240px minimum; actions keep their existing340px slot. Feedback replaces the action content through the existing API while search, filters and summary retain their owners. Use the existing toolbar composition for management filters; no callback, query, selected-row, column or pagination policy is moved into the surface.
+
+### 교재 재고 모바일 분류 필터 예외 (T09)
+
+교재 재고 탭의 과목·세부과목·학교·학년만 768px 미만에서 `필터 N` dialog를 사용한다. 열 때 적용값을 draft로 복사하고, 취소·Escape·외부 닫기는 폐기한다. 적용은 네 값을 workspace에 한 번 전달하며 기존 query controller가 변경 조건의 페이지를 1로 복원한다. 과목 변경은 draft 세부과목을, 학교 변경은 draft 학년을 전체로 되돌린다. 적용값은 개수와 검색 아래 한 줄에 표시한다. 검색, 미사용 교재, 전체 필터 초기화, 다른 네 탭, desktop 즉시 반영은 기존 의미를 유지한다.
