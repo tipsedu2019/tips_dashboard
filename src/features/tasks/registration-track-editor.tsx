@@ -23,6 +23,7 @@ import {
   getRegistrationApplicationCaseEditableSections,
   getRegistrationEnrollmentDirtyKey,
   getRegistrationApplicationSectionStates,
+  getRegistrationApplicationProgress,
   getRegistrationApplicationTrackState,
   getRegistrationConsultationModeDraft,
   getRegistrationObservationRefreshPlan,
@@ -37,6 +38,7 @@ import {
 } from "./registration-application-model"
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
+import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
 import { RegistrationApplicationShell } from "./registration-application-shell"
 import { RegistrationApplicationSubjectTabs } from "./registration-application-subject-tabs"
 import {
@@ -1595,7 +1597,11 @@ export function RegistrationApplication({
           </div> : null}
         </div>
       )}
-      progress={null}
+      progress={activeGenericTrack ? (
+        <RegistrationApplicationProgressStepper
+          steps={getRegistrationApplicationProgress(activeGenericTrack.status, activeGenericTrack.waitingKind, activeGenericTrack.workflowStatus)}
+        />
+      ) : null}
       sectionStates={openSectionStates}
       inquiry={(
         <RegistrationApplicationInquirySection

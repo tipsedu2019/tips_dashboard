@@ -6,6 +6,7 @@ import vm from "node:vm";
 import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
+  getRegistrationApplicationProgress,
   reconcileRegistrationEnrollmentDraft,
   resolveRegistrationWorkspaceWorkflowStatus,
 } from "../src/features/tasks/registration-application-model.ts";
@@ -411,6 +412,7 @@ async function loadMountedRegistrationApplication({
       canManageRegistrationObservationTrack: ({ viewerRole }) => (
         viewerRole === "admin" || viewerRole === "staff"
       ),
+      getRegistrationApplicationProgress,
       getRegistrationApplicationAppointmentActionPlans: () => [],
       getRegistrationApplicationCaseEditableSections: () => [],
       getRegistrationEnrollmentDirtyKey: (trackId, scope) => `enrollment:${trackId}:${scope}`,
@@ -435,6 +437,7 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-application-placement-section", { RegistrationApplicationPlacementSection: Passthrough }],
     ["./registration-application-history-action", { RegistrationApplicationHistoryAction }],
+    ["./registration-application-progress-stepper", { RegistrationApplicationProgressStepper: Passthrough }],
     ["./registration-application-shell", { RegistrationApplicationShell }],
     ["./registration-application-subject-tabs", { RegistrationApplicationSubjectTabs: Passthrough }],
     ["./registration-observation-editor", {
@@ -725,7 +728,7 @@ test("waiting and registration summaries omit unexplained duplicate fields", asy
   assert.match(source, /placementMode === "registration"/)
 })
 
-test("saved registration uses the subject status selector instead of a separate progress stepper", async () => {
+test("saved registration keeps the status selector and uses progress only for section navigation", async () => {
   const detail = await readFile(new URL("../src/features/tasks/registration-track-editor.tsx", import.meta.url), "utf8")
 
   assert.match(detail, /aria-label=\{`\$\{activeGenericTrack\.subject\} 진행상태`\}/)
@@ -734,8 +737,8 @@ test("saved registration uses the subject status selector instead of a separate 
   assert.doesNotMatch(detail, /registrationObservationActions\.withdrawRegistrationObservation/)
   assert.doesNotMatch(detail, /registrationObservationActions\.enterRegistrationObservation/)
   assert.match(detail, /await setRegistrationWorkflowStatus\(/)
-  assert.match(detail, /progress=\{null\}/)
-  assert.doesNotMatch(detail, /progress=\{<RegistrationApplicationProgressStepper/)
+  assert.match(detail, /<RegistrationApplicationProgressStepper/)
+  assert.match(detail, /steps=\{getRegistrationApplicationProgress\(activeGenericTrack.status, activeGenericTrack.waitingKind, activeGenericTrack.workflowStatus\)\}/)
 })
 
 test("new registration owns only the inquiry subject picker before subject journeys begin", async () => {
@@ -1441,7 +1444,7 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /phoneReadyAt/);
   assert.match(source, /className="grid min-w-0 gap-2 p-2 lg:hidden"/);
   assert.match(source, /className="hidden w-full min-w-0 overflow-hidden lg:block"/);
-  assert.match(source, /className="min-w-0 overflow-hidden bg-background lg:rounded-lg lg:border"/);
+  assert.match(source, /className=\{DATA_TABLE_LAYOUT_CLASS_NAME\}/);
   assert.doesNotMatch(source, /md:hidden|md:block/);
   assert.match(source, /const targetTrack = item\.viewKey === "observation"[\s\S]*?item\.matchingTracks\.find\(\(track\) => track\.observationSummaryVisible\)[\s\S]*?: item\.representativeTrack/);
   assert.match(source, /if \(!targetTrack\) return/);
@@ -3130,7 +3133,7 @@ test("bounded execution windows never lock factual or status editing and only fe
   const subjectNavigation = sourceBetween(
     application,
     "subjectNavigation={(\n",
-    "      progress={null}",
+    "      progress={activeGenericTrack",
   )
   const enrollmentAction = sourceBetween(
     application,

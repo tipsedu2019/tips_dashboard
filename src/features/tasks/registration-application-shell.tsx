@@ -1,6 +1,6 @@
 "use client"
 
-import type { ReactNode } from "react"
+import { useEffect, useRef, type ReactNode } from "react"
 
 import {
   isRegistrationApplicationSectionContentDisabled,
@@ -94,10 +94,10 @@ function RegistrationApplicationSection({
       data-registration-application-section={section}
       data-registration-state={contentDisabled ? "locked" : state.current ? "current" : "ready"}
       aria-label={stateLabel}
-      className="scroll-mt-52 border-t py-4 lg:grid lg:scroll-mt-40 lg:grid-cols-[7rem_minmax(0,1fr)] lg:gap-6 lg:py-5"
+      className="scroll-mt-[var(--registration-section-scroll-margin,13rem)] border-t py-4 lg:grid lg:grid-cols-[7rem_minmax(0,1fr)] lg:gap-6 lg:py-5"
     >
       <header className="mb-3 lg:mb-0 lg:pt-0.5">
-        <h3 className="text-sm font-semibold tracking-tight">
+        <h3 data-registration-section-heading tabIndex={-1} className="rounded-sm text-sm font-semibold outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">
           {SECTION_TITLES[section]}
         </h3>
       </header>
@@ -122,15 +122,28 @@ function RegistrationApplicationSection({
 }
 
 export function RegistrationApplicationShell(props: RegistrationApplicationShellProps) {
+  const shellRef = useRef<HTMLDivElement>(null)
+  const headerRef = useRef<HTMLElement>(null)
+  useEffect(() => {
+    const header = headerRef.current
+    const shell = shellRef.current
+    if (!header || !shell) return
+    const updateMargin = () => shell.style.setProperty("--registration-section-scroll-margin", `${header.getBoundingClientRect().height + 16}px`)
+    updateMargin()
+    if (typeof ResizeObserver === "undefined") return
+    const observer = new ResizeObserver(updateMargin)
+    observer.observe(header)
+    return () => observer.disconnect()
+  }, [])
   const sections = props.mode === "create"
     ? CREATE_UI_SECTION_ORDER
     : APPLICATION_UI_SECTION_ORDER.filter((section) => section !== "observation" || props.observation !== undefined)
 
   return (
-    <div data-registration-application-mode={props.mode} className="min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
-      <header className="sticky -top-6 z-20 -mx-6 -mt-6 border-b bg-background px-6 pb-3 pt-4">
+    <div ref={shellRef} data-registration-application-mode={props.mode} className="min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
+      <header ref={headerRef} className="sticky -top-6 z-20 -mx-6 -mt-6 border-b bg-background px-6 pb-3 pt-4">
         <div className="flex min-w-0 items-center justify-between gap-3">
-          <h2 className="min-w-0 truncate text-xl font-semibold tracking-tight">{props.studentName}</h2>
+          <h2 className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">{props.studentName}</h2>
           <div className="flex items-center justify-end gap-2">
             {props.historyAction}
             {props.closeAction}
@@ -140,7 +153,7 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
         {props.mode === "detail" && props.progress ? <div className="mt-3">{props.progress}</div> : null}
       </header>
 
-      <div>
+      <div className="pb-4">
         {sections.map((section) => {
           const contentKey = SECTION_CONTENT_KEY[section]
           const sectionState = section === "waiting"

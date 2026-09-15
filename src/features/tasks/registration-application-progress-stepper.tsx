@@ -1,3 +1,7 @@
+"use client"
+
+import { useEffect, useRef } from "react"
+
 import { ArrowRight, Check, Circle, CircleDot, Minus, X } from "lucide-react"
 
 import type {
@@ -48,14 +52,28 @@ export function RegistrationApplicationProgressStepper({
   steps: readonly RegistrationApplicationProgressStep[]
   enabledKeys?: readonly RegistrationApplicationProgressStep["key"][]
 }) {
+  const listRef = useRef<HTMLOListElement>(null)
+  const currentKey = steps.find((step) => step.state === "current" || step.state === "terminal")?.key
+  useEffect(() => {
+    const list = listRef.current
+    const current = list?.querySelector<HTMLElement>('[aria-current="step"]')
+    if (!list || !current) return
+    // Only reveal the current item horizontally; never move the form vertically.
+    const listBounds = list.getBoundingClientRect()
+    const currentBounds = current.getBoundingClientRect()
+    if (currentBounds.left < listBounds.left) list.scrollLeft += currentBounds.left - listBounds.left
+    else if (currentBounds.right > listBounds.right) list.scrollLeft += currentBounds.right - listBounds.right
+  }, [currentKey])
+
   function moveToSection(key: RegistrationApplicationProgressStep["key"]) {
     const target = document.getElementById(`registration-application-${key}`)
     if (target instanceof HTMLDetailsElement) target.open = true
-    target?.scrollIntoView({ behavior: "smooth", block: "start" })
+    target?.querySelector<HTMLElement>("[data-registration-section-heading]")?.focus({ preventScroll: true })
+    target?.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth", block: "start" })
   }
 
   return (
-    <ol aria-label="과목별 등록 진행 상황" className="grid gap-2 sm:grid-cols-7">
+    <ol ref={listRef} aria-label="과목별 등록 진행 상황" className="flex min-w-0 gap-1 overflow-x-auto pb-1">
       {steps.map((step) => {
         const presentation = PROGRESS_STATE_PRESENTATION[step.state]
         const Icon = presentation.Icon
@@ -67,17 +85,18 @@ export function RegistrationApplicationProgressStepper({
             key={step.key}
             data-registration-progress-state={step.state}
             aria-current={isActive ? "step" : undefined}
-            className={`min-w-0 rounded-md border ${presentation.className}`}
+            className={`min-w-fit shrink-0 rounded-md border ${presentation.className}`}
           >
             <button
               type="button"
               aria-label={enabled ? `${step.label} 섹션으로 이동` : `${step.label}: 저장 후 사용 가능`}
-              className="flex w-full min-w-0 items-center gap-2 px-3 py-2 text-left disabled:cursor-not-allowed disabled:opacity-45"
+              aria-controls={`registration-application-${step.key}`}
+              className="flex min-h-[var(--touch-target-height)] w-full items-center gap-1.5 rounded-md px-2.5 py-2 text-left outline-none focus-visible:ring-[3px] focus-visible:ring-inset focus-visible:ring-ring/50 disabled:cursor-not-allowed disabled:opacity-45 sm:min-h-[var(--control-height)]"
               disabled={!enabled}
               onClick={enabled ? () => moveToSection(step.key) : undefined}
             >
               <Icon aria-hidden="true" className="size-4 shrink-0" />
-              <span className="block min-w-0 truncate text-sm font-medium">{step.key === "inquiry" ? step.label : `${steps.findIndex((item) => item.key === step.key)}. ${step.key === "admission" ? "입학" : step.label}`}</span>
+              <span className="block min-w-0 truncate text-sm font-medium">{step.label}</span>
             </button>
           </li>
         )
