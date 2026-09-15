@@ -5,7 +5,7 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { JSDOM } from "jsdom"
-import { act, createElement } from "react"
+import { act, createElement, useEffect } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
@@ -79,7 +79,11 @@ test("snapshot hook retains same-key refresh errors and isolates query and role 
     ["@/providers/auth-provider", { useAuth: () => auth }],
   ]))
   let state
-  function Harness({ subject }) { state = useStatisticsSnapshot({ tab: "students_classes", subject }); return null }
+  function Harness({ subject }) {
+    const snapshot = useStatisticsSnapshot({ tab: "students_classes", subject })
+    useEffect(() => { state = snapshot }, [snapshot])
+    return null
+  }
   const container = document.createElement("div")
   const reactRoot = createRoot(container)
   const render = subject => act(async () => { reactRoot.render(createElement(Harness, { subject })); await new Promise(resolve => setTimeout(resolve, 0)) })

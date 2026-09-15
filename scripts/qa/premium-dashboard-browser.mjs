@@ -61,6 +61,17 @@ for (const id of ids) for (const width of [1440, 390]) for (const name of routes
     else if (name === 'statistics') await page.getByRole('region', { name: '통계 결과' }).locator('[aria-label="핵심 운영 지표"]').waitFor();
     else if (name === 'textbooks' && id !== 'C') await page.getByText(id === 'B' ? '합성교재제목'.repeat(16) + '구분가나' : '합성 영어 독해 교재', { exact: true }).filter({ visible: true }).first().waitFor();
     else await page.getByText(/없습니다|0건/).filter({ visible: true }).first().waitFor();
+    if (id === 'D' && name === 'students') {
+      await page.getByRole('button', { name: '다음 페이지', exact: true }).click();
+      await page.getByText('합성학생11', { exact: true }).filter({ visible: true }).first().waitFor();
+      const search = page.getByRole('textbox', { name: '학생 검색', exact: true });
+      await search.fill('일치하지않는합성검색');
+      await page.getByText('0건 · 0–0번째', { exact: true }).waitFor();
+      await search.fill('');
+      await page.getByText('합성학생01', { exact: true }).filter({ visible: true }).first().waitFor();
+      await page.getByText('20건 · 1–10번째', { exact: true }).waitFor();
+      entry.studentPagingAndSearch = 'page2 -> zero search -> clear -> page1 restored';
+    }
     await page.waitForLoadState('networkidle');
     await page.waitForFunction(() => [...document.images].filter(image => image.getBoundingClientRect().width > 0).every(image => image.complete && image.naturalWidth > 0));
     entry.performance = await page.evaluate(() => ({ navigation: performance.getEntriesByType('navigation').map(entry => ({ duration: entry.duration, responseEnd: entry.responseEnd, domContentLoadedEventEnd: entry.domContentLoadedEventEnd })), resourceCount: performance.getEntriesByType('resource').length, transferredBytes: performance.getEntriesByType('resource').reduce((sum, entry) => sum + entry.transferSize, 0) }));

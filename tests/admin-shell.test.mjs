@@ -621,7 +621,7 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /min-w-0 max-w-full text-sm font-semibold leading-5/);
   assert.match(source, /grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center/);
   assert.doesNotMatch(source, /DashboardFilterMenu/);
-  assert.match(pageSource, /px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6/);
+  assert.match(pageSource, /px-4 pb-5 sm:px-5 sm:pb-6 lg:px-6/);
 });
 
 test("lesson-design routes resolve to the actual design workspace title", async () => {
