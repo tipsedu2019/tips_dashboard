@@ -29,7 +29,7 @@
 </div>
 ```
 
-- `DATA_TABLE_LAYOUT_CLASS_NAME` supplies the single outer border, radius, background, and shadow. The shared toolbar, viewport, and pager classes use internal dividers and should stay unframed when composed inside it.
+- `DATA_TABLE_LAYOUT_CLASS_NAME` supplies the single outer border, 8px radius and background without a shadow. The shared toolbar, viewport, and pager classes use internal dividers and should stay unframed when composed inside it.
 - `DATA_TABLE_HEADER_CELL_CLASS_NAME` and `DATA_TABLE_BODY_CELL_CLASS_NAME` expose the same 44px header, 48px body, and 12px horizontal padding to legacy settings tables that cannot yet use the components directly.
 - Use `DataTableSortButton` inside a header cell. Pass the current `asc`, `desc`, or `false` state so the active sort remains visible and its accessible label describes the next action.
 - Use `pin={{ left, layer }}` on matching header and body cells. Pinned body cells preserve the row hover and selection colors instead of masking them.

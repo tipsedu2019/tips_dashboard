@@ -6,7 +6,6 @@ import vm from "node:vm";
 
 import { JSDOM } from "jsdom";
 import { act, createElement, forwardRef } from "react";
-import { createRoot } from "react-dom/client";
 import ts from "typescript";
 
 const require = createRequire(import.meta.url);
@@ -71,6 +70,7 @@ test("pinned wrapping cells inherit row interaction colors without changing lega
   const { DataTableBodyCell, DataTableBodyRow } = await loadSurface();
   const container = document.createElement("table");
   document.body.append(container);
+  const { createRoot } = await import("react-dom/client");
   const root = createRoot(container);
 
   await act(async () => root.render(createElement("tbody", null,
@@ -81,7 +81,7 @@ test("pinned wrapping cells inherit row interaction colors without changing lega
 
   const row = container.querySelector("tr");
   const cell = container.querySelector("td");
-  assert.match(row.className, /h-12/);
+  assert.ok(row.className.includes("h-[var(--table-row-height)]"));
   assert.match(row.className, /data-\[state=selected\]:bg-accent/);
   assert.equal(cell.style.left, "40px");
   assert.equal(cell.style.zIndex, "10");
@@ -98,6 +98,7 @@ test("sort button exposes the current state and describes the next direction", a
   t.after(() => dom.window.close());
   const { DataTableSortButton } = await loadSurface();
   const container = document.createElement("div");
+  const { createRoot } = await import("react-dom/client");
   const root = createRoot(container);
 
   await act(async () => root.render(createElement(DataTableSortButton, { direction: "asc", label: "이름" }, "이름")));
@@ -119,6 +120,7 @@ test("toolbar and viewport keep their semantic slots and forward the scrollport 
   t.after(() => dom.window.close());
   const { DataTableToolbar, DataTableViewport } = await loadSurface();
   const container = document.createElement("div");
+  const { createRoot } = await import("react-dom/client");
   const root = createRoot(container);
   const viewportRef = { current: null };
 
@@ -148,4 +150,50 @@ test("management lists share the opt-in surface without replacing domain state o
   assert.match(source, /useDebouncedValue\(globalFilter, 300\)/);
   assert.match(source, /getFilteredSelectedRowModel/);
   assert.match(source, /rememberManagementScrollPosition/);
+});
+
+
+test("toolbar search and filter retain DOM identity and focus through loading, feedback and recovery", async (t) => {
+  const dom = installDom();
+  t.after(() => dom.window.close());
+  const { DataTableWorkspaceToolbar, DataTableReadFeedback } = await loadSurface();
+  const container = document.createElement("div");
+  document.body.append(container);
+  const { createRoot } = await import("react-dom/client");
+  const root = createRoot(container);
+  const searchRef = { current: null };
+  let retries = 0;
+  const render = (phase) => root.render(createElement(DataTableWorkspaceToolbar, {
+    search: createElement("input", { ref: searchRef, "aria-label": "학생 검색", defaultValue: "긴 학생 이름" }),
+    actions: createElement("button", { type: "button", disabled: phase === "loading" }, "학생 추가"),
+    filters: createElement("select", { "aria-label": "학교", defaultValue: "school" }, createElement("option", { value: "school" }, "긴 학교 이름")),
+    summary: phase === "loading" ? "불러오는 중" : "전체 20명",
+    feedback: phase === "error" ? createElement(DataTableReadFeedback, {
+      label: "조회 실패", message: "학생 목록을 불러오지 못했습니다.", retryLabel: "학생 목록 다시 시도",
+      returnFocusRef: searchRef, onRetry: () => { retries += 1; },
+    }) : undefined,
+  }));
+  await act(async () => render("ready"));
+  const search = searchRef.current;
+  const filter = container.querySelector("select");
+  const commandRow = container.querySelector("[data-slot=data-table-command-row]");
+  const conditions = container.querySelector("[data-slot=data-table-condition-row]");
+  search.focus();
+  for (const phase of ["loading", "error", "ready"]) {
+    await act(async () => render(phase));
+    assert.equal(searchRef.current, search, phase);
+    assert.equal(container.querySelector("select"), filter, phase);
+    assert.equal(container.querySelector("[data-slot=data-table-command-row]"), commandRow, phase);
+    assert.equal(container.querySelector("[data-slot=data-table-condition-row]"), conditions, phase);
+    assert.equal(document.activeElement, search, phase);
+    assert.equal(search.value, "긴 학생 이름", phase);
+    if (phase === "error") {
+      const retry = container.querySelector('[aria-label="학생 목록 다시 시도"]');
+      retry.focus();
+      await act(async () => retry.click());
+      assert.equal(retries, 1);
+      assert.equal(document.activeElement, search);
+    }
+  }
+  await act(async () => root.unmount());
 });

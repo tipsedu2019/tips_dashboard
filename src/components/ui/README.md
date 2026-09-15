@@ -65,3 +65,9 @@ Use the application `ThemeProvider`/`useTheme` pair for controls and toast surfa
 Choose the existing control by role: ordinary desktop action36px, edit field42px, primary touch action44px. `globals.css` owns the `--control-height`, `--field-height`, `--touch-target-height`, table and shell metrics. Existing explicit field sizing remains supported. `rounded-md` consumes the6px control radius; use `--radius-surface` for an8px flat table surface. Do not change dialog sizing to imitate a table.
 
 Primary and destructive foreground tokens are theme pairs. Use `text-destructive-foreground` for a filled destructive button; white text and a separate dark opacity override break the dark pair. Muted text must remain readable on both normal and selected rows. Native disabled semantics and50% opacity remain unchanged; a disabled control is not an enabled color variant.
+
+## Shared table surfaces and toolbars
+
+`DataTableSurface` exports compose one flat outer surface (8px radius), a44px header, minimum48px rows and12px cell side padding. Use wrapping `DataTableBodyCell` and `DataTableDetailButton` for full identities; the detail button uses neutral600-weight text. Hover uses `muted`, selection uses `accent` plus the existing checkbox, keyboard focus uses a3px ring. Do not encode selection by focus color.
+
+`DataTableWorkspaceToolbar` keeps the search, action/feedback and condition rows mounted in stable slots. Desktop search has a240px minimum; actions keep their existing340px slot. Feedback replaces the action content through the existing API while search, filters and summary retain their owners. Use the existing toolbar composition for management filters; no callback, query, selected-row, column or pagination policy is moved into the surface.
