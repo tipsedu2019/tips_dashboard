@@ -128,20 +128,30 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
     const header = headerRef.current
     const shell = shellRef.current
     if (!header || !shell) return
-    const updateMargin = () => shell.style.setProperty("--registration-section-scroll-margin", `${header.getBoundingClientRect().height + 16}px`)
+    const updateMargin = () => {
+      // A mobile keyboard can leave less room than the sticky header needs.
+      const compactViewport = (window.visualViewport?.height ?? window.innerHeight) < 600
+      shell.dataset.registrationCompactViewport = String(compactViewport)
+      shell.style.setProperty("--registration-section-scroll-margin", `${compactViewport ? 16 : header.getBoundingClientRect().height + 16}px`)
+    }
     updateMargin()
-    if (typeof ResizeObserver === "undefined") return
-    const observer = new ResizeObserver(updateMargin)
-    observer.observe(header)
-    return () => observer.disconnect()
+    const observer = typeof ResizeObserver === "undefined" ? null : new ResizeObserver(updateMargin)
+    observer?.observe(header)
+    window.visualViewport?.addEventListener("resize", updateMargin)
+    window.addEventListener("resize", updateMargin)
+    return () => {
+      observer?.disconnect()
+      window.visualViewport?.removeEventListener("resize", updateMargin)
+      window.removeEventListener("resize", updateMargin)
+    }
   }, [])
   const sections = props.mode === "create"
     ? CREATE_UI_SECTION_ORDER
     : APPLICATION_UI_SECTION_ORDER.filter((section) => section !== "observation" || props.observation !== undefined)
 
   return (
-    <div ref={shellRef} data-registration-application-mode={props.mode} className="min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
-      <header ref={headerRef} className="sticky -top-6 z-20 -mx-6 -mt-6 border-b bg-background px-6 pb-3 pt-4">
+    <div ref={shellRef} data-registration-application-mode={props.mode} className="group/registration-shell min-w-0 [&_select:disabled]:border-muted-foreground/20 [&_select:disabled]:bg-muted [&_select:disabled]:text-muted-foreground [&_select:disabled]:opacity-100">
+      <header ref={headerRef} className="sticky -top-6 z-20 group-data-[registration-compact-viewport=true]/registration-shell:static -mx-6 -mt-6 border-b bg-background px-6 pb-3 pt-4">
         <div className="flex min-w-0 items-center justify-between gap-3">
           <h2 className="min-w-0 break-words text-lg font-semibold [overflow-wrap:anywhere]">{props.studentName}</h2>
           <div className="flex items-center justify-end gap-2">

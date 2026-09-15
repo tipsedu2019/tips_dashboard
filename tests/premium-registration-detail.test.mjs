@@ -1,7 +1,6 @@
 import assert from "node:assert/strict"
 import test from "node:test"
 import { act, createElement, useEffect } from "react"
-import { createRoot } from "react-dom/client"
 import { JSDOM } from "jsdom"
 import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
@@ -17,6 +16,7 @@ test("section navigation focuses mounted headings while drafts and errors remain
     savedGlobals.set(key, Object.getOwnPropertyDescriptor(globalThis, key))
     Object.defineProperty(globalThis, key, { value, configurable: true, writable: true })
   }
+  const { createRoot } = await import("react-dom/client")
   window.matchMedia = () => ({ matches: true })
   const scrolls = []
   window.HTMLElement.prototype.scrollIntoView = function(options) { scrolls.push({ id: this.id, options }) }
@@ -65,6 +65,14 @@ test("section navigation focuses mounted headings while drafts and errors remain
     const save = document.querySelector('#registration-application-admission button')
     assert.equal(save.disabled, true)
     assert.equal(save.getAttribute("aria-busy"), "true")
+    Object.defineProperty(window, "innerHeight", { value: 520, configurable: true })
+    await act(async () => window.dispatchEvent(new window.Event("resize")))
+    const shell = document.querySelector('[data-registration-application-mode="detail"]')
+    assert.equal(shell.dataset.registrationCompactViewport, "true")
+    assert.equal(shell.style.getPropertyValue("--registration-section-scroll-margin"), "16px")
+    Object.defineProperty(window, "innerHeight", { value: 900, configurable: true })
+    await act(async () => window.dispatchEvent(new window.Event("resize")))
+    assert.equal(shell.dataset.registrationCompactViewport, "false")
   } finally {
     await act(async () => root.unmount())
     dom.window.close()
