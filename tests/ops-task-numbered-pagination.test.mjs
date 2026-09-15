@@ -693,7 +693,7 @@ test('word-retest drafts survive numbered replacement while selection and bulk t
   const finish = async (patches) => { const request = requests().at(-1); await act(async () => page.finish(page.requests.indexOf(request), 12, patches)); };
   const first = Array.from({ length: 10 }, (_, i) => operationPatch('word_retest', `학생${i + 1}`));
   await finish(first);
-  const select = document.querySelector('input[aria-label="학생1 단어 재시험 선택"]');
+  const select = document.querySelector('[role=checkbox][aria-label="학생1 단어 재시험 선택"]');
   await act(async () => select.click()); assert.ok(document.body.textContent.includes('1건 선택'));
   const score = document.querySelector('input[aria-label="학생1 1차 점수"]');
   assert.ok(score); assert.equal(score.disabled, false);
@@ -704,7 +704,7 @@ test('word-retest drafts survive numbered replacement while selection and bulk t
   await act(async () => document.querySelector('button[aria-label="2 페이지"]').click());
   await finish([operationPatch('word_retest', '학생11'), operationPatch('word_retest', '학생12')]);
   assert.equal(document.body.textContent.includes('1건 선택'), false, JSON.stringify({pages: requests().map(r=>r.args.p_page), text:document.body.textContent.slice(-1200), url:window.location.href}));
-  await act(async () => document.querySelector('input[aria-label="보이는 단어 재시험 전체 선택"]').click());
+  await act(async () => document.querySelector('[role=checkbox][aria-label="보이는 단어 재시험 전체 선택"]').click());
   assert.ok(document.body.textContent.includes('2건 선택'));
   await act(async () => document.querySelector('button[aria-label="1 페이지"]').click()); await finish(first);
   assert.equal(document.body.textContent.includes('2건 선택'), false);

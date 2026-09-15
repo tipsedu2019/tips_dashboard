@@ -104,3 +104,13 @@ Old closing URLs return to stock page one, retain a valid page size and discard 
 # Read failures
 
 Use `DataTableWorkspaceToolbar.feedback` with `DataTableReadFeedback` to show read failures and their retry action in the existing command row. Keep search and filters mounted; do not insert a new alert above the whole workspace. Distinguish a failed read from a successful empty result. Pass a search ref for focus recovery when retry replaces the feedback with loading or normal actions. Keep resource selection, permission checks and retries in the feature.
+
+## Stable selection commands
+
+`DataTableCommandRow` reserves one actions lane (36px desktop, 44px mobile). Keep the same search node mounted and the same lane width whether it contains ordinary actions, a selection, or read feedback. `reserveActions={false}` is for lists that never expose commands; it removes unused space. Do not base this flag on the current selected count.
+
+`DataTableSelectionActions` presents a selected count, authorized feature actions and a named clear button inside that lane. Never insert a bulk editor, a selected-count badge row, or a condition row between the existing toolbar and data on checkbox selection. Real filters keep their own state, position and labels. Restore focus to the stable search input when clearing removes the focused selection action.
+
+Student/class batch edits open `ManagementBulkActionBar`'s bounded edit dialog only on request. Cancel preserves the draft and returns focus to the edit trigger; failed writes preserve the input and selected targets; successful writes clear selection and return focus to search. The parent reports success/failure explicitly while retaining its mutation locks and authorization. Destructive commands retain their existing confirmation flow. Word-retest row selection uses the same checkbox target on desktop and mobile, and label padding must never open the row editor.
+
+Verify checkbox selection at 390px and desktop, including one/multiple/all/clear, document-relative search/filter/first-row bounds, long labels, dark mode, keyboard access and dialog focus. Browser scrolling to an off-screen row is different from a layout shift; account for scroll offsets in geometry checks.

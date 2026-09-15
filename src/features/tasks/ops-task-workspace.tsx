@@ -1,5 +1,7 @@
 "use client"
 
+import { DataTableCommandRow } from "@/components/data-table/data-table-surface"
+import { DataTableSelectionActions, DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
 import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
@@ -12224,6 +12226,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       return next
     })
   }, [canDeleteTask])
+  const selectedWordRetests = isWordRetestWorkspace ? visibleTasks.filter((task) => wordRetestSelectedTaskIds.has(task.id) && canDeleteTask(task)) : []
   const clearWordRetestSelection = useCallback(() => {
     setWordRetestSelectedTaskIds(new Set())
   }, [])
@@ -12540,8 +12543,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         )}
 
         {(showSearch || (isWordRetestWorkspace && showClosedToggle)) && (
-          <div className="flex items-center gap-2">
-            {showSearch ? (
+          <DataTableCommandRow reserveActions={isWordRetestWorkspace}
+            search={showSearch ? (
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
@@ -12576,7 +12579,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             ) : (
               <div className="min-w-0 flex-1" />
             )}
-            {isWordRetestWorkspace && showClosedToggle && (
+            actions={isWordRetestWorkspace && (selectedWordRetests.length > 0 ? (
+              <DataTableSelectionActions count={selectedWordRetests.length} label="선택한 단어 재시험 작업" disabled={saving} onClear={() => { clearWordRetestSelection(); taskSearchInputRef.current?.focus({ preventScroll: true }); }}>
+                <Button type="button" variant="destructive-ghost" size="sm" disabled={saving} onClick={() => requestRemoveWordRetests(selectedWordRetests)}>
+                  <Trash2 aria-hidden="true" className="size-4" />선택 삭제
+                </Button>
+              </DataTableSelectionActions>
+            ) : showClosedToggle && (
               <Button
                 type="button"
                 variant="outline"
@@ -12588,8 +12597,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 <Check className="size-4" />
                 <span>{showClosed ? "완료 숨김" : "완료 보기"}</span>
               </Button>
-            )}
-          </div>
+            ))}
+          />
         )}
 
 	        {isWordRetestWorkspace && (
@@ -12789,8 +12798,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            canSelectTask={canDeleteTask}
 	            onSelectTask={toggleWordRetestSelection}
 	            onSelectAll={toggleAllVisibleWordRetests}
-	            onClearSelection={clearWordRetestSelection}
-	            onBulkDelete={requestRemoveWordRetests}
 	            onCreate={() => openCreate(scopedTaskType)}
 	            emptyLabel={emptyTaskLabel}
 	            emptyActionLabel={emptyActionLabel}
@@ -15648,8 +15655,6 @@ function WordRetestTaskList({
   canSelectTask,
   onSelectTask,
   onSelectAll,
-  onClearSelection,
-  onBulkDelete,
   onCreate,
   emptyLabel = "단어 재시험 없음",
   emptyActionLabel = "추가",
@@ -15677,8 +15682,6 @@ function WordRetestTaskList({
   canSelectTask: (task: OpsTask) => boolean
   onSelectTask: (task: OpsTask, selected: boolean) => void
   onSelectAll: (selected: boolean, tasks: OpsTask[]) => void
-  onClearSelection: () => void
-  onBulkDelete: (tasks: OpsTask[]) => void
   onCreate: () => void
   emptyLabel?: string
   emptyActionLabel?: string
@@ -15757,35 +15760,16 @@ function WordRetestTaskList({
 
   return (
     <div className="overflow-x-auto rounded-md border">
-      {selectedTasks.length > 0 && (
-        <div className="flex flex-col gap-2 border-b bg-muted/30 px-3 py-2 text-sm font-medium sm:flex-row sm:items-center sm:justify-between">
-          <span>{selectedTasks.length}건 선택</span>
-          <span className="flex flex-wrap gap-2">
-            <Button type="button" variant="ghost" size="sm" onClick={onClearSelection} disabled={statusActionDisabled}>
-              선택 해제
-            </Button>
-            <Button type="button" variant="destructive" size="sm" onClick={() => onBulkDelete(selectedTasks)} disabled={statusActionDisabled}>
-              <Trash2 className="size-4" />
-              선택 삭제
-            </Button>
-          </span>
-        </div>
-      )}
       <div
-        className="hidden min-w-max border-b bg-muted/50 px-3 py-2 text-xs font-medium text-muted-foreground md:grid md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
+        className="hidden min-h-[var(--table-header-height)] min-w-max border-b bg-muted/50 px-3 py-0.5 text-xs font-medium text-muted-foreground md:grid md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
         style={gridTemplateStyle}
       >
         <span className="flex min-w-0 items-center justify-center">
-          <input
-            type="checkbox"
+          <DataTableSelectionCheckbox
             aria-label="보이는 단어 재시험 전체 선택"
-            checked={allVisibleSelected}
+            checked={allVisibleSelected || (partiallySelected && "indeterminate")}
             disabled={selectableTasks.length === 0 || statusActionDisabled}
-            ref={(node) => {
-              if (node) node.indeterminate = partiallySelected
-            }}
-            onChange={(event) => onSelectAll(event.target.checked, visibleWordRetestTasks)}
-            className="size-4 rounded border-border text-primary"
+            onCheckedChange={(checked) => onSelectAll(checked === true, visibleWordRetestTasks)}
           />
         </span>
         <WordRetestResizableHeaderCell label="상태" columnKey="status" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
@@ -15878,7 +15862,7 @@ function WordRetestResizableHeaderCell({
 
 function shouldIgnoreWordRetestRowOpen(target: EventTarget | null) {
   if (!(target instanceof Element)) return false
-  return Boolean(target.closest("button, input, textarea, select, a, [data-word-retest-interactive='true']"))
+  return Boolean(target.closest("button, input, label, textarea, select, a, [data-word-retest-interactive='true']"))
 }
 
 const WordRetestTaskRow = memo(function WordRetestTaskRow({
@@ -15946,21 +15930,20 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
         if (shouldIgnoreWordRetestRowOpen(event.target)) return
         onOpen(task)
       }}
-      className="grid cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
+      data-state={selected ? "selected" : undefined}
+      className="relative grid cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 data-[state=selected]:bg-accent md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
       style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
     >
-      <span className="hidden min-w-0 items-center md:flex md:justify-center">
-        <input
-          type="checkbox"
+      <span className="absolute right-3 top-3 flex min-w-0 items-center justify-end md:static md:justify-center">
+        <DataTableSelectionCheckbox
           aria-label={`${studentLabel} 단어 재시험 선택`}
           checked={selected}
           disabled={!selectable || statusActionDisabled}
-          onChange={(event) => onSelectTask(task, event.target.checked)}
+          onCheckedChange={(checked) => onSelectTask(task, checked === true)}
           onClick={(event) => event.stopPropagation()}
-          className="size-4 rounded border-border text-primary"
         />
       </span>
-      <span className="order-1 min-w-0 md:order-none">
+      <span className="order-1 flex min-h-10 min-w-0 items-center pr-12 md:order-none md:min-h-0 md:block md:pr-0">
         <span className="mr-2 text-xs text-muted-foreground md:hidden">진행상태</span>
         <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-middle">
           <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />

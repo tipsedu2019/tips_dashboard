@@ -14,7 +14,7 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME } from "@/components/data-table/data-table-surface";
+import { DataTableCommandRow, DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME } from "@/components/data-table/data-table-surface";
 
 export type ClassFilterPanelOption = {
   value: string;
@@ -49,6 +49,7 @@ type ClassFilterPanelProps = {
   createDisabled?: boolean;
   footerAction?: ReactNode;
   toolbarAction?: ReactNode;
+  selectionActions?: ReactNode;
   className?: string;
 };
 
@@ -75,6 +76,7 @@ export function ClassFilterPanel({
   createDisabled = false,
   footerAction,
   toolbarAction,
+  selectionActions,
   className,
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
@@ -117,8 +119,9 @@ export function ClassFilterPanel({
 
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1" role="search" aria-label={searchPlaceholder}>
+      <DataTableCommandRow
+        reserveActions={hasCreate || Boolean(toolbarAction) || Boolean(selectionActions)}
+        search={<div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1" role="search" aria-label={searchPlaceholder}>
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
@@ -144,8 +147,8 @@ export function ClassFilterPanel({
               <X className="size-3.5" />
             </Button>
           ) : null}
-        </div>
-
+        </div>}
+        actions={selectionActions ?? <>
         {hasCreate ? (
           <Button
             variant={createDisabled ? "outline" : "default"}
@@ -159,7 +162,8 @@ export function ClassFilterPanel({
           </Button>
         ) : null}
         {toolbarAction}
-      </div>
+        </>}
+      />
 
       <DataTableFilters aria-label={`${searchPlaceholder} 조건`}>
         {selects.map(renderSelectField)}

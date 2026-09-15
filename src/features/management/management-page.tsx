@@ -2763,15 +2763,15 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const handleBulkUpdateRows = useCallback(async (rows: ManagementRow[], change: { field: string; value: string }) => {
     const value = text(change.value);
     if (rows.length === 0 || !value) {
-      return;
+      return false;
     }
     if (!canMutateRows) {
       setOperationError("수정 권한이 없습니다.");
-      return;
+      return false;
     }
 
     const isCurrent = beginSaving();
-    if (!isCurrent) return;
+    if (!isCurrent) return false;
     setOperationError(null);
     try {
       // A failed row must not release the lock while another row is still saving.
@@ -2787,8 +2787,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       });
       if (isCurrent()) reportPublicClassesCacheRefresh(results);
       await reconcileManagementPage();
+      return isCurrent();
     } catch (bulkError) {
       if (isCurrent()) setOperationError(getSaveErrorMessage(bulkError));
+      return false;
     } finally {
       finishSaving();
     }

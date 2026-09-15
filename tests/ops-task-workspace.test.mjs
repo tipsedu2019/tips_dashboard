@@ -3524,7 +3524,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "selectedTaskIds={wordRetestSelectedTaskIds}",
     "onSelectTask={toggleWordRetestSelection}",
     "onSelectAll={toggleAllVisibleWordRetests}",
-    "onBulkDelete={requestRemoveWordRetests}",
+    "requestRemoveWordRetests(selectedWordRetests)",
     "보이는 단어 재시험 전체 선택",
     "선택 삭제",
     "memo(function WordRetestTaskRow",

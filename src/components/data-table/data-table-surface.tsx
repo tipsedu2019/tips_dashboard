@@ -66,6 +66,23 @@ export function DataTableFilters({
   );
 }
 
+/** Selection and read feedback replace actions inside a fixed-size lane. Search never reflows. */
+export function DataTableCommandRow({ search, actions, feedback, reserveActions = true, className, ...props }: {
+  search: ReactNode;
+  reserveActions?: boolean;
+  actions?: ReactNode;
+  feedback?: ReactNode;
+} & Omit<React.ComponentProps<"div">, "children">) {
+  return (
+    <div data-slot="data-table-command-row" className={cn("grid min-w-0 gap-2", reserveActions && "lg:grid-cols-[minmax(0,1fr)_340px] lg:items-center", className)} {...props}>
+      <div data-slot="data-table-search" className="min-w-0 lg:min-w-60 [&_input[type=search]]:h-11 sm:[&_input[type=search]]:h-9">{search}</div>
+      {reserveActions ? <div data-slot="data-table-actions" className="flex h-11 min-w-0 items-center justify-end gap-1 sm:h-9 sm:gap-2 [&_[data-slot=button]]:h-11 sm:[&_[data-slot=button]]:h-9 [&_[data-slot=button][data-size=icon]]:w-11 sm:[&_[data-slot=button][data-size=icon]]:w-9">
+        {feedback ?? actions}
+      </div> : null}
+    </div>
+  );
+}
+
 /** Shared two-row layout: search and actions, then conditions and a compact total. */
 export function DataTableWorkspaceToolbar({ search, actions, feedback, filters, summary, ...props }: {
   search: ReactNode;
@@ -76,12 +93,7 @@ export function DataTableWorkspaceToolbar({ search, actions, feedback, filters, 
 } & Omit<React.ComponentProps<"div">, "children">) {
   return (
     <DataTableToolbar {...props}>
-      <div data-slot="data-table-command-row" className="grid min-w-0 gap-2 lg:grid-cols-[minmax(0,1fr)_340px] lg:items-center">
-        <div data-slot="data-table-search" className="min-w-0 lg:min-w-60">{search}</div>
-        <div data-slot="data-table-actions" className="flex h-11 min-w-0 items-center justify-end gap-1 sm:h-9 sm:gap-2 [&_[data-slot=button]]:h-11 sm:[&_[data-slot=button]]:h-9 [&_[data-slot=button][data-size=icon]]:w-11 sm:[&_[data-slot=button][data-size=icon]]:w-9">
-          {feedback ?? actions}
-        </div>
-      </div>
+      <DataTableCommandRow search={search} actions={actions} feedback={feedback} />
       <div data-slot="data-table-condition-row" className="flex min-h-11 min-w-0 flex-col justify-center gap-2 sm:min-h-9 lg:flex-row lg:items-center lg:justify-between">
         {filters ? <div className="min-w-0 flex-1">{filters}</div> : null}
         {summary ? <span className="shrink-0 text-xs tabular-nums text-muted-foreground" aria-live="polite">{summary}</span> : null}

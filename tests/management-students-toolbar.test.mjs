@@ -294,16 +294,17 @@ test("student and class tables expose bulk edit and delete actions for selected 
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(tableSource, /type BulkEditField/);
+  const bulkSource = await readFile(new URL("src/features/management/management-bulk-actions.tsx", root), "utf8");
+  assert.match(bulkSource, /type BulkEditField/);
   assert.match(tableSource, /const BULK_EDIT_FIELDS/);
-  assert.match(tableSource, /function ManagementBulkActionBar/);
+  assert.match(bulkSource, /function ManagementBulkActionBar/);
   assert.match(tableSource, /selectedRows/);
   assert.match(tableSource, /actions\.onBulkUpdateRows/);
   assert.match(tableSource, /actions\.onBulkDeleteRows/);
   assert.match(tableSource, /bulkEditField/);
   assert.match(tableSource, /deleteLabel=\{kind === "students" \? "일괄 퇴원" : "일괄 삭제"\}/);
   assert.match(tableSource, /onDelete=\{actions\.onBulkDeleteRows \? \(\) => void submitBulkDelete\(\) : undefined\}/);
-  assert.match(tableSource, /일괄 수정/);
+  assert.match(bulkSource, /일괄 수정/);
   assert.match(tableSource, /일괄 퇴원/);
   assert.doesNotMatch(tableSource, /일괄 종강/);
   assert.match(pageSource, /handleBulkUpdateRows/);

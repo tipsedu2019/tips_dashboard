@@ -35,7 +35,6 @@ import {
 import {
   ChevronDown,
   ChevronRight,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -45,6 +44,7 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection";
+import { ManagementBulkActionBar, type BulkEditField } from "./management-bulk-actions";
 import { StudentRowActions } from "./student-row-actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -80,6 +80,7 @@ import {
   type DataTablePinnedColumn,
   DataTableSortButton,
   DataTableToolbar,
+  DataTableCommandRow,
   DataTableFilters,
   DATA_TABLE_FILTER_FIELD_CLASS_NAME,
   DataTableViewport,
@@ -348,7 +349,7 @@ type ManagementTableActions = {
   onCreate?: () => void;
   onOpenRow?: (row: ManagementRow) => void;
   onDeleteRow?: (row: ManagementRow) => void;
-  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<void> | void;
+  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<boolean | void> | boolean | void;
   onBulkDeleteRows?: (rows: ManagementRow[]) => Promise<void> | void;
   onOpenSchoolMaster?: () => void;
   onOpenTeacherMaster?: () => void;
@@ -362,12 +363,6 @@ type StoredManagementScroll = {
   tableY: number;
 };
 
-type BulkEditField = {
-  id: string;
-  label: string;
-  placeholder: string;
-  options?: string[];
-};
 
 const BULK_EDIT_FIELDS: Record<ManagementKind, BulkEditField[]> = {
   students: [
@@ -1122,105 +1117,6 @@ function buildSortingValue(
   ].filter(Boolean) as SortingState;
 }
 
-function ManagementBulkActionBar({
-  selectedCount,
-  fields,
-  field,
-  value,
-  pending,
-  deleteLabel = "일괄 삭제",
-  onFieldChange,
-  onValueChange,
-  onApply,
-  onDelete,
-  onClear,
-}: {
-  selectedCount: number;
-  fields: BulkEditField[];
-  field: string;
-  value: string;
-  pending: boolean;
-  deleteLabel?: string;
-  onFieldChange: (value: string) => void;
-  onValueChange: (value: string) => void;
-  onApply: () => void;
-  onDelete?: () => void;
-  onClear: () => void;
-}) {
-  if (selectedCount === 0 || fields.length === 0) {
-    return null;
-  }
-
-  const selectedField = fields.find((item) => item.id === field) || fields[0];
-  const valueOptions = selectedField.options || [];
-  const canApply = value.trim().length > 0 && !pending;
-
-  return (
-    <div className="flex flex-col gap-3 border-b border-primary/20 bg-primary/5 px-3 py-3 md:flex-row md:items-end md:justify-between">
-      <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-end">
-        <Badge variant="secondary" className="h-9 w-fit rounded-md px-3">
-          선택 {selectedCount}건
-        </Badge>
-        <div className="grid min-w-[9rem] gap-1.5">
-          <Label className="text-xs text-muted-foreground">수정 항목</Label>
-          <Select value={selectedField.id} onValueChange={onFieldChange}>
-            <SelectTrigger className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fields.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid min-w-[12rem] flex-1 gap-1.5">
-          <Label className="text-xs text-muted-foreground">변경 값</Label>
-          {valueOptions.length > 0 ? (
-            <Select value={value || "__empty__"} onValueChange={(nextValue) => onValueChange(nextValue === "__empty__" ? "" : nextValue)}>
-              <SelectTrigger className="h-9">
-                <SelectValue placeholder={selectedField.placeholder} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__empty__">선택 안 함</SelectItem>
-                {valueOptions.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              value={value}
-              onChange={(event) => onValueChange(event.target.value)}
-              placeholder={selectedField.placeholder}
-              className="h-9"
-            />
-          )}
-        </div>
-      </div>
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" size="sm" className="h-9" disabled={!canApply} onClick={onApply}>
-          <Pencil className="mr-2 size-4" />
-          일괄 수정
-        </Button>
-        {onDelete ? (
-          <Button type="button" size="sm" variant="destructive" className="h-9" disabled={pending} onClick={onDelete}>
-            <Trash2 className="mr-2 size-4" />
-            {deleteLabel}
-          </Button>
-        ) : null}
-        <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending} onClick={onClear}>
-          선택 해제
-        </Button>
-      </div>
-    </div>
-  );
-}
-
 type ManagementDataTableProps = {
   kind: ManagementKind;
   rows: ManagementRow[];
@@ -1898,7 +1794,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const summaryLabel = kind === "classes"
     ? authoritativeTotal === undefined ? "수업 건수 확인 중" : `전체 수업 ${authoritativeTotal}개 · 서버 집계`
     : `표시 ${filteredRowCount}건`;
-  const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);
   const bulkEditFields = BULK_EDIT_FIELDS[kind];
   const selectedBulkEditField = bulkEditFields.find((item) => item.id === bulkEditField) || bulkEditFields[0];
@@ -2636,17 +2531,19 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
 
   async function submitBulkUpdate() {
     if (!selectedRows.length || !selectedBulkEditField || !bulkEditValue.trim() || !actions.onBulkUpdateRows) {
-      return;
+      return false;
     }
 
     setBulkActionPending(true);
     try {
-      await actions.onBulkUpdateRows(selectedRows, {
+      const applied = await actions.onBulkUpdateRows(selectedRows, {
         field: selectedBulkEditField.id,
         value: bulkEditValue.trim(),
       });
+      if (applied === false) return false;
       setBulkEditValue("");
       setRowSelection({});
+      return true;
     } finally {
       setBulkActionPending(false);
     }
@@ -2666,8 +2563,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     }
   }
 
-  const bulkActionBar = (
+  const bulkActionBar = selectedRows.length > 0 && bulkEditFields.length > 0 ? (
     <ManagementBulkActionBar
+      canEdit={Boolean(actions.onBulkUpdateRows)}
       selectedCount={selectedRows.length}
       fields={bulkEditFields}
       field={bulkEditField}
@@ -2679,11 +2577,12 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         setBulkEditValue("");
       }}
       onValueChange={setBulkEditValue}
-      onApply={() => void submitBulkUpdate()}
+      onApply={submitBulkUpdate}
       onDelete={actions.onBulkDeleteRows ? () => void submitBulkDelete() : undefined}
-      onClear={() => setRowSelection({})}
+      returnFocusRef={tableLayoutRef}
+      onClear={() => { setRowSelection({}); tableLayoutRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus({ preventScroll: true }); }}
     />
-  );
+  ) : null;
 
   const classMobileList = kind === "classes" ? (
     <div className={DATA_TABLE_MOBILE_LIST_CLASS_NAME} aria-label={`${emptyLabel} 모바일 목록`}>
@@ -2894,67 +2793,34 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           onCreate={actions.onCreate}
           createDisabled={!hasCreateAction}
           footerAction={null}
+          selectionActions={bulkActionBar}
           toolbarAction={<div className="ml-auto flex justify-end">{columnSettingsControl}</div>}
         />
       ) : (
         <DataTableToolbar className={cn("gap-2", kind === "students" && "student-list-toolbar")}>
-          <div className="flex flex-wrap items-center gap-2">
-            {kind === "students" ? (
-              <>
-                <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{searchControl}</div>
-                {createControl}
-                <div className="ml-auto flex justify-end">{columnSettingsControl}</div>
-              </>
-            ) : (
-              <>
-                <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{searchControl}</div>
-                {badgeColumn ? (
-                  <div className="min-w-0 flex-1 sm:w-40 sm:flex-none">
-                    <Label htmlFor="badge-filter" className="sr-only">
-                      {badgeLabel}
-                    </Label>
-                    <Select
-                      value={badgeFilter || "all"}
-                      onValueChange={(value) => {
-                        const nextValue = value === "all" ? "" : value;
-                        badgeColumn.setFilterValue(nextValue);
-                        syncTextbookListQueryState({ publisher: nextValue });
-                        setRowSelection({});
-                      }}
-                    >
-                      <SelectTrigger className="h-9 w-full" id="badge-filter" aria-label={badgeLabel}>
-                        <SelectValue placeholder={badgeLabel} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">전체 {badgeLabel}</SelectItem>
-                        {badgeOptions.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-                <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
-                  <Label htmlFor="status-filter" className="sr-only">
-                    {statusLabel}
+          <DataTableCommandRow search={searchControl} actions={bulkActionBar ?? <>{createControl}{columnSettingsControl}</>} />
+          {kind !== "students" ? (
+            <DataTableFilters>
+              {badgeColumn ? (
+                <div className="min-w-0 flex-1 sm:w-40 sm:flex-none">
+                  <Label htmlFor="badge-filter" className="sr-only">
+                    {badgeLabel}
                   </Label>
                   <Select
-                    value={statusFilter || "all"}
+                    value={badgeFilter || "all"}
                     onValueChange={(value) => {
                       const nextValue = value === "all" ? "" : value;
-                      statusColumn?.setFilterValue(nextValue);
-                      syncTextbookListQueryState({ status: nextValue });
+                      badgeColumn.setFilterValue(nextValue);
+                      syncTextbookListQueryState({ publisher: nextValue });
                       setRowSelection({});
                     }}
                   >
-                    <SelectTrigger className="h-9 w-full" id="status-filter" aria-label={statusLabel}>
-                      <SelectValue placeholder={statusLabel} />
+                    <SelectTrigger className="h-9 w-full" id="badge-filter" aria-label={badgeLabel}>
+                      <SelectValue placeholder={badgeLabel} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">전체 {statusLabel}</SelectItem>
-                      {statusOptions.map((option) => (
+                      <SelectItem value="all">전체 {badgeLabel}</SelectItem>
+                      {badgeOptions.map((option) => (
                         <SelectItem key={option} value={option}>
                           {option}
                         </SelectItem>
@@ -2962,11 +2828,35 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                     </SelectContent>
                   </Select>
                 </div>
-                {createControl}
-                <div className="ml-auto flex justify-end">{columnSettingsControl}</div>
-              </>
-            )}
-          </div>
+              ) : null}
+              <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
+                <Label htmlFor="status-filter" className="sr-only">
+                  {statusLabel}
+                </Label>
+                <Select
+                  value={statusFilter || "all"}
+                  onValueChange={(value) => {
+                    const nextValue = value === "all" ? "" : value;
+                    statusColumn?.setFilterValue(nextValue);
+                    syncTextbookListQueryState({ status: nextValue });
+                    setRowSelection({});
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full" id="status-filter" aria-label={statusLabel}>
+                    <SelectValue placeholder={statusLabel} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체 {statusLabel}</SelectItem>
+                    {statusOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </DataTableFilters>
+          ) : null}
 
           {kind === "students" ? (
             <DataTableFilters data-testid="student-quick-filters" aria-label="학생 검색 조건">
@@ -2981,7 +2871,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", kind === "students" && "student-filter-status")} aria-live="polite">
             {showSummaryBadge ? <Badge variant="secondary">{summaryLabel}</Badge> : null}
             {rows.length !== filteredRowCount ? <Badge variant="outline">전체 {rows.length}건</Badge> : null}
-            {selectedRowCount > 0 ? <Badge variant="outline">선택 {selectedRowCount}건</Badge> : null}
             {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
             {kind !== "students" ? (
               <>
@@ -2994,8 +2883,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           </div>
         </DataTableToolbar>
       )}
-
-      {bulkActionBar}
 
       {studentMobileList}
       {classMobileList}

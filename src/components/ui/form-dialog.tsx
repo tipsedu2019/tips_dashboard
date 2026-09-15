@@ -107,6 +107,7 @@ function ConfirmationDialogContent({ title, description, items = [], totalCount 
 }
 
 type FormDialogContentProps = {
+  height?: number
   returnFocusRef?: React.RefObject<HTMLElement | null>
   title: string
   description: string
@@ -126,7 +127,7 @@ type FormDialogContentProps = {
 function FormDialogContent({
   title, description, children, onSubmit, onCancel, cancelLabel,
   submitLabel, submitAriaLabel, submitDisabled = false, busy = false, error = "", hint = "",
-  returnFocusRef,
+  returnFocusRef, height,
 }: FormDialogContentProps) {
   const feedbackId = React.useId()
   const errorRef = React.useRef<HTMLDivElement>(null)
@@ -135,7 +136,7 @@ function FormDialogContent({
   }, [error])
 
   return (
-    <DialogFrame title={title} description={description} returnFocusRef={returnFocusRef}>
+    <DialogFrame title={title} description={description} returnFocusRef={returnFocusRef} height={height}>
       <form
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         onSubmit={(event) => {
