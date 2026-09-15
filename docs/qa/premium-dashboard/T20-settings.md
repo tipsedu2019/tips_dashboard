@@ -20,8 +20,8 @@ owner 경로의 prefix는 `src/features/`. curriculum fixture는 `tests/academic
 
 ## 확인 결과
 
--18회 모두 기대한 이름/입력값 또는 명시 준비 전 안내가 렌더됐다. document 가로 넘침0, page runtime error0, 미정의 API 요청0.
-- 학교/강의실/그룹/선생님 추가 버튼은1440/390에서 enabled 상태·직접 keyboard focus를 확인했다. 버튼 실행이나 저장은 하지 않았다. 교재 설정은 출판사에서 총판으로 탭을 실제 전환했다.
+- 18회 모두 기대한 이름/입력값 또는 명시 준비 전 안내가 렌더됐다. document 가로 넘침0, page runtime error0, 미정의 API 요청0.
+- 학교/강의실/그룹/선생님 추가 버튼은1440/390에서 enabled 상태·직접 포커스와 focus ring를 확인했다. Tab 순서 전체, 버튼 실행이나 저장은 검사하지 않았다. 교재 설정은 출판사에서 총판으로 탭을 실제 전환했다.
 - 학교390, 수업설계390, 총판1440 screenshot을 직접 검토했다. 모바일 학교 카드와 버튼의 focus ring, 수업 설계의 제목·탭·교재 연결 필요 상태, 총판 표·페이지 제어가 확인됐다.
 - 모든 인증·조회는 합성 응답이다. 외부 URL/미정의 API는 차단하고 앱 서버로는 GET/HEAD만 통과시킨다. provider 활성화·고객 발송·실제 DB 변경은 없다.
 - 최초 fixture 누락(teacher identity API, 기본 publisher 탭, lesson classId/runtime/schedule RPC)을 실제 계약에 맞게 보완한 뒤 전체18개를 재실행했다. 초기 실패는 제품 장애로 집계하지 않았다.
