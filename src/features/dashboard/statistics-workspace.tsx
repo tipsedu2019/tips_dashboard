@@ -123,7 +123,7 @@ function StudentBreakdowns({ data, subject, division }: { data: Data; subject: S
     const key = text(row.key)
     const children = sortStatisticsDistribution(list(row.children), group.axis === "school" ? "grade" : "school")
     return <div key={key} className="grid min-w-0 gap-2 border-b pb-3 last:border-0">
-      <StatisticsDrilldown label={`${text(row.label)} 학생 명단 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.studentCount)} maximum={maximum} unit="명" />} input={{ kind: "student-roster", subject, division, axis: group.axis, key, parentKey: "" }} />
+      <StatisticsDrilldown label={`${text(row.label)} ${format(row.studentCount)}명 · 학생 명단 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.studentCount)} maximum={maximum} unit="명" />} input={{ kind: "student-roster", subject, division, axis: group.axis, key, parentKey: "" }} />
       <span className="text-xs text-muted-foreground">수강 등록 {format(row.enrollmentCount)}건</span>
       {children.length ? <details className="text-sm"><summary className="cursor-pointer py-1 text-muted-foreground">{group.axis === "grade" ? "학교별" : "학년별"} 보기</summary><div className="mt-2 grid gap-2 border-l pl-3">{children.map((child) => {
         const childKey = text(child.key)
@@ -142,7 +142,7 @@ function ClassGroups({ data, subject, division }: { data: Data; subject: Subject
   return <Card><CardHeader className="flex-row flex-wrap items-center justify-between gap-3"><CardTitle className="text-base">수업 운영</CardTitle><FilterButtons label="그룹" active={axis} onChange={setAxis} values={[{ key: "grade", label: "학년" }, { key: "teacher", label: "선생님" }, { key: "classroom", label: "강의실" }]} /></CardHeader><CardContent className="grid gap-2">{rows.length ? rows.map((row) => {
     const key = text(row.key)
     return <div key={key} className="rounded-lg border p-3"><p className="text-sm text-muted-foreground tabular-nums">주간 {text(row.weeklyHoursLabel)} · 학생 {format(row.studentCount)}명</p>
-      <StatisticsDrilldown label={`${text(row.label)} 수업 목록 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.classCount)} maximum={maximum} unit="개" />} input={{ kind: "class-group", subject, division, axis, key }} renderRow={(classRow) => <div className="flex flex-wrap items-center justify-between gap-2"><span>{text(classRow.title)}</span><StatisticsDrilldown label="학생 명단 보기" input={{ kind: "class-roster", classId: text(classRow.id) }} /></div>} />
+      <StatisticsDrilldown label={`${text(row.label)} ${format(row.classCount)}개 · 수업 목록 보기`} trigger={<DistributionBar label={text(row.label)} value={number(row.classCount)} maximum={maximum} unit="개" />} input={{ kind: "class-group", subject, division, axis, key }} renderRow={(classRow) => <div className="flex flex-wrap items-center justify-between gap-2"><span>{text(classRow.title)}</span><StatisticsDrilldown label="학생 명단 보기" input={{ kind: "class-roster", classId: text(classRow.id) }} /></div>} />
     </div>
   }) : <p className="text-sm text-muted-foreground">수업 데이터 없음</p>}</CardContent></Card>
 }

@@ -134,7 +134,7 @@ function createSnapshotHook() {
   return { calls, responses, useStatisticsSnapshot }
 }
 
-async function loadWorkspace(snapshotHook) {
+async function loadWorkspace(snapshotHook, useActualDrilldown = false) {
   const { button, card, tabs } = await loadUiModules()
   const routeState = await import("../src/features/dashboard/statistics-route-state.ts")
   const navigation = await import("../src/lib/guarded-navigation.ts")
@@ -157,7 +157,10 @@ async function loadWorkspace(snapshotHook) {
         : createElement("div", { "data-conflict-status": source.status })
     },
   }
-  const drilldown = { StatisticsDrilldown: ({ trigger, input, label }) => createElement("button", { "data-drilldown": JSON.stringify(input), "aria-label": label }, trigger ?? label) }
+  const drilldown = useActualDrilldown ? await loadTypeScript(new URL("src/features/dashboard/statistics-drilldown.tsx", root), new Map([
+    ["@/components/ui/button", button],
+    ["@/providers/auth-provider", { useAuth: () => ({ session: { access_token: "fixture-token" } }) }],
+  ])) : { StatisticsDrilldown: ({ trigger, input, label }) => createElement("button", { "data-drilldown": JSON.stringify(input), "aria-label": label }, trigger ?? label) }
   return loadTypeScript(
     new URL("src/features/dashboard/statistics-workspace.tsx", root),
     new Map([
@@ -481,5 +484,32 @@ test("deep links, filter replace, tab push and browser history restore only the 
   assert.equal(container.querySelector('[aria-label="부서"] [aria-pressed="true"]').textContent, "고등부")
   await act(async () => { window.history.forward(); await new Promise(resolve => setTimeout(resolve, 30)) })
   assert.equal(tab(container, "교재").getAttribute("aria-selected"), "true")
+  await act(async () => reactRoot.unmount())
+})
+
+test("real distribution buttons expose the displayed count and unit in their accessible names", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const snapshot = createSnapshotHook()
+  const data = studentsData(1200)
+  data.studentBreakdowns.byGrade = [{ key: "grade-id", label: "고1", studentCount: 0, enrollmentCount: 0 }]
+  data.studentBreakdowns.bySchool = [{ key: "school-id", label: "합성학교", studentCount: 1200, enrollmentCount: 1300 }]
+  data.classGroups.byGrade = [{ key: "class-grade-id", label: "고1", classCount: 12, studentCount: 1200, weeklyHoursLabel: "24시간" }]
+  snapshot.responses.set("students_classes:all:all", { data })
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot, true)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  await click(tab(container, "학생·수업"))
+  for (const [accessibleName, visibleValue] of [
+    ["고1 0명 · 학생 명단 보기", "0명"],
+    ["합성학교 1,200명 · 학생 명단 보기", "1,200명"],
+    ["고1 12개 · 수업 목록 보기", "12개"],
+  ]) {
+    const button = [...container.querySelectorAll("button")].find(item => item.getAttribute("aria-label") === accessibleName)
+    assert.ok(button, `Missing accessible name: ${accessibleName}`)
+    assert.ok(button.textContent.includes(visibleValue))
+  }
   await act(async () => reactRoot.unmount())
 })
