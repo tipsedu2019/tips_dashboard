@@ -6617,7 +6617,7 @@ export function ClassScheduleWorkspace() {
               <p className="text-sm font-semibold text-foreground">수업 목록</p>
               <Badge variant="outline">전체 {Number(data.stats.total || 0)}개</Badge>
               <Badge variant="outline">표시 {model.rows.length}개</Badge>
-              <Badge variant="outline">경고 {model.rows.filter((row) => row.warningText).length}</Badge>
+              {model.rows.some((row) => row.warningText) ? <Badge variant="outline">경고 {model.rows.filter((row) => row.warningText).length}</Badge> : null}
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>{model.syncGroupCards.length}개 동기 그룹</span>
