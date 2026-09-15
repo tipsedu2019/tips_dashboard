@@ -98,7 +98,7 @@ function StatisticsDrilldownContent({ input, label, trigger, renderRow, accessTo
         {trigger ?? label}<span aria-hidden="true" className="ml-2 shrink-0 text-xs text-muted-foreground">{opened ? "접기" : "펼치기"}</span>
       </Button>
       <div id={panelId} hidden={!opened} aria-busy={loading}>
-        {opened ? <div className="grid gap-2">
+        <div className="grid gap-2">
           {rows.length > 0 ? <div role="list" aria-label={`${noun} 목록`} className="grid gap-1 rounded-md border bg-background p-2">
             {rows.map(row => <div key={rowId(row)} role="listitem" className="text-sm">{renderRow ? renderRow(row) : `${row.name || row.title || "항목"}`}</div>)}
           </div> : null}
@@ -106,7 +106,7 @@ function StatisticsDrilldownContent({ input, label, trigger, renderRow, accessTo
           {loading ? <p role="status" className="text-sm text-muted-foreground">{noun} 목록을 불러오는 중입니다.</p> : null}
           {loaded && hasMore && !error ? <Button type="button" size="sm" variant="outline" disabled={loading} onClick={() => void load()}>다음 {STATISTICS_DRILLDOWN_PAGE_SIZE}{unit} 더 보기</Button> : null}
           {loaded && !hasMore && !error ? <p role="status" className="text-xs text-muted-foreground">{rows.length ? `총 ${rows.length.toLocaleString("ko-KR")}${unit} · 모두 표시했습니다.` : `해당하는 ${noun}이 없습니다.`}</p> : null}
-        </div> : null}
+        </div>
       </div>
     </div>
   )

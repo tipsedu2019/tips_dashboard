@@ -541,7 +541,7 @@ test("drilldown collapses without losing focus or refetching and retries only th
   await click(trigger)
   assert.equal(trigger.getAttribute('aria-expanded'), 'false')
   assert.equal(document.activeElement, trigger)
-  assert.equal(container.querySelector('[role=list]'), null)
+  assert.ok(container.querySelector('[role=list]').closest('[hidden]'))
   await click(trigger)
   assert.equal(pending.length, 1, 'accepted roster reopens without another request')
   assert.match(container.querySelector('[role=list]').textContent, /합성 학생1/)
@@ -564,4 +564,24 @@ test("drilldown collapses without losing focus or refetching and retries only th
   await act(async () => pending[4].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [], nextCursor: null, hasMore: false } }))))
   assert.match(container.textContent, /해당하는 학생이 없습니다/)
   assert.doesNotMatch(container.textContent, /마지막 항목/)
+  await act(async () => reactRoot.render(createElement(StatisticsDrilldown, {
+    input: { kind: 'class-group', subject: 'english', division: 'all', axis: 'grade', key: '중3' },
+    label: '중3 수업',
+    renderRow: row => createElement(StatisticsDrilldown, { input: { kind: 'class-roster', classId: row.id }, label: `${row.name} 학생` }),
+  })))
+  const groupTrigger = container.querySelector('[aria-expanded]')
+  await click(groupTrigger)
+  await act(async () => pending[5].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'class-1', name: '합성 수업' }], nextCursor: null, hasMore: false } }))))
+  const rosterTrigger = container.querySelector('[aria-label="합성 수업 학생"]')
+  await click(rosterTrigger)
+  await act(async () => pending[6].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'student-1', name: '합성 수강생' }], nextCursor: null, hasMore: false } }))))
+  await click(groupTrigger)
+  assert.ok(rosterTrigger.closest('[hidden]'))
+  await click(groupTrigger)
+  assert.equal(rosterTrigger.isConnected, true, 'outer collapse preserves the real nested roster instance')
+  assert.equal(rosterTrigger.getAttribute('aria-expanded'), 'true')
+  assert.match(container.textContent, /합성 수강생/)
+  await click(rosterTrigger)
+  await click(rosterTrigger)
+  assert.equal(pending.length, 7, 'neither level of the accepted group/roster tree refetches on reopen')
 })
