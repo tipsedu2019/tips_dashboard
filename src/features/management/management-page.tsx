@@ -1157,9 +1157,7 @@ function renderStudentTimelineList(
     <section className="overflow-hidden rounded-md border bg-background">
       <div className="flex h-10 items-center justify-between border-b px-3">
         <div className="text-sm font-semibold">{label}</div>
-        <Badge variant="secondary" className="h-6 rounded-full px-2">
-          {items.length}건
-        </Badge>
+        <span className="text-sm tabular-nums text-muted-foreground">{items.length}건</span>
       </div>
       {items.length > 0 ? (
         <div className="divide-y">
@@ -1183,7 +1181,7 @@ function renderStudentHistoryPanel(row: ManagementRow) {
         {renderStudentTimelineList("수업 이력", classHistory, (item, index) => (
           <div key={text(item.id) || `class-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
             <div className="flex min-w-0 items-start justify-between gap-3">
-              <span className="min-w-0 whitespace-normal break-words text-sm font-medium">{text(item.className || item.class_name) || "-"}</span>
+              <span className="min-w-0 whitespace-normal break-words text-sm font-semibold leading-5">{text(item.className || item.class_name) || "-"}</span>
               <Badge variant="outline" className="shrink-0">{text(item.label || item.action) || "-"}</Badge>
             </div>
             <div className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">
@@ -1196,8 +1194,8 @@ function renderStudentHistoryPanel(row: ManagementRow) {
         {renderStudentTimelineList("교재 이력", textbookHistory, (item, index) => (
           <div key={text(item.id) || `textbook-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
             <div className="flex min-w-0 items-start justify-between gap-3">
-              <span className="min-w-0 whitespace-normal break-words text-sm font-medium">{text(item.title) || "-"}</span>
-              <Badge variant="outline" className="shrink-0">{text(item.quantity) || "0"}권</Badge>
+              <span className="min-w-0 whitespace-normal break-words text-sm font-semibold leading-5">{text(item.title) || "-"}</span>
+              <span className="shrink-0 text-sm leading-5 tabular-nums">{text(item.quantity) || "0"}권</span>
             </div>
             <div className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">
               {[text(item.className || item.class_name), text(item.status), formatHistoryDate(item.issuedAt || item.issued_at || item.createdAt || item.created_at)]
@@ -1981,7 +1979,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           ) : ids.map((id) => (
             <div key={`${modeLabel}-${id}`} className="student-class-row grid min-w-0 gap-3 px-4 py-3">
               <div className="min-w-0">
-                <div className="whitespace-normal break-words text-sm font-semibold leading-6">{resolveRelatedTitle(id)}</div>
+                <div className="whitespace-normal break-words text-sm font-semibold leading-5">{resolveRelatedTitle(id)}</div>
                 <div className="mt-1 whitespace-normal break-words text-xs leading-5 text-muted-foreground">{relatedMeta(kind, resolveRelatedRecord(id)) || modeLabel}</div>
               </div>
               <div className="student-class-actions flex flex-wrap gap-2">
