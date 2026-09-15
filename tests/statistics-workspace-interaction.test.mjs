@@ -5,7 +5,7 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { JSDOM } from "jsdom"
-import { act, createElement, forwardRef, useState } from "react"
+import { act, createElement, forwardRef, useSyncExternalStore, useState } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
@@ -67,12 +67,13 @@ function installDom() {
 async function loadUiModules() {
   const utils = await loadTypeScript(new URL("src/lib/utils.ts", root))
   const common = new Map([["@/lib/utils", utils]])
-  const [button, card, tabs] = await Promise.all([
+  const [button, card, tabs, skeleton] = await Promise.all([
     loadTypeScript(new URL("src/components/ui/button.tsx", root), common),
     loadTypeScript(new URL("src/components/ui/card.tsx", root), common),
     loadTypeScript(new URL("src/components/ui/tabs.tsx", root), common),
+    loadTypeScript(new URL("src/components/ui/skeleton.tsx", root), common),
   ])
-  return { button, card, tabs }
+  return { button, card, tabs, skeleton }
 }
 
 function summary(count) {
@@ -107,7 +108,8 @@ function createSnapshotHook() {
   ])
 
   function useStatisticsSnapshot(input) {
-    const [range, setRange] = useState(90)
+    const [fallbackRange, setRange] = useState(90)
+    const range = input.rangeQuery ? Number(input.rangeQuery) : fallbackRange
     const key = input.tab === "students_classes"
       ? `${input.tab}:${input.subject}:${input.division}`
       : input.tab === "schedule_conflicts" || input.tab === "textbooks"
@@ -116,11 +118,11 @@ function createSnapshotHook() {
     calls.push({ ...input, range })
     const response = responses.get(key) ?? { data: {} }
     return {
-      snapshot: null,
+      snapshot: response.accepted || (!response.loading && !response.error) ? { data: response.data } : null,
       data: response.data ?? null,
       loading: response.loading ?? false,
       error: response.error ?? null,
-      generatedAt: null,
+      generatedAt: response.accepted ? "2026-09-15T00:00:00.000Z" : null,
       expiresAt: null,
       cacheStatus: null,
       range,
@@ -132,8 +134,20 @@ function createSnapshotHook() {
   return { calls, responses, useStatisticsSnapshot }
 }
 
-async function loadWorkspace(snapshotHook) {
+async function loadWorkspace(snapshotHook, useActualDrilldown = false) {
   const { button, card, tabs } = await loadUiModules()
+  const routeState = await import("../src/features/dashboard/statistics-route-state.ts")
+  const navigation = await import("../src/lib/guarded-navigation.ts")
+  // Model Next's native-history integration so focus and active-panel behavior stay real.
+  for (const method of ["pushState", "replaceState"]) {
+    const original = window.history[method].bind(window.history)
+    window.history[method] = (...args) => { original(...args); window.dispatchEvent(new window.Event("routechange")) }
+  }
+  const next = { useSearchParams: () => new URLSearchParams(useSyncExternalStore(
+    callback => { window.addEventListener("routechange", callback); window.addEventListener("popstate", callback); return () => { window.removeEventListener("routechange", callback); window.removeEventListener("popstate", callback) } },
+    () => window.location.search,
+  )) }
+  const presentation = await import("../src/features/dashboard/statistics-presentation.ts")
   const statisticsContract = await import("../src/features/dashboard/statistics-contract.ts")
   const conflict = {
     ConflictWarning({ metrics }) {
@@ -143,15 +157,22 @@ async function loadWorkspace(snapshotHook) {
         : createElement("div", { "data-conflict-status": source.status })
     },
   }
-  const drilldown = { StatisticsDrilldown: () => null }
+  const drilldown = useActualDrilldown ? await loadTypeScript(new URL("src/features/dashboard/statistics-drilldown.tsx", root), new Map([
+    ["@/components/ui/button", button],
+    ["@/providers/auth-provider", { useAuth: () => ({ session: { access_token: "fixture-token" } }) }],
+  ])) : { StatisticsDrilldown: ({ trigger, input, label }) => createElement("button", { "data-drilldown": JSON.stringify(input), "aria-label": label }, trigger ?? label) }
   return loadTypeScript(
     new URL("src/features/dashboard/statistics-workspace.tsx", root),
     new Map([
+      ["next/navigation", next],
+      ["@/lib/guarded-navigation", navigation],
+      ["@/features/dashboard/statistics-route-state", routeState],
       ["@/components/ui/button", button],
       ["@/components/ui/card", card],
       ["@/components/ui/tabs", tabs],
       ["@/app/admin/dashboard/components/section-cards", conflict],
       ["@/features/dashboard/statistics-contract", statisticsContract],
+      ["@/features/dashboard/statistics-presentation", presentation],
       ["@/features/dashboard/statistics-drilldown", drilldown],
       ["@/features/dashboard/use-statistics-snapshot", { useStatisticsSnapshot: snapshotHook }],
     ]),
@@ -198,7 +219,7 @@ function assertActivePanelLinkage(container, activeTab) {
 test("dashboard renders the statistics shortcut to its statistics route", async (t) => {
   const dom = installDom()
   t.after(() => dom.window.close())
-  const { button } = await loadUiModules()
+  const { button, skeleton } = await loadUiModules()
   const Link = forwardRef(function Link({ href, children, ...props }, ref) {
     return createElement("a", { ...props, href, ref }, children)
   })
@@ -207,6 +228,7 @@ test("dashboard renders the statistics shortcut to its statistics route", async 
     new Map([
       ["next/link", Link],
       ["@/components/ui/button", button],
+      ["@/components/ui/skeleton", skeleton],
       ["./use-dashboard-daily-brief", {
         useDashboardDailyBrief: () => ({ brief: null, error: null, retry: () => undefined }),
       }],
@@ -386,4 +408,182 @@ test("schedule and textbook ranges remain operable and focused while their resul
   assert.doesNotMatch(container.textContent, /95건/)
 
   await act(async () => reactRoot.unmount())
+})
+
+ test("same-key refresh and refresh failure retain accepted content and timestamp", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const snapshot = createSnapshotHook()
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  for (const response of [
+    { loading: true, accepted: true, data: { summary: summary(42) } },
+    { error: "통계를 불러오지 못했습니다.", accepted: true, data: { summary: summary(42) } },
+  ]) {
+    snapshot.responses.set("overview", response)
+    await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+    assert.match(container.textContent, /42명/)
+    assert.match(container.textContent, /26\. 9\. 15/)
+    assert.equal(container.querySelector('[aria-label="통계 결과"]').getAttribute("aria-busy"), String(Boolean(response.loading)))
+    if (response.error) assert.match(container.querySelector('[role="alert"]').textContent, /갱신 실패.*이전 통계/)
+    else assert.match(container.querySelector('[role="status"]').textContent, /갱신하는 중/)
+  }
+  await act(async () => reactRoot.unmount())
+})
+
+test("distribution shows top eight of fifty schools with exact keys, readable totals and expansion", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const snapshot = createSnapshotHook()
+  const data = studentsData(42)
+  data.studentBreakdowns.bySchool = Array.from({ length: 50 }, (_, i) => ({ key: `server-school-${i}`, label: `아주긴학교이름서로다른학교${i}`, studentCount: 50 - i, enrollmentCount: 60 - i }))
+  snapshot.responses.set("students_classes:all:all", { data })
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  await click(tab(container, "학생·수업"))
+  assert.match(container.textContent, /전체 50개 학교/)
+  assert.equal(container.querySelectorAll('[data-drilldown]').length, 8)
+  assert.equal(JSON.parse(container.querySelector('[data-drilldown]').dataset.drilldown).key, "server-school-0")
+  assert.match(container.querySelector('[aria-label="핵심 운영 지표"]').textContent, /수강 등록42건/)
+  await click([...container.querySelectorAll('button')].find(button => button.textContent === "모두 보기 (50개 학교)"))
+  assert.equal(container.querySelectorAll('[data-drilldown]').length, 50)
+  assert.equal(container.querySelectorAll('[style="width: 100%;"]').length, 1)
+  await act(async () => reactRoot.unmount())
+})
+
+test("deep links, filter replace, tab push and browser history restore only the active tab", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  window.history.replaceState(null, "", "/admin/statistics?tab=students_classes&subject=english&division=high")
+  const snapshot = createSnapshotHook()
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  assert.equal(tab(container, "학생·수업").getAttribute("aria-selected"), "true")
+  assert.deepEqual(new Set(snapshot.calls.map(call => call.tab)), new Set(["students_classes"]))
+  const length = window.history.length
+  const math = [...container.querySelectorAll('[aria-label="과목"] button')].find(button => button.textContent === "수학")
+  await click(math)
+  assert.equal(window.history.length, length)
+  assert.equal(window.location.search, "?tab=students_classes&subject=math&division=high")
+  assert.equal(document.activeElement, math)
+  await click(tab(container, "교재"))
+  assert.equal(window.history.length, length + 1)
+  assert.equal(window.location.search, "?tab=textbooks")
+  await act(async () => { window.history.back(); await new Promise(resolve => setTimeout(resolve, 30)) })
+  assert.equal(tab(container, "학생·수업").getAttribute("aria-selected"), "true")
+  assert.equal(container.querySelector('[aria-label="과목"] [aria-pressed="true"]').textContent, "수학")
+  assert.equal(container.querySelector('[aria-label="부서"] [aria-pressed="true"]').textContent, "고등부")
+  await act(async () => { window.history.forward(); await new Promise(resolve => setTimeout(resolve, 30)) })
+  assert.equal(tab(container, "교재").getAttribute("aria-selected"), "true")
+  await act(async () => reactRoot.unmount())
+})
+
+test("real distribution buttons expose the displayed count and unit in their accessible names", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const snapshot = createSnapshotHook()
+  const data = studentsData(1200)
+  data.studentBreakdowns.byGrade = [{ key: "grade-id", label: "고1", studentCount: 0, enrollmentCount: 0 }]
+  data.studentBreakdowns.bySchool = [{ key: "school-id", label: "합성학교", studentCount: 1200, enrollmentCount: 1300 }]
+  data.classGroups.byGrade = [{ key: "class-grade-id", label: "고1", classCount: 12, studentCount: 1200, weeklyHoursLabel: "24시간" }]
+  snapshot.responses.set("students_classes:all:all", { data })
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot, true)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  await click(tab(container, "학생·수업"))
+  for (const [accessibleName, visibleValue] of [
+    ["고1 0명 · 학생 명단 보기", "0명"],
+    ["합성학교 1,200명 · 학생 명단 보기", "1,200명"],
+    ["고1 12개 · 수업 목록 보기", "12개"],
+  ]) {
+    const button = [...container.querySelectorAll("button")].find(item => item.getAttribute("aria-label") === accessibleName)
+    assert.ok(button, `Missing accessible name: ${accessibleName}`)
+    assert.ok(button.textContent.includes(visibleValue))
+  }
+  await act(async () => reactRoot.unmount())
+})
+
+test("drilldown collapses without losing focus or refetching and retries only the failed next page", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const { button } = await loadUiModules()
+  const { StatisticsDrilldown } = await loadTypeScript(new URL("src/features/dashboard/statistics-drilldown.tsx", root), new Map([
+    ["@/components/ui/button", button],
+    ["@/providers/auth-provider", { useAuth: () => ({ user: { id: "synthetic-user" }, role: "admin", session: { access_token: "fixture-token" } }) }],
+  ]))
+  const originalFetch = globalThis.fetch
+  const pending = []
+  globalThis.fetch = (_url, options) => new Promise(resolve => pending.push({ resolve, options }))
+  t.after(() => { globalThis.fetch = originalFetch })
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  t.after(() => act(async () => reactRoot.unmount()))
+  const input = { kind: "student-roster", subject: "english", division: "all", axis: "school", key: "school-a", parentKey: "" }
+  await act(async () => reactRoot.render(createElement(StatisticsDrilldown, { input, label: "합성 학교 31명" })))
+  const trigger = container.querySelector('[aria-expanded]')
+  await click(trigger)
+  assert.equal(document.activeElement, trigger)
+  assert.equal(trigger.getAttribute('aria-expanded'), 'true')
+  assert.equal(pending.length, 1)
+  assert.equal(pending[0].options.method, 'POST')
+  assert.equal(pending[0].options.headers.Authorization, 'Bearer fixture-token')
+  await act(async () => pending[0].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'student-1', name: '합성 학생1' }], nextCursor: { sortValue: '합성 학생1', id: 'student-1' }, hasMore: true } }))))
+  await click(trigger)
+  assert.equal(trigger.getAttribute('aria-expanded'), 'false')
+  assert.equal(document.activeElement, trigger)
+  assert.ok(container.querySelector('[role=list]').closest('[hidden]'))
+  await click(trigger)
+  assert.equal(pending.length, 1, 'accepted roster reopens without another request')
+  assert.match(container.querySelector('[role=list]').textContent, /합성 학생1/)
+  await click([...container.querySelectorAll('button')].find(node => node.textContent === '다음 30명 더 보기'))
+  assert.equal(JSON.parse(pending[1].options.body).cursorId, 'student-1')
+  await act(async () => pending[1].resolve(new Response('{}', { status: 500 })))
+  assert.match(container.querySelector('[role=list]').textContent, /합성 학생1/)
+  assert.match(container.querySelector('[role=alert]').textContent, /불러오지 못했습니다/)
+  await click([...container.querySelectorAll('button')].find(node => node.textContent === '다시 시도'))
+  assert.equal(JSON.parse(pending[2].options.body).cursorId, 'student-1')
+  await act(async () => pending[2].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'student-1', name: '합성 학생1' }, { id: 'student-2', name: '합성 학생2' }], nextCursor: null, hasMore: false } }))))
+  assert.equal(container.querySelectorAll('[role=listitem]').length, 2)
+  assert.match(container.textContent, /총 2명 · 모두 표시했습니다/)
+  await act(async () => reactRoot.render(createElement(StatisticsDrilldown, { input: { ...input, subject: 'math' }, label: "합성 학교 수학" })))
+  assert.equal(container.querySelector('[role=list]'), null, 'query change does not expose previous roster')
+  await click(container.querySelector('[aria-expanded]'))
+  await act(async () => reactRoot.render(createElement(StatisticsDrilldown, { input: { ...input, subject: 'science' }, label: "합성 학교 과학" })))
+  assert.equal(pending[3].options.signal.aborted, true, 'obsolete pending request canceled')
+  await click(container.querySelector('[aria-expanded]'))
+  await act(async () => pending[4].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [], nextCursor: null, hasMore: false } }))))
+  assert.match(container.textContent, /해당하는 학생이 없습니다/)
+  assert.doesNotMatch(container.textContent, /마지막 항목/)
+  await act(async () => reactRoot.render(createElement(StatisticsDrilldown, {
+    input: { kind: 'class-group', subject: 'english', division: 'all', axis: 'grade', key: '중3' },
+    label: '중3 수업',
+    renderRow: row => createElement(StatisticsDrilldown, { input: { kind: 'class-roster', classId: row.id }, label: `${row.name} 학생` }),
+  })))
+  const groupTrigger = container.querySelector('[aria-expanded]')
+  await click(groupTrigger)
+  await act(async () => pending[5].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'class-1', name: '합성 수업' }], nextCursor: null, hasMore: false } }))))
+  const rosterTrigger = container.querySelector('[aria-label="합성 수업 학생"]')
+  await click(rosterTrigger)
+  await act(async () => pending[6].resolve(new Response(JSON.stringify({ ok: true, data: { rows: [{ id: 'student-1', name: '합성 수강생' }], nextCursor: null, hasMore: false } }))))
+  await click(groupTrigger)
+  assert.ok(rosterTrigger.closest('[hidden]'))
+  await click(groupTrigger)
+  assert.equal(rosterTrigger.isConnected, true, 'outer collapse preserves the real nested roster instance')
+  assert.equal(rosterTrigger.getAttribute('aria-expanded'), 'true')
+  assert.match(container.textContent, /합성 수강생/)
+  await click(rosterTrigger)
+  await click(rosterTrigger)
+  assert.equal(pending.length, 7, 'neither level of the accepted group/roster tree refetches on reopen')
 })

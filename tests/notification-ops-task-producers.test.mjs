@@ -983,7 +983,7 @@ test("클라이언트 서비스는 모든 실제 알림 원본 ID를 타입이 �
 test("업무 화면은 생성·수정·상태·재시험 전용 동작·댓글 receipt를 legacy bridge까지 전달한다", async () => {
   const workspace = await source(workspaceUrl)
   const quickAdd = block(workspace, "const submitQuickAdd", "const submitForm")
-  const submitForm = block(workspace, "const submitForm", "const handleFormKeyDown")
+  const submitForm = block(workspace, "const submitForm", "function focusRegistrationFormSection")
   const changeStatus = block(workspace, "const changeStatus", "const updateWithdrawalChecklist")
   const wordFlow = block(workspace, "const updateWordRetestFlow", "const submitWordRetestCompletion")
   const undo = block(workspace, "const undoStatusChange", "const submitAttachment")

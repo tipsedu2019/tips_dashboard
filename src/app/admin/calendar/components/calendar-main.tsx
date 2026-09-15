@@ -47,7 +47,7 @@ import {
 } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
 import { cn } from "@/lib/utils"
-import { type CalendarEvent } from "../types"
+import { type CalendarEvent, type CalendarNavigation } from "../types"
 import {
   buildDateSelectionRange,
   buildDragPreviewRange,
@@ -62,6 +62,7 @@ import {
 } from "../utils/calendar-grid.js"
 
 interface CalendarMainProps {
+  navigation?: CalendarNavigation
   selectedDate?: Date
   initialQuery?: string
   onDateSelect?: (date: Date) => void
@@ -266,6 +267,7 @@ function matchesCalendarQuery(event: CalendarEvent, query: string) {
 }
 
 export function CalendarMain({
+  navigation,
   selectedDate,
   initialQuery,
   onDateSelect,
@@ -279,7 +281,8 @@ export function CalendarMain({
   onEventDrop,
   onVisibleRangeChange,
 }: CalendarMainProps) {
-  const [currentDate, setCurrentDate] = useState(selectedDate || new Date())
+  const [localDate, setCurrentDate] = useState(selectedDate || new Date())
+  const currentDate = navigation?.displayedDate || localDate
   const [viewMode, setViewMode] = useState<"month" | "list">("month")
   const [query, setQuery] = useState("")
   const [overflowDate, setOverflowDate] = useState<Date | null>(null)
@@ -411,7 +414,10 @@ export function CalendarMain({
   }, [dragAnchorDate, dragTargetDate, draggedEvent])
 
   const navigateMonth = (direction: "prev" | "next") => {
-    setCurrentDate(direction === "prev" ? subMonths(currentDate, 1) : addMonths(currentDate, 1))
+    const anchor = navigation?.requestedDate || currentDate
+    const next = direction === "prev" ? subMonths(anchor, 1) : addMonths(anchor, 1)
+    if (navigation) navigation.onDateChange(next)
+    else setCurrentDate(next)
   }
 
   const goToToday = () => {
@@ -877,17 +883,19 @@ export function CalendarMain({
                     return (
                     <Card
                       key={event.id}
-                      className="cursor-pointer transition-shadow hover:shadow-md"
-                      onClick={() => onEventClick?.(event)}
                     >
                       <CardContent className="px-4">
                         <div className="flex items-start justify-between gap-4">
-                          <div className="flex flex-1 items-start gap-3">
+                          <div className="flex min-w-0 flex-1 items-start gap-3">
                             <div className={cn("mt-1.5 size-3 rounded-full", event.color)} />
                             <div className="flex-1">
                               <div className="flex flex-wrap items-center gap-2">
                                 {renderExamScopeHover(event)}
-                                <h3 className="font-medium">{event.title}</h3>
+                                <h3 className="min-w-0 font-medium">
+                                  <button type="button" onClick={() => onEventClick?.(event)} className="min-h-[var(--touch-target-height)] cursor-pointer rounded-md text-left break-words hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring sm:min-h-[var(--control-height)]" aria-label={`${event.title} 상세 보기`}>
+                                    {event.title}
+                                  </button>
+                                </h3>
                                 {renderEventContextBadges(event, "list")}
                               </div>
                               <div className="mt-2 flex flex-wrap items-center gap-4 text-sm text-muted-foreground">
@@ -905,7 +913,7 @@ export function CalendarMain({
                               </div>
                             </div>
                           </div>
-                          <div className="flex shrink-0 items-start gap-2">
+                          <div className="flex shrink-0 flex-col items-end gap-2 sm:flex-row sm:items-start">
                             <Link
                               href={annualBoardHref}
                               className="inline-flex size-8 items-center justify-center rounded-md border text-muted-foreground transition-colors hover:bg-muted"

@@ -7957,6 +7957,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   ))
   const registrationPersistence = FACT_ONLY_REGISTRATION_PERSISTENCE
   const formBaselineRef = useRef(serializeOpsTaskInput(form))
+  const formOpenerRef = useRef<{ element: HTMLElement; pathname: string } | null>(null)
+  const taskSearchInputRef = useRef<HTMLInputElement>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState("")
   const [formCompletionBlockers, setFormCompletionBlockers] = useState<string[]>([])
@@ -8024,7 +8026,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const attachmentNameId = useId()
   const attachmentLinkId = useId()
   const quickAddInputRef = useRef<HTMLInputElement | null>(null)
-  const searchInputRef = useRef<HTMLInputElement | null>(null)
   const autoAbsentWordRetestIdsRef = useRef<Set<string>>(new Set())
   const wordRetestTeacherFilterTouchedRef = useRef(false)
   const deferredQuery = useDeferredValue(query)
@@ -9410,7 +9411,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       : scopedTasks.some((task) => showClosed || isOpenTask(task))
   const showSearch = isRegistrationWorkspace
     ? registrationMode === "list"
-    : !isWithdrawalWorkspace && !isTransferWorkspace && (hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
+    : !isWithdrawalWorkspace && !isTransferWorkspace && (isTodoWorkspace || hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
   const emptyActionLabel = getWorkspaceCreateActionLabel(workspace, workspaceLabel)
   const emptyTaskLabel = isTodoWorkspace
     ? getTodoEmptyLabel(todoView, isFilteredEmpty)
@@ -9514,6 +9515,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   async function openCreate(type: OpsTaskType = scopedTaskType, initialValues: Partial<OpsTaskInput> = {}) {
     if (!canOpenCreate) return
     if (type === "registration" && !canManageRegistrationWorkflow) return
+    // Capture before option loading and input autofocus can move focus.
+    formOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? { element: document.activeElement, pathname: window.location.pathname }
+      : null
     const taskOptions = type === "registration" ? null : await ensureTaskOptions()
     if (type === "registration") void ensureRegistrationOptions(true)
     else if (!taskOptions) return
@@ -9616,6 +9621,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
   const openEdit = useCallback((task: OpsTask, blockers: string[] = [], completionIntent: FormCompletionIntent | null = null) => {
     if (task.type === "registration" && !canManageRegistrationWorkflow) return
+    formOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? { element: document.activeElement, pathname: window.location.pathname }
+      : null
     if (task.type === "registration") void ensureRegistrationOptions(true)
     else void ensureTaskOptions()
     const inferredCompletionIntent = completionIntent || getCompletionIntentForBlockedEdit(task, blockers)
@@ -9645,6 +9653,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   }, [canManageRegistrationWorkflow, ensureRegistrationOptions, ensureTaskOptions, syncTaskDeepLink])
 
   const openWordRetestRetryForm = useCallback((task: OpsTask, retryReason: WordRetestRetryReason) => {
+    formOpenerRef.current = document.activeElement instanceof HTMLElement
+      ? { element: document.activeElement, pathname: window.location.pathname }
+      : null
     const baseForm = formFromTask(task)
     const wordRetest = baseForm.wordRetest || {}
     const nextForm = cloneForm({
@@ -11579,13 +11590,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
   }
 
-  const handleFormKeyDown = (event: KeyboardEvent<HTMLFormElement>) => {
-    if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
-      event.preventDefault()
-      event.currentTarget.requestSubmit()
-    }
-  }
-
   function focusRegistrationFormSection(blocker: string) {
     const nextStep = getCompletionBlockerFormStep(form.type, [blocker]) || activeFormDetailStep
     setFormDetailStep(nextStep)
@@ -12247,13 +12251,6 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const focusQuickAdd = useCallback(() => {
     quickAddInputRef.current?.focus()
   }, [])
-  const focusSearch = useCallback(() => {
-    if (searchInputRef.current) {
-      searchInputRef.current.focus()
-      return
-    }
-    if (isTodoWorkspace) focusQuickAdd()
-  }, [focusQuickAdd, isTodoWorkspace])
   const workspaceTab = isWordRetestWorkspace ? wordRetestMode
     : isRegistrationWorkspace ? registrationMode === "calendar" ? registrationCalendarKind : registrationView
     : isWithdrawalWorkspace || isTransferWorkspace ? withdrawalView
@@ -12273,38 +12270,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     ? "flex flex-col gap-2"
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
 
-  useEffect(() => {
-    if (!isTodoWorkspace) return
-
-    const handleShortcut = (event: globalThis.KeyboardEvent) => {
-      if (event.defaultPrevented || event.ctrlKey || event.metaKey || event.altKey || formOpen || detailOpen || deleteTarget || bulkDeleteTargets.length > 0) return
-
-      const target = event.target as HTMLElement | null
-      const tagName = target?.tagName?.toLowerCase()
-      const isEditableTarget = Boolean(
-        target?.isContentEditable ||
-        tagName === "input" ||
-        tagName === "textarea" ||
-        tagName === "select",
-      )
-      if (isEditableTarget) return
-
-      if (event.key.toLowerCase() === "n") {
-        event.preventDefault()
-        focusQuickAdd()
-      }
-      if (event.key === "/") {
-        event.preventDefault()
-        focusSearch()
-      }
-    }
-
-    window.addEventListener("keydown", handleShortcut)
-    return () => window.removeEventListener("keydown", handleShortcut)
-  }, [bulkDeleteTargets.length, deleteTarget, detailOpen, focusQuickAdd, focusSearch, formOpen, isTodoWorkspace])
-
   return (
-    <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-3 pb-6 sm:px-4 lg:px-6">
+    <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0 && (
         <div className={HORIZONTAL_CHIP_BAR_CLASS}>
           {visibleOperationMetrics.map((metric) => (
@@ -12578,13 +12545,13 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               <div className="relative min-w-0 flex-1">
                 <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  ref={searchInputRef}
                   type="search"
                   value={query}
                   aria-label={`${workspaceLabel} 검색`}
                   autoComplete="off"
                   enterKeyHint="search"
                   data-testid="task-search-input"
+                  ref={taskSearchInputRef}
                   onChange={(event) => setQuery(event.target.value)}
                   onKeyDown={(event) => {
                     if (event.key === "Escape") setQuery("")
@@ -12596,7 +12563,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                   <button
                     type="button"
                     aria-label="검색 지우기"
-                    onClick={() => setQuery("")}
+                    onClick={() => {
+                      setQuery("")
+                      taskSearchInputRef.current?.focus()
+                    }}
                     className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
                   >
                     <X className="size-4" />
@@ -12938,6 +12908,16 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           form.type === "transfer" ? "sm:max-w-5xl xl:max-w-6xl" : form.type === "registration" ? "" : isTemplateForm ? "sm:max-w-3xl" : "sm:min-h-[min(760px,92vh)] sm:max-w-2xl",
         ].join(" ")}
           closeButtonLabel={formCloseLabel}
+          onCloseAutoFocus={(event) => {
+            const opener = formOpenerRef.current
+            formOpenerRef.current = null
+            if (!opener || opener.pathname !== window.location.pathname) return
+            const element = opener.element
+            if (element.isConnected && !element.matches(':disabled, [aria-disabled="true"]') && !element.closest('[hidden], [inert]') && element.getClientRects().length > 0) {
+              event.preventDefault()
+              element.focus({ preventScroll: true })
+            }
+          }}
           onCloseButtonClick={closeForm}
           showCloseButton={!registrationCreateApplicationRendered}
         >
@@ -12947,7 +12927,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               운영 업무를 입력하고 저장합니다.
             </DialogDescription>
           </DialogHeader>
-          <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
+          <form onSubmit={submitForm} className="grid gap-3">
             {form.type === "registration" && registrationOptionsLoading && (
               <div role="status" aria-live="polite" className="rounded-md border bg-muted/35 px-3 py-2 text-sm text-muted-foreground">
                 상담 책임자·수업·교재 선택 정보를 불러오는 중입니다.
@@ -13770,7 +13750,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
             <span data-registration-state="saved" className="sr-only">저장된 신청서</span>
           ) : null}
           {registrationApplicationHost.kind === "create" ? (
-            <form onSubmit={submitForm} onKeyDown={handleFormKeyDown} className="grid gap-3">
+            <form onSubmit={submitForm} className="grid gap-3">
               <DialogTitle className="sr-only">등록 신청서</DialogTitle>
               <DialogDescription className="sr-only">새 등록 신청서 내용을 입력합니다.</DialogDescription>
               {message ? (

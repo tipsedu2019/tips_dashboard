@@ -587,7 +587,7 @@ test("class official summary removes redundant identity and state badges", async
   assert.doesNotMatch(summarySource, /<Badge variant="secondary">\{periodLabel\}<\/Badge>/);
   assert.match(pageSource, /\{summaryMetaItems\.map\(\(item\) => \(/);
   assert.match(pageSource, /<span key=\{item\.label\} className="inline-flex max-w-full items-baseline gap-1\.5 text-xs leading-5 text-muted-foreground">/);
-  assert.match(pageSource, /<span className="min-w-0 whitespace-normal break-words font-medium text-foreground">\{item\.value\}<\/span>/);
+  assert.match(pageSource, /item\.label === "요일\/시간"[\s\S]*formatClassScheduleDisplayLines\(item\.value\)\.map\([\s\S]*formatScheduleTimeRange\(line\)/);
   assert.match(pageSource, /\{ label: "요일\/시간", value: scheduleSummary \}/);
   assert.match(pageSource, /\{ label: "선생님", value: teacher \}/);
   assert.match(pageSource, /\{ label: "강의실", value: classroom \}/);

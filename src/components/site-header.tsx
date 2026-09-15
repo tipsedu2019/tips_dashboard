@@ -1,9 +1,7 @@
 "use client"
 
 import * as React from "react"
-import Link from "next/link"
 import { usePathname } from "next/navigation"
-import { ExternalLink } from "lucide-react"
 
 import { CommandSearch, SearchTrigger } from "@/components/command-search"
 import { ModeToggle } from "@/components/mode-toggle"
@@ -25,55 +23,28 @@ export function SiteHeader() {
     setSearchOpen(false)
   }, [pathname])
 
-  React.useEffect(() => {
-    const down = (e: KeyboardEvent) => {
-      if (e.key === "k" && (e.metaKey || e.ctrlKey)) {
-        e.preventDefault()
-        if (searchOpen) setSearchOpen(false)
-        else openSearch(document.activeElement instanceof HTMLElement ? document.activeElement : null)
-      }
-    }
-
-    document.addEventListener("keydown", down)
-    return () => document.removeEventListener("keydown", down)
-  }, [openSearch, searchOpen])
-
   return (
     <>
-      <header className="sticky top-0 z-30 flex h-auto shrink-0 items-center border-b bg-background/95 backdrop-blur transition-[width,height] ease-linear supports-[backdrop-filter]:bg-background/80 group-has-data-[collapsible=icon]/sidebar-wrapper:h-auto">
-        <div className="flex w-full items-start gap-3 px-4 py-3 lg:px-6">
-          <div className="flex shrink-0 items-center gap-2 pt-1">
-            <SidebarTrigger className="-ml-1 shrink-0" data-testid="admin-sidebar-toggle" />
-            <Separator orientation="vertical" className="hidden data-[orientation=vertical]:h-6 sm:block" />
+      <header data-slot="site-header" className="sticky top-0 z-30 flex min-h-[var(--shell-header-height-mobile)] shrink-0 items-center border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:min-h-[var(--shell-header-height)]">
+        <div className="flex w-full items-center gap-2 px-4 py-1 md:gap-3 md:px-5 md:py-3 xl:px-6">
+          <SidebarTrigger className="-ml-1 size-[var(--touch-target-height)] shrink-0 md:size-[var(--control-height)]" data-testid="admin-sidebar-toggle" />
+          <Separator orientation="vertical" className="hidden data-[orientation=vertical]:h-6 md:block" />
+
+          <div className="flex min-w-0 flex-1 items-center gap-2 text-sm">
+            {workspaceMeta.section !== workspaceMeta.title ? (
+              <>
+                <p className="hidden shrink-0 text-xs font-medium text-muted-foreground md:block">
+                  {workspaceMeta.section}
+                </p>
+                <span aria-hidden="true" className="hidden text-muted-foreground md:block">/</span>
+              </>
+            ) : null}
+            <h1 className="min-w-0 break-words text-lg leading-[26px] font-semibold text-foreground">{workspaceMeta.title}</h1>
           </div>
 
-          <div className="flex min-w-0 flex-1 flex-col gap-2 sm:flex-row sm:items-center sm:justify-between sm:gap-3">
-            <div className="min-w-0 flex items-center gap-2 text-sm">
-              <p className="shrink-0 text-xs font-medium text-muted-foreground">
-                {workspaceMeta.section}
-              </p>
-              <span className="text-muted-foreground/40">/</span>
-              <h1 className="truncate text-lg font-semibold tracking-tight text-foreground">{workspaceMeta.title}</h1>
-            </div>
-
-            <div className="flex min-w-0 items-center gap-2 sm:ml-4">
-              <Link
-                href="/"
-                target="_blank"
-                rel="noreferrer"
-                aria-label="홈페이지를 새 화면에서 확인"
-                title="홈페이지 확인"
-                data-testid="admin-public-site-link"
-                className="hidden size-8 items-center justify-center rounded-md border border-input bg-background text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-accent-foreground lg:inline-flex"
-              >
-                <ExternalLink className="size-3.5" aria-hidden="true" />
-                <span className="sr-only">홈페이지 확인</span>
-              </Link>
-              <div className="min-w-0 flex-1 lg:w-64 lg:flex-none">
-                <SearchTrigger onClick={(event) => openSearch(event.currentTarget)} />
-              </div>
-              <ModeToggle />
-            </div>
+          <div className="flex shrink-0 items-center gap-1 md:gap-2 [&_[data-testid=admin-theme-toggle]]:size-[var(--touch-target-height)] md:[&_[data-testid=admin-theme-toggle]]:size-[var(--control-height)]">
+            <SearchTrigger onClick={(event) => openSearch(event.currentTarget)} />
+            <ModeToggle />
           </div>
         </div>
       </header>

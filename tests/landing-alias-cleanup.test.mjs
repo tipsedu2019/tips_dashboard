@@ -1,7 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { readdir, readFile } from "node:fs/promises";
-import { join, resolve } from "node:path";
+import { readFile } from "node:fs/promises";
+import { resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
@@ -19,33 +19,9 @@ async function pathExists(pathname) {
   }
 }
 
-async function listFiles(pathname) {
-  const base = resolve(root, pathname);
-  const output = [];
-
-  async function walk(relativePath) {
-    const entries = await readdir(resolve(base, relativePath), { withFileTypes: true });
-    for (const entry of entries) {
-      const child = join(relativePath, entry.name).replaceAll("\\", "/");
-      if (entry.isDirectory()) {
-        await walk(`${child}/`);
-      } else {
-        output.push(`${pathname}/${child}`.replace(/\/+/g, "/"));
-      }
-    }
-  }
-
-  await walk("");
-  return output.sort();
-}
-
 test("landing alias does not keep unused marketing template and theme customizer files", async () => {
-  const landingSource = await readSource("src/app/landing/page.tsx");
-  const landingFiles = await listFiles("src/app/landing");
   const globalsSource = await readSource("src/app/globals.css");
 
-  assert.match(landingSource, /redirect\("\/admin\/dashboard"\)/);
-  assert.deepEqual(landingFiles, ["src/app/landing/page.tsx"]);
 
   for (const pathname of [
     "src/components/color-picker.tsx",

@@ -133,12 +133,12 @@ test("class-only column filters never access missing student or textbook columns
   assert.match(source, /if \(kind === "classes"\) \{\s*for \(const filter of CLASS_FILTERS\)/);
 });
 
-test("student status badge can open a class roster popover", async () => {
+test("student plain status preserves the explicit class roster popover", async () => {
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
 
   assert.match(tableSource, /function renderStudentClassStatusPopover/);
-  assert.match(tableSource, /row\.statusValue \|\| row\.status/);
+  assert.match(tableSource, /\{row\.status \|\| "—"\}/);
   assert.match(tableSource, /aria-label=\{`\$\{row\.title\} \$\{label\} 수업 \$\{count\}개 보기`\}/);
   assert.match(hookSource, /function attachStudentClassSummaries/);
   assert.match(hookSource, /const \[classes, classHistory, textbookSaleLines, textbooks\] = await Promise\.all/);

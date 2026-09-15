@@ -142,6 +142,17 @@ export function SchoolMasterWorkspace() {
   const { confirmation } = useDraftNavigation({ dirty: isDirty });
   const [query, setQuery] = useState("");
   const [categoryFilter, setCategoryFilter] = useState<(typeof CATEGORY_FILTERS)[number]>("전체");
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const pendingSchoolFocusRef = useRef<string | null>(null);
+  useEffect(() => {
+    const id = pendingSchoolFocusRef.current;
+    if (!id) return;
+    const input = Array.from(document.querySelectorAll<HTMLInputElement>("input[data-school-row-name]")).find((node) => node.dataset.schoolRowName === id && node.getClientRects().length > 0);
+    if (input) {
+      input.focus();
+      pendingSchoolFocusRef.current = null;
+    }
+  }, [rows]);
   const [nameSortDirection, setNameSortDirection] = useState<NameSortDirection>("none");
   const { isColumnVisible, visibleColumnCount, columnSettingsControl } = useSettingsTableColumns(
     "tips-settings-table:schools:v1",
@@ -297,7 +308,10 @@ export function SchoolMasterWorkspace() {
 
   const handleAdd = () => {
     if (!hasLoadedRef.current || savingRef.current || loadingRef.current) return;
-    setRows((current) => [createEmptySchool(nextSortOrder, categoryFilter), ...current]);
+    const row = createEmptySchool(nextSortOrder, categoryFilter);
+    pendingSchoolFocusRef.current = row.id;
+    setQuery("");
+    setRows((current) => [row, ...current]);
     setNameSortDirection("none");
     setIsDirty(true);
   };
@@ -435,6 +449,7 @@ export function SchoolMasterWorkspace() {
             <div className="relative w-full min-w-[220px] sm:w-72" role="search" aria-label="학교명 검색">
               <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
+                ref={searchInputRef}
                 type="search"
                 className="h-9 pr-9 pl-9"
                 value={query}
@@ -448,7 +463,7 @@ export function SchoolMasterWorkspace() {
                 <button
                   type="button"
                   className="absolute right-2 top-1/2 rounded-md p-1 text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
-                  onClick={() => setQuery("")}
+                  onClick={() => { setQuery(""); searchInputRef.current?.focus({ preventScroll: true }); }}
                   aria-label="학교명 검색 초기화"
                 >
                   <X className="size-4" />
@@ -596,6 +611,7 @@ export function SchoolMasterWorkspace() {
                     </Select>
                     <Input
                       name="school-name"
+                      data-school-row-name={row.id}
                       disabled={editBlocked}
                       className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
                       value={row.name}
@@ -693,6 +709,7 @@ export function SchoolMasterWorkspace() {
                         <div className="flex items-center gap-2">
                           <Input
                             name="school-name"
+                      data-school-row-name={row.id}
                             disabled={editBlocked}
                             className={`h-9 ${isInvalid ? "border-destructive focus-visible:ring-destructive/30" : ""}`}
                             value={row.name}

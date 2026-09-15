@@ -1,0 +1,42 @@
+[
+  {
+    "width": 1440,
+    "theme": "light",
+    "errors": [],
+    "unhandled": [],
+    "writes": [
+      {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "수정한 합성 이름",
+        "uid": "",
+        "school": "합성중고등학교",
+        "grade": "중3",
+        "contact": "01000000000",
+        "parent_contact": "01000000000",
+        "recent_issue": "",
+        "enroll_date": "2026-09-01"
+      }
+    ],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "errors": [],
+    "unhandled": [],
+    "writes": [
+      {
+        "id": "00000000-0000-4000-8000-000000000001",
+        "name": "수정한 합성 이름",
+        "uid": "",
+        "school": "합성중고등학교",
+        "grade": "중3",
+        "contact": "01000000000",
+        "parent_contact": "01000000000",
+        "recent_issue": "",
+        "enroll_date": "2026-09-01"
+      }
+    ],
+    "passed": true
+  }
+]

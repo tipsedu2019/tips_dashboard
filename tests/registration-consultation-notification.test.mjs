@@ -639,7 +639,7 @@ test("canonical visit identity includes place while flat registration create sta
   assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /getConsultationNotificationWarning\(result\.value\)/);
   assert.match(notificationModel.partitionRegistrationVisitNotificationResults?.toString() || "", /result\.value\?\.ok === false/);
   const submitStart = workspaceSource.indexOf("const submitForm = async");
-  const submitEnd = workspaceSource.indexOf("const handleFormKeyDown", submitStart);
+  const submitEnd = workspaceSource.indexOf("function focusRegistrationFormSection", submitStart);
   const submitSource = workspaceSource.slice(submitStart, submitEnd);
   assert.match(submitSource, /await createRegistrationCase\(\{/);
   assert.doesNotMatch(submitSource, /dispatchRegistrationVisitNotificationTargets|sendRegistrationVisitNotificationTarget/);

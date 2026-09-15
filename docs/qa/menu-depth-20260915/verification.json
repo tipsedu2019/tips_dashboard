@@ -1,0 +1,31 @@
+{
+  "baseline": "fd1f52ae",
+  "lastProductCommit": "bae83ea9",
+  "finalBuildCheckout": "8978c22f",
+  "buildId": "8j1m4SEu-iHbC-huW6-kT",
+  "productionDeployment": false,
+  "branch": "codex/internal-dashboard-only-20260915",
+  "tests": {
+    "operations": {
+      "passed": 225,
+      "failed": 0
+    },
+    "calendar": {
+      "passed": 52,
+      "failed": 0
+    },
+    "otherRelevant": {
+      "passed": 168,
+      "failed": 0,
+      "note": "Initial run167passed/1stale source-text assertion; moved transport assertion into mounted test and corrected rerun11/11 passed. No product test failure remained."
+    }
+  },
+  "typeScript": "passed in final Next production build",
+  "eslint": "all changed source/test files passed; final calendar fix scoped lint passed; Babel500KB informational note",
+  "browser": {
+    "coreBuild": "42567d74 local production, all dashboard/statistics/management/schoolCMS scripts exit0 at1440/390",
+    "calendarBuild": "8978c22f local production, full calendar1440/390 +failed-detail/new-session desktop fixture exit0",
+    "transport": "synthetic only; external/unknown API blocked",
+    "limitations": "Other menus current development UI audit; exact per-menu untested branches in reports; no production data or provider send validation."
+  }
+}

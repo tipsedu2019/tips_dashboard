@@ -64,9 +64,8 @@ export default function DashboardLayout({
     <AuthGuard>
       <SidebarProvider
         style={{
-          "--sidebar-width": "16rem",
+          "--sidebar-width": "var(--shell-sidebar-width)",
           "--sidebar-width-icon": "3rem",
-          "--header-height": "calc(var(--spacing) * 14)",
         } as React.CSSProperties}
         className={config.collapsible === "none" ? "sidebar-none-mode" : ""}
       >
@@ -77,13 +76,13 @@ export default function DashboardLayout({
               collapsible={config.collapsible}
               side={config.side}
             />
-            <SidebarInset>
+            <SidebarInset className="m-0! min-w-0 rounded-none! shadow-none!">
               <DashboardMain>{children}</DashboardMain>
             </SidebarInset>
           </>
         ) : (
           <>
-            <SidebarInset>
+            <SidebarInset className="m-0! min-w-0 rounded-none! shadow-none!">
               <DashboardMain>{children}</DashboardMain>
             </SidebarInset>
             <AppSidebar

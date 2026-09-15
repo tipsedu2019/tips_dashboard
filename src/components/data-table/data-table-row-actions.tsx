@@ -14,7 +14,7 @@ export function DataTableDetailButton({ label, children, onClick }: {
     <Button
       type="button"
       variant="text"
-      className="h-auto min-w-0 max-w-full shrink justify-start whitespace-normal break-words p-0 text-left"
+      className="h-auto min-w-0 max-w-full shrink justify-start whitespace-normal break-words p-0 text-left font-semibold"
       aria-label={label}
       onClick={onClick}
     >

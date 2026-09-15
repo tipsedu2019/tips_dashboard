@@ -1,6 +1,8 @@
 "use client"
 
-import { type KeyboardEvent, type ReactNode } from "react"
+import { createContext, useContext, type KeyboardEvent, type ReactNode } from "react"
+
+import { DATA_TABLE_LAYOUT_CLASS_NAME } from "@/components/data-table/data-table-surface"
 
 import { Button } from "@/components/ui/button"
 
@@ -51,6 +53,10 @@ const REGISTRATION_CASE_VIEW_COLUMNS = {
   payment: ["학생", "빠른 처리", "입학신청서", "메이크에듀", "청구서", "수납"],
   completed: ["학생", "빠른 처리", "책임자", "등록 수업", "완료 일시"],
 } as const
+
+// Appointment groups and case-wide facts are not one-to-one with subject tracks.
+const TRACK_ALIGNED_VIEWS = new Set(["consultation_requested", "consultation_completed", "waiting", "observation", "enrollment", "completed"])
+const RegistrationCaseTrackLayout = createContext({ count: 1, aligned: false })
 
 const WAITING_KIND_LABELS = {
   current_class: "현재반 대기",
@@ -106,9 +112,9 @@ function RegistrationCaseStudentIdentity({
 }) {
   return (
     <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-      <span className="min-w-0 font-medium">{studentName}</span>
-      {schoolGrade ? <RegistrationCasePill>{schoolGrade}</RegistrationCasePill> : null}
-      {schoolName ? <RegistrationCasePill>{schoolName}</RegistrationCasePill> : null}
+      <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{studentName}</span>
+      {schoolGrade ? <span className="text-xs text-muted-foreground">{schoolGrade}</span> : null}
+      {schoolName ? <span className="text-xs text-muted-foreground">{schoolName}</span> : null}
     </div>
   )
 }
@@ -116,13 +122,16 @@ function RegistrationCaseStudentIdentity({
 function RegistrationCaseTrackValue({
   track,
   children,
+  anchor = false,
 }: {
+  anchor?: boolean
   track: RegistrationCaseListViewItem["matchingTracks"][number]
   children: ReactNode
 }) {
+  const { count, aligned } = useContext(RegistrationCaseTrackLayout)
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
-      <RegistrationCasePill tone="primary" className="shrink-0">{track.subject}</RegistrationCasePill>
+    <div data-registration-track-value={track.trackId} className="flex min-h-8 min-w-0 flex-wrap items-center gap-1.5">
+      {anchor || count > 1 ? <span data-registration-subject-anchor={anchor || undefined} className={`shrink-0 text-xs font-medium text-primary ${!anchor && aligned ? "lg:sr-only" : ""}`}>{track.subject}</span> : null}
       <div className="min-w-0">{children}</div>
     </div>
   )
@@ -222,10 +231,12 @@ function getRegistrationCaseTrackTimeLabel(track: RegistrationCaseListViewItem["
 }
 
 function RegistrationCaseCell({ label, children, cellRole }: { label: string; children: ReactNode; cellRole?: "cell" }) {
+  const { count, aligned } = useContext(RegistrationCaseTrackLayout)
+  const trackRows = aligned && cellRole === "cell"
   return (
-    <div role={cellRole} className="min-w-0 break-words [overflow-wrap:anywhere]">
+    <div role={cellRole} className={`min-w-0 break-words [overflow-wrap:anywhere] ${trackRows ? "grid grid-rows-subgrid" : ""}`} style={trackRows ? { gridRow: `span ${count}` } : undefined}>
       <div className="mb-1 text-[11px] text-muted-foreground lg:hidden">{label}</div>
-      <div>{children || "미정"}</div>
+      <div className={trackRows ? "grid grid-rows-subgrid" : undefined} style={trackRows ? { gridRow: `span ${count}` } : undefined}>{children || <span className="text-xs text-muted-foreground">미정</span>}</div>
     </div>
   )
 }
@@ -248,8 +259,9 @@ function RegistrationCaseProcessCells({
   />
   const classLabelById = new Map(classes.map((classItem) => [classItem.id, classItem.label]))
   const textbookLabelById = new Map(textbooks.map((textbook) => [textbook.id, textbook.label]))
+  const aligned = cellRole === "cell" && TRACK_ALIGNED_VIEWS.has(item.viewKey)
   const trackLines = (render: (track: RegistrationCaseListViewItem["matchingTracks"][number]) => ReactNode) => (
-    <div className="grid gap-1">{item.matchingTracks.map((track) => <div key={track.trackId}>{render(track)}</div>)}</div>
+    <div className={aligned ? "contents" : "grid gap-1"}>{item.matchingTracks.map((track) => <div key={track.trackId} data-registration-track-line={track.trackId} className="flex min-h-8 min-w-0 items-center">{render(track)}</div>)}</div>
   )
   const enrollmentRows = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => track.enrollmentDetailRows || []
   const enrollmentClassLabel = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => {
@@ -266,10 +278,10 @@ function RegistrationCaseProcessCells({
   }
   const status = (
     <RegistrationCaseCell label="빠른 처리" cellRole={cellRole}>
-      <div className="grid gap-1">
+      <div className={aligned ? "contents" : "grid gap-1"}>
         {item.matchingTracks.map((track) => (
-          <div key={track.trackId} className="flex min-w-0 items-center gap-1.5">
-            <RegistrationCasePill tone="primary" className="shrink-0">{track.subject}</RegistrationCasePill>
+          <div key={track.trackId} data-registration-track-line={track.trackId} className="flex min-h-8 min-w-0 items-center gap-1.5">
+            <span data-registration-subject-anchor className="shrink-0 text-xs font-medium text-primary">{track.subject}</span>
             <RegistrationTrackStatusControl
               studentName={item.studentName}
               track={track}
@@ -339,7 +351,7 @@ function RegistrationCaseProcessCells({
     <RegistrationCaseCell label="학생" cellRole={cellRole}>{student}</RegistrationCaseCell>
     <RegistrationCaseCell label="상태" cellRole={cellRole}>{trackLines((track) => {
       const summary = getRegistrationObservationListSummary(track)
-      return <RegistrationCaseTrackValue track={track}><RegistrationCasePill tone={summary.label === "원장 확인 대기" ? "warning" : "primary"}>{summary.label}</RegistrationCasePill></RegistrationCaseTrackValue>
+      return <RegistrationCaseTrackValue track={track} anchor><RegistrationCasePill tone={summary.label === "원장 확인 대기" ? "warning" : "primary"}>{summary.label}</RegistrationCasePill></RegistrationCaseTrackValue>
     })}</RegistrationCaseCell>
     <RegistrationCaseCell label="예약 일시" cellRole={cellRole}>{trackLines((track) => {
       const summary = getRegistrationObservationListSummary(track)
@@ -393,7 +405,8 @@ function RegistrationCaseActions({
   return (
     <div
       role={cellRole}
-      className="flex min-w-0 flex-wrap justify-end gap-1.5"
+      style={cellRole === "cell" && TRACK_ALIGNED_VIEWS.has(item.viewKey) ? { gridRow: `span ${Math.max(1, item.matchingTracks.length)}` } : undefined}
+      className="flex min-w-0 flex-wrap items-start justify-end gap-1.5"
       onClick={(event) => event.stopPropagation()}
       onKeyDown={(event) => event.stopPropagation()}
     >
@@ -418,7 +431,7 @@ export function RegistrationCaseListRow({
   showActionColumn = false,
 }: RegistrationCaseRowProps) {
   return (
-    <>
+    <RegistrationCaseTrackLayout.Provider value={{ count: Math.max(1, item.matchingTracks.length), aligned: TRACK_ALIGNED_VIEWS.has(item.viewKey) }}>
       <RegistrationCaseProcessCells
         item={item}
         viewerId={viewerId}
@@ -430,7 +443,7 @@ export function RegistrationCaseListRow({
         cellRole={cellRole}
       />
       {showActionColumn ? <RegistrationCaseActions item={item} disabled={disabled} canDelete={canDelete} onDelete={onDelete} cellRole={cellRole} /> : null}
-    </>
+    </RegistrationCaseTrackLayout.Provider>
   )
 }
 
@@ -477,7 +490,7 @@ export function RegistrationCaseList({
   }
 
   return (
-    <section className="min-w-0 overflow-hidden bg-background lg:rounded-lg lg:border" aria-label="등록 신청 목록">
+    <section className={DATA_TABLE_LAYOUT_CLASS_NAME} aria-label="등록 신청 목록">
       {loading || isEmpty ? (
         <div className="px-4 py-12 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
           {loading ? "불러오는 중입니다." : emptyLabel}
@@ -491,7 +504,7 @@ export function RegistrationCaseList({
                 key={item.taskId}
                 data-registration-case-row=""
                 tabIndex={entryAvailable ? 0 : undefined}
-                className={`grid min-w-0 gap-3 overflow-hidden rounded-md border bg-background p-3 shadow-xs outline-none transition-colors ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
+                className={`grid min-w-0 gap-3 overflow-hidden rounded-[var(--radius-surface)] border border-border/70 bg-background p-3 outline-none transition-colors ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
                 role="listitem"
                 aria-label={`${item.studentName} 등록 신청${entryAvailable ? " 열기" : ""}`}
                 onClick={entryAvailable ? () => openRegistrationCase(item) : undefined}
@@ -502,7 +515,7 @@ export function RegistrationCaseList({
             })}
           </div>
           <div data-testid="registration-case-desktop-list" className="hidden w-full min-w-0 overflow-hidden lg:block" role="table" aria-label="등록 신청 데이터테이블">
-            <div className="grid min-w-0 border-b bg-muted/45 text-xs text-muted-foreground" style={{ gridTemplateColumns }} role="row">
+            <div className="grid min-h-[var(--table-header-height)] min-w-0 items-center border-b border-border/80 bg-muted text-xs font-semibold text-foreground" style={{ gridTemplateColumns }} role="row">
               {columns.map((column) => <div key={column} className="px-3 py-2" role="columnheader">{column}</div>)}
               {showActionColumn ? <div className="px-3 py-2 text-right" role="columnheader">관리</div> : null}
             </div>
@@ -512,8 +525,8 @@ export function RegistrationCaseList({
                 key={item.taskId}
                 data-registration-case-row=""
                 tabIndex={entryAvailable ? 0 : undefined}
-                className={`grid min-w-0 items-center gap-3 border-b p-3 text-sm outline-none transition-colors last:border-b-0 ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50" : ""}`}
-                style={{ gridTemplateColumns }}
+                className={`grid min-h-[var(--table-row-height)] min-w-0 items-stretch gap-x-3 gap-y-1 border-b border-border/70 px-[var(--table-cell-padding-inline)] py-2 text-sm outline-none transition-colors last:border-b-0 ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:bg-muted/30 focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring/50" : ""}`}
+                style={{ gridTemplateColumns, gridTemplateRows: TRACK_ALIGNED_VIEWS.has(item.viewKey) ? `repeat(${Math.max(1, item.matchingTracks.length)}, minmax(2rem, auto))` : undefined }}
                 role="row"
                 aria-label={`${item.studentName} 등록 신청${entryAvailable ? " 열기" : ""}`}
                 onClick={entryAvailable ? () => openRegistrationCase(item) : undefined}

@@ -1,0 +1,18 @@
+[
+  {
+    "width": 1440,
+    "theme": "light",
+    "errors": [],
+    "unhandled": [],
+    "detailOverflow": 0,
+    "passed": true
+  },
+  {
+    "width": 390,
+    "theme": "light",
+    "errors": [],
+    "unhandled": [],
+    "detailOverflow": 0,
+    "passed": true
+  }
+]

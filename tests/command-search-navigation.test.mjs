@@ -41,7 +41,7 @@ async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification
   const { Dialog, DialogContent, DialogTitle, DialogDescription } = loadNotificationComponent("src/components/ui/dialog.tsx", boundaries)
   const { useUnsavedNavigationGuard } = loadNotificationComponent("src/hooks/use-unsaved-navigation-guard.ts", boundaries)
   const h = React.createElement
-  // The management confirmation explicitly restores its editor on close.
+  // The inline editor remains reachable from the clickable header search.
   function Harness() {
     const [confirmOpen, setConfirmOpen] = React.useState(false)
     const guard = useUnsavedNavigationGuard({ enabled: dirty, navigate: router.push, onConfirmRequest: () => {
@@ -50,9 +50,8 @@ async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification
     } })
     return h(React.Fragment, null,
       h(Header),
-      detail ? h(Dialog, { open: true }, h(DialogContent, { "data-testid": "editor", className: "z-[80]" },
-        h(DialogTitle, null, "학생 상세"), h(DialogDescription, null, "합성 편집기"),
-        h("input", { "aria-label": "학생 초안", defaultValue: "미저장 초안" }))) : null,
+      detail ? h("section", { "data-testid": "editor" },
+        h("input", { "aria-label": "학생 초안", defaultValue: "미저장 초안" })) : null,
       h(Dialog, { open: confirmOpen, onOpenChange: setConfirmOpen }, h(DialogContent, { layer: "nested", "data-testid": "confirm", onCloseAutoFocus: event => { event.preventDefault(); document.querySelector('[aria-label="학생 초안"]')?.focus() } },
         h(DialogTitle, null, "변경사항을 버릴까요?"), h(DialogDescription, null, "저장되지 않았습니다."),
         h("button", { onClick: () => { guard.cancelNavigation(); setConfirmOpen(false) } }, "계속 편집"),
@@ -64,7 +63,13 @@ async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification
   await settle()
   t.after(async () => { await React.act(async () => root.unmount()); await settle(); dom.window.close() })
   const key = async (value, extra = {}) => { await React.act(async () => document.activeElement.dispatchEvent(new window.KeyboardEvent("keydown", { key: value, bubbles: true, cancelable: true, ...extra }))); await settle() }
-  const open = async () => { if (detail) document.querySelector('[aria-label="학생 초안"]').focus(); await key("k", { ctrlKey: true }); assert.ok(document.querySelector('[data-testid="admin-quick-search-dialog"]')); assert.ok(document.activeElement.matches('[cmdk-input]')) }
+  const open = async () => {
+    const trigger = document.querySelector('[data-testid="admin-quick-search-trigger"]')
+    await React.act(async () => { trigger.focus(); trigger.click() })
+    await settle()
+    assert.ok(document.querySelector('[data-testid="admin-quick-search-dialog"]'))
+    assert.ok(document.activeElement.matches('[cmdk-input]'))
+  }
   const select = async (path, keyboard = false) => {
     const item = document.querySelector(`[data-testid="admin-quick-search-item-${path}"]`)
     assert.ok(item)
@@ -75,15 +80,25 @@ async function setup(t, { dirty = true, detail = true, skipAutoFocusNotification
   return { open, key, select, button, calls, prefetches, confirmationOrigins, settle }
 }
 
-test("quick search is above an existing management detail", async t => {
-  const p = await setup(t); await p.open()
-  assert.ok(document.querySelector('[data-testid="admin-quick-search-dialog"]').classList.contains("z-[90]"))
+test("header search opens by click while global hotkeys preserve normal input", async t => {
+  const p = await setup(t)
+  const input = document.querySelector('[aria-label="학생 초안"]')
+  for (const modifier of ["ctrlKey", "metaKey"]) {
+    const event = new window.KeyboardEvent("keydown", { key: "k", [modifier]: true, bubbles: true, cancelable: true })
+    await React.act(async () => { input.focus(); input.dispatchEvent(event) })
+    await p.settle()
+    assert.equal(event.defaultPrevented, false)
+    assert.equal(document.querySelector('[data-testid="admin-quick-search-dialog"]'), null)
+    assert.ok(document.activeElement === input)
+  }
+  assert.equal(document.querySelector("header kbd"), null)
+  await p.open()
 })
 
 for (const keyboard of [false, true]) test(`quick search ${keyboard ? "keyboard" : "pointer"} intent closes its scope before dirty confirmation`, async t => {
   const p = await setup(t); await p.open(); await p.select("admin-classes", keyboard)
   assert.deepEqual(p.calls, [])
-  assert.deepEqual(p.confirmationOrigins, [{ quickSearchExists: false, active: "학생 초안" }])
+  assert.deepEqual(p.confirmationOrigins, [{ quickSearchExists: false, active: "빠른 이동 열기" }])
   assert.ok(document.querySelector('[data-testid="confirm"]').contains(document.activeElement))
   await p.button("계속 편집")
   assert.equal(document.querySelector('[aria-label="학생 초안"]').value, "미저장 초안")
@@ -92,10 +107,10 @@ for (const keyboard of [false, true]) test(`quick search ${keyboard ? "keyboard"
   assert.deepEqual(p.calls, ["/admin/classes"])
 })
 
-test("current quick search path only closes and restores the editor", async t => {
+test("current quick search path only closes and restores its button", async t => {
   const p = await setup(t); await p.open(); await p.select("admin-students")
   assert.deepEqual(p.calls, []); assert.deepEqual(p.confirmationOrigins, [])
-  assert.ok(document.activeElement.matches('[aria-label="학생 초안"]'))
+  assert.ok(document.activeElement.matches('[data-testid="admin-quick-search-trigger"]'))
   assert.equal(window.location.search, "?selected=student-1")
 })
 
@@ -110,12 +125,12 @@ test("clean quick search navigates once after closing and preserves selective pr
   assert.equal(document.querySelector('[data-testid="admin-quick-search-dialog"]'), null)
 })
 
-test("quick search Escape and shortcut toggle restore the real opening control", async t => {
+test("quick search Escape restores the real opening button", async t => {
   const p = await setup(t, { dirty: false, detail: false })
   const trigger = document.querySelector('[data-testid="admin-quick-search-trigger"]')
   await React.act(async () => { trigger.focus(); trigger.click() }); await p.settle()
   await p.key("Escape"); assert.ok(document.activeElement === trigger)
-  await p.open(); await p.key("k", { ctrlKey: true }); assert.ok(document.activeElement === trigger)
+  await p.open(); await p.key("Escape"); assert.ok(document.activeElement === trigger)
   assert.deepEqual(p.calls, [])
 })
 

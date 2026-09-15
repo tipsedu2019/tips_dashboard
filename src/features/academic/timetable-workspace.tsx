@@ -106,7 +106,7 @@ function buildTimetableVisibleRange(days: 7 | 14) {
 
 function TimetableWorkspaceSkeleton() {
   return (
-    <div className="flex flex-col gap-4 px-4 lg:px-6">
+    <div className="flex flex-col gap-4 px-4 sm:px-5 lg:px-6">
       <div className="grid gap-4 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, index) => (
           <Skeleton key={index} className="h-28 w-full rounded-2xl" />
@@ -411,7 +411,7 @@ export function AcademicTimetableWorkspace() {
   }
 
   return (
-    <div className={`${styles.scope} flex flex-col gap-6 px-4 lg:px-6`}>
+    <div className={`${styles.scope} flex flex-col gap-6 px-4 sm:px-5 lg:px-6`}>
       {error ? (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">

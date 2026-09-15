@@ -12,9 +12,8 @@ export const DataTableSearchField = forwardRef<HTMLInputElement, {
   label: string;
   clearLabel?: string;
   placeholder?: string;
-  shortcut?: string;
   className?: string;
-}>(function DataTableSearchField({ value, onValueChange, label, clearLabel = `${label} 초기화`, placeholder, shortcut, className }, ref) {
+}>(function DataTableSearchField({ value, onValueChange, label, clearLabel = `${label} 초기화`, placeholder, className }, ref) {
   const inputRef = useRef<HTMLInputElement>(null);
   useImperativeHandle(ref, () => inputRef.current!, []);
   function clear() {
@@ -33,7 +32,7 @@ export const DataTableSearchField = forwardRef<HTMLInputElement, {
             clear();
           }
         }}
-        aria-label={label} aria-keyshortcuts={shortcut} autoComplete="off" enterKeyHint="search" placeholder={placeholder}
+        aria-label={label} autoComplete="off" enterKeyHint="search" placeholder={placeholder}
         className="h-11 pl-9 pr-11 sm:h-9 [&::-webkit-search-cancel-button]:appearance-none [&::-webkit-search-decoration]:appearance-none" />
       <Button type="button" variant="ghost" size="icon" aria-label={clearLabel} disabled={!value}
         className={cn("absolute right-0 top-0 size-11 sm:right-0.5 sm:top-0.5 sm:size-8", !value && "invisible")}

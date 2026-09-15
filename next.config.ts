@@ -55,12 +55,22 @@ const nextConfig: NextConfig = {
     ];
   },
 
-  // Redirects for better SEO
+  // Public pages are owned by tips_dashboard_public; keep existing bookmarks usable.
   async redirects() {
     return [
       {
         source: '/home',
         destination: '/admin/dashboard',
+        permanent: true,
+      },
+      ...['classes', 'reviews', 'results'].map((page) => ({
+        source: `/${page}`,
+        destination: `https://tipsedu.co.kr/${page}`,
+        permanent: true,
+      })),
+      {
+        source: '/landing',
+        destination: 'https://tipsedu.co.kr',
         permanent: true,
       },
     ];

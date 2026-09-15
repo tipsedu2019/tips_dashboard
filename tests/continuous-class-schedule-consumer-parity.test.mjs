@@ -5,7 +5,6 @@ import test from "node:test"
 import { buildDashboardMetrics } from "../src/features/dashboard/metrics.js"
 import { buildPublicClassesPayload } from "../src/server/public-classes-payload.js"
 import { createPublicClassesApiResponder } from "../src/server/public-classes-api.js"
-import { progressForSession, sessionDisplay, sessionState } from "../src/components/public/classes/helpers.ts"
 
 test("dashboard conflict reader uses normalized lesson sessions including two sessions on one date", () => {
   const metrics = buildDashboardMetrics({
@@ -102,10 +101,16 @@ test("public API preserves materialized calendar and progress without private pl
   assert.equal(item.enrolledCount, 1)
   assert.equal(item.waitlistCount, 1)
   assert.equal(item.schedulePlan.billingPeriods[0].sessionCount, 2, "only recorded active and makeup sessions count")
-  assert.deepEqual(sessionDisplay(item, regular), { time: "17:00–18:00", regularFallback: true, teacher: "정규 선생님", room: "1강의실" })
-  assert.deepEqual(sessionDisplay(item, makeup), { time: "19:00–20:00", regularFallback: false, teacher: "보강 선생님", room: "2강의실" })
-  assert.deepEqual(sessionState(makeup), { label: "보강", cancelled: false })
-  assert.deepEqual(sessionState(cancelled), { label: "휴강", cancelled: true })
+  assert.equal(item.schedule, "월 17:00-18:00")
+  assert.equal(item.teacher, "정규 선생님")
+  assert.equal(item.room, "1강의실")
+  assert.equal(regular.scheduleState, "active")
+  assert.equal(makeup.scheduleState, "makeup")
+  assert.equal(makeup.startTime, "19:00")
+  assert.equal(makeup.endTime, "20:00")
+  assert.equal(makeup.teacherName, "보강 선생님")
+  assert.equal(makeup.classroomName, "2강의실")
+  assert.equal(cancelled.scheduleState, "cancelled")
   assert.equal(makeup.originalDate, "2026-09-05")
   assert.equal(makeup.makeupDate, "2026-09-07")
   assert.equal(makeup.publicNote, "보강 안내")
@@ -113,8 +118,8 @@ test("public API preserves materialized calendar and progress without private pl
   assert.equal(makeup.textbookEntries[0].plan.end, "10")
   assert.equal(makeup.textbookEntries[0].actual.end, "9")
   assert.equal(payload.textbooks[0].lessons[0].title, "공개 단원")
-  assert.equal(progressForSession(payload.progressLogs, regular, item.schedulePlan.sessions).get("book-1").rangeLabel, "1~4쪽")
-  assert.equal(progressForSession(payload.progressLogs, makeup, item.schedulePlan.sessions).get("book-1").rangeLabel, "5~9쪽")
+  assert.equal(payload.progressLogs.find(log => log.sessionId === regular.id)?.rangeLabel, "1~4쪽")
+  assert.equal(payload.progressLogs.find(log => log.sessionId === makeup.sessionKey)?.rangeLabel, "5~9쪽")
   assert.deepEqual(rows, before, "public projection must not mutate the internal planner source")
 })
 

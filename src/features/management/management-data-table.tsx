@@ -63,6 +63,8 @@ import {
   TableHeader,
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
+import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
+import { formatStudentContact } from "@/lib/student-contact-display";
 import { DataTableSettings, DataTableSettingsSection, DataTableSettingsSelect, DataTableColumnSetting } from "@/components/data-table/data-table-settings";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
@@ -126,11 +128,11 @@ const STUDENT_TABLE_COLUMN_IDS = [
 
 const CLASS_TABLE_COLUMN_IDS = [
   "select",
+  "title",
   "subject",
   "grade",
-  "title",
-  "schedule",
   "teacher",
+  "schedule",
   "classroom",
   "enrollmentStatus",
   "capacity",
@@ -283,6 +285,18 @@ const DEFAULT_COLUMN_WIDTHS: Record<string, number> = {
   metaSummary: 220,
 };
 
+// Initial widths only; persisted column preferences still take precedence.
+const STUDENT_COLUMN_WIDTHS: Record<string, number> = {
+  select: 44,
+  title: 180,
+  school: 120,
+  grade: 64,
+  contact: 152,
+  parentContact: 152,
+  status: 88,
+  action: 44,
+};
+
 const DEFAULT_TABLE_CONFIG: Record<
   ManagementKind,
   {
@@ -422,12 +436,12 @@ function formatColumnLabel(columnId: string, badgeLabel: string, statusLabel: st
   return prettifyColumnKey(columnId);
 }
 
-function getPinnedColumn(columnId: string, surface: "header" | "body"): DataTablePinnedColumn | undefined {
+function getPinnedColumn(columnId: string, surface: "header" | "body", selectionWidth = 40): DataTablePinnedColumn | undefined {
   if (columnId === "select") {
     return { left: 0, layer: surface === "header" ? 40 : 20 };
   }
   if (columnId === "title") {
-    return { left: 40, layer: surface === "header" ? 30 : 10 };
+    return { left: selectionWidth, layer: surface === "header" ? 30 : 10 };
   }
   return undefined;
 }
@@ -443,12 +457,12 @@ function getKindColumnIds(kind: ManagementKind) {
   return new Set<string>(TABLE_COLUMN_IDS_BY_KIND[kind]);
 }
 
-function normalizeColumnWidth(value: unknown, fallback: number) {
+function normalizeColumnWidth(value: unknown, fallback: number, minimum = 72) {
   const width = Number(value);
   if (!Number.isFinite(width)) {
     return fallback;
   }
-  return Math.min(420, Math.max(72, Math.round(width)));
+  return Math.min(420, Math.max(minimum, Math.round(width)));
 }
 
 function normalizeScalar(value: unknown): string {
@@ -766,15 +780,16 @@ function normalizeClassScheduleMeta(value: unknown) {
 }
 
 function formatClassScheduleLineForList(line: string, row: ManagementRow) {
+  const displayLine = formatScheduleTimeRange(line);
   const raw = row.raw || {};
   const teacher = normalizeClassScheduleMeta(raw.teacher || raw.teacher_name || raw.teacherName);
   const classroom = normalizeClassScheduleMeta(raw.classroom || raw.room);
   const expectedScheduleMeta = [teacher, classroom].filter(Boolean).join(", ");
   if (!expectedScheduleMeta) {
-    return line;
+    return displayLine;
   }
 
-  return line.replace(/\s*\(([^()]*)\)\s*$/, (match, slotMeta) => {
+  return displayLine.replace(/\s*\(([^()]*)\)\s*$/, (match, slotMeta) => {
     if (normalizeClassScheduleMeta(slotMeta) !== normalizeClassScheduleMeta(expectedScheduleMeta)) {
       return match;
     }
@@ -798,7 +813,7 @@ function renderClassScheduleCell(row: ManagementRow) {
   return (
     <div className="grid min-w-[11rem] gap-1 py-0.5 text-sm text-foreground">
       {lines.map((line, index) => (
-        <span key={`${row.id}-schedule-${index}`} className="leading-5">
+        <span key={`${row.id}-schedule-${index}`} className="whitespace-normal break-words leading-5">
           {formatClassScheduleLineForList(line, row)}
         </span>
       ))}
@@ -869,13 +884,9 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
   const waitlistCount = Number(row.metrics.waitlistCount || 0);
   const mode = registeredCount > 0 ? "registered" : waitlistCount > 0 ? "waitlist" : "none";
   const lifecycleBadge = (
-    row.status === "재원" ? (
-      <span className="px-1 text-xs text-muted-foreground">{row.status}</span>
-    ) : (
-      <Badge variant="secondary" className={getStatusColor(row.statusValue || row.status)}>
-        {row.status}
-      </Badge>
-    )
+    <span className={cn("text-sm leading-5", row.status === "재원" ? "text-foreground" : "text-muted-foreground")}>
+      {row.status || "—"}
+    </span>
   );
 
   if (mode === "none") {
@@ -899,7 +910,7 @@ function renderStudentClassStatusPopover(row: ManagementRow) {
             variant="ghost"
             size="sm"
             className={cn(
-              "relative z-20 h-6 rounded-full px-2.5 text-xs font-medium",
+              "relative z-20 h-6 rounded-md px-1.5 text-xs font-medium",
               mode === "registered"
                 ? "bg-muted/60 text-foreground hover:bg-muted"
                 : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50",
@@ -1014,9 +1025,9 @@ function buildDefaultColumnOrder(kind: ManagementKind, columnIds: string[]) {
   return [...new Set(["select", ...ordered, ...columnIds])];
 }
 
-function buildDefaultColumnSizing(columnIds: string[]) {
+function buildDefaultColumnSizing(columnIds: string[], kind: ManagementKind) {
   return Object.fromEntries(
-    columnIds.map((columnId) => [columnId, DEFAULT_COLUMN_WIDTHS[columnId] || 140]),
+    columnIds.map((columnId) => [columnId, (kind === "students" ? STUDENT_COLUMN_WIDTHS[columnId] : undefined) || DEFAULT_COLUMN_WIDTHS[columnId] || 140]),
   ) as ColumnSizingState;
 }
 
@@ -1062,7 +1073,7 @@ function sanitizePreferences(
   const columnSizing = Object.fromEntries(
     columnIds.map((columnId) => [
       columnId,
-      normalizeColumnWidth(savedColumnSizing[columnId], defaultColumnSizing[columnId] || DEFAULT_COLUMN_WIDTHS[columnId] || 140),
+      normalizeColumnWidth(savedColumnSizing[columnId], defaultColumnSizing[columnId] || DEFAULT_COLUMN_WIDTHS[columnId] || 140, kind === "students" ? 44 : 72),
     ]),
   ) as ColumnSizingState;
   const sorting = (saved.sorting || []).filter((item) => allowedColumnIds.has(item.id)).slice(0, 2);
@@ -1367,9 +1378,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         enableHiding: false,
         enableResizing: false,
         enableGrouping: false,
-        size: 40,
-        minSize: 40,
-        maxSize: 40,
+        size: kind === "students" ? 44 : 40,
+        minSize: kind === "students" ? 44 : 40,
+        maxSize: kind === "students" ? 44 : 40,
       },
       {
         id: "title",
@@ -1380,8 +1391,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             <button
               type="button"
               className={cn(
-                "-mx-1.5 inline-flex min-h-6 max-w-full cursor-pointer rounded-md px-1.5 py-0.5 text-left text-sm font-medium leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0",
-                kind === "classes" ? "text-blue-600 dark:text-blue-400" : "text-foreground",
+                "-mx-1.5 inline-flex min-h-6 max-w-full cursor-pointer rounded-md px-1.5 py-0.5 text-left text-sm font-semibold leading-5 underline-offset-4 transition-colors hover:bg-primary/5 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-1 active:translate-y-px motion-reduce:transition-none motion-reduce:active:translate-y-0",
+                "text-foreground",
               )}
               onClick={() => openManagementRow(row.original)}
               data-student-detail-trigger={kind === "students" ? row.original.id : undefined}
@@ -1413,19 +1424,19 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         id: "school",
         accessorFn: (row) => normalizeScalar((row.raw || {}).school),
         header: "학교",
-        cell: ({ row }) => renderPlainCell((row.original.raw || {}).school),
+        cell: ({ row }) => renderPlainCell((row.original.raw || {}).school || "—", "whitespace-normal break-words text-sm leading-5 text-foreground"),
       },
       {
         id: "contact",
         accessorFn: (row) => normalizeScalar((row.raw || {}).contact),
-        header: "연락처",
-        cell: ({ row }) => renderPlainCell((row.original.raw || {}).contact),
+        header: "학생 연락처",
+        cell: ({ row }) => renderPlainCell(formatStudentContact((row.original.raw || {}).contact)),
       },
       {
         id: "parentContact",
         accessorFn: (row) => normalizeScalar((row.raw || {}).parent_contact || (row.raw || {}).parentContact),
         header: "학부모 연락처",
-        cell: ({ row }) => renderPlainCell((row.original.raw || {}).parent_contact || (row.original.raw || {}).parentContact),
+        cell: ({ row }) => renderPlainCell(formatStudentContact((row.original.raw || {}).parent_contact || (row.original.raw || {}).parentContact)),
       },
       {
         id: "publisher",
@@ -1456,7 +1467,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         id: "grade",
         accessorFn: (row) => normalizeScalar((row.raw || {}).grade),
         header: "학년",
-        cell: ({ row }) => renderPlainCell((row.original.raw || {}).grade, "text-sm text-foreground"),
+        cell: ({ row }) => renderPlainCell((row.original.raw || {}).grade || "—", "text-sm leading-5 text-foreground"),
         filterFn: (row, columnId, value) => !value || row.getValue(columnId) === value,
       },
       {
@@ -1553,8 +1564,10 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         cell: ({ row }) =>
           kind === "students" ? (
             renderStudentClassStatusPopover(row.original)
+          ) : kind === "classes" ? (
+            <span className="text-sm leading-5">{row.original.status}</span>
           ) : (
-            <Badge variant="secondary" className={getStatusColor(kind === "classes" ? getClassStatusFilterValue(row.original) : row.original.statusValue)}>
+            <Badge variant="secondary" className={getStatusColor(row.original.statusValue)}>
               {row.original.status}
             </Badge>
         ),
@@ -1574,13 +1587,13 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     return fixedColumns.filter((column) => {
       const columnId = String(column.id ?? "");
       return getKindColumnIds(kind).has(columnId) && USER_FACING_COLUMN_IDS.has(columnId);
-    }).map((column) => ({ ...column, enableSorting: MANAGEMENT_NUMBERED_SORT_COLUMNS[kind].includes(String(column.id)) }));
+    }).map((column) => ({ ...column, ...(kind === "students" && column.id !== "select" ? { minSize: 44 } : {}), enableSorting: MANAGEMENT_NUMBERED_SORT_COLUMNS[kind].includes(String(column.id)) }));
   }, [actions, badgeLabel, emptyLabel, kind, openManagementRow, statusLabel]);
 
   const allColumnIds = useMemo(() => columns.map((column) => String(column.id ?? "")).filter(Boolean), [columns]);
 
   const defaultVisibility = useMemo(() => buildDefaultVisibility(kind, allColumnIds), [allColumnIds, kind]);
-  const defaultColumnSizing = useMemo(() => buildDefaultColumnSizing(allColumnIds), [allColumnIds]);
+  const defaultColumnSizing = useMemo(() => buildDefaultColumnSizing(allColumnIds, kind), [allColumnIds, kind]);
 
   useEffect(() => {
     setBulkEditField(BULK_EDIT_FIELDS[kind][0]?.id || "");
@@ -2385,9 +2398,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
               const currentColumnWidth = column.getSize();
               return <DataTableColumnSetting key={columnId}
                 label={option.label} visible={column.getIsVisible()} canHide={column.getCanHide()}
-                width={currentColumnWidth} canMoveUp={currentColumnIndex !== 1} canMoveDown={currentColumnIndex !== columnOrder.length - 1}
+                width={currentColumnWidth} minWidth={kind === "students" ? 44 : 72} canMoveUp={currentColumnIndex !== 1} canMoveDown={currentColumnIndex !== columnOrder.length - 1}
                 onVisibleChange={(value) => column.toggleVisibility(value)}
-                onWidthChange={(value) => setColumnSizing((current) => ({ ...current, [columnId]: normalizeColumnWidth(value, currentColumnWidth) }))}
+                onWidthChange={(value) => setColumnSizing((current) => ({ ...current, [columnId]: normalizeColumnWidth(value, currentColumnWidth, kind === "students" ? 44 : 72) }))}
                 onMove={(direction) => setColumnOrder((current) => reorderColumns(current, columnId, direction))}
               />;
             })}
@@ -2704,31 +2717,29 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                   className="-ml-2 -mt-1"
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    {subject ? <Badge className="rounded-md px-2 py-0.5">{subject}</Badge> : null}
-                    {grade ? <Badge variant="secondary" className="rounded-md px-2 py-0.5">{grade}</Badge> : null}
-                    <Badge variant="secondary" className={cn("rounded-md px-2 py-0.5", getStatusColor(getClassStatusFilterValue(record)))}>
-                      {record.status}
-                    </Badge>
-                  </div>
                   <button
                     type="button"
-                    className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-class-detail-trigger={record.id}
                   >
                     {record.title}
                   </button>
+                  <div className="mt-1 flex flex-wrap gap-x-2 gap-y-1 text-sm leading-5">
+                    {subject ? <span>{subject}</span> : null}
+                    {grade ? <span>{grade}</span> : null}
+                    <span className="text-muted-foreground">{record.status}</span>
+                  </div>
                   <div className="mt-1 flex min-w-0 flex-wrap gap-x-2 gap-y-1 text-sm text-muted-foreground">
-                    {teacher ? <span className="min-w-0 break-keep">{teacher}</span> : null}
-                    {classroom ? <span className="min-w-0 break-keep">{classroom}</span> : null}
+                    {teacher ? <span className="min-w-0 whitespace-normal break-words">{teacher}</span> : null}
+                    {classroom ? <span className="min-w-0 whitespace-normal break-words">{classroom}</span> : null}
                   </div>
                 </div>
               </div>
               <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">요일/시간</dt>
-                  <dd className="min-w-0 text-foreground [&>div]:min-w-0 [&_span]:break-keep">
+                  <dd className="min-w-0 text-foreground [&>div]:min-w-0 [&_span]:break-words">
                     {renderClassScheduleCell(row.original)}
                   </dd>
                 </div>
@@ -2744,7 +2755,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 </div>
                 <div className="grid grid-cols-[4.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">운영</dt>
-                  <dd className="min-w-0 break-keep text-foreground">
+                  <dd className="min-w-0 whitespace-normal break-words text-foreground">
                     {[capacity > 0 ? `정원 ${capacity}` : "", weeklyHours, tuition].filter(Boolean).join(" · ") || "-"}
                   </dd>
                 </div>
@@ -2790,8 +2801,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           const raw = record.raw || {};
           const school = normalizeScalar(raw.school);
           const grade = normalizeScalar(raw.grade);
-          const contact = normalizeScalar(raw.contact);
-          const parentContact = normalizeScalar(raw.parent_contact || raw.parentContact);
+          const contact = formatStudentContact(raw.contact);
+          const parentContact = formatStudentContact(raw.parent_contact || raw.parentContact);
 
           return (
             <article
@@ -2807,19 +2818,19 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                   className="-ml-2 -mt-1"
                 />
                 <div className="min-w-0 flex-1">
-                  <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
-                    {renderStudentClassStatusPopover(record)}
-                    {school ? <Badge variant="secondary" className="rounded-md px-2 py-0.5">{school}</Badge> : null}
-                    {grade ? <Badge variant="outline" className="rounded-md px-2 py-0.5">{grade}</Badge> : null}
-                  </div>
                   <button
                     type="button"
-                    className="block min-w-0 text-left text-base font-semibold leading-6 text-primary underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-student-detail-trigger={record.id}
                   >
                     {record.title}
                   </button>
+                  <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-5">
+                    <span className="min-w-0 whitespace-normal break-words">{school || "—"}</span>
+                    <span>{grade || "—"}</span>
+                    {renderStudentClassStatusPopover(record)}
+                  </div>
                 </div>
                 <StudentRowActions
                   studentName={record.title}
@@ -2830,11 +2841,11 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
               <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
                 <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">학생 연락처</dt>
-                  <dd className="min-w-0 break-keep text-foreground">{contact || "-"}</dd>
+                  <dd className="min-w-0 break-keep text-foreground">{contact}</dd>
                 </div>
                 <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
                   <dt className="text-muted-foreground">학부모</dt>
-                  <dd className="min-w-0 break-keep text-foreground">{parentContact || "-"}</dd>
+                  <dd className="min-w-0 break-keep text-foreground">{parentContact}</dd>
                 </div>
               </dl>
             </article>
@@ -3018,9 +3029,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                       className={cn(
                         header.id === "select" || header.id === "action" ? "text-center" : "",
                         header.id === "select" && "px-0 py-0",
-                        !getPinnedColumn(header.id, "header") && "z-20",
+                        !getPinnedColumn(header.id, "header", table.getColumn("select")?.getSize()) && "z-20",
                       )}
-                      pin={getPinnedColumn(header.id, "header")}
+                      pin={getPinnedColumn(header.id, "header", table.getColumn("select")?.getSize())}
                       style={getColumnSizeStyle(header.getSize())}
                     >
                       {header.isPlaceholder ? null : (
@@ -3105,7 +3116,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                       return (
                         <DataTableBodyCell
                           key={cell.id}
-                          pin={getPinnedColumn(cell.column.id, "body")}
+                          pin={getPinnedColumn(cell.column.id, "body", table.getColumn("select")?.getSize())}
                           wrap
                           style={getColumnSizeStyle(cell.column.getSize())}
                         >
@@ -3129,7 +3140,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                       return (
                         <DataTableBodyCell
                           key={cell.id}
-                          pin={getPinnedColumn(cell.column.id, "body")}
+                          pin={getPinnedColumn(cell.column.id, "body", table.getColumn("select")?.getSize())}
                           wrap
                           style={getColumnSizeStyle(cell.column.getSize())}
                         />
@@ -3140,7 +3151,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                       return (
                         <DataTableBodyCell
                           key={cell.id}
-                          pin={getPinnedColumn(cell.column.id, "body")}
+                          pin={getPinnedColumn(cell.column.id, "body", table.getColumn("select")?.getSize())}
                           wrap
                           style={getColumnSizeStyle(cell.column.getSize())}
                         />
@@ -3150,7 +3161,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                     return (
                       <DataTableBodyCell
                         key={cell.id}
-                        pin={getPinnedColumn(cell.column.id, "body")}
+                        pin={getPinnedColumn(cell.column.id, "body", table.getColumn("select")?.getSize())}
                         wrap
                         className={cell.column.id === "select" ? "px-0 py-1" : undefined}
                         style={getColumnSizeStyle(cell.column.getSize())}

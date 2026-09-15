@@ -82,11 +82,12 @@ export function DataTableSettingsSelect({ label, value, options, onValueChange, 
   );
 }
 
-export function DataTableColumnSetting({ label, visible, canHide, width, canMoveUp, canMoveDown, onVisibleChange, onWidthChange, onMove }: {
+export function DataTableColumnSetting({ label, visible, canHide, width, minWidth = 72, canMoveUp, canMoveDown, onVisibleChange, onWidthChange, onMove }: {
   label: string;
   visible: boolean;
   canHide: boolean;
   width: number;
+  minWidth?: number;
   canMoveUp: boolean;
   canMoveDown: boolean;
   onVisibleChange: (visible: boolean) => void;
@@ -99,7 +100,7 @@ export function DataTableColumnSetting({ label, visible, canHide, width, canMove
         <Checkbox checked={visible} onCheckedChange={(value) => onVisibleChange(!!value)} disabled={!canHide} aria-label={`${label} 표시`} className="size-4 shrink-0" />
         <span className="min-w-0 break-words leading-5">{label}</span>
       </label>
-      <Input aria-label={`${label} 너비`} type="number" min={72} max={420} step={8} value={width} onChange={(event) => onWidthChange(event.target.value)} className="h-8 min-w-0 bg-background px-2 text-right text-xs tabular-nums shadow-none max-sm:h-11" />
+      <Input aria-label={`${label} 너비`} type="number" min={minWidth} max={420} step={1} value={width} onChange={(event) => onWidthChange(event.target.value)} className="h-8 min-w-0 bg-background px-2 text-right text-xs tabular-nums shadow-none max-sm:h-11" />
       <div className="flex items-center justify-end">
         <Button type="button" variant="ghost" size="icon" className="size-9 rounded-md text-muted-foreground max-sm:h-11" aria-label={`${label} 앞으로 이동`} title="앞으로 이동" disabled={!canMoveUp} onClick={() => onMove("up")}><ArrowUp className="size-3.5" aria-hidden="true" /></Button>
         <Button type="button" variant="ghost" size="icon" className="size-9 rounded-md text-muted-foreground max-sm:h-11" aria-label={`${label} 뒤로 이동`} title="뒤로 이동" disabled={!canMoveDown} onClick={() => onMove("down")}><ArrowDown className="size-3.5" aria-hidden="true" /></Button>

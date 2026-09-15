@@ -34,6 +34,8 @@ import {
   normalizeStudentStatus,
 } from "@/lib/student-status";
 import { cn } from "@/lib/utils";
+import { formatStudentContact } from "@/lib/student-contact-display";
+import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
 import {
   ACADEMIC_SUBJECT_VALUES,
   isScienceGrade,
@@ -1157,9 +1159,7 @@ function renderStudentTimelineList(
     <section className="overflow-hidden rounded-md border bg-background">
       <div className="flex h-10 items-center justify-between border-b px-3">
         <div className="text-sm font-semibold">{label}</div>
-        <Badge variant="secondary" className="h-6 rounded-full px-2">
-          {items.length}건
-        </Badge>
+        <span className="text-sm tabular-nums text-muted-foreground">{items.length}건</span>
       </div>
       {items.length > 0 ? (
         <div className="divide-y">
@@ -1183,7 +1183,7 @@ function renderStudentHistoryPanel(row: ManagementRow) {
         {renderStudentTimelineList("수업 이력", classHistory, (item, index) => (
           <div key={text(item.id) || `class-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
             <div className="flex min-w-0 items-start justify-between gap-3">
-              <span className="min-w-0 whitespace-normal break-words text-sm font-medium">{text(item.className || item.class_name) || "-"}</span>
+              <span className="min-w-0 whitespace-normal break-words text-sm font-semibold leading-5">{text(item.className || item.class_name) || "-"}</span>
               <Badge variant="outline" className="shrink-0">{text(item.label || item.action) || "-"}</Badge>
             </div>
             <div className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">
@@ -1196,8 +1196,8 @@ function renderStudentHistoryPanel(row: ManagementRow) {
         {renderStudentTimelineList("교재 이력", textbookHistory, (item, index) => (
           <div key={text(item.id) || `textbook-history-${index}`} className="grid gap-0.5 px-3 py-2.5">
             <div className="flex min-w-0 items-start justify-between gap-3">
-              <span className="min-w-0 whitespace-normal break-words text-sm font-medium">{text(item.title) || "-"}</span>
-              <Badge variant="outline" className="shrink-0">{text(item.quantity) || "0"}권</Badge>
+              <span className="min-w-0 whitespace-normal break-words text-sm font-semibold leading-5">{text(item.title) || "-"}</span>
+              <span className="shrink-0 text-sm leading-5 tabular-nums">{text(item.quantity) || "0"}권</span>
             </div>
             <div className="whitespace-normal break-words text-xs leading-5 text-muted-foreground">
               {[text(item.className || item.class_name), text(item.status), formatHistoryDate(item.issuedAt || item.issued_at || item.createdAt || item.created_at)]
@@ -1368,6 +1368,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
+  const [validationAttempted, setValidationAttempted] = useState(false);
   const [savedForm, setSavedForm] = useState<FormState>(() => initialForm(kind));
   const [discardConfirmationOpen, setDiscardConfirmationOpen] = useState(false);
   const discardReturnFocusRef = useRef<HTMLElement | null>(null);
@@ -1927,7 +1928,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                      <button
 	                        type="button"
 	                        data-testid="class-roster-student-name-link"
-	                        className="block max-w-full whitespace-normal break-words text-left text-sm font-semibold underline-offset-2 transition hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+	                        className="block max-w-full whitespace-normal break-words text-left text-sm font-semibold leading-5 underline-offset-2 transition hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
 	                        onClick={() => setPendingClassStudentDetailId(id)}
 	                      >
 	                        {resolveRelatedTitle(id)}
@@ -1935,19 +1936,19 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                    </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학교</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{school || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{school || "—"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학년</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{grade || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{grade || "—"}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학생 연락처</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{studentContact || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(studentContact)}</div>
                     </div>
                     <div className="min-w-0">
                       <div className="text-xs text-muted-foreground lg:hidden">학부모 연락처</div>
-                      <div className="whitespace-normal break-words text-sm font-medium">{parentContact || "-"}</div>
+                      <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(parentContact)}</div>
                     </div>
 	                    <div className="flex flex-wrap justify-end gap-1">
 	                      {modeLabel !== "수강" ? (
@@ -1981,7 +1982,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           ) : ids.map((id) => (
             <div key={`${modeLabel}-${id}`} className="student-class-row grid min-w-0 gap-3 px-4 py-3">
               <div className="min-w-0">
-                <div className="whitespace-normal break-words text-sm font-semibold leading-6">{resolveRelatedTitle(id)}</div>
+                <div className="whitespace-normal break-words text-sm font-semibold leading-5">{resolveRelatedTitle(id)}</div>
                 <div className="mt-1 whitespace-normal break-words text-xs leading-5 text-muted-foreground">{relatedMeta(kind, resolveRelatedRecord(id)) || modeLabel}</div>
               </div>
               <div className="student-class-actions flex flex-wrap gap-2">
@@ -2455,6 +2456,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     );
   };
 
+  const validateRequiredFields = (scope: "detail" | "form") => {
+    setValidationAttempted(true);
+    const missing = FORM_FIELDS[kind].find((field) => (
+      field.required
+      && (kind !== "classes" || field.name !== "subjectAreaKey" || isScienceClassSubject(form.subject))
+      && !text(form[field.name])
+    ));
+    if (!missing) return true;
+    setOperationError(null);
+    setSaveNotice("");
+    document.getElementById(`${kind}-${scope}-${missing.name}`)?.focus();
+    return false;
+  };
+
   const renderEditableFields = (scope: "detail" | "form" | "quick", fieldNames?: string[]) => {
     const fieldsDisabled = !canMutateRows || (scope === "form" && saving);
     const requestedFields = fieldNames
@@ -2469,6 +2484,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         {fieldsToRender.map((field) => {
           const id = `${kind}-${scope}-${field.name}`;
           const value = form[field.name] || "";
+          const invalid = validationAttempted && Boolean(field.required) && !text(value);
+          const errorId = `${id}-error`;
           const selectOptions = getEditableFieldOptions(field.name, value);
           const fieldWrapperClassName = cn(
             "space-y-2",
@@ -2490,7 +2507,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                     disabled={fieldsDisabled || scienceSubjectAreaOptions.length === 0}
                   >
-                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택">
+                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택" aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
                       <SelectValue placeholder={field.placeholder} />
                     </SelectTrigger>
                     <SelectContent>
@@ -2500,7 +2517,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       ))}
                     </SelectContent>
                   </Select>
-                  {!value ? <p className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
+                  {invalid ? <p id={errorId} role="alert" className="text-xs text-destructive">과학 영역을 선택하세요.</p> : null}
                 </>
               ) : kind === "classes" && field.name === "capacity" ? (
                 <ClassCapacityInput
@@ -2556,6 +2573,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   id={id}
                   name={field.name}
                   type={field.type || "text"}
+                  aria-invalid={invalid || undefined}
+                  aria-describedby={invalid ? errorId : undefined}
                   inputMode={field.inputMode}
                   autoComplete={field.autoComplete || "off"}
                   autoFocus={scope === "form" && field.name === FORM_FIELDS[kind][0]?.name}
@@ -2566,6 +2585,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               )}
+              {invalid && field.name !== "subjectAreaKey" ? (
+                <p id={errorId} role="alert" className="text-xs text-destructive">{field.label} 항목을 입력하세요.</p>
+              ) : null}
               </div>
             </Fragment>
           );
@@ -2597,6 +2619,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       : Promise.resolve(null);
     setSelectedRow(activeRow);
     setForm(nextForm);
+    setValidationAttempted(false);
     setSavedForm(nextForm);
     setDiscardConfirmationOpen(false);
     setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
@@ -2825,6 +2848,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setScheduleDefaultsRequestKey("");
         const nextForm = initialForm(kind);
         setForm(nextForm);
+        setValidationAttempted(false);
         setSavedForm(nextForm);
         setDiscardConfirmationOpen(false);
         setClassScheduleSlots(kind === "classes" ? parseClassScheduleSlots(nextForm.schedule, nextForm.teacher, nextForm.classroom) : []);
@@ -2899,6 +2923,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
+    if (!validateRequiredFields("form")) return;
     const isCurrent = beginSaving({ form: formDraft, schedule: scheduleDraft });
     if (!isCurrent) return;
     setOperationError(null);
@@ -2974,6 +2999,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setOperationError("과학팀 교사와 과학 강의실을 선택하세요.");
       return;
     }
+    if (!validateRequiredFields("detail")) return;
     const isCurrent = beginSaving({ form: formDraft, ...(!normalizedScheduleDefaults ? { schedule: scheduleDraft } : {}) });
     if (!isCurrent) return;
     setOperationError(null);
@@ -3266,7 +3292,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 {summaryMetaItems.map((item) => (
                   <span key={item.label} className="inline-flex max-w-full items-baseline gap-1.5 text-xs leading-5 text-muted-foreground">
                     <span className="shrink-0">{item.label}</span>
-                    <span className="min-w-0 whitespace-normal break-words font-medium text-foreground">{item.value}</span>
+                    <span className="grid min-w-0 gap-1 whitespace-normal break-words font-normal text-foreground">
+                      {item.label === "요일/시간"
+                        ? formatClassScheduleDisplayLines(item.value).map((line, index) => <span key={index}>{formatScheduleTimeRange(line)}</span>)
+                        : item.value}
+                    </span>
                   </span>
                 ))}
               </div>
@@ -3372,7 +3402,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 return (
                   <div key={id} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2.5">
                     <div className="min-w-0">
-                      <div className="whitespace-normal break-words text-sm font-medium">{textbook?.title || "교재 정보 확인 필요"}</div>
+                      <div className="whitespace-normal break-words text-sm font-semibold leading-5">{textbook?.title || "교재 정보 확인 필요"}</div>
                       {textbook ? (
                         <PickerMetaPills
                           className="mt-1"

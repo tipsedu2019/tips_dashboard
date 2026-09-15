@@ -1,5 +1,7 @@
 import type { ComponentProps } from "react"
 
+import { cn } from "@/lib/utils"
+
 import { Button } from "@/components/ui/button"
 
 import { getRegistrationSaveActionPresentation } from "./registration-application-model"
@@ -21,6 +23,7 @@ export function RegistrationSaveButton({
   blocked = false,
   actionLabel,
   cleanLabel = "저장됨",
+  className,
   ...buttonProps
 }: RegistrationSaveButtonProps) {
   const presentation = getRegistrationSaveActionPresentation({
@@ -34,6 +37,8 @@ export function RegistrationSaveButton({
   return (
     <Button
       {...buttonProps}
+      className={cn("min-h-[var(--touch-target-height)] min-w-28 shrink-0 sm:min-h-[var(--control-height)]", className)}
+      aria-busy={saving || undefined}
       variant={presentation.emphasis === "primary" ? "default" : "outline"}
       disabled={presentation.disabled}
     >

@@ -15,6 +15,9 @@ async function setup(t) {
   globalThis.requestAnimationFrame = window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
   globalThis.cancelAnimationFrame = window.cancelAnimationFrame = window.clearTimeout;
   window.HTMLElement.prototype.scrollIntoView = () => {};
+  // React DOM was imported before jsdom, so its legacy input-focus probe needs these shims.
+  window.HTMLInputElement.prototype.attachEvent = () => {};
+  window.HTMLInputElement.prototype.detachEvent = () => {};
   const { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } = loadNotificationComponent('src/components/ui/workspace-tabs.tsx');
   const changes = [], root = createRoot(document.getElementById('root'));
   let mounts = 0, unmounts = 0, accept;
@@ -87,4 +90,23 @@ test('all triggers control one stable labelled panel, preserving child DOM and d
   assert.equal(panel.hidden, false);
   assert.equal(p.mounts, 1);
   assert.equal(p.unmounts, 0);
+});
+
+
+test('accepted deep-link selection reveals the clipped tab without moving focus or resetting the draft', async (t) => {
+  const p = await setup(t), [pending, , , mine] = p.tabs;
+  const list = document.querySelector('[role="tablist"]');
+  const draft = document.querySelector('input');
+  list.getBoundingClientRect = () => ({ left: 20, right: 370 });
+  mine.getBoundingClientRect = () => ({ left: 410, right: 510 });
+  pending.getBoundingClientRect = () => ({ left: -120, right: -20 });
+  await React.act(async () => draft.focus());
+  await p.accept('mine');
+  assert.equal(list.scrollLeft, 140);
+  assert.equal(document.activeElement, draft);
+  assert.deepEqual(p.changes, []);
+  await p.accept('pending');
+  assert.equal(list.scrollLeft, 0);
+  assert.equal(document.activeElement, draft);
+  assert.equal(p.mounts, 1);
 });

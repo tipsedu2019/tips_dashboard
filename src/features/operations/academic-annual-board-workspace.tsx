@@ -1604,7 +1604,7 @@ export function AcademicAnnualBoardWorkspace() {
   return (
     <div className="annual-board-workspace flex flex-col gap-4">
       {error || mutationError ? (
-        <div className="annual-board-non-print px-4 lg:px-6">
+        <div className="annual-board-non-print px-4 sm:px-5 lg:px-6">
           <Alert variant="destructive">
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>{error || mutationError}</span>
@@ -1619,7 +1619,7 @@ export function AcademicAnnualBoardWorkspace() {
       ) : null}
 
       {densityError?.code === "annual_board_too_dense" ? (
-        <div className="annual-board-non-print px-4 lg:px-6">
+        <div className="annual-board-non-print px-4 sm:px-5 lg:px-6">
           <Alert>
             <AlertDescription>선택한 연도의 일정이 너무 많아 이전에 성공한 연간 일정표를 유지합니다.</AlertDescription>
           </Alert>
@@ -1627,7 +1627,7 @@ export function AcademicAnnualBoardWorkspace() {
       ) : null}
 
       {isSeedCalendar || !canManageAll ? (
-        <div className="annual-board-non-print px-4 lg:px-6">
+        <div className="annual-board-non-print px-4 sm:px-5 lg:px-6">
           <Alert>
             <AlertDescription>
               {isSeedCalendar ? "연간 일정표는 현재 기본 학사일정 세트를 기준으로 표시됩니다." : "읽기 전용 상태로 표시됩니다."}
@@ -1636,7 +1636,7 @@ export function AcademicAnnualBoardWorkspace() {
         </div>
       ) : null}
 
-      <div className="px-4 lg:px-6">
+      <div className="px-4 sm:px-5 lg:px-6">
         <div className="annual-board-print-surface overflow-hidden border">
           <div className="annual-board-print-header hidden border-b px-4 py-3 print:block">
             <h2 className="text-sm font-semibold text-foreground">{printSummary}</h2>

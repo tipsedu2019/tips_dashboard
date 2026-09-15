@@ -1,10 +1,10 @@
-/* Option 3 pilot. Keep these rules within the student workspace until review. */
+/* Student detail composition; list and shell primitives remain shared. */
 .student-workspace,
 .student-edit-sheet,
 .class-edit-sheet {
-  --student-control-height: 42px;
-  --student-control-radius: 6px;
-  --student-motion-fast: 120ms;
+  --student-control-height: var(--field-height);
+  --student-control-radius: var(--radius-control);
+  --student-motion-fast: var(--motion-duration-control);
   --student-motion-ease: cubic-bezier(0.2, 0, 0, 1);
 }
 
@@ -14,14 +14,15 @@
 :is(.student-fields, .class-fields, .class-schedule-fields) :is([data-slot="input"], [data-slot="select-trigger"]) {
   height: var(--student-control-height);
   border-radius: var(--student-control-radius);
-  font-size: 15px;
+  font-size: 14px;
+  line-height: 20px;
 }
 .student-list-toolbar [aria-label$="검색어 지우기"] { height: 32px; }
 
 .student-edit-overlay,
 .class-edit-overlay {
   background: color-mix(in oklch, var(--foreground), transparent 90%);
-  animation-duration: 180ms;
+  animation-duration: var(--motion-duration-dialog);
 }
 .student-edit-sheet {
   container-name: student-edit-sheet;
@@ -37,7 +38,7 @@
   overscroll-behavior: contain;
   scroll-padding-block: 96px;
 }
-.student-edit-sheet[data-state="open"] { animation: student-sheet-enter 180ms var(--student-motion-ease); }
+.student-edit-sheet[data-state="open"] { animation: student-sheet-enter var(--motion-duration-dialog) var(--student-motion-ease); }
 /* Closed dialogs release pointers immediately, following the existing dialog contract. */
 .student-edit-sheet > [data-slot="dialog-header"] {
   margin: -28px -32px 28px;
@@ -49,10 +50,11 @@
   text-align: left;
 }
 .student-edit-sheet [data-slot="dialog-title"] {
-  font-size: 22px;
-  line-height: 1.35;
-  letter-spacing: -0.025em;
-  font-weight: 650;
+  font-size: 20px;
+  line-height: 28px;
+  letter-spacing: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
 }
 .student-edit-sheet .student-sheet-close {
   position: absolute;
@@ -66,19 +68,19 @@
   row-gap: 24px;
 }
 .student-fields > div { min-width: 0; }
-.student-fields [data-slot="label"] { font-size: 13px; line-height: 18px; font-weight: 550; }
+.student-fields [data-slot="label"] { font-size: 14px; line-height: 20px; font-weight: 500; }
 .student-field-divider { grid-column: 1 / -1; height: 1px; background: var(--border); margin: 2px 0; }
 .student-detail-body > section + section { margin-top: 28px; padding-top: 24px; }
 .student-detail-body > section:not(:first-child) > .grid { min-width: 0; }
 .student-related-lists, .student-history-lists { grid-template-columns: minmax(0, 1fr); }
 .student-related-lists > section, .student-history-lists > section { min-width: 0; }
 .student-class-picker { grid-template-columns: minmax(0, 1fr); }
+.student-class-actions { justify-content: flex-end; }
 .student-class-actions [data-slot="button"] { min-height: 36px; height: auto; padding: 6px 12px; }
 .student-history-lists .divide-y > div { padding: 14px 16px; row-gap: 4px; }
 @media (min-width: 768px) {
   .student-class-picker { grid-template-columns: minmax(0, 1fr) auto auto; }
   .student-class-row { grid-template-columns: minmax(0, 1fr) auto; align-items: start; }
-  .student-class-actions { justify-content: flex-end; }
 }
 @container student-edit-sheet (max-width: 759px) {
   .student-fields { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -109,36 +111,10 @@
 }
 .student-edit-sheet > [data-slot="alert"] { margin-bottom: 24px; }
 
-/* Use the existing semantic theme and shell. Menu contents and preferences are unchanged. */
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-inset"] { margin: 0; border-radius: 0; box-shadow: none; }
-body:has(:is(.student-workspace, .class-workspace)) header { min-height: 72px; }
-body:has(:is(.student-workspace, .class-workspace)) header p { font-size: 14px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-header"] { padding: 20px 12px 16px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] > div:first-child {
-  border: 0;
-  box-shadow: none;
-  background: transparent;
-  padding: 0;
-}
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] img { width: 48px; height: 48px; max-width: none; flex-shrink: 0; }
-.dark body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-sidebar-brand"] > div:first-child { background: white; }
 .dark .student-fields input[type="date"] { color-scheme: dark; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-button"][data-size="default"] { min-height: 40px; font-size: 14px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub-button"] { min-height: 36px; }
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-button"][data-active="true"],
-body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar-menu-sub-button"][data-active="true"] {
-  color: var(--primary);
-  background: color-mix(in oklch, var(--primary), transparent 91%);
-  font-weight: 600;
-}
-body:has(:is(.student-workspace, .class-workspace)) header [data-slot="button"],
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-quick-search-trigger"],
-body:has(:is(.student-workspace, .class-workspace)) [data-testid="admin-public-site-link"] {
-  height: 36px;
-}
 body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {
   border-radius: 8px;
-  animation-duration: 120ms;
+  animation-duration: var(--motion-duration-control);
   --tw-enter-scale: 1;
   --tw-exit-scale: 1;
 }
@@ -177,7 +153,5 @@ body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-conte
   body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-content"], [data-slot="popover-content"]) {
     animation: none;
   }
-  .student-workspace *, .student-edit-sheet *,
-  body:has(:is(.student-workspace, .class-workspace)) [data-slot="sidebar"] *,
-  body:has(:is(.student-workspace, .class-workspace)) header * { transition-duration: 0ms; scroll-behavior: auto; }
+  .student-workspace *, .student-edit-sheet * { transition-duration: 0ms; scroll-behavior: auto; }
 }

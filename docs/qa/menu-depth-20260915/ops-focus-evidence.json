@@ -1,0 +1,2417 @@
+{
+  "sourceSha": null,
+  "captureCheckoutSha": "fd1f52aec05659f1a65fde5fa3dcd838b181459b",
+  "buildId": "development-server-3216",
+  "base": "http://127.0.0.1:3216",
+  "fixedNow": "2026-09-15T05:30:00.000Z",
+  "data": "synthetic only",
+  "network": "Every API/Supabase request fulfilled or aborted; other external requests aborted; WebSockets closed",
+  "captures": [
+    {
+      "route": "/admin/transfer",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "transfer",
+            "p_filters": {
+              "taskType": "transfer",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "transfer",
+            "p_filters": {
+              "taskType": "transfer",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n전반\n빠른 이동\n다크 모드로 전환\n신청\n처리 중\n완료\n전반 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n상태\n과목\n전 선생님\n전 수업\n학생\n전반사유\n전 미배부 교재\n전 수업 종료일\n전 종료회차\n후 선생님\n후 수업\n후 수업 시작일\n후 시작회차\n후 미배부 교재\n처리 확인\n액션\n전반 없음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "전반 신청",
+          "전체 기간",
+          "오늘",
+          "이번주",
+          "이번달",
+          "직접입력",
+          "",
+          "상태",
+          "",
+          "과목",
+          "",
+          "전 선생님",
+          "",
+          "전 수업",
+          "",
+          "학생",
+          "",
+          "전반사유",
+          "",
+          "전 미배부 교재",
+          "",
+          "전 수업 종료일",
+          "",
+          "전 종료회차",
+          "",
+          "후 선생님",
+          "",
+          "후 수업",
+          "",
+          "후 수업 시작일",
+          "",
+          "후 시작회차",
+          "",
+          "후 미배부 교재",
+          "",
+          "처리 확인",
+          "",
+          "액션",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n전반\n빠른 이동\n다크 모드로 전환\n신청\n처리 중\n완료\n전반 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n상태\n과목\n전 선생님\n전 수업\n학생\n전반사유\n전 미배부 교재\n전 수업 종료일\n전 종료회차\n후 선생님\n후 수업\n후 수업 시작일\n후 시작회차\n후 미배부 교재\n처리 확인\n액션\n전반 없음\n\n0건 · 0–0번째\n\n10개씩 보기\n전반 신청\n\n운영 업무를 입력하고 저장합니다.\n\n전반 업무 흐름\n타당성 검토, 공동 제출, 관리팀 처리\n과목\n*\n필수 입력\n필수 입력\n과목 선택\n학생\n*\n필수 입력\n전 수업 먼저\n전반사유\n전 수업 정보\n전 선생님\n*\n필수 입력\n과목 먼저\n전 수업\n*\n필수 입력\n전 선생님 먼저\n전 미배부 교재\n교재 추가\n전 수업 종료일*\n필수 입력\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n전 수업 종료일 회차\n자동 계산\n후 수업 정보\n후 선생님\n*\n필수 입력\n과목 먼저\n후 수업\n*\n필수 입력\n후 선생님 먼저\n후 미배부 교재\n교재 추가\n후 수업 시작일*\n필수 입력\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n후 수업 시작일 회차\n자동 계산\n수업료 정산\n자동 계산\n전 종료회차\n종료일 선택\n전 진행률\n자동 계산\n전 수업료\n수업료 미등록\n후 시작회차\n시작일 선택\n후 잔여진행률\n자동 계산\n후 수업료\n수업료 미등록\n\n전/후 수업과 날짜를 선택하면 정산액이 자동 계산됩니다.\n\n수업료가 등록된 수업만 추가 납부 또는 환불/이월 금액을 계산할 수 있습니다.\n\n메이크에듀 전반처리\n수업료 처리\n교재비 처리\n닫기\n전반 신청\n닫기",
+        "buttons": [
+          "전반 업무 흐름타당성 검토, 공동 제출, 관리팀 처리",
+          "전 수업 먼저",
+          "과목 먼저",
+          "전 선생님 먼저",
+          "",
+          "교재 추가",
+          "",
+          "과목 먼저",
+          "후 선생님 먼저",
+          "",
+          "교재 추가",
+          "",
+          "닫기",
+          "전반 신청",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "1번 교재",
+            "type": "text",
+            "aria": "전 미배부 교재 1"
+          },
+          {
+            "placeholder": "1번 교재",
+            "type": "text",
+            "aria": "후 미배부 교재 1"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전반 업무 흐름타당성 검토, 공동 제출, 관리팀 처리",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "과목 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전 수업 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "과목 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전 선생님 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "전 미배부 교재 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "전 미배부 교재 항목 추가",
+          "text": "교재 추가",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": "전 미배부 교재 1",
+          "text": "",
+          "placeholder": "1번 교재"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "1번 미배부 교재 삭제",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "과목 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "후 선생님 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "후 미배부 교재 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "후 미배부 교재 항목 추가",
+          "text": "교재 추가",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": "후 미배부 교재 1",
+          "text": "",
+          "placeholder": "1번 교재"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "1번 미배부 교재 삭제",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전반 신청",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"default\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/withdrawal",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "withdrawal",
+            "p_filters": {
+              "taskType": "withdrawal",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "withdrawal",
+            "p_filters": {
+              "taskType": "withdrawal",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n퇴원\n빠른 이동\n다크 모드로 전환\n신청\n처리 중\n완료\n퇴원 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n상태\n과목\n선생님\n수업\n학생\n고객 퇴원사유\n선생님 의견\n미배부 교재\n퇴원일\n퇴원회차\n진행 수업시수\n4주 기준 수업시수\n수업진행률\n처리 확인\n액션\n퇴원 없음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "퇴원 신청",
+          "전체 기간",
+          "오늘",
+          "이번주",
+          "이번달",
+          "직접입력",
+          "",
+          "상태",
+          "",
+          "과목",
+          "",
+          "선생님",
+          "",
+          "수업",
+          "",
+          "학생",
+          "",
+          "고객 퇴원사유",
+          "",
+          "선생님 의견",
+          "",
+          "미배부 교재",
+          "",
+          "퇴원일",
+          "",
+          "퇴원회차",
+          "",
+          "진행 수업시수",
+          "",
+          "4주 기준 수업시수",
+          "",
+          "수업진행률",
+          "",
+          "처리 확인",
+          "",
+          "액션",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n퇴원\n빠른 이동\n다크 모드로 전환\n신청\n처리 중\n완료\n퇴원 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n상태\n과목\n선생님\n수업\n학생\n고객 퇴원사유\n선생님 의견\n미배부 교재\n퇴원일\n퇴원회차\n진행 수업시수\n4주 기준 수업시수\n수업진행률\n처리 확인\n액션\n퇴원 없음\n\n0건 · 0–0번째\n\n10개씩 보기\n퇴원 신청\n\n운영 업무를 입력하고 저장합니다.\n\n과목\n과목 선택\n선생님\n과목 먼저\n수업\n선생님 먼저\n학생\n수업 먼저\n고객 퇴원사유\n선생님 의견\n미배부 교재\n교재 추가\n퇴원일\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n퇴원회차\n자동 계산\n진행 수업시수\n자동 계산\n4주 기준 수업시수\n자동 계산\n수업진행률\n자동 계산\n메이크에듀 퇴원처리\n수업료 처리\n교재비 처리\n닫기\n퇴원 신청\n닫기",
+        "buttons": [
+          "과목 먼저",
+          "선생님 먼저",
+          "수업 먼저",
+          "",
+          "교재 추가",
+          "",
+          "",
+          "닫기",
+          "퇴원 신청",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "1번 교재",
+            "type": "text",
+            "aria": "미배부 교재 1"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "과목 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "과목 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선생님 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "수업 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "미배부 교재 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "미배부 교재 항목 추가",
+          "text": "교재 추가",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": "미배부 교재 1",
+          "text": "",
+          "placeholder": "1번 교재"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "1번 미배부 교재 삭제",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "퇴원일 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "퇴원 신청",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"default\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/word-retests",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n영어 단어 재시험\n빠른 이동\n다크 모드로 전환\n조교선생님\n2\n담당선생님\n1\n영어 단어 재시험 업무 매뉴얼\n추가\n완료 보기\n전체\n본관\n별관\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n담당선생님\n담당선생님 전체\n수업\n수업 전체\n상태\n본시험일\n응시예정일시\n담당선생님\n수업\n학생\n교재\n시험범위\n메모\n출제 개수\n커트라인\n맞은 개수\n결과\n다음 액션\n시작 전\n2026-07-21\n2026-07-24 09:00\n연결 선생님\n영어 어휘 A\n김연결\nFixture 어휘 교재\nUnit 7\n사전 준비가 필요한 학생\n30\n27\n저장\n-\n시험 시작\n시작 전\n2026-07-23\n2026-07-25 10:20\n연결 선생님\n영어 어휘 A\n최비연결\nFixture 어휘 교재\nUnit 9\n이름만 같은 비연결 업무\n30\n27\n저장\n-\n시험 시작\n\n2건 · 1–2번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "영어 단어 재시험 업무 매뉴얼",
+          "추가",
+          "완료 보기",
+          "전체",
+          "본관",
+          "별관",
+          "전체 기간",
+          "오늘",
+          "이번주",
+          "이번달",
+          "직접입력",
+          "담당선생님 전체",
+          "수업 전체",
+          "상태",
+          "",
+          "본시험일",
+          "",
+          "응시예정일시",
+          "",
+          "담당선생님",
+          "",
+          "수업",
+          "",
+          "학생",
+          "",
+          "교재",
+          "",
+          "시험범위",
+          "",
+          "메모",
+          "",
+          "출제 개수",
+          "",
+          "커트라인",
+          "",
+          "맞은 개수",
+          "",
+          "결과",
+          "",
+          "다음 액션",
+          "",
+          "응시예정일시2026-07-24 09:00",
+          "학생김연결",
+          "저장",
+          "시험 시작",
+          "응시예정일시2026-07-25 10:20",
+          "학생최비연결",
+          "저장",
+          "시험 시작",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "단어 재시험 검색",
+            "type": "search",
+            "aria": "영어 단어 재시험 검색"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "보이는 단어 재시험 전체 선택"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "김연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "김연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "김연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "김연결 3차 점수"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "최비연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "최비연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "최비연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "최비연결 3차 점수"
+          }
+        ],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n영어 단어 재시험\n빠른 이동\n다크 모드로 전환\n조교선생님\n2\n담당선생님\n1\n영어 단어 재시험 업무 매뉴얼\n추가\n완료 보기\n전체\n본관\n별관\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n담당선생님\n담당선생님 전체\n수업\n수업 전체\n상태\n본시험일\n응시예정일시\n담당선생님\n수업\n학생\n교재\n시험범위\n메모\n출제 개수\n커트라인\n맞은 개수\n결과\n다음 액션\n시작 전\n2026-07-21\n2026-07-24 09:00\n연결 선생님\n담당선생님 계정 연결 필요\n영어 어휘 A\n김연결\nFixture 어휘 교재\nUnit 7\n사전 준비가 필요한 학생\n30\n27\n저장\n-\n시험 시작\n시작 전\n2026-07-23\n2026-07-25 10:20\n연결 선생님\n담당선생님 계정 연결 필요\n영어 어휘 A\n최비연결\nFixture 어휘 교재\nUnit 9\n이름만 같은 비연결 업무\n30\n27\n저장\n-\n시험 시작\n\n2건 · 1–2번째\n\n10개씩 보기\n1\n영어 단어 재시험 추가\n\n운영 업무를 입력하고 저장합니다.\n\n담당선생님\n합성 선생님\n수업\n선택\n학생\n선택\n본시험일\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n응시예정일시\n날짜 선택\n시각 선택\n장소\n본관\n교재\n선택\n시험범위\n메모\n출제 개수\n커트라인(합격 개수)\n닫기\n저장\n닫기",
+        "buttons": [
+          "합성 선생님",
+          "선택",
+          "선택",
+          "날짜 선택",
+          "시각 선택",
+          "선택",
+          "닫기",
+          "저장",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "단어 재시험 검색",
+            "type": "search",
+            "aria": "영어 단어 재시험 검색"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "보이는 단어 재시험 전체 선택"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "김연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "김연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "김연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "김연결 3차 점수"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "최비연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "최비연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "최비연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "최비연결 3차 점수"
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "합성 선생님",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "응시예정일 날짜",
+          "text": "날짜 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "응시예정일 시각",
+          "text": "시각 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "본관",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선택",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "저장",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"default\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/tasks",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n할 일\n빠른 이동\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n우선순위\n시작/마감\n제목\n요청자/요청팀\n담당자/담당팀\n상태\n다음 액션\n보통\n시작미정\n마감미정\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n미지정 / 미지정\n합성 관리자 / 미지정\n요청\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "우선순위",
+          "시작/마감",
+          "상태",
+          "합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인요청 미지정 / 미지정담당 합성 관리자 / 미지정시작/마감시작미정마감미정상태 요청다음 액션 확인",
+          "확인",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n할 일\n빠른 이동\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n우선순위\n시작/마감\n제목\n요청자/요청팀\n담당자/담당팀\n상태\n다음 액션\n보통\n시작미정\n마감미정\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n합성 관리자 / 미지정\n합성 관리자 / 미지정\n요청\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1\n할 일 추가\n\n운영 업무를 입력하고 저장합니다.\n\n우선순위\n보통\n제목\n담당팀\n영어팀\n담당자\n합성 관리자\n시작일\n연도. 월. 일.\n마감일\n연도. 월. 일.\n나에게\n오늘 시작\n오늘 마감\n내일 마감\n메모\n요청팀\n영어팀\n요청자\n합성 관리자\n요청일시\n2026-09-15 14:30\n닫기\n저장\n닫기",
+        "buttons": [
+          "합성 관리자",
+          "연도. 월. 일.",
+          "연도. 월. 일.",
+          "나에게",
+          "오늘 시작",
+          "오늘 마감",
+          "내일 마감",
+          "닫기",
+          "저장",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          },
+          {
+            "placeholder": "무엇을 해야 하나요?",
+            "type": "text",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "보통",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": "무엇을 해야 하나요?"
+        },
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "영어팀",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "합성 관리자",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "연도. 월. 일.",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "연도. 월. 일.",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "나에게",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "오늘 시작",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "오늘 마감",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "내일 마감",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": "메모"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "저장",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"outline\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/transfer",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "transfer",
+            "p_filters": {
+              "taskType": "transfer",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "transfer",
+            "p_filters": {
+              "taskType": "transfer",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "사이드바 열기\n전반\n다크 모드로 전환\n신청\n처리 중\n완료\n전반 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n전반 없음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "전반 신청",
+          "전체 기간",
+          "오늘",
+          "이번주",
+          "이번달",
+          "직접입력",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "사이드바 열기\n전반\n다크 모드로 전환\n신청\n처리 중\n완료\n전반 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n전반 없음\n\n0건 · 0–0번째\n\n10개씩 보기\n전반 신청\n\n운영 업무를 입력하고 저장합니다.\n\n전반 업무 흐름\n타당성 검토, 공동 제출, 관리팀 처리\n과목\n*\n필수 입력\n필수 입력\n과목 선택\n학생\n*\n필수 입력\n전 수업 먼저\n전반사유\n전 수업 정보\n전 선생님\n*\n필수 입력\n과목 먼저\n전 수업\n*\n필수 입력\n전 선생님 먼저\n전 미배부 교재\n교재 추가\n전 수업 종료일*\n필수 입력\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n전 수업 종료일 회차\n자동 계산\n후 수업 정보\n후 선생님\n*\n필수 입력\n과목 먼저\n후 수업\n*\n필수 입력\n후 선생님 먼저\n후 미배부 교재\n교재 추가\n후 수업 시작일*\n필수 입력\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n후 수업 시작일 회차\n자동 계산\n수업료 정산\n자동 계산\n전 종료회차\n종료일 선택\n전 진행률\n자동 계산\n전 수업료\n수업료 미등록\n후 시작회차\n시작일 선택\n후 잔여진행률\n자동 계산\n후 수업료\n수업료 미등록\n\n전/후 수업과 날짜를 선택하면 정산액이 자동 계산됩니다.\n\n수업료가 등록된 수업만 추가 납부 또는 환불/이월 금액을 계산할 수 있습니다.\n\n메이크에듀 전반처리\n수업료 처리\n교재비 처리\n닫기\n전반 신청\n닫기",
+        "buttons": [
+          "전반 업무 흐름타당성 검토, 공동 제출, 관리팀 처리",
+          "전 수업 먼저",
+          "과목 먼저",
+          "전 선생님 먼저",
+          "",
+          "교재 추가",
+          "",
+          "과목 먼저",
+          "후 선생님 먼저",
+          "",
+          "교재 추가",
+          "",
+          "닫기",
+          "전반 신청",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "1번 교재",
+            "type": "text",
+            "aria": "전 미배부 교재 1"
+          },
+          {
+            "placeholder": "1번 교재",
+            "type": "text",
+            "aria": "후 미배부 교재 1"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전반 업무 흐름타당성 검토, 공동 제출, 관리팀 처리",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "과목 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전 수업 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "과목 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전 선생님 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "전 미배부 교재 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "전 미배부 교재 항목 추가",
+          "text": "교재 추가",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": "전 미배부 교재 1",
+          "text": "",
+          "placeholder": "1번 교재"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "1번 미배부 교재 삭제",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "과목 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "후 선생님 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "후 미배부 교재 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "후 미배부 교재 항목 추가",
+          "text": "교재 추가",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": "후 미배부 교재 1",
+          "text": "",
+          "placeholder": "1번 교재"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "1번 미배부 교재 삭제",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "전반 신청",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"default\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/withdrawal",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "withdrawal",
+            "p_filters": {
+              "taskType": "withdrawal",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "withdrawal",
+            "p_filters": {
+              "taskType": "withdrawal",
+              "search": "",
+              "statuses": [],
+              "view": "applicant",
+              "subject": null,
+              "teacher": null,
+              "period": "all",
+              "dateFrom": null,
+              "dateTo": null,
+              "filterColumn": null,
+              "sortColumn": null,
+              "sortDirection": null
+            }
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "사이드바 열기\n퇴원\n다크 모드로 전환\n신청\n처리 중\n완료\n퇴원 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n퇴원 없음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "퇴원 신청",
+          "전체 기간",
+          "오늘",
+          "이번주",
+          "이번달",
+          "직접입력",
+          "",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "사이드바 열기\n퇴원\n다크 모드로 전환\n신청\n처리 중\n완료\n퇴원 신청\n과목 필터\n과목 전체\n선생님 필터\n선생님 전체\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n퇴원 없음\n\n0건 · 0–0번째\n\n10개씩 보기\n퇴원 신청\n\n운영 업무를 입력하고 저장합니다.\n\n과목\n과목 선택\n선생님\n과목 먼저\n수업\n선생님 먼저\n학생\n수업 먼저\n고객 퇴원사유\n선생님 의견\n미배부 교재\n교재 추가\n퇴원일\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n퇴원회차\n자동 계산\n진행 수업시수\n자동 계산\n4주 기준 수업시수\n자동 계산\n수업진행률\n자동 계산\n메이크에듀 퇴원처리\n수업료 처리\n교재비 처리\n닫기\n퇴원 신청\n닫기",
+        "buttons": [
+          "과목 먼저",
+          "선생님 먼저",
+          "수업 먼저",
+          "",
+          "교재 추가",
+          "",
+          "",
+          "닫기",
+          "퇴원 신청",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "1번 교재",
+            "type": "text",
+            "aria": "미배부 교재 1"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "과목 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "과목 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선생님 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "수업 먼저",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "미배부 교재 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "미배부 교재 항목 추가",
+          "text": "교재 추가",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": "미배부 교재 1",
+          "text": "",
+          "placeholder": "1번 교재"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "1번 미배부 교재 삭제",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "퇴원일 도움말",
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "퇴원 신청",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"default\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/word-retests",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "사이드바 열기\n영어 단어 재시험\n다크 모드로 전환\n조교선생님\n2\n담당선생님\n1\n영어 단어 재시험 업무 매뉴얼\n추가\n완료 보기\n전체\n본관\n별관\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n담당선생님\n담당선생님 전체\n수업\n수업 전체\n진행상태\n시작 전\n본시험일2026-07-21\n응시예정일시2026-07-24 09:00\n담당선생님\n연결 선생님\n수업영어 어휘 A\n학생김연결\n장소본관\n교재Fixture 어휘 교재\n시험범위Unit 7\n메모\n사전 준비가 필요한 학생\n출제 개수30\n커트라인27\n맞은 개수\n저장\n결과-\n다음 액션\n시험 시작\n진행상태\n시작 전\n본시험일2026-07-23\n응시예정일시2026-07-25 10:20\n담당선생님\n연결 선생님\n수업영어 어휘 A\n학생최비연결\n장소본관\n교재Fixture 어휘 교재\n시험범위Unit 9\n메모\n이름만 같은 비연결 업무\n출제 개수30\n커트라인27\n맞은 개수\n저장\n결과-\n다음 액션\n시험 시작\n\n2건 · 1–2번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "영어 단어 재시험 업무 매뉴얼",
+          "추가",
+          "완료 보기",
+          "전체",
+          "본관",
+          "별관",
+          "전체 기간",
+          "오늘",
+          "이번주",
+          "이번달",
+          "직접입력",
+          "담당선생님 전체",
+          "수업 전체",
+          "응시예정일시2026-07-24 09:00",
+          "학생김연결",
+          "저장",
+          "시험 시작",
+          "응시예정일시2026-07-25 10:20",
+          "학생최비연결",
+          "저장",
+          "시험 시작",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "단어 재시험 검색",
+            "type": "search",
+            "aria": "영어 단어 재시험 검색"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "보이는 단어 재시험 전체 선택"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "김연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "김연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "김연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "김연결 3차 점수"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "최비연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "최비연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "최비연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "최비연결 3차 점수"
+          }
+        ],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "사이드바 열기\n영어 단어 재시험\n다크 모드로 전환\n조교선생님\n2\n담당선생님\n1\n영어 단어 재시험 업무 매뉴얼\n추가\n완료 보기\n전체\n본관\n별관\n전체 기간\n오늘\n이번주\n이번달\n직접입력\n담당선생님\n담당선생님 전체\n수업\n수업 전체\n진행상태\n시작 전\n본시험일2026-07-21\n응시예정일시2026-07-24 09:00\n담당선생님\n연결 선생님\n담당선생님 계정 연결 필요\n수업영어 어휘 A\n학생김연결\n장소본관\n교재Fixture 어휘 교재\n시험범위Unit 7\n메모\n사전 준비가 필요한 학생\n출제 개수30\n커트라인27\n맞은 개수\n저장\n결과-\n다음 액션\n시험 시작\n진행상태\n시작 전\n본시험일2026-07-23\n응시예정일시2026-07-25 10:20\n담당선생님\n연결 선생님\n담당선생님 계정 연결 필요\n수업영어 어휘 A\n학생최비연결\n장소본관\n교재Fixture 어휘 교재\n시험범위Unit 9\n메모\n이름만 같은 비연결 업무\n출제 개수30\n커트라인27\n맞은 개수\n저장\n결과-\n다음 액션\n시험 시작\n\n2건 · 1–2번째\n\n10개씩 보기\n1\n영어 단어 재시험 추가\n\n운영 업무를 입력하고 저장합니다.\n\n담당선생님\n합성 선생님\n수업\n선택\n학생\n선택\n본시험일\n수업을 먼저 선택하면 등록된 수업일정이 표시됩니다.\n응시예정일시\n날짜 선택\n시각 선택\n장소\n본관\n교재\n선택\n시험범위\n메모\n출제 개수\n커트라인(합격 개수)\n닫기\n저장\n닫기",
+        "buttons": [
+          "합성 선생님",
+          "선택",
+          "선택",
+          "날짜 선택",
+          "시각 선택",
+          "선택",
+          "닫기",
+          "저장",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "단어 재시험 검색",
+            "type": "search",
+            "aria": "영어 단어 재시험 검색"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "보이는 단어 재시험 전체 선택"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "김연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "김연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "김연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "김연결 3차 점수"
+          },
+          {
+            "placeholder": "",
+            "type": "checkbox",
+            "aria": "최비연결 단어 재시험 선택"
+          },
+          {
+            "placeholder": "1차",
+            "type": "text",
+            "aria": "최비연결 1차 점수"
+          },
+          {
+            "placeholder": "2차",
+            "type": "text",
+            "aria": "최비연결 2차 점수"
+          },
+          {
+            "placeholder": "3차",
+            "type": "text",
+            "aria": "최비연결 3차 점수"
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          },
+          {
+            "placeholder": "",
+            "type": "text",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "합성 선생님",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "응시예정일 날짜",
+          "text": "날짜 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "응시예정일 시각",
+          "text": "시각 선택",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "본관",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "선택",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "저장",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"default\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    },
+    {
+      "route": "/admin/tasks",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/students",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/classes",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/textbooks",
+          "args": {}
+        },
+        {
+          "method": "GET",
+          "path": "/rest/v1/teacher_catalogs",
+          "args": {}
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "사이드바 열기\n할 일\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n요청\n보통\n확인\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n요청\n미지정 / 미지정\n담당\n합성 관리자 / 미지정\n시작/마감\n시작미정\n마감미정\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인",
+          "확인",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "dialog": {
+        "text": "사이드바 열기\n할 일\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n요청\n보통\n확인\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n요청\n합성 관리자 / 미지정\n담당\n합성 관리자 / 미지정\n시작/마감\n시작미정\n마감미정\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1\n할 일 추가\n\n운영 업무를 입력하고 저장합니다.\n\n우선순위\n보통\n제목\n담당팀\n영어팀\n담당자\n합성 관리자\n시작일\n연도. 월. 일.\n마감일\n연도. 월. 일.\n나에게\n오늘 시작\n오늘 마감\n내일 마감\n메모\n요청팀\n영어팀\n요청자\n합성 관리자\n요청일시\n2026-09-15 14:30\n닫기\n저장\n닫기",
+        "buttons": [
+          "합성 관리자",
+          "연도. 월. 일.",
+          "연도. 월. 일.",
+          "나에게",
+          "오늘 시작",
+          "오늘 마감",
+          "내일 마감",
+          "닫기",
+          "저장",
+          "닫기"
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          },
+          {
+            "placeholder": "무엇을 해야 하나요?",
+            "type": "text",
+            "aria": null
+          }
+        ],
+        "overflow": 0
+      },
+      "dialogControls": [
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "보통",
+          "placeholder": null
+        },
+        {
+          "tag": "INPUT",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": "무엇을 해야 하나요?"
+        },
+        {
+          "tag": "BUTTON",
+          "role": "combobox",
+          "label": null,
+          "text": "영어팀",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "합성 관리자",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "연도. 월. 일.",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "연도. 월. 일.",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "나에게",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "오늘 시작",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "오늘 마감",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "내일 마감",
+          "placeholder": null
+        },
+        {
+          "tag": "TEXTAREA",
+          "role": null,
+          "label": null,
+          "text": "",
+          "placeholder": "메모"
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "닫기",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": null,
+          "text": "저장",
+          "placeholder": null
+        },
+        {
+          "tag": "BUTTON",
+          "role": null,
+          "label": "닫기",
+          "text": "닫기",
+          "placeholder": null
+        }
+      ],
+      "closed": true,
+      "focusRestored": true,
+      "focusAfterClose": "<button data-slot=\"button\" data-variant=\"outline\" data-size=\"sm\" class=\"inline-flex items-center justify-center whitespace-nowrap text-sm font-medium transition-[background-color,border-color,color,box-shadow,opacity,filter] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] disabled:pointer-events-none disabled:brightness-100 disabled:opacity-50 active:brightness-95 mot"
+    }
+  ],
+  "browser": "151.0.7922.34"
+}

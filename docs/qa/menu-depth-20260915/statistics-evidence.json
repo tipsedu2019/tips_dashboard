@@ -1,0 +1,56 @@
+[
+  {
+    "width": 1440,
+    "seen": [
+      "?tab=students_classes&subject=english&division=high",
+      {
+        "kind": "student-roster",
+        "subject": "english",
+        "division": "high",
+        "axis": "school",
+        "key": "school-id-0",
+        "parentKey": "",
+        "cursorName": null,
+        "cursorId": null
+      },
+      "?tab=students_classes&subject=english&division=high&refresh=1",
+      "?tab=students_classes&subject=math&division=high&refresh=1",
+      "?tab=textbooks&subject=all&dateFrom=2026-06-18&dateTo=2026-09-15",
+      "?tab=textbooks&subject=all&dateFrom=2026-08-17&dateTo=2026-09-15",
+      "?tab=textbooks&subject=all&dateFrom=2026-08-17&dateTo=2026-09-15",
+      "?tab=textbooks&subject=all&dateFrom=2026-08-17&dateTo=2026-09-15",
+      "?tab=schedule_conflicts&dateFrom=2026-09-15&dateTo=2026-12-14"
+    ],
+    "errors": [],
+    "unhandled": [],
+    "overflow": false,
+    "checks": "deep-link, top8/all50, Enter-drilldown, same-key refresh/error, query isolation, history, reload, invalid range"
+  },
+  {
+    "width": 390,
+    "seen": [
+      "?tab=students_classes&subject=english&division=high",
+      {
+        "kind": "student-roster",
+        "subject": "english",
+        "division": "high",
+        "axis": "school",
+        "key": "school-id-0",
+        "parentKey": "",
+        "cursorName": null,
+        "cursorId": null
+      },
+      "?tab=students_classes&subject=english&division=high&refresh=1",
+      "?tab=students_classes&subject=math&division=high&refresh=1",
+      "?tab=textbooks&subject=all&dateFrom=2026-06-18&dateTo=2026-09-15",
+      "?tab=textbooks&subject=all&dateFrom=2026-08-17&dateTo=2026-09-15",
+      "?tab=textbooks&subject=all&dateFrom=2026-08-17&dateTo=2026-09-15",
+      "?tab=textbooks&subject=all&dateFrom=2026-08-17&dateTo=2026-09-15",
+      "?tab=schedule_conflicts&dateFrom=2026-09-15&dateTo=2026-12-14"
+    ],
+    "errors": [],
+    "unhandled": [],
+    "overflow": false,
+    "checks": "deep-link, top8/all50, Enter-drilldown, same-key refresh/error, query isolation, history, reload, invalid range"
+  }
+]

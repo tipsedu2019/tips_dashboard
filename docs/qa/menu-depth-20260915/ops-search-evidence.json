@@ -1,0 +1,552 @@
+{
+  "sourceSha": null,
+  "captureCheckoutSha": "d783292ba688bf139dbcc2d416a72b85f70271c6",
+  "buildId": "development-server-3216",
+  "base": "http://127.0.0.1:3216",
+  "fixedNow": "2026-09-15T05:30:00.000Z",
+  "data": "synthetic only",
+  "network": "Every API/Supabase request fulfilled or aborted; other external requests aborted; WebSockets closed",
+  "captures": [
+    {
+      "route": "/admin/tasks",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 1440,
+        "height": 900
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "zzzz-no-result",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "zzzz-no-result",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            }
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n할 일\n빠른 이동\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n우선순위\n시작/마감\n제목\n요청자/요청팀\n담당자/담당팀\n상태\n다음 액션\n보통\n시작미정\n마감미정\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n미지정 / 미지정\n합성 관리자 / 미지정\n요청\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "우선순위",
+          "시작/마감",
+          "상태",
+          "합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인요청 미지정 / 미지정담당 합성 관리자 / 미지정시작/마감시작미정마감미정상태 요청다음 액션 확인",
+          "확인",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "search-zero": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n할 일\n빠른 이동\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n조건에 맞는 할 일 없음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "searchClearLoadingFocus": true,
+      "clear-loading": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n할 일\n빠른 이동\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n받은함 비어 있음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "searchClearFocus": true,
+      "search-restored": {
+        "text": "TIPS Dashboard\n운영 포털\n운영\n대시보드\n통계\n영어 단어 재시험\n등록\n전반\n퇴원\n휴보강\n전자결재\n학사일정\n시간표\n관리\n수업계획\n교재관리\n학생관리\n수업관리\n홈페이지 관리\n채용 지원서\n설정\n환경 설정\n합성 관리자\nfixture@example.invalid\n사이드바 접기\n\n운영\n\n/\n할 일\n빠른 이동\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n우선순위\n시작/마감\n제목\n요청자/요청팀\n담당자/담당팀\n상태\n다음 액션\n보통\n시작미정\n마감미정\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n미지정 / 미지정\n합성 관리자 / 미지정\n요청\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "",
+          "",
+          "합성 관리자fixture@example.invalid",
+          "",
+          "사이드바 접기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "우선순위",
+          "시작/마감",
+          "상태",
+          "합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인요청 미지정 / 미지정담당 합성 관리자 / 미지정시작/마감시작미정마감미정상태 요청다음 액션 확인",
+          "확인",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "allZeroOverflow": true
+    },
+    {
+      "route": "/admin/tasks",
+      "fixture": "A",
+      "role": "admin",
+      "viewport": {
+        "width": 390,
+        "height": 844
+      },
+      "requests": [
+        {
+          "method": "GET",
+          "path": "/rest/v1/profiles",
+          "args": {}
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "zzzz-no-result",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "zzzz-no-result",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            }
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/list_ops_task_numbered_page_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            },
+            "p_page": 1,
+            "p_page_size": 10
+          }
+        },
+        {
+          "method": "POST",
+          "path": "/rest/v1/rpc/get_ops_task_list_stats_v1",
+          "args": {
+            "p_type": "general",
+            "p_filters": {
+              "taskType": "general",
+              "search": "",
+              "statuses": [],
+              "queue": "inbox",
+              "requestedById": null,
+              "requestedTeam": null,
+              "assigneeId": null,
+              "assigneeTeam": null,
+              "focus": "none",
+              "sort": "due"
+            }
+          }
+        }
+      ],
+      "unhandled": [],
+      "pageErrors": [],
+      "consoleErrors": [],
+      "blockedExternal": [],
+      "initial": {
+        "text": "사이드바 열기\n할 일\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n요청\n보통\n확인\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n요청\n미지정 / 미지정\n담당\n합성 관리자 / 미지정\n시작/마감\n시작미정\n마감미정\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인",
+          "확인",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "search-zero": {
+        "text": "사이드바 열기\n할 일\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n조건에 맞는 할 일 없음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "searchClearLoadingFocus": true,
+      "clear-loading": {
+        "text": "사이드바 열기\n할 일\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n받은함 비어 있음\n\n0건 · 0–0번째\n\n10개씩 보기",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "",
+          "",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "searchClearFocus": true,
+      "search-restored": {
+        "text": "사이드바 열기\n할 일\n다크 모드로 전환\n받은함\n보낸함\n완료\n새로고침\n빠른 추가\n추가\n요청자\n요청자 전체\n요청팀\n요청팀 전체\n담당자\n담당자 전체\n담당팀\n담당팀 전체\n요청\n보통\n확인\n합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인\n요청\n미지정 / 미지정\n담당\n합성 관리자 / 미지정\n시작/마감\n시작미정\n마감미정\n확인\n\n1건 · 1–1번째\n\n10개씩 보기\n1",
+        "buttons": [
+          "사이드바 열기",
+          "빠른 이동",
+          "다크 모드로 전환",
+          "새로고침",
+          "빠른 추가",
+          "추가",
+          "요청자 전체",
+          "요청팀 전체",
+          "담당자 전체",
+          "담당팀 전체",
+          "합성 긴 업무 제목 학생 상담 일정과 교재 준비 확인",
+          "확인",
+          "",
+          "",
+          "1",
+          "",
+          ""
+        ],
+        "inputs": [
+          {
+            "placeholder": "예: 긴급. 담당 홍길동. 내일까지 할 일 하기",
+            "type": "text",
+            "aria": "할 일 빠른 추가"
+          },
+          {
+            "placeholder": "할 일 검색",
+            "type": "search",
+            "aria": "할 일 검색"
+          }
+        ],
+        "overflow": 0
+      },
+      "allZeroOverflow": true
+    }
+  ],
+  "browser": "151.0.7922.34"
+}

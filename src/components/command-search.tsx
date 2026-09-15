@@ -103,7 +103,6 @@ interface SearchItem {
   icon?: LucideIcon
 }
 
-export const QUICK_SEARCH_SHORTCUT_LABEL = "Ctrl + K"
 const EMPTY_GROUPED_SEARCH_ITEMS = {} as Record<string, SearchItem[]>
 const EMPTY_GROUPED_SEARCH_ENTRIES: Array<[string, SearchItem[]]> = []
 
@@ -326,19 +325,14 @@ export function SearchTrigger({ onClick }: { onClick: React.MouseEventHandler<HT
   return (
     <button
       type="button"
-      aria-label={`빠른 이동 열기, ${QUICK_SEARCH_SHORTCUT_LABEL}`}
-      title={`빠른 이동 (${QUICK_SEARCH_SHORTCUT_LABEL})`}
+      aria-label="빠른 이동 열기"
+      title="빠른 이동"
       data-testid="admin-quick-search-trigger"
-      data-shortcut-label={QUICK_SEARCH_SHORTCUT_LABEL}
       onClick={onClick}
-      className="relative inline-flex h-8 w-full items-center justify-start gap-2 whitespace-nowrap rounded-md border border-input bg-background px-3 py-1 text-sm font-medium text-muted-foreground shadow-sm transition-[background-color,color,box-shadow,transform] hover:bg-accent hover:text-accent-foreground active:translate-y-px focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:pointer-events-none disabled:opacity-50 sm:pr-12 md:w-36 lg:w-56"
+      className="inline-flex size-[var(--touch-target-height)] items-center justify-center gap-2 whitespace-nowrap rounded-md border border-transparent bg-background text-sm font-medium text-muted-foreground transition-[background-color,color,box-shadow] duration-[var(--motion-duration-control)] ease-[var(--motion-easing-control)] hover:bg-accent hover:text-accent-foreground focus-visible:outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 disabled:pointer-events-none disabled:opacity-50 motion-reduce:transition-none md:h-[var(--control-height)] md:w-36 md:justify-start md:border-input md:px-3 lg:w-56"
     >
-      <Search className="h-3.5 w-3.5 shrink-0" />
-      <span className="hidden lg:inline-flex">빠른 이동</span>
-      <span className="inline-flex lg:hidden">빠른 이동</span>
-      <kbd className="pointer-events-none absolute right-1.5 top-1.5 hidden h-4 select-none items-center gap-1 rounded border bg-muted px-1.5 font-mono text-[10px] font-medium opacity-100 sm:flex">
-        {QUICK_SEARCH_SHORTCUT_LABEL}
-      </kbd>
+      <Search className="size-4 shrink-0" aria-hidden="true" />
+      <span className="hidden md:inline">빠른 이동</span>
     </button>
   )
 }

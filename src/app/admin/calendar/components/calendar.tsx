@@ -1,6 +1,6 @@
 "use client"
 
-import { isSameDay } from "date-fns"
+import { isSameDay, isSameMonth } from "date-fns"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -13,7 +13,7 @@ import {
 import { CalendarMain } from "./calendar-main"
 import { CalendarSidebar } from "./calendar-sidebar"
 import { EventForm } from "./event-form"
-import { type CalendarEvent } from "../types"
+import { type CalendarEvent, type CalendarNavigation } from "../types"
 import { type CalendarGroup } from "./calendars"
 
 interface SchoolOption {
@@ -23,6 +23,7 @@ interface SchoolOption {
 }
 
 interface CalendarProps {
+  navigation?: CalendarNavigation
   events: CalendarEvent[]
   eventDates: Array<{ date: Date; count: number }>
   readOnly?: boolean
@@ -38,6 +39,15 @@ interface CalendarProps {
   onMoveEvent?: (eventData: Partial<CalendarEvent>) => boolean | Promise<boolean>
   onVisibleRangeChange?: (range: { start: Date; end: Date }) => void
   onLoadEventDetail?: (eventId: string) => Promise<CalendarEvent | null>
+}
+
+type CalendarFormOpener = { element: HTMLElement; href: string }
+
+function captureCalendarFormOpener(): CalendarFormOpener | null {
+  const element = document.activeElement
+  return element instanceof HTMLElement && element !== document.body && element !== document.documentElement
+    ? { element, href: window.location.href }
+    : null
 }
 
 function toCalendarDayKey(date?: Date | null) {
@@ -84,6 +94,7 @@ function buildDefaultCalendarFilters(calendars?: CalendarGroup[]) {
 }
 
 export function Calendar({
+  navigation,
   events,
   eventDates,
   readOnly = false,
@@ -111,16 +122,33 @@ export function Calendar({
   const [pendingDetailEvent, setPendingDetailEvent] = useState<CalendarEvent | null>(null)
   const [detailLoadError, setDetailLoadError] = useState("")
   const [detailLoading, setDetailLoading] = useState(false)
+  const pendingDetailOpenerRef = useRef<CalendarFormOpener | null>(null)
+  const formOpenerRef = useRef<CalendarFormOpener | null>(null)
+  const displayedDate = navigation?.displayedDate
+  const visibleSelectedDate = displayedDate && !isSameMonth(selectedDate, displayedDate) ? displayedDate : selectedDate
+
+  useEffect(() => {
+    if (displayedDate) setSelectedDate((current) => isSameMonth(current, displayedDate) ? current : displayedDate)
+  }, [displayedDate])
+
   const detailRequestRevisionRef = useRef(0)
   const detailRequestIdentityRef = useRef("")
 
   const invalidateDetailRequest = useCallback(() => {
     detailRequestRevisionRef.current += 1
     detailRequestIdentityRef.current = ""
+    pendingDetailOpenerRef.current = null
     setPendingDetailEvent(null)
     setDetailLoadError("")
     setDetailLoading(false)
   }, [])
+
+  const navigateToDate = navigation?.onDateChange
+  const handleNavigationDateChange = useCallback((date: Date) => {
+    invalidateDetailRequest()
+    navigateToDate?.(date)
+  }, [invalidateDetailRequest, navigateToDate])
+  const controlledNavigation = navigation ? { ...navigation, onDateChange: handleNavigationDateChange } : undefined
 
   const defaultFilters = useMemo(() => buildDefaultCalendarFilters(calendars), [calendars])
   const activeFilters = useMemo(
@@ -205,6 +233,7 @@ export function Calendar({
       if (!detail) {
         throw new Error("operations_event_detail_invalid")
       }
+      formOpenerRef.current = pendingDetailOpenerRef.current
       setEditingEvent(detail)
       setShowEventForm(true)
       setPendingDetailEvent(null)
@@ -252,7 +281,8 @@ export function Calendar({
 
   const handleDateSelect = (date: Date) => {
     invalidateDetailRequest()
-    setSelectedDate(date)
+    if (navigation) navigation.onDateChange(date)
+    if (!navigation || isSameMonth(date, navigation.displayedDate)) setSelectedDate(date)
     setShowCalendarSheet(false)
   }
 
@@ -262,6 +292,7 @@ export function Calendar({
     }
 
     invalidateDetailRequest()
+    formOpenerRef.current = captureCalendarFormOpener()
     setShowCalendarSheet(false)
 
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
@@ -280,6 +311,7 @@ export function Calendar({
     }
 
     invalidateDetailRequest()
+    formOpenerRef.current = captureCalendarFormOpener()
     setShowCalendarSheet(false)
     setSelectedDate(range.start)
     setSelectedEndDate(range.end)
@@ -288,6 +320,7 @@ export function Calendar({
   }
 
   const handleEditEvent = (event: CalendarEvent) => {
+    pendingDetailOpenerRef.current = captureCalendarFormOpener()
     void openExactEventDetail(event)
   }
 
@@ -333,7 +366,8 @@ export function Calendar({
         <div className="flex min-h-[800px]">
           <div className="hidden w-80 shrink-0 border-r xl:block">
             <CalendarSidebar
-              selectedDate={selectedDate}
+              navigation={controlledNavigation}
+              selectedDate={visibleSelectedDate}
               onDateSelect={handleDateSelect}
               onNewEvent={handleNewEvent}
               onCalendarToggle={handleCalendarToggle}
@@ -347,7 +381,8 @@ export function Calendar({
 
           <div className="min-w-0 flex-1">
             <CalendarMain
-              selectedDate={selectedDate}
+              navigation={controlledNavigation}
+              selectedDate={visibleSelectedDate}
               onDateSelect={handleDateSelect}
               onMenuClick={() => setShowCalendarSheet(true)}
               events={visibleEvents}
@@ -366,6 +401,7 @@ export function Calendar({
                 if (moved !== false) {
                   invalidateDetailRequest()
                   setSelectedDate(nextEvent.date)
+                  navigation?.onDateChange(nextEvent.date)
                 }
                 return moved
               }}
@@ -379,7 +415,8 @@ export function Calendar({
               <SheetTitle>학사일정 캘린더</SheetTitle>
             </SheetHeader>
             <CalendarSidebar
-              selectedDate={selectedDate}
+              navigation={controlledNavigation}
+              selectedDate={visibleSelectedDate}
               onDateSelect={handleDateSelect}
               onNewEvent={handleNewEvent}
               onCalendarToggle={handleCalendarToggle}
@@ -394,6 +431,19 @@ export function Calendar({
       </div>
 
       <EventForm
+        onCloseAutoFocus={(event) => {
+          const opener = formOpenerRef.current
+          formOpenerRef.current = null
+          if (!opener || opener.href !== window.location.href) return
+          const element = opener.element
+          if (!element.isConnected || element.matches(":disabled") ||
+            element.closest('[hidden], [inert], [aria-disabled="true"]') ||
+            element.getClientRects().length === 0) return
+          const style = window.getComputedStyle(element)
+          if (style.visibility === "hidden" || style.visibility === "collapse" || style.display === "none") return
+          event.preventDefault()
+          element.focus()
+        }}
         event={editingEvent}
         open={showEventForm}
         readOnly={readOnly}

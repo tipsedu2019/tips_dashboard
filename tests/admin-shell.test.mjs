@@ -621,7 +621,7 @@ test("dashboard keeps dense cards readable on mobile widths", async () => {
   assert.match(source, /min-w-0 max-w-full text-sm font-semibold leading-5/);
   assert.match(source, /grid min-w-0 gap-2 sm:flex sm:flex-wrap sm:items-center/);
   assert.doesNotMatch(source, /DashboardFilterMenu/);
-  assert.match(pageSource, /px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6/);
+  assert.match(pageSource, /px-4 pb-5 sm:px-5 sm:pb-6 lg:px-6/);
 });
 
 test("lesson-design routes resolve to the actual design workspace title", async () => {
@@ -646,13 +646,12 @@ test("class schedule list heading avoids explanatory copy", async () => {
   assert.doesNotMatch(navigationSource, /수업일정 워크스페이스/);
 });
 
-test("quick search trigger shows Ctrl + K", async () => {
+test("quick search remains a discoverable menu search", async () => {
   const source = await readSource("src/components/command-search.tsx");
 
   assert.match(source, /usePathname/);
   assert.match(source, /function normalizeCommandPath/);
   assert.match(source, /const currentPath = React\.useMemo/);
-  assert.match(source, /QUICK_SEARCH_SHORTCUT_LABEL = "Ctrl \+ K"/);
   assert.match(source, /return "운영"/);
   assert.match(source, /aria-label="빠른 이동"/);
   assert.match(source, /<DialogTitle className="sr-only">빠른 이동<\/DialogTitle>/);
@@ -663,8 +662,6 @@ test("quick search trigger shows Ctrl + K", async () => {
   assert.match(source, /aria-label=\{`빠른 이동: \$\{item\.title\}`\}/);
   assert.match(source, /현재/);
   assert.match(source, /<ArrowRight/);
-  assert.match(source, /aria-label=\{`빠른 이동 열기, \$\{QUICK_SEARCH_SHORTCUT_LABEL\}`\}/);
-  assert.match(source, /title=\{`빠른 이동 \(\$\{QUICK_SEARCH_SHORTCUT_LABEL\}\)`\}/);
   assert.match(source, /heading=\{`\$\{group\} \$\{items\.length\}개`\}/);
   assert.match(source, /keywords=\{\[item\.group, item\.url\]\}/);
   assert.doesNotMatch(source, /운영 워크스페이스/);
@@ -690,10 +687,9 @@ test("sidebar submenu disclosure stays discoverable", async () => {
 });
 
 test("global shell controls use Korean action labels", async () => {
-  const [sidebarSource, modeToggleSource, headerSource, navUserSource, appSidebarSource] = await Promise.all([
+  const [sidebarSource, modeToggleSource, navUserSource, appSidebarSource] = await Promise.all([
     readSource("src/components/ui/sidebar.tsx"),
     readSource("src/components/mode-toggle.tsx"),
-    readSource("src/components/site-header.tsx"),
     readSource("src/components/nav-user.tsx"),
     readSource("src/components/app-sidebar.tsx"),
   ]);
@@ -711,9 +707,6 @@ test("global shell controls use Korean action labels", async () => {
   assert.match(modeToggleSource, /라이트 모드로 전환/);
   assert.doesNotMatch(modeToggleSource, /Switch to/);
 
-  assert.match(headerSource, /aria-label="홈페이지를 새 화면에서 확인"/);
-  assert.match(headerSource, /target="_blank"/);
-  assert.match(headerSource, /rel="noreferrer"/);
   assert.match(navUserSource, /계정 메뉴 열기/);
   assert.match(appSidebarSource, /aria-label="대시보드 홈으로 이동"/);
 });
@@ -766,7 +759,6 @@ test("global shell exposes stable browser-use targets", async () => {
 
   assert.match(appSidebarSource, /data-testid="admin-sidebar-brand"/);
   assert.match(headerSource, /data-testid="admin-sidebar-toggle"/);
-  assert.match(headerSource, /data-testid="admin-public-site-link"/);
   assert.match(navMainSource, /data-testid=\{`admin-nav-link-\$\{itemTargetId\}`\}/);
   assert.match(navMainSource, /data-testid=\{`admin-nav-disclosure-\$\{itemTargetId\}`\}/);
   assert.match(navMainSource, /data-testid=\{`admin-nav-sublink-\$\{navigationTargetId\(subItem\.url\)\}`\}/);
@@ -849,14 +841,13 @@ test("admin shell does not keep unused floating template controls", async () => 
   assert.doesNotMatch(modeToggleSource, /theme-customizer/);
 });
 
-test("public site links use the homepage label consistently", async () => {
+test("class schedule retains the homepage preview for internal operators", async () => {
   const [headerSource, navigationSource, classScheduleSource] = await Promise.all([
     readSource("src/components/site-header.tsx"),
     readSource("src/lib/navigation.ts"),
     readSource("src/features/operations/class-schedule-workspace.tsx"),
   ]);
 
-  assert.match(headerSource, /홈페이지 확인/);
   assert.doesNotMatch(navigationSource, /홈페이지 확인/);
   assert.match(classScheduleSource, /홈페이지 확인/);
 
