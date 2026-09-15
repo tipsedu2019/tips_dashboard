@@ -26,7 +26,7 @@ export function SiteHeader() {
   return (
     <>
       <header data-slot="site-header" className="sticky top-0 z-30 flex min-h-[var(--shell-header-height-mobile)] shrink-0 items-center border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/80 md:min-h-[var(--shell-header-height)]">
-        <div className="flex w-full items-center gap-2 px-4 py-1.5 md:gap-3 md:px-5 md:py-3 xl:px-6">
+        <div className="flex w-full items-center gap-2 px-4 py-1 md:gap-3 md:px-5 md:py-3 xl:px-6">
           <SidebarTrigger className="-ml-1 size-[var(--touch-target-height)] shrink-0 md:size-[var(--control-height)]" data-testid="admin-sidebar-toggle" />
           <Separator orientation="vertical" className="hidden data-[orientation=vertical]:h-6 md:block" />
 

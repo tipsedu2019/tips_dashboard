@@ -13,3 +13,7 @@
 - `node --test tests/admin-shell.test.mjs tests/sidebar-focus-return.test.mjs tests/command-search-navigation.test.mjs tests/guarded-navigation.test.mjs`:53 passed,0 failed. Includes role navigation, click-only quick search, input-preserving hotkeys, Escape opener return, dirty confirmation sequencing, mobile destination focus and collapsed tooltip behavior.
 - ESLint on `site-header.tsx`, `command-search.tsx`, `app-sidebar.tsx`, `ui/sidebar.tsx`, `admin/layout.tsx`: exit0, no output.
 - No build or restart of3215. Real1440/390 layout, title zoom, left/right/collapsed/hidden preference smoke and route start-line comparison are deferred to integrated QA. Tests do not prove rendered CSS geometry.
+
+## Integrated measurement correction
+
+The controller's first mobile browser matrix measured 57px: 44px touch control + 12px vertical padding + 1px border. Reduced only mobile inner padding to 8px; the outer min-height56 now centers the row at the specified baseline. Desktop padding and controls are unchanged. Browser retest is owned by the integrated QA run.
