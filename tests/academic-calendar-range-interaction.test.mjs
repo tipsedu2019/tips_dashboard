@@ -108,7 +108,7 @@ test("accepted calendar range survives failure, ignores reverse responses, and r
   } finally { await act(async () => renderer.unmount()); dom.window.close() }
 })
 
-test("controlled month navigation invalidates pending detail and keeps sidebar selection in the accepted month", async () => {
+test("calendar form sessions retain only their own usable opener and invalidate pending detail on navigation", async () => {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "http://localhost/admin/academic-calendar" })
   for (const key of ["window", "document", "HTMLElement", "Event", "Node"]) {
     Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] })
@@ -122,7 +122,10 @@ test("controlled month navigation invalidates pending detail and keeps sidebar s
     ["@/components/ui/button", { Button: box("button") }],
     ["@/components/ui/sheet", { Sheet: () => null, SheetContent: box("div"), SheetHeader: box("div"), SheetTitle: box("h2") }],
     ["@/features/operations/academic-event-utils.js", eventUtils],
-    ["./calendar-main", { CalendarMain: (props) => { main = props; return createElement("button", { onClick: () => props.onEventClick(event) }, "detail") } }],
+    ["./calendar-main", { CalendarMain: (props) => { main = props; return createElement("div", null,
+      createElement("button", { "data-action": "detail", onClick: () => props.onEventClick(event) }, "detail"),
+      createElement("button", { "data-action": "new", onClick: () => props.onEmptySlotClick(september) }, "new"),
+      createElement("button", { "data-action": "range", onClick: () => props.onRangeSelect({ start: september, end: october }) }, "range")) } }],
     ["./calendar-sidebar", { CalendarSidebar: (props) => { sidebar = props; return null } }],
     ["./event-form", { EventForm: (props) => { form = props; return null } }],
   ])
@@ -137,6 +140,7 @@ test("controlled month navigation invalidates pending detail and keeps sidebar s
   try {
     await render(september)
     const button = container.querySelector("button")
+    Object.defineProperty(button, "getClientRects", { configurable: true, value: () => [{ width: 100, height: 36 }] })
     button.focus()
     await act(async () => button.click())
     await act(async () => main.navigation.onDateChange(october))
@@ -157,5 +161,70 @@ test("controlled month navigation invalidates pending detail and keeps sidebar s
     form.onCloseAutoFocus(close)
     assert.equal(close.defaultPrevented, true)
     assert.equal(document.activeElement, button)
+    await act(async () => form.onOpenChange(false))
+
+    const press = async (action) => {
+      const opener = container.querySelector(`[data-action="${action}"]`)
+      Object.defineProperty(opener, "getClientRects", { configurable: true, value: () => [{ width: 100, height: 36 }] })
+      opener.focus()
+      await act(async () => opener.click())
+      return opener
+    }
+    const focusSink = document.createElement("button")
+    document.body.append(focusSink)
+    const dismiss = async () => {
+      await act(async () => form.onOpenChange(false))
+      focusSink.focus()
+      const closeEvent = new Event("closeAutoFocus", { cancelable: true })
+      form.onCloseAutoFocus(closeEvent)
+      return closeEvent
+    }
+    for (const failure of [true, false]) {
+      for (const action of ["new", "range"]) {
+        await press("detail")
+        const detail = detailLoads.at(-1)
+        if (failure) await act(async () => detail.reject(new Error("synthetic detail failure")))
+        const opener = await press(action)
+        assert.equal(form.open, true)
+        assert.equal(form.event, null)
+        if (!failure) await act(async () => detail.resolve(event))
+        assert.equal(form.event, null, "a late detail must not replace the new form")
+        await dismiss()
+        assert.equal(document.activeElement === opener, true, `${failure ? "failed" : "pending"} detail then ${action} must restore its own opener`)
+      }
+    }
+
+    const detailOpener = await press("detail")
+    await act(async () => detailLoads.at(-1).reject(new Error("synthetic detail failure")))
+    const retry = [...container.querySelectorAll("button")].find(item => item.textContent === "상세 다시 불러오기")
+    retry.focus()
+    await act(async () => retry.click())
+    await act(async () => detailLoads.at(-1).resolve(event))
+    assert.equal(form.open, true)
+    await dismiss()
+    assert.equal(document.activeElement === detailOpener, true, "retry success retains the original detail opener")
+
+    for (const guard of ["hidden", "css-hidden", "no-layout", "inert", "disabled", "aria-disabled", "route", "detached"]) {
+      const opener = await press("new")
+      const openerParent = opener.parentNode
+      if (guard === "hidden") opener.hidden = true
+      if (guard === "css-hidden") opener.style.visibility = "hidden"
+      if (guard === "no-layout") Object.defineProperty(opener, "getClientRects", { configurable: true, value: () => [] })
+      if (guard === "inert") opener.setAttribute("inert", "")
+      if (guard === "disabled") opener.disabled = true
+      if (guard === "aria-disabled") opener.setAttribute("aria-disabled", "true")
+      if (guard === "route") dom.window.history.pushState({}, "", "/admin/academic-calendar?date=2026-11-01")
+      if (guard === "detached") opener.remove()
+      const closeEvent = await dismiss()
+      assert.equal(closeEvent.defaultPrevented, false, `${guard} opener must leave default restoration intact`)
+      assert.equal(document.activeElement === opener, false)
+      if (guard === "hidden") opener.hidden = false
+      if (guard === "css-hidden") opener.style.visibility = ""
+      if (guard === "inert") opener.removeAttribute("inert")
+      if (guard === "disabled") opener.disabled = false
+      if (guard === "aria-disabled") opener.removeAttribute("aria-disabled")
+      if (guard === "route") dom.window.history.replaceState({}, "", "/admin/academic-calendar")
+      if (guard === "detached") openerParent.append(opener)
+    }
   } finally { await act(async () => renderer.unmount()); dom.window.close() }
 })

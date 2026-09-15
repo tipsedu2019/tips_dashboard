@@ -41,6 +41,15 @@ interface CalendarProps {
   onLoadEventDetail?: (eventId: string) => Promise<CalendarEvent | null>
 }
 
+type CalendarFormOpener = { element: HTMLElement; href: string }
+
+function captureCalendarFormOpener(): CalendarFormOpener | null {
+  const element = document.activeElement
+  return element instanceof HTMLElement && element !== document.body && element !== document.documentElement
+    ? { element, href: window.location.href }
+    : null
+}
+
 function toCalendarDayKey(date?: Date | null) {
   if (!(date instanceof Date) || Number.isNaN(date.getTime())) {
     return ""
@@ -113,7 +122,8 @@ export function Calendar({
   const [pendingDetailEvent, setPendingDetailEvent] = useState<CalendarEvent | null>(null)
   const [detailLoadError, setDetailLoadError] = useState("")
   const [detailLoading, setDetailLoading] = useState(false)
-  const detailTriggerRef = useRef<HTMLElement | null>(null)
+  const pendingDetailOpenerRef = useRef<CalendarFormOpener | null>(null)
+  const formOpenerRef = useRef<CalendarFormOpener | null>(null)
   const displayedDate = navigation?.displayedDate
   const visibleSelectedDate = displayedDate && !isSameMonth(selectedDate, displayedDate) ? displayedDate : selectedDate
 
@@ -127,6 +137,7 @@ export function Calendar({
   const invalidateDetailRequest = useCallback(() => {
     detailRequestRevisionRef.current += 1
     detailRequestIdentityRef.current = ""
+    pendingDetailOpenerRef.current = null
     setPendingDetailEvent(null)
     setDetailLoadError("")
     setDetailLoading(false)
@@ -222,6 +233,7 @@ export function Calendar({
       if (!detail) {
         throw new Error("operations_event_detail_invalid")
       }
+      formOpenerRef.current = pendingDetailOpenerRef.current
       setEditingEvent(detail)
       setShowEventForm(true)
       setPendingDetailEvent(null)
@@ -280,6 +292,7 @@ export function Calendar({
     }
 
     invalidateDetailRequest()
+    formOpenerRef.current = captureCalendarFormOpener()
     setShowCalendarSheet(false)
 
     if (date instanceof Date && !Number.isNaN(date.getTime())) {
@@ -298,6 +311,7 @@ export function Calendar({
     }
 
     invalidateDetailRequest()
+    formOpenerRef.current = captureCalendarFormOpener()
     setShowCalendarSheet(false)
     setSelectedDate(range.start)
     setSelectedEndDate(range.end)
@@ -306,7 +320,7 @@ export function Calendar({
   }
 
   const handleEditEvent = (event: CalendarEvent) => {
-    detailTriggerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    pendingDetailOpenerRef.current = captureCalendarFormOpener()
     void openExactEventDetail(event)
   }
 
@@ -418,11 +432,17 @@ export function Calendar({
 
       <EventForm
         onCloseAutoFocus={(event) => {
-          if (detailTriggerRef.current?.isConnected) {
-            event.preventDefault()
-            detailTriggerRef.current.focus()
-          }
-          detailTriggerRef.current = null
+          const opener = formOpenerRef.current
+          formOpenerRef.current = null
+          if (!opener || opener.href !== window.location.href) return
+          const element = opener.element
+          if (!element.isConnected || element.matches(":disabled") ||
+            element.closest('[hidden], [inert], [aria-disabled="true"]') ||
+            element.getClientRects().length === 0) return
+          const style = window.getComputedStyle(element)
+          if (style.visibility === "hidden" || style.visibility === "collapse" || style.display === "none") return
+          event.preventDefault()
+          element.focus()
         }}
         event={editingEvent}
         open={showEventForm}
