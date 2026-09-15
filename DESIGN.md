@@ -34,7 +34,7 @@ TIPS는 학원 구성원이 학생, 수업, 일정, 교재, 등록, 알림 업�
 ### 모바일
 
 - 390px 너비에서도 페이지 전체의 가로 넘침 없이 핵심 내용과 주 행동에 도달할 수 있어야 한다. 넓은 표는 열을 무작정 축약하지 말고 업무 단위의 카드, 우선 열, 또는 명시적인 내부 스크롤을 선택한다.
-- 터치 대상과 간격은 실제 모바일에서 잘못 누르지 않을 크기로 확인한다. 외부 지침의 44px 권고는 점검 기준이며 기존 화면을 일괄 재규격화하는 프로젝트 수치는 아니다.
+- 터치 대상과 간격은 실제 모바일에서 잘못 누르지 않을 크기로 확인한다. 주요 모바일 행동은 아래 44px 역할 토큰을 사용하며 작은 보조 제어를 일괄 확대하지 않는다.
 - 데스크톱과 모바일에서 같은 저장·취소·오류 복구 의미를 유지한다.
 
 ### 키보드와 접근성
@@ -78,3 +78,21 @@ TIPS는 학원 구성원이 학생, 수업, 일정, 교재, 등록, 알림 업�
 - React 성능 변경은 먼저 재현 가능한 측정으로 병목을 확인하고, 같은 조건의 전후 결과를 비교한다.
 - DB 변경은 최종 정렬된 migration 체인의 실제 함수 정의와 pgTAP을 기준으로 인증, RLS/ACL, 잠금, idempotency, SQLSTATE, no-send 경계를 확인한다.
 - fixture 결과, 운영 데이터, 배포 상태, 외부 provider 결과를 서로 대신하는 증거로 쓰지 않는다.
+
+## 공통 시각 수치
+
+`src/app/globals.css`가 수치의 유일한 기준이다. 기존 업무 계약은 유지한다.
+
+| 역할 | 토큰 / 값 | 사용 |
+| --- | --- | --- |
+| 일반 제어 | `--control-height`: 36px | desktop Button, 검색·필터 |
+| 편집 필드 | `--field-height`: 42px | 학생·수업의 기존 편집 밀도 |
+| 모바일 주 행동 | `--touch-target-height`: 44px | 검색 아이콘, 주 action; 모든 보조 아이콘에 강제하지 않음 |
+| 표 | `--table-header-height`: 44px / `--table-row-height`: 48px / `--table-cell-padding-inline`: 12px | 행 높이는 최솟값이며 긴 식별명은 전체 줄바꿈 |
+| 반경 | `--radius-control`: 6px / `--radius-surface`: 8px | `rounded-md`는 control; 표 surface는 명시 토큰. dialog의 기존 `--radius` 체계 유지 |
+| 셸 | sidebar 256px, header desktop64/mobile56px, logo36px, menu40px | `--shell-*`; 긴 제목·확대 시 header 자연 확장 |
+| 모션 | control150ms / dialog200ms | 기존 easing, reduced motion 유지 |
+
+본문은14/20px·400, 식별명600, 셸 h1은18/26px·600을 기준으로 한다. 한글 기본 자간은0이다. focus는 기존3px ring을 사용한다.
+
+색은 기존 semantic token을 소비한다. 밝은 테마 primary/destructive는 기존 hue·chroma를 유지한 채 명도를 낮추고, 어두운 테마는 밝은 action색과 어두운 foreground를 짝지었다. hover의90% 배경과 선택면 위 보조 본문까지4.5:1을 검사한다. 상태는 텍스트·선택 제어로도 표현한다. 수치 대비 검증은 `tests/premium-semantic-contrast.test.mjs`; 실제 브라우저 상태·색역 검수는 별도 증거다.

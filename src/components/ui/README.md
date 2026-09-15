@@ -59,3 +59,9 @@ An optional stable `submitAriaLabel` can retain an established accessible action
 ## Theme initialization
 
 Use the application `ThemeProvider`/`useTheme` pair for controls and toast surfaces. Keep server and first hydration labels identical before resolving saved preferences. System mode must track media changes in both the root surface and toggle; toggling from a dark system preference selects light. Invalid or unavailable local storage falls back without disabling this session's control. Reduced motion skips the view transition entirely.
+
+## Density and semantic tokens
+
+Choose the existing control by role: ordinary desktop action36px, edit field42px, primary touch action44px. `globals.css` owns the `--control-height`, `--field-height`, `--touch-target-height`, table and shell metrics. Existing explicit field sizing remains supported. `rounded-md` consumes the6px control radius; use `--radius-surface` for an8px flat table surface. Do not change dialog sizing to imitate a table.
+
+Primary and destructive foreground tokens are theme pairs. Use `text-destructive-foreground` for a filled destructive button; white text and a separate dark opacity override break the dark pair. Muted text must remain readable on both normal and selected rows. Native disabled semantics and50% opacity remain unchanged; a disabled control is not an enabled color variant.
