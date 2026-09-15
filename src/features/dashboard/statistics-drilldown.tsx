@@ -32,10 +32,12 @@ function rowId(row: DrilldownRow) {
 export function StatisticsDrilldown({
   input,
   label,
+  trigger,
   renderRow,
 }: {
   input: StatisticsDrilldownInput
   label: string
+  trigger?: React.ReactNode
   renderRow?: (row: DrilldownRow) => React.ReactNode
 }) {
   const { session } = useAuth()
@@ -75,7 +77,8 @@ export function StatisticsDrilldown({
 
   return (
     <div className="grid gap-2">
-      {!opened ? <Button type="button" size="sm" variant="outline" onClick={() => void load()}>{label}</Button> : null}
+      {!opened ? <Button type="button" size="sm" variant={trigger ? "ghost" : "outline"} className={trigger ? "h-auto min-h-11 w-full whitespace-normal px-1 py-2" : undefined} aria-label={trigger ? label : undefined} onClick={() => void load()}>{trigger ?? label}</Button> : null}
+      {opened && trigger ? <div className="px-1 py-2">{trigger}</div> : null}
       {opened && rows.length > 0 ? <div role="list" className="grid gap-1 rounded-md border bg-background p-2">
         {rows.map((row) => <div key={rowId(row)} role="listitem" className="text-sm">{renderRow ? renderRow(row) : `${row.name || row.title || "항목"}`}</div>)}
       </div> : null}

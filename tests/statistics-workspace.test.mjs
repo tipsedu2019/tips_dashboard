@@ -59,7 +59,7 @@ test("statistics keeps the legacy class-average KPI and conflict monitoring", as
     workspace.indexOf("function TextbookStatisticsPanel"),
   );
 
-  assert.match(summary, /"수업당"/);
+  assert.match(summary, /"수업당 평균"/);
   assert.match(summary, /registeredEnrollmentCount/);
   assert.match(summary, /activeClassesCount/);
   assert.match(conflicts, /DashboardConflictWarning/);

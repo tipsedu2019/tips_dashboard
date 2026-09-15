@@ -135,6 +135,7 @@ function createSnapshotHook() {
 
 async function loadWorkspace(snapshotHook) {
   const { button, card, tabs } = await loadUiModules()
+  const presentation = await import("../src/features/dashboard/statistics-presentation.ts")
   const statisticsContract = await import("../src/features/dashboard/statistics-contract.ts")
   const conflict = {
     ConflictWarning({ metrics }) {
@@ -144,7 +145,7 @@ async function loadWorkspace(snapshotHook) {
         : createElement("div", { "data-conflict-status": source.status })
     },
   }
-  const drilldown = { StatisticsDrilldown: () => null }
+  const drilldown = { StatisticsDrilldown: ({ trigger, input, label }) => createElement("button", { "data-drilldown": JSON.stringify(input), "aria-label": label }, trigger ?? label) }
   return loadTypeScript(
     new URL("src/features/dashboard/statistics-workspace.tsx", root),
     new Map([
@@ -153,6 +154,7 @@ async function loadWorkspace(snapshotHook) {
       ["@/components/ui/tabs", tabs],
       ["@/app/admin/dashboard/components/section-cards", conflict],
       ["@/features/dashboard/statistics-contract", statisticsContract],
+      ["@/features/dashboard/statistics-presentation", presentation],
       ["@/features/dashboard/statistics-drilldown", drilldown],
       ["@/features/dashboard/use-statistics-snapshot", { useStatisticsSnapshot: snapshotHook }],
     ]),
@@ -411,5 +413,28 @@ test("schedule and textbook ranges remain operable and focused while their resul
     if (response.error) assert.match(container.querySelector('[role="alert"]').textContent, /갱신 실패.*이전 통계/)
     else assert.match(container.querySelector('[role="status"]').textContent, /갱신하는 중/)
   }
+  await act(async () => reactRoot.unmount())
+})
+
+test("distribution shows top eight of fifty schools with exact keys, readable totals and expansion", async (t) => {
+  const dom = installDom()
+  t.after(() => dom.window.close())
+  const snapshot = createSnapshotHook()
+  const data = studentsData(42)
+  data.studentBreakdowns.bySchool = Array.from({ length: 50 }, (_, i) => ({ key: `server-school-${i}`, label: `아주긴학교이름서로다른학교${i}`, studentCount: 50 - i, enrollmentCount: 60 - i }))
+  snapshot.responses.set("students_classes:all:all", { data })
+  const { StatisticsWorkspace } = await loadWorkspace(snapshot.useStatisticsSnapshot)
+  const container = document.createElement("div")
+  document.body.append(container)
+  const reactRoot = createRoot(container)
+  await act(async () => reactRoot.render(createElement(StatisticsWorkspace)))
+  await click(tab(container, "학생·수업"))
+  assert.match(container.textContent, /전체 50개 학교/)
+  assert.equal(container.querySelectorAll('[data-drilldown]').length, 8)
+  assert.equal(JSON.parse(container.querySelector('[data-drilldown]').dataset.drilldown).key, "server-school-0")
+  assert.match(container.querySelector('[aria-label="핵심 운영 지표"]').textContent, /수강 등록42건/)
+  await click([...container.querySelectorAll('button')].find(button => button.textContent === "모두 보기 (50개 학교)"))
+  assert.equal(container.querySelectorAll('[data-drilldown]').length, 50)
+  assert.equal(container.querySelectorAll('[style="width: 100%;"]').length, 1)
   await act(async () => reactRoot.unmount())
 })
