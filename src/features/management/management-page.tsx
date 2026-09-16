@@ -2781,13 +2781,20 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
         return service.updateTextbook(payload);
       }));
-      const results = outcomes.map((outcome) => {
-        if (outcome.status === "rejected") throw outcome.reason;
-        return outcome.value;
-      });
-      if (isCurrent()) reportPublicClassesCacheRefresh(results);
-      await reconcileManagementPage();
-      return isCurrent();
+      if (!isCurrent()) return false;
+      const results = outcomes.flatMap((outcome) => outcome.status === "fulfilled" ? [outcome.value] : []);
+      const failedIds = rows.filter((_, index) => outcomes[index].status === "rejected").map((row) => row.id);
+      const failure = outcomes.find((outcome) => outcome.status === "rejected");
+      reportPublicClassesCacheRefresh(results);
+      if (results.length > 0) {
+        await reconcileManagementPage();
+      }
+      if (!isCurrent()) return false;
+      if (failure?.status === "rejected") {
+        setOperationError(getSaveErrorMessage(failure.reason));
+        return { failedIds };
+      }
+      return true;
     } catch (bulkError) {
       if (isCurrent()) setOperationError(getSaveErrorMessage(bulkError));
       return false;

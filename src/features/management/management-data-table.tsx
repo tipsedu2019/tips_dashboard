@@ -362,7 +362,7 @@ type ManagementTableActions = {
   onCreate?: () => void;
   onOpenRow?: (row: ManagementRow) => void;
   onDeleteRow?: (row: ManagementRow) => void;
-  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<boolean | void> | boolean | void;
+  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<boolean | void | { failedIds: string[] }> | boolean | void | { failedIds: string[] };
   onBulkDeleteRows?: (rows: ManagementRow[]) => Promise<void> | void;
   onOpenSchoolMaster?: () => void;
   onOpenTeacherMaster?: () => void;
@@ -1616,6 +1616,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
 
   const table = useReactTable({
     data: tableSourceRows,
+    getRowId: (row) => row.id,
     columns,
     onSortingChange: (updater) => {
       onSortChange(typeof updater === "function" ? updater(sorting) : updater);
@@ -2562,6 +2563,11 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         value: bulkEditValue.trim(),
       });
       if (applied === false) return false;
+      if (applied && typeof applied === "object" && applied.failedIds.length > 0) {
+        const failedIds = new Set(applied.failedIds);
+        setRowSelection((current) => Object.fromEntries(Object.entries(current).filter(([id, selected]) => selected && failedIds.has(id))));
+        return false;
+      }
       setBulkEditValue("");
       setRowSelection({});
       return true;
