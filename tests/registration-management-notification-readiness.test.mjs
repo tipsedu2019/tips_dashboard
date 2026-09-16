@@ -73,7 +73,7 @@ test("status save and explicit management notification are separate UI actions",
   assert.match(actions, /hasUnsavedChanges/u)
   assert.match(service, /ensure_registration_workflow_notification_v4/u)
   assert.match(actions, /관리팀 알림 보내기/u)
-  assert.match(editor, /canManageCase && notificationReadiness\.eventKey/u)
+  assert.match(editor, /canManageCase && activeGenericTrack && notificationReadiness\.eventKey/u)
   assert.match(editor, /studentName: detail\.task\.studentName,/u)
   assert.doesNotMatch(editor, /studentName: detail\.task\.studentName \|\| detail\.task\.title/u)
   assert.match(editor, /notificationReadiness\.ready/u)

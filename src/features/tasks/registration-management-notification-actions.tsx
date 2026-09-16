@@ -120,7 +120,7 @@ function ManagementNotificationScope({ trackId, workflowRevision, sessionToken, 
       if (next) void loadPreview()
       else { generation.current += 1; setPreview(null) }
     }}>
-      <DialogTrigger asChild><Button type="button" variant="outline" disabled={disabled || !sessionToken}>관리팀 알림 미리보기</Button></DialogTrigger>
+      <DialogTrigger asChild><Button type="button" size="form" variant="outline" disabled={disabled || !sessionToken}>관리팀 알림 미리보기</Button></DialogTrigger>
       <DialogContent className="z-[90] max-h-[85dvh] overflow-y-auto sm:max-w-xl" overlayClassName="z-[90]" closeButtonLabel="관리팀 알림 미리보기 닫기">
         <DialogHeader>
           <DialogTitle>관리팀 알림 보내기</DialogTitle>

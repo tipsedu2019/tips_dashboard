@@ -46,26 +46,6 @@ export type RegistrationInquiryCommonFieldsProps = {
   onChange: (field: RegistrationInquiryFieldName, value: string) => void
 }
 
-function FieldLabel({
-  children,
-  requirement,
-}: {
-  children: string
-  requirement: "선택"
-}) {
-  return (
-    <span className="inline-flex items-center gap-1.5">
-      <span>{children}</span>
-      <span
-        aria-hidden="true"
-        className="text-xs text-muted-foreground"
-      >
-        {requirement}
-      </span>
-    </span>
-  )
-}
-
 export function RegistrationInquiryCommonFields({
   values,
   disabled = false,
@@ -78,7 +58,7 @@ export function RegistrationInquiryCommonFields({
   return (
     <div className="grid min-w-0 gap-3 sm:grid-cols-2 xl:grid-cols-3">
       <Label className="grid min-w-0 gap-1.5" data-registration-focus="studentName">
-        <FieldLabel requirement="선택">학생명</FieldLabel>
+        <span>학생명</span>
         <Input
           data-common-field="student-name"
           value={values.studentName}
@@ -88,7 +68,7 @@ export function RegistrationInquiryCommonFields({
       </Label>
 
       <Label className="grid min-w-0 gap-1.5" data-registration-focus="schoolGrade">
-        <FieldLabel requirement="선택">학년</FieldLabel>
+        <span>학년</span>
         <RegistrationSelect
           data-common-field="school-grade"
           value={values.schoolGrade}
@@ -107,7 +87,7 @@ export function RegistrationInquiryCommonFields({
       </Label>
 
       <Label className="grid min-w-0 gap-1.5">
-        <FieldLabel requirement="선택">학교</FieldLabel>
+        <span>학교</span>
         <Input
           data-common-field="school-name"
           value={values.schoolName}
@@ -117,7 +97,7 @@ export function RegistrationInquiryCommonFields({
       </Label>
 
       <Label className="grid min-w-0 gap-1.5" data-registration-focus="parentPhone">
-        <FieldLabel requirement="선택">학부모 전화</FieldLabel>
+        <span>학부모 전화</span>
         <Input
           data-common-field="parent-phone"
           inputMode="tel"
@@ -128,7 +108,7 @@ export function RegistrationInquiryCommonFields({
       </Label>
 
       <Label className="grid min-w-0 gap-1.5">
-        <FieldLabel requirement="선택">학생 전화</FieldLabel>
+        <span>학생 전화</span>
         <Input
           data-common-field="student-phone"
           inputMode="tel"
@@ -139,7 +119,7 @@ export function RegistrationInquiryCommonFields({
       </Label>
 
       <Label className="grid min-w-0 gap-1.5">
-        <FieldLabel requirement="선택">문의일시</FieldLabel>
+        <span>문의일시</span>
         <Input
           data-common-field="inquiry-at"
           type="datetime-local"
@@ -150,7 +130,7 @@ export function RegistrationInquiryCommonFields({
       </Label>
 
       <Label className="grid min-w-0 gap-1.5 sm:col-span-2 xl:col-span-3">
-        <FieldLabel requirement="선택">요청 사항</FieldLabel>
+        <span>요청 사항</span>
         <Textarea
           value={values.requestNote}
           rows={3}

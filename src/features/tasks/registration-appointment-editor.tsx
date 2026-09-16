@@ -850,7 +850,7 @@ export function RegistrationAppointmentEditor({
       >
         <div className="grid min-w-0 gap-3 sm:grid-cols-[minmax(0,1.5fr)_minmax(12rem,1fr)]">
           <Label data-appointment-field="scheduled-at" className="grid min-w-0 gap-1.5">
-            <span>예약 일시 <span className="text-xs font-semibold text-primary">필수</span></span>
+            <span>예약 일시 <span aria-hidden="true" className="text-destructive">*</span></span>
             <DateTimePickerControl
               value={scheduledAt}
               onChange={(value) => {
@@ -868,7 +868,7 @@ export function RegistrationAppointmentEditor({
             />
           </Label>
           <fieldset data-appointment-field="place" className="grid min-w-0 gap-1.5">
-            <legend>장소 <span className="text-xs font-semibold text-primary">필수</span></legend>
+            <legend>장소 <span aria-hidden="true" className="text-destructive">*</span><span className="sr-only">필수 입력</span></legend>
             <div role="group" aria-label={`${appointmentParticipantSubjectLabel} 예약 장소`} className="grid grid-cols-2 gap-2">
               {REGISTRATION_LEVEL_TEST_PLACES.map((option) => (
                 <Button
@@ -899,7 +899,7 @@ export function RegistrationAppointmentEditor({
           {canCancelAppointment ? (
             <Button
               type="button"
-              className="min-h-11 min-w-11"
+              size="form"
               variant="outline"
               disabled={saving || mutationLocked || confirmationPending || Boolean(conflict) || appointmentDirty || externalDirty}
               onClick={() => {
@@ -924,7 +924,7 @@ export function RegistrationAppointmentEditor({
           {canSendManagementNotification && kind === "visit_consultation" ? (
             <Button
               type="button"
-              className="min-h-11 min-w-11"
+              size="form"
               variant="outline"
               disabled={visitManagementNotificationBlocked}
               onClick={() => void sendVisitManagementNotification()}
@@ -940,7 +940,7 @@ export function RegistrationAppointmentEditor({
             <>
               <Button
                 type="button"
-                className="min-h-11 min-w-11"
+                size="form"
                 variant="outline"
                 disabled={customerMessageBlocked}
                 onClick={() => {
@@ -981,8 +981,8 @@ export function RegistrationAppointmentEditor({
           >
             <h4 id="registration-appointment-confirmation-title" className="font-semibold">예약을 저장할까요?</h4>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={dismissAppointmentConfirmation} disabled={readOnly || saving}>돌아가기</Button>
-              <Button type="button" className="min-h-11 min-w-11" onClick={() => void confirmPreparedAppointmentMutation()} disabled={readOnly || saving}>저장</Button>
+              <Button type="button" size="form" variant="outline" onClick={dismissAppointmentConfirmation} disabled={readOnly || saving}>돌아가기</Button>
+              <Button type="button" size="form" onClick={() => void confirmPreparedAppointmentMutation()} disabled={readOnly || saving}>저장</Button>
             </div>
           </div>
         ) : null}
@@ -999,8 +999,8 @@ export function RegistrationAppointmentEditor({
             </h4>
             <p className="text-sm">저장된 예약 사실만 취소합니다. 고객·관리 알림은 별도 명시 발송이며 자동으로 전송되지 않습니다.</p>
             <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-              <Button type="button" className="min-h-11 min-w-11" variant="outline" onClick={() => setPendingCancellation(false)} disabled={readOnly || saving}>돌아가기</Button>
-              <Button type="button" className="min-h-11 min-w-11" variant="destructive" onClick={() => void confirmAppointmentCancellation()} disabled={readOnly || saving}>예약 취소</Button>
+              <Button type="button" size="form" variant="outline" onClick={() => setPendingCancellation(false)} disabled={readOnly || saving}>돌아가기</Button>
+              <Button type="button" size="form" variant="destructive" onClick={() => void confirmAppointmentCancellation()} disabled={readOnly || saving}>예약 취소</Button>
             </div>
           </div>
         ) : null}

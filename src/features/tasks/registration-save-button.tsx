@@ -24,6 +24,7 @@ export function RegistrationSaveButton({
   actionLabel,
   cleanLabel = "저장됨",
   className,
+  size = "form",
   ...buttonProps
 }: RegistrationSaveButtonProps) {
   const presentation = getRegistrationSaveActionPresentation({
@@ -37,7 +38,8 @@ export function RegistrationSaveButton({
   return (
     <Button
       {...buttonProps}
-      className={cn("min-h-[var(--touch-target-height)] min-w-28 shrink-0 sm:min-h-[var(--control-height)]", className)}
+      size={size}
+      className={cn("min-w-28 shrink-0", className)}
       aria-busy={saving || undefined}
       variant={presentation.emphasis === "primary" ? "default" : "outline"}
       disabled={presentation.disabled}
