@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import test from "node:test";
 import vm from "node:vm";
 import { createElement } from "react";
+import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs";
 import { renderToStaticMarkup } from "react-dom/server";
 import {
   getRegistrationApplicationProgress,
@@ -16,6 +17,7 @@ import { getSelectableRegistrationScheduleSessions } from "../src/features/tasks
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
+const { NativeSelect } = loadNotificationComponent("src/components/ui/native-select.tsx");
 
 const listUrl = new URL(
   "../src/features/tasks/registration-case-list.tsx",
@@ -276,6 +278,7 @@ async function loadMountedRegistrationEnrollmentEditor({
     ["@/components/ui/alert", { Alert: Wrapper, AlertDescription: Wrapper, AlertTitle: Wrapper }],
     ["@/components/ui/badge", { Badge }],
     ["@/components/ui/button", { Button }],
+    ["@/components/ui/native-select", { NativeSelect }],
     ["@/components/ui/calendar", { Calendar }],
     ["@/components/ui/collapsible", { Collapsible: Wrapper, CollapsibleContent: Wrapper, CollapsibleTrigger: Wrapper }],
     ["@/components/ui/label", { Label }],
@@ -395,6 +398,7 @@ async function loadMountedRegistrationApplication({
   const localModules = new Map([
     ["@/components/ui/badge", { Badge }],
     ["@/components/ui/button", { Button }],
+    ["@/components/ui/native-select", { NativeSelect }],
     ["@/features/notifications/notification-delivery-control", { GoogleChatDeliveryControl: Passthrough }],
     ["@/lib/supabase", { supabase: {} }],
     ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
@@ -1444,13 +1448,13 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /phoneReadyAt/);
   assert.match(source, /className="grid min-w-0 gap-2 p-2 lg:hidden"/);
   assert.match(source, /className="hidden w-full min-w-0 overflow-hidden lg:block"/);
-  assert.match(source, /className=\{DATA_TABLE_LAYOUT_CLASS_NAME\}/);
+  assert.match(source, /className=\{embedded \? "min-w-0" : DATA_TABLE_LAYOUT_CLASS_NAME\}/);
   assert.doesNotMatch(source, /md:hidden|md:block/);
   assert.match(source, /const targetTrack = item\.viewKey === "observation"[\s\S]*?item\.matchingTracks\.find\(\(track\) => track\.observationSummaryVisible\)[\s\S]*?: item\.representativeTrack/);
   assert.match(source, /if \(!targetTrack\) return/);
   assert.match(source, /onEdit\(item\.taskId, targetTrack\.trackId\)[\s\S]*?onOpen\(item\.taskId, targetTrack\.trackId\)/);
   assert.match(source, /break-words \[overflow-wrap:anywhere\]/);
-  assert.match(source, /"빠른 처리"/);
+  assert.match(source, /"과목 · 진행상태"/);
   assert.match(source, /"요청 사항"/);
   assert.match(source, /"레벨테스트 결과"/);
   assert.match(source, /"상담 방식"/);
@@ -2027,7 +2031,8 @@ test("mounted registration application accepts only its canonical observation bo
   const originalDocument = globalThis.document
   const originalHTMLElement = globalThis.HTMLElement
   globalThis.HTMLElement = class HTMLElement {}
-  globalThis.window = {
+  const sectionScrolls = []
+  globalThis.window = { matchMedia: () => ({ matches: true }),
     requestAnimationFrame(callback) {
       callback()
       return 1
@@ -2037,7 +2042,13 @@ test("mounted registration application accepts only its canonical observation bo
   globalThis.document = {
     activeElement: null,
     getElementById() {
-      return { scrollIntoView() {} }
+      return {
+        closest(selector) {
+          assert.equal(selector, "[data-registration-application-section]")
+          return { scrollIntoView: (options) => sectionScrolls.push(options) }
+        },
+        scrollIntoView() { assert.fail("The fixed-offset track panel must not hide the section heading") },
+      }
     },
   }
 
@@ -2047,6 +2058,7 @@ test("mounted registration application accepts only its canonical observation bo
     await flushMountedRegistrationWork()
     view = hookHarness.render(mounted.RegistrationApplication, props)
     hookHarness.flushEffects()
+    assert.deepEqual(sectionScrolls, [{ block: "start", behavior: "instant" }])
     const shell = findMountedRegistrationElement(
       view,
       (node) => node.type === mounted.RegistrationApplicationShell,
@@ -2197,7 +2209,7 @@ test("legacy observation status selector resolves to its decoupled manual target
   const originalDocument = globalThis.document
   const originalHTMLElement = globalThis.HTMLElement
   globalThis.HTMLElement = class HTMLElement {}
-  globalThis.window = {
+  globalThis.window = { matchMedia: () => ({ matches: false }),
     requestAnimationFrame(callback) {
       callback()
       return 1
@@ -2207,7 +2219,7 @@ test("legacy observation status selector resolves to its decoupled manual target
   globalThis.document = {
     activeElement: null,
     getElementById() {
-      return { scrollIntoView() {} }
+      return { closest() { return null }, scrollIntoView() {} }
     },
   }
 
@@ -2220,7 +2232,7 @@ test("legacy observation status selector resolves to its decoupled manual target
     )
     let statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === "select" && node.props["aria-label"] === "영어 진행상태",
+      (node) => node.type === NativeSelect && node.props["aria-label"] === "영어 진행상태",
       "observation workflow status select before manager detail",
     )
     assert.equal(statusSelect.props.disabled, false)
@@ -2239,7 +2251,7 @@ test("legacy observation status selector resolves to its decoupled manual target
     )
     statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === "select" && node.props["aria-label"] === "영어 진행상태",
+      (node) => node.type === NativeSelect && node.props["aria-label"] === "영어 진행상태",
       "observation workflow status select",
     )
     assert.equal(statusSelect.props.disabled, false)
@@ -2286,6 +2298,7 @@ test("mounted consultation status selector never starts an observation process",
     attempts: [],
     classes: [],
   }
+  const warnings = []
   const hookHarness = createRegistrationEditorHookHarness()
   const mounted = await loadMountedRegistrationApplication({
     hookHarness,
@@ -2338,7 +2351,7 @@ test("mounted consultation status selector never starts an observation process",
     viewerRole: "admin",
     onFocusTrack: () => undefined,
     onReload: async (preferredTrackId) => reloadCalls.push(preferredTrackId),
-    onWarning: () => undefined,
+    onWarning: (message) => warnings.push(message),
     subjectCapabilities: [],
     customerMessageClient: {},
     observationRuntime: { available: true, runtimeVersion: 1 },
@@ -2349,8 +2362,8 @@ test("mounted consultation status selector never starts an observation process",
   const originalDocument = globalThis.document
   const originalHTMLElement = globalThis.HTMLElement
   globalThis.HTMLElement = class HTMLElement {}
-  globalThis.window = { requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
-  globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
+  globalThis.window = { matchMedia: () => ({ matches: false }), requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById() { return { closest() { return null }, scrollIntoView() {} } } }
 
   try {
     let view = hookHarness.render(mounted.RegistrationApplication, props)
@@ -2360,7 +2373,7 @@ test("mounted consultation status selector never starts an observation process",
     const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "registration application shell")
     const statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === "select" && node.props["aria-label"] === "수학 진행상태",
+      (node) => node.type === NativeSelect && node.props["aria-label"] === "수학 진행상태",
       "consultation workflow status select",
     )
     assert.equal(statusSelect.props.disabled, false)
@@ -2382,6 +2395,7 @@ test("mounted consultation status selector never starts an observation process",
     })
     assert.match(genericStatusCalls[0].requestKey, new RegExp(`^registration-workflow-status:${trackId}:`))
     assert.deepEqual(reloadCalls, [trackId])
+    assert.deepEqual(warnings, [""], "a new status attempt clears the previous failure")
     assert.deepEqual(notificationCalls, [], "saving only a workflow status neither prepares nor dispatches an alert")
     const management = findMountedRegistrationElement(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions, "explicit management preview action")
     assert.equal(management.props.trackId, trackId)
@@ -2462,8 +2476,8 @@ test("mounted teacher registration detail keeps every mutation surface read-only
   const originalDocument = globalThis.document
   const originalHTMLElement = globalThis.HTMLElement
   globalThis.HTMLElement = class HTMLElement {}
-  globalThis.window = { requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
-  globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
+  globalThis.window = { matchMedia: () => ({ matches: false }), requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById() { return { closest() { return null }, scrollIntoView() {} } } }
 
   try {
     const view = hookHarness.render(mounted.RegistrationApplication, props)
@@ -2474,7 +2488,7 @@ test("mounted teacher registration detail keeps every mutation surface read-only
     )
     const statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === "select" && node.props["aria-label"] === "영어 진행상태",
+      (node) => node.type === NativeSelect && node.props["aria-label"] === "영어 진행상태",
       "teacher read-only workflow status select",
     )
 
@@ -2567,8 +2581,8 @@ test("mounted pre-observation detail exposes an empty booking table independentl
   const originalDocument = globalThis.document
   const originalHTMLElement = globalThis.HTMLElement
   globalThis.HTMLElement = class HTMLElement {}
-  globalThis.window = { requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
-  globalThis.document = { activeElement: null, getElementById() { return { scrollIntoView() {} } } }
+  globalThis.window = { matchMedia: () => ({ matches: false }), requestAnimationFrame(callback) { callback(); return 1 }, cancelAnimationFrame() {} }
+  globalThis.document = { activeElement: null, getElementById() { return { closest() { return null }, scrollIntoView() {} } } }
 
   try {
     let view = hookHarness.render(mounted.RegistrationApplication, props)
@@ -2646,7 +2660,7 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
   const originalWindow = globalThis.window
   const originalDocument = globalThis.document
   const scrolledPanelIds = []
-  globalThis.window = {
+  globalThis.window = { matchMedia: () => ({ matches: false }),
     requestAnimationFrame(callback) {
       callback()
       return 1
@@ -2655,7 +2669,7 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
   }
   globalThis.document = {
     getElementById(id) {
-      return { scrollIntoView: () => scrolledPanelIds.push(id) }
+      return { closest() { return null }, scrollIntoView: () => scrolledPanelIds.push(id) }
     },
   }
 
@@ -2838,7 +2852,7 @@ test("mounted observation child loads reject A-B-A and passive overwrites", asyn
   const directorId = "78000000-0000-4000-8000-000000000005"
   const originalWindow = globalThis.window
   const originalDocument = globalThis.document
-  globalThis.window = {
+  globalThis.window = { matchMedia: () => ({ matches: false }),
     requestAnimationFrame(callback) {
       callback()
       return 1
@@ -2847,7 +2861,7 @@ test("mounted observation child loads reject A-B-A and passive overwrites", asyn
   }
   globalThis.document = {
     getElementById() {
-      return { scrollIntoView() {} }
+      return { closest() { return null }, scrollIntoView() {} }
     },
   }
 
@@ -3117,7 +3131,7 @@ test("canonical registration mutation closures fail closed outside management ro
   assert.match(workflowStatus, /if \(!canManageCase\) return/)
   assert.doesNotMatch(workflowStatus, /ensureRegistrationWorkflowNotification|dispatchRegistrationManagement|previewService\.confirm|\bsend\(/)
   assert.doesNotMatch(saveInquiry, /ensureRegistrationWorkflowNotification|dispatchRegistrationManagement|previewService\.confirm|\bsend\(/)
-  assert.match(application, /canManageCase && notificationReadiness\.eventKey \? \([\s\S]*?<RegistrationManagementNotificationActions/)
+  assert.match(application, /canManageCase \? \([\s\S]*?activeGenericTrack && notificationReadiness\.eventKey \? \([\s\S]*?<RegistrationManagementNotificationActions/)
   assert.match(managementNotification, /if \(!preview\?\.canSend \|\| inFlight\.current \|\| currentGuards\.current\.disabled\) return/)
   assert.match(managementNotification, /currentGuards\.current\.hasUnsavedChanges\(\)[\s\S]*?return[\s\S]*?inFlight\.current = true/)
   assert.match(managementNotification, /requestKeys\.current\.get\(preview\.previewChecksum\)[\s\S]*?requestKeys\.current\.set/)
@@ -3215,7 +3229,7 @@ test("mounted incomplete execution windows lock only their process sections", as
     )
     const statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === "select" && String(node.props["aria-label"] || "").endsWith("진행상태"),
+      (node) => node.type === NativeSelect && String(node.props["aria-label"] || "").endsWith("진행상태"),
       "workflow status select",
     )
 

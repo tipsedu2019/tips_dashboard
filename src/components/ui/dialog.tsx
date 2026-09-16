@@ -57,6 +57,7 @@ function DialogContent({
   showCloseButton = true,
   showCloseButtonText = false,
   restoreFocusToOpener = false,
+  restoreFocusFallbackRef,
   onOpenAutoFocus,
   onCloseAutoFocus,
   ...props
@@ -69,8 +70,10 @@ function DialogContent({
   showCloseButtonText?: boolean
   /** Controlled dialogs opened from rows/cards without a DialogTrigger. */
   restoreFocusToOpener?: boolean
+  /** Used when a saved row disappears or a detail was opened directly. */
+  restoreFocusFallbackRef?: React.RefObject<HTMLElement | null>
 }) {
-  const openerRef = React.useRef<{ element: HTMLElement; pathname: string } | null>(null)
+  const openerRef = React.useRef<{ element: HTMLElement | null; pathname: string } | null>(null)
   const closeButtonClassName = cn(
     buttonVariants({ variant: showCloseButtonText ? "outline" : "ghost", size: showCloseButtonText ? "sm" : "icon" }),
     "z-30 text-muted-foreground",
@@ -99,8 +102,8 @@ function DialogContent({
         {...props}
         onOpenAutoFocus={(event) => {
           const active = document.activeElement
-          openerRef.current = restoreFocusToOpener && active instanceof HTMLElement && active !== document.body
-            ? { element: active, pathname: window.location.pathname }
+          openerRef.current = restoreFocusToOpener
+            ? { element: active instanceof HTMLElement && active !== document.body ? active : null, pathname: window.location.pathname }
             : null
           onOpenAutoFocus?.(event)
         }}
@@ -110,8 +113,9 @@ function DialogContent({
           const opener = openerRef.current
           openerRef.current = null
           if (!opener || opener.pathname !== window.location.pathname) return
-          const element = opener.element
-          if (element.isConnected && !element.matches(':disabled, [aria-disabled="true"]') && !element.closest('[hidden], [inert]') && element.getClientRects().length > 0) {
+          const element = [opener.element, restoreFocusFallbackRef?.current].find((candidate) =>
+            candidate?.isConnected && !candidate.matches(':disabled, [aria-disabled="true"]') && !candidate.closest('[hidden], [inert]') && candidate.getClientRects().length > 0)
+          if (element) {
             event.preventDefault()
             element.focus({ preventScroll: true })
           }

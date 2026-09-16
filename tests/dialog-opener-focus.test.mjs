@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom"
 import * as React from "react"
 import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
-async function setup(t, { contentProps = {}, nested = false } = {}) {
+async function setup(t, { contentProps = {}, nested = false, fallback = false, initialOpen = false } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: "https://test.invalid/admin/registration" })
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   globalThis.window = dom.window
@@ -20,7 +20,8 @@ async function setup(t, { contentProps = {}, nested = false } = {}) {
   const h = React.createElement
   let setReady
   function Fixture() {
-    const [open, setOpen] = React.useState(false)
+    const [open, setOpen] = React.useState(initialOpen)
+    const searchRef = React.useRef(null)
     const [childOpen, setChildOpen] = React.useState(false)
     const [ready, updateReady] = React.useState(false)
     React.useEffect(() => { setReady = updateReady }, [])
@@ -30,9 +31,10 @@ async function setup(t, { contentProps = {}, nested = false } = {}) {
       onClick: () => setOpen(true),
     }, id)
     return h(React.Fragment, null,
+      fallback ? h("input", { id: "search", ref: searchRef, type: "search" }) : null,
       h("div", null, opener("first"), opener("second")), h("h1", { tabIndex: -1 }, "다음 화면"),
       h(Dialog, { open, onOpenChange: setOpen },
-        h(DialogContent, { restoreFocusToOpener: true, ...contentProps },
+        h(DialogContent, { restoreFocusToOpener: true, restoreFocusFallbackRef: fallback ? searchRef : undefined, ...contentProps },
           h(DialogTitle, null, "등록 신청서"), h(DialogDescription, null, "조회"),
           h("p", null, ready ? "상세 내용" : "불러오는 중"),
           nested ? h("button", { id: "nested-opener", onClick: () => setChildOpen(true) }, "이력 보기") : null,
@@ -125,4 +127,24 @@ test("caller close autofocus takes precedence", async t => {
   await p.escape()
   assert.equal(called, 1)
   assert.ok(document.activeElement === document.querySelector("h1"))
+})
+
+for (const initialOpen of [false, true]) {
+  test(`search receives focus after ${initialOpen ? "a direct link" : "the opened row leaves the list"}`, async t => {
+    const p = await setup(t, { fallback: true, initialOpen })
+    if (initialOpen) await p.settle()
+    else (await p.open()).remove()
+    await p.escape()
+    assert.equal(document.activeElement, document.getElementById("search"))
+  })
+}
+
+test("fallback never steals focus during navigation to a different route", async t => {
+  const p = await setup(t, { fallback: true })
+  await p.open()
+  let attempts = 0
+  document.getElementById("search").focus = () => { attempts++ }
+  await React.act(async () => document.getElementById("route").click())
+  await p.settle()
+  assert.equal(attempts, 0)
 })

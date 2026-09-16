@@ -1,6 +1,7 @@
 "use client"
 
-import { DataTableCommandRow, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableCommandRow, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { cn } from "@/lib/utils"
 import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DataTableSelectionActions, DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection"
@@ -179,6 +180,7 @@ import {
   type RegistrationSubjectCapability,
 } from "./registration-subject-capability-probe"
 import { RegistrationCaseList } from "./registration-case-list"
+import { RegistrationListToolbar } from "./registration-list-toolbar"
 import {
   buildRegistrationCaseListItems,
   canDeleteRegistrationCase,
@@ -12271,6 +12273,43 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     else syncView(nextView as ViewKey)
   }
 
+  const isRegistrationList = isRegistrationWorkspace && registrationMode === "list"
+  const workspaceSearchControl = showSearch ? (
+    <div className="relative min-w-0 flex-1">
+      <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
+      <Input
+        type="search"
+        value={query}
+        aria-label={`${workspaceLabel} 검색`}
+        autoComplete="off"
+        enterKeyHint="search"
+        data-testid="task-search-input"
+        ref={taskSearchInputRef}
+        onChange={(event) => setQuery(event.target.value)}
+        onKeyDown={(event) => {
+          if (event.key === "Escape") setQuery("")
+        }}
+        placeholder={WORKSPACE_SEARCH_PLACEHOLDERS[workspace]}
+        className="pl-9 pr-9"
+      />
+      {query && (
+        <button
+          type="button"
+          aria-label="검색 지우기"
+          onClick={() => {
+            setQuery("")
+            taskSearchInputRef.current?.focus()
+          }}
+          className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+        >
+          <X className="size-4" />
+        </button>
+      )}
+    </div>
+  ) : (
+    <div className="min-w-0 flex-1" />
+  )
+
   const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace
     ? "flex flex-col gap-2"
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
@@ -12445,7 +12484,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 <span className="sr-only">새로고침</span>
               </Button>
             )}
-	            {showToolbarCreate && (
+	            {showToolbarCreate && !isRegistrationList && (
 	              <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
 	                <Plus className="size-4" />
 	                {getWorkspaceCreateActionLabel(workspace, workspaceLabel)}
@@ -12453,36 +12492,22 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            )}
           </div>
         </div>
-        <WorkspaceTabsPanel className="flex flex-col gap-2">
-        {isRegistrationWorkspace
-          && registrationMode === "list"
-          && isRegistrationConsultationViewKey(registrationView) ? (
-          <div role="group" aria-label="상담 목록 범위" className="inline-flex w-fit rounded-md border bg-background p-1">
-            {(["mine", "all"] as const).map((scope) => {
-              const active = registrationConsultationOwnerScope === scope
-              const count = registrationConsultationScopeCounts[scope]
-              const label = scope === "mine" ? "내 담당" : "전체"
-
-              return (
-                <button
-                  key={scope}
-                  type="button"
-                  aria-pressed={active}
-                  aria-label={count > 0 ? `${label} ${count}건` : label}
-                  onClick={() => syncRegistrationConsultationOwnerScope(scope)}
-                  className={[
-                    "rounded px-3 py-1.5 text-sm font-medium transition-colors",
-                    active
-                      ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-muted hover:text-foreground",
-                  ].join(" ")}
-                >
-                  <span>{label}</span>
-                  {count > 0 ? <span aria-hidden="true" className="ml-1 opacity-80">{count}</span> : null}
-                </button>
-              )
-            })}
-          </div>
+        <WorkspaceTabsPanel className={isRegistrationList ? DATA_TABLE_LAYOUT_CLASS_NAME : "flex flex-col gap-2"}>
+        {isRegistrationList ? (
+          <RegistrationListToolbar
+            search={workspaceSearchControl}
+            actions={showToolbarCreate ? (
+              <Button type="button" size="sm" onClick={() => openCreate(scopedTaskType)} disabled={createActionDisabled}>
+                <Plus className="size-4" />
+                {getWorkspaceCreateActionLabel(workspace, workspaceLabel)}
+              </Button>
+            ) : null}
+            consultationScope={isRegistrationConsultationViewKey(registrationView) ? {
+              value: registrationConsultationOwnerScope,
+              counts: registrationConsultationScopeCounts,
+              onChange: syncRegistrationConsultationOwnerScope,
+            } : undefined}
+          />
         ) : null}
         {isTodoWorkspace && (
           <div className="grid gap-2">
@@ -12544,43 +12569,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         )}
 
-        {(showSearch || (isWordRetestWorkspace && showClosedToggle)) && (
+        {!isRegistrationList && (showSearch || (isWordRetestWorkspace && showClosedToggle)) && (
           <DataTableCommandRow reserveActions={isWordRetestWorkspace}
-            search={showSearch ? (
-              <div className="relative min-w-0 flex-1">
-                <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-                <Input
-                  type="search"
-                  value={query}
-                  aria-label={`${workspaceLabel} 검색`}
-                  autoComplete="off"
-                  enterKeyHint="search"
-                  data-testid="task-search-input"
-                  ref={taskSearchInputRef}
-                  onChange={(event) => setQuery(event.target.value)}
-                  onKeyDown={(event) => {
-                    if (event.key === "Escape") setQuery("")
-                  }}
-                  placeholder={WORKSPACE_SEARCH_PLACEHOLDERS[workspace]}
-                  className="pl-9 pr-9"
-                />
-                {query && (
-                  <button
-                    type="button"
-                    aria-label="검색 지우기"
-                    onClick={() => {
-                      setQuery("")
-                      taskSearchInputRef.current?.focus()
-                    }}
-                    className="absolute right-2 top-1/2 inline-flex size-7 -translate-y-1/2 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                  >
-                    <X className="size-4" />
-                  </button>
-                )}
-              </div>
-            ) : (
-              <div className="min-w-0 flex-1" />
-            )}
+            search={workspaceSearchControl}
             actions={isWordRetestWorkspace && (selectedWordRetests.length > 0 ? (
               <DataTableSelectionActions count={selectedWordRetests.length} label="선택한 단어 재시험 작업" disabled={saving} onClear={() => { clearWordRetestSelection(); taskSearchInputRef.current?.focus({ preventScroll: true }); }}>
                 <Button type="button" variant="destructive-ghost" size="sm" disabled={saving} onClick={() => requestRemoveWordRetests(selectedWordRetests)}>
@@ -12723,6 +12714,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               />
             ) : (
 	            <RegistrationCaseList
+                embedded
 	              key={registrationView}
 	              items={displayedRegistrationCaseItems}
 	              viewerId={registrationViewerId}
@@ -12737,6 +12729,11 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	              canDelete={(item) => canDeleteTask(item.task)}
 	              onDelete={(item) => requestRemoveTask(item.task)}
 	              emptyLabel={registrationEmptyLabel}
+                emptyAction={isRegistrationConsultationViewKey(registrationView)
+                  && registrationConsultationOwnerScope === "mine"
+                  && registrationConsultationScopeCounts.all > 0 ? (
+                    <Button type="button" variant="outline" size="sm" onClick={() => syncRegistrationConsultationOwnerScope("all")}>전체 상담 보기</Button>
+                  ) : undefined}
 	            />
             )
 	        ) : isWithdrawalWorkspace ? (
@@ -12883,7 +12880,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           />
         )}
         {!(isRegistrationWorkspace && registrationMode === "calendar") ? (
-          <div className="grid gap-2 border-t pt-3">
+          <div className={isRegistrationList ? cn(DATA_TABLE_PAGER_CLASS_NAME, "sm:flex-col sm:items-stretch") : "grid gap-2 border-t pt-3"}>
             {numberedPage.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">
               페이지를 불러오지 못했습니다.
               <Button variant="outline" size="sm" onClick={() => void numberedPage.retry()}>다시 시도</Button>
@@ -13748,6 +13745,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         <DialogContent
           data-registration-application-host=""
           restoreFocusToOpener
+          restoreFocusFallbackRef={taskSearchInputRef}
           data-registration-application-mode={registrationApplicationHost.kind}
           data-registration-state={registrationApplicationHost.kind === "detail"
             ? "saved"

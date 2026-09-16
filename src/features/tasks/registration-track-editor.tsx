@@ -3,6 +3,7 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
+import { NativeSelect } from "@/components/ui/native-select"
 import { RegistrationManagementNotificationActions } from "./registration-management-notification-actions"
 import { supabase } from "@/lib/supabase"
 
@@ -1047,6 +1048,7 @@ export function RegistrationApplication({
     const nextOption = workflowStatusOptions.find((option) => option.value === nextStatus)
     if (!nextOption) return
     setWorkflowStatusSaving(true)
+    onWarning("")
     try {
       const receipt = await setRegistrationWorkflowStatus({
         trackId: activeGenericTrack.id,
@@ -1110,8 +1112,10 @@ export function RegistrationApplication({
     if (!focusPanelId) return
     const frame = window.requestAnimationFrame(() => {
       initialFocusAppliedRef.current = detail.task.id
-      document.getElementById(focusPanelId)
-        ?.scrollIntoView({ block: "nearest", behavior: "smooth" })
+      const panel = document.getElementById(focusPanelId)
+      // The shell measures its sticky header; track panels have a fixed legacy offset.
+      const section = panel?.closest<HTMLElement>("[data-registration-application-section]") || panel
+      section?.scrollIntoView({ block: "start", behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth" })
     })
     return () => window.cancelAnimationFrame(frame)
   }, [activeTrack, activeTrackId, deepLinkedObservationHistoryEligible, detail.task.id, focusTrackId, focusedContext, observationWorkspaceAvailable])
@@ -1536,35 +1540,41 @@ export function RegistrationApplication({
         <RegistrationApplicationHistoryAction detail={genericDetail} profiles={profiles} />
       </>}
       subjectNavigation={(
-        <div className="grid gap-3 md:grid-cols-[minmax(0,1fr)_18rem] md:items-end">
-          <RegistrationApplicationSubjectTabs
-            tracks={orderedTracks.map((track) => ({
-              id: track.id,
-              subject: track.subject,
-              statusLabel: REGISTRATION_WORKFLOW_STATUS_LABELS[track.workflowStatus] || REGISTRATION_TRACK_STATUS_LABELS[track.status],
-              viewKey: getRegistrationWorkflowViewKey(track.workflowStatus),
-            }))}
-            value={activeTrackId}
-            panelIdsByTrackId={subjectPanelIdsByTrackId}
-            onValueChange={handleSubjectTabChange}
-          />
-          {activeGenericTrack ? (
-            <div data-registration-workflow-status="" className="grid min-w-0 gap-1.5">
-              <span className="text-xs font-medium text-muted-foreground">진행상태</span>
-              <select
-                aria-label={`${activeGenericTrack.subject} 진행상태`}
-                value={activeGenericTrack.workflowStatus}
-                disabled={!canManageCase || workflowStatusSaving || workflowStatusOptions.length === 0}
-                onChange={(event) => void changeWorkflowStatus(event.target.value)}
-                className="h-10 min-w-0 rounded-md border border-primary/30 bg-primary/5 px-3 text-sm font-semibold text-primary outline-none focus:ring-2 focus:ring-ring/40 disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <option value={activeGenericTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeGenericTrack.workflowStatus]}</option>
-                {workflowStatusOptions.filter((option) => option.value !== activeGenericTrack.workflowStatus).map((option) => (
-                  <option key={option.value} value={option.value}>{option.label}</option>
-                ))}
-              </select>
-              {canManageCase && notificationReadiness.eventKey ? (
-                <div className="grid gap-1.5">
+        <div className="grid gap-3">
+          <div className="grid min-w-0 gap-3 md:grid-cols-[minmax(0,1fr)_auto] md:items-center">
+            <RegistrationApplicationSubjectTabs
+              tracks={orderedTracks.map((track) => ({
+                id: track.id,
+                subject: track.subject,
+                statusLabel: REGISTRATION_WORKFLOW_STATUS_LABELS[track.workflowStatus] || REGISTRATION_TRACK_STATUS_LABELS[track.status],
+                viewKey: getRegistrationWorkflowViewKey(track.workflowStatus),
+              }))}
+              value={activeTrackId}
+              panelIdsByTrackId={subjectPanelIdsByTrackId}
+              onValueChange={handleSubjectTabChange}
+            />
+            {activeGenericTrack ? (
+              <div data-registration-workflow-status="" className="flex min-w-0 items-center gap-2">
+                <span className="shrink-0 text-xs font-medium text-muted-foreground">진행상태</span>
+                <NativeSelect
+                  aria-label={`${activeGenericTrack.subject} 진행상태`}
+                  value={activeGenericTrack.workflowStatus}
+                  disabled={!canManageCase || workflowStatusSaving || workflowStatusOptions.length === 0}
+                  onChange={(event) => void changeWorkflowStatus(event.target.value)}
+                  className="h-11 w-full sm:h-9 sm:w-48"
+                >
+                  <option value={activeGenericTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeGenericTrack.workflowStatus]}</option>
+                  {workflowStatusOptions.filter((option) => option.value !== activeGenericTrack.workflowStatus).map((option) => (
+                    <option key={option.value} value={option.value}>{option.label}</option>
+                  ))}
+                </NativeSelect>
+              </div>
+            ) : null}
+          </div>
+          {canManageCase ? (
+            <div className="flex flex-wrap items-start gap-2">
+              {activeGenericTrack && notificationReadiness.eventKey ? (
+                <div className="grid min-w-0 gap-1.5">
                   <RegistrationManagementNotificationActions
                     trackId={activeGenericTrack.id}
                     workflowRevision={activeGenericTrack.workflowRevision}
@@ -1583,18 +1593,20 @@ export function RegistrationApplication({
                   ) : null}
                 </div>
               ) : null}
+              <div className="shrink-0">
+                <RegistrationVisitCancellationActions
+                  taskId={detail.task.id} sessionToken={notificationToken}
+                  refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}:${detail.appointments.map((item) => `${item.id}:${item.status}:${item.notificationRevision}`).join("|")}`}
+                  onWarning={onWarning}
+                />
+              </div>
             </div>
           ) : null}
           {!scheduledAppointmentWindowComplete || !currentEnrollmentWindowComplete ? (
-            <p role="alert" className="text-sm text-amber-700 md:col-span-2">
+            <p role="alert" className="text-sm text-amber-700">
               일부 예약 또는 등록 실행 이력이 조회 범위를 넘었습니다. 해당 실행 영역만 잠기며 기본정보와 진행상태는 계속 수정할 수 있습니다.
             </p>
           ) : null}
-          {canManageCase ? <div className="md:col-span-2"><RegistrationVisitCancellationActions
-            taskId={detail.task.id} sessionToken={notificationToken}
-            refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}:${detail.appointments.map((item) => `${item.id}:${item.status}:${item.notificationRevision}`).join("|")}`}
-            onWarning={onWarning} />
-          </div> : null}
         </div>
       )}
       progress={activeGenericTrack ? (

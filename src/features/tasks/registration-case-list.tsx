@@ -24,6 +24,8 @@ import {
 } from "./registration-workflow-status.js"
 
 export type RegistrationCaseListProps = {
+  embedded?: boolean
+  emptyAction?: ReactNode
   items: RegistrationCaseListViewItem[]
   viewerId?: string | null
   viewerRole?: "admin" | "staff" | "assistant" | "teacher" | null
@@ -43,15 +45,15 @@ export type RegistrationCaseListProps = {
 }
 
 const REGISTRATION_CASE_VIEW_COLUMNS = {
-  inquiry: ["학생", "빠른 처리", "연락처", "문의 일시", "요청 사항"],
-  level_test: ["학생", "빠른 처리", "예약 일시", "장소", "레벨테스트 결과"],
-  consultation_requested: ["학생", "빠른 처리", "상담 방식", "책임자", "예약 일시 · 장소"],
-  consultation_completed: ["학생", "빠른 처리", "책임자", "완료 일시"],
-  waiting: ["학생", "빠른 처리", "책임자", "대기 유형 · 수업", "진입 일시"],
-  observation: ["학생", "상태", "예약 일시", "장소"],
-  enrollment: ["학생", "빠른 처리", "수강 수업", "교재", "수업 시작"],
-  payment: ["학생", "빠른 처리", "입학신청서", "메이크에듀", "청구서", "수납"],
-  completed: ["학생", "빠른 처리", "책임자", "등록 수업", "완료 일시"],
+  inquiry: ["학생", "과목 · 진행상태", "연락처", "문의 일시", "요청 사항"],
+  level_test: ["학생", "과목 · 진행상태", "예약 일시", "장소", "레벨테스트 결과"],
+  consultation_requested: ["학생", "과목 · 진행상태", "상담 방식", "책임자", "예약 일시 · 장소"],
+  consultation_completed: ["학생", "과목 · 진행상태", "책임자", "완료 일시"],
+  waiting: ["학생", "과목 · 진행상태", "책임자", "대기 유형 · 수업", "진입 일시"],
+  observation: ["학생", "과목 · 진행상태", "예약 일시", "장소"],
+  enrollment: ["학생", "과목 · 진행상태", "수강 수업", "교재", "수업 시작"],
+  payment: ["학생", "과목 · 진행상태", "입학신청서", "메이크에듀", "청구서", "수납"],
+  completed: ["학생", "과목 · 진행상태", "책임자", "등록 수업", "완료 일시"],
 } as const
 
 // Appointment groups and case-wide facts are not one-to-one with subject tracks.
@@ -111,10 +113,12 @@ function RegistrationCaseStudentIdentity({
   schoolName?: string | null
 }) {
   return (
-    <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+    <div className="grid min-w-0 gap-1">
       <span className="min-w-0 font-semibold [overflow-wrap:anywhere]">{studentName}</span>
+      <div className="flex flex-wrap gap-x-1.5 gap-y-0.5">
       {schoolGrade ? <span className="text-xs text-muted-foreground">{schoolGrade}</span> : null}
       {schoolName ? <span className="text-xs text-muted-foreground">{schoolName}</span> : null}
+      </div>
     </div>
   )
 }
@@ -235,7 +239,7 @@ function RegistrationCaseCell({ label, children, cellRole }: { label: string; ch
   const trackRows = aligned && cellRole === "cell"
   return (
     <div role={cellRole} className={`min-w-0 break-words [overflow-wrap:anywhere] ${trackRows ? "grid grid-rows-subgrid" : ""}`} style={trackRows ? { gridRow: `span ${count}` } : undefined}>
-      <div className="mb-1 text-[11px] text-muted-foreground lg:hidden">{label}</div>
+      {label !== "학생" ? <div className="mb-1 text-[11px] text-muted-foreground lg:hidden">{label}</div> : null}
       <div className={trackRows ? "grid grid-rows-subgrid" : undefined} style={trackRows ? { gridRow: `span ${count}` } : undefined}>{children || <span className="text-xs text-muted-foreground">미정</span>}</div>
     </div>
   )
@@ -277,7 +281,7 @@ function RegistrationCaseProcessCells({
     return labels.length > 0 ? labels.join(", ") : [registration?.classStartDate, registration?.classStartSession].filter(Boolean).join(" · ") || "미정"
   }
   const status = (
-    <RegistrationCaseCell label="빠른 처리" cellRole={cellRole}>
+    <RegistrationCaseCell label="과목 · 진행상태" cellRole={cellRole}>
       <div className={aligned ? "contents" : "grid gap-1"}>
         {item.matchingTracks.map((track) => (
           <div key={track.trackId} data-registration-track-line={track.trackId} className="flex min-h-8 min-w-0 items-center gap-1.5">
@@ -448,6 +452,8 @@ export function RegistrationCaseListRow({
 }
 
 export function RegistrationCaseList({
+  embedded = false,
+  emptyAction,
   items,
   viewerId = null,
   viewerRole = null,
@@ -484,16 +490,17 @@ export function RegistrationCaseList({
     event: KeyboardEvent<HTMLElement>,
     item: RegistrationCaseListViewItem,
   ) => {
-    if (event.key !== "Enter" && event.key !== " ") return
+    if (event.target !== event.currentTarget || (event.key !== "Enter" && event.key !== " ")) return
     event.preventDefault()
     openRegistrationCase(item)
   }
 
   return (
-    <section className={DATA_TABLE_LAYOUT_CLASS_NAME} aria-label="등록 신청 목록">
+    <section className={embedded ? "min-w-0" : DATA_TABLE_LAYOUT_CLASS_NAME} aria-label="등록 신청 목록">
       {loading || isEmpty ? (
         <div className="px-4 py-12 text-center text-sm text-muted-foreground" role="status" aria-live="polite">
           {loading ? "불러오는 중입니다." : emptyLabel}
+          {!loading && emptyAction ? <div className="mt-3">{emptyAction}</div> : null}
         </div>
       ) : (
         <>
@@ -504,7 +511,7 @@ export function RegistrationCaseList({
                 key={item.taskId}
                 data-registration-case-row=""
                 tabIndex={entryAvailable ? 0 : undefined}
-                className={`grid min-w-0 gap-3 overflow-hidden rounded-[var(--radius-surface)] border border-border/70 bg-background p-3 outline-none transition-colors ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
+                className={`grid min-w-0 grid-cols-2 gap-3 overflow-hidden [&>div:first-child]:col-span-2 [&>div:nth-child(2)]:col-span-2 [&>div:last-child]:col-span-2 rounded-[var(--radius-surface)] border border-border/70 bg-background p-3 outline-none transition-colors ${entryAvailable ? "cursor-pointer hover:bg-muted/30 focus-visible:ring-2 focus-visible:ring-ring/50" : ""}`}
                 role="listitem"
                 aria-label={`${item.studentName} 등록 신청${entryAvailable ? " 열기" : ""}`}
                 onClick={entryAvailable ? () => openRegistrationCase(item) : undefined}
@@ -515,9 +522,9 @@ export function RegistrationCaseList({
             })}
           </div>
           <div data-testid="registration-case-desktop-list" className="hidden w-full min-w-0 overflow-hidden lg:block" role="table" aria-label="등록 신청 데이터테이블">
-            <div className="grid min-h-[var(--table-header-height)] min-w-0 items-center border-b border-border/80 bg-muted text-xs font-semibold text-foreground" style={{ gridTemplateColumns }} role="row">
-              {columns.map((column) => <div key={column} className="px-3 py-2" role="columnheader">{column}</div>)}
-              {showActionColumn ? <div className="px-3 py-2 text-right" role="columnheader">관리</div> : null}
+            <div className="grid min-h-[var(--table-header-height)] min-w-0 items-center gap-x-3 border-b border-border/80 bg-muted px-[var(--table-cell-padding-inline)] text-xs font-medium text-muted-foreground" style={{ gridTemplateColumns }} role="row">
+              {columns.map((column) => <div key={column} className="py-2" role="columnheader">{column}</div>)}
+              {showActionColumn ? <div className="py-2 text-right" role="columnheader">관리</div> : null}
             </div>
             {items.map((item) => {
               const entryAvailable = !disabled && canOpenRegistrationCaseListItem(item)
