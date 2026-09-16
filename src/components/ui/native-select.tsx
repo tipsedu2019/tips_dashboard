@@ -9,7 +9,7 @@ function NativeSelect({ className, ...props }: React.ComponentProps<"select">) {
     <select
       data-slot="native-select"
       className={cn(
-        "border-input bg-background text-foreground h-9 w-full min-w-0 rounded-md border px-3 text-base shadow-xs md:text-sm",
+        "border-input bg-background text-foreground h-9 w-full min-w-0 rounded-md border px-3 text-base md:text-sm",
         fieldStateClassName,
         className,
       )}

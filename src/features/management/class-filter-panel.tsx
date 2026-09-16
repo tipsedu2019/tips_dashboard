@@ -14,7 +14,8 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import { DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME } from "@/components/data-table/data-table-surface";
+import { DataTableCommandRow, DataTableFilters, DATA_TABLE_FILTER_FIELD_CLASS_NAME } from "@/components/data-table/data-table-surface";
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel";
 
 export type ClassFilterPanelOption = {
   value: string;
@@ -49,6 +50,7 @@ type ClassFilterPanelProps = {
   createDisabled?: boolean;
   footerAction?: ReactNode;
   toolbarAction?: ReactNode;
+  selectionActions?: ReactNode;
   className?: string;
 };
 
@@ -75,6 +77,7 @@ export function ClassFilterPanel({
   createDisabled = false,
   footerAction,
   toolbarAction,
+  selectionActions,
   className,
 }: ClassFilterPanelProps) {
   const hasCreate = Boolean(createLabel);
@@ -117,8 +120,9 @@ export function ClassFilterPanel({
 
   return (
     <div className={cn("flex flex-col gap-2 border border-border/70 bg-background px-3 py-3", className)}>
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1" role="search" aria-label={searchPlaceholder}>
+      <DataTableCommandRow
+        reserveActions={hasCreate || Boolean(toolbarAction) || Boolean(selectionActions)}
+        search={<div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1" role="search" aria-label={searchPlaceholder}>
           <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
           <Input
             type="search"
@@ -144,8 +148,8 @@ export function ClassFilterPanel({
               <X className="size-3.5" />
             </Button>
           ) : null}
-        </div>
-
+        </div>}
+        actions={selectionActions ?? <>
         {hasCreate ? (
           <Button
             variant={createDisabled ? "outline" : "default"}
@@ -159,12 +163,19 @@ export function ClassFilterPanel({
           </Button>
         ) : null}
         {toolbarAction}
-      </div>
+        </>}
+      />
 
+      <DataTableFilterPanel label={`${searchPlaceholder} 조건`} onReset={onReset} canReset={showReset}
+        activeFilters={selects.flatMap((select) => {
+          const value = select.value;
+          if (!value || value === (select.emptyValue || "all")) return [];
+          return [{ label: select.label, value: select.options.find((option) => option.value === value)?.label || value }];
+        })}>
       <DataTableFilters aria-label={`${searchPlaceholder} 조건`}>
         {selects.map(renderSelectField)}
         {showReset ? (
-          <div className="flex h-9 items-center sm:ml-auto">
+          <div className="hidden h-9 items-center md:ml-auto md:flex">
             <Button type="button" variant="ghost" size="sm" className="h-9 px-2 text-xs" onClick={onReset}>
               <X className="mr-1.5 size-3.5" />
               조건 초기화
@@ -172,6 +183,7 @@ export function ClassFilterPanel({
           </div>
         ) : null}
       </DataTableFilters>
+      </DataTableFilterPanel>
 
       {summaryLabel || footerAction ? (
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground" aria-live="polite">

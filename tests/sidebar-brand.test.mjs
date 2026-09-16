@@ -24,5 +24,7 @@ test("sidebar brand keeps the logo size and only repositions it in icon collapse
   assert.match(source, /group-data-\[collapsible=icon\]:size-9!/);
   assert.match(source, /group-data-\[collapsible=icon\]:justify-center/);
   assert.match(source, /group-data-\[collapsible=icon\]:hidden/);
-  assert.match(source, /rounded-md border border-sidebar-border\/60/);
+  assert.match(source, /width=\{36\}/);
+  assert.match(source, /height=\{36\}/);
+  assert.match(source, /size-\[var\(--shell-logo-size\)\]/);
 });

@@ -9,7 +9,7 @@ import { DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/c
 import { cn } from "@/lib/utils"
 
 const dialogBodyClassName = "min-h-0 flex-1 overflow-y-auto overscroll-contain px-5 py-5 [scrollbar-gutter:stable] sm:px-6"
-const dialogActionsClassName = "shrink-0 space-y-3 border-t bg-background px-5 py-4 sm:px-6"
+const dialogActionsClassName = "shrink-0 space-y-3 border-t border-border/70 bg-muted/60 px-5 pb-[max(1rem,env(safe-area-inset-bottom))] pt-4 sm:px-6"
 
 type DialogFrameProps = { title: string; description: string; children: React.ReactNode; compact?: boolean; wide?: boolean; returnFocusRef?: React.RefObject<HTMLElement | null>; confirmation?: boolean; busy?: boolean; height?: number; initialFocusRef?: React.RefObject<HTMLElement | null> }
 
@@ -50,8 +50,8 @@ function DialogFrame({ title, description, children, compact = false, wide = fal
       )}
       overlayClassName="motion-reduce:animate-none"
     >
-      <DialogHeader className={cn("shrink-0 border-b px-5 py-5 pr-14 text-left sm:px-6 sm:pr-14", confirmation && "pr-5 sm:pr-6")}>
-        <DialogTitle className="leading-6">{title}</DialogTitle>
+      <DialogHeader className={cn("shrink-0 border-b border-border/70 px-5 py-5 pr-14 text-left sm:px-6 sm:pr-14", confirmation && "pr-5 sm:pr-6")}>
+        <DialogTitle>{title}</DialogTitle>
         <DialogDescription className={confirmation ? "leading-relaxed" : "sr-only"}>{description}</DialogDescription>
       </DialogHeader>
       {children}
@@ -107,6 +107,7 @@ function ConfirmationDialogContent({ title, description, items = [], totalCount 
 }
 
 type FormDialogContentProps = {
+  height?: number
   returnFocusRef?: React.RefObject<HTMLElement | null>
   title: string
   description: string
@@ -126,7 +127,7 @@ type FormDialogContentProps = {
 function FormDialogContent({
   title, description, children, onSubmit, onCancel, cancelLabel,
   submitLabel, submitAriaLabel, submitDisabled = false, busy = false, error = "", hint = "",
-  returnFocusRef,
+  returnFocusRef, height,
 }: FormDialogContentProps) {
   const feedbackId = React.useId()
   const errorRef = React.useRef<HTMLDivElement>(null)
@@ -135,7 +136,7 @@ function FormDialogContent({
   }, [error])
 
   return (
-    <DialogFrame title={title} description={description} returnFocusRef={returnFocusRef}>
+    <DialogFrame title={title} description={description} returnFocusRef={returnFocusRef} height={height}>
       <form
         className="flex min-h-0 min-w-0 flex-1 flex-col"
         onSubmit={(event) => {

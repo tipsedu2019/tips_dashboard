@@ -78,20 +78,20 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
                   />
                 </div>
                 <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                  <span className="truncate font-medium">TIPS Dashboard</span>
-                  <span className="truncate text-xs">운영 포털</span>
+                  <span className="truncate text-base font-semibold tracking-tight">TIPS <span className="text-sm font-normal tracking-normal text-muted-foreground">Dashboard</span></span>
+                  <span className="mt-0.5 truncate text-xs text-muted-foreground">운영 포털</span>
                 </div>
               </Link>
             </SidebarMenuButton>
           </SidebarMenuItem>
         </SidebarMenu>
       </SidebarHeader>
-      <SidebarContent>
+      <SidebarContent className="gap-3 px-2 pb-4 group-data-[collapsible=icon]:px-0">
         {navGroups.map((group) => (
           <NavMain key={group.label} label={group.label} items={group.items} />
         ))}
       </SidebarContent>
-      <SidebarFooter>
+      <SidebarFooter className="border-t border-sidebar-border/60 p-3 group-data-[collapsible=icon]:p-2">
         {!user?.isFallbackRole && user?.email ? null : (
           <div className="flex items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/70">
             <Lock className="size-3.5" />

@@ -251,8 +251,9 @@ function CurriculumWorkspaceSkeleton() {
     <div className="px-4 lg:px-6" role="status" aria-label="수업계획 불러오는 중">
       <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
         <div className={DATA_TABLE_TOOLBAR_CLASS_NAME}>
-          <Skeleton className="h-9 w-full" />
-          <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+          <Skeleton className="h-11 w-full sm:h-9 lg:max-w-xl" />
+          <Skeleton className="h-11 w-24 md:hidden" />
+          <div className="hidden gap-2 md:grid md:grid-cols-5">
             {Array.from({ length: 5 }).map((_, index) => (
               <Skeleton key={`filter-${index}`} className="h-14 w-full" />
             ))}

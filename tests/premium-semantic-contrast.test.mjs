@@ -44,6 +44,8 @@ for (const [theme, tokens] of Object.entries(themes)) {
       ["--popover-foreground", "--popover"], ["--secondary-foreground", "--secondary"],
       ["--accent-foreground", "--accent"], ["--sidebar-foreground", "--sidebar"],
       ["--sidebar-accent-foreground", "--sidebar-accent"],
+      ["--foreground", "--workspace-background"], ["--muted-foreground", "--workspace-background"],
+      ["--muted-foreground", "--sidebar"], ["--primary", "--sidebar-accent"],
       ...["--background", "--card", "--muted", "--accent"].map((bg) => ["--muted-foreground", bg]),
       ...["--primary", "--destructive"].flatMap((fg) => [
         [fg, "--background"], [fg, "--card"], [`${fg}-foreground`, fg],

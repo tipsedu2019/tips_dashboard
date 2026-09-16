@@ -29,12 +29,16 @@ function loadPage(fixture, navigation, componentOverrides = []) {
     ["next/navigation", navigation],
     ["./management-data-table", { ManagementDataTable: ({ actions, rows }) => createElement("div", null,
       createElement("button", { onClick: actions.onCreate }, "수업 등록"),
-      actions.onBulkUpdateRows && createElement("button", { onClick: () => actions.onBulkUpdateRows(rows, { field: "grade", value: "중2" }) }, "검수 일괄 수정"),
+      actions.onBulkUpdateRows && createElement("button", { onClick: async () => {
+        const result = await actions.onBulkUpdateRows(rows, { field: "grade", value: "중2" });
+        fixture.bulkResults?.push(result);
+      } }, "검수 일괄 수정"),
       actions.onBulkDeleteRows && createElement("button", { onClick: () => actions.onBulkDeleteRows(rows) }, "검수 삭제 요청"),
       ...rows.map(row => createElement("button", { key: row.id, onClick: () => actions.onOpenRow(row) }, row.title))) }],
     ["@/components/ui/date-time-picker", { TimePickerControl: ({ value, onChange, ariaLabel, disabled }) => createElement("input", { "aria-label": ariaLabel, value, disabled, onChange: event => onChange(event.target.value) }) }],
     ...componentOverrides,
   ]);
+  if (fixture.actualTable) overrides.delete("./management-data-table");
   const cache = new Map();
   function load(url) {
     if (cache.has(url.href)) return cache.get(url.href).exports;
@@ -228,6 +232,23 @@ function deferServices(fixture, names) {
     };
   }
 }
+
+test("autofocused student create form returns to its opening button after discarding", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: fixture => studentFixture(fixture, []) });
+  const opener = [...document.querySelectorAll("button")].find(node => node.textContent === "수업 등록");
+  await act(async () => opener.focus());
+  await ui.click("수업 등록");
+  assert.equal(document.activeElement?.id, "students-form-name");
+  await ui.editField("students-form-name", "새 합성 학생");
+  await ui.click("학생 정보 닫기");
+  await ui.click("계속 편집");
+  assert.equal(document.getElementById("students-form-name").value, "새 합성 학생");
+  await ui.click("학생 정보 닫기");
+  await ui.click("변경사항 버리기");
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.ok(document.activeElement === opener);
+});
 
 test("dirty student close keeps the draft until explicit discard and restores focus after continuing", async t => {
   const ui = await setup(t, { kind: "students", configureFixture: fixture => studentFixture(fixture, []) });
@@ -907,6 +928,9 @@ test("the mutation slot stays occupied until the saved row has been reconciled",
 test("a partially failed bulk update holds its slot until the remaining row write settles", async t => {
   const ui = await setup(t, { kind: "students", configureFixture: fixture => {
     studentFixture(fixture, ["updateStudent"]);
+    fixture.bulkResults = [];
+    fixture.refreshes = [];
+    fixture.records.refresh = async () => { fixture.refreshes.push(true); };
     fixture.rows.push({ ...fixture.rows[0], id: "student-b", title: "이학생", raw: { ...fixture.rows[0].raw, id: "student-b", name: "이학생" } });
   } });
   await ui.click("검수 일괄 수정");
@@ -914,10 +938,50 @@ test("a partially failed bulk update holds its slot until the remaining row writ
   await act(async () => ui.mutations[0].reject(new Error("첫 행 저장 실패")));
   await ui.clickTogether("검수 일괄 수정");
   assert.equal(ui.mutations.length, 2, "the second row is still being written");
+  assert.equal(ui.refreshes.length, 0);
   await act(async () => ui.mutations[1].resolve({ id: "student-b" }));
+  assert.equal(ui.refreshes.length, 1, "confirmed partial writes refresh the displayed page");
+  assert.deepEqual(ui.bulkResults, [false, { failedIds: ["student-a"] }], "only failed rows are returned to the selection owner for retry");
   await ui.click("검수 일괄 수정");
   assert.equal(ui.mutations.length, 4, "retry is allowed after the entire previous batch settles");
   await act(async () => { ui.mutations[2].resolve({ id: "student-a" }); ui.mutations[3].resolve({ id: "student-b" }); });
+});
+
+test("real management table retries only failed rows and preserves the bulk draft", async t => {
+  const previousMatchMedia = window.matchMedia;
+  const previousScrollIntoView = window.HTMLElement.prototype.scrollIntoView;
+  const previousResizeObserver = globalThis.ResizeObserver;
+  globalThis.ResizeObserver = class { observe() {} unobserve() {} disconnect() {} };
+  window.matchMedia = query => ({ matches: false, media: query, addEventListener() {}, removeEventListener() {} });
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  t.after(() => { window.matchMedia = previousMatchMedia; window.HTMLElement.prototype.scrollIntoView = previousScrollIntoView; globalThis.ResizeObserver = previousResizeObserver; });
+  const ui = await setup(t, { kind: "students", configureFixture: fixture => {
+    studentFixture(fixture, ["updateStudent"]);
+    fixture.actualTable = true;
+    fixture.records.totalCount = 2;
+    fixture.records.refresh = async () => { fixture.records.rows = [...fixture.records.rows].reverse(); };
+    fixture.rows.push({ ...fixture.rows[0], id: "student-b", title: "이학생", raw: { ...fixture.rows[0].raw, id: "student-b", name: "이학생" } });
+  } });
+  const selections = () => [...document.querySelectorAll('tbody [role="checkbox"]')];
+  assert.equal(selections().length, 2);
+  await act(async () => { selections()[0].click(); selections()[1].click(); });
+  await ui.click("선택 항목 일괄 수정");
+  await act(async () => document.getElementById("management-bulk-value").click());
+  await act(async () => [...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "재원").click());
+  await ui.click("일괄 수정");
+  assert.equal(ui.mutations.length, 2);
+  await act(async () => { ui.mutations[0].resolve({ id: "student-a" }); ui.mutations[1].reject(new Error("검수용 부분 실패")); });
+  assert.equal(document.querySelector('[role="dialog"] h2').textContent, "선택 1건 수정");
+  assert.match(document.getElementById("management-bulk-value").textContent, /재원/);
+  assert.deepEqual(selections().map(box => box.getAttribute("aria-checked")), ["true", "false"], "selection follows failed row identity after the refreshed page reorders");
+  await ui.click("일괄 수정");
+  assert.equal(ui.mutations.length, 3, "the confirmed row is never submitted again");
+  assert.equal(ui.mutations[2].args[0].id, "student-b");
+  await act(async () => ui.mutations[2].resolve({ id: "student-b" }));
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.deepEqual(selections().map(box => box.getAttribute("aria-checked")), ["false", "false"]);
+  assert.equal(document.activeElement?.getAttribute("aria-label"), "학생 검색");
 });
 
 test("a partially failed bulk deletion holds its slot until the remaining deletion settles", async t => {

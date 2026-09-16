@@ -9,17 +9,20 @@ Use the smallest relevant route below. User instructions and `AGENTS.md` remain 
 
 ## Shared grounding
 
-1. Read [DESIGN.md](../../../DESIGN.md) for product priorities, existing tokens and components, interaction standards, and the management-list contract.
+1. Read [DESIGN.md](../../../DESIGN.md) for product priorities, existing tokens and components, interaction standards, the management-list contract, and **메뉴별 개선의 연속성**. Name the reference screen and shared components before changing a menu.
 2. Inspect the affected source, its callers, and relevant tests before deciding what should change.
 3. Keep code inspection, automated tests, browser evidence, production data, deployment, and provider outcomes as separate claims.
 
 ## UI and interaction work
 
 - Start with the existing `components.json`, `src/app/globals.css`, `src/components/ui/`, and the feature's real states. Reuse or repair local components before adding another pattern.
+- For lists, also read [the table composition guide](../../../src/components/data-table/README.md). Keep visual tokens and repeated interaction mechanics in the shared layer; keep feature data and business state in the feature.
+- Use the component map and change checklist in `DESIGN.md`. Menu polish preserves the established design; new shared patterns require updating their common implementation and that document together, with checks on sibling consumers.
 - When available, use the provided `vercel:shadcn` skill for component mechanics. Apply it to this repository's installed components and configuration; do not migrate or overwrite components merely to match newer examples.
 - For accessibility or UX review, use the official Vercel Web Interface Guidelines source pinned in [quality-sources.md](../../../docs/agents/quality-sources.md).
 - The separate official Vercel `design.md` applies to Vercel-authored reports and proposals. Reuse its evaluation and feedback-routing method only; do not apply its logo, Geist, stylesheet, or brand system to TIPS.
 - Verify the affected route at representative desktop and 390px mobile widths. Check the relevant keyboard, focus, loading, empty, error, dense-data, and long-content states.
+- Run the applicable tests from the `Verify shared dashboard design contracts` CI step. For visual changes, also compare screenshots under matching conditions; these tests protect selected contracts, not every visual decision.
 
 ## React performance work
 
@@ -38,7 +41,7 @@ Use the smallest relevant route below. User instructions and `AGENTS.md` remain 
 ## Guideline maintenance
 
 - Read [quality-sources.md](../../../docs/agents/quality-sources.md) before changing this skill, `DESIGN.md`, or source attribution.
-- Recheck the official text, revision, license, installed version, and actual repository behavior. Summarize only guidance that changes decisions; do not vendor whole external skills.
+- When adopting or revising external guidance, recheck its official text, revision, license, installed version, and actual repository behavior. Repository-owned rules must match current source and user decisions; do not present them as newly verified external guidance or vendor whole external skills.
 - Resolve conflicts in this order: user instruction, repository policy and domain contract, actual installed stack, task-relevant official guidance.
 
 Choose verification proportional to the change. This skill does not add blanket approval, full-suite testing, or subagent requirements to ordinary small edits.

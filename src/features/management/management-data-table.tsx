@@ -35,7 +35,6 @@ import {
 import {
   ChevronDown,
   ChevronRight,
-  Pencil,
   Plus,
   Search,
   Trash2,
@@ -45,6 +44,8 @@ import {
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection";
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel";
+import { ManagementBulkActionBar, type BulkEditField } from "./management-bulk-actions";
 import { StudentRowActions } from "./student-row-actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -64,12 +65,13 @@ import {
 } from "@/components/ui/table";
 import { cn } from "@/lib/utils";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
-import { formatStudentContact } from "@/lib/student-contact-display";
+import { formatStudentContact, getStudentContactHref } from "@/lib/student-contact-display";
 import { DataTableSettings, DataTableSettingsSection, DataTableSettingsSelect, DataTableColumnSetting } from "@/components/data-table/data-table-settings";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
   DATA_TABLE_LAYOUT_CLASS_NAME,
   DATA_TABLE_MOBILE_LIST_CLASS_NAME,
+  DATA_TABLE_MOBILE_ITEM_CLASS_NAME,
   DATA_TABLE_PAGER_CLASS_NAME,
   DATA_TABLE_TABLE_CLASS_NAME,
   DATA_TABLE_TOOLBAR_CLASS_NAME,
@@ -80,6 +82,7 @@ import {
   type DataTablePinnedColumn,
   DataTableSortButton,
   DataTableToolbar,
+  DataTableCommandRow,
   DataTableFilters,
   DATA_TABLE_FILTER_FIELD_CLASS_NAME,
   DataTableViewport,
@@ -290,11 +293,22 @@ const STUDENT_COLUMN_WIDTHS: Record<string, number> = {
   select: 44,
   title: 180,
   school: 120,
-  grade: 64,
+  grade: 88,
   contact: 152,
   parentContact: 152,
   status: 88,
   action: 44,
+};
+
+const CLASS_COLUMN_WIDTHS: Record<string, number> = {
+  select: 40,
+  title: 220,
+  teacher: 104,
+  schedule: 196,
+  classroom: 100,
+  enrollmentStatus: 156,
+  capacity: 88,
+  tuition: 104,
 };
 
 const DEFAULT_TABLE_CONFIG: Record<
@@ -314,7 +328,7 @@ const DEFAULT_TABLE_CONFIG: Record<
     grouping: [],
   },
   classes: {
-    visibleColumnIds: [...CLASS_TABLE_COLUMN_IDS],
+    visibleColumnIds: ["select", "title", "teacher", "schedule", "classroom", "enrollmentStatus", "capacity", "tuition"],
     sorting: [
       { id: "title", desc: false },
     ],
@@ -348,7 +362,7 @@ type ManagementTableActions = {
   onCreate?: () => void;
   onOpenRow?: (row: ManagementRow) => void;
   onDeleteRow?: (row: ManagementRow) => void;
-  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<void> | void;
+  onBulkUpdateRows?: (rows: ManagementRow[], change: { field: string; value: string }) => Promise<boolean | void | { failedIds: string[] }> | boolean | void | { failedIds: string[] };
   onBulkDeleteRows?: (rows: ManagementRow[]) => Promise<void> | void;
   onOpenSchoolMaster?: () => void;
   onOpenTeacherMaster?: () => void;
@@ -362,12 +376,6 @@ type StoredManagementScroll = {
   tableY: number;
 };
 
-type BulkEditField = {
-  id: string;
-  label: string;
-  placeholder: string;
-  options?: string[];
-};
 
 const BULK_EDIT_FIELDS: Record<ManagementKind, BulkEditField[]> = {
   students: [
@@ -1027,7 +1035,7 @@ function buildDefaultColumnOrder(kind: ManagementKind, columnIds: string[]) {
 
 function buildDefaultColumnSizing(columnIds: string[], kind: ManagementKind) {
   return Object.fromEntries(
-    columnIds.map((columnId) => [columnId, (kind === "students" ? STUDENT_COLUMN_WIDTHS[columnId] : undefined) || DEFAULT_COLUMN_WIDTHS[columnId] || 140]),
+    columnIds.map((columnId) => [columnId, (kind === "students" ? STUDENT_COLUMN_WIDTHS[columnId] : kind === "classes" ? CLASS_COLUMN_WIDTHS[columnId] : undefined) || DEFAULT_COLUMN_WIDTHS[columnId] || 140]),
   ) as ColumnSizingState;
 }
 
@@ -1120,105 +1128,6 @@ function buildSortingValue(
     firstColumn ? { id: firstColumn, desc: firstDirection === "desc" } : null,
     secondColumn ? { id: secondColumn, desc: secondDirection === "desc" } : null,
   ].filter(Boolean) as SortingState;
-}
-
-function ManagementBulkActionBar({
-  selectedCount,
-  fields,
-  field,
-  value,
-  pending,
-  deleteLabel = "일괄 삭제",
-  onFieldChange,
-  onValueChange,
-  onApply,
-  onDelete,
-  onClear,
-}: {
-  selectedCount: number;
-  fields: BulkEditField[];
-  field: string;
-  value: string;
-  pending: boolean;
-  deleteLabel?: string;
-  onFieldChange: (value: string) => void;
-  onValueChange: (value: string) => void;
-  onApply: () => void;
-  onDelete?: () => void;
-  onClear: () => void;
-}) {
-  if (selectedCount === 0 || fields.length === 0) {
-    return null;
-  }
-
-  const selectedField = fields.find((item) => item.id === field) || fields[0];
-  const valueOptions = selectedField.options || [];
-  const canApply = value.trim().length > 0 && !pending;
-
-  return (
-    <div className="flex flex-col gap-3 border-b border-primary/20 bg-primary/5 px-3 py-3 md:flex-row md:items-end md:justify-between">
-      <div className="flex min-w-0 flex-1 flex-col gap-2 md:flex-row md:items-end">
-        <Badge variant="secondary" className="h-9 w-fit rounded-md px-3">
-          선택 {selectedCount}건
-        </Badge>
-        <div className="grid min-w-[9rem] gap-1.5">
-          <Label className="text-xs text-muted-foreground">수정 항목</Label>
-          <Select value={selectedField.id} onValueChange={onFieldChange}>
-            <SelectTrigger className="h-9">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {fields.map((item) => (
-                <SelectItem key={item.id} value={item.id}>
-                  {item.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="grid min-w-[12rem] flex-1 gap-1.5">
-          <Label className="text-xs text-muted-foreground">변경 값</Label>
-          {valueOptions.length > 0 ? (
-            <Select value={value || "__empty__"} onValueChange={(nextValue) => onValueChange(nextValue === "__empty__" ? "" : nextValue)}>
-              <SelectTrigger className="h-9">
-                <SelectValue placeholder={selectedField.placeholder} />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="__empty__">선택 안 함</SelectItem>
-                {valueOptions.map((option) => (
-                  <SelectItem key={option} value={option}>
-                    {option}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          ) : (
-            <Input
-              value={value}
-              onChange={(event) => onValueChange(event.target.value)}
-              placeholder={selectedField.placeholder}
-              className="h-9"
-            />
-          )}
-        </div>
-      </div>
-      <div className="flex flex-wrap justify-end gap-2">
-        <Button type="button" size="sm" className="h-9" disabled={!canApply} onClick={onApply}>
-          <Pencil className="mr-2 size-4" />
-          일괄 수정
-        </Button>
-        {onDelete ? (
-          <Button type="button" size="sm" variant="destructive" className="h-9" disabled={pending} onClick={onDelete}>
-            <Trash2 className="mr-2 size-4" />
-            {deleteLabel}
-          </Button>
-        ) : null}
-        <Button type="button" size="sm" variant="ghost" className="h-9" disabled={pending} onClick={onClear}>
-          선택 해제
-        </Button>
-      </div>
-    </div>
-  );
 }
 
 type ManagementDataTableProps = {
@@ -1386,7 +1295,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         id: "title",
         accessorFn: (row) => row.title,
         header: kind === "classes" ? "수업명" : "이름",
-        cell: ({ row }) => (
+        cell: ({ row, table }) => (
           <div className="grid min-w-0 gap-0.5 py-0.5">
             <button
               type="button"
@@ -1402,6 +1311,14 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             </button>
             {kind === "textbooks" ? (
               <span className="min-w-0 whitespace-normal break-words text-xs text-muted-foreground">{row.original.subtitle || "기본 정보 없음"}</span>
+            ) : null}
+            {kind === "classes" ? (
+              <span className="min-w-0 whitespace-normal break-words text-xs leading-5 text-muted-foreground">
+                {[
+                  !table.getColumn("subject")?.getIsVisible() ? normalizeScalar(row.original.raw?.subject || row.original.badge) : "",
+                  !table.getColumn("grade")?.getIsVisible() ? normalizeScalar(row.original.raw?.grade) : "",
+                ].filter(Boolean).join(" · ")}
+              </span>
             ) : null}
           </div>
         ),
@@ -1699,6 +1616,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
 
   const table = useReactTable({
     data: tableSourceRows,
+    getRowId: (row) => row.id,
     columns,
     onSortingChange: (updater) => {
       onSortChange(typeof updater === "function" ? updater(sorting) : updater);
@@ -1898,7 +1816,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const summaryLabel = kind === "classes"
     ? authoritativeTotal === undefined ? "수업 건수 확인 중" : `전체 수업 ${authoritativeTotal}개 · 서버 집계`
     : `표시 ${filteredRowCount}건`;
-  const selectedRowCount = table.getFilteredSelectedRowModel().rows.length;
   const selectedRows = table.getFilteredSelectedRowModel().rows.map((row) => row.original);
   const bulkEditFields = BULK_EDIT_FIELDS[kind];
   const selectedBulkEditField = bulkEditFields.find((item) => item.id === bulkEditField) || bulkEditFields[0];
@@ -2636,17 +2553,24 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
 
   async function submitBulkUpdate() {
     if (!selectedRows.length || !selectedBulkEditField || !bulkEditValue.trim() || !actions.onBulkUpdateRows) {
-      return;
+      return false;
     }
 
     setBulkActionPending(true);
     try {
-      await actions.onBulkUpdateRows(selectedRows, {
+      const applied = await actions.onBulkUpdateRows(selectedRows, {
         field: selectedBulkEditField.id,
         value: bulkEditValue.trim(),
       });
+      if (applied === false) return false;
+      if (applied && typeof applied === "object" && applied.failedIds.length > 0) {
+        const failedIds = new Set(applied.failedIds);
+        setRowSelection((current) => Object.fromEntries(Object.entries(current).filter(([id, selected]) => selected && failedIds.has(id))));
+        return false;
+      }
       setBulkEditValue("");
       setRowSelection({});
+      return true;
     } finally {
       setBulkActionPending(false);
     }
@@ -2666,8 +2590,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     }
   }
 
-  const bulkActionBar = (
+  const bulkActionBar = selectedRows.length > 0 && bulkEditFields.length > 0 ? (
     <ManagementBulkActionBar
+      canEdit={Boolean(actions.onBulkUpdateRows)}
       selectedCount={selectedRows.length}
       fields={bulkEditFields}
       field={bulkEditField}
@@ -2679,11 +2604,12 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         setBulkEditValue("");
       }}
       onValueChange={setBulkEditValue}
-      onApply={() => void submitBulkUpdate()}
+      onApply={submitBulkUpdate}
       onDelete={actions.onBulkDeleteRows ? () => void submitBulkDelete() : undefined}
-      onClear={() => setRowSelection({})}
+      returnFocusRef={tableLayoutRef}
+      onClear={() => { setRowSelection({}); tableLayoutRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus({ preventScroll: true }); }}
     />
-  );
+  ) : null;
 
   const classMobileList = kind === "classes" ? (
     <div className={DATA_TABLE_MOBILE_LIST_CLASS_NAME} aria-label={`${emptyLabel} 모바일 목록`}>
@@ -2708,7 +2634,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           const tuition = normalizeScalar(raw.tuitionLabel || raw.tuition_label) || formatManagementCurrency(raw.fee || raw.tuition);
 
           return (
-            <article key={`class-mobile-${row.id}`} className="rounded-lg border border-border/70 bg-background p-3">
+            <article key={`class-mobile-${row.id}`} data-state={row.getIsSelected() ? "selected" : undefined} className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME}>
               <div className="flex items-start gap-3">
                 <DataTableSelectionCheckbox
                   checked={row.getIsSelected()}
@@ -2719,7 +2645,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
-                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-base font-semibold leading-6 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-class-detail-trigger={record.id}
                   >
@@ -2808,7 +2734,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
             <article
               key={`student-mobile-${row.id}`}
               data-testid={`student-mobile-card-${row.id}`}
-              className="rounded-lg border border-border/70 bg-background p-3"
+              data-state={row.getIsSelected() ? "selected" : undefined}
+              className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME}
             >
               <div className="flex items-start gap-3">
                 <DataTableSelectionCheckbox
@@ -2820,7 +2747,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 <div className="min-w-0 flex-1">
                   <button
                     type="button"
-                    className="block min-w-0 whitespace-normal break-words text-left text-sm font-semibold leading-5 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+                    className="block min-w-0 whitespace-normal break-words text-left text-base font-semibold leading-6 text-foreground underline-offset-4 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
                     onClick={() => openManagementRow(record)}
                     data-student-detail-trigger={record.id}
                   >
@@ -2838,16 +2765,20 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 />
               </div>
 
-              <dl className="mt-3 grid gap-2 border-t border-border/70 pt-3 text-sm">
-                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
-                  <dt className="text-muted-foreground">학생 연락처</dt>
-                  <dd className="min-w-0 break-keep text-foreground">{contact}</dd>
-                </div>
-                <div className="grid grid-cols-[5.5rem_minmax(0,1fr)] gap-3">
-                  <dt className="text-muted-foreground">학부모</dt>
-                  <dd className="min-w-0 break-keep text-foreground">{parentContact}</dd>
-                </div>
-              </dl>
+              {contact === "—" && parentContact === "—" ? (
+                <p className="mt-2 pl-11 text-xs text-muted-foreground">연락처 없음</p>
+              ) : (
+                <dl className="mt-3 grid grid-cols-2 gap-2 border-t border-border/70 pt-2 text-sm">
+                  {([["학생", raw.contact, contact], ["학부모", raw.parent_contact || raw.parentContact, parentContact]] as const).map(([label, value, display]) => (
+                    display !== "—" ? <div key={label} className="grid min-w-0 gap-0.5">
+                      <dt className="text-xs text-muted-foreground">{label}</dt>
+                      <dd className="min-w-0 tabular-nums [overflow-wrap:anywhere]">
+                        {getStudentContactHref(value) ? <a href={getStudentContactHref(value)} aria-label={`${record.title} ${label} ${display} 전화`} className="inline-flex min-h-11 items-center rounded-md text-foreground underline-offset-4 hover:text-primary hover:underline focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50">{display}</a> : <span>{display}</span>}
+                      </dd>
+                    </div> : null
+                  ))}
+                </dl>
+              )}
             </article>
           );
         })
@@ -2894,67 +2825,34 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           onCreate={actions.onCreate}
           createDisabled={!hasCreateAction}
           footerAction={null}
-          toolbarAction={<div className="ml-auto flex justify-end">{columnSettingsControl}</div>}
+          selectionActions={bulkActionBar}
+          toolbarAction={columnSettingsControl}
         />
       ) : (
         <DataTableToolbar className={cn("gap-2", kind === "students" && "student-list-toolbar")}>
-          <div className="flex flex-wrap items-center gap-2">
-            {kind === "students" ? (
-              <>
-                <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{searchControl}</div>
-                {createControl}
-                <div className="ml-auto flex justify-end">{columnSettingsControl}</div>
-              </>
-            ) : (
-              <>
-                <div className="min-w-0 basis-full sm:basis-auto sm:flex-1">{searchControl}</div>
-                {badgeColumn ? (
-                  <div className="min-w-0 flex-1 sm:w-40 sm:flex-none">
-                    <Label htmlFor="badge-filter" className="sr-only">
-                      {badgeLabel}
-                    </Label>
-                    <Select
-                      value={badgeFilter || "all"}
-                      onValueChange={(value) => {
-                        const nextValue = value === "all" ? "" : value;
-                        badgeColumn.setFilterValue(nextValue);
-                        syncTextbookListQueryState({ publisher: nextValue });
-                        setRowSelection({});
-                      }}
-                    >
-                      <SelectTrigger className="h-9 w-full" id="badge-filter" aria-label={badgeLabel}>
-                        <SelectValue placeholder={badgeLabel} />
-                      </SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="all">전체 {badgeLabel}</SelectItem>
-                        {badgeOptions.map((option) => (
-                          <SelectItem key={option} value={option}>
-                            {option}
-                          </SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  </div>
-                ) : null}
-                <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
-                  <Label htmlFor="status-filter" className="sr-only">
-                    {statusLabel}
+          <DataTableCommandRow search={searchControl} actions={bulkActionBar ?? <>{createControl}{columnSettingsControl}</>} />
+          {kind !== "students" ? (
+            <DataTableFilters>
+              {badgeColumn ? (
+                <div className="min-w-0 flex-1 sm:w-40 sm:flex-none">
+                  <Label htmlFor="badge-filter" className="sr-only">
+                    {badgeLabel}
                   </Label>
                   <Select
-                    value={statusFilter || "all"}
+                    value={badgeFilter || "all"}
                     onValueChange={(value) => {
                       const nextValue = value === "all" ? "" : value;
-                      statusColumn?.setFilterValue(nextValue);
-                      syncTextbookListQueryState({ status: nextValue });
+                      badgeColumn.setFilterValue(nextValue);
+                      syncTextbookListQueryState({ publisher: nextValue });
                       setRowSelection({});
                     }}
                   >
-                    <SelectTrigger className="h-9 w-full" id="status-filter" aria-label={statusLabel}>
-                      <SelectValue placeholder={statusLabel} />
+                    <SelectTrigger className="h-9 w-full" id="badge-filter" aria-label={badgeLabel}>
+                      <SelectValue placeholder={badgeLabel} />
                     </SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="all">전체 {statusLabel}</SelectItem>
-                      {statusOptions.map((option) => (
+                      <SelectItem value="all">전체 {badgeLabel}</SelectItem>
+                      {badgeOptions.map((option) => (
                         <SelectItem key={option} value={option}>
                           {option}
                         </SelectItem>
@@ -2962,26 +2860,56 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                     </SelectContent>
                   </Select>
                 </div>
-                {createControl}
-                <div className="ml-auto flex justify-end">{columnSettingsControl}</div>
-              </>
-            )}
-          </div>
+              ) : null}
+              <div className="min-w-0 flex-1 sm:w-32 sm:flex-none">
+                <Label htmlFor="status-filter" className="sr-only">
+                  {statusLabel}
+                </Label>
+                <Select
+                  value={statusFilter || "all"}
+                  onValueChange={(value) => {
+                    const nextValue = value === "all" ? "" : value;
+                    statusColumn?.setFilterValue(nextValue);
+                    syncTextbookListQueryState({ status: nextValue });
+                    setRowSelection({});
+                  }}
+                >
+                  <SelectTrigger className="h-9 w-full" id="status-filter" aria-label={statusLabel}>
+                    <SelectValue placeholder={statusLabel} />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">전체 {statusLabel}</SelectItem>
+                    {statusOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            </DataTableFilters>
+          ) : null}
 
           {kind === "students" ? (
+            <DataTableFilterPanel label="학생 검색 조건" onReset={resetFilters} activeFilters={[
+              { label: "재원 상태", value: statusFilter },
+              { label: "학교 구분", value: studentSchoolCategoryFilter },
+              { label: "학교", value: studentSchoolFilter },
+              { label: "학년", value: studentGradeFilter },
+            ].filter((filter) => Boolean(filter.value))}>
             <DataTableFilters data-testid="student-quick-filters" aria-label="학생 검색 조건">
               {renderStudentQuickFilter("재원 상태", renderStudentStatusSelect())}
               {renderStudentQuickFilter("학교 구분", renderStudentSchoolCategorySelect())}
               {renderStudentQuickFilter("학교", renderStudentSchoolSelect(), "sm:w-52")}
               {renderStudentQuickFilter("학년", renderStudentGradeSelect())}
-              {hasActiveFilters ? <div className="flex h-9 items-center sm:ml-auto">{resetControl}</div> : null}
+              {hasActiveFilters ? <div className="hidden h-9 items-center md:ml-auto md:flex">{resetControl}</div> : null}
             </DataTableFilters>
+            </DataTableFilterPanel>
           ) : null}
 
           <div className={cn("flex flex-wrap items-center gap-2 text-xs text-muted-foreground", kind === "students" && "student-filter-status")} aria-live="polite">
             {showSummaryBadge ? <Badge variant="secondary">{summaryLabel}</Badge> : null}
             {rows.length !== filteredRowCount ? <Badge variant="outline">전체 {rows.length}건</Badge> : null}
-            {selectedRowCount > 0 ? <Badge variant="outline">선택 {selectedRowCount}건</Badge> : null}
             {grouping.length > 0 ? <Badge variant="outline">그룹 {grouping.length}단</Badge> : null}
             {kind !== "students" ? (
               <>
@@ -2994,8 +2922,6 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           </div>
         </DataTableToolbar>
       )}
-
-      {bulkActionBar}
 
       {studentMobileList}
       {classMobileList}
