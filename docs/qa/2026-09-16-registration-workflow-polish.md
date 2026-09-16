@@ -65,3 +65,7 @@ Chrome CUA에서 1440×1000, 390×844 및 키보드 노출을 대신한 390×520
 - registration-track-workspace, registration-application-model, registration-observation-service, registration-observation-workspace, registration-track-fixtures, registration-visit-cancellation, premium-registration-detail, common-controls-ui: 347개 테스트 통과. 청강의 정상/오류 계약은 합성 데이터 기반 자동 검증이며 운영 예약 저장 증거가 아니다.
 - 변경 파일 ESLint, TypeScript, production build 통과. 기존 합성 환경의 public-class 조회 경고 외 빌드 실패 없음.
 - DB/API/업무 전이 변경, 실제 알림 발송, 운영 배포 없음. 사용자 원래 탭의 입력을 검증용으로 변경하지 않고 별도 탭을 사용했다.
+
+### 배포 준비 중 원격 검사 보완
+
+PR #54의 첫 필수 검사에서 관리팀 알림의 이전 연속 조건 문자열을 요구하는 정적 테스트가 실패했다. 이어 나머지 CI 검사를 로컬에서 실행하여 제거한 “선택” 라벨을 요구하는 검사도 확인했다. 실제 기능 변경 없이 두 기대값을 현재 UI에 맞췄다. 권한·활성 과목·알림 준비 조건, 상태 저장 시 자동 발송 금지, 문의 입력의 선택 여부 검증은 유지했다. 관리팀 알림·발송 복구·자동 이력·청강·방문 취소 관련 CI 묶음 262개를 재검증했다.

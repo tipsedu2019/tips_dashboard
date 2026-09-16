@@ -2293,7 +2293,7 @@ test("registration inquiry facts remain optional independently of workflow progr
   const submit = workspaceSource.slice(submitStart, submitEnd);
   assert.doesNotMatch(submit, /getRegistrationCreateBlockers|getRegistrationCreateErrorMessage|assertRegistrationInquiryBaseReady/);
   assert.match(submit, /submissionForm\.type === "registration" \? "등록 신청"/);
-  assert.match(inquiryFieldsSource, /requirement="선택"/);
+  assert.doesNotMatch(inquiryFieldsSource, /requirement="선택"/);
   assert.doesNotMatch(inquiryFieldsSource, /required=|isValidRegistrationMobilePhone/);
 });
 
