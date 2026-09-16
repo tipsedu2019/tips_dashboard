@@ -87,7 +87,7 @@ function SummaryCards({ summary }: { summary: Data }) {
     ["운영 수업", `${format(summary.activeClassesCount)}개`, text(summary.weeklyHoursLabel) ? `주간 ${text(summary.weeklyHoursLabel)}` : ""],
     ["수업당 평균", `${averageEnrollmentsPerClass}명`, ""],
   ]
-  return <section aria-label="핵심 운영 지표" className="grid overflow-hidden rounded-xl border bg-background md:grid-cols-2 lg:grid-cols-4">
+  return <section aria-label="핵심 운영 지표" className="grid overflow-hidden rounded-[var(--radius-surface)] border border-border/70 bg-background md:grid-cols-2 lg:grid-cols-4">
     {values.map(([label, value, sub], index) => <div key={label} className={`min-w-0 px-4 py-3 ${index > 0 ? "border-t md:border-l md:border-t-0" : ""}`}>
       <div className="text-xs font-medium text-muted-foreground">{label}</div><div className="mt-1 text-2xl font-semibold tabular-nums">{value}</div>{sub ? <div className="mt-1 text-xs text-muted-foreground">{sub}</div> : null}
     </div>)}
@@ -211,7 +211,7 @@ export function StatisticsWorkspace() {
   }
   const onFilter = (patch: Partial<StatisticsRouteState>) => navigate({ ...route, ...patch }, "replaceState")
   return <Tabs value={route.tab} onValueChange={(value) => navigate({ tab: value as DashboardStatisticsTab, subject: "all", division: "all", range: 90 }, "pushState")} activationMode="manual" className="min-w-0 gap-4 px-3 pb-5 sm:px-4 sm:pb-6 lg:px-6">
-    <TabsList aria-label="통계 탭" className="grid h-auto w-full grid-cols-4 gap-1 p-1">
+    <TabsList aria-label="통계 탭" className="grid h-auto w-full grid-cols-4 gap-1 p-1 md:w-fit md:min-w-[32rem]">
       {STATISTICS_TABS.map((tab) => <TabsTrigger key={tab.key} value={tab.key} className="min-w-0 px-1.5 text-xs sm:px-3 sm:text-sm">{tab.label}</TabsTrigger>)}
     </TabsList>
     <TabsContent value="overview"><OverviewPanel /></TabsContent>

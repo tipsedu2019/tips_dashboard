@@ -35,7 +35,7 @@ function SheetOverlay({
     <SheetPrimitive.Overlay
       data-slot="sheet-overlay"
       className={cn(
-        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:invisible data-[state=closed]:pointer-events-none! fixed inset-0 z-50 bg-black/50 duration-[var(--motion-duration-dialog)] ease-[var(--motion-easing-spatial)] motion-reduce:animate-none motion-reduce:transition-none",
+        "data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0 data-[state=closed]:invisible data-[state=closed]:pointer-events-none! fixed inset-0 z-50 bg-[var(--overlay-scrim)] duration-[var(--motion-duration-dialog)] ease-[var(--motion-easing-spatial)] motion-reduce:animate-none motion-reduce:transition-none",
         className
       )}
       {...props}
@@ -57,7 +57,7 @@ function SheetContent({
       <SheetPrimitive.Content
         data-slot="sheet-content"
         className={cn(
-          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:invisible data-[state=closed]:pointer-events-none! fixed z-50 flex min-w-0 flex-col gap-4 shadow-lg duration-[var(--motion-duration-dialog)] ease-[var(--motion-easing-spatial)] motion-reduce:animate-none motion-reduce:transition-none [&>[data-slot=sheet-header]]:pr-16",
+          "bg-background data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:invisible data-[state=closed]:pointer-events-none! fixed z-50 flex min-w-0 flex-col gap-4 shadow-[var(--shadow-overlay)] duration-[var(--motion-duration-dialog)] ease-[var(--motion-easing-spatial)] motion-reduce:animate-none motion-reduce:transition-none [&>[data-slot=sheet-header]]:pr-16",
           side === "right" &&
             "data-[state=closed]:slide-out-to-right data-[state=open]:slide-in-from-right inset-y-0 right-0 h-full w-3/4 border-l sm:max-w-sm",
           side === "left" &&
@@ -65,7 +65,7 @@ function SheetContent({
           side === "top" &&
             "data-[state=closed]:slide-out-to-top data-[state=open]:slide-in-from-top inset-x-0 top-0 h-auto border-b",
           side === "bottom" &&
-            "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom inset-x-0 bottom-0 h-auto border-t",
+            "data-[state=closed]:slide-out-to-bottom data-[state=open]:slide-in-from-bottom inset-x-0 bottom-0 h-auto rounded-t-[var(--radius-overlay)] border-t",
           className
         )}
         {...props}
@@ -111,7 +111,7 @@ function SheetTitle({
   return (
     <SheetPrimitive.Title
       data-slot="sheet-title"
-      className={cn("text-foreground min-w-0 font-semibold [overflow-wrap:anywhere]", className)}
+      className={cn("text-foreground min-w-0 text-xl leading-7 font-semibold [overflow-wrap:anywhere]", className)}
       {...props}
     />
   )

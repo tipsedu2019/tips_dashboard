@@ -99,10 +99,18 @@ TIPS는 학원 구성원이 학생, 수업, 일정, 교재, 등록, 알림 업�
 | 편집 필드 | `--field-height`: 42px | 학생·수업의 기존 편집 밀도 |
 | 모바일 주 행동 | `--touch-target-height`: 44px | 검색 아이콘, 주 action; 모든 보조 아이콘에 강제하지 않음 |
 | 표 | `--table-header-height`: 44px / `--table-row-height`: 48px / `--table-cell-padding-inline`: 12px | 행 높이는 최솟값이며 긴 식별명은 전체 줄바꿈 |
-| 반경 | `--radius-control`: 8px / `--radius-surface`: 12px | `rounded-md`는 control; 표 surface는 명시 토큰. dialog의 기존 `--radius` 체계 유지 |
-| 셸 | sidebar 256px, header desktop64/mobile56px, logo36px, menu40px | `--shell-*`; 긴 제목·확대 시 header 자연 확장 |
+| 반경 | `--radius-control`: 8px / `--radius-surface`: 12px | `rounded-md`는 control; 표 surface는 명시 토큰. dialog·sheet는 `--radius-overlay`: 20px |
+| 셸 | sidebar 240px, header desktop72/mobile56px, logo36px, menu40px | `--shell-*`; 긴 제목·확대 시 header 자연 확장 |
 | 모션 | control150ms / dialog200ms | 기존 easing, reduced motion 유지 |
 
-본문은14/20px·400, 식별명600, 셸 h1은18/26px·600을 기준으로 한다. 한글 기본 자간은0이다. focus는 기존3px ring을 사용한다.
+본문은14/20px·400, 식별명600, 셸 h1은 desktop22/28px·600, mobile18/26px·600을 기준으로 한다. 한글 기본 자간은0이다. focus는 기존3px ring을 사용한다.
 
 색은 기존 semantic token을 소비한다. 밝은 테마 primary/destructive는 기존 hue·chroma를 유지한 채 명도를 낮추고, 어두운 테마는 밝은 action색과 어두운 foreground를 짝지었다. hover의90% 배경과 선택면 위 보조 본문까지4.5:1을 검사한다. 상태는 텍스트·선택 제어로도 표현한다. 수치 대비 검증은 `tests/premium-semantic-contrast.test.mjs`; 실제 브라우저 상태·색역 검수는 별도 증거다.
+
+### 전체 화면과 편집 창의 구성
+
+- 내부 앱의 바탕은 `--workspace-background`, 작업 영역은 기존 `background`·`card` 토큰으로 구분한다. 상단바는 같은 바탕을 쓰고 작은 섹션명 아래에 화면명을 표시한다. 메뉴 순서·권한·라우트는 시각 개편과 함께 바꾸지 않는다.
+- 사이드바 선택은 중립적인 면과 아이콘의 primary 색, `aria-current`로 표시한다. 세로 강조선·파란 면·굵은 글자를 중복해 사용하지 않는다. 빠른 이동과 테마는 상단의 보조 행동으로 유지한다.
+- 일반 입력·보조 버튼은 테두리와 상태 변화로 구분하며 항상 그림자를 두지 않는다. 주요 제출 행동과 실제 선택 상태에 primary를 사용하고, 로딩 skeleton은 중립적인 secondary를 사용한다.
+- dialog·sheet는 `--radius-overlay`, `--overlay-scrim`, `--shadow-overlay`를 공유한다. 표와 카드의 surface 반경과 구분한다. 입력 창의 고정 머리·바닥, 본문 스크롤, 취소·오류·초안 보존은 유지한다.
+- 고정 도구막대는 상단바 높이 아래에 머물러야 한다. 본문 바로가기는 기본 키보드 접근을 제공하며 새 단축키를 도입하지 않는다.

@@ -333,7 +333,7 @@ function ClassTuitionManwonInput({
   };
 
   return (
-    <div className={cn("flex h-10 overflow-hidden rounded-md border bg-background shadow-sm", disabled && "bg-muted/30 opacity-75")}>
+    <div className={cn("flex h-10 overflow-hidden rounded-md border bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50", disabled && "bg-muted/30 opacity-75")}>
       <div className="relative min-w-0 flex-1">
         <Input
           id={id}
@@ -417,7 +417,7 @@ function ClassCapacityInput({
   };
 
   return (
-    <div className={cn("flex h-10 overflow-hidden rounded-md border bg-background shadow-sm", disabled && "bg-muted/30 opacity-75")}>
+    <div className={cn("flex h-10 overflow-hidden rounded-md border bg-background focus-within:border-ring focus-within:ring-[3px] focus-within:ring-ring/50", disabled && "bg-muted/30 opacity-75")}>
       <Input
         id={id}
         name={name}
@@ -2844,6 +2844,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const actions = useMemo(() => {
     const base = {
       onCreate: canMutateRows ? () => {
+        // The first field auto-focuses before Radix can report the opening focus.
+        managementDialogOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        managementDialogRowIdRef.current = null;
         beginDetailRequest();
         setSelectedRow(null);
         setNormalizedScheduleDefaults(null);
@@ -3672,9 +3675,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           className={cn("z-[80] max-h-[92vh] w-[calc(100vw-2rem)] max-w-[calc(100vw-2rem)] overflow-x-hidden overflow-y-auto p-4 sm:w-full sm:max-w-5xl sm:p-6", kind === "students" && "student-edit-sheet", kind === "classes" && "class-edit-sheet")}
           overlayClassName={kind === "students" ? "student-edit-overlay" : kind === "classes" ? "class-edit-overlay" : undefined}
           showCloseButton={kind !== "students" && (kind !== "classes" || !isDetail)}
-          onOpenAutoFocus={() => {
+          onOpenAutoFocus={(event) => {
             if (kind === "students" || kind === "classes") {
-              managementDialogOpenerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+              const active = document.activeElement;
+              if (active instanceof HTMLElement && active !== document.body
+                && !(event.target instanceof HTMLElement && event.target.contains(active))) {
+                managementDialogOpenerRef.current = active;
+              }
               managementDialogRowIdRef.current = selectedRow?.id ?? null;
             }
           }}

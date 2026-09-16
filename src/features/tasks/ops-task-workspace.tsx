@@ -12293,14 +12293,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
       <div className={workspaceSurfaceClassName}>
         {isRegistrationWorkspace ? (
-          <div role="group" aria-label="등록 화면 보기" className="inline-flex w-fit rounded-md border bg-background p-1">
+          <div role="group" aria-label="등록 화면 보기" className="inline-flex w-fit rounded-lg bg-secondary/70 p-1">
             <button
               type="button"
               aria-pressed={registrationMode === "list"}
               onClick={() => syncRegistrationMode("list")}
               className={[
-                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium",
-                registrationMode === "list" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+                "inline-flex h-11 items-center gap-1.5 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 md:h-9",
+                registrationMode === "list" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:bg-muted",
               ].join(" ")}
             >
               <List className="size-4" />
@@ -12311,8 +12311,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
               aria-pressed={registrationMode === "calendar"}
               onClick={() => syncRegistrationMode("calendar")}
               className={[
-                "inline-flex items-center gap-1.5 rounded px-3 py-1.5 text-sm font-medium",
-                registrationMode === "calendar" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+                "inline-flex h-11 items-center gap-1.5 rounded-md px-3 text-sm font-medium outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50 md:h-9",
+                registrationMode === "calendar" ? "bg-background text-foreground shadow-xs" : "text-muted-foreground hover:bg-muted",
               ].join(" ")}
             >
               <CalendarDays className="size-4" />

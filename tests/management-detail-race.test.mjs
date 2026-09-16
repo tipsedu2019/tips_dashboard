@@ -229,6 +229,23 @@ function deferServices(fixture, names) {
   }
 }
 
+test("autofocused student create form returns to its opening button after discarding", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture: fixture => studentFixture(fixture, []) });
+  const opener = [...document.querySelectorAll("button")].find(node => node.textContent === "수업 등록");
+  await act(async () => opener.focus());
+  await ui.click("수업 등록");
+  assert.equal(document.activeElement?.id, "students-form-name");
+  await ui.editField("students-form-name", "새 합성 학생");
+  await ui.click("학생 정보 닫기");
+  await ui.click("계속 편집");
+  assert.equal(document.getElementById("students-form-name").value, "새 합성 학생");
+  await ui.click("학생 정보 닫기");
+  await ui.click("변경사항 버리기");
+  await act(async () => { await new Promise(resolve => setTimeout(resolve, 20)); });
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.ok(document.activeElement === opener);
+});
+
 test("dirty student close keeps the draft until explicit discard and restores focus after continuing", async t => {
   const ui = await setup(t, { kind: "students", configureFixture: fixture => studentFixture(fixture, []) });
   await ui.click("김학생");

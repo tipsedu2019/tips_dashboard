@@ -42,7 +42,7 @@ function DashboardMain({ children }: { children: React.ReactNode }) {
     <>
       <SiteHeader />
       <ViewerPermissionNotice />
-      <div className="flex flex-1 flex-col">
+      <div id="admin-workspace" tabIndex={-1} className="flex min-w-0 flex-1 flex-col outline-none">
         <div className="@container/main flex flex-1 flex-col gap-2">
           <div className="flex flex-col gap-4 py-4 md:gap-6 md:py-6">
             {children}
@@ -69,6 +69,7 @@ export default function DashboardLayout({
         } as React.CSSProperties}
         className={config.collapsible === "none" ? "sidebar-none-mode" : ""}
       >
+        <a href="#admin-workspace" className="sr-only z-[100] rounded-md bg-background px-4 py-3 text-sm font-medium shadow-md focus:not-sr-only focus:fixed focus:left-4 focus:top-3 focus-visible:ring-[3px] focus-visible:ring-ring">본문으로 이동</a>
         {config.side === "left" ? (
           <>
             <AppSidebar
@@ -76,13 +77,13 @@ export default function DashboardLayout({
               collapsible={config.collapsible}
               side={config.side}
             />
-            <SidebarInset className="m-0! min-w-0 rounded-none! shadow-none!">
+            <SidebarInset className="m-0! min-w-0 rounded-none! bg-[var(--workspace-background)] shadow-none!">
               <DashboardMain>{children}</DashboardMain>
             </SidebarInset>
           </>
         ) : (
           <>
-            <SidebarInset className="m-0! min-w-0 rounded-none! shadow-none!">
+            <SidebarInset className="m-0! min-w-0 rounded-none! bg-[var(--workspace-background)] shadow-none!">
               <DashboardMain>{children}</DashboardMain>
             </SidebarInset>
             <AppSidebar

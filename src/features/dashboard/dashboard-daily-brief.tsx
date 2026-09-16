@@ -62,14 +62,14 @@ export function DashboardDailyBrief() {
           </div>
         </header>
 
-        <dl className="grid grid-cols-3 divide-x rounded-xl border bg-card py-4" aria-busy={initialLoading}>
+        <dl className="grid grid-cols-3 divide-x divide-border/60 rounded-[var(--radius-surface)] border border-border/70 bg-card py-5" aria-busy={initialLoading}>
           {countItems.map((item) => (
-            <div key={item.key} className="min-w-0 px-3 sm:px-5">
+            <div key={item.key} className="min-w-0 px-4 sm:px-6">
               <dt className="text-xs font-medium text-muted-foreground sm:text-sm">{item.label}</dt>
               <dd className="mt-2 flex min-h-8 items-baseline gap-1 tabular-nums">
                 {initialLoading ? <Skeleton className="h-8 w-16" /> : brief ? (
-                  <Link href={`/admin/registration?view=calendar&kind=${item.kind}`} prefetch={false} aria-label={`${item.label} ${brief.counts[item.key]}건 · 등록 일정 보기`} className="group flex min-h-11 w-full items-baseline gap-1 rounded-md text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                    <span className="text-2xl font-semibold group-hover:underline">{brief.counts[item.key]}</span><span className="text-sm">건</span><ChevronRight aria-hidden="true" className="ml-auto size-4 self-center" />
+                  <Link href={`/admin/registration?view=calendar&kind=${item.kind}`} prefetch={false} aria-label={`${item.label} ${brief.counts[item.key]}건 · 등록 일정 보기`} className="group flex min-h-11 w-full items-baseline gap-1 rounded-md text-foreground hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                    <span className="text-[28px] leading-9 font-semibold sm:text-[32px] sm:leading-10">{brief.counts[item.key]}</span><span className="text-sm text-muted-foreground">건</span><ChevronRight aria-hidden="true" className="ml-auto size-4 self-center text-muted-foreground group-hover:text-primary" />
                   </Link>
                 ) : <><span className="text-2xl font-semibold">—</span><span className="sr-only">미조회</span></>}
               </dd>
@@ -81,10 +81,10 @@ export function DashboardDailyBrief() {
       <div className="grid gap-3">
         <h3 className="text-sm font-medium">오늘 일정 <span className="font-normal text-muted-foreground">· 시간순 최대 5개</span></h3>
         {initialLoading ? (
-          <div role="status" aria-label="오늘 일정을 불러오는 중" className="divide-y rounded-xl border bg-card">
+          <div role="status" aria-label="오늘 일정을 불러오는 중" className="divide-y divide-border/60 rounded-[var(--radius-surface)] border border-border/70 bg-card">
             <span className="sr-only">오늘 일정을 불러오는 중입니다.</span>
             {[0, 1, 2].map((row) => (
-              <div key={row} aria-hidden="true" className="grid min-h-16 grid-cols-[48px_minmax(0,1fr)] items-start gap-3 px-4 py-3 md:grid-cols-[64px_minmax(0,1fr)]">
+              <div key={row} aria-hidden="true" className="grid min-h-20 grid-cols-[48px_minmax(0,1fr)] items-center gap-3 px-4 py-4 sm:px-6 md:grid-cols-[64px_minmax(0,1fr)]">
                 <Skeleton className="mt-1 h-4 w-10" />
                 <div className="grid gap-2"><Skeleton className="h-5 w-3/4" /><Skeleton className="h-4 w-1/2" /></div>
               </div>
@@ -103,13 +103,13 @@ export function DashboardDailyBrief() {
         </div>
 
         {brief?.upcoming.length ? (
-          <ul className="grid overflow-hidden rounded-xl border bg-card" aria-label="오늘 일정">
+          <ul className="grid overflow-hidden rounded-[var(--radius-surface)] border border-border/70 bg-card" aria-label="오늘 일정">
             {brief.upcoming.map((item) => (
-              <li key={`${item.sourceKind}:${item.sourceId}`} className="border-b last:border-b-0">
-                <Link href={item.href} className="grid min-h-16 grid-cols-[48px_minmax(0,1fr)] items-start gap-3 px-4 py-3 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[64px_minmax(0,1fr)]">
-                  <time dateTime={item.scheduledAt} className="pt-0.5 text-sm font-medium tabular-nums">{formatTime(item.scheduledAt)}</time>
+              <li key={`${item.sourceKind}:${item.sourceId}`} className="border-b border-border/60 last:border-b-0">
+                <Link href={item.href} className="grid min-h-20 grid-cols-[48px_minmax(0,1fr)] items-center gap-3 px-4 py-4 sm:px-6 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[64px_minmax(0,1fr)]">
+                  <time dateTime={item.scheduledAt} className="text-sm font-semibold tabular-nums md:text-base">{formatTime(item.scheduledAt)}</time>
                   <span className="min-w-0 [overflow-wrap:anywhere]">
-                    <span className="block font-medium">{item.title}</span>
+                    <span className="block text-sm font-semibold leading-6 md:text-base">{item.title}</span>
                     {item.subjectLabels.length || item.placeLabel ? <span className="mt-0.5 block text-sm text-muted-foreground">{[...item.subjectLabels, item.placeLabel].filter(Boolean).join(" · ")}</span> : null}
                   </span>
                 </Link>
@@ -117,7 +117,7 @@ export function DashboardDailyBrief() {
             ))}
           </ul>
         ) : brief ? (
-          <div className="rounded-xl border bg-card px-4 py-5">
+          <div className="rounded-[var(--radius-surface)] border border-border/70 bg-card px-5 py-8">
             <p className="text-sm text-muted-foreground">오늘 예정된 레벨테스트·방문상담·청강이 없습니다.</p>
             <Link href="/admin/registration?view=calendar" className={registrationLinkClass}>등록 일정 보기</Link>
           </div>

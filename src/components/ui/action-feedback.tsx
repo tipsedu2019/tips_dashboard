@@ -1,7 +1,7 @@
 "use client"
 
 import * as React from "react"
-import { X } from "lucide-react"
+import { CircleAlert, CircleCheck, X } from "lucide-react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
@@ -22,8 +22,9 @@ export function ActionFeedback({ message, error = false, onDismiss, returnFocusR
 
   return (
     <div data-slot="action-feedback" className="pointer-events-none fixed inset-x-4 bottom-[max(1rem,env(safe-area-inset-bottom))] z-40 sm:left-auto sm:right-6 sm:w-[min(28rem,calc(100vw-3rem))]">
-      <Alert role={error ? "alert" : "status"} aria-atomic="true" variant={error ? "destructive" : "default"} className="pointer-events-auto grid-cols-[minmax(0,1fr)_auto] items-center gap-3 bg-popover py-2 shadow-md">
-        <AlertDescription tabIndex={0} aria-label="처리 결과" className="col-start-1 max-h-[30dvh] min-w-0 overflow-y-auto whitespace-pre-line break-words rounded-sm py-1 leading-relaxed focus-visible:outline-2 focus-visible:outline-ring">
+      <Alert role={error ? "alert" : "status"} aria-atomic="true" variant={error ? "destructive" : "default"} className="pointer-events-auto grid-cols-[auto_minmax(0,1fr)_auto] items-center gap-3 rounded-[var(--radius-surface)] bg-popover py-2 shadow-[var(--shadow-overlay)]">
+        <span aria-hidden="true" className="col-start-1 self-center">{error ? <CircleAlert className="size-5" /> : <CircleCheck className="size-5 text-primary" />}</span>
+        <AlertDescription tabIndex={0} aria-label="처리 결과" className="col-start-2 max-h-[30dvh] min-w-0 overflow-y-auto whitespace-pre-line break-words rounded-sm py-1 leading-relaxed focus-visible:outline-2 focus-visible:outline-ring">
           {message}
         </AlertDescription>
         <Button type="button" variant="ghost" size="icon" className="size-11 sm:size-9" aria-label="처리 결과 닫기" onClick={() => {

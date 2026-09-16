@@ -21,7 +21,7 @@
 
 .student-edit-overlay,
 .class-edit-overlay {
-  background: color-mix(in oklch, var(--foreground), transparent 90%);
+  background: var(--overlay-scrim);
   animation-duration: var(--motion-duration-dialog);
 }
 .student-edit-sheet {
@@ -33,8 +33,8 @@
   max-height: min(860px, calc(100dvh - 64px));
   padding: 28px 32px 0;
   border: 1px solid color-mix(in oklch, var(--border), transparent 50%);
-  border-radius: 16px;
-  box-shadow: 0 20px 64px -16px color-mix(in oklch, var(--foreground), transparent 78%);
+  border-radius: var(--radius-overlay);
+  box-shadow: var(--shadow-overlay);
   overscroll-behavior: contain;
   scroll-padding-block: 96px;
 }
@@ -124,8 +124,8 @@ body:has(:is(.student-workspace, .class-workspace)) :is([data-slot="select-conte
   to { opacity: 1; transform: translateY(0); }
 }
 @media (min-width: 1024px) {
-  body:has(:is(.student-workspace, .class-workspace)):has([data-slot="sidebar"][data-state="expanded"][data-side="left"]) .student-edit-sheet { left: calc(50% + 128px); width: min(920px, calc(100vw - 320px)); }
-  body:has(:is(.student-workspace, .class-workspace)):has([data-slot="sidebar"][data-state="expanded"][data-side="right"]) .student-edit-sheet { left: calc(50% - 128px); width: min(920px, calc(100vw - 320px)); }
+  body:has(:is(.student-workspace, .class-workspace)):has([data-slot="sidebar"][data-state="expanded"][data-side="left"]) .student-edit-sheet { left: calc(50% + var(--shell-sidebar-width) / 2); width: min(920px, calc(100vw - var(--shell-sidebar-width) - 64px)); }
+  body:has(:is(.student-workspace, .class-workspace)):has([data-slot="sidebar"][data-state="expanded"][data-side="right"]) .student-edit-sheet { left: calc(50% - var(--shell-sidebar-width) / 2); width: min(920px, calc(100vw - var(--shell-sidebar-width) - 64px)); }
 }
 @media (max-width: 639px) {
   .student-edit-sheet {

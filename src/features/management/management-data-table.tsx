@@ -293,7 +293,7 @@ const STUDENT_COLUMN_WIDTHS: Record<string, number> = {
   select: 44,
   title: 180,
   school: 120,
-  grade: 64,
+  grade: 88,
   contact: 152,
   parentContact: 152,
   status: 88,

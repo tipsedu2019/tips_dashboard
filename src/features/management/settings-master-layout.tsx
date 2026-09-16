@@ -33,7 +33,7 @@ export function SettingsMasterHeader({ filters, actions, className }: SettingsMa
   return (
     <DataTableToolbar
       className={cn(
-        "sticky top-0 z-30 bg-background backdrop-blur md:flex-row md:items-center md:justify-between",
+        "sticky top-[var(--shell-header-height-mobile)] z-20 rounded-[var(--radius-surface)] border border-border/70 bg-background md:top-[var(--shell-header-height)] md:flex-row md:items-center md:justify-between",
         className,
       )}
     >
@@ -50,7 +50,7 @@ export function SettingsTableFrame({ children }: { children: ReactNode }) {
       role="region"
       aria-label="설정 목록"
       tabIndex={0}
-      className="max-h-[calc(100dvh-12rem)] overflow-x-auto overflow-y-auto rounded-lg border border-border/70 [&>[data-slot=table-container]]:overflow-visible [&_tbody_tr]:h-12"
+      className="max-h-[calc(100dvh-12rem)] overflow-x-auto overflow-y-auto rounded-[var(--radius-surface)] border border-border/70 [&>[data-slot=table-container]]:overflow-visible [&_tbody_tr]:h-12"
     >
       {children}
     </DataTableViewport>
