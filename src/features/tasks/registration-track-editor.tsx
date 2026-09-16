@@ -3,7 +3,7 @@
 import { Children, useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 
 import { Button } from "@/components/ui/button"
-import { NativeSelect } from "@/components/ui/native-select"
+import { RegistrationSelect } from "./registration-select"
 import { RegistrationManagementNotificationActions } from "./registration-management-notification-actions"
 import { supabase } from "@/lib/supabase"
 
@@ -40,7 +40,7 @@ import {
 import { RegistrationApplicationPlacementSection } from "./registration-application-placement-section"
 import { RegistrationApplicationHistoryAction } from "./registration-application-history-action"
 import { RegistrationApplicationProgressStepper } from "./registration-application-progress-stepper"
-import { RegistrationApplicationShell } from "./registration-application-shell"
+import { RegistrationApplicationShell, type RegistrationApplicationShellProps } from "./registration-application-shell"
 import { RegistrationApplicationSubjectTabs } from "./registration-application-subject-tabs"
 import {
   RegistrationObservationEditor,
@@ -193,6 +193,7 @@ export type RegistrationApplicationProps = {
   onDirtyChange?: (dirty: boolean) => void
   notificationToken?: string
   observationRuntime?: RegistrationObservationRuntimeState
+  observationUnavailableMessage?: string
   deepLinkedAttempt?: RegistrationObservationAttempt | null
   closeAction: ReactNode
 }
@@ -321,6 +322,7 @@ export function RegistrationApplication({
   onDirtyChange,
   notificationToken = "",
   observationRuntime = UNAVAILABLE_REGISTRATION_OBSERVATION_RUNTIME,
+  observationUnavailableMessage = "청강 신청 기능을 사용할 수 없습니다. 등록 정보를 다시 불러와 주세요.",
   deepLinkedAttempt = null,
   closeAction,
 }: RegistrationApplicationProps) {
@@ -986,7 +988,7 @@ export function RegistrationApplication({
     ? "청강 예약을 처리할 권한이 없습니다"
     : observationWorkspaceAvailable
       ? ""
-      : "청강 신청 기능을 사용할 수 없습니다. 등록 정보를 다시 불러와 주세요."
+      : observationUnavailableMessage
   const openSectionStates = Object.fromEntries(
     Object.entries(sectionStates).map(([section, state]) => [section, {
       ...state,
@@ -1527,6 +1529,46 @@ export function RegistrationApplication({
     />
   )
 
+  const managementNotificationActions = canManageCase && activeGenericTrack && notificationReadiness.eventKey ? (
+    <div className="grid min-w-0 gap-1.5">
+      <RegistrationManagementNotificationActions
+        trackId={activeGenericTrack.id}
+        workflowRevision={activeGenericTrack.workflowRevision}
+        viewerId={viewerId}
+        sessionToken={notificationToken}
+        disabled={workflowStatusSaving || !notificationReadiness.ready}
+        hasUnsavedChanges={() => dirtyKeysRef.current.size > 0}
+        onWarning={onWarning}
+      />
+      {!notificationReadiness.ready ? (
+        <p className="text-xs text-muted-foreground">알림에 필요한 내용: {notificationReadiness.missingFields.join(", ")}</p>
+      ) : !notificationToken ? (
+        <p className="text-xs text-muted-foreground">알림 연결을 확인한 뒤 보낼 수 있습니다.</p>
+      ) : null}
+    </div>
+  ) : null
+  const workflowView = getRegistrationWorkflowViewKey(activeGenericTrack?.workflowStatus)
+  const managementNotificationSection = workflowView === "level_test" ? "level_test"
+    : workflowView === "consultation_requested" || workflowView === "consultation_completed" ? "consultation"
+    : workflowView === "waiting" ? "waiting"
+    : workflowView === "observation" ? "observation"
+    : workflowView === "enrollment" ? "registration"
+    : workflowView === "payment" || workflowView === "completed" ? "admission"
+    : "inquiry"
+  const sectionActions: RegistrationApplicationShellProps["sectionActions"] = {
+    [managementNotificationSection]: managementNotificationActions,
+    consultation: canManageCase ? (
+      <>
+        {managementNotificationSection === "consultation" ? managementNotificationActions : null}
+        <RegistrationVisitCancellationActions
+          taskId={detail.task.id} sessionToken={notificationToken}
+          refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}:${detail.appointments.map((item) => `${item.id}:${item.status}:${item.notificationRevision}`).join("|")}`}
+          onWarning={onWarning}
+        />
+      </>
+    ) : null,
+  }
+
   return (
     <>
     <RegistrationApplicationShell
@@ -1556,52 +1598,21 @@ export function RegistrationApplication({
             {activeGenericTrack ? (
               <div data-registration-workflow-status="" className="flex min-w-0 items-center gap-2">
                 <span className="shrink-0 text-xs font-medium text-muted-foreground">진행상태</span>
-                <NativeSelect
+                <RegistrationSelect
                   aria-label={`${activeGenericTrack.subject} 진행상태`}
                   value={activeGenericTrack.workflowStatus}
                   disabled={!canManageCase || workflowStatusSaving || workflowStatusOptions.length === 0}
-                  onChange={(event) => void changeWorkflowStatus(event.target.value)}
-                  className="h-11 w-full sm:h-9 sm:w-48"
-                >
-                  <option value={activeGenericTrack.workflowStatus}>{REGISTRATION_WORKFLOW_STATUS_LABELS[activeGenericTrack.workflowStatus]}</option>
-                  {workflowStatusOptions.filter((option) => option.value !== activeGenericTrack.workflowStatus).map((option) => (
-                    <option key={option.value} value={option.value}>{option.label}</option>
-                  ))}
-                </NativeSelect>
+                  onValueChange={(value) => void changeWorkflowStatus(value)}
+                  placeholder="진행상태 선택"
+                  className="w-full data-[size=default]:h-11 sm:w-48 sm:data-[size=default]:h-9"
+                  options={[
+                    { value: activeGenericTrack.workflowStatus, label: REGISTRATION_WORKFLOW_STATUS_LABELS[activeGenericTrack.workflowStatus] },
+                    ...workflowStatusOptions.filter((option) => option.value !== activeGenericTrack.workflowStatus),
+                  ]}
+                />
               </div>
             ) : null}
           </div>
-          {canManageCase ? (
-            <div className="flex flex-wrap items-start gap-2">
-              {activeGenericTrack && notificationReadiness.eventKey ? (
-                <div className="grid min-w-0 gap-1.5">
-                  <RegistrationManagementNotificationActions
-                    trackId={activeGenericTrack.id}
-                    workflowRevision={activeGenericTrack.workflowRevision}
-                    viewerId={viewerId}
-                    sessionToken={notificationToken}
-                    disabled={workflowStatusSaving || !notificationReadiness.ready}
-                    hasUnsavedChanges={() => dirtyKeysRef.current.size > 0}
-                    onWarning={onWarning}
-                  />
-                  {!notificationReadiness.ready ? (
-                    <p className="text-xs text-muted-foreground">
-                      알림에 필요한 내용: {notificationReadiness.missingFields.join(", ")}
-                    </p>
-                  ) : !notificationToken ? (
-                    <p className="text-xs text-muted-foreground">알림 연결을 확인한 뒤 보낼 수 있습니다.</p>
-                  ) : null}
-                </div>
-              ) : null}
-              <div className="shrink-0">
-                <RegistrationVisitCancellationActions
-                  taskId={detail.task.id} sessionToken={notificationToken}
-                  refreshKey={`${detail.commonRevision}:${detail.task.updatedAt}:${detail.appointments.map((item) => `${item.id}:${item.status}:${item.notificationRevision}`).join("|")}`}
-                  onWarning={onWarning}
-                />
-              </div>
-            </div>
-          ) : null}
           {!scheduledAppointmentWindowComplete || !currentEnrollmentWindowComplete ? (
             <p role="alert" className="text-sm text-amber-700">
               일부 예약 또는 등록 실행 이력이 조회 범위를 넘었습니다. 해당 실행 영역만 잠기며 기본정보와 진행상태는 계속 수정할 수 있습니다.
@@ -1615,6 +1626,7 @@ export function RegistrationApplication({
         />
       ) : null}
       sectionStates={openSectionStates}
+      sectionActions={sectionActions}
       inquiry={(
         <RegistrationApplicationInquirySection
           mode="detail"
@@ -1815,11 +1827,7 @@ export function RegistrationApplication({
         ) : observationDetailLoading ? (
           <p className="text-sm text-muted-foreground">청강 정보를 불러오는 중입니다.</p>
         ) : null
-      ) : (
-        <p className="text-sm text-muted-foreground">
-          {observationSectionLockReason}
-        </p>
-      )}
+      ) : null}
       registration={registrationSection}
       admission={(
         <RegistrationApplicationAdmissionSection

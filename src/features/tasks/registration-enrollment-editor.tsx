@@ -892,7 +892,7 @@ export function RegistrationEnrollmentEditor({
 
       {canEditRows ? (
         <div className="flex flex-col gap-2 sm:flex-row sm:justify-between">
-          <Button type="button" data-registration-primary-action={`${track.subject}:enrollment-row-add`} aria-label={`${track.subject} 수업 추가`} variant="outline" onClick={addRow} disabled={saving}>
+          <Button type="button" size="form" data-registration-primary-action={`${track.subject}:enrollment-row-add`} aria-label={`${track.subject} 수업 추가`} variant="outline" onClick={addRow} disabled={saving}>
             <Plus className="size-4" aria-hidden="true" />
             수업 추가
           </Button>
@@ -1084,8 +1084,7 @@ export function RegistrationAdmissionPanel({
           <Button
             type="button"
             variant="outline"
-            size="sm"
-            className="min-h-11 min-w-11"
+            size="form"
             onClick={() => onOpenCustomerMessage({ messageKind: "admission_application", sourceId: taskId })}
           >
             입학신청서 알림톡

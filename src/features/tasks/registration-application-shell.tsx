@@ -19,6 +19,7 @@ export type RegistrationApplicationShellProps = {
     RegistrationApplicationSectionKey,
     RegistrationApplicationSectionState
   >
+  sectionActions?: Partial<Record<RegistrationApplicationUiSectionKey, ReactNode>>
   sectionNotices?: Partial<Record<RegistrationApplicationSectionKey, ReactNode>>
   inquiry: ReactNode
   levelTest?: ReactNode
@@ -65,12 +66,14 @@ function RegistrationApplicationSection({
   section,
   state,
   notice,
+  actions,
   children,
 }: {
   mode: "create" | "detail"
   section: RegistrationApplicationUiSectionKey
   state: RegistrationApplicationSectionState
   notice?: ReactNode
+  actions?: ReactNode
   children: ReactNode
 }) {
   const lockReasonId = `registration-application-${section}-lock-reason`
@@ -116,6 +119,7 @@ function RegistrationApplicationSection({
             {children}
           </fieldset>
         </div>
+        {actions ? <div className="flex flex-wrap items-start justify-end gap-2">{actions}</div> : null}
       </div>
     </section>
   )
@@ -177,6 +181,7 @@ export function RegistrationApplicationShell(props: RegistrationApplicationShell
               mode={props.mode}
               section={section}
               state={sectionState}
+              actions={props.sectionActions?.[section]}
               notice={section === "waiting" || section === "registration" ? undefined : props.sectionNotices?.[section]}
             >
               {props[contentKey]}

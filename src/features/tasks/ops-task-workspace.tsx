@@ -863,22 +863,9 @@ function RegistrationFieldLabel({
   label: string
   requirement: "required" | "optional"
 }) {
-  return (
-    <span className="inline-flex min-w-0 items-center gap-1.5">
-      <span>{label}</span>
-      <span
-        aria-hidden="true"
-        className={[
-          "rounded px-1.5 py-0.5 text-[10px] font-semibold leading-none",
-          requirement === "required"
-            ? "bg-primary/10 text-primary"
-            : "bg-muted text-muted-foreground",
-        ].join(" ")}
-      >
-        {requirement === "required" ? "필수" : "선택"}
-      </span>
-    </span>
-  )
+  return requirement === "required"
+    ? <RequiredFieldLabel label={label} />
+    : <span>{label}</span>
 }
 
 function RegistrationSubjectField({
@@ -13470,6 +13457,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                       viewerId={registrationViewerId}
                       viewerRole={registrationViewerRole}
                       observationRuntime={registrationObservationRuntime}
+                      observationUnavailableMessage={registrationFixtureEnabled ? "이 미리보기에서는 청강 예약을 지원하지 않습니다." : undefined}
                       deepLinkedAttempt={registrationDeepLinkedAttempt}
                       onFocusTrack={handleSelectRegistrationTrack}
                       onRequestLocalNavigation={requestRegistrationLocalNavigation}
@@ -13893,6 +13881,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
                 viewerId={registrationViewerId}
                 viewerRole={registrationViewerRole}
                 observationRuntime={registrationObservationRuntime}
+                observationUnavailableMessage={registrationFixtureEnabled ? "이 미리보기에서는 청강 예약을 지원하지 않습니다." : undefined}
                 deepLinkedAttempt={registrationDeepLinkedAttempt}
                 onFocusTrack={handleSelectRegistrationTrack}
                       onRequestLocalNavigation={requestRegistrationLocalNavigation}

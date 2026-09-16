@@ -125,7 +125,7 @@ function VisitCancellationActionsScope({ taskId, sessionToken, refreshKey, onWar
       if (!next) setSelected(null)
     }}>
       <DialogTrigger asChild>
-        <Button type="button" variant="ghost" size="sm" disabled={!sessionToken}>방문 취소 전달</Button>
+        <Button type="button" variant="ghost" size="form" disabled={!sessionToken}>방문 취소 전달</Button>
       </DialogTrigger>
       <DialogContent overlayClassName="z-[90]" closeButtonLabel="방문상담 취소 전달 닫기" className="z-[90] max-h-[90dvh] overflow-y-auto sm:max-w-xl">
         <DialogHeader>

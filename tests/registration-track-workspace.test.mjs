@@ -14,10 +14,11 @@ import {
 import { createRegistrationObservationAsyncOwnership } from "../src/features/tasks/registration-workspace-route.ts";
 import * as registrationTrackModel from "../src/features/tasks/registration-track-model.js";
 import { getSelectableRegistrationScheduleSessions } from "../src/features/tasks/registration-workflow.js";
+import { getRegistrationWorkflowViewKey } from "../src/features/tasks/registration-workflow-status.js";
 
 const require = createRequire(import.meta.url);
 const ts = require("typescript");
-const { NativeSelect } = loadNotificationComponent("src/components/ui/native-select.tsx");
+const { RegistrationSelect } = loadNotificationComponent("src/features/tasks/registration-select.tsx");
 
 const listUrl = new URL(
   "../src/features/tasks/registration-case-list.tsx",
@@ -278,7 +279,6 @@ async function loadMountedRegistrationEnrollmentEditor({
     ["@/components/ui/alert", { Alert: Wrapper, AlertDescription: Wrapper, AlertTitle: Wrapper }],
     ["@/components/ui/badge", { Badge }],
     ["@/components/ui/button", { Button }],
-    ["@/components/ui/native-select", { NativeSelect }],
     ["@/components/ui/calendar", { Calendar }],
     ["@/components/ui/collapsible", { Collapsible: Wrapper, CollapsibleContent: Wrapper, CollapsibleTrigger: Wrapper }],
     ["@/components/ui/label", { Label }],
@@ -398,7 +398,7 @@ async function loadMountedRegistrationApplication({
   const localModules = new Map([
     ["@/components/ui/badge", { Badge }],
     ["@/components/ui/button", { Button }],
-    ["@/components/ui/native-select", { NativeSelect }],
+    ["./registration-select", { RegistrationSelect }],
     ["@/features/notifications/notification-delivery-control", { GoogleChatDeliveryControl: Passthrough }],
     ["@/lib/supabase", { supabase: {} }],
     ["./registration-application-admission-section", { RegistrationApplicationAdmissionSection: Passthrough }],
@@ -543,7 +543,7 @@ async function loadMountedRegistrationApplication({
     }],
     ["./registration-workflow-status.js", {
       REGISTRATION_WORKFLOW_STATUS_LABELS: new Proxy({}, { get: () => "등록 신청" }),
-      getRegistrationWorkflowViewKey: () => "registration",
+      getRegistrationWorkflowViewKey,
       getRegistrationWorkflowStatusOptions: workflowStatusOptions,
       isRegistrationObservationWorkflowStatus: (status) => String(status).startsWith("observation_"),
     }],
@@ -973,7 +973,7 @@ test("registration create mounts the shared application with only actionable int
   const create = await readFile(new URL("../src/features/tasks/registration-application-create.tsx", import.meta.url), "utf8")
   const workspace = await readWorkspaceSource()
 
-  assert.match(create, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
+  assert.match(create, /import \{ RegistrationApplicationShell(?:, type RegistrationApplicationShellProps)? \} from "\.\/registration-application-shell"/)
   assert.match(create, /import \{ RegistrationApplicationInquirySection \} from "\.\/registration-application-inquiry-section"/)
   assert.match(create, /getRegistrationCreateSectionStates/)
   assert.match(create, /RegistrationSubjectPicker/)
@@ -1712,7 +1712,7 @@ test("track editor shows common information once and subject-scoped navigation",
 test("canonical detail uses one progressively filled registration application", async () => {
   const source = await readRegistrationApplicationSource()
 
-  assert.match(source, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
+  assert.match(source, /import \{ RegistrationApplicationShell(?:, type RegistrationApplicationShellProps)? \} from "\.\/registration-application-shell"/)
   assert.match(source, /<RegistrationApplicationShell/)
   assert.match(source, /mode="detail"/)
   assert.match(source, /inquiry=\{/)
@@ -1872,7 +1872,7 @@ test("saved and create applications share the intake shell while saved detail ow
   ])
 
   for (const consumer of [detail, create]) {
-    assert.match(consumer, /import \{ RegistrationApplicationShell \} from "\.\/registration-application-shell"/)
+    assert.match(consumer, /import \{ RegistrationApplicationShell(?:, type RegistrationApplicationShellProps)? \} from "\.\/registration-application-shell"/)
     assert.match(consumer, /RegistrationApplicationInquirySection/)
     assert.match(consumer, /from "\.\/registration-application-inquiry-section"/)
   }
@@ -2232,12 +2232,12 @@ test("legacy observation status selector resolves to its decoupled manual target
     )
     let statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === NativeSelect && node.props["aria-label"] === "영어 진행상태",
+      (node) => node.type === RegistrationSelect && node.props["aria-label"] === "영어 진행상태",
       "observation workflow status select before manager detail",
     )
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
-      statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
+      statusSelect.props.options.map((option) => option.value),
       ["waiting_current_class"],
     )
 
@@ -2251,16 +2251,16 @@ test("legacy observation status selector resolves to its decoupled manual target
     )
     statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === NativeSelect && node.props["aria-label"] === "영어 진행상태",
+      (node) => node.type === RegistrationSelect && node.props["aria-label"] === "영어 진행상태",
       "observation workflow status select",
     )
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
-      statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
+      statusSelect.props.options.map((option) => option.value),
       ["waiting_current_class"],
     )
 
-    statusSelect.props.onChange({ target: { value: "waiting_current_class" } })
+    statusSelect.props.onValueChange("waiting_current_class")
     await flushMountedRegistrationWork()
 
     assert.equal(withdrawalCalls.length, 0)
@@ -2373,16 +2373,16 @@ test("mounted consultation status selector never starts an observation process",
     const shell = findMountedRegistrationElement(view, (node) => node.type === mounted.RegistrationApplicationShell, "registration application shell")
     const statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === NativeSelect && node.props["aria-label"] === "수학 진행상태",
+      (node) => node.type === RegistrationSelect && node.props["aria-label"] === "수학 진행상태",
       "consultation workflow status select",
     )
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
-      statusSelect.props.children.flat().filter(Boolean).map((option) => option.props.value),
+      statusSelect.props.options.map((option) => option.value),
       ["consultation_completed", "waiting_next_opening"],
     )
 
-    statusSelect.props.onChange({ target: { value: "waiting_next_opening" } })
+    statusSelect.props.onValueChange("waiting_next_opening")
     await flushMountedRegistrationWork()
 
     assert.equal(enterCalls.length, 0)
@@ -2397,7 +2397,10 @@ test("mounted consultation status selector never starts an observation process",
     assert.deepEqual(reloadCalls, [trackId])
     assert.deepEqual(warnings, [""], "a new status attempt clears the previous failure")
     assert.deepEqual(notificationCalls, [], "saving only a workflow status neither prepares nor dispatches an alert")
-    const management = findMountedRegistrationElement(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions, "explicit management preview action")
+    const management = findMountedRegistrationElement(Object.values(shell.props.sectionActions || {}), (node) => node.type === mounted.RegistrationManagementNotificationActions, "explicit management preview action")
+    assert.equal(findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions || node.type === mounted.RegistrationVisitCancellationActions).length, 0)
+    assert.equal(findMountedRegistrationElements(shell.props.sectionActions.consultation, (node) => node.type === mounted.RegistrationManagementNotificationActions).length, 1)
+    assert.equal(findMountedRegistrationElements(shell.props.sectionActions.consultation, (node) => node.type === mounted.RegistrationVisitCancellationActions).length, 1)
     assert.equal(management.props.trackId, trackId)
     assert.equal(management.props.workflowRevision, 6)
     assert.equal(management.props.viewerId, directorId)
@@ -2488,7 +2491,7 @@ test("mounted teacher registration detail keeps every mutation surface read-only
     )
     const statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === NativeSelect && node.props["aria-label"] === "영어 진행상태",
+      (node) => node.type === RegistrationSelect && node.props["aria-label"] === "영어 진행상태",
       "teacher read-only workflow status select",
     )
 
@@ -2496,11 +2499,11 @@ test("mounted teacher registration detail keeps every mutation surface read-only
     for (const section of ["inquiry", "level_test", "consultation", "waiting", "observation", "registration", "admission"]) {
       assert.equal(shell.props.sectionStates[section].editable, false, `${section} must be read-only`)
     }
-    assert.equal(findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions).length, 0)
-    assert.equal(findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationVisitCancellationActions).length, 0)
+    assert.equal(findMountedRegistrationElements([shell.props.subjectNavigation, ...Object.values(shell.props.sectionActions || {})], (node) => node.type === mounted.RegistrationManagementNotificationActions).length, 0)
+    assert.equal(findMountedRegistrationElements([shell.props.subjectNavigation, ...Object.values(shell.props.sectionActions || {})], (node) => node.type === mounted.RegistrationVisitCancellationActions).length, 0)
     assert.equal(findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationCustomerMessageCaseHistory).length, 0)
 
-    statusSelect.props.onChange({ target: { value: "waiting_next_opening" } })
+    statusSelect.props.onValueChange("waiting_next_opening")
     await flushMountedRegistrationWork()
     assert.deepEqual(statusCalls, [])
     assert.deepEqual(reloadCalls, [])
@@ -2766,9 +2769,10 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
         (node) => node.type === mounted.RegistrationApplicationShell,
         "registration application shell",
       )
-      assert.ok(shell.props.observation, `${roleCase.label}:${status} keeps history mounted`)
+      assert.notEqual(shell.props.observation, undefined, `${roleCase.label}:${status} keeps the observation section mounted`)
       if (!roleCase.canManageCase) {
-        assert.match(renderToStaticMarkup(shell.props.observation), /권한/u)
+        assert.equal(shell.props.observation, null)
+        assert.match(shell.props.sectionStates.observation.lockReason, /권한/u)
         assert.equal(managerLoads, 0)
         assert.equal(feedbackLoads, 0)
         return null
@@ -3131,7 +3135,7 @@ test("canonical registration mutation closures fail closed outside management ro
   assert.match(workflowStatus, /if \(!canManageCase\) return/)
   assert.doesNotMatch(workflowStatus, /ensureRegistrationWorkflowNotification|dispatchRegistrationManagement|previewService\.confirm|\bsend\(/)
   assert.doesNotMatch(saveInquiry, /ensureRegistrationWorkflowNotification|dispatchRegistrationManagement|previewService\.confirm|\bsend\(/)
-  assert.match(application, /canManageCase \? \([\s\S]*?activeGenericTrack && notificationReadiness\.eventKey \? \([\s\S]*?<RegistrationManagementNotificationActions/)
+  assert.match(application, /canManageCase && activeGenericTrack && notificationReadiness\.eventKey \? \([\s\S]*?<RegistrationManagementNotificationActions/)
   assert.match(managementNotification, /if \(!preview\?\.canSend \|\| inFlight\.current \|\| currentGuards\.current\.disabled\) return/)
   assert.match(managementNotification, /currentGuards\.current\.hasUnsavedChanges\(\)[\s\S]*?return[\s\S]*?inFlight\.current = true/)
   assert.match(managementNotification, /requestKeys\.current\.get\(preview\.previewChecksum\)[\s\S]*?requestKeys\.current\.set/)
@@ -3229,7 +3233,7 @@ test("mounted incomplete execution windows lock only their process sections", as
     )
     const statusSelect = findMountedRegistrationElement(
       shell.props.subjectNavigation,
-      (node) => node.type === NativeSelect && String(node.props["aria-label"] || "").endsWith("진행상태"),
+      (node) => node.type === RegistrationSelect && String(node.props["aria-label"] || "").endsWith("진행상태"),
       "workflow status select",
     )
 
@@ -3368,8 +3372,8 @@ test("mounted registration detail makes level-test, visit-consultation, and mode
       ))
       assert.equal(modeButtons.length, 2, roleCase.role)
       assert.deepEqual(modeButtons.map((button) => button.props.disabled), [roleCase.readOnly, roleCase.readOnly], roleCase.role)
-      const managementActions = findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationManagementNotificationActions)
-      const cancellationActions = findMountedRegistrationElements(shell.props.subjectNavigation, (node) => node.type === mounted.RegistrationVisitCancellationActions)
+      const managementActions = findMountedRegistrationElements([shell.props.subjectNavigation, ...Object.values(shell.props.sectionActions || {})], (node) => node.type === mounted.RegistrationManagementNotificationActions)
+      const cancellationActions = findMountedRegistrationElements([shell.props.subjectNavigation, ...Object.values(shell.props.sectionActions || {})], (node) => node.type === mounted.RegistrationVisitCancellationActions)
       const customerHistory = findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationCustomerMessageCaseHistory)
       const automaticHistory = findMountedRegistrationElements(shell.props.historyAction, (node) => node.type === mounted.RegistrationApplicationHistoryAction)
       assert.equal(automaticHistory.length, 1, `${roleCase.role}: automatic history remains available exactly once`)
@@ -4556,7 +4560,7 @@ test("canonical registration editors keep messaging outside the admission checkl
     appointment.indexOf("{canOpenCustomerMessage ? ("),
     appointment.indexOf("</>", appointment.indexOf("{canOpenCustomerMessage ? (")),
   )
-  assert.equal((customerMessageControls.match(/className="min-h-11 min-w-11"/g) || []).length, 1)
+  assert.equal((customerMessageControls.match(/size="form"/g) || []).length, 1)
 
   assert.match(observation, /messageKind: "observation_booking", sourceId: current\.observationId/)
   assert.match(observation, /messageKind: "observation_booking",\s*sourceId: savedObservation\.observationId/)
@@ -4569,7 +4573,7 @@ test("canonical registration editors keep messaging outside the admission checkl
   assert.match(waiting, /messageKind: "waiting_notice", sourceId: track\.id/)
   assert.match(waiting, /permissions\.canManage/)
   assert.match(waiting, /waitingDirty \|\| saving \|\| refreshPending \|\| !savedWaitingComplete/)
-  assert.match(waiting, /className="min-h-11 min-w-11"[\s\S]*대기 안내 알림톡/)
+  assert.match(waiting, /size="form"[\s\S]*대기 안내 알림톡/)
 
   const admission = enrollment.slice(enrollment.indexOf("export function RegistrationAdmissionPanel"))
   assert.match(admission, /permissions\.canManage/)
@@ -4962,8 +4966,8 @@ test("appointment save confirmation stays visible inside the registration detail
   assert.match(appointment, /aria-labelledby="registration-appointment-confirmation-title"/)
   assert.match(appointment, /id="registration-appointment-confirmation-title"[\s\S]*?예약을 저장할까요\?/)
   assert.doesNotMatch(appointment, /registration-appointment-confirmation-description|pendingConfirmation\.message/)
-  assert.match(appointment, /className="min-h-11 min-w-11" variant="outline" onClick=\{dismissAppointmentConfirmation\} disabled=\{readOnly \|\| saving\}>돌아가기<\/Button>/)
-  assert.match(appointment, /className="min-h-11 min-w-11" onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\} disabled=\{readOnly \|\| saving\}>저장<\/Button>/)
+  assert.match(appointment, /size="form" variant="outline" onClick=\{dismissAppointmentConfirmation\} disabled=\{readOnly \|\| saving\}>돌아가기<\/Button>/)
+  assert.match(appointment, /size="form" onClick=\{\(\) => void confirmPreparedAppointmentMutation\(\)\} disabled=\{readOnly \|\| saving\}>저장<\/Button>/)
   assert.match(appointment, /blocked=\{readOnly \|\| mutationLocked \|\| confirmationPending \|\| Boolean\(conflict\)\}/)
   assert.match(appointment, /disabled=\{readOnly \|\| saving \|\| confirmationPending \|\| mutationLocked\}/)
 })

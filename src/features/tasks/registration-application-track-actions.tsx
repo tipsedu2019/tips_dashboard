@@ -857,6 +857,7 @@ export function RegistrationWaitingDetailsEditor({
                 type="button"
                 variant="outline"
                 disabled={saving || refreshPending}
+                size="form"
                 onClick={() => void clearWaitingDetails()}
               >
                 입력 지우기
@@ -864,7 +865,7 @@ export function RegistrationWaitingDetailsEditor({
             ) : null}
             <Button
               type="button"
-              className="min-h-11 min-w-11"
+              size="form"
               variant="outline"
               disabled={customerMessageBlocked}
               onClick={() => onOpenCustomerMessage?.({ messageKind: "waiting_notice", sourceId: track.id })}
