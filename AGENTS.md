@@ -38,6 +38,15 @@ This is a single-context repo. Read root `CONTEXT.md` and `docs/adr/` when they 
 
 For non-trivial UI, React performance, Supabase/Postgres, or quality-guideline work, read `.agents/skills/tips-quality/SKILL.md`. It routes to `DESIGN.md`, the affected implementation, and the maintained source record in `docs/agents/quality-sources.md` only when relevant.
 
+### Design continuity
+
+- Every menu-level UI task must first read `DESIGN.md`, especially **메뉴별 개선의 연속성**, and the relevant shared component source. Treat the current TIPS design system as the baseline; a request to improve one menu is not a request to invent a new visual language.
+- Reuse semantic tokens from `src/app/globals.css`, components from `src/components/ui/`, and the table patterns in `src/components/data-table/README.md`. Do not fork button, input, toolbar, selection, dialog, or feedback styling inside a feature to make that menu look different.
+- Improve content hierarchy, grouping and layout within that system. Preserve DB/API contracts, permissions, saved preferences and working business flows unless the task explicitly includes changing them.
+- A shared visual rule belongs in the shared token/component and `DESIGN.md` in the same change. Verify affected sibling screens; do not introduce a global rule through a feature stylesheet or silently redefine a shared token in a route.
+- Verify the affected screen against an existing reference with matching data, state, viewport and theme. Include the relevant design-contract checks and browser evidence in the PR; automated tests alone do not prove visual consistency.
+- Specialized calendars, schedules, documents and domain colors may keep their necessary presentation. Document a new exception's reason and scope in `DESIGN.md`; do not copy an existing exception into an unrelated menu. Routine choices within these rules do not require another approval.
+
 ## Code Review Rules
 
 - Determine the final active PL/pgSQL definition from the ordered migration chain, not an earlier definition alone.

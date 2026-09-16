@@ -53,7 +53,7 @@ export function DataTableFilterPanel({
         </span>
       </div>
       {isMobile ? (
-        <SheetContent side="bottom" aria-describedby={undefined} className="max-h-[85dvh] gap-0 rounded-t-2xl"
+        <SheetContent side="bottom" aria-describedby={undefined} className="max-h-[85dvh] gap-0"
           onCloseAutoFocus={(event) => {
             if (window.matchMedia("(min-width: 768px)").matches) {
               event.preventDefault();
