@@ -1,0 +1,128 @@
+[
+  {
+    "name": "desktop-selection",
+    "before": {
+      "[aria-label=\"수업 검색 조건\"]": {
+        "h": 58,
+        "w": 1118,
+        "x": 281,
+        "y": 161
+      },
+      "[aria-label=\"수업 검색\"]": {
+        "h": 36,
+        "w": 576,
+        "x": 281,
+        "y": 113
+      },
+      "[data-management-row=\"true\"]": {
+        "h": 84.5,
+        "w": 1135,
+        "x": 265,
+        "y": 280.5
+      }
+    },
+    "afterAll": {
+      "[aria-label=\"수업 검색 조건\"]": {
+        "h": 58,
+        "w": 1118,
+        "x": 281,
+        "y": 161
+      },
+      "[aria-label=\"수업 검색\"]": {
+        "h": 36,
+        "w": 576,
+        "x": 281,
+        "y": 113
+      },
+      "[data-management-row=\"true\"]": {
+        "h": 84.5,
+        "w": 1135,
+        "x": 265,
+        "y": 280.5
+      }
+    }
+  },
+  {
+    "check": "partial-roster-search",
+    "result": "pass",
+    "detail": "query retained; next page adds matching student09; loaded-only hint removed after completion"
+  },
+  {
+    "check": "mobile-selection-layout",
+    "result": "pass",
+    "before": {
+      "[role=\"search\"]": {
+        "h": 44,
+        "w": 317,
+        "x": 29,
+        "y": 85
+      },
+      "article": {
+        "h": 335,
+        "w": 317,
+        "x": 29,
+        "y": 262
+      },
+      "button[aria-label^=\"수업 검색 조건 필터\"]": {
+        "h": 44,
+        "w": 101.7421875,
+        "x": 29,
+        "y": 193
+      }
+    },
+    "selected": {
+      "[role=\"search\"]": {
+        "h": 44,
+        "w": 317,
+        "x": 29,
+        "y": 85
+      },
+      "article": {
+        "h": 335,
+        "w": 317,
+        "x": 29,
+        "y": 262
+      },
+      "button[aria-label^=\"수업 검색 조건 필터\"]": {
+        "h": 44,
+        "w": 101.7421875,
+        "x": 29,
+        "y": 193
+      }
+    }
+  },
+  {
+    "check": "mobile-save-retry",
+    "result": "pass",
+    "detail": "one alert, draft preserved, retry reads saved record",
+    "geometry": {
+      "dialogOverflow": 0,
+      "navBottom": 86,
+      "rosterTop": 274,
+      "saveHeight": 44
+    }
+  },
+  {
+    "check": "mobile-roster-anchor",
+    "result": "pass",
+    "navBottom": 86,
+    "rosterTop": 102,
+    "overflow": 0,
+    "buttonHeight": 44
+  },
+  {
+    "check": "list-read-error-recovery",
+    "result": "pass",
+    "detail": "search/filter/table/pagination remain; retry returns rows"
+  },
+  {
+    "check": "list-empty-search",
+    "result": "pass",
+    "detail": "no matching rows; controls retained"
+  },
+  {
+    "check": "shared-student-reference",
+    "result": "pass",
+    "detail": "default row menu z50; class roster menu z90; student add controls 36 desktop/44 mobile; no overflow"
+  }
+]

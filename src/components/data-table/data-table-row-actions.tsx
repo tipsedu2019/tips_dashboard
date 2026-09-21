@@ -23,10 +23,11 @@ export function DataTableDetailButton({ label, children, onClick }: {
   );
 }
 
-export function DataTableRowActions({ label, primaryAction, disabled = false, children }: {
+export function DataTableRowActions({ label, primaryAction, disabled = false, menuLayer = "default", children }: {
   label: string;
   primaryAction?: ReactNode;
   disabled?: boolean;
+  menuLayer?: "default" | "dialog";
   children: ReactNode;
 }) {
   return (
@@ -38,7 +39,7 @@ export function DataTableRowActions({ label, primaryAction, disabled = false, ch
             <MoreHorizontal className="size-4" aria-hidden="true" />
           </Button>
         </DropdownMenuTrigger>
-        <DropdownMenuContent align="end" className="min-w-44">{children}</DropdownMenuContent>
+        <DropdownMenuContent align="end" className={menuLayer === "dialog" ? "z-[90] min-w-44" : "min-w-44"}>{children}</DropdownMenuContent>
       </DropdownMenu>
     </div>
   );

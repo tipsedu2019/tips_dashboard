@@ -4,7 +4,7 @@ import nextTypescript from "eslint-config-next/typescript";
 const eslintConfig = [
   {
     ignores: [
-      ".next/**",
+      "**/.next/**",
       ".codex-temp/**",
       ".playwright-cli/**",
       "build/**",
