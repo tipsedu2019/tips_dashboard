@@ -51,6 +51,16 @@ SQL 검증에는 두 방향의 중복 관계, 등록·대기 동시 존재, 삭�
 
 ![모바일 대기](evidence/student-enrollment-status-20260922/students-mobile-waiting-dark.png)
 
+## 메뉴 분류
+
+기존 Sidebar/NavMain 구성과 권한을 유지하며 섹션을 운영 → 영어 → 관리 → 설정으로 정리했다. 영어 단어 재시험은 영어 섹션, 통계는 관리 섹션의 마지막으로 이동했고 상단 제목과 빠른 이동도 같은 분류를 사용한다. 기존 탐색·사이드바 검사 50개가 통과했다. 같은 합성 학생 화면에서 PC 1440×900 및 모바일 390×844 메뉴를 확인했고 브라우저 경고·오류는 없었다.
+
+![운영 아래 영어 섹션](evidence/student-enrollment-status-20260922/sidebar-desktop-light.png)
+
+![관리 마지막 통계](evidence/student-enrollment-status-20260922/sidebar-management-bottom.png)
+
+![모바일 메뉴](evidence/student-enrollment-status-20260922/sidebar-mobile-light.png)
+
 ## 배포 경계
 
-이 기록은 구현·로컬 검증 증빙이다. 운영 DB migration 적용과 Production 배포는 아직 수행하지 않았다. 새 웹 클라이언트 배포 전에 `20260921144020_student_enrollment_status.sql` 적용이 필요하며, 이후 운영 목록·필터·상세를 읽기 전용으로 확인해야 한다.
+이 기록은 구현·로컬 검증 증빙이다. 새 웹 클라이언트 배포 전에 `20260921144020_student_enrollment_status.sql`을 적용한다. 실제 운영 DB 적용, Production 배포 및 배포 후 확인 결과는 PR #57의 배포 기록으로 구분한다.

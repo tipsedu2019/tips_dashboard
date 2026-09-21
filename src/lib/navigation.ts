@@ -64,7 +64,7 @@ const workspaceMetaEntries: Array<{
   {
     match: "/admin/statistics",
     meta: {
-      section: "운영",
+      section: "관리",
       title: "통계",
       summary: "학생, 수업, 일정 충돌, 교재 운영 지표를 필요할 때 확인합니다.",
     },
@@ -264,7 +264,7 @@ const workspaceMetaEntries: Array<{
   {
     match: "/admin/word-retests",
     meta: {
-      section: "운영",
+      section: "영어",
       title: "영어 단어 재시험",
       summary: "본관과 별관 단어 재시험 요청, 응시, 점수를 처리합니다.",
     },
@@ -315,7 +315,6 @@ export function buildAdminNavGroups({
   isAdmin?: boolean
 }): NavGroup[] {
   const assistantOverviewItems: NavItem[] = [
-    { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",
@@ -329,8 +328,6 @@ export function buildAdminNavGroups({
   ]
   const fullOverviewItems: NavItem[] = [
     { title: "대시보드", url: "/admin/dashboard", icon: LayoutDashboard },
-    { title: "통계", url: "/admin/statistics", icon: ChartNoAxesCombined },
-    { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
     { title: "등록", url: "/admin/registration", icon: UserPlus },
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
@@ -385,7 +382,17 @@ export function buildAdminNavGroups({
     { title: "채용 지원서", url: "/admin/recruiting", icon: UserPlus },
   )
 
-  const groups: NavGroup[] = [overview]
+  if (!canUseAssistantOperations) {
+    managementItems.push({ title: "통계", url: "/admin/statistics", icon: ChartNoAxesCombined })
+  }
+
+  const groups: NavGroup[] = [
+    overview,
+    {
+      label: "영어",
+      items: [{ title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck }],
+    },
+  ]
 
   if (managementItems.length > 0) {
     groups.push({
