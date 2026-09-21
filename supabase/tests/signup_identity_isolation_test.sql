@@ -59,5 +59,14 @@ select is((select to_jsonb(t) from public.teacher_catalogs t where id=(select te
  (select value from previous_teacher),'stale reverse link cannot overwrite another owner');
 select isnt((select teacher_catalog_id from public.profiles where id=pg_temp.sid(3)),
  (select teacher_catalog_id from public.profiles where id=pg_temp.sid(1)),'stale reverse link is replaced with an independently owned teacher');
+-- Name allocation is bounded and failure rolls back the whole signup.
+insert into public.teacher_catalogs(id,name)
+select pg_temp.sid(1000+n),'가입 이름 한도' || case when n=1 then '' else ' ('||n::text||')' end
+from generate_series(1,100) n;
+select throws_ok($$insert into auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data)
+values(pg_temp.sid(9),'authenticated','authenticated','name-limit@example.invalid','{}','{"name":"가입 이름 한도"}')$$,
+ '23505','signup_teacher_name_conflict','exhausted name allocation raises exact unique-conflict SQLSTATE');
+select is((select count(*) from auth.users where id=pg_temp.sid(9)),0::bigint,'failed name allocation leaves no auth account');
+select is((select count(*) from public.profiles where id=pg_temp.sid(9)),0::bigint,'failed name allocation leaves no partial profile');
 select * from finish();
 rollback;
