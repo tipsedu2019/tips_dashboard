@@ -101,7 +101,7 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=fixture-only \
 node scripts/qa/class-workflow-fixture-server.mjs
 ```
 
-별도 터미널에서 두 프로세스를 실행하고 `http://127.0.0.1:3220/__fixture`로 진입한다. `?theme=dark`, `?route=students`를 지원한다. `/__control`에 `{ "mode": "partial" }`, `save-error`, `read-error`, `empty`, `loading`, `normal`을 POST하면 로컬 응답 모드가 바뀐다. `save-error`는 모드 전환 후 첫 저장만 실패한다. `/__evidence`는 합성 요청 기록을 반환한다. 외부 비밀키나 운영 세션을 사용하지 않는다.
+별도 터미널에서 두 프로세스를 실행하고 `http://127.0.0.1:3220/__fixture`로 진입한다. `?theme=dark`, `?route=students`를 지원한다. 각 독립 시나리오를 시작하기 전에 이전 요청의 완료를 기다린 뒤 `POST /__control`로 초기화한다. `{ "mode": "partial" }`, `save-error`, `read-error`, `empty`, `loading`, `normal`을 지원하며, 매번 모드·저장 시도 횟수와 수업 데이터 전체를 초기 상태로 재생성한다. 기본 시나리오는 `{ "mode": "normal" }`로 시작한다. `save-error`는 모드 전환 후 첫 저장만 실패한다. `/__evidence`는 초기화 요청을 포함한 합성 요청 기록을 반환한다. 자동 리뷰에서 발견된 시나리오 간 저장값 잔존은 `tests/class-workflow-fixture.test.mjs`에서 이름·수강료·추가 필드 초기화와 실패/재시도 횟수 초기화를 실제 handler로 검증한다. 외부 비밀키나 운영 세션을 사용하지 않는다.
 
 ## 릴리스 경계
 
