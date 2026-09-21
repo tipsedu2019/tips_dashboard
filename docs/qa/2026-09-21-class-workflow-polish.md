@@ -79,7 +79,7 @@ node --test --test-concurrency=1 --experimental-strip-types \
 - 오래된 source 기대값 4건과 테스트 mock의 빈 경고 초기화 판정 4건을 현재 구현에 맞췄다. 수업 상세의 복귀 URL helper 위임, 수업 계획의 진행 상태 문구, 자동 다음 회차 행동 금지, 설정 toolbar의 shell header offset을 검증한다. 경고를 지우는 `onWarning("")`는 새 발송 경고로 집계하지 않는다. 관련 검사와 새 검색 helper 합계 **47/47 통과**. 이 단계에서 제품 동작을 추가로 변경하지 않았다.
 - 남은 브라우저·DOM 검사 재실행은 **10개 통과, 파일 1개 실패**였다. 교사 Google Chat 프로필 브라우저 검사 9개와 교재 모바일 필터 1개는 통과했다. `tests/textbook-filter-controls.test.mjs`는 TAP 진단에서 `signal: SIGKILL`로 끝났다. `origin/main`의 `9f962dfcd68d18788f68eb1754d61fe1c3b1d75f`를 별도 임시 디렉터리에 추출하고 동일 Node·의존성으로 실행해 같은 종료를 재현했다. 원인은 미확정이며 이 파일을 통과로 간주하지 않는다.
 - 캐시 통합 검사가 생성하는 중첩 fixture `.next` 산출물까지 git/ESLint 제외 범위를 적용했다. 소스 검사 규칙을 끄지 않았고 이후 전체 lint는 **오류 0건, 기존 경고 5건**으로 통과했다.
-- `verify-free-tier-query-contracts.mjs --base 9f962dfcd68d18788f68eb1754d61fe1c3b1d75f --head HEAD --surface all` 통과. 원격 CI 결과는 PR의 실제 head 상태로 별도 확인한다.
+- `verify-free-tier-query-contracts.mjs --base 9f962dfcd68d18788f68eb1754d61fe1c3b1d75f --head 6985a74047a80e92ee878070cf06b171fcd9ef3c --surface all` 통과. 원격 CI 결과는 PR의 실제 head 상태로 별도 확인한다.
 - 전체 테스트에 남은 기존 종료 문제가 있어 초안 PR로 제출한다. 전체 회귀 검사 완료 또는 merge 준비 완료로 표현하지 않는다.
 
 ## 로컬 재현
