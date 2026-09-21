@@ -34,7 +34,8 @@ function harness(kind, { currentStatus = "payment_in_progress", allowed = true, 
     onReload: async () => { calls.push({ kind: "reload" }) },
     setLatestGoogleChatEventId: () => {}, setSaving: () => {}, setWorkflowStatusSaving: () => {},
     setMessage: message => { if (message) calls.push({ kind: "warning", message }) },
-    onWarning: message => { calls.push({ kind: "warning", message }) },
+    // Clearing an old warning before a save is not a new delivery warning.
+    onWarning: message => { if (message) calls.push({ kind: "warning", message }) },
     errorMessage: error => error.message, getOpsTaskActionErrorMessage: error => error.message,
   }
   const source = sources[kind]

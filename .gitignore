@@ -20,7 +20,7 @@ playwright-report/
 .lazyweb/
 
 # next.js
-/.next/
+.next/
 /out/
 
 # production

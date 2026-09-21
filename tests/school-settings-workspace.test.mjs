@@ -60,8 +60,9 @@ test("school settings table keeps actions reachable in dense lists", async () =>
 test("shared settings layout keeps command actions available while scrolling", async () => {
   const layoutSource = await readFile(layoutPath, "utf8");
 
-  assert.match(layoutSource, /sticky top-0/);
-  assert.match(layoutSource, /backdrop-blur/);
+  assert.match(layoutSource, /sticky top-\[var\(--shell-header-height-mobile\)\]/);
+  assert.match(layoutSource, /md:top-\[var\(--shell-header-height\)\]/);
+  assert.match(layoutSource, /bg-background/);
   assert.match(layoutSource, /overflow-x-auto/);
   assert.match(layoutSource, /md:w-auto/);
   assert.match(layoutSource, /settingsTableActionHeadClass/);

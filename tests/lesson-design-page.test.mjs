@@ -366,7 +366,9 @@ test("lesson design ranks class-fit textbooks and keeps session range entry manu
   assert.doesNotMatch(source, /\{selectedLessonSessionAssignedTextbookCount\}\/\{selectedLessonSession\.textbookEntries\.length\}권 배정/);
   assert.doesNotMatch(source, /Math\.max\(selectedLessonTextbookProgressSessionIndex \+ 1, 1\)/);
   assert.doesNotMatch(source, /\{Math\.max\(selectedLessonSessionIndex \+ 1, 1\)\}\/\{filteredLessonSessions\.length\}회/);
-  assert.doesNotMatch(source, /다음 회차/);
+  // The overview may direct readers to the next session in the detail view;
+  // the editor still must not expose an automatic next-session action.
+  assert.doesNotMatch(source, />\s*다음 회차\s*</);
   assert.doesNotMatch(source, /교재별 진도/);
   assert.doesNotMatch(source, /\$\{textbookEntrySummaries\.length\}개 교재 범위/);
 });
@@ -395,7 +397,7 @@ test("lesson design keeps return handling after class management delegates plann
   const managementSource = await readSource("src/features/management/management-page.tsx");
 
   assert.match(managementSource, /const buildClassDetailReturnPath = \(/);
-  assert.match(managementSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
+  assert.match(managementSource, /buildClassRosterReturnPath\(window\.location\.search, selectedRow\.id, tab, options\.studentId\)/);
   assert.doesNotMatch(managementSource, /buildLessonDesignFromClassDetailHref/);
   assert.doesNotMatch(managementSource, /\/admin\/curriculum\/lesson-design\?/);
   assert.match(workspaceSource, /function normalizeAdminReturnPath/);
@@ -666,7 +668,7 @@ test("class schedule overview uses mobile cards instead of a clipped wide table"
   assert.match(listSection, /className="grid gap-2 md:hidden"/);
   assert.match(listSection, /data-testid=\{`class-schedule-mobile-card-\$\{row\.id\}`\}/);
   assert.match(listSection, /row\.scheduleLabel \|\| "시간표 미정"/);
-  assert.match(listSection, /계획 \{row\.latestPlannedSessionIndex\}회차 · 실제 \{row\.latestActualSessionIndex\}회차/);
+  assert.match(listSection, /scheduleProgressState === "accepted" \? `계획 \$\{row\.latestPlannedSessionIndex\}회차 · 실제 \$\{row\.latestActualSessionIndex\}회차` : "회차는 상세에서 확인"/);
   assert.match(listSection, /snapshot\?\.pendingSessionSummary/);
   assert.match(listSection, /<ScrollArea className="hidden h-\[44rem\] md:block">/);
 });
