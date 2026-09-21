@@ -36,7 +36,7 @@ test("student management exposes lifecycle status alongside school filters", asy
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(source, /const STUDENT_SCHOOL_CATEGORY_OPTIONS = \["고등", "중등", "초등"\]/);
-  assert.match(source, /STUDENT_STATUS_OPTIONS/);
+  assert.match(source, /STUDENT_ENROLLMENT_STATUS_OPTIONS/);
   assert.match(source, /renderStudentStatusSelect/);
   assert.match(source, /renderStudentSchoolCategorySelect/);
   assert.match(source, /renderStudentSchoolSelect/);
@@ -59,7 +59,7 @@ test("student management keeps search and school filters in the URL for cross-vi
   assert.match(source, /const STUDENT_LIST_QUERY_PARAM_KEYS =/);
   assert.match(source, /function getStudentListQueryState/);
   assert.match(source, /q: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.q\)\)/);
-  assert.match(source, /status: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.status\)\)/);
+  assert.match(source, /status: normalizeStudentStatusFilter\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.status\)\)/);
   assert.match(source, /schoolCategory: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.schoolCategory\)\)/);
   assert.match(source, /school: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.school\)\)/);
   assert.match(source, /grade: normalizeScalar\(params\.get\(STUDENT_LIST_QUERY_PARAM_KEYS\.grade\)\)/);
@@ -85,7 +85,7 @@ test("student management opens with active students before withdrawn records", a
   const source = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
   const studentDefaultConfig = source.match(/students:\s*\{[\s\S]*?\n\s*\},\n\s*classes:/)?.[0] || "";
 
-  assert.match(source, /const STUDENT_STATUS_SORT_ORDER = \["재원", "퇴원"\]/);
+  assert.match(source, /const STUDENT_STATUS_SORT_ORDER = \["재원", "대기", "퇴원"\]/);
   assert.match(source, /function compareStudentStatusForTable/);
   assert.match(studentDefaultConfig, /\{ id: "status", desc: false \},\s*\{ id: "title", desc: false \}/);
   assert.match(source, /sortingFn: kind === "students"[\s\S]*compareStudentStatusForTable/);
@@ -133,15 +133,14 @@ test("class-only column filters never access missing student or textbook columns
   assert.match(source, /if \(kind === "classes"\) \{\s*for \(const filter of CLASS_FILTERS\)/);
 });
 
-test("student plain status preserves the explicit class roster popover", async () => {
-  const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
-  const hookSource = await readFile(new URL("src/features/management/use-management-records.ts", root), "utf8");
-
-  assert.match(tableSource, /function renderStudentClassStatusPopover/);
-  assert.match(tableSource, /\{row\.status \|\| "—"\}/);
-  assert.match(tableSource, /aria-label=\{`\$\{row\.title\} \$\{label\} 수업 \$\{count\}개 보기`\}/);
-  assert.match(hookSource, /function attachStudentClassSummaries/);
-  assert.match(hookSource, /const \[classes, classHistory, textbookSaleLines, textbooks\] = await Promise\.all/);
+test("student counts use the same trigger as class counts and a paginated relation reader", async () => {
+  const table = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
+  const cell = await readFile(new URL("src/features/management/student-enrollment-status-cell.tsx", root), "utf8");
+  const reference = await readFile(new URL("src/features/management/class-enrollment-status-cell.tsx", root), "utf8");
+  assert.match(table, /StudentEnrollmentStatusCell/);
+  assert.match(cell, /EnrollmentStatusTrigger/);
+  assert.match(reference, /EnrollmentStatusTrigger/);
+  assert.doesNotMatch(table, /renderStudentClassStatusPopover/);
 });
 
 test("student name cells do not repeat school and grade subtitle", async () => {
@@ -260,7 +259,7 @@ test("student management uses mobile cards instead of a clipped wide table", asy
   assert.match(source, /const studentMobileList = kind === "students" \? \(/);
   assert.match(source, /aria-label=\{`\$\{emptyLabel\} 모바일 학생 목록`\}/);
   assert.match(source, /data-testid=\{`student-mobile-card-\$\{row\.id\}`\}/);
-  assert.match(source, /renderStudentClassStatusPopover\(record\)/);
+  assert.match(source, /<StudentEnrollmentStatusCell[^>]*row=\{record\}/);
   assert.match(source, /parent_contact \|\| raw\.parentContact/);
   assert.match(source, /\(kind === "classes" \|\| kind === "students"\) && "hidden md:block"/);
 });

@@ -17,6 +17,7 @@ type RowBase = { id: string; status: string; sortKey: string; updatedAt: string 
 export type ManagementNumberedStudent = RowBase & {
   kind: "students"; name: string; grade: string | null; school: string | null;
   contact: string | null; parentContact: string | null;
+  registeredCount: number; waitlistCount: number; storedStatus: string;
 };
 export type ManagementNumberedClass = RowBase & {
   kind: "classes"; name: string; subject: string; grade: string | null;
@@ -92,6 +93,8 @@ function isRow<K extends ManagementNumberedKind>(value: unknown, kind: K): value
   if (!isObject(value) || value.kind !== kind || typeof value.id !== "string" || !value.id.trim()
     || !["status", "sortKey", "updatedAt"].every((key) => typeof value[key] === "string")) return false;
   if (kind === "students") return typeof value.name === "string"
+    && isCount(value.registeredCount) && isCount(value.waitlistCount) && typeof value.storedStatus === "string"
+    && value.status === (value.registeredCount > 0 ? "재원" : value.waitlistCount > 0 ? "대기" : "퇴원")
     && ["grade", "school", "contact", "parentContact"].every((key) => isNullableText(value[key]));
   if (kind === "classes") return typeof value.name === "string" && typeof value.subject === "string"
     && ["grade", "schedule", "teacherName", "classroom"].every((key) => isNullableText(value[key]))

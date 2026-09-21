@@ -110,7 +110,7 @@ select
   '0107' || pg_catalog.lpad(ordinal::text,7,'0'),
   '0108' || pg_catalog.lpad(ordinal::text,7,'0'),
   case when ordinal = 31 then '퇴원' else '재원' end,
-  '[]'::jsonb,
+  case when ordinal=31 then '[]'::jsonb else '["91000000-0000-4000-8000-000000000701"]'::jsonb end,
   '[]'::jsonb
 from pg_catalog.generate_series(1,32) ordinal;
 

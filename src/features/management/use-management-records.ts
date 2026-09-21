@@ -1,5 +1,7 @@
 "use client";
 
+import { DEFAULT_STUDENT_STATUS_FILTER } from "./student-enrollment-status.js";
+
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { supabase } from "@/lib/supabase";
@@ -651,7 +653,7 @@ export type UseManagementRecordsOptions = {
 };
 
 function defaultManagementFilters(kind: ManagementKind): ManagementListFilters {
-  if (kind === "students") return { kind, search: "", status: null, schoolCategory: null, school: null, grade: null };
+  if (kind === "students") return { kind, search: "", status: DEFAULT_STUDENT_STATUS_FILTER, schoolCategory: null, school: null, grade: null };
   if (kind === "classes") return { kind, search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null };
   return { kind, search: "", status: null, subject: null, publisher: null };
 }
@@ -920,7 +922,7 @@ export function useManagementRecords(
   }: {
     id: string;
     relationKind: string;
-    cursor: string;
+    cursor: string | null;
   }) => {
     if (!readService) return null;
     return readService.loadRelationPage({ kind, id, relationKind, cursor, limit: 30 });

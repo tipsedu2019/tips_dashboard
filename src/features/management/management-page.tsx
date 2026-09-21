@@ -33,10 +33,6 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import {
-  STUDENT_STATUS_OPTIONS,
-  normalizeStudentStatus,
-} from "@/lib/student-status";
 import { cn } from "@/lib/utils";
 import { formatStudentContact } from "@/lib/student-contact-display";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
@@ -182,10 +178,9 @@ const STUDENT_GRADE_OPTIONS_BY_CATEGORY: Record<(typeof STUDENT_SCHOOL_CATEGORY_
   중등: ["중1", "중2", "중3"],
   초등: ["초1", "초2", "초3", "초4", "초5", "초6"],
 };
-const STUDENT_SELECT_FIELD_NAMES = new Set(["status", "school_category", "school", "grade"]);
+const STUDENT_SELECT_FIELD_NAMES = new Set(["school_category", "school", "grade"]);
 const STUDENT_DETAIL_FIELD_NAMES = [
   "name",
-  "status",
   "uid",
   "school_category",
   "school",
@@ -197,7 +192,6 @@ const STUDENT_DETAIL_FIELD_NAMES = [
 const FORM_FIELDS: Record<ManagementKind, Field[]> = {
   students: [
     { name: "name", label: "학생명", placeholder: "김학생", required: true, autoComplete: "off" },
-    { name: "status", label: "재원 상태", placeholder: "재원" },
     { name: "uid", label: "메이크에듀 원생고유번호", placeholder: "S-001", autoComplete: "off" },
     { name: "school_category", label: "학교 구분", placeholder: "학교 구분" },
     { name: "school", label: "학교", placeholder: "학교" },
@@ -768,9 +762,7 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
     if (name === "name") return text(raw.name || raw.class_name || raw.className || row?.title);
     if (name === "school_category") return getStudentSchoolCategoryFromRaw(raw);
     if (name === "status") {
-      return kind === "students"
-        ? normalizeStudentStatus(raw.status || row?.status || row?.statusValue)
-        : normalizeClassStatusForForm(raw.status || row?.status || row?.statusValue);
+      return normalizeClassStatusForForm(raw.status || row?.status || row?.statusValue);
     }
     if (name === "classroom") return text(raw.classroom || raw.room);
     if (name === "subjectAreaKey") return text(raw.subject_area_key || raw.subjectAreaKey);
@@ -1242,9 +1234,9 @@ function getDetailMetrics(kind: ManagementKind, row: ManagementRow) {
 
   if (kind === "students") {
     return [
-      detailMetric("재원 상태", normalizeStudentStatus(raw.status || row.status)),
-      detailMetric("수강 수업", getStudentEnrolledClassIds(row).length),
-      detailMetric("대기 수업", getStudentWaitlistClassIds(row).length),
+      detailMetric("재원 상태", row.status),
+      detailMetric("등록 수업", Number(row.metrics.classCount || 0)),
+      detailMetric("대기 수업", Number(row.metrics.waitlistCount || 0)),
       detailMetric("교재 이력", getStudentTextbookHistory(row).length),
     ];
   }
@@ -1719,7 +1711,6 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     const rawRows = rows.map((row) => (row.raw || {}) as Record<string, unknown>);
 
     return {
-      status: [...STUDENT_STATUS_OPTIONS],
       school_category: [...STUDENT_SCHOOL_CATEGORY_OPTIONS],
       school: getStudentSchoolOptions(rawRows, studentSchoolCategory),
       grade: getStudentGradeOptions(rawRows, studentSchoolCategory),
@@ -2886,6 +2877,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setDialogMode("create" as const);
       } : undefined,
       onOpenRow: openRow,
+      onLoadStudentEnrollments: kind === "students" ? async (id: string, cursor: string | null) => {
+        const result = await loadRelationPage({ id, relationKind: "enrollments", cursor });
+        if (!result?.page) throw new Error("student_enrollment_preview_unavailable");
+        return result.page;
+      } : undefined,
       onLoadClassRoster: kind === "classes"
         ? (classId: string, mode: "registered" | "waitlist") => loadClassRosterPreview({ classId, mode })
         : undefined,
@@ -2908,7 +2904,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       };
     }
     return base;
-  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, openRow, requestManagementNavigation]);
+  }, [beginDetailRequest, canMutateRows, handleBulkDeleteRows, handleBulkUpdateRows, kind, loadClassRosterPreview, loadRelationPage, openRow, requestManagementNavigation]);
 
   const deleteActionLabel = "삭제";
   const deleteRequestCount = deleteRequest?.rows.length || 0;

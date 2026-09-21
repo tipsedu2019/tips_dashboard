@@ -8,6 +8,8 @@ import { JSDOM } from "jsdom";
 import { act, createContext, createElement, StrictMode, Suspense, startTransition, useContext, useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 import ts from "typescript";
+import { normalizeStudentManagementRecord } from "../src/features/management/records.js";
+import { normalizeStudentStatusFilter } from "../src/features/management/student-enrollment-status.js";
 
 const require = createRequire(import.meta.url);
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
@@ -40,7 +42,7 @@ function transport() {
     return { abortSignal(value) { signal = value; return this; }, retry() {
       if (name === "get_management_stats_v1") return Promise.resolve({ data: { total: 260 }, error: null });
       if (name === "list_management_filter_options_v1") return Promise.resolve({ data: {}, error: null });
-      if (name === "get_management_detail_v1") return Promise.resolve({ data: { kind: args.p_kind, record: { id: args.p_id, name: "Independent detail", status: "재원" } }, error: null });
+      if (name === "get_management_detail_v1") return Promise.resolve({ data: { kind: args.p_kind, record: { id: args.p_id, name: "Independent detail", status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0 } }, error: null });
       if (name === "get_management_default_class_period_v1") return Promise.resolve({ data: { periodId: "period-default" }, error: null });
       return new Promise((resolve, reject) => requests.push({ name, args, signal, resolve, reject }));
     } };
@@ -48,7 +50,7 @@ function transport() {
   function finish(index, totalCount = 260, rowOverrides = []) {
     const request = requests[index], { p_page: page, p_page_size: pageSize, p_kind: kind } = request.args;
     request.resolve({ error: null, data: { page, pageSize, totalCount, rows: Array.from({ length: Math.min(pageSize, Math.max(0, totalCount - (page - 1) * pageSize)) }, (_, i) => ({
-      kind, id: `row-${page}-${i}`, name: `Row ${page}-${i}`, status: "재원", sortKey: `row-${page}-${i}`, updatedAt: "2026-08-31", grade: null, school: null, contact: null, parentContact: null,
+      kind, id: `row-${page}-${i}`, name: `Row ${page}-${i}`, status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0, sortKey: `row-${page}-${i}`, updatedAt: "2026-08-31", grade: null, school: null, contact: null, parentContact: null,
       subject: "수학", title: `Book ${page}-${i}`, publisher: null, price: null, activeClassCount: 0,
       schedule: null, teacherName: null, classroom: null, capacity: null, weeklyMinutes: null, fee: null, studentCount: 0,
       ...rowOverrides[i],
@@ -58,10 +60,70 @@ function transport() {
 }
 const filters = { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null };
 
+test("student classification uses full server counts and preserves legacy write status", () => {
+  for (const [registeredCount, waitlistCount, expected] of [[1,0,"재원"],[0,1,"대기"],[0,0,"퇴원"],[35,4,"재원"]]) {
+    const row = normalizeStudentManagementRecord({ id: "student", name: "합성 학생", storedStatus: "퇴원", status: expected,
+      registeredCount, waitlistCount, class_ids: [], waitlist_class_ids: [] });
+    assert.equal(row.status, expected);
+    assert.equal(row.raw.status, "퇴원");
+    assert.equal(row.metrics.classCount, registeredCount);
+    assert.equal(row.metrics.waitlistCount, waitlistCount);
+  }
+  for (const value of [null, undefined, "", "all", "전체 상태", "등록 진행"]) assert.equal(normalizeStudentStatusFilter(value), "재원");
+});
+
+test("student page defaults to enrolled, offers exactly three statuses, and resets to enrolled", async (t) => {
+  const page = await mountManagementPage(t, { renderTable: true, initialQuery: "status=all" });
+  assert.equal(page.requests[0].args.p_filters.status, "재원");
+  await act(async () => page.finish(0, 1, [{ name: "합성 학생", registeredCount: 2, waitlistCount: 1 }]));
+  assert.match(document.querySelector('tr[data-management-row="true"]').textContent, /합성 학생/);
+  assert.ok(document.querySelector('[aria-label="합성 학생 등록 수업 2개 보기"]'));
+  assert.ok(document.querySelector('[aria-label="합성 학생 대기 수업 1개 보기"]'));
+  const status = document.querySelector('#student-status-filter');
+  await act(async () => status.dispatchEvent(new window.KeyboardEvent("keydown", { key: "ArrowDown", bubbles: true })));
+  assert.deepEqual([...document.querySelectorAll('[role="option"]')].map((el) => el.textContent), ["재원","대기","퇴원"]);
+  await act(async () => document.querySelector('[role="listbox"]').dispatchEvent(new window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })));
+  await act(async () => page.navigate("?status=대기&page=1"));
+  assert.equal(page.requests.at(-1).args.p_filters.status, "대기");
+  await act(async () => page.finish(page.requests.length - 1, 1, [{ status: "대기", registeredCount: 0, waitlistCount: 2 }]));
+  const reset = [...document.querySelectorAll("button")].find((el) => el.textContent === "조건 초기화");
+  assert.ok(reset);
+  await act(async () => reset.click());
+  assert.equal(page.requests.at(-1).args.p_filters.status, "재원");
+  assert.equal(page.requests.at(-1).args.p_page, 1);
+});
+
+test("student enrollment popover loads on demand, retries and reaches the next relation page", async (t) => {
+  const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  for (const key of ["HTMLElement", "Element", "NodeFilter", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
+  globalThis.getComputedStyle = dom.window.getComputedStyle;
+  globalThis.ResizeObserver = class { observe() {} disconnect() {} };
+  const { StudentEnrollmentStatusCell } = loadHook({}, "src/features/management/student-enrollment-status-cell.tsx");
+  const row = normalizeStudentManagementRecord({ id: "student", name: "합성 학생", registeredCount: 30, waitlistCount: 1 });
+  const requests = [];
+  const onLoad = (id, cursor) => { const pending = Promise.withResolvers(); requests.push({ id, cursor, ...pending }); return pending.promise; };
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  await act(async () => root.render(createElement(StudentEnrollmentStatusCell, { row, onLoad })));
+  assert.equal(requests.length, 0);
+  await act(async () => document.querySelector('[aria-label="합성 학생 대기 수업 1개 보기"]').click());
+  assert.equal(requests.length, 1); assert.equal(requests[0].cursor, null);
+  await act(async () => requests[0].reject(new Error("offline")));
+  assert.match(document.querySelector('[role="alert"]').textContent, /불러오지 못했습니다/);
+  await act(async () => [...document.querySelectorAll("button")].find((el) => el.textContent === "다시 시도").click());
+  await act(async () => requests[1].resolve({ rows: Array.from({ length: 30 }, (_, i) => ({ classId: `class-${i}`, status: "enrolled", className: `등록 ${i}` })), nextCursor: "opaque-next", hasMore: true }));
+  await act(async () => [...document.querySelectorAll("button")].find((el) => el.textContent === "수업 더 불러오기").click());
+  assert.equal(requests[2].cursor, "opaque-next");
+  await act(async () => requests[2].resolve({ rows: [{ classId: "waiting", status: "waitlisted", className: "마지막 대기 수업" }], nextCursor: null, hasMore: false }));
+  assert.match(document.querySelector('[role="dialog"]').textContent, /마지막 대기 수업/);
+  assert.doesNotMatch(document.querySelector('[role="dialog"]').textContent, /등록 0/);
+});
+
 async function mountClassConsumer(t, { renderTable = false, deferDefault = false, ...initial } = {}) {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid/classes?page=11" });
   globalThis.window = dom.window; globalThis.document = dom.window.document;
-  for (const key of ["HTMLElement", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
+  for (const key of ["HTMLElement", "Element", "NodeFilter", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
@@ -209,13 +271,14 @@ for (const transition of [
   });
 }
 
-async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null } = {}) {
-  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?page=11` });
+async function mountManagementPage(t, { kind = "students", preference = 10, holdNavigation = false, mutationError = null, renderTable = false, initialQuery = "page=11", columnPreferences = null } = {}) {
+  const dom = new JSDOM("<div id='root'></div>", { url: `https://test.invalid/admin/${kind}?${initialQuery}` });
   globalThis.window = dom.window; globalThis.document = dom.window.document;
-  for (const key of ["HTMLElement", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
+  for (const key of ["HTMLElement", "Element", "NodeFilter", "DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle;
   globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   if (Number.isInteger(preference)) window.localStorage.setItem("tips.data-table-page-size.v1", JSON.stringify({ [`management:${kind}`]: { mode: "manual", pageSize: preference } }));
+  if (columnPreferences) window.localStorage.setItem(`tips-management-table:${kind}:v14`, JSON.stringify(columnPreferences));
   const { supabase, requests, finish } = transport();
   const actualService = loadHook(supabase, "src/features/management/management-service.js");
   const mutations = [];
@@ -229,6 +292,18 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
     originalReplace(data, unused, url);
     startTransition(() => setSearch(window.location.search));
   };
+  window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0);
+  window.cancelAnimationFrame = window.clearTimeout;
+  window.scrollTo = () => {};
+  window.matchMedia = (media) => ({ media, matches: false, addEventListener() {}, removeEventListener() {} });
+  globalThis.HTMLSelectElement = window.HTMLSelectElement;
+  window.HTMLElement.prototype.scrollIntoView = () => {};
+  const navigationModule = {
+    usePathname: () => `/admin/${kind}`,
+    useSearchParams: () => new URLSearchParams(useContext(navigation)),
+    useRouter: () => ({ replace: (url) => window.history.replaceState(null, "", url), push: (url) => window.history.replaceState(null, "", url) }),
+  };
+  const RealTable = renderTable ? loadHook(supabase, "src/features/management/management-data-table.tsx", { "next/navigation": navigationModule }).ManagementDataTable : null;
   const { ManagementPage } = loadHook(supabase, "src/features/management/management-page.tsx", {
     "@/providers/auth-provider": { useAuth: () => ({ user: { id: "actor" }, role: "admin", loading: false, canManageAll: true }) },
     "next/navigation": {
@@ -236,7 +311,7 @@ async function mountManagementPage(t, { kind = "students", preference = 10, hold
       useSearchParams: () => new URLSearchParams(useContext(navigation)),
       useRouter: () => ({ replace: (url) => window.history.replaceState(null, "", url), push: (url) => window.history.replaceState(null, "", url) }),
     },
-    "./management-data-table": { ManagementDataTable(props) { useEffect(() => { table = props; }, [props]); return null; } },
+    "./management-data-table": { ManagementDataTable(props) { useEffect(() => { table = props; }, [props]); return renderTable ? createElement(RealTable, props) : null; } },
     "./management-service.js": { ...actualService, managementService: {
       ...actualService.managementService,
       deleteTextbook: async (id) => { mutations.push(id); if (mutationError) throw mutationError; return {}; },
@@ -588,4 +663,17 @@ test("the real table renders server page rows unchanged, routes sort headers and
   assert.equal(document.querySelectorAll('tr[data-management-row="true"]').length, 2, "page navigation must retain the previous rows while loading");
   assert.doesNotMatch(document.body.textContent, /수업 불러오는 중|수업 데이터를 불러오는 중/);
   await act(async () => root.unmount());
+});
+
+test("new student enrollment column preserves saved visibility, size and order", async (t) => {
+  const page = await mountManagementPage(t, { renderTable: true, initialQuery: "", columnPreferences: {
+    version: 14, columnOrder: ["select","title","school","grade","contact","parentContact","status","action"],
+    columnSizing: { title: 240, status: 88 }, columnVisibility: { school: false }, sorting: [], grouping: [],
+  } });
+  await act(async () => page.finish(0, 1));
+  const headers = [...document.querySelectorAll("thead th")];
+  assert.deepEqual(headers.slice(-3).map(el => el.textContent), ["재원 상태","수강 현황","작업"]);
+  assert.equal(headers[1].style.width, "240px");
+  assert.equal(headers.at(-3).style.width, "88px");
+  assert.ok(!headers.some(el => el.textContent === "학교"));
 });

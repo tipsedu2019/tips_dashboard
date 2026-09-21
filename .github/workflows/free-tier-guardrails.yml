@@ -33,6 +33,16 @@ jobs:
             tests/textbook-numbered-read-service.test.mjs
       - name: Verify class detail and schedule request ownership
         run: node --test --experimental-strip-types tests/management-detail-race.test.mjs tests/management-continuous-class-schedule.test.mjs tests/management-progressive-loading.test.mjs
+      - name: Verify student enrollment status and management pagination
+        run: |
+          node --test --experimental-strip-types \
+            tests/management-numbered-service.test.mjs \
+            tests/management-numbered-pagination.test.mjs \
+            tests/management-filter-transition.test.mjs \
+            tests/management-students-toolbar.test.mjs \
+            tests/management-class-enrollment-status-cell.test.mjs \
+            tests/management-student-detail-selects.test.mjs \
+            tests/management-student-lifecycle-history.test.mjs
       - name: Verify dialog and sidebar focus restoration
         run: node --test --experimental-strip-types tests/dialog-opener-focus.test.mjs tests/sidebar-focus-return.test.mjs tests/command-search-navigation.test.mjs
       - name: Verify shared dashboard design contracts

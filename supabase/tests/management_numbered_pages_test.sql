@@ -50,7 +50,7 @@ values
 insert into public.classes(id,name,class_type,subject,grade,teacher,schedule,room,capacity,fee,status,student_ids,waitlist_ids,textbook_ids,lessons,schedule_plan)
 select ('94200000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'__numbered__ 수업 '||n,'정규','영어','중2',
   case when n%2=0 then '교사 2' else '교사 1' end,'월 18:00','1강',12,n*10000,'수강',
-  jsonb_build_array('94100000-0000-4000-8000-'||lpad(n::text,12,'0')),'[]',
+  case when n=111 then '[]'::jsonb else jsonb_build_array('94100000-0000-4000-8000-'||lpad(n::text,12,'0')) end,'[]',
   jsonb_build_array('94300000-0000-4000-8000-'||lpad(n::text,12,'0')),'[]','{}' from generate_series(1,111) n;
 insert into public.class_schedule_sync_groups(id,name,subject) values ('94000000-0000-4000-8000-000000000902','__numbered_period__','영어');
 insert into public.class_schedule_sync_group_members(group_id,class_id)

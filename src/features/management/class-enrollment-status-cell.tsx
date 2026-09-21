@@ -3,7 +3,7 @@
 import { useRef, useState } from "react";
 
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { EnrollmentStatusTrigger } from "./enrollment-status-trigger";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 
 import type { ManagementRow } from "./use-management-records";
@@ -138,16 +138,7 @@ function ClassEnrollmentStatusCell({
     return (
       <Popover open={openMode === mode} onOpenChange={(open) => handleOpenChange(mode, open)}>
         <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant={count > 0 ? "secondary" : "ghost"}
-            size="sm"
-            className="relative h-11 px-2 text-xs tabular-nums md:h-7"
-            aria-label={`${label} 학생 ${count}명 보기`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {label} {count}
-          </Button>
+          <EnrollmentStatusTrigger label={label} count={count} aria-label={`${label} 학생 ${count}명 보기`} />
         </PopoverTrigger>
         <PopoverContent align="start" sideOffset={8} className="w-64 rounded-lg p-0 shadow-lg">
           <div className="flex items-center justify-between border-b px-3 py-2">

@@ -4,7 +4,7 @@ import { readFile } from "node:fs/promises";
 
 const root = new URL("../", import.meta.url);
 
-test("student lifecycle status is a persisted student field", async () => {
+test("student management derives status while preserving the legacy write contract", async () => {
   const statusSource = await readFile(new URL("src/lib/student-status.js", root), "utf8");
   const serviceSource = await readFile(new URL("src/features/management/management-service.js", root), "utf8");
   const recordsSource = await readFile(new URL("src/features/management/records.js", root), "utf8");
@@ -13,7 +13,8 @@ test("student lifecycle status is a persisted student field", async () => {
   assert.match(statusSource, /ACTIVE_STUDENT_STATUS = "재원"/);
   assert.match(statusSource, /WITHDRAWN_STUDENT_STATUS = "퇴원"/);
   assert.match(serviceSource, /status: normalizeStudentStatus\(record\.status\)/);
-  assert.match(recordsSource, /const status = normalizeStudentStatus\(row\.status\)/);
+  assert.match(recordsSource, /const status = getStudentEnrollmentStatus\(row\)/);
+  assert.match(recordsSource, /status: normalizeStudentStatus\(row\.storedStatus \?\? row\.status\)/);
   assert.match(migrationSource, /add column if not exists status text not null default '재원'/);
   assert.match(migrationSource, /check \(status in \('재원', '퇴원'\)\)/);
 });

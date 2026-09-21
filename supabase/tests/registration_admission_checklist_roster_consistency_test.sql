@@ -1,6 +1,6 @@
 begin;
 
-select plan(38);
+select plan(40);
 
 set local timezone = 'Asia/Seoul';
 set local statement_timeout = '30s';
@@ -686,6 +686,10 @@ select ok(
   'a planned capacity claim is not exposed as completed enrollment'
 );
 
+select is(dashboard_private.management_student_enrollment_summary_v1('00000000-0000-4000-8000-00000000b201'),
+  '{"status":"퇴원","registeredCount":0,"waitlistCount":0}'::jsonb,
+  'planned roster-active claims do not produce registered or waiting management status');
+
 create or replace function pg_temp.registration_admission_status_side_effect_snapshot(
   p_task_id uuid,
   p_track_id uuid,
@@ -1161,6 +1165,10 @@ select ok(
   ) = 1,
   'management count, student classes, and class roster all expose one student'
 );
+select is(dashboard_private.management_student_enrollment_summary_v1('00000000-0000-4000-8000-00000000b201'),
+  '{"status":"재원","registeredCount":1,"waitlistCount":0}'::jsonb,
+  'finalized registration claim and reciprocal arrays count as one registered class');
+
 
 select ok(
   (

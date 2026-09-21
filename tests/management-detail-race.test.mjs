@@ -489,10 +489,10 @@ test("pending save coverage locks student creation fields and restores them afte
   await ui.editField("students-form-name", "제출한 등록명");
   await ui.submitTogether();
   assert.equal(document.getElementById("students-form-name").disabled, true);
-  assert.equal(document.getElementById("students-form-status").disabled, true);
+  assert.equal(document.getElementById("students-form-school_category").disabled, true);
   await act(async () => ui.mutations[0].reject(new Error("생성 실패")));
   assert.equal(document.getElementById("students-form-name").disabled, false);
-  assert.equal(document.getElementById("students-form-status").disabled, false);
+  assert.equal(document.getElementById("students-form-school_category").disabled, false);
   assert.equal(document.getElementById("students-form-name").value, "제출한 등록명");
   await ui.click("학생 정보 닫기");
   assert.ok(document.querySelector('[data-testid="management-discard-confirm-dialog"]'));
@@ -1016,12 +1016,12 @@ test("real management table retries only failed rows and preserves the bulk draf
   await act(async () => { selections()[0].click(); selections()[1].click(); });
   await ui.click("선택 항목 일괄 수정");
   await act(async () => document.getElementById("management-bulk-value").click());
-  await act(async () => [...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "재원").click());
+  await act(async () => [...document.querySelectorAll('[role="option"]')].find(option => option.textContent === "고등").click());
   await ui.click("일괄 수정");
   assert.equal(ui.mutations.length, 2);
   await act(async () => { ui.mutations[0].resolve({ id: "student-a" }); ui.mutations[1].reject(new Error("검수용 부분 실패")); });
   assert.equal(document.querySelector('[role="dialog"] h2').textContent, "선택 1건 수정");
-  assert.match(document.getElementById("management-bulk-value").textContent, /재원/);
+  assert.match(document.getElementById("management-bulk-value").textContent, /고등/);
   assert.deepEqual(selections().map(box => box.getAttribute("aria-checked")), ["true", "false"], "selection follows failed row identity after the refreshed page reorders");
   await ui.click("일괄 수정");
   assert.equal(ui.mutations.length, 3, "the confirmed row is never submitted again");

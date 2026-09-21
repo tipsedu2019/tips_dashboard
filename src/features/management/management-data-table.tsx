@@ -49,7 +49,6 @@ import { ManagementBulkActionBar, type BulkEditField } from "./management-bulk-a
 import { StudentRowActions } from "./student-row-actions";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
   Select,
   SelectContent,
@@ -89,7 +88,8 @@ import {
 } from "@/components/data-table/data-table-surface";
 import { MANAGEMENT_NUMBERED_SORT_COLUMNS, type ManagementNumberedSort } from "./management-numbered-service";
 import { MANAGEMENT_TABLE_STORAGE_VERSION, managementTableStorageKey, resetManagementPageForFilters } from "./management-numbered-state";
-import { STUDENT_STATUS_OPTIONS } from "@/lib/student-status";
+import { STUDENT_ENROLLMENT_STATUS_OPTIONS, DEFAULT_STUDENT_STATUS_FILTER, normalizeStudentStatusFilter } from "./student-enrollment-status.js";
+import { StudentEnrollmentStatusCell, type LoadStudentEnrollments } from "./student-enrollment-status-cell";
 import type { ManagementKind, ManagementRow, ManagementStat } from "@/features/management/use-management-records";
 import {
   getManagementListViewportHeight,
@@ -126,6 +126,7 @@ const STUDENT_TABLE_COLUMN_IDS = [
   "contact",
   "parentContact",
   "status",
+  "enrollmentStatus",
   "action",
 ] as const;
 
@@ -188,7 +189,7 @@ const EMPTY_CLASS_LIST_QUERY_STATE: ClassListQueryState = {
 };
 
 const STUDENT_SCHOOL_CATEGORY_OPTIONS = ["고등", "중등", "초등"] as const;
-const STUDENT_STATUS_SORT_ORDER = ["재원", "퇴원"] as const;
+const STUDENT_STATUS_SORT_ORDER = ["재원", "대기", "퇴원"] as const;
 
 const STUDENT_LIST_QUERY_PARAM_KEYS = {
   q: "q",
@@ -296,7 +297,8 @@ const STUDENT_COLUMN_WIDTHS: Record<string, number> = {
   grade: 88,
   contact: 152,
   parentContact: 152,
-  status: 88,
+  enrollmentStatus: 150,
+  status: 120,
   action: 44,
 };
 
@@ -359,6 +361,7 @@ type ColumnOption = {
 };
 
 type ManagementTableActions = {
+  onLoadStudentEnrollments?: LoadStudentEnrollments;
   onCreate?: () => void;
   onOpenRow?: (row: ManagementRow) => void;
   onDeleteRow?: (row: ManagementRow) => void;
@@ -379,7 +382,6 @@ type StoredManagementScroll = {
 
 const BULK_EDIT_FIELDS: Record<ManagementKind, BulkEditField[]> = {
   students: [
-    { id: "status", label: "재원 상태", placeholder: "재원", options: Array.from(STUDENT_STATUS_OPTIONS) },
     { id: "school_category", label: "학교 구분", placeholder: "고등/중등/초등", options: Array.from(STUDENT_SCHOOL_CATEGORY_OPTIONS) },
     { id: "school", label: "학교", placeholder: "학교명" },
     { id: "grade", label: "학년", placeholder: "고1" },
@@ -537,7 +539,7 @@ function buildClassListHref(pathname: string, searchParamString: string, state: 
 function getStudentListQueryState(params: URLSearchParams): StudentListQueryState {
   return {
     q: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.q)),
-    status: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.status)),
+    status: normalizeStudentStatusFilter(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.status)),
     schoolCategory: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.schoolCategory)),
     school: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.school)),
     grade: normalizeScalar(params.get(STUDENT_LIST_QUERY_PARAM_KEYS.grade)),
@@ -548,7 +550,7 @@ function buildStudentListHref(pathname: string, searchParamString: string, state
   const params = new URLSearchParams(searchParamString);
 
   setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.q, state.q);
-  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.status, state.status);
+  setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.status, normalizeStudentStatusFilter(state.status));
   setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.schoolCategory, state.schoolCategory);
   setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.school, state.school);
   setClassListQueryParam(params, STUDENT_LIST_QUERY_PARAM_KEYS.grade, state.grade);
@@ -829,142 +831,6 @@ function renderClassScheduleCell(row: ManagementRow) {
   );
 }
 
-type StudentClassSummary = {
-  id?: string;
-  name?: string;
-  subject?: string;
-  teacher?: string;
-  schedule?: string;
-  classroom?: string;
-};
-
-function normalizeStudentClassSummaries(value: unknown): StudentClassSummary[] {
-  if (!Array.isArray(value)) {
-    return [];
-  }
-
-  return value
-    .map((item) => {
-      if (item && typeof item === "object") {
-        const record = item as Record<string, unknown>;
-        return {
-          id: normalizeScalar(record.id),
-          name: normalizeScalar(record.name || record.title || record.className || record.class_name),
-          subject: normalizeScalar(record.subject),
-          teacher: normalizeScalar(record.teacher || record.teacher_name || record.teacherName),
-          schedule: normalizeScalar(record.schedule),
-          classroom: normalizeScalar(record.classroom || record.room),
-        };
-      }
-
-      return {
-        id: normalizeScalar(item),
-        name: normalizeScalar(item),
-      };
-    })
-    .filter((classItem) => classItem.name || classItem.id);
-}
-
-function getStudentClassSummaries(row: ManagementRow, status: "registered" | "waitlist") {
-  const raw = row.raw || {};
-  const summaryValue = status === "registered"
-    ? raw.enrolledClasses || raw.enrolled_classes
-    : raw.waitlistClasses || raw.waitlist_classes;
-  const summaryList = normalizeStudentClassSummaries(summaryValue);
-  if (summaryList.length > 0) {
-    return summaryList;
-  }
-
-  const idValue = status === "registered"
-    ? raw.class_ids || raw.classIds
-    : raw.waitlist_class_ids || raw.waitlistClassIds;
-  return normalizeStudentClassSummaries(Array.isArray(idValue) ? idValue : []);
-}
-
-function formatStudentClassSummary(classItem: StudentClassSummary) {
-  const title = classItem.name || classItem.id || "수업";
-  const meta = [classItem.subject, classItem.teacher, classItem.classroom].filter(Boolean).join(" · ");
-  return { title, meta, schedule: classItem.schedule || "" };
-}
-
-function renderStudentClassStatusPopover(row: ManagementRow) {
-  const registeredCount = Number(row.metrics.classCount || 0);
-  const waitlistCount = Number(row.metrics.waitlistCount || 0);
-  const mode = registeredCount > 0 ? "registered" : waitlistCount > 0 ? "waitlist" : "none";
-  const lifecycleBadge = (
-    <span className={cn("text-sm leading-5", row.status === "재원" ? "text-foreground" : "text-muted-foreground")}>
-      {row.status || "—"}
-    </span>
-  );
-
-  if (mode === "none") {
-    return lifecycleBadge;
-  }
-
-  const label = mode === "registered" ? "수강" : "대기";
-  const count = mode === "registered" ? registeredCount : waitlistCount;
-  const classList = getStudentClassSummaries(row, mode);
-  const sortedClassList = [...classList].sort((a, b) =>
-    (a.name || a.id || "").localeCompare(b.name || b.id || "", "ko", { numeric: true }),
-  );
-
-  return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      {lifecycleBadge}
-      <Popover>
-        <PopoverTrigger asChild>
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            className={cn(
-              "relative z-20 h-6 rounded-md px-1.5 text-xs font-medium",
-              mode === "registered"
-                ? "bg-muted/60 text-foreground hover:bg-muted"
-                : "bg-orange-50 text-orange-700 hover:bg-orange-100 dark:bg-orange-950/30 dark:text-orange-300 dark:hover:bg-orange-950/50",
-            )}
-            aria-label={`${row.title} ${label} 수업 ${count}개 보기`}
-            onClick={(event) => event.stopPropagation()}
-          >
-            {label} {count}개
-          </Button>
-        </PopoverTrigger>
-        <PopoverContent align="start" sideOffset={8} className="w-72 rounded-lg p-0 shadow-lg">
-          <div className="flex items-center justify-between border-b px-3 py-2">
-            <div className="text-sm font-semibold">{label} 수업</div>
-            <Badge variant="secondary" className="h-5 rounded-full px-2 text-[11px]">
-              {count}개
-            </Badge>
-          </div>
-          <div className="max-h-72 overflow-y-auto p-2">
-            {sortedClassList.length > 0 ? (
-              <div className="grid gap-1">
-                {sortedClassList.map((classItem, index) => {
-                  const formatted = formatStudentClassSummary(classItem);
-                  return (
-                    <div
-                      key={`${row.id}-${mode}-${classItem.id || classItem.name || index}`}
-                      className="rounded-md px-2 py-1.5 hover:bg-muted/70"
-                    >
-                      <div className="truncate text-sm font-medium">{formatted.title}</div>
-                      {formatted.meta ? <div className="truncate text-xs text-muted-foreground">{formatted.meta}</div> : null}
-                      {formatted.schedule ? <div className="truncate text-xs text-muted-foreground">{formatted.schedule}</div> : null}
-                    </div>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="px-2 py-5 text-center text-sm text-muted-foreground">
-                표시할 수업이 없습니다.
-              </div>
-            )}
-          </div>
-        </PopoverContent>
-      </Popover>
-    </div>
-  );
-}
-
 function renderClassCapacityCell(row: ManagementRow) {
   const capacity = getClassCapacity(row);
   return capacity > 0 ? <span className="text-sm text-foreground">{capacity}</span> : null;
@@ -1077,6 +943,11 @@ function sanitizePreferences(
   const columnOrder = [
     ...new Set([...(saved.columnOrder || []).filter((columnId) => allowedColumnIds.has(columnId)), ...columnIds]),
   ];
+  if (kind === "students" && !saved.columnOrder?.includes("enrollmentStatus") && columnOrder.includes("enrollmentStatus")) {
+    columnOrder.splice(columnOrder.indexOf("enrollmentStatus"), 1);
+    const statusIndex = columnOrder.indexOf("status");
+    columnOrder.splice(statusIndex >= 0 ? statusIndex + 1 : columnOrder.indexOf("action"), 0, "enrollmentStatus");
+  }
   const savedColumnSizing = saved.columnSizing || {};
   const columnSizing = Object.fromEntries(
     columnIds.map((columnId) => [
@@ -1411,7 +1282,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         id: "enrollmentStatus",
         accessorFn: (row) => normalizeScalar((row.raw || {}).capacityStatus || (row.raw || {}).capacity_status),
         header: "수강 현황",
-        cell: ({ row }) => (
+        cell: ({ row }) => kind === "students" ? (
+          <StudentEnrollmentStatusCell key={`${row.original.id}:${row.original.metrics.classCount}:${row.original.metrics.waitlistCount}:${row.original.raw?.updated_at || ""}`} row={row.original} onLoad={actions.onLoadStudentEnrollments} />
+        ) : (
           <ClassEnrollmentStatusCell
             key={getClassEnrollmentStatusCellKey(row.original)}
             row={row.original}
@@ -1480,7 +1353,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         header: statusLabel,
         cell: ({ row }) =>
           kind === "students" ? (
-            renderStudentClassStatusPopover(row.original)
+            <span className="text-sm leading-5">{row.original.status}</span>
           ) : kind === "classes" ? (
             <span className="text-sm leading-5">{row.original.status}</span>
           ) : (
@@ -1738,7 +1611,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
       kind === "classes"
         ? [...CLASS_STATUS_FILTER_OPTIONS]
         : kind === "students"
-          ? [...STUDENT_STATUS_OPTIONS]
+          ? [...STUDENT_ENROLLMENT_STATUS_OPTIONS]
         : serverOptions("status").sort((a, b) => a.localeCompare(b, "ko")),
     [kind, serverOptions],
   );
@@ -1801,13 +1674,14 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const activeClassFilters = kind === "classes" ? classFilterValues.filter((filter) => filter.value) : [];
   const normalizedClassStatusFilter = kind === "classes" ? statusFilter || DEFAULT_CLASS_STATUS_FILTER : statusFilter;
   const hasNonDefaultStatusFilter = kind === "classes" && normalizedClassStatusFilter !== DEFAULT_CLASS_STATUS_FILTER;
-  const hasActiveStudentFilters = kind === "students" && Boolean(statusFilter || studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
+  const normalizedStudentStatusFilter = normalizeStudentStatusFilter(statusFilter);
+  const hasActiveStudentFilters = kind === "students" && Boolean(normalizedStudentStatusFilter !== DEFAULT_STUDENT_STATUS_FILTER || studentSchoolCategoryFilter || studentSchoolFilter || studentGradeFilter);
   const normalizedGlobalFilter = String(globalFilter || "").trim();
   const normalizedColumnSearchQuery = columnSearchQuery.trim().toLowerCase();
   const hasActiveFilters = Boolean(
     normalizedGlobalFilter ||
       badgeFilter ||
-      (kind === "classes" ? hasNonDefaultStatusFilter : statusFilter) ||
+      (kind === "classes" ? hasNonDefaultStatusFilter : kind === "students" ? hasActiveStudentFilters : statusFilter) ||
       activeClassFilters.length > 0 ||
       hasActiveStudentFilters,
   );
@@ -1925,12 +1799,12 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
   const currentStudentListQueryState = useMemo<StudentListQueryState>(
     () => ({
       q: debouncedGlobalFilter,
-      status: kind === "students" ? statusFilter : "",
+      status: kind === "students" ? normalizedStudentStatusFilter : "",
       schoolCategory: studentSchoolCategoryFilter,
       school: studentSchoolFilter,
       grade: studentGradeFilter,
     }),
-    [debouncedGlobalFilter, kind, statusFilter, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
+    [debouncedGlobalFilter, kind, normalizedStudentStatusFilter, studentGradeFilter, studentSchoolCategoryFilter, studentSchoolFilter],
   );
   const syncStudentListQueryState = useCallback(
     (nextState: Partial<StudentListQueryState>, preserveLocalUntilUrl = false) => {
@@ -2099,7 +1973,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     pendingStudentListQueryStateRef.current = reconciliation.pending;
     const nextFilters = reconciliation.filters;
 
-    const requestedStatusFilter = nextFilters.status || "";
+    const requestedStatusFilter = normalizeStudentStatusFilter(nextFilters.status);
     if (statusColumn && statusFilter !== requestedStatusFilter) {
       statusColumn.setFilterValue(requestedStatusFilter);
     }
@@ -2160,6 +2034,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     badgeColumn?.setFilterValue("");
     if (kind === "classes") {
       statusColumn?.setFilterValue(DEFAULT_CLASS_STATUS_FILTER);
+    } else if (kind === "students") {
+      statusColumn?.setFilterValue(DEFAULT_STUDENT_STATUS_FILTER);
     } else {
       statusColumn?.setFilterValue("");
     }
@@ -2179,7 +2055,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
     if (kind === "students") {
       syncStudentListQueryState({
         q: "",
-        status: "",
+        status: DEFAULT_STUDENT_STATUS_FILTER,
         schoolCategory: "",
         school: "",
         grade: "",
@@ -2431,9 +2307,9 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
         재원 상태
       </Label>
       <Select
-        value={statusFilter || "all"}
+        value={normalizedStudentStatusFilter}
         onValueChange={(value) => {
-          const nextStatusValue = value === "all" ? "" : value;
+          const nextStatusValue = normalizeStudentStatusFilter(value);
           statusColumn?.setFilterValue(nextStatusValue);
           syncStudentListQueryState({ status: nextStatusValue }, true);
           setRowSelection({});
@@ -2443,8 +2319,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           <SelectValue placeholder="재원 상태" />
         </SelectTrigger>
         <SelectContent>
-          <SelectItem value="all">전체 상태</SelectItem>
-          {STUDENT_STATUS_OPTIONS.map((option) => (
+          {STUDENT_ENROLLMENT_STATUS_OPTIONS.map((option) => (
             <SelectItem key={option} value={option}>
               {option}
             </SelectItem>
@@ -2756,7 +2631,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                   <div className="mt-1 flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1 text-sm leading-5">
                     <span className="min-w-0 whitespace-normal break-words">{school || "—"}</span>
                     <span>{grade || "—"}</span>
-                    {renderStudentClassStatusPopover(record)}
+                    <span>{record.status}</span>
                   </div>
                 </div>
                 <StudentRowActions
@@ -2765,6 +2640,7 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
                 />
               </div>
 
+              <div className="mt-2 pl-11"><StudentEnrollmentStatusCell key={`${record.id}:${record.metrics.classCount}:${record.metrics.waitlistCount}:${record.raw?.updated_at || ""}`} row={record} onLoad={actions.onLoadStudentEnrollments} /></div>
               {contact === "—" && parentContact === "—" ? (
                 <p className="mt-2 pl-11 text-xs text-muted-foreground">연락처 없음</p>
               ) : (
@@ -2891,8 +2767,8 @@ const ManagementDataTableContent = memo(function ManagementDataTableContent({
           ) : null}
 
           {kind === "students" ? (
-            <DataTableFilterPanel label="학생 검색 조건" onReset={resetFilters} activeFilters={[
-              { label: "재원 상태", value: statusFilter },
+            <DataTableFilterPanel label="학생 검색 조건" onReset={resetFilters} canReset={hasActiveFilters} activeFilters={[
+              { label: "재원 상태", value: normalizedStudentStatusFilter },
               { label: "학교 구분", value: studentSchoolCategoryFilter },
               { label: "학교", value: studentSchoolFilter },
               { label: "학년", value: studentGradeFilter },
