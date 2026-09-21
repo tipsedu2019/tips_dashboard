@@ -78,6 +78,34 @@ select is((select amount from public.textbook_stock_moves where purchase_order_l
 select lives_ok($$select public.return_textbook_purchase_line_v1(pg_temp.sid(5))$$,'teacher copy return succeeds');
 select is((select sum(quantity) from public.textbook_stock_moves where purchase_order_line_id=pg_temp.sid(5) and copy_scope='teacher'),0::bigint,'teacher copy return stays in its own inventory scope');
 
+-- A partial group return must not block the still-active sibling.
+reset role;
+insert into public.textbook_purchase_orders(id,status) values(pg_temp.sid(110),'ordered');
+insert into public.textbook_purchase_order_lines(id,purchase_order_id,textbook_id,ordered_quantity)
+values(pg_temp.sid(10),pg_temp.sid(110),pg_temp.sid(800),10),
+ (pg_temp.sid(11),pg_temp.sid(110),pg_temp.sid(800),10);
+set local role authenticated;
+select lives_ok($$select pg_temp.receive(10)$$,'receive first grouped line');
+select lives_ok($$select public.return_textbook_purchase_line_v1(pg_temp.sid(10))$$,'return only first grouped line');
+select is((select status from public.textbook_purchase_orders where id=pg_temp.sid(110)),'ordered','unreceived sibling keeps the order active');
+select lives_ok($$select public.update_textbook_purchase_lifecycle_v1(pg_temp.sid(11),pg_temp.sid(110),'receive',
+ '{"statement_number":"group-sibling"}',jsonb_build_object('textbook_id',pg_temp.sid(800),'requested_quantity',10,'ordered_quantity',10,'received_quantity',10,'unit_cost',1000.5,'copy_scope','student'))$$,
+ 'sibling can be received after first return commits');
+select lives_ok($$select public.return_textbook_purchase_line_v1(pg_temp.sid(11))$$,'return final grouped line');
+select is((select status from public.textbook_purchase_orders where id=pg_temp.sid(110)),'returned','all returned lines close the parent');
+select is((select sum(quantity) from public.textbook_stock_moves where purchase_order_line_id in (pg_temp.sid(10),pg_temp.sid(11))),0::bigint,'all grouped receipts and returns balance');
+reset role;
+insert into public.textbook_purchase_orders(id,status) values(pg_temp.sid(112),'ordered');
+insert into public.textbook_purchase_order_lines(id,purchase_order_id,textbook_id,ordered_quantity)
+values(pg_temp.sid(12),pg_temp.sid(112),pg_temp.sid(800),10),
+ (pg_temp.sid(13),pg_temp.sid(112),pg_temp.sid(800),10);
+set local role authenticated;
+select lives_ok($$select pg_temp.receive(12)$$,'receive grouped line before sibling deletion');
+select lives_ok($$select public.return_textbook_purchase_line_v1(pg_temp.sid(12))$$,'return grouped line before sibling deletion');
+select is((select status from public.textbook_purchase_orders where id=pg_temp.sid(112)),'ordered','remaining requested line is still active');
+select lives_ok($$select public.delete_textbook_purchase_line_v1(pg_temp.sid(13))$$,'delete the final unreceived sibling');
+select is((select status from public.textbook_purchase_orders where id=pg_temp.sid(112)),'returned','deleting the last active sibling closes the returned parent');
+
 reset role;
 insert into public.textbook_sales(id,charge_month) values(pg_temp.sid(700),'2099-09');
 insert into public.textbook_sale_lines(id,sale_id,textbook_id,charge_month,status) values(pg_temp.sid(600),pg_temp.sid(700),pg_temp.sid(800),'2099-09','issued');

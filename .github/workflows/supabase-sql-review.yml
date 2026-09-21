@@ -130,6 +130,7 @@ jobs:
             --probe tests/probe-textbook-stock-count-concurrency.mjs \
             --test supabase/tests/textbook_purchase_lifecycle_atomic_test.sql \
             --test supabase/tests/signup_identity_isolation_test.sql \
+            --probe tests/probe-signup-identity-concurrency.mjs \
             --probe tests/probe-textbook-purchase-concurrency.mjs \
             --test supabase/tests/textbook_sale_transition_atomic_test.sql \
             --probe tests/probe-textbook-sale-transition-concurrency.mjs \

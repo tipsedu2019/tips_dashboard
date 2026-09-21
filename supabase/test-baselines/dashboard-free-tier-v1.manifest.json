@@ -459,6 +459,16 @@
       "fileName": "20260921114314_signup_identity_isolation.sql",
       "status": "final",
       "sha256": "acf7b70ff77cab9614cd61cb6f348492869298af7127e6c051a5b1f3988e9afb"
+    },
+    {
+      "fileName": "20260921132000_purchase_group_return_state.sql",
+      "sha256": "f9f6c2c830eaea550214b0cc46ba735df2b8d9da4eedea3409f11d725a1a0e18",
+      "status": "final"
+    },
+    {
+      "fileName": "20260921132001_signup_teacher_ownership.sql",
+      "sha256": "5c47b8ec037cb7b42440e6eb485c786fbc2d9a84554b7bf572c1cb9b54733d47",
+      "status": "final"
     }
   ]
 }
