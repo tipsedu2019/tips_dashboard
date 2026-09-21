@@ -151,6 +151,55 @@ async function setup(t, options = {}) {
   };
 }
 
+test("class roster search keeps membership counts and drafts while filtering enrolled and waiting students", async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    Object.assign(fixture.rows[0].raw, {
+      student_ids: ['s1', 's2'], waitlist_ids: ['s3'],
+      registered_students: [{ id: 's1', name: '합성학생', school: '제주중', grade: '중3' }, { id: 's2', name: '다른학생', school: '제주고', grade: '고1' }],
+      waitlist_students: [{ id: 's3', name: '합성대기', school: '제주중', grade: '중3' }],
+    });
+  } });
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await ui.editField('classes-detail-name', '보존할 초안');
+  const search = document.querySelector('input[aria-label="명단 학생 검색"]');
+  await act(async () => {
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set.call(search, '제주중 중3');
+    search.dispatchEvent(new window.Event('input', { bubbles: true }));
+  });
+  assert.equal(document.querySelectorAll('[data-testid="class-roster-student-row"]').length, 2);
+  assert.match(document.querySelector('[data-testid="class-enrolled-student-roster"]').textContent, /1 \/ 2명/);
+  assert.match(document.querySelector('[data-testid="class-waitlist-student-roster"]').textContent, /1 \/ 1명/);
+  assert.equal(document.getElementById('classes-detail-name').value, '보존할 초안');
+  await ui.click('명단 학생 검색 초기화');
+  assert.equal(document.activeElement, search);
+  assert.equal(document.querySelectorAll('[data-testid="class-roster-student-row"]').length, 3);
+  assert.deepEqual(ui.rows[0].raw.student_ids, ['s1', 's2']);
+});
+
+test("class save failure appears once beside save, retains the draft, and retries the same intent", async t => {
+  let attempts = 0;
+  const ui = await setup(t, { configureFixture(fixture) {
+    fixture.service.updateClass = async input => {
+      attempts += 1;
+      if (attempts === 1) throw new Error('합성 저장 실패');
+      return input;
+    };
+  } });
+  await ui.click('A 영어반');
+  await ui.resolve(0, defaultsFor());
+  await ui.editField('classes-detail-name', '실패 후에도 보존');
+  await ui.click('저장');
+  const footer = document.querySelector('[data-testid="class-detail-actions"]');
+  assert.match(footer.textContent, /합성 저장 실패/);
+  assert.equal((ui.text().match(/합성 저장 실패/g) || []).length, 1);
+  assert.equal(document.getElementById('classes-detail-name').value, '실패 후에도 보존');
+  await ui.click('저장');
+  assert.equal(attempts, 2);
+  assert.doesNotMatch(footer.textContent, /합성 저장 실패/);
+  assert.match(footer.textContent, /저장 완료/);
+});
+
 test("current class loads normalized schedule and saves its own revision and slots", async t => {
   const ui = await setup(t);
   await ui.click("B 영어반");

@@ -80,6 +80,8 @@ Student rows use `StudentRowActions` with the existing authorized withdrawal cal
 
 `DataTableRowActions` supplies the same trailing primary action, accessible more trigger and aligned dropdown in student, request, purchase and sale rows. The caller supplies menu items, disabled state and callbacks. Use `DataTableDetailButton` for wrapped titles that open a dialog; keep navigation destinations as links. Do not attach mutation or permission logic to either presentation wrapper.
 
+Inside a high-layer management dialog, set `menuLayer="dialog"` so the portaled row menu is above the dialog. The default list layer and focus behavior stay unchanged.
+
 ## Sale process composition
 
 Use the shared frame, toolbar, viewport, selection target, cells, mobile region and row actions. Put the book title and recipient first, followed by status and quantity; wrap long titles and class names. Only show the next workflow action as a primary row button. Keep detail, cancellation, customer return and history deletion in the shared menu with their existing eligibility and fresh-read callbacks.

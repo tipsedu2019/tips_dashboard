@@ -545,6 +545,9 @@ test("authorized detail catalogs remain available through metadata failure and c
 
 test("the real table renders server page rows unchanged, routes sort headers and disables derived sorts", async (t) => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid/?page=11" });
+  // Weekly hours is optional in the recommended layout. Make it visible to
+  // exercise both derived columns without changing the production defaults.
+  dom.window.localStorage.setItem("tips-management-table:classes:v14", JSON.stringify({ columnVisibility: { weeklyHours: true } }));
   globalThis.window = dom.window; globalThis.document = dom.window.document;
   globalThis.HTMLElement = dom.window.HTMLElement;
   for (const key of ["DocumentFragment", "MutationObserver", "CustomEvent", "Event", "Node", "HTMLInputElement"]) globalThis[key] = dom.window[key];

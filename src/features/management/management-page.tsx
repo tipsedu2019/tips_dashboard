@@ -19,6 +19,10 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field";
+import { DataTableRowActions } from "@/components/data-table/data-table-row-actions";
+import { DropdownMenuItem } from "@/components/ui/dropdown-menu";
+import { buildClassRosterReturnPath, matchesClassRosterSearch } from "./class-roster-search";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -744,14 +748,16 @@ function normalizeClassDetailTab(value: unknown): ClassDetailTab {
 }
 
 function scrollClassDetailTargetIntoView(target: HTMLElement) {
-  target.scrollIntoView({ block: "center", behavior: "smooth" });
-  const dialog = target.closest('[role="dialog"]') as HTMLElement | null;
+  const dialog = target.closest<HTMLElement>('[role="dialog"]');
   if (!dialog) return;
-
-  const dialogRect = dialog.getBoundingClientRect();
-  const targetRect = target.getBoundingClientRect();
-  const targetOffset = targetRect.top - dialogRect.top - Math.max((dialogRect.height - targetRect.height) / 2, 0);
-  dialog.scrollTop += targetOffset;
+  const navigation = dialog.querySelector<HTMLElement>('[data-testid="class-detail-navigation"]');
+  const top = dialog.getBoundingClientRect().top + dialog.clientTop
+    + (Number.parseFloat(window.getComputedStyle(dialog).paddingTop) || 0)
+    + (navigation?.offsetHeight || 0);
+  dialog.scrollBy({
+    top: target.getBoundingClientRect().top - top - 16,
+    behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
+  });
 }
 
 function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormState {
@@ -1443,6 +1449,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const [classStudentFilters, setClassStudentFilters] = useState<ClassStudentPickerFilters>({ grade: "", school: "" });
   const [detailRowQuery, setDetailRowQuery] = useState("");
   const [relationQuery, setRelationQuery] = useState("");
+  const [classRosterQuery, setClassRosterQuery] = useState("");
   const [loadingRelationKind, setLoadingRelationKind] = useState<ManagementRelationKind | null>(null);
   const [relationPageState, setRelationPageState] = useState<Partial<Record<ManagementRelationKind, Record<string, unknown>>>>({});
   const [textbookCandidateQuery, setTextbookCandidateQuery] = useState("");
@@ -1880,7 +1887,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     ids: string[],
     modeLabel: "수강" | "대기",
     relationKind: ManagementRelationKind,
-  ) => (
+  ) => {
+    const visibleIds = kind === "classes" ? ids.filter((id) => {
+      const record = resolveRelatedRecord(id);
+      return matchesClassRosterSearch(classRosterQuery, [resolveRelatedTitle(id), getStudentSchoolValue(record), getStudentGradeValue(record), getStudentContactValue(record, "student"), getStudentContactValue(record, "parent")]);
+    }) : ids;
+    return (
     <section
       data-testid={kind === "classes" ? (modeLabel === "수강" ? "class-enrolled-student-roster" : "class-waitlist-student-roster") : undefined}
       className="overflow-hidden rounded-md border bg-background"
@@ -1888,10 +1900,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       <div className="flex h-10 items-center justify-between border-b px-3">
         <div className="text-sm font-semibold">{label}</div>
         <Badge variant="secondary" className="h-6 rounded-full px-2">
-          {ids.length}{kind === "students" ? "개" : "명"}
+          {kind === "classes" && classRosterQuery.trim() ? `${visibleIds.length} / ` : ""}{ids.length}{kind === "students" ? "개" : "명"}
         </Badge>
       </div>
-      {ids.length > 0 ? (
+      {visibleIds.length > 0 ? (
         <div className="divide-y">
           {kind === "classes" ? (
             <>
@@ -1903,7 +1915,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 <div>학부모 연락처</div>
                 <div className="text-right">관리</div>
               </div>
-              {ids.map((id) => {
+              {visibleIds.map((id) => {
                 const record = resolveRelatedRecord(id);
                 const school = getStudentSchoolValue(record);
                 const grade = getStudentGradeValue(record);
@@ -1950,31 +1962,23 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                       <div className="text-xs text-muted-foreground lg:hidden">학부모 연락처</div>
                       <div className="whitespace-normal break-words text-sm leading-5">{formatStudentContact(parentContact)}</div>
                     </div>
-	                    <div className="flex flex-wrap justify-end gap-1">
-	                      {modeLabel !== "수강" ? (
-	                        <Button
-	                          type="button"
-	                          variant="outline"
-	                          size="sm"
-	                          className="h-7 px-2"
-	                          onClick={() => handleRelationModeChange(id, "enrolled")}
-	                          disabled={saving || !canMutateRows}
-	                        >
-	                          등록 전환
-	                        </Button>
-	                      ) : null}
-	                      <Button
-                        type="button"
-                        variant="destructive-outline"
-                        size="sm"
-                        className="h-7 px-2"
-                        onClick={() => handleRelationRemove(selectedRow?.id || "", id)}
-                        disabled={saving || !canMutateRows}
-                        aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}
-                      >
+                    <DataTableRowActions
+                      label={`${resolveRelatedTitle(id)} 학생 관리`}
+                      menuLayer="dialog"
+                      disabled={saving || !canMutateRows}
+                      primaryAction={modeLabel !== "수강" ? (
+                        <Button type="button" variant="outline" size="form"
+                          onClick={() => handleRelationModeChange(id, "enrolled")} disabled={saving || !canMutateRows}>
+                          등록 전환
+                        </Button>
+                      ) : undefined}
+                    >
+                      <DropdownMenuItem variant="destructive" disabled={saving || !canMutateRows}
+                        onSelect={() => handleRelationRemove(selectedRow?.id || "", id)}
+                        aria-label={`${resolveRelatedTitle(id)} ${modeLabel} 해제`}>
                         {modeLabel === "수강" ? "수강 해제" : "대기 해제"}
-                      </Button>
-                    </div>
+                      </DropdownMenuItem>
+                    </DataTableRowActions>
                   </div>
                 );
               })}
@@ -2023,7 +2027,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         </div>
       ) : (
         <div className="px-3 py-5 text-sm text-muted-foreground">
-          {label} 없음
+          {kind === "classes" && classRosterQuery.trim() ? "검색 결과 없음" : `${label} 없음`}
         </div>
       )}
       {getRelationPage(selectedRow, relationKind).hasMore === true ? (
@@ -2041,6 +2045,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       ) : null}
     </section>
   );
+  };
+
   const getEditableFieldOptions = (fieldName: string, value: string) => {
     if (kind === "students" && STUDENT_SELECT_FIELD_NAMES.has(fieldName)) {
       const options = studentSelectOptions[fieldName] || [];
@@ -2437,13 +2443,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             <p className="text-xs text-muted-foreground">새로 생성하는 일정부터 적용 · 기존 일정은 유지</p>
             <div className="flex items-center gap-2">
               {operationError?.includes("최신값을 불러온") ? (
-                <Button type="button" size="sm" variant="outline" onClick={() => void reloadClassScheduleDefaults()} disabled={scheduleDefaultsSaving}>
+                <Button type="button" size="form" variant="outline" onClick={() => void reloadClassScheduleDefaults()} disabled={scheduleDefaultsSaving}>
                   최신값 불러오기
                 </Button>
               ) : null}
               <Button
                 type="button"
-                size="sm"
+                size="form"
                 onClick={() => void handleClassScheduleDefaultsSave()}
                 disabled={!canMutateRows || !classScheduleDefaultsDirty || scheduleDefaultsSaving}
               >
@@ -2499,7 +2505,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 <div className="student-field-divider" role="separator" />
               ) : null}
               <div className={fieldWrapperClassName}>
-                <Label htmlFor={id}>{field.label}</Label>
+                <Label htmlFor={id}>{field.label}{kind === "classes" && field.required ? <><span aria-hidden="true" className="text-destructive">*</span><span className="sr-only">필수 입력</span></> : null}</Label>
                 {kind === "classes" && field.name === "subjectAreaKey" ? (
                   <>
                   <Select
@@ -2507,7 +2513,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                     disabled={fieldsDisabled || scienceSubjectAreaOptions.length === 0}
                   >
-                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역 선택" aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
+                    <SelectTrigger id={id} className="w-full" aria-label="과학 영역" aria-required={field.required || undefined} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
                       <SelectValue placeholder={field.placeholder} />
                     </SelectTrigger>
                     <SelectContent>
@@ -2556,7 +2562,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
                   disabled={fieldsDisabled}
                 >
-                  <SelectTrigger id={id} className="w-full">
+                  <SelectTrigger id={id} className="w-full" aria-required={field.required || undefined} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
                     <SelectValue placeholder={field.placeholder || `${field.label} 선택`} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2634,6 +2640,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setClassStudentFilters(getDefaultClassStudentPickerFilters(kind === "classes" ? activeRow.raw || {} : {}));
     setRelatedRows(getEmbeddedRelatedRecords(kind, activeRow));
     setDetailRowQuery("");
+    setClassRosterQuery("");
     setRelationQuery("");
     setTextbookCandidateQuery("");
     setTextbookCandidateFilters(getDefaultClassTextbookFilters(activeRow.raw || {}));
@@ -2733,7 +2740,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (
       kind !== "classes" ||
       dialogMode !== "detail" ||
-      !requestedClassDetailStudentId
+      (!requestedClassDetailStudentId && requestedClassDetailTab !== "students")
     ) {
       return;
     }
@@ -2742,6 +2749,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const row = document.getElementById(`class-roster-student-${requestedClassDetailStudentId}`);
       if (row) {
         scrollClassDetailTargetIntoView(row);
+      } else if (!requestedClassDetailStudentId) {
+        const section = document.getElementById("class-detail-students-section");
+        if (section) scrollClassDetailTargetIntoView(section);
       }
     };
     const timer = window.setTimeout(scrollFocusedRosterStudent, 80);
@@ -2751,7 +2761,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       window.clearTimeout(timer);
       window.clearTimeout(retryTimer);
     };
-  }, [dialogMode, kind, relatedRows.length, requestedClassDetailStudentId, selectedRow?.id]);
+  }, [dialogMode, kind, relatedRows.length, requestedClassDetailStudentId, requestedClassDetailTab, selectedRow?.id]);
 
   const reportPublicClassesCacheRefresh = (result: unknown) => {
     const values = Array.isArray(result) ? result : [result];
@@ -2869,6 +2879,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         setPendingClassStudentDetailId("");
         setRelationPickerOpen(false);
         setDetailRowQuery("");
+        setClassRosterQuery("");
         setRelationQuery("");
         setOperationError(null);
         setSaveNotice("");
@@ -3190,16 +3201,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     options: { studentId?: string } = {},
   ) => {
     if (!selectedRow) return "/admin/classes";
-    const params = new URLSearchParams();
-    params.set("classId", selectedRow.id);
-    params.set("tab", tab);
-    if (options.studentId) {
-      params.set("studentId", options.studentId);
-    }
-    if (requestedClassReturnPath) {
-      params.set("returnTo", requestedClassReturnPath);
-    }
-    return `/admin/classes?${params.toString()}`;
+    return buildClassRosterReturnPath(window.location.search, selectedRow.id, tab, options.studentId);
   };
 
   const renderSaveStatus = () => {
@@ -3218,6 +3220,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       );
     }
     if (operationError) {
+      if (kind === "classes" && isDetail) return null;
       const saveErrorStatusLabel = getSaveErrorStatusLabel(operationError);
       return (
         <div data-testid="management-save-status" className="text-xs font-medium text-destructive">
@@ -3235,17 +3238,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     return null;
   };
 
-  const scrollClassRosterIntoView = () => {
-    const section = document.getElementById("class-detail-students-section");
-    const scrollport = section?.closest<HTMLElement>('[data-slot="dialog-content"]');
-    if (!section || !scrollport) return;
-    const header = scrollport.querySelector<HTMLElement>('[data-testid="class-official-summary-bar"]');
-    const visibleTop = header?.getBoundingClientRect().bottom ?? scrollport.getBoundingClientRect().top;
-    scrollport.scrollBy({
-      top: section.getBoundingClientRect().top - visibleTop - 16,
-      behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth",
-    });
+  const scrollClassSectionIntoView = (sectionId: string) => {
+    const section = document.getElementById(sectionId);
+    if (!section) return;
+    scrollClassDetailTargetIntoView(section);
+    section.focus({ preventScroll: true });
   };
+  const scrollClassRosterIntoView = () => scrollClassSectionIntoView("class-detail-students-section");
 
   const renderClassSummaryBar = () => {
     if (kind !== "classes" || !selectedRow) return null;
@@ -3268,7 +3267,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       : `${registeredCount}명 (${waitlistCount}명)`;
 
     return (
-      <div data-testid="class-official-summary-bar" className="class-detail-header sticky top-0 z-20 -mx-4 border-b bg-background px-4 py-3 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background sm:-mx-6 sm:px-6 sm:before:-top-6 sm:before:h-6">
+      <div data-testid="class-official-summary-bar" className="class-detail-header border-b bg-background">
         <div className="flex items-start gap-3">
           <div className="grid min-w-0 flex-1 gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-center">
             <div className="min-w-0">
@@ -3320,23 +3319,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 className="-mx-2 rounded-md px-2 py-1.5 text-left text-sm transition-colors hover:bg-muted focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none"
                 onClick={scrollClassRosterIntoView}
               >
-                <div className="text-xs text-muted-foreground">등록 (대기) / 정원</div>
+                <div className="text-xs text-muted-foreground">학생 명단 · 등록 (대기) / 정원</div>
                 <div className="mt-1 font-medium">{capacitySummary}</div>
               </button>
             </div>
           </div>
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            data-testid="class-detail-sticky-close"
-            className="size-9 shrink-0"
-            aria-label="수업 상세 닫기"
-            title="수업 상세 닫기"
-            onClick={() => handleDialogOpenChange(false)}
-          >
-            <X className="size-4" aria-hidden="true" />
-          </Button>
+
         </div>
       </div>
     );
@@ -3358,7 +3346,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     return (
       <section data-testid="class-textbook-management" className="space-y-3 border-t pt-4">
         <div data-testid="class-textbook-picker-panel" className="grid gap-1.5 rounded-md border bg-background p-3">
-          <Label>교재 선택</Label>
+          <Label>교재</Label>
           <ClassTextbookPicker
             key={`${selectedRow.id}:${form.subject}:${form.grade}`}
             classRecord={{ ...raw, subject: form.subject, grade: form.grade }}
@@ -3558,12 +3546,19 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
     return (
       <section data-testid={kind === "classes" ? "class-student-roster-panel" : undefined} className="space-y-3 border-t pt-4">
-        {kind !== "classes" ? (
-          <div className="text-sm font-semibold">수업 연결</div>
-        ) : null}
-        <div className={cn("grid gap-3 rounded-md border bg-background p-3", kind === "students" ? "student-class-picker" : "lg:grid-cols-[minmax(16rem,1fr)_auto_auto]")}>
-          <div data-testid={kind === "classes" ? "class-relation-picker" : undefined} className="grid gap-1.5">
-            <Label htmlFor={`${kind}-relation-picker-trigger`}>{relationLabel} 선택</Label>
+        {kind !== "classes" ? <div className="text-sm font-semibold">수업 연결</div> : (
+          <>
+            <h3 className="text-sm font-semibold">학생 명단</h3>
+            <DataTableSearchField value={classRosterQuery} onValueChange={setClassRosterQuery}
+              label="명단 학생 검색" placeholder="이름, 학교, 학년, 연락처 검색" />
+            {getRelationPage(selectedRow, "registered_students").hasMore || getRelationPage(selectedRow, "waitlisted_students").hasMore ? (
+              <p className="text-xs text-muted-foreground">불러온 학생에서 검색합니다. 각 명단 아래에서 더 불러올 수 있습니다.</p>
+            ) : null}
+          </>
+        )}
+        <div className={cn("grid gap-3 rounded-md border bg-background p-3", kind === "students" ? "student-class-picker" : "grid-cols-2 lg:grid-cols-[minmax(16rem,1fr)_auto_auto]")}>
+          <div data-testid={kind === "classes" ? "class-relation-picker" : undefined} className={cn("grid gap-1.5", kind === "classes" && "col-span-2 lg:col-span-1")}>
+            <Label htmlFor={`${kind}-relation-picker-trigger`}>{kind === "classes" ? "추가할 학생" : `${relationLabel} 선택`}</Label>
             <ManagementRelationCombobox
               open={relationPickerOpen}
               onOpenChange={setRelationPickerOpen}
@@ -3586,10 +3581,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             />
           </div>
           <div className="grid content-end">
-            <Button type="button" className="h-10 px-5" onClick={() => requestRelationSave("enrolled")} disabled={!canMutateRows || !targetId || saving}>{kind === "students" ? "수강 추가" : "등록 추가"}</Button>
+            <Button type="button" size="form" onClick={() => requestRelationSave("enrolled")} disabled={!canMutateRows || !targetId || saving}>{kind === "students" ? "수강 추가" : "등록 추가"}</Button>
           </div>
           <div className="grid content-end">
-            <Button type="button" variant="outline" className="h-10 px-5" onClick={() => requestRelationSave("waitlist")} disabled={!canMutateRows || !targetId || saving}>대기 추가</Button>
+            <Button type="button" variant="outline" size="form" onClick={() => requestRelationSave("waitlist")} disabled={!canMutateRows || !targetId || saving}>대기 추가</Button>
           </div>
         </div>
         <div className={cn("grid gap-3 text-sm", kind === "students" && "student-related-lists")}>
@@ -3728,32 +3723,53 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           {isDetail && selectedRow && kind === "classes" ? (
             <div data-testid="class-official-detail" className="class-detail-body space-y-4">
               {renderClassSummaryBar()}
-              {operationError ? (
-                <Alert variant="destructive">
-                  <AlertDescription>{operationError}</AlertDescription>
-                </Alert>
-              ) : null}
-
-              <section data-testid="class-detail-basic-section" className="space-y-3">
+              <nav data-testid="class-detail-navigation" aria-label="수업 상세 영역" className="class-detail-navigation flex items-center gap-1">
+                {[
+                  ["class-detail-basic-section", "수업 정보"],
+                  ["class-detail-schedule-section", "시간표"],
+                  ["class-detail-textbooks-section", "교재"],
+                  ["class-detail-students-section", "학생 명단"],
+                ].map(([id, label]) => (
+                  <Button key={id} type="button" size="form" variant="ghost" aria-label={`${label} 영역으로 이동`} onClick={() => scrollClassSectionIntoView(id)} className="px-2">{label}</Button>
+                ))}
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  data-testid="class-detail-sticky-close"
+                  className="ml-auto size-9 shrink-0"
+                  aria-label="수업 상세 닫기"
+                  title="수업 상세 닫기"
+                  onClick={() => handleDialogOpenChange(false)}
+                >
+                  <X className="size-4" aria-hidden="true" />
+                </Button>
+              </nav>
+              <section id="class-detail-basic-section" tabIndex={-1} aria-label="수업 정보" data-testid="class-detail-basic-section" className="space-y-3">
+                <h3 className="text-sm font-semibold">수업 정보</h3>
                 {renderEditableFields("detail", [
+                  "name",
                   "grade",
                   "subject",
                   "subjectAreaKey",
-                  "name",
                   "capacity",
                   "fee",
                   "status",
                 ])}
-                {renderClassScheduleSlotEditor()}
               </section>
-              {renderClassTextbookManagement()}
-              <div id="class-detail-students-section" data-testid="class-detail-students-section" className="space-y-4">
+              <section id="class-detail-schedule-section" tabIndex={-1} aria-label="시간표">{renderClassScheduleSlotEditor()}</section>
+              <section id="class-detail-textbooks-section" tabIndex={-1} aria-label="교재">{renderClassTextbookManagement()}</section>
+              <div id="class-detail-students-section" tabIndex={-1} aria-label="학생 명단" data-testid="class-detail-students-section" className="space-y-4">
                 {renderRelationManagementSection()}
               </div>
-              <DialogFooter data-testid="class-detail-actions" className="class-sheet-actions">
+              <DialogFooter data-testid="class-detail-actions" className="class-sheet-actions" aria-busy={saving}>
+                {operationError ? <Alert variant="destructive" role="alert" className="max-h-24 basis-full overflow-y-auto">
+                  <AlertDescription>{operationError}</AlertDescription>
+                </Alert> : null}
+                <span role="status" className="sr-only">{saving ? "수업 정보 저장 중" : saveNotice}</span>
                 {renderSaveStatus()}
-                <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button>
-                <Button type="button" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" size="form" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button>
+                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (
@@ -3845,13 +3861,13 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               {renderEditableFields("form")}
               <DialogFooter className={cn("items-center gap-3", kind === "students" && "student-sheet-actions", kind === "classes" && "class-sheet-actions")}>
                 {renderSaveStatus()}
-                <Button type="button" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>
+                <Button type="button" size={kind === "classes" ? "form" : "default"} variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>취소</Button>
                 {pendingClassScheduleInitialization ? (
-                  <Button type="button" onClick={() => void retryClassScheduleInitialization()} disabled={saving || !canMutateRows}>
+                  <Button type="button" size="form" onClick={() => void retryClassScheduleInitialization()} disabled={saving || !canMutateRows}>
                     기본 시간표 초기화 다시 시도
                   </Button>
                 ) : (
-                  <Button type="submit" disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
+                  <Button type="submit" size={kind === "classes" ? "form" : "default"} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
                 )}
               </DialogFooter>
             </form>

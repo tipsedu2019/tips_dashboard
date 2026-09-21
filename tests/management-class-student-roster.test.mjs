@@ -92,7 +92,7 @@ test("class management accepts legacy class detail tab URLs without rendering de
   assert.doesNotMatch(pageSource, /data-testid="class-detail-counseling-tab"/);
   assert.match(pageSource, /const buildClassDetailReturnPath = \(/);
   assert.match(pageSource, /params\.set\("studentId", options\.studentId\)/);
-  assert.match(pageSource, /params\.set\("returnTo", requestedClassReturnPath\)/);
+  assert.match(pageSource, /buildClassRosterReturnPath\(window\.location\.search, selectedRow\.id, tab, options\.studentId\)/);
 });
 
 test("class management keeps progress out while allowing direct textbook links in the detail dialog", async () => {
@@ -203,7 +203,7 @@ test("class textbook picker follows subject-detail then school-grade order and m
   assert.ok(subjectIndex >= 0 && subSubjectIndex > subjectIndex);
   assert.ok(schoolIndex > subSubjectIndex && gradeIndex > schoolIndex);
   assert.match(pageSource, /data-testid="class-textbook-picker-panel"/);
-  assert.match(pageSource, /교재 선택/);
+  assert.match(pageSource, /<Label>교재<\/Label>/);
   assert.match(pageSource, /연결 교재/);
   assert.match(pickerSource, /교재 검색 또는 선택/);
 });
@@ -461,7 +461,7 @@ test("class student roster still focuses requested student rows", async () => {
   assert.match(pageSource, /scrollClassDetailTargetIntoView\(row\)/);
   assert.match(pageSource, /const retryTimer = window\.setTimeout\(scrollFocusedRosterStudent, 450\)/);
   assert.doesNotMatch(pageSource, /activeClassDetailTab !== "students"/);
-  assert.match(pageSource, /\}, \[dialogMode, kind, relatedRows\.length, requestedClassDetailStudentId, selectedRow\?\.id\]\)/);
+  assert.match(pageSource, /\}, \[dialogMode, kind, relatedRows\.length, requestedClassDetailStudentId, requestedClassDetailTab, selectedRow\?\.id\]\)/);
 });
 
 test("class student add control uses one picker and confirms direct enrolled or waitlist actions", async () => {
@@ -541,10 +541,10 @@ test("class detail summary replaces the visible dialog title and keeps close act
   assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
   assert.match(pageSource, /<DialogHeader className=\{isDetail && kind === "classes" \? "sr-only" : "pr-10"\}>/);
   assert.match(pageSource, /showCloseButton=\{kind !== "students" && \(kind !== "classes" \|\| !isDetail\)\}/);
-  assert.match(detailSource, /\{renderClassSummaryBar\(\)\}[\s\S]*<section data-testid="class-detail-basic-section"/);
-  assert.match(summarySource, /data-testid="class-detail-sticky-close"/);
-  assert.match(summarySource, /aria-label="수업 상세 닫기"/);
-  assert.match(summarySource, /onClick=\{\(\) => handleDialogOpenChange\(false\)\}/);
+  assert.match(detailSource, /\{renderClassSummaryBar\(\)\}[\s\S]*<section[^>]*data-testid="class-detail-basic-section"/);
+  assert.match(detailSource, /data-testid="class-detail-navigation"[\s\S]*data-testid="class-detail-sticky-close"/);
+  assert.match(detailSource, /aria-label="수업 상세 닫기"/);
+  assert.match(detailSource, /onClick=\{\(\) => handleDialogOpenChange\(false\)\}/);
   assert.match(summarySource, /\{selectedRow\.title\} 수업정보/);
   assert.doesNotMatch(detailSource, /<div className="mt-1 truncate text-base font-semibold text-foreground">\{selectedRow\.title\}<\/div>[\s\S]*<div className="mt-0\.5 truncate text-sm text-muted-foreground">/);
 });
@@ -592,9 +592,9 @@ test("class official summary removes redundant identity and state badges", async
   assert.match(pageSource, /\{ label: "선생님", value: teacher \}/);
   assert.match(pageSource, /\{ label: "강의실", value: classroom \}/);
   assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
-  assert.match(pageSource, /data-testid="class-official-summary-bar" className="class-detail-header sticky top-0 z-20 -mx-4 border-b bg-background px-4 py-3 before:absolute before:inset-x-0 before:-top-4 before:h-4 before:bg-background sm:-mx-6 sm:px-6 sm:before:-top-6 sm:before:h-6"/);
+  assert.match(pageSource, /data-testid="class-official-summary-bar" className="class-detail-header border-b bg-background"/);
   assert.match(pageSource, /const capacitySummary = capacity > 0[\s\S]*\? `\$\{registeredCount\}명 \(\$\{waitlistCount\}명\) \/ \$\{capacity\}명`[\s\S]*: `\$\{registeredCount\}명 \(\$\{waitlistCount\}명\)`/);
-  assert.match(pageSource, />등록 \(대기\) \/ 정원<\/div>/);
+  assert.match(pageSource, />학생 명단 · 등록 \(대기\) \/ 정원<\/div>/);
   assert.match(pageSource, /\{capacitySummary\}/);
   assert.doesNotMatch(pageSource, />등록\/대기<\/div>/);
   assert.doesNotMatch(pageSource, /grid grid-cols-2 gap-2 text-sm/);
@@ -614,13 +614,13 @@ test("class database groups matching schedule times and stacks multi-value resou
 test("class official summary roster count jumps to the student roster section", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
-  assert.match(pageSource, /const scrollClassRosterIntoView = \(\) => \{/);
+  assert.match(pageSource, /const scrollClassRosterIntoView = \(\) => scrollClassSectionIntoView\("class-detail-students-section"\)/);
   assert.match(pageSource, /document\.getElementById\("class-detail-students-section"\)/);
-  assert.match(pageSource, /top: section\.getBoundingClientRect\(\)\.top - visibleTop - 16/);
+  assert.match(pageSource, /top: target\.getBoundingClientRect\(\)\.top - top - 16/);
   assert.match(pageSource, /behavior: window\.matchMedia\("\(prefers-reduced-motion: reduce\)"\)\.matches \? "instant" : "smooth"/);
   assert.match(pageSource, /data-testid="class-summary-roster-jump"/);
   assert.match(pageSource, /onClick=\{scrollClassRosterIntoView\}/);
-  assert.match(pageSource, /<div id="class-detail-students-section" data-testid="class-detail-students-section" className="space-y-4">/);
+  assert.match(pageSource, /<div id="class-detail-students-section"[^>]*data-testid="class-detail-students-section" className="space-y-4">/);
 });
 
 test("class detail basic fields use the requested operator order", async () => {
@@ -636,7 +636,7 @@ test("class detail basic fields use the requested operator order", async () => {
   assert.doesNotMatch(pageSource, /FORM_FIELDS\[kind\]\.filter\(\(field\) => !fieldNames \|\| fieldNames\.includes\(field\.name\)\)\.map/);
   assert.match(pageSource, /const fieldWrapperClassName = cn\([\s\S]*?"space-y-2",[\s\S]*?field\.multiline \|\| \(kind === "classes" && scope === "detail" && field\.name === "name"\)[\s\S]*?\? "sm:col-span-2"[\s\S]*?: "",[\s\S]*?\);/);
   assert.doesNotMatch(pageSource, /kind === "students" && \(field\.name === "school"/);
-  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"grade"[\s\S]*"subject"[\s\S]*"name"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
+  assert.match(detailSource, /renderEditableFields\("detail", \[[\s\S]*"name"[\s\S]*"grade"[\s\S]*"subject"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
   assert.doesNotMatch(detailSource, /renderEditableFields\("detail", \[[\s\S]*"name"[\s\S]*"status"[\s\S]*"subject"[\s\S]*"grade"[\s\S]*"capacity"[\s\S]*"fee"[\s\S]*"classGroupIds"[\s\S]*\]\)/);
 });
 
@@ -824,7 +824,7 @@ test("class official summary omits the counseling decision strip", async () => {
   assert.doesNotMatch(pageSource, /data-testid="class-summary-decision-strip"/);
   assert.doesNotMatch(pageSource, />다음 작업</);
   assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
-  assert.match(summarySource, />등록 \(대기\) \/ 정원<\/div>/);
+  assert.match(summarySource, />학생 명단 · 등록 \(대기\) \/ 정원<\/div>/);
   assert.match(summarySource, /\{capacitySummary\}/);
   assert.doesNotMatch(summarySource, />일정<\/div>/);
   assert.doesNotMatch(summarySource, />교재·진도<\/div>/);
