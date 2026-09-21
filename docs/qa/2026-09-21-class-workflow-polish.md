@@ -55,7 +55,8 @@ Chrome의 실제 Next 화면을 1440×900 및 390×900으로 검수했다. 로�
 - 마지막 요약 헤더 스타일 정리 후 영향 범위 **56/56 재검사 통과**.
 - 변경 파일 ESLint, `tsc --noEmit`, `git diff --check` 통과.
 - `next build --webpack` **exit 0**. 합성 Supabase 주소 `http://127.0.0.1:9`로 외부 DB 연결을 차단한 빌드다. 공개 데이터 정적 생성 중 `public_classes_read_failed` network 기록은 이 의도적인 주소에서 발생했고 84개 정적 페이지 생성은 완료됐다. 운영 API 가용성 증거로 사용하지 않는다.
-- **전체 lint는 통과하지 않았다.** 변경하지 않은 `tests/dialog-opener-focus.test.mjs:34,37`에서 `react-hooks/refs` 오류 2건, 기존 파일 경고 5건이 남는다. 해당 테스트 파일은 기준 커밋과 동일하며 동작 검사에는 통과했다. 변경 파일 lint 통과와 전체 lint 상태를 구분한다.
+- **후속 작업에서 전체 lint 통과: 오류 0건, 기존 경고 5건.** 최초 검수에서 남았던 `tests/dialog-opener-focus.test.mjs`의 `react-hooks/refs` 오류 2건을 해결했다. 설치된 린터는 테스트의 `createElement`에 hook ref를 전달하는 것을 렌더 중 ref 접근으로 판단했다. 테스트 setup마다 `React.createRef()`를 한 번 만들어 마운트와 재렌더링 동안 유지하도록 정리했다. 규칙 비활성화나 제품 Dialog 변경은 없다. 기존 경고는 timetable의 불필요한 useMemo 의존성 1건, ops-task-service의 미사용 함수 3건, public-classes-cache 테스트의 미사용 import 1건이다.
+- 후속 초점·탐색 회귀 검사 **27/27 통과**: `dialog-opener-focus`, `sidebar-focus-return`, `command-search-navigation`. 검색창으로 초점을 돌리는 기존 두 테스트에 상세 로딩 후 재렌더링을 추가하여 ref가 계속 유효한지도 확인했다. 수정은 테스트 fixture와 이 기록에만 적용했으므로 제품 빌드·브라우저 검수 결과는 앞선 실행과 구분한다.
 - numbered pagination 테스트는 기본 숨김인 weeklyHours 열을 해당 테스트 안에서만 명시적으로 표시하도록 수정했다. 제품의 열 기본값이나 사용자 저장 설정을 바꾸지 않았다.
 - 이전 `premium-class-browser.mjs`의 이름 필드 locator를 필수 접근성 이름에 맞췄다. 이번 실제 브라우저 검수는 CUA로 수행했으며 그 스크립트를 재실행한 것으로 기록하지 않는다.
 

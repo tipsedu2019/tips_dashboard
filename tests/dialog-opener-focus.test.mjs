@@ -18,10 +18,11 @@ async function setup(t, { contentProps = {}, nested = false, fallback = false, i
   const { createRoot } = await import("react-dom/client")
   const { Dialog, DialogContent, DialogTitle, DialogDescription } = loadNotificationComponent("src/components/ui/dialog.tsx")
   const h = React.createElement
+  // One ref per mounted test fixture, stable across state-driven rerenders.
+  const searchRef = React.createRef()
   let setReady
   function Fixture() {
     const [open, setOpen] = React.useState(initialOpen)
-    const searchRef = React.useRef(null)
     const [childOpen, setChildOpen] = React.useState(false)
     const [ready, updateReady] = React.useState(false)
     React.useEffect(() => { setReady = updateReady }, [])
@@ -134,6 +135,7 @@ for (const initialOpen of [false, true]) {
     const p = await setup(t, { fallback: true, initialOpen })
     if (initialOpen) await p.settle()
     else (await p.open()).remove()
+    await p.ready()
     await p.escape()
     assert.equal(document.activeElement, document.getElementById("search"))
   })
