@@ -469,6 +469,11 @@
       "fileName": "20260921132001_signup_teacher_ownership.sql",
       "sha256": "5c47b8ec037cb7b42440e6eb485c786fbc2d9a84554b7bf572c1cb9b54733d47",
       "status": "final"
+    },
+    {
+      "fileName": "20260921133800_purchase_return_read_consistency.sql",
+      "sha256": "509fa0a84608d959ec92e485f1deca9470725f5c4be1371800d9d66903989fe2",
+      "status": "final"
     }
   ]
 }

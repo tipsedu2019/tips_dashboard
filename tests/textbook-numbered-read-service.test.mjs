@@ -366,6 +366,21 @@ test('purchase detail uses any real member identity, validates nested source and
     const transport=wire({row:null}); await assert.rejects(()=>api.getTextbookPurchaseDetail(input,{client:transport.client}),/input_invalid/); assert.equal(transport.calls.length,0);
   }
 });
+test('returned purchase DTOs preserve an active parent without reclassifying the member', async () => {
+  const api = await service();
+  const row = purchaseRow();
+  row.mode = 'order'; row.status = 'returned'; row.id = row.id.replace(/^requested/, 'returned');
+  row.lines = row.lines.map(line => ({ ...line, status: 'returned', ordered_quantity: 2, received_quantity: 2,
+    order: { ...line.order, status: 'ordered', ordered_at: '2026-08-02T00:00:00+00:00', received_at: '2026-08-03T00:00:00+00:00' } }));
+  row.line = { ...row.lines[0], purchaseScopeLines: row.lines };
+  row.quantities = { requested: 4, ordered: 4, received: 4,
+    student: { requested: 2, ordered: 2, received: 2 }, teacher: { requested: 2, ordered: 2, received: 2 } };
+  const detail = await api.getTextbookPurchaseDetail({ anchorLineId: row.anchorLineId, mode: 'order' }, { client: wire({ row }).client });
+  assert.equal(detail.row.status, 'returned');
+  assert.equal(detail.row.line.status, 'returned');
+  assert.equal(detail.row.line.order.status, 'ordered');
+  assert.equal(detail.row.eventAt, '2026-08-01T00:00:00+00:00');
+});
 test('workflow summaries reject inconsistent full totals and sale detail rejects wrong real identity',async()=>{
  const api=await service();
  for(const patch of [{totalCount:100},{rawLineCount:201},{mode:'order'},{groups:[]}]) await assert.rejects(()=>api.getTextbookPurchaseSummary(purchaseFilters,{client:wire({...purchaseSummary(),...patch}).client}),/response_invalid/);
