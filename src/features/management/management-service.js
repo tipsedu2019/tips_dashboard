@@ -938,6 +938,18 @@ function hasProfilePatchChanges(profile = {}, patch = {}) {
   return false;
 }
 
+function updateLinkedTeacherProfile(client, profileId, patch) {
+  return client.from("profiles").update(patch).eq("id", profileId)
+    .select("id,role,teacher_catalog_id").maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+}
+
+function updateLinkedTeacherProfileRole(client, profileId, patch) {
+  return client.from("profiles").update(patch).eq("id", profileId)
+    .select("id,role").maybeSingle()
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+}
+
 async function syncLinkedTeacherProfiles(client, rows = []) {
   const linkedRows = rows.filter((row) => trimText(row.profile_id));
   if (linkedRows.length === 0) {
@@ -960,19 +972,19 @@ async function syncLinkedTeacherProfiles(client, rows = []) {
     }
 
     let expectedPatch = extendedPatch;
-    let result = await client.from("profiles").update(expectedPatch).eq("id", profileId).select();
+    let result = await updateLinkedTeacherProfile(client, profileId, expectedPatch);
     if (result.error && isMissingColumnError(result.error)) {
       expectedPatch = { role: extendedPatch.role };
-      result = await client.from("profiles").update(expectedPatch).eq("id", profileId).select();
+      result = await updateLinkedTeacherProfileRole(client, profileId, expectedPatch);
     }
     if (result.error) {
       throw result.error;
     }
-    const savedProfile = result.data?.find((profile) => profile.id === profileId);
-    if (!savedProfile || Object.entries(expectedPatch).some(([key, value]) => savedProfile[key] !== value)) {
+    const savedProfile = result.data;
+    if (!savedProfile || savedProfile.id !== profileId || Object.entries(expectedPatch).some(([key, value]) => savedProfile[key] !== value)) {
       throw new Error("선생님 계정 권한의 저장 결과를 확인하지 못했습니다. 다시 시도해 주세요.");
     }
-    updates.push(...(result.data || []));
+    updates.push(savedProfile);
   }
 
   return updates;

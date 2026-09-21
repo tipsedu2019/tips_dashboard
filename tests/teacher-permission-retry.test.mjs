@@ -26,15 +26,34 @@ function fixture({ failure = "network" } = {}) {
         update(patch) {
           assert.equal(table, "profiles");
           calls.profile += 1;
-          return { eq: () => ({ select: async () => {
-            if (calls.profile === 1) {
-              if (failure === "network") return { data: null, error: { code: "NETWORK_ERROR" } };
-              if (failure === "empty") return { data: [], error: null };
-              if (failure === "unchanged") return { data: [{ ...profile }], error: null };
-            }
-            profile = { ...profile, ...patch };
-            return { data: [{ ...profile }], error: null };
-          } }) };
+          const query = {
+            eq(column, id) {
+              assert.equal(column, "id");
+              assert.equal(id, "profile-a");
+              return query;
+            },
+            select(projection) {
+              assert.equal(projection, "teacher_catalog_id" in patch ? "id,role,teacher_catalog_id" : "id,role");
+              return query;
+            },
+            maybeSingle() { return query; },
+            abortSignal(signal) {
+              assert.ok(signal instanceof AbortSignal);
+              return query;
+            },
+            async retry(retry) {
+              assert.equal(retry, false);
+              if (calls.profile === 1) {
+                if (failure === "network") return { data: null, error: { code: "NETWORK_ERROR" } };
+                if (failure === "empty") return { data: null, error: null };
+                if (failure === "unchanged") return { data: { ...profile }, error: null };
+                if (failure === "missing-column") return { data: null, error: { code: "42703", message: "column teacher_catalog_id does not exist" } };
+              }
+              profile = { ...profile, ...patch };
+              return { data: { ...profile }, error: null };
+            },
+          };
+          return query;
         },
       };
     },
@@ -45,6 +64,13 @@ function fixture({ failure = "network" } = {}) {
     catalog: () => catalog, profile: () => profile, calls,
   };
 }
+
+test("permission save uses a bounded single-row fallback when the account link column is absent", async () => {
+  const f = fixture({ failure: "missing-column" });
+  await f.service.upsertTeacherCatalogs(f.input);
+  assert.equal(f.profile().role, "staff");
+  assert.deepEqual(f.calls, { catalog: 1, profile: 2 });
+});
 
 for (const failure of ["network", "empty", "unchanged"]) {
   test(`permission save retries the actual profile after ${failure} despite an unchanged catalog`, async () => {
