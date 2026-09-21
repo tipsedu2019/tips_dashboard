@@ -22,7 +22,7 @@ jobs:
       - name: Verify safe login returns and authentication guards
         run: node --test --experimental-strip-types tests/auth-login-return.test.mjs tests/auth-login.test.mjs tests/auth-guard-loading.test.mjs tests/auth-session-refresh.test.mjs
       - name: Verify atomic textbook inventory writes
-        run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-pagination.test.mjs
+        run: node --test --experimental-strip-types tests/textbook-sale-transition.test.mjs tests/textbook-purchase-lifecycle.test.mjs tests/textbook-stock-count.test.mjs tests/textbook-ledger.test.mjs tests/textbook-workspace.test.mjs tests/textbook-numbered-renderers.test.mjs tests/textbook-numbered-pagination.test.mjs
       - name: Verify textbook SQL wire provenance and consumer parity
         run: |
           node --test --experimental-strip-types \
@@ -61,7 +61,7 @@ jobs:
       - name: Verify dashboard conflict interactions and request recovery
         run: node --test --experimental-strip-types tests/dashboard-conflict-interaction.test.mjs tests/ops-task-service-loading.test.mjs
       - name: Verify registration subject snapshots and inquiry recovery
-        run: node --test --experimental-strip-types tests/registration-track-service.test.mjs tests/registration-track-workspace.test.mjs
+        run: node --test --experimental-strip-types tests/registration-track-service.test.mjs tests/registration-track-workspace.test.mjs tests/registration-subject-navigation-safety.test.mjs tests/teacher-permission-retry.test.mjs
       - name: Verify notification settings drafts and atomic saves
         run: |
           node --test --experimental-strip-types \
