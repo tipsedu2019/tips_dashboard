@@ -352,8 +352,8 @@ export function RegistrationApplication({
   const [consultationModeDrafts, setConsultationModeDrafts] = useState<Record<string, RegistrationConsultationMode>>({})
   const [consultationDirectorDirtyByTrackId, setConsultationDirectorDirtyByTrackId] = useState<Record<string, boolean>>({})
   const [consultationSharedSaving, setConsultationSharedSaving] = useState(false)
-  const [consultationSwitchPending, setConsultationSwitchPending] = useState(false)
-  const [consultationCancelPending, setConsultationCancelPending] = useState(false)
+  const [consultationSwitchTarget, setConsultationSwitchTarget] = useState<{ taskId: string; trackId: string; appointmentId: string; revision: number } | null>(null)
+  const [consultationCancelTarget, setConsultationCancelTarget] = useState<{ taskId: string; trackId: string; consultationId: string } | null>(null)
   const activeConsultationDirectorRef = useRef<RegistrationTrackDirectorSectionHandle | null>(null)
   const dirtyKeysRef = useRef<Set<RegistrationApplicationDirtyKey>>(new Set())
   const dirtyProducersRef = useRef(new Map<RegistrationApplicationDirtyKey, Set<string>>())
@@ -366,8 +366,8 @@ export function RegistrationApplication({
   const canManageCase = canManageRegistrationCase(viewerRole)
   useEffect(() => {
     if (canManageCase) return
-    setConsultationSwitchPending(false)
-    setConsultationCancelPending(false)
+    setConsultationSwitchTarget(null)
+    setConsultationCancelTarget(null)
   }, [canManageCase])
   const openCustomerMessage = useCallback((target: RegistrationCustomerMessageTarget) => {
     if (!canManageCase) return
@@ -406,6 +406,10 @@ export function RegistrationApplication({
     tracks: genericTracks,
   }), [detail, genericTracks])
   const activeTrackId = resolveRegistrationActiveTrackId(orderedTracks, focusTrackId)
+  useEffect(() => {
+    setConsultationSwitchTarget(null)
+    setConsultationCancelTarget(null)
+  }, [detail.task.id, activeTrackId])
   const activeTrack = orderedTracks.find((track) => track.id === activeTrackId) || null
   const activeGenericTrack = genericTracks.find((track) => track.id === activeTrackId) || null
   const activeObservationTrackId = activeTrack?.id || null
@@ -1172,8 +1176,12 @@ export function RegistrationApplication({
 
   function handleSubjectTabChange(trackId: string) {
     if (trackId === activeTrackId) return
-    if (observationDirtyKeysRef.current.size > 0 && onRequestLocalNavigation) {
-      onRequestLocalNavigation(() => onFocusTrack(trackId))
+    const appointmentDirty = [...dirtyKeysRef.current].some((key) => (
+      key.startsWith("level_test:") || key.startsWith("consultation:appointment-")
+    ))
+    if (observationDirtyKeysRef.current.size > 0 || appointmentDirty) {
+      if (onRequestLocalNavigation) onRequestLocalNavigation(() => onFocusTrack(trackId))
+      else onWarning("작성 중인 내용을 저장하거나 취소한 뒤 과목을 변경하세요.")
       return
     }
     onFocusTrack(trackId)
@@ -1346,6 +1354,15 @@ export function RegistrationApplication({
       item.trackId === activeGenericTrack.id && item.mode === "phone" && item.status !== "canceled"
     )) || null
     : null
+  const consultationSwitchPending = Boolean(consultationSwitchTarget
+    && consultationSwitchTarget.taskId === detail.task.id
+    && consultationSwitchTarget.trackId === activeTrackId
+    && consultationSwitchTarget.appointmentId === activeVisitAppointment?.id
+    && consultationSwitchTarget.revision === activeVisitAppointment?.notificationRevision)
+  const consultationCancelPending = Boolean(consultationCancelTarget
+    && consultationCancelTarget.taskId === detail.task.id
+    && consultationCancelTarget.trackId === activeTrackId
+    && consultationCancelTarget.consultationId === phoneConsultation?.id)
   const activeConsultationMode = activeGenericTrack ? getRegistrationConsultationModeDraft({
     draftMode: consultationModeDrafts[activeGenericTrack.id] || null,
     savedMode: activeVisitAppointment
@@ -1388,7 +1405,7 @@ export function RegistrationApplication({
   async function savePhoneConsultation() {
     if (!canManageCase || !activeGenericTrack || consultationSharedSaving) return
     if (activeVisitAppointment) {
-      setConsultationSwitchPending(true)
+      setConsultationSwitchTarget({ taskId: detail.task.id, trackId: activeGenericTrack.id, appointmentId: activeVisitAppointment.id, revision: activeVisitAppointment.notificationRevision })
       return
     }
     setConsultationSharedSaving(true)
@@ -1426,7 +1443,7 @@ export function RegistrationApplication({
   }
 
   async function confirmVisitToPhoneSwitch() {
-    if (!canManageAppointments || !activeGenericTrack || !activeVisitAppointment || consultationSharedSaving) return
+    if (!canManageAppointments || !activeGenericTrack || !activeVisitAppointment || !consultationSwitchPending || consultationSharedSaving) return
     setConsultationSharedSaving(true)
     const directorWasDirty = activeConsultationDirectorDirty
     try {
@@ -1445,7 +1462,7 @@ export function RegistrationApplication({
           : errorMessage(error, "방문상담 예약을 취소하지 못했습니다."))
         return
       }
-      setConsultationSwitchPending(false)
+      setConsultationSwitchTarget(null)
       let phoneSaved = false
       try {
         await saveRegistrationPhoneConsultation({
@@ -1477,7 +1494,7 @@ export function RegistrationApplication({
   }
 
   async function confirmPhoneConsultationCancellation() {
-    if (!canManageCase || !phoneConsultation || consultationSharedSaving) return
+    if (!canManageCase || !phoneConsultation || !consultationCancelPending || consultationSharedSaving) return
     setConsultationSharedSaving(true)
     try {
       await saveRegistrationConsultationDetails({
@@ -1487,7 +1504,7 @@ export function RegistrationApplication({
         note: phoneConsultation.note || "",
         requestKey: `registration-phone-consultation-cancel:${phoneConsultation.id}:${crypto.randomUUID()}`,
       })
-      setConsultationCancelPending(false)
+      setConsultationCancelTarget(null)
       await onReload(phoneConsultation.trackId)
     } catch (error) {
       onWarning(errorMessage(error, "전화상담을 취소하지 못했습니다."))
@@ -1743,7 +1760,7 @@ export function RegistrationApplication({
                       disabled={!canManageCase || consultationSharedSaving}
                       onClick={() => {
                         if (!canManageCase) return
-                        setConsultationCancelPending(true)
+                        setConsultationCancelTarget({ taskId: detail.task.id, trackId: activeGenericTrack.id, consultationId: phoneConsultation.id })
                       }}
                     >상담 취소</Button>
                   ) : null}
@@ -1765,7 +1782,7 @@ export function RegistrationApplication({
                   <h4 id="registration-consultation-switch-title" className="font-semibold">전화상담으로 변경할까요?</h4>
                   <p className="text-sm">기존 방문상담 예약 사실을 취소하고 전화상담 정보를 저장합니다. 알림은 자동으로 전송되지 않습니다.</p>
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationSwitchPending(false)}>돌아가기</Button>
+                    <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationSwitchTarget(null)}>돌아가기</Button>
                     <Button type="button" disabled={!canManageCase || consultationSharedSaving} onClick={() => void confirmVisitToPhoneSwitch()}>전화상담으로 변경</Button>
                   </div>
                 </div>
@@ -1775,7 +1792,7 @@ export function RegistrationApplication({
                 <div role="alertdialog" aria-labelledby="registration-phone-consultation-cancel-title" className="grid gap-3 rounded-lg border border-red-200 bg-red-50 p-4 text-red-950">
                   <h4 id="registration-phone-consultation-cancel-title" className="font-semibold">전화상담을 취소할까요?</h4>
                   <div className="flex flex-col-reverse gap-2 sm:flex-row sm:justify-end">
-                    <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationCancelPending(false)}>돌아가기</Button>
+                    <Button type="button" variant="outline" disabled={!canManageCase || consultationSharedSaving} onClick={() => setConsultationCancelTarget(null)}>돌아가기</Button>
                     <Button type="button" variant="destructive" disabled={!canManageCase || consultationSharedSaving} onClick={() => void confirmPhoneConsultationCancellation()}>상담 취소</Button>
                   </div>
                 </div>

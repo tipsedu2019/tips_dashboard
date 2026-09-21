@@ -1154,7 +1154,7 @@ test("textbook process supports pre-cancel and post-return actions", async () =>
   assert.match(workspaceSource, /출고 이력을 삭제했습니다/);
   assert.match(serviceSource, /returnPurchaseLifecycle/);
   assert.match(serviceSource, /deleteSaleLineLifecycle/);
-  assert.match(serviceSource, /move_type: "return_out"/);
+  assert.match(serviceSource, /client\.rpc\("return_textbook_purchase_line_v1"/);
   assert.match(ledgerSource, /target === "returned"/);
   assert.match(ledgerSource, /move_type: "return_in"/);
 });

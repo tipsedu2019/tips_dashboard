@@ -959,12 +959,18 @@ async function syncLinkedTeacherProfiles(client, rows = []) {
       continue;
     }
 
-    let result = await client.from("profiles").update(extendedPatch).eq("id", profileId).select();
+    let expectedPatch = extendedPatch;
+    let result = await client.from("profiles").update(expectedPatch).eq("id", profileId).select();
     if (result.error && isMissingColumnError(result.error)) {
-      result = await client.from("profiles").update({ role: extendedPatch.role }).eq("id", profileId).select();
+      expectedPatch = { role: extendedPatch.role };
+      result = await client.from("profiles").update(expectedPatch).eq("id", profileId).select();
     }
     if (result.error) {
       throw result.error;
+    }
+    const savedProfile = result.data?.find((profile) => profile.id === profileId);
+    if (!savedProfile || Object.entries(expectedPatch).some(([key, value]) => savedProfile[key] !== value)) {
+      throw new Error("선생님 계정 권한의 저장 결과를 확인하지 못했습니다. 다시 시도해 주세요.");
     }
     updates.push(...(result.data || []));
   }
@@ -1560,11 +1566,10 @@ export function createManagementService(options = {}) {
       const payload = buildResourceCatalogPayload(resources, { kind: "teacher", generateId });
       const currentRows = await selectTeacherCatalogRowsByIds(client, payload);
       const changedPayload = filterChangedTeacherCatalogPayload(payload, currentRows);
-      if (changedPayload.length === 0) {
-        return [];
-      }
-      const rows = await upsertTeacherCatalogRows(client, changedPayload);
-      await syncLinkedTeacherProfiles(client, changedPayload);
+      const rows = changedPayload.length > 0 ? await upsertTeacherCatalogRows(client, changedPayload) : [];
+      // A previous catalog write can have committed while its profile write failed.
+      // Reconcile every requested link, including unchanged catalog rows, on retry.
+      await syncLinkedTeacherProfiles(client, payload);
       return rows;
     },
 

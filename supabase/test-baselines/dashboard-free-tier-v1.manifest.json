@@ -449,6 +449,16 @@
       "fileName": "20260912074228_public_site_content_management.sql",
       "status": "final",
       "sha256": "522a4fdd7050ed745ea9c234a33fa0bd6963aab309a80ee7a829b3ace960ef87"
+    },
+    {
+      "fileName": "20260921114313_textbook_lifecycle_atomic.sql",
+      "status": "final",
+      "sha256": "c95a5d5fa4e829025943bc80fd3b35e6ada0b807fb8797742e5b2b8b3a657cd4"
+    },
+    {
+      "fileName": "20260921114314_signup_identity_isolation.sql",
+      "status": "final",
+      "sha256": "acf7b70ff77cab9614cd61cb6f348492869298af7127e6c051a5b1f3988e9afb"
     }
   ]
 }

@@ -2,6 +2,18 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { setup, button, id, inventoryHistoryRow, masterRow, masterSummary, purchaseRow, purchaseSummary, saleHistorySummary, saleRow, saleSummary } from './helpers/textbook-numbered-harness.mjs';
 
+const isLifecycleWrite = request => Boolean(request.table || [
+  'update_textbook_purchase_lifecycle_v1', 'delete_textbook_purchase_line_v1',
+  'return_textbook_purchase_line_v1', 'delete_textbook_sale_line_v1',
+].includes(request.name));
+async function resolvePurchaseWrite(h, request) {
+  const { p_line_id, p_order_id, p_stage, p_line } = request.args;
+  await h.resolve(request, {
+    order: { id: p_order_id, status: p_stage === 'request' ? 'requested' : p_stage === 'order' ? 'ordered' : 'received' },
+    line: { id: p_line_id, purchase_order_id: p_order_id, ...p_line },
+  });
+}
+
 async function selectPurchaseDelete(h) {
   await h.act(() => document.querySelector('[aria-label="교재 101 요청 더보기"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
   const item = document.querySelector('[role="menuitem"][aria-label="교재 101 요청 건 삭제"]');
@@ -75,7 +87,7 @@ function purchaseLifecycleSummary(rows) {
 
 test('actual textbook consumer restores direct master page 11 without starting the full operations bundle', async t => {
   const h = await setup(t, { search: '?textbookTab=master&textbookPage=11&textbookPageSize=10&unrelated=keep' });
-  assert.deepEqual(h.requests.filter(request => request.table).map(request => request.table), [], 'ordinary startup must not read the legacy seventeen-table bundle');
+  assert.deepEqual(h.requests.filter(isLifecycleWrite).map(isLifecycleWrite), [], 'ordinary startup must not read the legacy seventeen-table bundle');
   const pages = h.requests.filter(request => request.name === 'list_textbook_master_page_v1');
   assert.equal(pages.length, 1);
   assert.equal(pages[0].args.p_page, 11);
@@ -101,10 +113,10 @@ test('purchase deletion reads the complete actual member before opening confirma
   await h.resolve(detail[0], { row: purchaseRow('request') });
   assert.equal(document.body.textContent.includes('요청 묶음 삭제'), true, 'complete detail opens the original destructive confirmation');
   assert.equal(document.querySelector('[role="alertdialog"]')?.textContent.includes('교재 101'), true);
-  assert.equal(h.requests.some(request => request.table), false, 'opening confirmation starts zero writers');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'opening confirmation starts zero writers');
   await h.act(() => button('요청 묶음 삭제 취소').click());
   assert.equal(document.querySelector('[role="alertdialog"]'), null);
-  assert.equal(h.requests.some(request => request.table), false, 'cancelling confirmation starts zero writers');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'cancelling confirmation starts zero writers');
 });
 
 test('master cleanup confirmation keeps the complete long title and selection when cancelled without writing', async t => {
@@ -120,11 +132,11 @@ test('master cleanup confirmation keeps the complete long title and selection wh
   assert.ok(dialog);
   assert.equal(dialog.querySelector('[aria-label="정리 대상 교재"] p')?.textContent, longTitle);
   assert.ok(button('선택 교재 정리 정리 실행'));
-  assert.equal(h.requests.some(request => request.table), false);
+  assert.equal(h.requests.some(isLifecycleWrite), false);
   await h.act(() => button('선택 교재 정리 취소').click());
   assert.equal(document.querySelector('[role="alertdialog"]'), null);
   assert.ok(document.querySelector('[aria-label="선택한 교재 일괄 작업"]')?.textContent.includes('1개 선택'));
-  assert.equal(h.requests.some(request => request.table), false);
+  assert.equal(h.requests.some(isLifecycleWrite), false);
 });
 
 test('inventory history confirmation blocks duplicate execution, preserves its target after failure, and closes after retry', async t => {
@@ -203,7 +215,7 @@ test('purchase detail completion from a former actor opens no confirmation and s
   await h.auth({ role: 'staff', isAdmin: false, isStaff: true });
   await h.resolve(detail, { row: purchaseRow('request') });
   assert.equal(document.body.textContent.includes('요청 묶음 삭제'), false);
-  assert.equal(h.requests.some(request => request.table), false, 'former actor completion starts zero lifecycle writers');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'former actor completion starts zero lifecycle writers');
 });
 
 test('purchase context error and owner unmount each keep the writer boundary closed', async t => {
@@ -215,12 +227,12 @@ test('purchase context error and owner unmount each keep the writer boundary clo
   await h.reject(failed, { message: '__purchase_context_failed__' });
   assert.equal(document.body.textContent.includes('__purchase_context_failed__'), false);
   assert.equal(document.body.textContent.includes('처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.'), true);
-  assert.equal(h.requests.some(request => request.table), false);
+  assert.equal(h.requests.some(isLifecycleWrite), false);
   await selectPurchaseDelete(h);
   const late = h.requests.findLast(request => request.name === 'get_textbook_purchase_detail_v1');
   await h.unmount();
   await h.resolve(late, { row: purchaseRow('request') });
-  assert.equal(h.requests.some(request => request.table), false, 'unmounted owner cannot publish confirmation or start a lifecycle writer');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'unmounted owner cannot publish confirmation or start a lifecycle writer');
 });
 
 test('actor change after the first purchase writer lets the lifecycle finish but suppresses stale success and invalidation', async t => {
@@ -231,16 +243,16 @@ test('actor change after the first purchase writer lets the lifecycle finish but
   await h.resolve(h.requests.find(request => request.name === 'get_textbook_purchase_detail_v1'), { row: purchaseRow('request') });
   await h.act(() => button('삭제').click());
   await h.resolve(h.requests.findLast(request => request.name === 'get_textbook_purchase_detail_v1'), { row: purchaseRow('request') });
-  assert.equal(h.requests.filter(request => request.table).length, 1, 'the first unchanged lifecycle writer has started');
+  assert.equal(h.requests.filter(isLifecycleWrite).length, 1, 'the first unchanged lifecycle writer has started');
   await h.auth({ role: 'staff', isAdmin: false, isStaff: true });
-  const actorRefreshCount = h.requests.filter(request => request.name).length;
-  for (const expectedTable of ['textbook_stock_moves', 'textbook_purchase_order_lines', 'textbook_purchase_order_lines', 'textbook_purchase_orders', 'textbook_stock_moves', 'textbook_purchase_order_lines', 'textbook_purchase_order_lines', 'textbook_purchase_orders']) {
-    const request = h.requests.filter(item => item.table).at(-1);
-    assert.equal(request.table, expectedTable);
-    const isRemainingSelect = request.table === 'textbook_purchase_order_lines' && request.steps.some(step => step.method === 'select');
-    await h.resolve(request, isRemainingSelect ? [] : null);
+  const actorRefreshCount = h.requests.filter(request => request.name && !isLifecycleWrite(request)).length;
+  for (const line of purchaseRow('request').lines) {
+    const request = h.requests.filter(isLifecycleWrite).at(-1);
+    assert.equal(request.name, 'delete_textbook_purchase_line_v1');
+    assert.equal(request.args.p_line_id, line.id);
+    await h.resolve(request, { purchaseOrderLineId: line.id, purchaseOrderId: line.purchase_order_id });
   }
-  assert.equal(h.requests.filter(request => request.name).length, actorRefreshCount, 'former actor completion starts no targeted invalidation');
+  assert.equal(h.requests.filter(request => request.name && !isLifecycleWrite(request)).length, actorRefreshCount, 'former actor completion starts no targeted invalidation');
   assert.equal(document.body.textContent.includes('요청 묶음을 삭제했습니다.'), false, 'former actor completion publishes no stale success');
 });
 
@@ -259,23 +271,22 @@ test('bulk order quantity changes before writing and purchase selection changes 
   const requestDetailRow = { ...row, mode: 'request' };
   await h.resolve(firstDetail, { row: requestDetailRow });
   await h.act(() => Promise.resolve());
-  assert.equal(h.requests.some(request => request.table), false, 'bulk quantity change while detail is pending starts zero writers');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'bulk quantity change while detail is pending starts zero writers');
 
   await h.act(() => button('일괄 주문').click());
   const retryDetail = h.requests.findLast(request => request.name === 'get_textbook_purchase_detail_v1');
   await h.resolve(retryDetail, { row: requestDetailRow });
   await h.act(() => Promise.resolve());
-  assert.equal(h.requests.filter(request => request.table).length, 1, 'unchanged retry starts its first lifecycle writer');
-  const rpcCountAtWriter = h.requests.filter(request => request.name).length;
+  assert.equal(h.requests.filter(isLifecycleWrite).length, 1, 'unchanged retry starts its first lifecycle writer');
+  const rpcCountAtWriter = h.requests.filter(request => request.name && !isLifecycleWrite(request)).length;
   await h.act(() => selector.click());
-  for (let index = 0; index < row.lines.length * 3; index += 1) {
-    const request = h.requests.filter(item => item.table)[index];
-    assert.ok(request, `purchase lifecycle writer ${index + 1}`);
-    if (request.table === 'textbook_purchase_orders') await h.resolve(request, { id: row.lines[Math.floor(index / 3)]?.purchase_order_id || id(200) });
-    else if (request.table === 'textbook_purchase_order_lines') await h.resolve(request, { id: row.lines[Math.floor(index / 3)]?.id || id(300) });
-    else await h.resolve(request, []);
+  for (const line of row.lines) {
+    const request = h.requests.filter(isLifecycleWrite).at(-1);
+    assert.equal(request.name, 'update_textbook_purchase_lifecycle_v1');
+    assert.equal(request.args.p_line_id, line.id);
+    await resolvePurchaseWrite(h, request);
   }
-  assert.equal(h.requests.filter(request => request.name).length, rpcCountAtWriter, 'changed purchase selection suppresses stale targeted invalidation');
+  assert.equal(h.requests.filter(request => request.name && !isLifecycleWrite(request)).length, rpcCountAtWriter, 'changed purchase selection suppresses stale targeted invalidation');
   assert.equal(document.body.textContent.includes('건을 주문으로 전환했습니다.'), false, 'changed purchase selection suppresses stale success');
 });
 
@@ -329,15 +340,12 @@ test('bulk order grouped selectors include both scopes and preserve their exact 
 
   const payloads = [];
   for (const line of row.lines) {
-    const orderWrite = h.requests.filter(request => request.table === 'textbook_purchase_orders').at(-1);
-    assert.ok(orderWrite);
-    await h.resolve(orderWrite, { id: line.purchase_order_id });
-    const lineWrite = h.requests.filter(request => request.table === 'textbook_purchase_order_lines').at(-1);
-    assert.deepEqual(lineWrite.steps.find(step => step.method === 'eq').args, ['id', line.id]);
-    payloads.push(lineWrite.steps.find(step => step.method === 'update').args[0]);
-    await h.resolve(lineWrite, { id: line.id });
-    const stockRead = h.requests.filter(request => request.table === 'textbook_stock_moves').at(-1);
-    await h.resolve(stockRead, []);
+    const request = h.requests.filter(isLifecycleWrite).at(-1);
+    assert.equal(request.name, 'update_textbook_purchase_lifecycle_v1');
+    assert.equal(request.args.p_line_id, line.id);
+    assert.equal(request.args.p_order_id, line.purchase_order_id);
+    payloads.push(request.args.p_line);
+    await resolvePurchaseWrite(h, request);
   }
 
   assert.deepEqual(payloads, [
@@ -396,19 +404,13 @@ test('grouped purchase checkboxes pass both scopes to receive and return while t
   await h.act(() => Promise.resolve());
   const receivedLineIds = [];
   for (const line of ordered.lines) {
-    const orderWrite = h.requests.filter(request => request.table === 'textbook_purchase_orders').at(-1);
-    assert.deepEqual(orderWrite.steps.find(step => step.method === 'eq').args, ['id', line.purchase_order_id]);
-    await h.resolve(orderWrite, { id: line.purchase_order_id });
-    const lineWrite = h.requests.filter(request => request.table === 'textbook_purchase_order_lines').at(-1);
-    assert.deepEqual(lineWrite.steps.find(step => step.method === 'eq').args, ['id', line.id]);
-    receivedLineIds.push(line.id);
-    await h.resolve(lineWrite, { id: line.id });
-    const stockRead = h.requests.filter(request => request.table === 'textbook_stock_moves').at(-1);
-    assert.deepEqual(stockRead.steps.find(step => step.method === 'eq' && step.args[0] === 'purchase_order_line_id').args, ['purchase_order_line_id', line.id]);
-    await h.resolve(stockRead, []);
-    const stockInsert = h.requests.filter(request => request.table === 'textbook_stock_moves').at(-1);
-    assert.equal(stockInsert.steps.find(step => step.method === 'insert').args[0].purchase_order_line_id, line.id);
-    await h.resolve(stockInsert, null);
+    const request = h.requests.filter(isLifecycleWrite).at(-1);
+    assert.equal(request.name, 'update_textbook_purchase_lifecycle_v1');
+    assert.equal(request.args.p_line_id, line.id);
+    assert.equal(request.args.p_order_id, line.purchase_order_id);
+    assert.equal(request.args.p_stage, 'receive');
+    receivedLineIds.push(request.args.p_line_id);
+    await resolvePurchaseWrite(h, request);
   }
   assert.deepEqual(receivedLineIds, ordered.memberLineIds, 'bulk receive writes student and teacher member IDs');
 });
@@ -443,13 +445,13 @@ test('bulk receive synchronously blocks duplicate reads and keeps a dismissible 
   assert.equal(feedback.textContent.includes('합성 일괄 입고 조회 실패'), false);
   assert.ok(feedback.textContent.includes('처리 중 오류가 발생했습니다. 잠시 후 다시 시도하세요.'));
   assert.ok(document.body.textContent.includes('2개 선택'), 'failed receive preserves both selected members');
-  assert.equal(h.requests.some(request => request.table), false, 'failed fresh read starts zero writers');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'failed fresh read starts zero writers');
   await h.act(() => Promise.resolve());
   assert.ok(document.querySelector('[data-slot="action-feedback"]'), 'feedback persists without a timeout');
 
   await h.act(() => button('처리 결과 닫기').click());
   assert.equal(document.querySelector('[data-slot="action-feedback"]'), null);
-  assert.equal(h.requests.some(request => request.table), false, 'dismissing feedback starts zero writers');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'dismissing feedback starts zero writers');
   await h.act(() => button('선택 주문 일괄 입고').click());
   assert.equal(detailReads().length, 2, 'failure releases the action lock for retry');
   await h.reject(detailReads()[1], { message: '합성 일괄 입고 재시도 실패' });
@@ -472,7 +474,7 @@ test('bulk sale selection change after the first writer lets writers finish but 
   const transitions = () => h.requests.filter(request => request.name === 'transition_textbook_sale_line_v1');
   const reads = () => h.requests.filter(request => request.name && request.name !== 'transition_textbook_sale_line_v1');
   assert.equal(transitions().length, 1, 'the first frozen sale starts one atomic transition');
-  assert.equal(h.requests.some(request => request.table), false);
+  assert.equal(h.requests.some(isLifecycleWrite), false);
   const readCountAtWriter = reads().length;
   await h.act(() => document.querySelector(`[aria-label="${rows[1].recipientName} ${rows[1].textbook.title} 출고 선택"]`).click());
   for (const [index, row] of rows.entries()) {
@@ -482,7 +484,7 @@ test('bulk sale selection change after the first writer lets writers finish but 
     await h.resolve(request, { ...row.line, status: 'issued' });
   }
   assert.equal(transitions().length, 2, 'the original frozen batch finishes after selection changes');
-  assert.equal(h.requests.some(request => request.table), false, 'sale transitions never fall back to separate table writes');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'sale transitions never fall back to separate table writes');
   assert.equal(reads().length, readCountAtWriter, 'changed sale selection suppresses stale targeted invalidation');
   assert.equal(document.body.textContent.includes('건을 출고 완료했습니다.'), false);
 });
@@ -511,9 +513,9 @@ test('inactive cleanup confirms five previews but rechecks and writes the comple
   await h.act(() => button('영구 삭제').click());
   const second = h.requests.findLast(request => request.name === 'get_textbook_inactive_cleanup_context_v1');
   assert.notEqual(second, first, 'confirmation rechecks the complete cleanup authority');
-  assert.equal(h.requests.some(request => request.table), false, 'cleanup starts zero writers before the recheck completes');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'cleanup starts zero writers before the recheck completes');
   await h.resolve(second, cleanup);
-  const firstWriter = h.requests.find(request => request.table);
+  const firstWriter = h.requests.find(isLifecycleWrite);
   assert.equal(firstWriter.table, 'textbook_stock_counts');
   assert.deepEqual(firstWriter.steps.find(step => step.method === 'in').args, ['textbook_id', targetIds], 'writer retains all off-page cleanup IDs');
 });
@@ -530,13 +532,13 @@ test('sale status reads the actual sale member and its exact balance before the 
   const detail = h.requests.find(request => request.name === 'get_textbook_sale_detail_v1');
   assert.deepEqual(detail.args, { p_id: row.id });
   assert.equal(h.requests.some(request => request.name === 'transition_textbook_sale_line_v1'), false, 'atomic transition waits for the fresh actual member');
-  assert.equal(h.requests.some(request => request.table), false, 'sale writer waits for the fresh actual member');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'sale writer waits for the fresh actual member');
   await h.resolve(detail, { row });
 
   const balance = h.requests.find(request => request.name === 'get_textbook_inventory_balance_v1');
   assert.deepEqual(balance.args.p_input, { textbookIds: [row.textbook.id], locationId: row.location.id });
   assert.equal(h.requests.some(request => request.name === 'transition_textbook_sale_line_v1'), false, 'atomic transition waits for the exact member balance');
-  assert.equal(h.requests.some(request => request.table), false, 'sale writer waits for the exact member balance');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'sale writer waits for the exact member balance');
   await h.resolve(balance, {
     locationId: row.location.id,
     rows: [{ textbookId: row.textbook.id, currentQuantity: 9, locationQuantities: { [row.location.id]: 9 }, studentLocationQuantities: {}, teacherLocationQuantities: { [row.location.id]: 9 }, totalQuantity: 9, studentQuantity: 0, teacherQuantity: 9, stockValue: 90000 }],
@@ -547,6 +549,6 @@ test('sale status reads the actual sale member and its exact balance before the 
   assert.deepEqual(transitions[0].args, { p_sale_line_id: row.id, p_target_status: 'issued' });
   assert.equal(document.body.textContent.includes('출고가 반영되었습니다.'), false, 'success waits for the atomic commit');
   await h.resolve(transitions[0], { ...row.line, status: 'issued' });
-  assert.equal(h.requests.some(request => request.table), false, 'stock movement and line status are committed together by the database');
+  assert.equal(h.requests.some(isLifecycleWrite), false, 'stock movement and line status are committed together by the database');
   assert.equal(h.requests.filter(request => request.name === 'list_textbook_sale_page_v1').length, 2, 'the completed transition refreshes the sale page');
 });

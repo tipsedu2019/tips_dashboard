@@ -140,7 +140,7 @@ test("mounted request form starts bounded independent reference pickers without 
   assert.deepEqual(location.args, {
     p_filters: { search: "" }, p_sort: "match-order", p_page: 1, p_page_size: 20,
   })
-  assert.deepEqual(h.requests.filter((request) => request.table), [], "bounded reference startup must not start legacy tables")
+  assert.deepEqual(h.requests.filter((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), [], "bounded reference startup must not start legacy tables")
 })
 
 test("reference hook addresses every named service and aborts the old same-user role lifetime", async (t) => {
@@ -195,7 +195,7 @@ test("book picker keeps authoritative facets and server order across bounded pag
   assert.equal(searched.args.p_page, 1)
   await h.reject(searched, { code: "PGRST202", message: "strict missing rpc" })
   assert.equal(h.current.bookOptions.search, "typed server search", "typed search survives an error")
-  assert.equal(h.requests.some((request) => request.table), false, "strict reference error never falls back to legacy tables")
+  assert.equal(h.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false, "strict reference error never falls back to legacy tables")
 })
 
 test("location picker publishes only the real nonempty server default and never fabricates a location", async (t) => {
@@ -226,7 +226,7 @@ test("accepted null is distinct from transport error and retained retry callback
   assert.equal(h.current.selectedBook.value, null)
   assert.equal(h.current.selectedBook.acceptedInput, null)
   assert.ok(h.current.selectedBook.error)
-  assert.equal(h.requests.some((request) => request.table), false, "strict selected-reference failure has zero fallback reads")
+  assert.equal(h.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false, "strict selected-reference failure has zero fallback reads")
 
   const beforeUnmount = h.requests.length
   await h.unmount()
@@ -348,17 +348,17 @@ test("mounted class sale uses the complete off-page school roster, duplicates, a
   const saveContext = h.requests.findLast((request) => request.name === "get_class_textbook_sale_context_v1")
   assert.notEqual(saveContext, positivePreview, "save re-reads the full off-page roster instead of using its preview")
   assert.deepEqual(saveContext.args.p_input, positiveInput)
-  assert.equal(h.requests.some((request) => request.table), false, "class writer waits for the complete fresh roster context")
+  assert.equal(h.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false, "class writer waits for the complete fresh roster context")
   const visibleStudent = document.querySelector('[aria-label$="출고 대상 선택"]')
   await h.act(() => visibleStudent.click())
   await h.resolve(saveContext, positiveContext)
-  assert.equal(h.requests.some((request) => request.table), false, "changing excluded students while save context is pending keeps every writer closed")
+  assert.equal(h.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false, "changing excluded students while save context is pending keeps every writer closed")
 
   await h.act(() => button("출고 대기 저장").click())
   const retryContext = h.requests.findLast((request) => request.name === "get_class_textbook_sale_context_v1")
   assert.notEqual(retryContext, saveContext)
   await h.resolve(retryContext, positiveContext)
-  const firstWriter = h.requests.find((request) => request.table)
+  const firstWriter = h.requests.find((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1"))
   assert.equal(firstWriter.table, "textbook_sales")
   assert.equal(firstWriter.steps.find((step) => step.method === "insert").args[0].charge_month, "2099-09")
 })
@@ -390,7 +390,7 @@ test("mounted teacher sale preserves a manual name and re-reads its exact accept
   const saveBalance = h.requests.findLast((request) => request.name === "get_textbook_inventory_balance_v1")
   assert.notEqual(saveBalance, previewBalance)
   assert.deepEqual(saveBalance.args.p_input, { textbookIds: [id(101)], locationId: id(900) })
-  assert.equal(h.requests.some((request) => request.table), false)
+  assert.equal(h.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false)
   await h.reject(saveBalance, { message: "합성 출고 저장 전 조회 실패" })
   const saleDialog = document.querySelector('[role="dialog"]')
   assert.ok(saleDialog.querySelector('[role="alert"]').textContent.includes(safeUnexpectedError))
@@ -538,14 +538,14 @@ test("off-page direct purchase save re-reads its frozen direct identity and clos
   const fresh = h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").at(-1)
   assert.equal(h.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").length, requestCount + 1)
   assert.deepEqual(fresh.args, { p_anchor_line_id: direct.anchorLineId, p_mode: "request" })
-  assert.equal(h.requests.some((request) => request.table), false)
+  assert.equal(h.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false)
   const freshOrderId = id(999)
   const freshLines = direct.lines.map((line) => ({ ...line, purchase_order_id: freshOrderId, order: { ...line.order, id: freshOrderId } }))
   const freshRow = { ...direct, line: { ...freshLines[0], purchaseScopeLines: freshLines }, lines: freshLines }
   await h.resolve(fresh, { row: freshRow })
-  const writer = h.requests.find((request) => request.table)
-  assert.equal(writer.table, "textbook_purchase_orders")
-  assert.deepEqual(writer.steps.find((step) => step.method === "eq").args, ["id", freshOrderId])
+  const writer = h.requests.find((request) => request.name === "update_textbook_purchase_lifecycle_v1")
+  assert.equal(writer.args.p_order_id, freshOrderId)
+  assert.equal(writer.args.p_line_id, freshLines[0].id)
   await h.unmount()
 
   const h2 = await setup(t, { search: `?textbookTab=requests&textbookPage=4&textbookPageSize=15&textbookDetailKind=purchase&textbookDetail=${direct.anchorLineId}` })
@@ -563,7 +563,7 @@ test("off-page direct purchase save re-reads its frozen direct identity and clos
   const pending = h2.requests.filter((request) => request.name === "get_textbook_purchase_detail_v1").at(-1)
   await h2.popstate("?textbookTab=requests&textbookPage=4&textbookPageSize=15")
   await h2.resolve(pending, { row: direct })
-  assert.equal(h2.requests.some((request) => request.table), false)
+  assert.equal(h2.requests.some((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), false)
   assert.equal(document.body.textContent.includes("요청 건이 저장되었습니다."), false)
 })
 
@@ -738,7 +738,7 @@ test("purchase projected stock comes from exact accepted purchase balance and di
 
   const unregistered = unregisteredPurchaseRow()
   const h2 = await setup(t, { search: `?textbookTab=requests&textbookPage=1&textbookPageSize=10&textbookDetailKind=purchase&textbookDetail=${unregistered.anchorLineId}` })
-  assert.deepEqual(h2.requests.filter((request) => request.table), [], "direct detail hydration has no legacy catalog scan")
+  assert.deepEqual(h2.requests.filter((request) => (request.table || request.name === "update_textbook_purchase_lifecycle_v1")), [], "direct detail hydration has no legacy catalog scan")
   await h2.resolve(h2.requests.find((request) => request.name === "get_textbook_purchase_detail_v1"), { row: unregistered })
   const selectedRequest = h2.requests.find((request) => request.name === "resolve_textbook_reference_v1")
   assert.equal(selectedRequest.args.p_reference, "Legacy title", "authoritative null detail never substitutes legacy textbook UUID")

@@ -140,6 +140,11 @@ export function getTextbookActionErrorMessage(error) {
     textbook_sale_quantity_invalid: "출고 수량이 올바르지 않습니다. 수량을 확인하세요.",
     textbook_sale_not_found: "출고 작업 대상을 찾을 수 없습니다. 새로고침 후 다시 확인하세요.",
     textbook_sale_forbidden: "출고와 반품을 처리할 권한이 없습니다.",
+    textbook_purchase_forbidden: "교재 입고와 반품을 처리할 권한이 없습니다.",
+    textbook_purchase_not_found: "요청 건을 찾을 수 없습니다. 새로고침 후 확인하세요.",
+    textbook_purchase_input_invalid: "교재와 수량, 거래명세표 번호를 확인하세요.",
+    textbook_purchase_state_conflict: "요청 상태가 변경되었습니다. 새로고침 후 다시 확인하세요.",
+    textbook_purchase_stock_conflict: "입고와 반품의 재고 이동이 일치하지 않습니다. 재고 내역을 확인하세요.",
     textbook_sale_target_invalid: "지원하지 않는 출고 상태입니다.",
   };
   if (Object.hasOwn(saleErrors, message)) return saleErrors[message];
