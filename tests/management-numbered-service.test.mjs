@@ -9,7 +9,7 @@ const filters = {
 };
 const student = {
   kind: "students", id: "91000000-0000-4000-8000-000000000101", name: "학생 101", grade: "중2", school: "관리중",
-  contact: null, parentContact: "01012345678", status: "재원", sortKey: "학생 101", updatedAt: "2026-08-31T00:00:00+00:00",
+  contact: null, parentContact: "01012345678", status: "재원", storedStatus: "재원", registeredCount: 1, waitlistCount: 0, sortKey: "학생 101", updatedAt: "2026-08-31T00:00:00+00:00",
 };
 const classRow = {
   kind: "classes", id: "92000000-0000-4000-8000-000000000101", name: "수업 101", subject: "영어", grade: "중2",
@@ -182,4 +182,20 @@ test("persisted unsupported sorts normalize before request, retaining valid prim
   ]), [{ id: "grade", desc: true }, { id: "title", desc: false }]);
   assert.deepEqual(normalizeManagementNumberedSort("textbooks", null), []);
   assert.deepEqual(normalizeManagementNumberedSort("textbooks", [{ id: "price", desc: "true" }]), []);
+});
+
+for (const [status, registeredCount, waitlistCount] of [["재원", 2, 3], ["대기", 0, 4], ["퇴원", 0, 0]]) {
+  test(`student DTO accepts authoritative ${status} status and both counts`, async () => {
+    const req = request("students", { page: 1 });
+    const data = { rows: [{ ...student, status, registeredCount, waitlistCount, storedStatus: "퇴원" }], page: 1, pageSize: 10, totalCount: 1 };
+    const wire = transport(rpcArgs(req), { data, error: null });
+    assert.deepEqual(await createManagementNumberedReadService({ supabase: wire.client }).readPage(req), data);
+  });
+}
+test("student DTO fails closed for missing, partial or contradictory enrollment counts", async () => {
+  const req = request("students", { page: 1 });
+  for (const patch of [{ registeredCount: undefined }, { registeredCount: -1 }, { waitlistCount: "1" }, { registeredCount: 0, waitlistCount: 1 }, { storedStatus: undefined }]) {
+    const wire = transport(rpcArgs(req), { data: { rows: [{ ...student, ...patch }], page: 1, pageSize: 10, totalCount: 1 }, error: null });
+    await assert.rejects(createManagementNumberedReadService({ supabase: wire.client }).readPage(req), { code: "management_numbered_response_invalid" });
+  }
 });

@@ -14,7 +14,7 @@ export function studentsFor(id) {
   return Array.from({ length: id === 'D' ? 20 : 10 }, (_, i) => ({
     kind: 'students', id: `00000000-0000-4000-8000-${String(i + 1).padStart(12, '0')}`,
     name: id === 'B' ? '합성긴이름학생구분용가나다라마바' + String(i).padStart(2, '0') : `합성학생${String(i + 1).padStart(2, '0')}`,
-    status: 'active', sortKey: String(i).padStart(2, '0'), updatedAt: FIXED_NOW,
+    status: '재원', storedStatus: '재원', registeredCount: 1, waitlistCount: 0, sortKey: String(i).padStart(2, '0'), updatedAt: FIXED_NOW,
     grade: i % 2 ? '고1' : '중3', school: id === 'B' ? '합성학교'.repeat(7) + '학교' : '합성중고등학교',
     contact: i % 3 === 0 ? null : '01000000000', parentContact: i % 4 === 0 ? null : '01000000000',
   }));

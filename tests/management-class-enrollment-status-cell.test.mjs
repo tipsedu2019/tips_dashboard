@@ -84,6 +84,14 @@ async function loadEnrollmentStatusCell() {
     if (local) return local;
     throw new Error(`unexpected enrollment status cell import: ${specifier}`);
   };
+  const triggerUrl = new URL("../src/features/management/enrollment-status-trigger.tsx", import.meta.url);
+  const triggerSource = ts.transpileModule(await readFile(triggerUrl, "utf8"), {
+    compilerOptions: { esModuleInterop: true, jsx: ts.JsxEmit.ReactJSX, module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
+    fileName: triggerUrl.pathname,
+  }).outputText;
+  const triggerModule = { exports: {} };
+  vm.runInThisContext(`(function(require, module, exports) {${triggerSource}\n})`, { filename: triggerUrl.pathname })(runtimeRequire, triggerModule, triggerModule.exports);
+  localModules.set("./enrollment-status-trigger", triggerModule.exports);
   const runtimeModule = { exports: {} };
   const factory = vm.runInThisContext(`(function(require, module, exports) {${output}\n})`, {
     filename: componentUrl.pathname,

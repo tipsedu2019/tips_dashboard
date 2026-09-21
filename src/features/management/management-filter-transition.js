@@ -1,3 +1,5 @@
+import { normalizeStudentStatusFilter } from "./student-enrollment-status.js";
+
 function sameFilterState(left, right) {
   const keys = new Set([...Object.keys(left || {}), ...Object.keys(right || {})]);
   return [...keys].every((key) => String(left?.[key] || "") === String(right?.[key] || ""));
@@ -29,7 +31,7 @@ export function serializeManagementListFilters(kind, searchParamString) {
     return JSON.stringify({
       kind,
       search: normalizeSearchValue(params.get("q")),
-      status: nullableSearchParam(params, "status"),
+      status: normalizeStudentStatusFilter(params.get("status")),
       schoolCategory: nullableSearchParam(params, "schoolCategory"),
       school: nullableSearchParam(params, "school"),
       grade: nullableSearchParam(params, "grade"),

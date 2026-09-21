@@ -1,3 +1,4 @@
+import { getStudentEnrollmentCounts, getStudentEnrollmentStatus } from "./student-enrollment-status.js";
 import {
   ACTIVE_CLASS_STATUS,
   PREPARING_CLASS_STATUS,
@@ -125,20 +126,13 @@ function computeWeeklyClassMinutes(schedule) {
 }
 
 export function normalizeStudentManagementRecord(row = {}) {
-  const classIds = toArray(row.class_ids || row.classIds);
-  const waitlistClassIds = toArray(
-    row.waitlist_class_ids || row.waitlistClassIds,
-  );
   const school = text(row.school) || "학교 미정";
   const grade = text(row.grade) || "학년 미정";
   const title = text(row.name) || "이름 미정";
-  const status = normalizeStudentStatus(row.status);
+  const { registeredCount, waitlistCount } = getStudentEnrollmentCounts(row);
+  const status = getStudentEnrollmentStatus(row);
   const recentIssue = getStudentRecentIssue(row);
-  const classStatus = classIds.length
-    ? `수강 ${classIds.length}개`
-    : waitlistClassIds.length
-      ? `대기 ${waitlistClassIds.length}개`
-      : "미배정";
+  const classStatus = `등록 ${registeredCount}개 · 대기 ${waitlistCount}개`;
 
   return {
     kind: "students",
@@ -176,7 +170,8 @@ export function normalizeStudentManagementRecord(row = {}) {
       .join(" "),
     raw: {
       ...row,
-      status,
+      status: normalizeStudentStatus(row.storedStatus ?? row.status),
+      enrollment_status: status,
       recent_issue: recentIssue,
       recentIssue,
       class_status: classStatus,
@@ -185,8 +180,8 @@ export function normalizeStudentManagementRecord(row = {}) {
     metrics: {
       status,
       classStatus,
-      classCount: classIds.length,
-      waitlistCount: waitlistClassIds.length,
+      classCount: registeredCount,
+      waitlistCount,
       school,
       recentIssue,
     },

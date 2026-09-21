@@ -479,6 +479,11 @@
       "fileName": "20260921141000_signup_confirmation_link.sql",
       "sha256": "8081664146cada5997101bbdc50941f8dfb0819fe002a07ab454e1011c1dacfe",
       "status": "final"
+    },
+    {
+      "fileName": "20260921144020_student_enrollment_status.sql",
+      "status": "final",
+      "sha256": "8340be5894d4147aea02e66b008456755a8e7b4ff277de63e1effd42b6600a5e"
     }
   ]
 }
