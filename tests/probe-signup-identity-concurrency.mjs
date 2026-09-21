@@ -57,9 +57,12 @@ async function signupRace(seed, rollback) {
   const first = session(insert(seed + 1, `${name}-a`), true);
   await until(() => first.output().includes('SIGNUP_DONE'), 'first signup has finished within its transaction');
   const second = session(insert(seed + 2, `${name}-b`) + 'commit;\n');
-  await until(async () => second.output().includes('SIGNUP_DONE')
-    || await query(`select count(*) from pg_stat_activity where application_name='${name}-b';`) === '1',
-    'competing signup has reached the database');
+  await until(async () => await query(`select count(*) from pg_stat_activity blocked
+    where blocked.application_name='${name}-b' and blocked.wait_event_type='Lock'
+      and exists (select 1 from pg_stat_activity blocker
+        where blocker.pid=any(pg_blocking_pids(blocked.pid))
+          and blocker.application_name='${name}-a');`) === '1',
+    'competing signup is blocked by the first transaction');
   first.child.stdin.end(rollback ? 'rollback;\n' : 'commit;\n');
   const results = await Promise.all([first.done, second.done]);
   for (const result of results) assert.equal(result.code, 0, result.stderr);

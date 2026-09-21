@@ -474,6 +474,11 @@
       "fileName": "20260921133800_purchase_return_read_consistency.sql",
       "sha256": "509fa0a84608d959ec92e485f1deca9470725f5c4be1371800d9d66903989fe2",
       "status": "final"
+    },
+    {
+      "fileName": "20260921141000_signup_confirmation_link.sql",
+      "sha256": "8081664146cada5997101bbdc50941f8dfb0819fe002a07ab454e1011c1dacfe",
+      "status": "final"
     }
   ]
 }

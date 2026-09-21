@@ -44,6 +44,22 @@ values(pg_temp.sid(101),'이메일 예약 교사','unconfirmed@example.invalid',
 insert into auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data)
 values(pg_temp.sid(6),'authenticated','authenticated','unconfirmed@example.invalid','{}','{"name":"새 가입자"}');
 select is((select profile_id from public.teacher_catalogs where id=pg_temp.sid(101)),null::uuid,'unconfirmed signup cannot claim an email-reserved teacher');
+-- Ordinary email/password signup confirms by UPDATE after the auth row exists.
+select is((select teacher_catalog_id from public.profiles where id=pg_temp.sid(6)),null::uuid,'reserved signup defers catalog allocation until email confirmation');
+select is((select count(*) from public.teacher_catalogs where profile_id=pg_temp.sid(6)),0::bigint,'unconfirmed reserved signup creates no duplicate catalog');
+select lives_ok($$update auth.users set email_confirmed_at=now() where id=pg_temp.sid(6)$$,'deferred email confirmation completes signup');
+select is((select profile_id from public.teacher_catalogs where id=pg_temp.sid(101)),pg_temp.sid(6),'confirmation update claims the exact-email reserved catalog');
+select is((select teacher_catalog_id from public.profiles where id=pg_temp.sid(6)),pg_temp.sid(101),'confirmation publishes the matching reverse link');
+select is((select count(*) from public.teacher_catalogs where profile_id=pg_temp.sid(6)),1::bigint,'confirmation creates exactly one linked catalog');
+select is((select role from public.profiles where id=pg_temp.sid(6)),'viewer','confirmation cannot elevate profile privileges');
+select is((select dashboard_role from public.teacher_catalogs where id=pg_temp.sid(101)),'viewer','reserved catalog cannot elevate confirmed account privileges');
+update public.teacher_catalogs set dashboard_role='teacher',is_visible=false where id=pg_temp.sid(101);
+create temp table confirmed_teacher_before as select to_jsonb(t) value from public.teacher_catalogs t where id=pg_temp.sid(101);
+update auth.users set email_confirmed_at=now()+interval '1 day',raw_user_meta_data='{"name":"재확인 이름"}' where id=pg_temp.sid(6);
+select is((select to_jsonb(t) from public.teacher_catalogs t where id=pg_temp.sid(101)),(select value from confirmed_teacher_before),'repeated confirmation updates preserve existing teacher settings');
+-- A normal signup with an existing owned catalog remains linked on confirmation.
+update auth.users set email_confirmed_at=now() where id=pg_temp.sid(1);
+select is((select to_jsonb(t) from public.teacher_catalogs t where profile_id=pg_temp.sid(1)),(select value from previous_teacher),'later confirmation preserves an already owned catalog');
 -- Verified email remains a supported ownership signal.
 insert into public.teacher_catalogs(id,name,account_email,dashboard_role,is_visible)
 values(pg_temp.sid(102),'확인된 이메일 교사','confirmed@example.invalid','viewer',false);
