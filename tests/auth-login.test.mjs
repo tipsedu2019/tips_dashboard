@@ -3,6 +3,8 @@ import { access, readFile } from "node:fs/promises";
 import test from "node:test";
 
 import { getAuthErrorMessage } from "../src/lib/auth-error-messages.ts";
+import { getRoleCapabilities } from "../src/lib/auth-utils.ts";
+import { buildAdminNavGroups } from "../src/lib/navigation.ts";
 import {
   loadAuthSession,
   signInWithPassword,
@@ -349,11 +351,10 @@ test("registered sign-in explains the next step and viewer accounts can open the
 });
 
 test("assistant role cannot navigate search or directly access makeup while full roles retain it", async () => {
-  const [authUtilsSource, authGuardSource, navigationSource, sidebarSource, commandSearchSource] =
+  const [authUtilsSource, authGuardSource, sidebarSource, commandSearchSource] =
     await Promise.all([
       readSource("src/lib/auth-utils.ts"),
       readSource("src/components/auth/auth-guard.tsx"),
-      readSource("src/lib/navigation.ts"),
       readSource("src/components/app-sidebar.tsx"),
       readSource("src/components/command-search.tsx"),
     ]);
@@ -361,14 +362,9 @@ test("assistant role cannot navigate search or directly access makeup while full
     authGuardSource.indexOf("const ASSISTANT_ALLOWED_ADMIN_PATHS"),
     authGuardSource.indexOf("function normalizeAdminPath"),
   );
-  const assistantOverviewSource = navigationSource.slice(
-    navigationSource.indexOf("const assistantOverviewItems"),
-    navigationSource.indexOf("const fullOverviewItems"),
-  );
-  const fullOverviewSource = navigationSource.slice(
-    navigationSource.indexOf("const fullOverviewItems"),
-    navigationSource.indexOf("const overview"),
-  );
+  const navigationUrls = (role) => buildAdminNavGroups(getRoleCapabilities(role))
+    .flatMap((group) => group.items.map((item) => item.url));
+  const assistantUrls = navigationUrls("assistant");
 
   assert.match(authUtilsSource, /normalizedRole === "assistant"/);
   assert.match(authUtilsSource, /canUseAssistantOperations/);
@@ -379,9 +375,11 @@ test("assistant role cannot navigate search or directly access makeup while full
   assert.match(assistantAllowedPathsSource, /"\/admin\/academic-calendar"/);
   assert.match(assistantAllowedPathsSource, /"\/admin\/timetable"/);
   assert.doesNotMatch(assistantAllowedPathsSource, /"\/admin\/makeup-requests"/);
-  assert.match(assistantOverviewSource, /url: "\/admin\/word-retests"/);
-  assert.doesNotMatch(assistantOverviewSource, /url: "\/admin\/makeup-requests"/);
-  assert.match(fullOverviewSource, /url: "\/admin\/makeup-requests"/);
+  assert.ok(assistantUrls.includes("/admin/word-retests"));
+  assert.equal(assistantUrls.includes("/admin/makeup-requests"), false);
+  for (const role of ["admin", "staff", "teacher"]) {
+    assert.ok(navigationUrls(role).includes("/admin/makeup-requests"));
+  }
   assert.match(authGuardSource, /const canAccessCurrentRoute = !canUseAssistantOperations \|\| canAssistantAccessPath\(pathname\)/);
   assert.match(authGuardSource, /router\.replace\(defaultAdminPath\)/);
   assert.match(sidebarSource, /canUseAssistantOperations/);
