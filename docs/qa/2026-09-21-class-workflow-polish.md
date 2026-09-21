@@ -77,10 +77,20 @@ node --test --test-concurrency=1 --experimental-strip-types \
 - `node --test --test-concurrency=2 --experimental-strip-types tests/*.test.mjs` 전체 실행: **5,315개 중 5,279개 통과, 36개 실패**. 이 실행을 전체 통과로 기록하지 않는다.
 - 실패 파일을 분리해 확인했다. 로컬 서버의 sandbox 포트 제한과 중지된 Docker 환경을 해결한 뒤 격리 DB·알림·캐시 검사 **135/135**, provider-zero·알림 설정 검사 **26/26**가 통과했다. disposable 로컬 DB와 합성 transport만 사용했고 외부 발송은 없다.
 - 오래된 source 기대값 4건과 테스트 mock의 빈 경고 초기화 판정 4건을 현재 구현에 맞췄다. 수업 상세의 복귀 URL helper 위임, 수업 계획의 진행 상태 문구, 자동 다음 회차 행동 금지, 설정 toolbar의 shell header offset을 검증한다. 경고를 지우는 `onWarning("")`는 새 발송 경고로 집계하지 않는다. 관련 검사와 새 검색 helper 합계 **47/47 통과**. 이 단계에서 제품 동작을 추가로 변경하지 않았다.
-- 남은 브라우저·DOM 검사 재실행은 **10개 통과, 파일 1개 실패**였다. 교사 Google Chat 프로필 브라우저 검사 9개와 교재 모바일 필터 1개는 통과했다. `tests/textbook-filter-controls.test.mjs`는 TAP 진단에서 `signal: SIGKILL`로 끝났다. `origin/main`의 `9f962dfcd68d18788f68eb1754d61fe1c3b1d75f`를 별도 임시 디렉터리에 추출하고 동일 Node·의존성으로 실행해 같은 종료를 재현했다. 원인은 미확정이며 이 파일을 통과로 간주하지 않는다.
+- 남은 브라우저·DOM 검사 재실행은 **10개 통과, 파일 1개 실패**였다. 교사 Google Chat 프로필 브라우저 검사 9개와 교재 모바일 필터 1개는 통과했다. `tests/textbook-filter-controls.test.mjs`는 TAP 진단에서 `signal: SIGKILL`로 끝났다. `origin/main`의 `9f962dfcd68d18788f68eb1754d61fe1c3b1d75f`를 별도 임시 디렉터리에 추출하고 동일 Node·의존성으로 실행해 같은 종료를 재현했다. 이 최초 실행 시점에는 원인이 미확정이었으며 통과로 간주하지 않았다. 아래 후속 조사에서 원인을 확인하고 수정했다.
 - 캐시 통합 검사가 생성하는 중첩 fixture `.next` 산출물까지 git/ESLint 제외 범위를 적용했다. 소스 검사 규칙을 끄지 않았고 이후 전체 lint는 **오류 0건, 기존 경고 5건**으로 통과했다.
 - `verify-free-tier-query-contracts.mjs --base 9f962dfcd68d18788f68eb1754d61fe1c3b1d75f --head 6985a74047a80e92ee878070cf06b171fcd9ef3c --surface all` 통과. 원격 CI 결과는 PR의 실제 head 상태로 별도 확인한다.
-- 전체 테스트에 남은 기존 종료 문제가 있어 초안 PR로 제출한다. 전체 회귀 검사 완료 또는 merge 준비 완료로 표현하지 않는다.
+- 최초 제출은 전체 테스트에 남은 종료 문제 때문에 초안 PR이었다. 후속 수정과 검증 결과는 아래에 구분해 기록한다.
+
+## 후속 교재 필터 테스트 안정화
+
+- 설치 환경은 Node `v24.19.0`, Radix Select `2.2.6` / FocusScope `1.1.7`이다. 설치된 FocusScope의 unmount cleanup은 `setTimeout(..., 0)`에서 초점을 복원한다. React `act()`가 끝난 직후에는 그 타이머가 아직 실행되지 않을 수 있다.
+- 종료 직전 assertion을 DOM 전체 직렬화 없이 진단하자 출고 필터의 `document.activeElement`가 trigger 대신 `BODY`인 상태에서 실패했다. 같은 패턴은 모바일 분류 필터에도 있었다. 두 초점 비교를 boolean assertion으로 바꾸면 `SIGKILL` 대신 해당 초점 실패가 약 1초 내에 표시됐다. 제품의 필터·저장 동작이나 라이브러리를 변경하지 않았다.
+- `tests/helpers/dom-focus.mjs`는 실제 `activeElement`가 기대 trigger가 될 때까지 최대 1초 동안 확인한다. 10ms마다 React `act` 안에서 이벤트 루프를 진행하며, `.focus()`를 호출하지 않는다. 복원이 누락되면 element tag/label만 담은 짧은 assertion으로 실패한다.
+- 공통 교재 테스트 행동 helper에서 선택·Escape 뒤 초점 복원을 기다린다. 모바일 분류 필터도 선택·취소·적용 뒤 실제 복원을 기다린다. 기존 검색·목록 보존, 초안 취소, 페이지 초기화, 중복 요청 금지 assertions는 유지했다.
+- 새 helper 검사는 지연된 실제 DOM focus 복원을 기다리는 경우와 복원이 없는 경우의 실패를 검증한다. 타임아웃을 늘려 통과시키거나 검사 대상을 건너뛰지 않는다.
+- 관련 교재·helper 검사 **59/59 통과**. 실패하던 두 파일과 helper를 512MiB V8 heap 한도, concurrency 2로 **20회 연속 실행해 100/100 통과**했다. 반복 횟수는 새 고유 테스트 수가 아닌 안정성 관찰이다.
+- 후속 전체 lint는 **오류 0건, 기존 경고 5건**으로 통과했다. 전체 회귀 검사 수치와 최종 head의 원격 CI 결과는 [PR #55](https://github.com/tipsedu2019/tips_dashboard/pull/55)의 검증 항목과 체크에 기록한다.
 
 ## 로컬 재현
 

@@ -33,7 +33,7 @@ test('sale filters keep search, controls and accepted rows mounted through pendi
   const finalOptions = (await openFilter(h, '출고 상태')).map(node => node.textContent)
   assert.ok(finalOptions.includes('반품0'), JSON.stringify(finalOptions))
   await closeFilter(h)
-  assert.equal(document.activeElement, filter)
+  assert.ok(document.activeElement === filter, "closing the sale filter returns focus to its trigger")
   await h.assertNoLegacyReads()
 })
 
