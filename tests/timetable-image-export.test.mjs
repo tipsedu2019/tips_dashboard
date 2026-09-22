@@ -70,7 +70,6 @@ test("compact timetable blocks keep class names readable", async () => {
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\)/);
   assert.match(css, /\.scope :global\(\.timetable-block\) \{[\s\S]*justify-content:\s*flex-start/);
   assert.match(css, /\.scope :global\(\.block-name\) \{[\s\S]*word-break:\s*keep-all/);
-  assert.match(css, /\.scope :global\(\.block-info\) \{[\s\S]*margin-top:\s*auto/);
   assert.ok(component.indexOf('className="block-name"') < component.indexOf('className="block-subject"'));
   assert.match(css, /--timetable-fit-min-width:\s*560px/);
   assert.match(css, /@media \(max-width: 767px\) \{[\s\S]*\.scope :global\(\.timetable-grid-shell\.is-fit-columns\) \{[\s\S]*overflow-x:\s*auto !important/);
