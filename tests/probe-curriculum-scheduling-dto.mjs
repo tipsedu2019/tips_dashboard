@@ -17,7 +17,7 @@ assert.ok(config.includes(`[db]\nport = ${url.port}\n`))
 const fixture = await readFile("supabase/tests/curriculum_scheduling_textbook_usage_test.sql", "utf8")
 const end = fixture.indexOf("reset role;\nselect ok(not has_function_privilege")
 assert.ok(end > 0)
-const sql = fixture.slice(0, end) + "\nselect data from result;\nrollback;\n"
+const sql = fixture.slice(0, end).replace("begin;", "begin;\ncreate extension if not exists pgtap with schema extensions;\nset local search_path=public,extensions;") + "\nselect data from result;\nrollback;\n"
 const child = spawn(
   "docker",
   [
