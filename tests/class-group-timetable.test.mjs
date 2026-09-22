@@ -6,7 +6,7 @@ import {
   buildTimetableWorkspaceModel,
 } from "../src/features/academic/records.js";
 
-test("timetable rows can be filtered by many-to-many class groups", () => {
+test("timetable ignores retired many-to-many group filters while preserving historical metadata", () => {
   const workspace = buildTimetableWorkspaceModel({
     classes: [
       {
@@ -45,9 +45,8 @@ test("timetable rows can be filtered by many-to-many class groups", () => {
     },
   });
 
-  assert.equal(workspace.rows.length, 1);
-  assert.equal(workspace.rows[0].classId, "class-a");
-  assert.deepEqual(workspace.rows[0].classGroupIds, ["group-2026-1", "group-inner"]);
+  assert.equal(workspace.rows.length, 2);
+  assert.deepEqual(workspace.rows.find(row => row.classId === "class-a").classGroupIds, ["group-2026-1", "group-inner"]);
   assert.deepEqual(
     workspace.classGroupOptions.map((option) => option.label),
     ["2026 1학기", "내신 집중"],

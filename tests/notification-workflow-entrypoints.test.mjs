@@ -17,10 +17,8 @@ async function createEntrypointFixture(t, overrides = {}) {
     "src/app/admin/transfer/page.tsx": '<OpsTaskWorkspace workspace="transfer" />',
     "src/app/admin/withdrawal/page.tsx": '<OpsTaskWorkspace workspace="withdrawal" />',
     "src/app/admin/makeup-requests/page.tsx": "export default function Page() {}",
-    "src/app/admin/approvals/page.tsx": "export default function Page() {}",
     "src/features/tasks/ops-task-workspace.tsx": "export function OpsTaskWorkspace() {}",
     "src/features/makeup-requests/makeup-request-workspace.tsx": "export function MakeupRequestWorkspace() {}",
-    "src/features/approvals/approval-workspace.tsx": "export function ApprovalWorkspace() {}",
     "src/app/admin/settings/notifications/page.tsx": "<NotificationSettingsWorkspace />",
     "src/features/notifications/notification-settings-workspace.tsx": '<NotificationControlPanel presentation="page" />',
     "src/features/notifications/notification-control-panel.tsx": "NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map(() => data-notification-workflow={activeWorkflow})",
@@ -31,7 +29,6 @@ async function createEntrypointFixture(t, overrides = {}) {
       "transfer",
       "withdrawal",
       "makeup_requests",
-      "approvals",
     ].map((key) => `{ key: "${key}" },`).join("\n") + '\n] as const\nexport const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(\n  (workflow) => workflow.key !== "tasks" && workflow.key !== "word_retests",\n)\n',
     "src/lib/navigation.ts": '{ title: "알림 설정", url: "/admin/settings/notifications" }',
     "src/app/api/google-chat/route.ts": "notification_payload_forbidden sourceEventId",
@@ -46,7 +43,7 @@ async function createEntrypointFixture(t, overrides = {}) {
   return pathToFileURL(`${root}/`)
 }
 
-test("일곱 업무 화면은 공통 설정 surface와 고정 adapter key를 정확히 한 번 사용한다", async () => {
+test("여섯 업무 화면은 공통 설정 surface와 고정 adapter key를 정확히 한 번 사용한다", async () => {
   const verifier = await import(verifierUrl.href)
   const evidence = verifier.NOTIFICATION_WORKFLOW_ENTRYPOINTS.map((entry) => ({
     ...entry,
@@ -55,7 +52,7 @@ test("일곱 업무 화면은 공통 설정 surface와 고정 adapter key를 정
     providerPostCount: 0,
     legacySourceBridgeCount: 0,
   }))
-  assert.equal(verifier.NOTIFICATION_WORKFLOW_ENTRYPOINTS.length, 7)
+  assert.equal(verifier.NOTIFICATION_WORKFLOW_ENTRYPOINTS.length, 6)
   assert.deepEqual(verifier.verifyNotificationWorkflowEntrypoints(evidence), {
     passed: true,
     blockers: [],
@@ -69,13 +66,13 @@ test("설정 열기·저장 evidence에 provider 또는 source bridge가 있으�
     commonPanelCount: 1,
     routeLocalDialogCount: 0,
     providerPostCount: entry.workflowKey === "tasks" ? 1 : 0,
-    legacySourceBridgeCount: entry.workflowKey === "approvals" ? 1 : 0,
+    legacySourceBridgeCount: entry.workflowKey === "makeup_requests" ? 1 : 0,
   }))
   assert.deepEqual(verifier.verifyNotificationWorkflowEntrypoints(evidence), {
     passed: false,
     blockers: [
       "settings_provider_call:tasks",
-      "settings_legacy_bridge_call:approvals",
+      "settings_legacy_bridge_call:makeup_requests",
     ],
   })
 })
@@ -84,7 +81,7 @@ test("정적 entry-point scan은 provider POST와 route-local 알림 dialog를 �
   const verifier = await import(verifierUrl.href)
   const result = await verifier.scanNotificationWorkflowEntrypoints(new URL("../", import.meta.url))
   assert.deepEqual(result.blockers, [])
-  assert.equal(result.entrypoints.length, 7)
+  assert.equal(result.entrypoints.length, 6)
 
   const script = await readFile(verifierUrl, "utf8")
   assert.match(script, /--base-url/)
@@ -111,7 +108,7 @@ test("정적 scan은 공통 panel 이름을 쓰지 않는 route-local 알림 설
 test("정적 scan은 entry page에 직접 추가된 알림 설정 dialog도 차단한다", async (t) => {
   const verifier = await import(verifierUrl.href)
   const rootUrl = await createEntrypointFixture(t, {
-    "src/app/admin/approvals/page.tsx": `
+    "src/app/admin/makeup-requests/page.tsx": `
       export default function Page() {
         return <Dialog open={notificationDialogOpen}><DialogTitle>알림 설정</DialogTitle></Dialog>
       }
@@ -119,7 +116,7 @@ test("정적 scan은 entry page에 직접 추가된 알림 설정 dialog도 차�
   })
 
   const result = await verifier.scanNotificationWorkflowEntrypoints(rootUrl)
-  assert.deepEqual(result.blockers, ["route_local_dialog:approvals"])
+  assert.deepEqual(result.blockers, ["route_local_dialog:makeup_requests"])
 })
 
 test("정적 scan은 우회 형태의 route-local Google Chat API 재도입도 차단한다", async (t) => {

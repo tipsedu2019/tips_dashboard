@@ -13,7 +13,6 @@ type StaticNotificationPath =
   | "/admin/transfer"
   | "/admin/withdrawal"
   | "/admin/makeup-requests"
-  | "/admin/approvals"
 
 type ParsedNotificationAppLink = NotificationAppLink & Readonly<{
   workflowKey: NotificationWorkflowKey
@@ -31,7 +30,6 @@ const STATIC_QUERY_KEYS: Readonly<Record<StaticNotificationPath, ReadonlySet<str
   "/admin/transfer": new Set(["flow", "taskId"]),
   "/admin/withdrawal": new Set(["flow", "taskId"]),
   "/admin/makeup-requests": new Set(["request"]),
-  "/admin/approvals": new Set(["approvalId"]),
 })
 
 const WORKFLOW_BY_STATIC_PATH: Readonly<Record<StaticNotificationPath, NotificationWorkflowKey>> = Object.freeze({
@@ -41,7 +39,6 @@ const WORKFLOW_BY_STATIC_PATH: Readonly<Record<StaticNotificationPath, Notificat
   "/admin/transfer": "transfer",
   "/admin/withdrawal": "withdrawal",
   "/admin/makeup-requests": "makeup_requests",
-  "/admin/approvals": "approvals",
 })
 
 function linkError(): never {

@@ -1,5 +1,7 @@
 # Secondary Numbered Read Audit
 
+> 2026-09-22: 전자결재 기능 폐기. 이 문서의 전자결재 관련 개선·구현·활성화 항목은 모두 취소하며, 과거 기록으로만 보존한다. 휴보강 결재는 유지한다.
+
 **Date:** 2026-08-31  
 **Status:** Read-only implementation input for the approved app-wide numbered-pagination design.  
 **Scope:** Makeup requests, approvals, academic curriculum list, and class-schedule list only.

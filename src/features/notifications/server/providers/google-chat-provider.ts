@@ -306,9 +306,9 @@ export function createGoogleChatProvider(input: {
 
   return {
     async send(context: GoogleChatProviderInput): Promise<NotificationProviderResult> {
-      if (context?.workflow_key === "word_retests" || context?.workflow_key === "tasks") {
+      if (context?.workflow_key === "word_retests" || context?.workflow_key === "tasks" || context?.workflow_key === "approvals") {
         return result("failed", "render_validation_failed", {
-          errorCode: context.workflow_key === "tasks" ? "task_notifications_retired" : "word_retest_google_chat_retired",
+          errorCode: context.workflow_key === "approvals" ? "approvals_retired" : context.workflow_key === "tasks" ? "task_notifications_retired" : "word_retest_google_chat_retired",
           errorSummary: "notification workflow is retired",
         })
       }

@@ -7,7 +7,6 @@ const root = new URL("../", import.meta.url);
 
 const ko = {
   add: "\ucd94\uac00",
-  approvals: "\uc804\uc790\uacb0\uc7ac",
   board: "\ubcf4\ub4dc",
   calendar: "\uc77c\uc815",
   class: "\uc218\uc5c5",
@@ -748,7 +747,6 @@ test("navigation removes todo queues for every role and preserves operation menu
     `{ title: "${ko.transfer}", url: "/admin/transfer", icon: Repeat2 }`,
     `{ title: "${ko.withdrawal}", url: "/admin/withdrawal", icon: UserMinus }`,
     `{ title: "${ko.wordRetest}", url: "/admin/word-retests", icon: SpellCheck }`,
-    `{ title: "${ko.approvals}", url: "/admin/approvals", icon: FileCheck2 }`,
     'match: "/admin/tasks"',
   ]);
 
@@ -4622,82 +4620,6 @@ test("completed operational task details are locked after management sync", asyn
   ]);
 });
 
-test("approval workspace supports monthly report templates and approval history", async () => {
-  const [pageSource, workspaceSource, serviceSource, migrationSource, templateMigrationSource, navigationSource] = await Promise.all([
-    readSource("src/app/admin/approvals/page.tsx"),
-    readSource("src/features/approvals/approval-workspace.tsx"),
-    readSource("src/features/approvals/approval-service.ts"),
-    readSource("supabase/migrations/20260523190000_approval_requests.sql"),
-    readSource("supabase/migrations/20260524113000_approval_templates.sql"),
-    readSource("src/lib/navigation.ts"),
-  ]);
-
-  assert.match(pageSource, /<ApprovalWorkspace \/>/);
-  assertIncludesAll(workspaceSource, [
-    "\uc601\uc5b4 \uc6d4\uac04 \ubcf4\uace0\uc11c",
-    "\uc218\ud559 \uc6d4\uac04 \ubcf4\uace0\uc11c",
-    "\uc790\uc720 \uc11c\uc2dd",
-    "ENGLISH_MONTHLY_CHECKS",
-    "MATH_COMMON_CHECKS",
-    "function checklistGroups",
-    "function buildTemplateInput",
-    "function buildSavedTemplateTitle",
-    "canSubmitApproval",
-    "progress.percent",
-    "placeholder=\"예: 고1 영어A / 전체\"",
-    "placeholder=\"월간 보고 내용을 자유롭게 정리\"",
-    "결재자 미정",
-    "기본 서식",
-    "saveApprovalTemplate",
-    "APPROVAL_VIEWS",
-    "createMonthlyReportApproval",
-    "updateMonthlyReportApproval",
-    "updateApprovalStatus",
-    "addApprovalComment",
-    "function ApprovalActivity({ comments, events }",
-    "approvalEventLabel(event)",
-    "placeholder=\"\ub313\uae00\"",
-    "from \"@/components/ui/empty\"",
-    "<Empty className=\"min-h-48 border-0 p-8\">",
-  ]);
-
-  assertIncludesAll(serviceSource, [
-    'export type ApprovalStatus = "draft" | "submitted" | "reviewing" | "approved" | "returned" | "canceled"',
-    'export type ApprovalSubject = "english" | "math" | "general"',
-    "export type ApprovalChecklistItem = {",
-    "group?: string",
-    "export type ApprovalTemplate = {",
-    "function parseChecklistItems",
-    "subject: (text(row.subject) || \"general\") as ApprovalSubject",
-    "templateKey: text(row.template_key) || \"free\"",
-    "checklistItems: parseChecklistItems(row.checklist_items)",
-    "attachmentLinks: text(row.attachment_links)",
-    ".from(\"approval_templates\")",
-    "export async function saveApprovalTemplate",
-    ".from(\"approval_comments\")",
-    ".from(\"approval_events\")",
-    "export async function addApprovalComment",
-    ".from(\"approval_requests\")",
-  ]);
-
-  assertIncludesAll(migrationSource, [
-    "create table if not exists public.approval_requests",
-    "request_type in ('monthly_report', 'general')",
-    "subject text not null default 'general'",
-    "template_key text not null default 'free'",
-    "checklist_items jsonb not null default '[]'::jsonb",
-    "approval_requests_subject_idx",
-    "write_approval_status_event",
-  ]);
-
-  assertIncludesAll(templateMigrationSource, [
-    "create table if not exists public.approval_templates",
-    "checklist_items jsonb not null default '[]'::jsonb",
-    "approval_templates_select_shared_or_own",
-  ]);
-  assert.ok(navigationSource.includes(`title: "${ko.approvals}"`));
-});
-
 test("browser workflow scripts target the operation surfaces", async () => {
   const [workspaceSource, serviceSource, scriptSource, sampleScriptSource] = await Promise.all([
     readSource("src/features/tasks/ops-task-workspace.tsx"),
@@ -4744,7 +4666,6 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "/admin/transfer",
     "/admin/withdrawal",
     "/admin/word-retests",
-    "/admin/approvals",
     "AUTHENTICATED_CORE_SMOKE_ROUTES",
     "/admin/students",
     "/admin/classes",
@@ -4758,7 +4679,6 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "/admin/settings/schools",
     "/admin/settings/teachers",
     "/admin/settings/classrooms",
-    "/admin/settings/class-groups",
     "/admin/settings/textbook-suppliers",
     "management-students",
     "dashboard",
@@ -4773,7 +4693,6 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "settings-schools",
     "settings-teachers",
     "settings-classrooms",
-    "settings-class-groups",
     "settings-textbook-suppliers",
     "verifyQuickAddInteraction",
     "verifySingleQuickAddInteraction",
@@ -4834,15 +4753,6 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "transfer_assigned_to_new_class",
     "word_retest_links_resolved",
     "verifyCreateDialogInteraction",
-    "verifyApprovalDraftInteraction",
-    "Approval composer should start collapsed.",
-    "Approval title did not refresh when report month changed.",
-    "Approval body kept a stale monthly section after report month changed.",
-    "Approval attachment template kept stale month labels.",
-    'await monthInput.fill("2026-05")',
-    'await monthInput.fill("2026-07")',
-    'page.getByRole("combobox", { name: "결재자" })',
-    '!optionText.includes("미정")',
     ".env.ops-browser.local",
     "OPS_BROWSER_LOGIN_ID/OPS_BROWSER_PASSWORD",
     "OPS_BROWSER_SUPABASE_STORAGE",
@@ -4881,7 +4791,6 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "admin-settings-user-redirect",
     "protected-tasks-redirect",
     "protected-dashboard-redirect",
-    "protected-approvals-redirect",
     "protected-registration-redirect",
     "protected-transfer-redirect",
     "protected-withdrawal-redirect",
@@ -4898,7 +4807,6 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "legacy-forgot-password-2",
     "expectedSearchIncludes",
     "next=%2Fadmin%2Ftasks%3FtaskId%3Dmissing-task-for-smoke",
-    "next=%2Fadmin%2Fapprovals",
     "next=%2Fadmin%2Fcalendar",
     "next=%2Fadmin%2Fmanual",
     "next=%2Fadmin%2Fsettings%2Fschools",
@@ -4919,14 +4827,12 @@ test("browser workflow scripts target the operation surfaces", async () => {
     "catch {",
     "still shows the old step progress label",
     'getByRole("button", { name: "완료" })',
-    'getByRole("button", { name: "해당 없음" })',
     'hiddenStatus of ["요청", "진행", "보류", "취소"]',
     'Todo detail leaked workflow status',
     'teacherButton.innerText()).includes("선생님")',
     'assistantButton.innerText()).includes("조교")',
     `expectedTexts: ["${ko.todo}", "${ko.inbox}", "${ko.add}"]`,
     `expectedTexts: ["${ko.registration}", "${ko.registration} ${ko.add}"]`,
-    `expectedTexts: ["${ko.approvals}",`,
   ]);
 
   assertIncludesAll(sampleScriptSource, [

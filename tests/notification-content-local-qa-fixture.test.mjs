@@ -45,7 +45,6 @@ const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_registration_handoffs_test.sql",
   "supabase/tests/notification_transfer_withdrawal_adapters_test.sql",
   "supabase/tests/notification_makeup_adapter_test.sql",
-  "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
   "supabase/tests/notification_worker_production_schedule_test.sql",
   "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
@@ -140,13 +139,13 @@ test("합성 fixture manifest는 현재 196개 설정 graph와 고정 identity�
   assert.equal(Object.isFrozen(contract.manifest.identities), true)
 })
 
-test("pgTAP 계약은 review된 14개 파일의 순서와 실제 SHA-256만 허용한다", async () => {
+test("pgTAP 계약은 review된 13개 파일의 순서와 실제 SHA-256만 허용한다", async () => {
   const { loadNotificationContentLocalQaContract } = await loadSubject()
   const contract = await loadNotificationContentLocalQaContract()
 
   assert.deepEqual(contract.pgTap.files.map((entry) => entry.relativePath), expectedPgTapFiles)
-  assert.equal(contract.pgTap.fileCount, 14)
-  assert.equal(new Set(contract.pgTap.files.map((entry) => entry.relativePath)).size, 14)
+  assert.equal(contract.pgTap.fileCount, 13)
+  assert.equal(new Set(contract.pgTap.files.map((entry) => entry.relativePath)).size, 13)
   assert.equal(contract.pgTap.files.every((entry) => /^[a-f0-9]{64}$/u.test(entry.sha256)), true)
   assert.match(contract.pgTap.sha256, /^[a-f0-9]{64}$/u)
   assert.equal(Object.isFrozen(contract.pgTap), true)
@@ -279,7 +278,7 @@ test("allowlist pgTAP은 최신 196 identity와 single-writer/vNext 상태를 �
   )
 })
 
-test("isolated DB runner plan은 fixture count와 exact pgTAP 14개를 출력하지만 실행은 계속 닫힌다", async () => {
+test("isolated DB runner plan은 fixture count와 exact pgTAP 13개를 출력하지만 실행은 계속 닫힌다", async () => {
   const result = spawnSync(process.execPath, ["--experimental-strip-types", runnerUrl.pathname], {
     cwd: new URL("..", import.meta.url),
     encoding: "utf8",
@@ -291,7 +290,7 @@ test("isolated DB runner plan은 fixture count와 exact pgTAP 14개를 출력하
   assert.equal(plan.expectedResources.syntheticFixture.settingsRegistry, 196)
   assert.equal(plan.expectedResources.syntheticFixture.rules, 197)
   assert.equal(plan.expectedResources.syntheticFixture.operationalRows, 0)
-  assert.equal(plan.expectedResources.pgTapFileCount, 14)
+  assert.equal(plan.expectedResources.pgTapFileCount, 13)
   assert.deepEqual(plan.expectedResources.pgTapFiles, expectedPgTapFiles)
   assert.equal(plan.expectedResources.providerEgressBlocked, true)
   assert.equal(plan.expectedResources.productionRowDataCopied, 0)

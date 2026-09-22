@@ -7,7 +7,6 @@ const SHA256 = /^[a-f0-9]{64}$/
 export const NOTIFICATION_SHADOW_FIXTURE_SCOPES = Object.freeze([
   "tasks",
   "word_retests",
-  "approvals",
   "transfer",
   "withdrawal",
   "makeup_requests",
@@ -76,7 +75,7 @@ export function buildNotificationShadowFixturePlan({
 }
 
 export async function executeNotificationShadowFixturePlan(plan, dependencies = {}) {
-  if (!plan?.execute || !Array.isArray(plan.calls) || plan.calls.length !== 10) {
+  if (!plan?.execute || !Array.isArray(plan.calls) || plan.calls.length !== NOTIFICATION_SHADOW_FIXTURE_SCOPES.length) {
     throw new Error("shadow_fixture_execution_plan_invalid")
   }
   const rpc = dependencies.rpc

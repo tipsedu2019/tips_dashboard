@@ -113,13 +113,12 @@ test("현재성 검증은 self-parity fixture를 거절하고 운영 closed/sent
   assert.doesNotMatch(current, /fixture_no_external_side_effect/)
 })
 
-test("운영 runner는 고정 10개 scope와 자연 비교·무활성 결과를 모두 검증한다", async () => {
+test("운영 runner는 고정 9개 scope와 자연 비교·무활성 결과를 모두 검증한다", async () => {
   const runner = await import(scriptUrl.href)
   const batchRequestId = "11111111-1111-4111-8111-111111111111"
   assert.deepEqual(runner.NOTIFICATION_SHADOW_FIXTURE_SCOPES, [
     "tasks",
     "word_retests",
-    "approvals",
     "transfer",
     "withdrawal",
     "makeup_requests",
@@ -133,8 +132,8 @@ test("운영 runner는 고정 10개 scope와 자연 비교·무활성 결과를 
     execute: false,
     batchRequestId,
   })
-  assert.equal(dryRun.calls.length, 10)
-  assert.equal(new Set(dryRun.calls.map((call) => call.parameters.p_request_id)).size, 10)
+  assert.equal(dryRun.calls.length, 9)
+  assert.equal(new Set(dryRun.calls.map((call) => call.parameters.p_request_id)).size, 9)
   assert.throws(
     () => runner.buildNotificationShadowFixturePlan({ execute: true, batchRequestId }),
     /explicit_shadow_fixture_authorization_required/,
@@ -151,7 +150,7 @@ test("운영 runner는 고정 10개 scope와 자연 비교·무활성 결과를 
     async rpc(name, parameters) {
       calledRpcNames.push(name)
       if (name === "verify_notification_shadow_evidence_complete_v1") {
-        return { verified: true, scopeCount: 10 }
+        return { verified: true, scopeCount: 9 }
       }
       if (name.includes("deterministic")) throw new Error(`unexpected_rpc:${name}`)
       const natural = index++ % 2 === 1
@@ -166,13 +165,13 @@ test("운영 runner는 고정 10개 scope와 자연 비교·무활성 결과를 
       }
     },
   })
-  assert.equal(result.completedScopes, 10)
-  assert.equal(result.scopes.filter((scope) => scope.evidenceKind === "natural_comparison").length, 5)
+  assert.equal(result.completedScopes, 9)
+  assert.equal(result.scopes.filter((scope) => scope.evidenceKind === "natural_comparison").length, 4)
   assert.equal(result.scopes.filter((scope) => scope.evidenceKind === "no_active_rule").length, 5)
   assert.equal(calledRpcNames.some((name) => name.includes("deterministic")), false)
   assert.equal(calledRpcNames.includes("replay_notification_shadow_evidence_v1"), false)
   assert.deepEqual(calledRpcNames, [
-    ...Array(10).fill("record_notification_shadow_fixture_evidence_v1"),
+    ...Array(9).fill("record_notification_shadow_fixture_evidence_v1"),
     "verify_notification_shadow_evidence_complete_v1",
   ])
 })

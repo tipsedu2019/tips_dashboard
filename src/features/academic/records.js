@@ -1371,13 +1371,10 @@ export function buildTimetableWorkspaceModel({
         ),
   );
 
-  const selectedGroup = text(filters.classGroupId || filters.classGroup || filters.group);
-  const selectedGroupValues = getClassGroupFilterValues(groupContext.classGroupOptions, selectedGroup);
   const rows = allRows.filter((row) => {
     const selectedStatus = text(filters.status);
     return (
       matchesSearch(row.searchText, filters.search) &&
-      rowMatchesClassGroup(row, selectedGroupValues) &&
       (!selectedStatus || row.statusFilter === selectedStatus) &&
       matchesFilter(row.subject, filters.subject) &&
       matchesFilter(row.grade, filters.grade) &&
@@ -1391,7 +1388,6 @@ export function buildTimetableWorkspaceModel({
     eligibleClasses,
     classTerms,
     allRows.filter((row) =>
-      rowMatchesClassGroup(row, selectedGroupValues) &&
       (!text(filters.status) || row.statusFilter === text(filters.status)) &&
       matchesFilter(row.subject, filters.subject),
     ),
@@ -1537,12 +1533,12 @@ function buildHalfHourSlots(startHour = 11, endHour = 24) {
     slots.push(`${safeHour}:30-${nextHour}:00`);
   }
 
-  return slots.filter((slot) => !slot.startsWith("23:30-"));
+  return slots;
 }
 
-const DEFAULT_TIMETABLE_TIME_SLOTS = buildHalfHourSlots();
+const FULL_DAY_TIME_SLOTS = buildHalfHourSlots(0);
 
-function minutesToSlotIndex(value, startHour = 11) {
+function minutesToSlotIndex(value, startHour = 0) {
   const minutes = timeToMinutes(value);
   const baseMinutes = startHour * 60;
   return Math.max(0, Math.floor((minutes - baseMinutes) / 30));
@@ -1847,12 +1843,19 @@ export function buildTimetableGridPanels({
     })
     .filter((panel) => panel.columns.length > 0);
 
+  // All panels share the same axis, cropped to the actual teaching hours.
+  // Start from midnight so morning classes are never clamped into the 11 AM slot.
+  const blocks = panels.flatMap((panel) => panel.blocks);
+  const firstSlot = blocks.length ? Math.max(0, Math.min(...blocks.map((block) => block.startSlot)) - 1) : 22;
+  const lastSlot = blocks.length ? Math.min(48, Math.max(...blocks.map((block) => block.endSlot)) + 1) : 48;
   return {
     view,
     axisMode,
     axisOptions,
     activeTargets,
-    timeSlots: DEFAULT_TIMETABLE_TIME_SLOTS,
-    panels,
+    timeSlots: FULL_DAY_TIME_SLOTS.slice(firstSlot, lastSlot),
+    panels: panels.map((panel) => ({...panel, blocks: panel.blocks.map((block) => ({
+      ...block, startSlot: block.startSlot - firstSlot, endSlot: block.endSlot - firstSlot,
+    }))})),
   };
 }

@@ -7,7 +7,6 @@ const ROUTES = [
   "/admin/transfer",
   "/admin/withdrawal",
   "/admin/word-retests",
-  "/admin/approvals",
 ]
 
 const VIEWPORTS = [

@@ -1,5 +1,7 @@
 # Registration Observation Google Chat Implementation Plan
 
+> 2026-09-22: 전자결재 기능 폐기. 이 문서의 전자결재 관련 개선·구현·활성화 항목은 모두 취소하며, 과거 기록으로만 보존한다. 휴보강 결재는 유지한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 청강 예약·변경·취소, 시작 3시간 전 준비, 종료 30분 후 피드백 요청, 피드백 제출, 담당 원장 변경을 정확한 과목방·관리팀방·원장 inbox에 한 번씩 전달하고, 검증된 현재/변경 담당자만 멘션하되 예약 저장과 provider를 분리하고 source drift·중복·개인정보·과거 backlog를 fail closed한다.

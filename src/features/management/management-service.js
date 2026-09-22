@@ -807,19 +807,6 @@ export function buildClassTermPayload(terms = [], options = {}) {
   }));
 }
 
-export function buildClassGroupPayload(groups = [], options = {}) {
-  const { generateId = createId } = options;
-
-  return (groups || []).map((group, index) => ({
-    id: group?.id || generateId(),
-    name: trimText(group?.name),
-    subject: trimText(group?.subject),
-    term_id: trimText(group?.termId || group?.term_id) || null,
-    sort_order: group?.sortOrder ?? group?.sort_order ?? index,
-    is_default: group?.isDefault === true || group?.is_default === true,
-  }));
-}
-
 async function upsertRows(client, table, payload, { onConflict = "id", select = true } = {}) {
   let query = client.from(table).upsert(payload, { onConflict });
   if (select) {
@@ -1629,73 +1616,6 @@ export function createManagementService(options = {}) {
     async deleteClassTerm(id) {
       const client = ensureClient(supabase);
       return deleteRows(client, "class_terms", Array.isArray(id) ? id : id ? [id] : []);
-    },
-
-    async upsertClassGroups(groups = []) {
-      const client = ensureClient(supabase);
-      const payload = buildClassGroupPayload(groups, { generateId });
-      try {
-        return await upsertRows(
-          client,
-          "class_schedule_sync_groups",
-          payload,
-        );
-      } catch (error) {
-        const message = trimText(error?.message);
-        if (!message.includes("sort_order") && !message.includes("is_default")) {
-          throw error;
-        }
-
-        return upsertRows(
-          client,
-          "class_schedule_sync_groups",
-          payload.map((group) => {
-            const fallbackGroup = { ...group };
-            delete fallbackGroup.sort_order;
-            delete fallbackGroup.is_default;
-            return fallbackGroup;
-          }),
-        );
-      }
-    },
-
-    async setDefaultClassGroup(id) {
-      const client = ensureClient(supabase);
-      const safeId = trimText(id);
-      if (!safeId) {
-        throw new Error("기간 ID를 찾을 수 없습니다.");
-      }
-
-      try {
-        const { error: resetError } = await client
-          .from("class_schedule_sync_groups")
-          .update({ is_default: false })
-          .neq("id", safeId);
-        if (resetError) {
-          throw resetError;
-        }
-
-        const { data, error } = await client
-          .from("class_schedule_sync_groups")
-          .update({ is_default: true })
-          .eq("id", safeId)
-          .select();
-        if (error) {
-          throw error;
-        }
-        return data || [];
-      } catch (error) {
-        const message = trimText(error?.message);
-        if (message.includes("is_default")) {
-          return [];
-        }
-        throw error;
-      }
-    },
-
-    async deleteClassGroup(id) {
-      const client = ensureClient(supabase);
-      return deleteRows(client, "class_schedule_sync_groups", Array.isArray(id) ? id : id ? [id] : []);
     },
 
     async createStudent(record = {}) {

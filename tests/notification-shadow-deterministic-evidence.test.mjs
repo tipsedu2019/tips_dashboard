@@ -389,86 +389,6 @@ test("댓글 sourceType과 scalar·array 다중 수신자 중복 제거를 실�
   assert.deepEqual(artifact.canonicalIntents, artifact.legacyIntents)
 })
 
-test("결재 댓글 sourceType과 결재 entity 딥 링크를 실제 adapter로 검증한다", async () => {
-  const evaluator = await import(`${evaluatorUrl.href}?approval-comment=${Date.now()}`)
-  const plan = taskPlan()
-  const href = `/admin/approvals?approvalId=${UUIDS.task}`
-  plan.scopeKey = "approvals"
-  plan.fixture.canonical = {
-    ...plan.fixture.canonical,
-    workflowKey: "approvals",
-    eventKey: "approval.comment_added",
-    sourceType: "approval_comment",
-    sourceId: UUIDS.source,
-    payload: {
-      approval_id: UUIDS.task,
-      requester_profile_id: UUIDS.recipient,
-      occurred_at: "2026-07-17T03:00:00.000Z",
-    },
-    rule: {
-      ...plan.fixture.canonical.rule,
-      audienceKey: "requester_profile",
-    },
-  }
-  plan.fixture.legacy = {
-    ...plan.fixture.legacy,
-    workflowKey: "approvals",
-    eventKey: "approval.comment_added",
-    audienceKey: "requester_profile",
-    context: {
-      workflow_label: "전자결재",
-      event_label: "댓글",
-      occurred_at: "2026-07-17T03:00:00.000Z",
-      deep_link: href,
-    },
-    href,
-  }
-
-  assert.notEqual(plan.fixture.canonical.sourceId, plan.fixture.canonical.payload.approval_id)
-  const artifact = await evaluator.evaluateNotificationShadowDeterministicPlan(plan)
-  assert.deepEqual(artifact.canonicalIntents, artifact.legacyIntents)
-})
-
-test("결재 source event ID와 업무 entity ID가 달라도 entity 딥 링크를 검증한다", async () => {
-  const evaluator = await import(`${evaluatorUrl.href}?approval-entity=${Date.now()}`)
-  const plan = taskPlan()
-  const href = `/admin/approvals?approvalId=${UUIDS.task}`
-  plan.scopeKey = "approvals"
-  plan.fixture.canonical = {
-    ...plan.fixture.canonical,
-    workflowKey: "approvals",
-    eventKey: "approval.submitted",
-    sourceType: "approval_event",
-    sourceId: UUIDS.source,
-    payload: {
-      approval_id: UUIDS.task,
-      requester_profile_id: UUIDS.recipient,
-      occurred_at: "2026-07-17T03:00:00.000Z",
-    },
-    rule: {
-      ...plan.fixture.canonical.rule,
-      audienceKey: "requester_profile",
-    },
-  }
-  plan.fixture.legacy = {
-    ...plan.fixture.legacy,
-    workflowKey: "approvals",
-    eventKey: "approval.submitted",
-    audienceKey: "requester_profile",
-    context: {
-      workflow_label: "전자결재",
-      event_label: "제출",
-      occurred_at: "2026-07-17T03:00:00.000Z",
-      deep_link: href,
-    },
-    href,
-  }
-
-  assert.notEqual(plan.fixture.canonical.sourceId, plan.fixture.canonical.payload.approval_id)
-  const artifact = await evaluator.evaluateNotificationShadowDeterministicPlan(plan)
-  assert.deepEqual(artifact.canonicalIntents, artifact.legacyIntents)
-})
-
 test("운영 실행기는 자연 비교 부족을 결정적 RPC로 우회하지 않는다", async () => {
   const runner = await import(`${runnerUrl.href}?natural-only=${Date.now()}`)
   const plan = runner.buildNotificationShadowFixturePlan({
@@ -562,7 +482,7 @@ test("운영 실행기는 자연 비교가 없으면 결정적 무발송 증거�
         }
       }
       if (name === "verify_notification_shadow_evidence_complete_v1") {
-        return { verified: true, scopeCount: 10 }
+        return { verified: true, scopeCount: 9 }
       }
       throw new Error(`unexpected_rpc:${name}`)
     },
@@ -644,7 +564,7 @@ test("운영 실행기는 활성 규칙별 결정적 cycle을 운영 증거로 �
         }
       }
       if (name === "verify_notification_shadow_evidence_complete_v1") {
-        return { verified: true, scopeCount: 10 }
+        return { verified: true, scopeCount: 9 }
       }
       throw new Error(`unexpected_rpc:${name}`)
     },
@@ -713,7 +633,7 @@ test("같은 묶음 요청 재실행도 record RPC 자체 멱등성만 사용한
       return result
     }
     if (name === "verify_notification_shadow_evidence_complete_v1") {
-      return { verified: true, scopeCount: 10 }
+      return { verified: true, scopeCount: 9 }
     }
     throw new Error(`unexpected_rpc:${name}`)
   }
@@ -723,11 +643,11 @@ test("같은 묶음 요청 재실행도 record RPC 자체 멱등성만 사용한
   const secondRunStart = calls.length
   const replayed = await runner.executeNotificationShadowFixturePlan(plan, dependencies)
 
-  assert.equal(replayed.completedScopes, 10)
+  assert.equal(replayed.completedScopes, 9)
   assert.deepEqual(
     calls.slice(secondRunStart),
     [
-      ...Array(10).fill("record_notification_shadow_fixture_evidence_v1"),
+      ...Array(9).fill("record_notification_shadow_fixture_evidence_v1"),
       "verify_notification_shadow_evidence_complete_v1",
     ],
   )
@@ -797,7 +717,7 @@ test("record RPC가 결정적 증거를 반환해도 운영 계약은 거절한�
   )
 })
 
-test("10개 응답 뒤 DB의 활성 rule별 최종 gate가 실패하면 완료로 보고하지 않는다", async () => {
+test("9개 응답 뒤 DB의 활성 rule별 최종 gate가 실패하면 완료로 보고하지 않는다", async () => {
   const runner = await import(`${runnerUrl.href}?complete=${Date.now()}`)
   const plan = runner.buildNotificationShadowFixturePlan({
     execute: true,

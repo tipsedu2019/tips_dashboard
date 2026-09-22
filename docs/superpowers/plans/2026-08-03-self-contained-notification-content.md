@@ -1,5 +1,7 @@
 # 대시보드·Google Chat 자기완결형 알림 콘텐츠 Implementation Plan
 
+> 2026-09-22: 전자결재 기능 폐기. 이 문서의 전자결재 관련 개선·구현·활성화 항목은 모두 취소하며, 과거 기록으로만 보존한다. 휴보강 결재는 유지한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 대시보드와 Google Chat 알림이 링크를 열지 않아도 대상·발생한 일·핵심 값·현재 진행 상태를 정확히 이해할 수 있게 만들고, 기존 맞춤형 title/body 편집·저장 흐름과 과거 이력을 보존한다.

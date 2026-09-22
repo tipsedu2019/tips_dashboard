@@ -9,7 +9,6 @@ const subjectRow = { subject: "영어", isActive: true, registrationCreateEnable
 const cases = [
   { kind: "school", component: "SchoolMasterWorkspace", table: "academic_schools", field: "school-name", upsert: "upsertAcademicSchools", row: { id: "school-1", name: "기존학교", category: "elementary", color: null, sort_order: 1 } },
   { kind: "classroom", component: "ClassroomMasterWorkspace", table: "classroom_catalogs", field: "classroom-name", upsert: "upsertClassroomCatalogs", row: { id: "room-1", name: "기존강의실", subjects: ["영어"], campus: "본관", is_visible: true, sort_order: 1 } },
-  { kind: "class-group", component: "ClassGroupMasterWorkspace", table: "class_schedule_sync_groups", field: "class-group-name", upsert: "upsertClassGroups", row: { id: "group-1", name: "기존그룹", subject: "영어", sort_order: 1, is_default: false } },
   { kind: "teacher", component: "TeacherMasterWorkspace", field: "teacher-name", upsert: "upsertTeacherCatalogs", row: { id: "teacher-1", name: "기존선생님", subjects: ["영어팀"], profile_id: null, account_email: "", dashboard_role: "teacher", is_visible: true, sort_order: 1 } },
   { kind: "subject", component: "SubjectMasterWorkspace", row: subjectRow },
 ];
@@ -86,12 +85,12 @@ for (const spec of cases) test(`${spec.kind}: pending/failed save keeps guard; a
   await ui.save(); assert.equal(ui.writes.length, 2); await ui.acceptSave(1); assert.equal(ui.unload(), false); await ui.app(); assert.equal(ui.confirmation(), null); assert.equal(ui.routes.length, 1);
 });
 test("subject: reverting edits is clean and saving one subject keeps another subject protected", async t => {
-  const ui = await mount(t, cases[4], [subjectRow, { ...subjectRow, subject: "수학" }]); await ui.acceptLoad(); await ui.edit(); await ui.edit(); assert.equal(ui.unload(), false);
+  const ui = await mount(t, cases.find((spec) => spec.kind === "subject"), [subjectRow, { ...subjectRow, subject: "수학" }]); await ui.acceptLoad(); await ui.edit(); await ui.edit(); assert.equal(ui.unload(), false);
   await ui.edit(); await ui.edit("math"); await ui.save(); await ui.acceptSave(0); assert.equal(ui.unload(), true); await ui.app(); assert.ok(ui.confirmation()); await ui.flush(() => ui.button("계속 편집").click());
   await ui.save("math"); await ui.acceptSave(1); assert.equal(ui.unload(), false);
 });
 test("accepted subject save dismisses an open confirmation without reopening it on the next edit", async t => {
-  const ui = await mount(t, cases[4]); await ui.acceptLoad(); await ui.edit(); await ui.save(); await ui.app(); assert.ok(ui.confirmation());
+  const ui = await mount(t, cases.find((spec) => spec.kind === "subject")); await ui.acceptLoad(); await ui.edit(); await ui.save(); await ui.app(); assert.ok(ui.confirmation());
   await ui.acceptSave(0); assert.equal(ui.confirmation(), null); assert.deepEqual(ui.routes, []);
   await ui.edit(); assert.equal(ui.confirmation(), null); await ui.app(); assert.ok(ui.confirmation()); await ui.flush(() => ui.button("계속 편집").click());
 });

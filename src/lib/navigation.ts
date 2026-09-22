@@ -3,7 +3,6 @@ import {
   BookOpen,
   CalendarDays,
   CalendarClock,
-  FileCheck2,
   GraduationCap,
   ChartNoAxesCombined,
   LayoutDashboard,
@@ -110,14 +109,6 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
-    match: "/admin/settings/class-groups",
-    meta: {
-      section: "설정",
-      title: "수업그룹 설정",
-      summary: "같은 진도로 운영하는 수업을 묶을 그룹 기준을 관리합니다.",
-    },
-  },
-  {
     match: "/admin/settings/textbook-suppliers",
     meta: {
       section: "설정",
@@ -161,7 +152,7 @@ const workspaceMetaEntries: Array<{
     match: "/admin/timetable",
     meta: {
       section: "시간표",
-      title: "시간표 비교 뷰",
+      title: "시간표",
       summary: "교사·강의실 축으로 운영 겹침과 주간 흐름을 점검합니다.",
     },
   },
@@ -278,14 +269,6 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
-    match: "/admin/approvals",
-    meta: {
-      section: "운영",
-      title: "전자결재",
-      summary: "월간 보고서 제출과 결재 대기 문서를 처리합니다.",
-    },
-  },
-  {
     match: "/admin/tasks",
     meta: {
       section: "운영",
@@ -332,7 +315,6 @@ export function buildAdminNavGroups({
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
     { title: "휴보강", url: "/admin/makeup-requests", icon: CalendarClock },
-    { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",
@@ -414,7 +396,6 @@ export function buildAdminNavGroups({
             { title: "과목 설정", url: "/admin/settings/subjects" },
             { title: "선생님 설정", url: "/admin/settings/teachers" },
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
-            { title: "수업그룹 설정", url: "/admin/settings/class-groups" },
             { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
             { title: "알림 설정", url: "/admin/settings/notifications" },
           ],

@@ -9,7 +9,6 @@ globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const cases = [
   { kind: "school", component: "SchoolMasterWorkspace", table: "academic_schools", add: "학교 추가", field: "school-name", upsert: "upsertAcademicSchools", remove: "deleteAcademicSchools", row: { id: "school-1", name: "기존학교", category: "elementary", color: null, sort_order: 1 } },
   { kind: "classroom", component: "ClassroomMasterWorkspace", table: "classroom_catalogs", add: "강의실 추가", field: "classroom-name", upsert: "upsertClassroomCatalogs", remove: "deleteClassroomCatalogs", row: { id: "room-1", name: "기존강의실", subjects: ["영어"], campus: "본관", is_visible: true, sort_order: 1 } },
-  { kind: "class-group", component: "ClassGroupMasterWorkspace", table: "class_schedule_sync_groups", add: "그룹 추가", field: "class-group-name", upsert: "upsertClassGroups", remove: "deleteClassGroup", row: { id: "group-1", name: "기존그룹", subject: "영어", sort_order: 1, is_default: false } },
   { kind: "teacher", component: "TeacherMasterWorkspace", add: "선생님 추가", field: "teacher-name", upsert: "upsertTeacherCatalogs", remove: "deleteTeacherCatalogs", row: { id: "teacher-1", name: "기존선생님", subjects: ["영어팀"], profile_id: null, account_email: "", dashboard_role: "teacher", is_visible: true, sort_order: 1 } },
 ];
 

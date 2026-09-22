@@ -7,8 +7,6 @@ import {
   useState,
   type ComponentType,
   type CSSProperties,
-  type Dispatch,
-  type SetStateAction,
 } from "react";
 import {
   CalendarDays,
@@ -18,6 +16,7 @@ import {
   School,
   User,
   type LucideIcon,
+  RotateCcw,
 } from "lucide-react";
 import { toast } from "sonner";
 
@@ -32,7 +31,14 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Skeleton } from "@/components/ui/skeleton";
-import { pickDefaultPeriodValue, readDefaultPeriodPreference } from "@/features/management/period-preferences";
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel";
+import {
+  WorkspaceTabs,
+  WorkspaceTabsList,
+  WorkspaceTabsTrigger,
+  WorkspaceTabsPanel,
+} from "@/components/ui/workspace-tabs";
+import { TimetableTargetFilter } from "./timetable-target-filter";
 import { exportElementAsImage } from "@/lib/export-as-image";
 import { cn } from "@/lib/utils";
 
@@ -45,8 +51,9 @@ import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 import styles from "./timetable-grid-skin.module.css";
 import TimetableGrid from "./components/legacy-timetable-grid.jsx";
 
-const LegacyTimetableGrid =
-  TimetableGrid as unknown as ComponentType<Record<string, unknown>>;
+const LegacyTimetableGrid = TimetableGrid as unknown as ComponentType<
+  Record<string, unknown>
+>;
 
 type TimetableView =
   | "teacher-weekly"
@@ -93,7 +100,9 @@ const PRIMARY_SUBJECT_FILTERS = ["영어", "수학"];
 
 function buildTimetableVisibleRange(days: 7 | 14) {
   const today = new Date();
-  const start = new Date(Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()));
+  const start = new Date(
+    Date.UTC(today.getFullYear(), today.getMonth(), today.getDate()),
+  );
   const day = start.getUTCDay();
   start.setUTCDate(start.getUTCDate() - (day === 0 ? 6 : day - 1));
   const end = new Date(start);
@@ -107,22 +116,13 @@ function buildTimetableVisibleRange(days: 7 | 14) {
 function TimetableWorkspaceSkeleton() {
   return (
     <div className="flex flex-col gap-4 px-4 sm:px-5 lg:px-6">
-      <div className="grid gap-4 xl:grid-cols-4">
-        {Array.from({ length: 4 }).map((_, index) => (
-          <Skeleton key={index} className="h-28 w-full rounded-2xl" />
-        ))}
-      </div>
-      <Skeleton className="h-[360px] w-full rounded-[28px]" />
+      <Skeleton className="h-40 w-full rounded-xl" />
       <div className="grid gap-6 xl:grid-cols-2">
-        <Skeleton className="h-[820px] w-full rounded-[28px]" />
-        <Skeleton className="h-[820px] w-full rounded-[28px]" />
+        <Skeleton className="h-[820px] w-full rounded-xl" />
+        <Skeleton className="h-[820px] w-full rounded-xl" />
       </div>
     </div>
   );
-}
-
-function iconForView(view: TimetableView) {
-  return VIEW_OPTIONS.find((option) => option.id === view)?.icon || User;
 }
 
 function normalizeSelections(values: string[], options: string[]) {
@@ -137,7 +137,9 @@ function normalizeSelections(values: string[], options: string[]) {
 
 function buildSubjectFilterOptions(subjectOptions: string[]) {
   const primarySet = new Set(PRIMARY_SUBJECT_FILTERS);
-  const extras = subjectOptions.filter((option) => option && !primarySet.has(option));
+  const extras = subjectOptions.filter(
+    (option) => option && !primarySet.has(option),
+  );
   return ["", ...PRIMARY_SUBJECT_FILTERS, ...extras];
 }
 
@@ -152,7 +154,9 @@ function sanitizeImageFileName(value: string) {
 function getTimetableCaptureWidth(element: HTMLElement) {
   const gridElement = element.querySelector<HTMLElement>(".timetable-grid");
   const gridWidth = gridElement ? gridElement.scrollWidth + 32 : 0;
-  return Math.ceil(Math.max(element.offsetWidth, element.scrollWidth, gridWidth));
+  return Math.ceil(
+    Math.max(element.offsetWidth, element.scrollWidth, gridWidth),
+  );
 }
 
 type TimetablePanelBlockSummary = {
@@ -165,17 +169,27 @@ type TimetablePanelBlockSummary = {
 
 function formatWeeklyHours(hours: number) {
   const safeHours = Math.round(Math.max(0, hours) * 10) / 10;
-  return Number.isInteger(safeHours) ? `${safeHours}시간` : `${safeHours.toFixed(1)}시간`;
+  return Number.isInteger(safeHours)
+    ? `${safeHours}시간`
+    : `${safeHours.toFixed(1)}시간`;
 }
 
 function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
   const lessonKeys = new Set(
-    blocks.map((block) => String(block.lessonKey || block.classId || block.key || "")).filter(Boolean),
+    blocks
+      .map((block) =>
+        String(block.lessonKey || block.classId || block.key || ""),
+      )
+      .filter(Boolean),
   );
   const weeklyHours = blocks.reduce((total, block) => {
     const startSlot = Number(block.startSlot);
     const endSlot = Number(block.endSlot);
-    if (!Number.isFinite(startSlot) || !Number.isFinite(endSlot) || endSlot <= startSlot) {
+    if (
+      !Number.isFinite(startSlot) ||
+      !Number.isFinite(endSlot) ||
+      endSlot <= startSlot
+    ) {
       return total;
     }
 
@@ -190,20 +204,15 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 
 export function AcademicTimetableWorkspace() {
   const [view, setView] = useState<TimetableView>("teacher-weekly");
-  const [classGroupId, setClassGroupId] = useState(() => {
-    const preference = readDefaultPeriodPreference();
-    return preference.id || preference.name || "";
-  });
   const [status, setStatus] = useState("수강");
   const [subject, setSubject] = useState("");
-  const [rangeDays, setRangeDays] = useState<7 | 14>(14);
   const [gridCount, setGridCount] = useState(2);
   const [selectedTeachers, setSelectedTeachers] = useState<string[]>([]);
   const [selectedClassrooms, setSelectedClassrooms] = useState<string[]>([]);
   const [selectedDays, setSelectedDays] = useState<string[]>([]);
   const [savingPanelId, setSavingPanelId] = useState("");
   const timetablePanelRefs = useRef<Record<string, HTMLDivElement | null>>({});
-  const visibleRange = useMemo(() => buildTimetableVisibleRange(rangeDays), [rangeDays]);
+  const visibleRange = useMemo(() => buildTimetableVisibleRange(7), []);
   const {
     data: timetableData,
     densityError,
@@ -212,35 +221,66 @@ export function AcademicTimetableWorkspace() {
     refresh,
     successfulRequest,
     displayRequest,
+    dataMatchesCurrentScope,
   } = useAcademicWorkspaceData({
     mode: "timetable",
     dateFrom: visibleRange.dateFrom,
     dateTo: visibleRange.dateTo,
     filters: {
-      classGroupId: classGroupId || null,
+      classGroupId: null,
       status: status || null,
       subject: subject || null,
     },
   });
-  const displayTimetableRequest = displayRequest.mode === "timetable"
-    ? displayRequest
-    : successfulRequest?.mode === "timetable"
-      ? successfulRequest
-      : {
-          mode: "timetable" as const,
-          dateFrom: visibleRange.dateFrom,
-          dateTo: visibleRange.dateTo,
-          filters: { classGroupId: classGroupId || null, status: status || null, subject: subject || null },
-        };
-  const data = useMemo(() => ({
-    rows: Array.isArray(timetableData?.rows) ? timetableData.rows : [],
-    classSummaries: Array.isArray(timetableData?.classSummaries) ? timetableData.classSummaries : [],
-    classTerms: Array.isArray(timetableData?.classTerms) ? timetableData.classTerms : [],
-    classGroups: Array.isArray(timetableData?.classGroups) ? timetableData.classGroups : [],
-    classGroupMembers: Array.isArray(timetableData?.classGroupMembers) ? timetableData.classGroupMembers : [],
-    teacherCatalogs: Array.isArray(timetableData?.teacherCatalogs) ? timetableData.teacherCatalogs : [],
-    classroomCatalogs: Array.isArray(timetableData?.classroomCatalogs) ? timetableData.classroomCatalogs : [],
-  }), [timetableData]);
+  const displayTimetableRequest = useMemo(
+    () =>
+      displayRequest.mode === "timetable"
+        ? displayRequest
+        : successfulRequest?.mode === "timetable"
+          ? successfulRequest
+          : {
+              mode: "timetable" as const,
+              dateFrom: visibleRange.dateFrom,
+              dateTo: visibleRange.dateTo,
+              filters: {
+                classGroupId: null,
+                status: status || null,
+                subject: subject || null,
+              },
+            },
+    [
+      displayRequest,
+      successfulRequest,
+      visibleRange.dateFrom,
+      visibleRange.dateTo,
+      status,
+      subject,
+    ],
+  );
+  const data = useMemo(
+    () => ({
+      rows: Array.isArray(timetableData?.rows) ? timetableData.rows : [],
+      classSummaries: Array.isArray(timetableData?.classSummaries)
+        ? timetableData.classSummaries
+        : [],
+      classTerms: Array.isArray(timetableData?.classTerms)
+        ? timetableData.classTerms
+        : [],
+      classGroups: Array.isArray(timetableData?.classGroups)
+        ? timetableData.classGroups
+        : [],
+      classGroupMembers: Array.isArray(timetableData?.classGroupMembers)
+        ? timetableData.classGroupMembers
+        : [],
+      teacherCatalogs: Array.isArray(timetableData?.teacherCatalogs)
+        ? timetableData.teacherCatalogs
+        : [],
+      classroomCatalogs: Array.isArray(timetableData?.classroomCatalogs)
+        ? timetableData.classroomCatalogs
+        : [],
+    }),
+    [timetableData],
+  );
 
   const workspace = useMemo(
     () =>
@@ -255,7 +295,6 @@ export function AcademicTimetableWorkspace() {
         filters: displayTimetableRequest.filters,
       }),
     [
-      classGroupId,
       data.classGroupMembers,
       data.classGroups,
       data.classTerms,
@@ -264,15 +303,8 @@ export function AcademicTimetableWorkspace() {
       data.rows,
       data.teacherCatalogs,
       displayTimetableRequest,
-      status,
-      subject,
     ],
   );
-  const defaultPeriodId = useMemo(
-    () => pickDefaultPeriodValue(workspace.classGroupOptions),
-    [workspace.classGroupOptions],
-  );
-
   useEffect(() => {
     if (status && !workspace.statusOptions.includes(status)) {
       setStatus(workspace.statusOptions[0] || "수강");
@@ -280,15 +312,21 @@ export function AcademicTimetableWorkspace() {
   }, [status, workspace.statusOptions]);
 
   useEffect(() => {
-    setSelectedTeachers((current) => normalizeSelections(current, workspace.teacherOptions));
+    setSelectedTeachers((current) =>
+      normalizeSelections(current, workspace.teacherOptions),
+    );
   }, [workspace.teacherOptions]);
 
   useEffect(() => {
-    setSelectedClassrooms((current) => normalizeSelections(current, workspace.classroomOptions));
+    setSelectedClassrooms((current) =>
+      normalizeSelections(current, workspace.classroomOptions),
+    );
   }, [workspace.classroomOptions]);
 
   useEffect(() => {
-    setSelectedDays((current) => normalizeSelections(current, workspace.dayOptions));
+    setSelectedDays((current) =>
+      normalizeSelections(current, workspace.dayOptions),
+    );
   }, [workspace.dayOptions]);
 
   const subjectFilterOptions = useMemo(
@@ -303,30 +341,41 @@ export function AcademicTimetableWorkspace() {
         ? "강의실"
         : "요일";
 
-  const selectedTeacherSet = useMemo(() => new Set(selectedTeachers), [selectedTeachers]);
-  const selectedClassroomSet = useMemo(() => new Set(selectedClassrooms), [selectedClassrooms]);
+  const selectedTeacherSet = useMemo(
+    () => new Set(selectedTeachers),
+    [selectedTeachers],
+  );
+  const selectedClassroomSet = useMemo(
+    () => new Set(selectedClassrooms),
+    [selectedClassrooms],
+  );
   const selectedDaySet = useMemo(() => new Set(selectedDays), [selectedDays]);
 
-  const filteredRows = useMemo(
-    () => {
-      const hasSelectedTeachers = selectedTeacherSet.size > 0;
-      const hasSelectedClassrooms = selectedClassroomSet.size > 0;
-      const hasSelectedDays = selectedDaySet.size > 0;
+  const filteredRows = useMemo(() => {
+    const hasSelectedTeachers = selectedTeacherSet.size > 0;
+    const hasSelectedClassrooms = selectedClassroomSet.size > 0;
+    const hasSelectedDays = selectedDaySet.size > 0;
 
-      return workspace.rows.filter((row) => {
-        if (view === "teacher-weekly") {
-          return !hasSelectedTeachers || selectedTeacherSet.has(row.teacher);
-        }
+    return workspace.rows.filter((row) => {
+      if (view === "teacher-weekly") {
+        return !hasSelectedTeachers || selectedTeacherSet.has(row.teacher);
+      }
 
-        if (view === "classroom-weekly") {
-          return !hasSelectedClassrooms || selectedClassroomSet.has(row.classroom);
-        }
+      if (view === "classroom-weekly") {
+        return (
+          !hasSelectedClassrooms || selectedClassroomSet.has(row.classroom)
+        );
+      }
 
-        return !hasSelectedDays || selectedDaySet.has(row.day);
-      });
-    },
-    [selectedClassroomSet, selectedDaySet, selectedTeacherSet, view, workspace.rows],
-  );
+      return !hasSelectedDays || selectedDaySet.has(row.day);
+    });
+  }, [
+    selectedClassroomSet,
+    selectedDaySet,
+    selectedTeacherSet,
+    view,
+    workspace.rows,
+  ]);
 
   const axisSelectedTargets =
     view === "teacher-weekly"
@@ -363,17 +412,7 @@ export function AcademicTimetableWorkspace() {
     )}, minmax(0, 1fr))`,
   } as CSSProperties;
 
-  const toggleFilterValue = (
-    value: string,
-    currentValues: string[],
-    setter: Dispatch<SetStateAction<string[]>>,
-  ) => {
-    const hasValue = currentValues.includes(value);
-    setter(hasValue ? currentValues.filter((item) => item !== value) : [...currentValues, value]);
-  };
-
   const resetFilters = () => {
-    setClassGroupId(defaultPeriodId);
     setStatus("수강");
     setSubject("");
     setSelectedTeachers([]);
@@ -411,284 +450,263 @@ export function AcademicTimetableWorkspace() {
   }
 
   return (
-    <div className={`${styles.scope} flex flex-col gap-6 px-4 sm:px-5 lg:px-6`}>
+    <WorkspaceTabs
+      value={view}
+      onValueChange={(value) => setView(value as TimetableView)}
+      className={`${styles.scope} flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6`}
+    >
       {error ? (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
             <span>{error}</span>
-            <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => void refresh()}
+            >
               다시 시도
             </Button>
           </AlertDescription>
         </Alert>
       ) : null}
 
-      {densityError?.code === "visible_range_too_dense" ? (
-        <Alert variant="destructive">
-          <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>{densityError.range.dateFrom}~{densityError.range.dateTo} 범위의 시간표가 너무 많습니다. 기존 시간표를 유지했습니다.</span>
-            <Button type="button" size="sm" variant="outline" onClick={() => (rangeDays === 7 ? void refresh() : setRangeDays(7))}>
-              {rangeDays === 7 ? "한 주 다시 조회" : "한 주 보기"}
-            </Button>
-          </AlertDescription>
-        </Alert>
-      ) : null}
-
-      {densityError?.code === "timetable_collection_too_dense" ? (
+      {densityError ? (
         <Alert variant="destructive">
           <AlertDescription>
-            참조 항목이 많습니다. 기간·수업 상태·과목을 더 좁게 선택해 주세요. 기존 시간표는 유지됩니다.
+            시간표가 너무 많습니다. 과목을 선택해 조회 범위를 좁혀 주세요.
           </AlertDescription>
         </Alert>
       ) : null}
 
-      <div className="flex flex-col gap-4 border border-border/70 bg-background p-3 sm:p-4">
-        <div className="grid gap-3 lg:grid-cols-[12rem_minmax(0,1fr)_minmax(0,1fr)_9rem]">
-          <div className="min-w-0 space-y-2">
-            <Label htmlFor="period-filter" className="text-[11px] text-muted-foreground">기간</Label>
+      <div className="overflow-hidden rounded-xl border bg-card">
+        <div className="flex min-w-0 flex-wrap items-center justify-between gap-3 border-b p-3 sm:px-4">
+          <WorkspaceTabsList
+            aria-label="시간표 보기"
+            className="grid grid-cols-2 md:flex md:w-auto"
+          >
+            {VIEW_OPTIONS.map((option) => {
+              const Icon = option.icon;
+              return (
+                <WorkspaceTabsTrigger
+                  key={option.id}
+                  value={option.id}
+                  className="h-11 md:h-9"
+                >
+                  <Icon aria-hidden="true" />
+                  {option.label}
+                </WorkspaceTabsTrigger>
+              );
+            })}
+          </WorkspaceTabsList>
+          <div className="hidden items-center gap-2 xl:flex">
+            <Label htmlFor="timetable-layout" className="text-muted-foreground">
+              배치
+            </Label>
             <Select
-              value={classGroupId || defaultPeriodId || "none"}
-              disabled={workspace.classGroupOptions.length === 0}
-              onValueChange={(value) => {
-                if (value !== "none") {
-                  setClassGroupId(value);
-                }
-              }}
+              value={String(gridCount)}
+              onValueChange={(value) => setGridCount(Number(value))}
             >
-              <SelectTrigger id="period-filter" className="h-9 w-full rounded-md">
-                <SelectValue placeholder="기간" />
+              <SelectTrigger id="timetable-layout" className="w-24">
+                <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {workspace.classGroupOptions.length === 0 ? (
-                  <SelectItem value="none" disabled>
-                    기간 없음
+                {GRID_OPTIONS.map((count) => (
+                  <SelectItem key={count} value={String(count)}>
+                    {count}단
                   </SelectItem>
-                ) : (
-                  workspace.classGroupOptions.map((option) => (
-                    <SelectItem key={option.value} value={option.value}>
-                      {option.label}
-                    </SelectItem>
-                  ))
-                )}
+                ))}
               </SelectContent>
             </Select>
           </div>
-
-          <div className="min-w-0 space-y-2">
-            <Label className="text-[11px] text-muted-foreground">수업 상태</Label>
-            <div className="flex flex-wrap gap-2">
-              {workspace.statusOptions.map((option) => (
-                <Button
-                  key={option}
-                  type="button"
-                  variant={status === option ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setStatus(option)}
-                  className="h-9 shrink-0 rounded-md px-3 text-[12px] font-medium"
-                >
-                  {option}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          <div className="min-w-0 space-y-2">
-            <Label className="text-[11px] text-muted-foreground">과목</Label>
-            <div className="flex flex-wrap gap-2">
-              {subjectFilterOptions.map((option) => (
-                <Button
-                  key={option || "all-subjects"}
-                  type="button"
-                  variant={subject === option ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setSubject(option)}
-                  className="h-9 min-w-12 shrink-0 rounded-md px-3 text-[12px] font-medium"
-                >
-                  {option || "전체"}
-                </Button>
-              ))}
-            </div>
-          </div>
-
-          <div className="min-w-0 space-y-2">
-            <Label className="text-[11px] text-muted-foreground">레이아웃</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {GRID_OPTIONS.map((count) => {
-                const active = count === gridCount;
-                return (
-                  <Button
-                    key={count}
-                    type="button"
-                    variant={active ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setGridCount(count)}
-                    className="h-9 min-w-0 rounded-md px-2 text-[12px] font-medium"
-                  >
-                    {count}단
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
         </div>
-
-        <div className="grid gap-3 border-t border-border/70 pt-3 xl:grid-cols-[minmax(18rem,0.7fr)_minmax(0,1fr)_auto] xl:items-end">
-          <div className="min-w-0 space-y-2">
-            <Label className="text-[11px] text-muted-foreground">보기 전환</Label>
-            <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4">
-              {VIEW_OPTIONS.map((option) => {
-                const Icon = option.icon;
-                const active = option.id === view;
-                return (
-                  <Button
-                    key={option.id}
-                    type="button"
-                    variant={active ? "default" : "outline"}
-                    size="sm"
-                    onClick={() => setView(option.id)}
-                    className="h-8 min-w-0 justify-center rounded-md px-2 text-[11px] font-medium"
-                  >
-                    <Icon className="mr-1 size-3.5 shrink-0" />
-                    <span className="min-w-0 truncate">{option.label}</span>
-                  </Button>
-                );
-              })}
-            </div>
-          </div>
-
-          <div className="min-w-0 space-y-2">
-            <Label className="text-[11px] text-muted-foreground">{activeSubFilterLabel}</Label>
-            <div className="-mx-1 flex min-w-0 gap-1.5 overflow-x-auto px-1 pb-1 [scrollbar-width:thin]">
-              {(view === "teacher-weekly"
-                ? workspace.teacherOptions.map((option) => ({
-                    label: option,
-                    active: selectedTeachers.includes(option),
-                    onClick: () => toggleFilterValue(option, selectedTeachers, setSelectedTeachers),
-                  }))
-                : view === "classroom-weekly"
-                  ? workspace.classroomOptions.map((option) => ({
-                      label: option,
-                      active: selectedClassrooms.includes(option),
-                      onClick: () => toggleFilterValue(option, selectedClassrooms, setSelectedClassrooms),
-                    }))
-                  : workspace.dayOptions.map((option) => ({
-                      label: option,
-                      active: selectedDays.includes(option),
-                      onClick: () => toggleFilterValue(option, selectedDays, setSelectedDays),
-                    }))).map((option) => (
-                      <Button
-                        key={option.label}
-                        type="button"
-                        variant={option.active ? "default" : "outline"}
-                        size="sm"
-                        onClick={option.onClick}
-                        className="h-8 shrink-0 rounded-md px-2.5 text-[12px] font-medium whitespace-nowrap"
-                      >
-                        {option.label}
-                      </Button>
-                    ))}
-            </div>
-          </div>
-
-          <Button
-            type="button"
-            variant="ghost"
-            size="sm"
-            onClick={resetFilters}
-            className="h-8 shrink-0 rounded-md px-2.5 text-[12px] font-medium text-muted-foreground xl:self-end"
+        <div className="p-3 sm:px-4">
+          <DataTableFilterPanel
+            label="시간표 조건"
+            activeFilters={[
+              { label: "수업 상태", value: status },
+              ...(subject ? [{ label: "과목", value: subject }] : []),
+              ...(axisSelectedTargets.length
+                ? [
+                    {
+                      label: activeSubFilterLabel,
+                      value: axisSelectedTargets.join(", "),
+                    },
+                  ]
+                : []),
+            ]}
+            onReset={resetFilters}
+            canReset={
+              status !== "수강" ||
+              Boolean(subject) ||
+              axisSelectedTargets.length > 0
+            }
           >
-            필터 초기화
-          </Button>
+            <div
+              data-slot="data-table-filters"
+              className="grid grid-cols-1 items-end gap-3 md:grid-cols-[9rem_9rem_minmax(10rem,18rem)_auto]"
+            >
+              <div className="space-y-2">
+                <Label htmlFor="timetable-status">수업 상태</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger id="timetable-status" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {workspace.statusOptions.map((option) => (
+                      <SelectItem key={option} value={option}>
+                        {option}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="timetable-subject">과목</Label>
+                <Select
+                  value={subject || "all"}
+                  onValueChange={(value) =>
+                    setSubject(value === "all" ? "" : value)
+                  }
+                >
+                  <SelectTrigger id="timetable-subject" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {subjectFilterOptions.map((option) => (
+                      <SelectItem key={option || "all"} value={option || "all"}>
+                        {option || "전체 과목"}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <TimetableTargetFilter
+                key={activeSubFilterLabel}
+                label={activeSubFilterLabel}
+                options={
+                  view === "teacher-weekly"
+                    ? workspace.teacherOptions
+                    : view === "classroom-weekly"
+                      ? workspace.classroomOptions
+                      : workspace.dayOptions
+                }
+                selected={axisSelectedTargets}
+                onChange={
+                  view === "teacher-weekly"
+                    ? setSelectedTeachers
+                    : view === "classroom-weekly"
+                      ? setSelectedClassrooms
+                      : setSelectedDays
+                }
+              />
+              <Button
+                type="button"
+                variant="ghost"
+                className="hidden justify-self-end md:inline-flex"
+                onClick={resetFilters}
+                disabled={
+                  status === "수강" && !subject && !axisSelectedTargets.length
+                }
+              >
+                <RotateCcw aria-hidden="true" />
+                초기화
+              </Button>
+            </div>
+          </DataTableFilterPanel>
         </div>
       </div>
 
-      {filteredRows.length === 0 || grid.panels.length === 0 ? (
-        <div className="flex min-h-[420px] items-center justify-center border border-dashed border-border/60 bg-muted/10 px-6 text-center text-sm text-muted-foreground">
-          현재 조건에 맞는 시간표가 없습니다. 기간, 수업 상태, 과목을 확인해 주세요.
-        </div>
-      ) : (
-        <div
-          className="grid grid-cols-1 gap-6 lg:[grid-template-columns:var(--timetable-panel-columns)]"
-          style={panelGridStyle}
-        >
-          {grid.panels.map((panel) => {
-            const PanelIcon = iconForView(view);
-            const isSavingPanel = savingPanelId === panel.id;
-            const panelSummary = getTimetablePanelSummary(panel.blocks);
+      <WorkspaceTabsPanel
+        aria-label={VIEW_OPTIONS.find((option) => option.id === view)?.label}
+        aria-busy={loading}
+      >
+        {!dataMatchesCurrentScope && timetableData ? (
+          <p role="status" className="pb-3 text-sm text-muted-foreground">
+            {loading ? "시간표를 불러오는 중 · " : "이전 조회 결과 · "}
+            {displayTimetableRequest.filters.status || "전체 상태"} ·{" "}
+            {displayTimetableRequest.filters.subject || "전체 과목"}
+          </p>
+        ) : null}
+        {filteredRows.length === 0 || grid.panels.length === 0 ? (
+          <div className="flex min-h-64 items-center justify-center rounded-xl border bg-card px-6 text-center text-sm text-muted-foreground">
+            조건에 맞는 시간표가 없습니다.
+          </div>
+        ) : (
+          <div
+            className="grid grid-cols-1 gap-4 xl:[grid-template-columns:var(--timetable-panel-columns)]"
+            style={panelGridStyle}
+          >
+            {grid.panels.map((panel) => {
+              const isSavingPanel = savingPanelId === panel.id;
+              const panelSummary = getTimetablePanelSummary(panel.blocks);
 
-            return (
-              <section
-                key={panel.id}
-                className="relative min-w-0 overflow-hidden rounded-xl border border-border/70 bg-background shadow-sm"
-              >
-                <div
-                  ref={(node) => {
-                    timetablePanelRefs.current[panel.id] = node;
-                  }}
-                  className="min-w-0 bg-background"
+              return (
+                <section
+                  key={panel.id}
+                  className="relative min-w-0 overflow-hidden rounded-xl border bg-card"
                 >
-                  <div className="flex items-start gap-3 border-b border-border/70 bg-muted/15 px-4 py-3 pr-12 sm:items-center sm:pr-14">
-                    <div className="flex size-9 shrink-0 items-center justify-center rounded-md border border-border/70 bg-background text-muted-foreground">
-                      <PanelIcon className="size-4" />
-                    </div>
-                    <div className="flex min-w-0 flex-1 flex-col gap-1.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2">
-                      <p className="truncate text-sm font-semibold tracking-tight text-foreground">
-                        {panel.title}
-                      </p>
-                      <div className="flex max-w-full flex-wrap items-center gap-1.5">
-                        <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-                          수업 {panelSummary.lessonCount}개
-                        </span>
-                        <span className="inline-flex items-center rounded-full border border-border/70 bg-background px-2 py-0.5 text-[11px] font-semibold text-muted-foreground">
-                          주간 {panelSummary.weeklyHoursLabel}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
                   <div
-                    className={cn(
-                      "min-w-0 p-4",
-                      panelLayout.allowHorizontalScroll
-                        ? "overflow-x-auto"
-                        : "overflow-x-hidden",
-                    )}
+                    ref={(node) => {
+                      timetablePanelRefs.current[panel.id] = node;
+                    }}
+                    className="min-w-0 bg-background"
                   >
-                    <LegacyTimetableGrid
-                      columns={panel.columns}
-                      timeSlots={grid.timeSlots}
-                      blocks={panel.blocks}
-                      editable={false}
-                      density={panelLayout.density}
-                      slotHeight={panelLayout.slotHeight}
-                      timeColumnWidth={panelLayout.timeColumnWidth}
-                      minColumnWidth={panelLayout.minColumnWidth}
-                      fitColumns={panelLayout.fitColumns}
-                    />
-                  </div>
-                </div>
+                    <div className="flex min-h-16 flex-wrap items-center gap-x-3 gap-y-1 border-b px-4 py-3 pr-16">
+                      <h2 className="min-w-0 break-words text-base font-semibold tracking-tight">
+                        {panel.title}
+                      </h2>
+                      <p className="text-xs tabular-nums text-muted-foreground">
+                        수업 {panelSummary.lessonCount}개 ·{" "}
+                        {view.endsWith("weekly") ? "주간 " : ""}
+                        {panelSummary.weeklyHoursLabel}
+                      </p>
+                    </div>
 
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  aria-label={`${panel.title} 이미지 저장`}
-                  title="이미지 저장"
-                  disabled={Boolean(savingPanelId)}
-                  onClick={() => handleSavePanelImage(panel.id, panel.title)}
-                  className="absolute right-3 top-3 size-9 rounded-md border border-border/70 bg-background/95 shadow-sm"
-                >
-                  {isSavingPanel ? (
-                    <Loader2 className="size-4 animate-spin" />
-                  ) : (
-                    <ImageDown className="size-4" />
-                  )}
-                </Button>
-              </section>
-            );
-          })}
-        </div>
-      )}
-    </div>
+                    <div
+                      className={cn(
+                        "min-w-0 p-3",
+                        panelLayout.allowHorizontalScroll
+                          ? "overflow-x-auto"
+                          : "overflow-x-hidden",
+                      )}
+                    >
+                      <LegacyTimetableGrid
+                        columns={panel.columns}
+                        timeSlots={grid.timeSlots}
+                        blocks={panel.blocks}
+                        editable={false}
+                        density={panelLayout.density}
+                        slotHeight={panelLayout.slotHeight}
+                        timeColumnWidth={panelLayout.timeColumnWidth}
+                        minColumnWidth={panelLayout.minColumnWidth}
+                        fitColumns={panelLayout.fitColumns}
+                      />
+                    </div>
+                  </div>
+
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    aria-label={`${panel.title} 이미지 저장`}
+                    title="이미지 저장"
+                    disabled={Boolean(savingPanelId)}
+                    onClick={() => handleSavePanelImage(panel.id, panel.title)}
+                    className="absolute right-2 top-2 size-11 sm:right-3 sm:top-3 sm:size-9"
+                  >
+                    {isSavingPanel ? (
+                      <Loader2 className="size-4 animate-spin" />
+                    ) : (
+                      <ImageDown className="size-4" />
+                    )}
+                  </Button>
+                </section>
+              );
+            })}
+          </div>
+        )}
+      </WorkspaceTabsPanel>
+    </WorkspaceTabs>
   );
 }

@@ -140,28 +140,14 @@ test("admin navigation nests notification settings inside environment settings",
   assert.doesNotMatch(headerSource, /aria-label="알림"/);
 });
 
-test("environment settings expose explicit class groups without a period workspace", async () => {
-  const [legacySettingsRoute, legacyAdminRoute, groupWorkspaceSource] = await Promise.all([
-    readSource("src/app/admin/settings/terms/page.tsx"),
-    readSource("src/app/admin/terms/page.tsx"),
-    readSource("src/features/management/class-group-master-workspace.tsx"),
-  ]);
+test("retired class group and period settings are absent from navigation and routes", async () => {
+  const { existsSync } = await import("node:fs");
   const groups = buildAdminNavGroups(getRoleCapabilities("admin"));
-  const environmentSettings = groups
-    .find(({ label }) => label === "설정")
-    ?.items.find(({ title }) => title === "환경 설정");
-
-  assert.deepEqual(
-    environmentSettings?.items?.filter(({ url }) => url === "/admin/settings/class-groups"),
-    [{ title: "수업그룹 설정", url: "/admin/settings/class-groups" }],
-  );
-  assert.equal(environmentSettings?.items?.some(({ title }) => title.includes("기간")), false);
-  assert.equal(resolveAdminWorkspaceMeta("/admin/settings/class-groups").title, "수업그룹 설정");
-  assert.match(legacySettingsRoute, /redirect\("\/admin\/settings\/class-groups"\)/);
-  assert.match(legacyAdminRoute, /redirect\("\/admin\/settings\/class-groups"\)/);
-  assert.match(groupWorkspaceSource, /그룹명/);
-  assert.match(groupWorkspaceSource, /class-group-subject/);
-  assert.doesNotMatch(groupWorkspaceSource, /기간명|기간 추가|기본값으로 설정|readDefaultPeriodPreference|writeDefaultPeriodPreference|tips-settings-table:periods/);
+  const settings = groups.find(({ label }) => label === "설정")?.items.find(({ title }) => title === "환경 설정");
+  assert.equal(settings?.items?.some(({ url }) => /class-groups|terms/.test(url)), false);
+  for (const route of ["settings/class-groups", "settings/terms", "terms"]) {
+    assert.equal(existsSync(new URL(`../src/app/admin/${route}/page.tsx`, import.meta.url)), false);
+  }
 });
 
 test("role-based navigation exposes textbook requests to teachers without manager-only links", () => {

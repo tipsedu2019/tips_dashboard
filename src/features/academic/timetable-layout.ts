@@ -15,13 +15,13 @@ export function getTimetablePanelLayout({
 }: TimetablePanelLayoutInput) {
   const isWeeklyView =
     view === "teacher-weekly" || view === "classroom-weekly";
-  const fitWeeklyColumns = isWeeklyView && gridCount === 2;
+  const fitWeeklyColumns = isWeeklyView;
 
   return {
     allowHorizontalScroll: !fitWeeklyColumns && !isWeeklyView,
     fitColumns: fitWeeklyColumns,
     density: gridCount === 2 ? "compact" : "comfortable",
-    slotHeight: fitWeeklyColumns ? 28 : gridCount === 2 ? 30 : 38,
+    slotHeight: gridCount === 2 ? 32 : 38,
     timeColumnWidth: fitWeeklyColumns ? 76 : isWeeklyView ? 72 : 84,
     minColumnWidth: fitWeeklyColumns ? 0 : isWeeklyView ? 0 : 120,
   };

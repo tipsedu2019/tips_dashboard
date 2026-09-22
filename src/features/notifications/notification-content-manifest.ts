@@ -47,6 +47,7 @@ const WORD_RETEST_CELLS = [
   { audienceKey: "management_team", channelKey: "google_chat", ruleVariantKeys: IMMEDIATE },
 ] as const satisfies ReadonlyArray<NotificationContentRuleCell>
 
+// Historical template identities only. The approvals adapter and settings are retired.
 const APPROVAL_CELLS = [
   { audienceKey: "requester_profile", channelKey: "in_app", ruleVariantKeys: IMMEDIATE },
   { audienceKey: "approver_profile", channelKey: "in_app", ruleVariantKeys: IMMEDIATE },

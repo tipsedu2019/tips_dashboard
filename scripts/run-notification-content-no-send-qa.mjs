@@ -235,12 +235,12 @@ export async function runNotificationContentNoSendQa() {
         audience_key: identity.audienceKey,
       }
       const expected = buildGoogleChatCardPayload(context)
-      assert.equal(expected.ok, true)
+      assert.equal(expected.ok, identity.workflowKey !== "approvals")
       const beforeCalls = fakeFormattingCalls.length
       const sent = await provider.send(context)
-      if (["tasks", "word_retests"].includes(identity.workflowKey)) {
+      if (["tasks", "word_retests", "approvals"].includes(identity.workflowKey)) {
         assert.equal(sent.status, "failed")
-        assert.equal(sent.errorCode, identity.workflowKey === "tasks" ? "task_notifications_retired" : "word_retest_google_chat_retired")
+        assert.equal(sent.errorCode, identity.workflowKey === "approvals" ? "approvals_retired" : identity.workflowKey === "tasks" ? "task_notifications_retired" : "word_retest_google_chat_retired")
         assert.equal(fakeFormattingCalls.length, beforeCalls)
         retiredGoogleChatIdentityCount += 1
         continue

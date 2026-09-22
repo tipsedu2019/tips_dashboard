@@ -428,7 +428,7 @@ export function createAcademicReadService(options = {}) {
           client.rpc("get_academic_timetable_range_v1", {
             p_date_from: range.dateFrom,
             p_date_to: range.dateTo,
-            p_class_group_id: text(request.filters?.classGroupId) || null,
+            p_class_group_id: null,
             p_status: text(request.filters?.status) || null,
             p_subject: text(request.filters?.subject) || null,
           })

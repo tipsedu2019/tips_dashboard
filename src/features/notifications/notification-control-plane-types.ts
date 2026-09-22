@@ -12,10 +12,10 @@ export const NOTIFICATION_WORKFLOW_OPTIONS = [
   { key: "transfer", label: "전반" },
   { key: "withdrawal", label: "퇴원" },
   { key: "makeup_requests", label: "휴보강" },
-  { key: "approvals", label: "전자결재" },
 ] as const
 
-export type NotificationWorkflowKey = (typeof NOTIFICATION_WORKFLOW_OPTIONS)[number]["key"]
+// The retired key only identifies historical delivery records; it is never configurable.
+export type NotificationWorkflowKey = (typeof NOTIFICATION_WORKFLOW_OPTIONS)[number]["key"] | "approvals"
 
 // Retired workflows remain parseable only for historical delivery records.
 export const NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS = NOTIFICATION_WORKFLOW_OPTIONS.filter(
@@ -414,7 +414,7 @@ export type NotificationResult<T> =
   | { ok: true; value: T }
   | { ok: false; issues: ReadonlyArray<NotificationIssue> }
 
-const WORKFLOW_KEY_SET = new Set<string>(NOTIFICATION_WORKFLOW_OPTIONS.map(({ key }) => key))
+const WORKFLOW_KEY_SET = new Set<string>([...NOTIFICATION_WORKFLOW_OPTIONS.map(({ key }) => key), "approvals"])
 const AUDIENCE_KEY_SET = new Set<string>(NOTIFICATION_AUDIENCE_KEYS)
 const CHANNEL_KEY_SET = new Set<string>(NOTIFICATION_CHANNEL_KEYS)
 const EDITABLE_CHANNEL_KEY_SET = new Set<string>(NOTIFICATION_EDITABLE_CHANNEL_KEYS)
