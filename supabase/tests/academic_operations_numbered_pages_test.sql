@@ -63,13 +63,14 @@ insert into public.class_schedule_sync_group_members(group_id,class_id,sort_orde
  (pg_temp.fid(901),pg_temp.fid(301),0),(pg_temp.fid(901),pg_temp.fid(302),0);
 set constraints all immediate;
 
+update public.classes set schedule_storage_mode='normalized' where id in(select pg_temp.fid(n) from generate_series(201,204)n);
 select set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_name_snapshot,classroom_name_snapshot,origin,revision) values
  (pg_temp.fid(401),pg_temp.fid(201),'numbered-skipped','2199-01-01','skipped',null,null,'상태 교사','별4','manual',1),
  (pg_temp.fid(402),pg_temp.fid(202),'numbered-unlinked','2199-01-02','active',null,null,'상태 교사','별4','manual',1),
  (pg_temp.fid(403),pg_temp.fid(203),'numbered-planned','2199-01-03','active',null,null,'상태 교사','별4','manual',1),
  (pg_temp.fid(404),pg_temp.fid(203),'numbered-next','2199-01-04','active',null,null,'상태 교사','별4','manual',1),
- (pg_temp.fid(405),pg_temp.fid(204),'numbered-done','2199-01-05','active',null,null,'상태 교사','별4','manual',1);
+ (pg_temp.fid(405),pg_temp.fid(204),'numbered-done','2000-01-05','active',null,null,'상태 교사','별4','manual',1);
 select set_config('app.class_schedule_mutation','',true);
 insert into public.progress_logs(id,class_id,textbook_id,session_id,progress_key,status,content,date,updated_at) values
  (pg_temp.fid(501),pg_temp.fid(203),pg_temp.fid(920),null,'numbered-planned','partial','','2199-01-03',now()),
@@ -143,20 +144,20 @@ select is(public.get_operations_class_schedule_numbered_page_v1(pg_temp.of('{"se
 
 create temp table states as select public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"search":"__states__"}'),1,10) data;
 select is(data#>>'{stats,viewModeCounts,all}','4','all four classified candidates counted') from states;
-select is(data#>>'{stats,viewModeCounts,unscheduled}','1','skipped-only class is unscheduled before unlinked') from states;
-select is(data#>>'{stats,viewModeCounts,unlinked}','1','scheduled class without books is unlinked') from states;
-select is(data#>>'{stats,viewModeCounts,update}','1','partial planned vs2 sessions needs update') from states;
-select is(data#>>'{stats,viewModeCounts,done}','1','distinct completed class is done') from states;
-select is(data#>>'{rows,2,nextSession,sessionId}',pg_temp.fid(404)::text,'selected-page next session skips session-key match') from states;
-select is(data#>>'{rows,2,nextSession,sessionKey}','numbered-next','next session key is retained') from states;
-select is(data#>>'{rows,2,nextSession,periodLabel}','','nullable session times produce empty period label') from states;
-select is(data#>>'{rows,2,plannedSessions}','1','pending logs excluded from planned count') from states;
-select is(data#>>'{rows,3,plannedSessions}','2','same session_id dedupes and null key falls back to log ID') from states;
-select is(data#>>'{rows,3,progressPercent}','200','legacy planned aggregate may exceed100 percent') from states;
-select is(data#>'{rows,3,nextSession}','null'::jsonb,'UUID-text session match leaves no next session') from states;
+select is(data#>>'{stats,viewModeCounts,unscheduled}','1','skipped-only class is unscheduled') from states;
+select is(data#>>'{stats,viewModeCounts,unlinked}','0','retired book queue remains empty') from states;
+select is(data#>>'{stats,viewModeCounts,update}','1','past-only class needs a schedule extension') from states;
+select is(data#>>'{stats,viewModeCounts,done}','2','future schedules are ready regardless of progress logs') from states;
+select is(data#>>'{rows,2,nextSession,sessionId}',pg_temp.fid(403)::text,'next date includes a session with a progress log') from states;
+select is(data#>>'{rows,2,nextSession,sessionKey}','numbered-planned','next session key is retained') from states;
+select is(data#>>'{rows,2,nextSession,periodLabel}','','nullable times produce an empty period label') from states;
+select is(data#>>'{rows,2,plannedSessions}','0','future sessions are not elapsed') from states;
+select is(data#>>'{rows,3,plannedSessions}','1','past sessions count once regardless of duplicate logs') from states;
+select is(data#>>'{rows,3,progressPercent}','100','compatibility percentage cannot exceed schedule total') from states;
+select is(data#>'{rows,3,nextSession}','null'::jsonb,'past-only class has no upcoming session') from states;
 create temp table update_view as select public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"search":"__states__","viewMode":"update"}'),1,10) data;
 select is(data->>'totalCount','1','selected view total is filtered') from update_view;
-select is(data#>>'{stats,totalSessions}','2','selected-view stats use filtered candidates') from update_view;
+select is(data#>>'{stats,totalSessions}','1','selected-view stats use filtered candidates') from update_view;
 select is(data#>>'{stats,viewModeCounts,all}','4','view counts remain pre-view') from update_view;
 select is(data#>'{filterOptions,grades}','["고2","고3"]'::jsonb,'options use base before view selection') from update_view;
 select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.af('{"periodId":"__numbered_period_A__"}'),11,10)->>'resolvedPeriodId','__numbered_period_A__','explicit period name alias remains selector');

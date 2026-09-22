@@ -35,6 +35,7 @@ update public.classes set schedule_plan=jsonb_build_object('textbooks',jsonb_bui
  jsonb_build_object('id','legacy:invalid','date','2026-02-31','state','active')
 )) where id in(pg_temp.fid(1),pg_temp.fid(2),pg_temp.fid(3));
 update public.classes set schedule_plan=jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','past','date',(current_date-10)::text,'state','active'))) where id=pg_temp.fid(4);
+select set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(class_id,session_key,session_date,schedule_state,origin) values
 (pg_temp.fid(2),'ignored-shadow',current_date+2,'active','manual'),
 (pg_temp.fid(3),'normalized-future',current_date+3,'active','manual'),
@@ -44,7 +45,7 @@ create temporary table result as select public.get_academic_curriculum_numbered_
 select is((select (r->>'totalSessions')::int from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),2,'legacy count comes from valid saved sessions');
 select is((select (r->>'totalSessions')::int from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(2)::text),2,'shadow does not double count normalized copies');
 select is((select (r->>'totalSessions')::int from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(3)::text),1,'normalized storage uses authoritative rows and excludes skipped sessions');
-select is((select r#>>'{nextSession,id}' from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'legacy:future','legacy keys survive in next-session DTO');
+select is((select r#>>'{nextSession,sessionId}' from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'legacy:future','legacy keys survive in next-session DTO');
 select is((select r->>'stateLabel' from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'일정 편성','book assignments do not determine schedule readiness');
 select is((select r->>'stateLabel' from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(4)::text),'일정 연장 필요','past-only active class needs a new schedule');
 select is((select data#>>'{stats,noScheduleClassCount}' from result),'1','only truly empty class is unscheduled');

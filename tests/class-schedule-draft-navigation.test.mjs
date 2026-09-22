@@ -134,7 +134,7 @@ async function editor(t, route = 'class-schedule') {
   if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
   return page;
 }
-function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, billingPeriods: p.billingPeriods.map((period, index) => index ? period : {...period, label: name}) }))); }
+function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, billingPeriods: p.billingPeriods.map((period, index) => index ? period : {...period, color: name}) }))); }
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_'));
 async function finishSave(page, data = null, failRead = false) {
@@ -155,16 +155,16 @@ test('plan: same-class refreshed source preserves an authored draft', async t =>
   const page = await editor(t); await editPlan(page, 'ADDITIONAL INPUT');
   const next = detail(); next.classItem.schedulePlan.className = 'SERVER REFRESH';
   await refreshDetail(page, next);
-  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'ADDITIONAL INPUT');
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'ADDITIONAL INPUT');
 });
 test('plan: accepted save preserves input added while pending and failed re-read does not claim write failure', async t => {
   const page = await editor(t); await editPlan(page, 'SUBMITTED');
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 1);
-  assert.equal(saveRequests(page)[0].args.schedule_plan.billingPeriods[0].label, 'SUBMITTED');
+  assert.equal(saveRequests(page)[0].args.schedule_plan.billingPeriods[0].color, 'SUBMITTED');
   await editPlan(page, 'ADDED WHILE SAVING');
   await finishSave(page, null, true);
-  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'ADDED WHILE SAVING');
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'ADDED WHILE SAVING');
   assert.match(page.observed.lessonDesignSaveNotice, /저장/);
   assert.match(page.observed.lessonDesignSaveError, /다시 불러/);
   assert.equal(saveRequests(page).length, 1);
@@ -189,13 +189,13 @@ async function confirm(text) {
 }
 for (const route of ['class-schedule', 'curriculum', 'curriculum/lesson-design']) test(`${route}: clean read, revert, protected close and confirmed destination`, async t => {
   const page = await editor(t, route); assert.equal(dirty(), false);
-  const original = page.observed.lessonPlanDraft.billingPeriods[0].label;
+  const original = page.observed.lessonPlanDraft.billingPeriods[0].color;
   await editPlan(page, 'CHANGED'); assert.equal(dirty(), true);
   await editPlan(page, original); assert.equal(dirty(), false);
   await editPlan(page, 'KEEP');
   await act(async () => page.observed.requestLessonDesignClose());
   assert.ok(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'));
-  await confirm('계속 편집'); assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'KEEP');
+  await confirm('계속 편집'); assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'KEEP');
   await act(async () => page.observed.requestLessonDesignClose());
   await confirm('변경사항 버리기');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
@@ -203,13 +203,13 @@ for (const route of ['class-schedule', 'curriculum', 'curriculum/lesson-design']
   assert.equal(new URLSearchParams(window.location.search).has('classId'), false);
 });
 test('plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked', async t => {
-  const page = await editor(t), original = page.observed.lessonPlanDraft.billingPeriods[0].label;
+  const page = await editor(t), original = page.observed.lessonPlanDraft.billingPeriods[0].color;
   await editPlan(page, 'SUBMITTED');
   await act(async () => { void page.observed.handleSaveLessonPlan(); void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 1);
   await editPlan(page, original); assert.equal(dirty(), false);
   await finishSave(page);
-  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, original);
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, original);
   assert.equal(dirty(), true, 'the accepted value changed even though the user reverted before the response');
 });
 test('normalized session: unchanged/reverted draft is clean and accepted revision is reused', async t => {
@@ -235,12 +235,12 @@ test('plan: failed write retains its draft and a retry submits the current value
   const page = await editor(t); await editPlan(page, 'RETRY DRAFT');
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   await act(async () => saveRequests(page)[0].resolve({error: new Error('internal synthetic save error'), data: null}));
-  assert.equal(dirty(), true); assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'RETRY DRAFT');
+  assert.equal(dirty(), true); assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'RETRY DRAFT');
   assert.match(page.observed.lessonDesignSaveError, /다시 저장/);
   assert.equal(page.observed.lessonDesignSaveError.includes('internal'), false);
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 2);
-  assert.equal(saveRequests(page).at(-1).args.schedule_plan.billingPeriods[0].label, 'RETRY DRAFT');
+  assert.equal(saveRequests(page).at(-1).args.schedule_plan.billingPeriods[0].color, 'RETRY DRAFT');
 });
 test('actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled', async t => {
   const page = await editor(t); await editPlan(page, 'OLD ACTOR');

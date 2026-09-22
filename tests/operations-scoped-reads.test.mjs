@@ -907,8 +907,8 @@ test("operations workspaces issue mode requests and expose dense-range recovery 
   assert.match(annual, /resolveAnnualBoardEntryParentId/);
   assert.match(schedule, /mode:\s*"class_schedule"/);
   assert.match(schedule, /loadClassLessonDesignDetail/);
-  assert.match(schedule, /loadLessonTextbookCandidates/);
-  assert.match(schedule, /lessonTextbookCandidatePage/);
+  assert.doesNotMatch(schedule, /loadLessonTextbookCandidates/);
+  assert.doesNotMatch(schedule, /lessonTextbookCandidatePage/);
   assert.match(schedule, /isLessonDesignRouteActive\s*&&/);
   assert.doesNotMatch(schedule, /data\.classes\.filter/);
 });

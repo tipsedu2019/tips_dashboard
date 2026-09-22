@@ -143,7 +143,13 @@ begin
       coalesce(nullif(pg_catalog.btrim(class.name), ''), U&'\FFFF') collate dashboard_private.ko_numeric as sort_key
     from public.classes class
     left join public.class_terms term on term.id = class.term_id
-    where true
+    where (nullif(pg_catalog.btrim(v_filters ->> 'periodId'), '') is null or exists (
+        select 1
+        from public.class_schedule_sync_group_members member
+        join public.class_schedule_sync_groups group_row on group_row.id = member.group_id
+        where member.class_id = class.id
+          and (member.group_id::text = v_filters ->> 'periodId' or group_row.name = v_filters ->> 'periodId')
+      ))
       and (nullif(pg_catalog.btrim(v_filters ->> 'status'), '') is null
         or dashboard_private.academic_class_status_v1(class.status, nullif(pg_catalog.btrim(class.start_date), '')::date, nullif(pg_catalog.btrim(class.end_date), '')::date) = pg_catalog.btrim(v_filters ->> 'status'))
       and (nullif(pg_catalog.btrim(v_filters ->> 'subject'), '') is null or pg_catalog.btrim(class.subject) = pg_catalog.btrim(v_filters ->> 'subject'))
@@ -356,7 +362,7 @@ begin
     'totalCount', (select pg_catalog.count(*) from filtered),
     'stats', case when p_include_scope_metadata then (select data from stats) else null end,
     'filterOptions', case when p_include_scope_metadata then (select data from filter_options) else null end,
-    'resolvedPeriodId', null
+    'resolvedPeriodId', v_filters ->> 'periodId'
   ) into v_result;
 
   return v_result;
