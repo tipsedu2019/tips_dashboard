@@ -524,6 +524,11 @@
       "fileName": "20260922105632_registration_multiple_textbooks.sql",
       "status": "final",
       "sha256": "ac78bfbe76c223ae9467b1c70809aeebc8a431ee85954e65c3b60b80748314d9"
+    },
+    {
+      "fileName": "20260922140000_class_detail_roster_counts.sql",
+      "status": "final",
+      "sha256": "8752e43ff7a3dcb4f605455bf24e2808ff297f16ab8732fd5afddb12dfc9d932"
     }
   ]
 }

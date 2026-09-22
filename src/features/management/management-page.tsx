@@ -3249,8 +3249,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   const renderClassSummaryBar = () => {
     if (kind !== "classes" || !selectedRow) return null;
     const raw = selectedRow.raw || {};
-    const registeredCount = getClassEnrolledStudentIds(selectedRow).length;
-    const waitlistCount = getClassWaitlistStudentIds(selectedRow).length;
+    const registeredCount = typeof raw.registered_count === "number" ? raw.registered_count : null;
+    const waitlistCount = typeof raw.waitlist_count === "number" ? raw.waitlist_count : null;
     const capacity = Number(raw.capacity || selectedRow.metrics.capacity || 0);
     const teacher = text(form.teacher || raw.teacher || raw.teacher_name || raw.teacherName) || "담당 미정";
     const classroom = text(form.classroom || raw.classroom || raw.room) || "강의실 미정";
@@ -3263,8 +3263,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       { label: "강의실", value: classroom },
     ];
     const capacitySummary = capacity > 0
-      ? `${registeredCount}명 (${waitlistCount}명) / ${capacity}명`
-      : `${registeredCount}명 (${waitlistCount}명)`;
+      ? `${registeredCount === null ? "등록 인원 확인 중" : `${registeredCount}명`} (${waitlistCount === null ? "대기 인원 확인 중" : `${waitlistCount}명`}) / ${capacity}명`
+      : `${registeredCount === null ? "등록 인원 확인 중" : `${registeredCount}명`} (${waitlistCount === null ? "대기 인원 확인 중" : `${waitlistCount}명`})`;
 
     return (
       <div data-testid="class-official-summary-bar" className="class-detail-header border-b bg-background">
