@@ -209,6 +209,7 @@ export type RegistrationEnrollmentDraft = {
   clientKey: string
   classId: string
   textbookId: string
+  textbookIds: string[]
   textbookExplicitlyCleared: boolean
   classStartDate: string
   classStartSessionKey: string
@@ -252,6 +253,7 @@ export type RegistrationEnrollmentSerializedRow = {
   id?: string
   classId: string
   textbookId: string | null
+  textbookIds: string[]
   classStartDate: string | null
   classStartSessionKey: string | null
   classStartLessonSessionId: string | null
@@ -315,8 +317,9 @@ export type RegistrationEnrollmentBlocker = {
 
 export function createRegistrationEnrollmentDraft(input?: Partial<RegistrationEnrollmentDraft>): RegistrationEnrollmentDraft
 
-export function restoreRegistrationEnrollmentDraft(input?: Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession" | "classStartSourceObservationId"> & {
+export function restoreRegistrationEnrollmentDraft(input?: Omit<Partial<RegistrationEnrollmentDraft>, "textbookIds" | "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession" | "classStartSourceObservationId"> & {
   textbookId?: string | null
+  textbookIds?: readonly string[]
   classStartDate?: string | null
   classStartSessionKey?: string | null
   classStartLessonSessionId?: string | null
@@ -371,11 +374,12 @@ export function serializeRegistrationEnrollmentRows(
 
 export function mergeSavedRegistrationEnrollmentRows(
   localRows?: readonly RegistrationEnrollmentDraft[],
-  savedRows?: readonly (Omit<Partial<RegistrationEnrollmentDraft>, "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession" | "classStartSourceObservationId"> & {
+  savedRows?: readonly (Omit<Partial<RegistrationEnrollmentDraft>, "textbookIds" | "textbookId" | "classStartDate" | "classStartSessionKey" | "classStartLessonSessionId" | "classStartSession" | "classStartSourceObservationId"> & {
     textbookId?: string | null
+    textbookIds?: readonly string[]
     classStartDate?: string | null
-  classStartSessionKey?: string | null
-  classStartLessonSessionId?: string | null
+    classStartSessionKey?: string | null
+    classStartLessonSessionId?: string | null
     classStartSession?: string | null
     classStartSourceObservationId?: string | null
   })[],
@@ -527,3 +531,5 @@ export function deriveRegistrationParentState(input?: {
   taskStatus: "requested" | "in_progress" | "done" | "canceled"
   outcome: "" | "all_registered" | "partial_registration" | "none_registered"
 }
+
+export function getRegistrationEnrollmentTextbookIds(row?: { textbookId?: string | null; textbookIds?: readonly string[] | null }): string[]

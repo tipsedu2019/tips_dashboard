@@ -319,17 +319,22 @@ export function getRegistrationWaitingDetailsDraft(track = {}) {
   }
 }
 
+export function getRegistrationEnrollmentTextbookIds(row = {}) {
+  const values = Array.isArray(row?.textbookIds) ? row.textbookIds : [row?.textbookId]
+  return [...new Set(values.map(enrollmentText).filter(Boolean))]
+}
+
 export function createRegistrationEnrollmentDraft({
   id = null,
   clientKey,
   sortOrder = 0,
   ...initial
 } = {}) {
+  const textbookIds = getRegistrationEnrollmentTextbookIds(initial)
   return {
     id: id || null,
     clientKey: enrollmentText(clientKey) || enrollmentText(id) || createEnrollmentClientKey(),
     classId: "",
-    textbookId: "",
     textbookExplicitlyCleared: false,
     classStartDate: "",
     classStartSessionKey: "",
@@ -341,6 +346,8 @@ export function createRegistrationEnrollmentDraft({
     rosterActive: false,
     sortOrder,
     ...initial,
+    textbookId: textbookIds[0] || "",
+    textbookIds,
   }
 }
 
@@ -351,7 +358,8 @@ export function restoreRegistrationEnrollmentDraft(enrollment = {}) {
     id: id || null,
     clientKey: enrollmentText(enrollment?.clientKey) || id || undefined,
     textbookId: enrollmentText(enrollment?.textbookId),
-    textbookExplicitlyCleared: Boolean(id) && enrollment?.textbookId == null,
+    textbookExplicitlyCleared: (Boolean(id) || Array.isArray(enrollment?.textbookIds))
+      && getRegistrationEnrollmentTextbookIds(enrollment).length === 0,
     classStartDate: enrollmentText(enrollment?.classStartDate),
     classStartSessionKey: enrollmentText(enrollment?.classStartSessionKey),
     classStartLessonSessionId: enrollmentText(enrollment?.classStartLessonSessionId),
@@ -538,6 +546,7 @@ export function applyRegistrationEnrollmentClassSelection(row, input = {}) {
     ...row,
     classId: enrollmentText(input.classItem?.id),
     textbookId: linkedTextbookIds.find((id) => availableTextbookIds.has(id)) || "",
+    textbookIds: linkedTextbookIds.filter((id) => availableTextbookIds.has(id)).slice(0, 1),
     textbookExplicitlyCleared: false,
     classStartDate: "",
     classStartSessionKey: "",
@@ -551,7 +560,8 @@ export function serializeRegistrationEnrollmentRows(rows = []) {
   return rows.map((row, index) => {
     const serialized = {
       classId: enrollmentText(row?.classId),
-      textbookId: enrollmentText(row?.textbookId) || null,
+      textbookId: getRegistrationEnrollmentTextbookIds(row)[0] || null,
+      textbookIds: getRegistrationEnrollmentTextbookIds(row),
       classStartDate: enrollmentText(row?.classStartDate) || null,
       classStartSessionKey: enrollmentText(row?.classStartSessionKey) || null,
       classStartLessonSessionId: enrollmentText(row?.classStartLessonSessionId) || null,
@@ -639,15 +649,16 @@ export function getRegistrationEnrollmentBlockers(input = {}) {
       activeClassIds.add(classId)
     }
 
-    const textbookId = enrollmentText(row?.textbookId)
-    if (validateTextbooks && textbookId && !availableTextbookIds.has(textbookId)) {
-      blockers.push({ rowId, field: "textbookId", message: "선택할 수 없는 교재" })
-    } else if (textbookId) {
-      const validTextbookIds = textbookIdsByClassId instanceof Map
-        ? textbookIdsByClassId.get(classId)
-        : textbookIdsByClassId[classId]
-      if (Array.isArray(validTextbookIds) && !validTextbookIds.map(enrollmentText).includes(textbookId)) {
-        blockers.push({ rowId, field: "textbookId", message: "선택한 수업에 연결되지 않은 교재" })
+    for (const textbookId of getRegistrationEnrollmentTextbookIds(row)) {
+      if (validateTextbooks && textbookId && !availableTextbookIds.has(textbookId)) {
+        blockers.push({ rowId, field: "textbookId", message: "선택할 수 없는 교재" })
+      } else if (textbookId) {
+        const validTextbookIds = textbookIdsByClassId instanceof Map
+          ? textbookIdsByClassId.get(classId)
+          : textbookIdsByClassId[classId]
+        if (Array.isArray(validTextbookIds) && !validTextbookIds.map(enrollmentText).includes(textbookId)) {
+          blockers.push({ rowId, field: "textbookId", message: "선택한 수업에 연결되지 않은 교재" })
+        }
       }
     }
 

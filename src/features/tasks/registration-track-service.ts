@@ -245,6 +245,7 @@ export type OpsRegistrationEnrollment = {
   admissionBatchId: string | null
   classId: string
   textbookId: string | null
+  textbookIds?: string[]
   classStartDate: string | null
   classStartSessionKey: string | null
   classStartLessonSessionId: string | null
@@ -727,6 +728,7 @@ export type RegistrationEnrollmentRowInput = Readonly<{
   id?: string
   classId: string
   textbookId?: string | null
+  textbookIds?: readonly string[]
   classStartDate?: string | null
   classStartSessionKey?: string | null
   classStartLessonSessionId?: string | null
@@ -1300,6 +1302,7 @@ function mapRegistrationEnrollmentRowInput(row: Row): RegistrationEnrollmentRowI
     ...(id ? { id } : {}),
     classId: text(value(row, "classId", "class_id")),
     textbookId: nullableText(value(row, "textbookId", "textbook_id")),
+    textbookIds: registrationEnrollmentTextbookIds(row),
     classStartDate: nullableText(value(row, "classStartDate", "class_start_date")),
     classStartSessionKey: nullableText(value(row, "classStartSessionKey", "class_start_session_key")),
     classStartLessonSessionId: nullableText(value(row, "classStartLessonSessionId", "class_start_lesson_session_id")),
@@ -1425,6 +1428,7 @@ function mapEnrollment(row: Row): OpsRegistrationEnrollment {
     admissionBatchId: nullableText(value(row, "admission_batch_id", "admissionBatchId")),
     classId: text(value(row, "class_id", "classId")),
     textbookId: nullableText(value(row, "textbook_id", "textbookId")),
+    textbookIds: registrationEnrollmentTextbookIds(row),
     classStartDate: nullableText(value(row, "class_start_date", "classStartDate")),
     classStartSessionKey: nullableText(value(row, "class_start_session_key", "classStartSessionKey")),
     classStartLessonSessionId: nullableText(value(row, "class_start_lesson_session_id", "classStartLessonSessionId")),
@@ -1829,11 +1833,19 @@ function normalizeUuid(input: unknown) {
   return normalized && UUID_PATTERN.test(normalized) ? normalized : null
 }
 
+function registrationEnrollmentTextbookIds(row: Row) {
+  const ids = value(row, "textbookIds", "textbook_ids")
+  return Array.isArray(ids)
+    ? [...new Set(ids.map(text).filter(Boolean))]
+    : [nullableText(value(row, "textbookId", "textbook_id"))].filter((id): id is string => Boolean(id))
+}
+
 function registrationEnrollmentRowPayload(row: RegistrationEnrollmentRowInput) {
   return {
     id: normalizeUuid(row.id),
     classId: row.classId,
-    textbookId: normalizeUuid(row.textbookId),
+    textbookId: normalizeUuid(row.textbookIds ? row.textbookIds[0] : row.textbookId),
+    ...(row.textbookIds ? { textbookIds: [...row.textbookIds] } : {}),
     classStartDate: nullableText(row.classStartDate),
     classStartSessionKey: nullableText(row.classStartSessionKey),
     classStartLessonSessionId: normalizeUuid(row.classStartLessonSessionId),
@@ -2608,7 +2620,7 @@ export function createRegistrationTrackService(
           const [loadedCurrentEnrollmentPage, enrollmentHistoryRows] = await Promise.all([
             queryCountedRows(
               client.from("ops_registration_enrollments")
-                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
+                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
                 .in("track_id", trackIds)
                 .or("status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)")
                 .order("created_at", { ascending: false })
@@ -2622,7 +2634,7 @@ export function createRegistrationTrackService(
             ),
             queryRows(
               client.from("ops_registration_enrollments")
-                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
+                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
                 .in("track_id", trackIds)
                 .or("status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)")
                 .order("updated_at", { ascending: false })
@@ -4361,6 +4373,8 @@ export function saveRegistrationEnrollmentRows(
 export function saveRegistrationEnrollmentDetails(
   input: Parameters<typeof defaultRegistrationTrackService.saveRegistrationEnrollmentDetails>[0],
 ) {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<Awaited<ReturnType<typeof defaultRegistrationTrackService.saveRegistrationEnrollmentDetails>>>("saveRegistrationEnrollmentDetails", input)
+  if (fixture) return fixture
   return defaultRegistrationTrackService.saveRegistrationEnrollmentDetails(input)
 }
 

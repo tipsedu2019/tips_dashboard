@@ -286,6 +286,7 @@ async function loadMountedRegistrationEnrollmentEditor({
     ["@/components/ui/textarea", { Textarea }],
     ["./registration-admission-progress", { RegistrationAdmissionChecklist: Wrapper }],
     ["./registration-select", { RegistrationSelect }],
+    ["./registration-textbook-select", { RegistrationTextbookSelect: Wrapper }],
     ["./registration-save-button", { RegistrationSaveButton }],
     ["./ops-task-service", { loadOpsRegistrationClassDetails: loadClassDetails }],
     ["./registration-track-model.js", registrationTrackModel],
@@ -1467,7 +1468,7 @@ test("case list renders application-scoped desktop and mobile rows", async () =>
   assert.match(source, /waitingDetailKind/);
   assert.match(source, /enrollmentDetailRows/);
   assert.match(source, /classLabelById\.get\(row\.classId\) \|\| "수업 정보 확인 필요"/);
-  assert.match(source, /textbookLabelById\.get\(row\.textbookId\) \|\| "교재 정보 확인 필요"/);
+  assert.match(source, /textbookLabelById\.get\(id\) \|\| "교재 정보 확인 필요"/);
 });
 
 test("level-test list uses only active canonical appointment values", async () => {
@@ -3954,7 +3955,7 @@ test("enrollment editor supports stable repeated subject rows and exact class de
   assert.match(source, /classDetailById/)
   assert.match(source, /loadingClassIds/)
   assert.match(source, /new Set\(draftRows\.map/)
-  assert.match(source, /선택 안 함 · 이미 보유/)
+  assert.match(await readFile(new URL("../src/features/tasks/registration-textbook-select.tsx", import.meta.url), "utf8"), /선택 안 함 · 이미 보유/)
   assert.match(source, /textbookExplicitlyCleared/)
   assert.match(source, /getSelectableRegistrationScheduleSessions/)
   assert.match(source, /saveRegistrationEnrollmentDetails/)
@@ -4203,6 +4204,7 @@ test("mounted observation first lesson keeps a regular override through refresh 
     assert.deepEqual(saveCalls[0].rows, [{
       classId: MOUNTED_REGISTRATION_CLASS_ID,
       textbookId: null,
+      textbookIds: [],
       classStartDate: "2026-08-24",
       classStartSessionKey: MOUNTED_REGISTRATION_FUTURE_SESSION_KEY,
       classStartLessonSessionId: MOUNTED_REGISTRATION_FUTURE_LESSON_ID,
@@ -5146,4 +5148,45 @@ test("saved-detail descendants use shared dashboard controls instead of native c
   ]) {
     assert.match(sourceByFile[file], /from "@\/components\/ui\/alert"/)
   }
+})
+
+
+test("mounted enrollment editor saves multiple textbooks and retains them after a failed save", async () => {
+  const hookHarness = createRegistrationEditorHookHarness()
+  const books = ["76000000-0000-4000-8000-000000000081", "76000000-0000-4000-8000-000000000082"]
+  const saves = []
+  const details = mountedRegistrationClassDetails()
+  details[MOUNTED_REGISTRATION_CLASS_ID].textbookIds = books
+  const Editor = await loadMountedRegistrationEnrollmentEditor({
+    hookHarness, loadObservation: async () => null, loadClassDetails: async () => details,
+    saveEnrollmentDetails: async (input) => {
+      saves.push(input)
+      if (saves.length === 1) throw new Error("일시적인 저장 오류")
+      return { trackId: input.trackId, rows: input.rows, externalReconciliationRequired: false }
+    },
+  })
+  const props = mountedRegistrationEditorProps({
+    classes: [{ id: MOUNTED_REGISTRATION_CLASS_ID, label: "중2 영어 A반", subject: "영어", textbookIds: books }],
+    textbooks: books.map((id, index) => ({ id, label: `교재 ${index + 1}` })),
+  })
+  const render = () => { hookHarness.flushEffects(); return hookHarness.render(Editor, props) }
+  const select = (view) => findMountedRegistrationElement(view, (el) => el.props.label === "영어 수업 1 교재 선택", "multiple textbook selection")
+  const save = (view) => findMountedRegistrationElement(view, (el) => el.props["aria-label"] === "영어 등록 정보 저장", "save")
+  try {
+    let view = render(); hookHarness.flushEffects()
+    findMountedRegistrationElement(view, (el) => el.props["aria-label"] === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    view = render(); hookHarness.flushEffects(); await flushMountedRegistrationWork()
+    view = render(); hookHarness.flushEffects(); view = render()
+    select(view).props.onValuesChange(books)
+    view = render(); save(view).props.onClick(); await flushMountedRegistrationWork(); view = render()
+    assert.deepEqual(select(view).props.values, books, "failed save preserves both draft selections")
+    save(view).props.onClick(); await flushMountedRegistrationWork(); view = render()
+    assert.deepEqual(saves[1].rows[0].textbookIds, books)
+    assert.deepEqual(select(view).props.values, books, "successful response hydration preserves both")
+    select(view).props.onValuesChange([]); view = render(); hookHarness.flushEffects(); view = render()
+    assert.deepEqual(select(view).props.values, [], "explicit clearing does not reapply the default")
+    hookHarness.flushEffects()
+    const readOnly = hookHarness.render(Editor, { ...props, permissions: { canManage: false } })
+    assert.equal(select(readOnly).props.disabled, true)
+  } finally { hookHarness.cleanup() }
 })

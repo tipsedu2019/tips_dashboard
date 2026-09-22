@@ -3350,6 +3350,7 @@ test("every fixture UI mutation is declared and produces an idempotency receipt"
     "transitionRegistrationWaiting",
     "routeRegistrationEnrollmentDecision",
     "saveRegistrationEnrollmentRows",
+    "saveRegistrationEnrollmentDetails",
     "cancelRegistrationEnrollment",
     "startRegistrationAdmissionBatch",
     "setRegistrationEnrollmentMakeedu",

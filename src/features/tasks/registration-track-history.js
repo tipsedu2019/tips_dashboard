@@ -1,3 +1,4 @@
+import { getRegistrationEnrollmentTextbookIds } from "./registration-track-model.js";
 import { sortAcademicSubjects } from "../../lib/academic-subject-registry.ts";
 
 function text(value) {
@@ -322,7 +323,7 @@ function snapshotDescription(event) {
   for (const row of list(metadata.rows).map(record)) {
     const rowParts = [
       text(row.classId) ? `수업: ${text(row.classId)}` : "",
-      text(row.textbookId) ? `교재: ${text(row.textbookId)}` : "교재 없음",
+      getRegistrationEnrollmentTextbookIds(row).length ? `교재: ${getRegistrationEnrollmentTextbookIds(row).join(", ")}` : "교재 없음",
       text(row.classStartDate) ? `수업 시작일: ${text(row.classStartDate)}` : "",
       text(row.classStartSession) ? `회차: ${text(row.classStartSession)}` : "",
       text(row.status) ? `상태: ${displayValue(row.status)}` : "",
@@ -333,7 +334,7 @@ function snapshotDescription(event) {
   if (Object.keys(enrollmentSnapshot).length > 0) {
     const enrollmentParts = [
       text(enrollmentSnapshot.classId) ? `기존 수업: ${text(enrollmentSnapshot.classId)}` : "",
-      text(enrollmentSnapshot.textbookId) ? `기존 교재: ${text(enrollmentSnapshot.textbookId)}` : "기존 교재 없음",
+      getRegistrationEnrollmentTextbookIds(enrollmentSnapshot).length ? `기존 교재: ${getRegistrationEnrollmentTextbookIds(enrollmentSnapshot).join(", ")}` : "기존 교재 없음",
       text(enrollmentSnapshot.admissionBatchId) ? `등록 묶음: ${text(enrollmentSnapshot.admissionBatchId)}` : "",
       text(enrollmentSnapshot.classStartDate) ? `수업 시작일: ${text(enrollmentSnapshot.classStartDate)}` : "",
       text(enrollmentSnapshot.classStartSession) ? `회차: ${text(enrollmentSnapshot.classStartSession)}` : "",
@@ -846,7 +847,7 @@ export function buildRegistrationSubjectHistory(detail = {}) {
       subjects: [subjectByTrackId.get(text(enrollment.trackId))],
       title: "수강 등록",
       description: [text(enrollment.classId), displayValue(enrollment.status)].filter(Boolean).join(" · "),
-      metadata: { enrollmentId: enrollment.id, batchId: enrollment.admissionBatchId, textbookId: enrollment.textbookId },
+      metadata: { enrollmentId: enrollment.id, batchId: enrollment.admissionBatchId, textbookId: enrollment.textbookId, textbookIds: getRegistrationEnrollmentTextbookIds(enrollment) },
       actorKind: "migration",
       timeKind: "unavailable",
       origin: "migration",

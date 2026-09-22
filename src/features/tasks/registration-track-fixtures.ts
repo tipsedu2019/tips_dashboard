@@ -99,6 +99,7 @@ export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
   "transitionRegistrationWaiting",
   "routeRegistrationEnrollmentDecision",
   "saveRegistrationEnrollmentRows",
+  "saveRegistrationEnrollmentDetails",
   "cancelRegistrationEnrollment",
   "startRegistrationAdmissionBatch",
   "setRegistrationEnrollmentMakeedu",
@@ -1848,7 +1849,8 @@ function enrollment(input: Partial<OpsRegistrationEnrollment> & Pick<OpsRegistra
     studentId: input.studentId ?? null,
     admissionBatchId: input.admissionBatchId ?? null,
     classId: input.classId,
-    textbookId: input.textbookId ?? null,
+    textbookId: input.textbookIds ? input.textbookIds[0] ?? null : input.textbookId ?? null,
+    textbookIds: input.textbookIds ?? (input.textbookId ? [input.textbookId] : []),
     classStartDate: input.classStartDate ?? "2026-07-20",
     classStartSessionKey: input.classStartSessionKey ?? "2026-07-20:1",
     classStartLessonSessionId: input.classStartLessonSessionId ?? null,
@@ -2409,7 +2411,7 @@ function createRegistrationObservationFixtureState(): RegistrationObservationFix
 
 export function createRegistrationSubjectTrackFixtureState(): RegistrationSubjectTrackFixtureState {
   const classDetails = {
-    "fixture-class-eng-a": classOption({ id: "fixture-class-eng-a", label: "고1 영어 정규 A", subject: "영어", textbookIds: ["fixture-textbook-eng-a"], startDate: "2026-07-20" }),
+    "fixture-class-eng-a": classOption({ id: "fixture-class-eng-a", label: "고1 영어 정규 A", subject: "영어", textbookIds: ["fixture-textbook-eng-a", "fixture-textbook-eng-special"], startDate: "2026-07-20" }),
     "fixture-class-eng-special": classOption({ id: "fixture-class-eng-special", label: "고1 영어 특강", subject: "영어", textbookIds: ["fixture-textbook-eng-special"], startDate: "2026-07-21" }),
     "fixture-class-math-a": classOption({ id: "fixture-class-math-a", label: "고1 수학 정규 A", subject: "수학", textbookIds: ["fixture-textbook-math-a"], startDate: "2026-07-20" }),
     "fixture-class-science-a": classOption({ id: "fixture-class-science-a", label: "고1 과학 정규 A", subject: "과학", textbookIds: ["fixture-textbook-science-a"], startDate: "2026-07-20" }),
@@ -4194,15 +4196,27 @@ export function reduceRegistrationSubjectTrackFixture(
       result = transitionResult(selected)
       break
     }
+    case "saveRegistrationEnrollmentDetails":
     case "saveRegistrationEnrollmentRows": {
       const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
       const trackId = asText(payload, "trackId")
+      const selectedTrack = detail.tracks.find((item) => item.id === trackId)
+      if (command.type === "saveRegistrationEnrollmentDetails" && detail.enrollments.some((item) => (
+        item.trackId === trackId && (item.admissionBatchId || item.rosterActive)
+      ))) {
+        const rows = clone(payload.rows as NonNullable<OpsRegistrationTrackSummary["enrollmentDetailRows"]>)
+        if (selectedTrack) selectedTrack.enrollmentDetailRows = rows
+        syncCase(state, detail)
+        result = { trackId, rows, externalReconciliationRequired: true }
+        break
+      }
       const immutable = detail.enrollments.filter((item) => item.trackId !== trackId || item.admissionBatchId || item.status !== "planned")
       const rows = (payload.rows as Array<Record<string, unknown>> || []).map((row, index) => enrollment({
         id: String(row.id || `fixture-enrollment-${trackId}-${index + 1}`),
         trackId,
         classId: String(row.classId || ""),
         textbookId: row.textbookId ? String(row.textbookId) : null,
+        textbookIds: Array.isArray(row.textbookIds) ? row.textbookIds.map(String) : undefined,
         classStartDate: row.classStartDate ? String(row.classStartDate) : null,
         classStartSessionKey: row.classStartSessionKey ? String(row.classStartSessionKey) : null,
         classStartSession: row.classStartSession ? String(row.classStartSession) : null,
@@ -4210,8 +4224,9 @@ export function reduceRegistrationSubjectTrackFixture(
         status: "planned",
       }))
       detail.enrollments = [...immutable, ...rows]
+      if (selectedTrack) selectedTrack.enrollmentDetailRows = rows
       syncCase(state, detail)
-      result = { trackId, rows }
+      result = { trackId, rows, externalReconciliationRequired: false }
       break
     }
     case "cancelRegistrationEnrollment": {
