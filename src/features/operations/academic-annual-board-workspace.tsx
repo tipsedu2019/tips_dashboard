@@ -9,7 +9,8 @@ import { useAuth } from "@/providers/auth-provider";
 import { supabase } from "@/lib/supabase";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card";
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { DataTableToolbar } from "@/components/data-table/data-table-surface";
 import { Label } from "@/components/ui/label";
 import {
   Select,
@@ -118,10 +119,10 @@ type PendingBoardEntryEdit = {
 };
 
 const ANNUAL_BOARD_TERM_ROWS: AnnualBoardTermRow[] = [
-  { key: "1-mid", label: "1중", kind: "exam", semester: "1학기", examTerm: "1학기 중간" },
-  { key: "1-final", label: "1기", kind: "exam", semester: "1학기", examTerm: "1학기 기말" },
-  { key: "2-mid", label: "2중", kind: "exam", semester: "2학기", examTerm: "2학기 중간" },
-  { key: "2-final", label: "2기", kind: "exam", semester: "2학기", examTerm: "2학기 기말" },
+  { key: "1-mid", label: "1학기 중간", kind: "exam", semester: "1학기", examTerm: "1학기 중간" },
+  { key: "1-final", label: "1학기 기말", kind: "exam", semester: "1학기", examTerm: "1학기 기말" },
+  { key: "2-mid", label: "2학기 중간", kind: "exam", semester: "2학기", examTerm: "2학기 중간" },
+  { key: "2-final", label: "2학기 기말", kind: "exam", semester: "2학기", examTerm: "2학기 기말" },
   { key: "experience", label: "체험", kind: "event", type: "체험학습" },
   { key: "vacation", label: "방학", kind: "event", type: "방학·휴일·기타" },
   { key: "tips", label: "팁스", kind: "event", type: "팁스" },
@@ -442,8 +443,8 @@ function getCellStateForEntries(entries: AcademicAnnualBoardEntry[], type: Acade
 
 function getCellToneClass(type: AcademicAnnualBoardType, state: EntryState, active: boolean) {
   return cn(
-    "annual-board-value inline-flex min-h-7 w-full items-center rounded-[4px] border px-2 text-left text-[12px] leading-5 font-medium transition-[background-color,border-color,box-shadow,transform]",
-    "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#2F6FED]/35 active:scale-[0.99]",
+    "annual-board-value inline-flex min-h-9 w-full items-center rounded-md border border-transparent px-2 text-left text-xs leading-5 font-medium tabular-nums transition-colors",
+    "focus-visible:outline-none focus-visible:ring-[3px] focus-visible:ring-ring/50",
     type === "시험기간" && "annual-board-value-period",
     type === "영어시험일" && "annual-board-value-english",
     type === "수학시험일" && "annual-board-value-math",
@@ -492,7 +493,7 @@ function AnnualBoardSkeleton({ columns }: { columns: readonly string[] }) {
     <>
       {Array.from({ length: 5 }).map((_, rowIndex) => (
         <TableRow key={`annual-board-skeleton-${rowIndex}`}>
-          <TableCell className="sticky left-0 z-10 w-[96px] border-b border-r bg-background px-2 py-3">
+          <TableCell className="sticky left-0 z-10 w-[128px] border-b border-r bg-background px-2 py-3">
             <div className="h-4 w-16 rounded-sm bg-muted" />
           </TableCell>
           {columns.map((column) => (
@@ -509,11 +510,11 @@ function AnnualBoardSkeleton({ columns }: { columns: readonly string[] }) {
 function ScopeSection({ title, items }: { title: string; items: TextbookScopeItem[] }) {
   return (
     <div className="grid gap-1.5">
-      <p className="annual-board-muted-label text-[11px] font-semibold uppercase tracking-[0.06em]">{title}</p>
+      <p className="annual-board-muted-label text-xs font-medium">{title}</p>
       {items.length > 0 ? (
         <div className="grid gap-1">
           {items.slice(0, 4).map((item, index) => (
-            <p key={`${title}-${index}`} className="annual-board-scope-pill rounded-[4px] border px-2 py-1 text-[12px] leading-5">
+            <p key={`${title}-${index}`} className="annual-board-scope-pill rounded-md border px-2 py-1 text-[12px] leading-5">
               {formatScopeItem(item)}
             </p>
           ))}
@@ -522,7 +523,7 @@ function ScopeSection({ title, items }: { title: string; items: TextbookScopeIte
           ) : null}
         </div>
       ) : (
-        <p className="annual-board-scope-empty rounded-[4px] border px-2 py-1 text-[11px] font-medium">
+        <p className="annual-board-scope-empty rounded-md border px-2 py-1 text-[11px] font-medium">
           미입력
         </p>
       )}
@@ -559,10 +560,11 @@ function AnnualBoardCellHoverContent({
   const subtextbookScopes = getStructuredScopeItems(primaryEntry, "subtextbookScopes");
 
   return (
-    <HoverCardContent
+    <PopoverContent
       align="start"
       sideOffset={8}
-      className="annual-board-hover-card w-[336px] rounded-[6px] border p-0 shadow-[0_18px_50px_-28px_rgba(23,32,51,0.45)]"
+      className="annual-board-hover-card max-h-[min(560px,var(--radix-popover-content-available-height))] w-[336px] max-w-[calc(100vw-32px)] overflow-y-auto p-0"
+      aria-label={`${schoolName} ${gradeLabel} ${termLabel} ${getTypeLabel(type)} 상세`}
     >
       <div className="annual-board-hover-card-header border-b px-3 py-2.5">
         <p className="annual-board-hover-title text-[13px] font-semibold">
@@ -602,9 +604,9 @@ function AnnualBoardCellHoverContent({
 
         {entries.length > 1 ? (
           <div className="grid gap-1.5">
-            <p className="annual-board-muted-label text-[11px] font-semibold uppercase tracking-[0.06em]">등록 일정</p>
+            <p className="annual-board-muted-label text-xs font-medium">등록 일정</p>
             {entries.slice(0, 4).map((entry) => (
-              <p key={entry.id} className="annual-board-scope-pill rounded-[4px] px-2 py-1 text-[12px] leading-5">
+              <p key={entry.id} className="annual-board-scope-pill rounded-md px-2 py-1 text-[12px] leading-5">
                 {formatRangeLabel(entry, { compact: true })} {text(entry.title)}
               </p>
             ))}
@@ -612,7 +614,7 @@ function AnnualBoardCellHoverContent({
         ) : null}
 
         {missingItems.length > 0 ? (
-          <div className="annual-board-scope-empty rounded-[4px] border px-2 py-1.5 text-[11px]">
+          <div className="annual-board-scope-empty rounded-md border px-2 py-1.5 text-[11px]">
             {missingItems.join(", ")}
           </div>
         ) : null}
@@ -621,7 +623,7 @@ function AnnualBoardCellHoverContent({
           <Button
             type="button"
             size="sm"
-            className="h-8 rounded-[4px] text-[12px]"
+            className="w-full"
             disabled={readOnly}
             onClick={() => {
               if (primaryEntry) {
@@ -636,7 +638,7 @@ function AnnualBoardCellHoverContent({
           </Button>
         ) : null}
       </div>
-    </HoverCardContent>
+    </PopoverContent>
   );
 }
 
@@ -669,11 +671,13 @@ function AnnualBoardValueCell({
   onEntryEdit: (row: AcademicAnnualBoardRow, entry: AcademicAnnualBoardEntry) => void;
   onCellCreate: (row: AcademicAnnualBoardRow, type: AcademicAnnualBoardType, examTerm?: ExamTerm) => void;
 }) {
-  const isActive =
+  const [open, setOpen] = useState(false);
+  const isActive = open || (
     hoveredCell?.schoolKey === schoolRow.schoolKey &&
     hoveredCell?.gradeLabel === gradeLabel &&
     hoveredCell?.termKey === termRow.key &&
-    hoveredCell?.type === type;
+    hoveredCell?.type === type
+  );
   const examTerm = termRow.kind === "exam" ? termRow.examTerm : undefined;
   const canCreateScienceExam =
     type !== "과학시험일" || HIGH_SCHOOL_GRADES.includes(gradeLabel as (typeof HIGH_SCHOOL_GRADES)[number]);
@@ -685,11 +689,13 @@ function AnnualBoardValueCell({
   };
 
   return (
-    <HoverCard openDelay={160} closeDelay={80}>
-      <HoverCardTrigger asChild>
+    <Popover open={open} onOpenChange={setOpen}>
+      <PopoverTrigger asChild>
         <button
           type="button"
+          data-annual-board-focus-return="true"
           className={getCellToneClass(type, state, isActive)}
+          aria-label={`${schoolRow.schoolName} ${gradeLabel} ${termRow.label} ${getTypeLabel(type)}: ${state === "empty" ? "미입력" : label}`}
           onMouseEnter={() => onHoverCell(hoverPayload)}
           onFocus={() => onHoverCell(hoverPayload)}
           onMouseLeave={() => onHoverCell(null)}
@@ -697,7 +703,7 @@ function AnnualBoardValueCell({
         >
           <span className="min-w-0 truncate">{label}</span>
         </button>
-      </HoverCardTrigger>
+      </PopoverTrigger>
       <AnnualBoardCellHoverContent
         schoolName={schoolRow.schoolName}
         gradeLabel={gradeLabel}
@@ -707,10 +713,10 @@ function AnnualBoardValueCell({
         state={state}
         readOnly={readOnly}
         canCreateScienceExam={canCreateScienceExam}
-        onEdit={(entry) => onEntryEdit(row, entry)}
-        onCreate={() => onCellCreate(row, type, examTerm)}
+        onEdit={(entry) => { setOpen(false); onEntryEdit(row, entry); }}
+        onCreate={() => { setOpen(false); onCellCreate(row, type, examTerm); }}
       />
-    </HoverCard>
+    </Popover>
   );
 }
 
@@ -744,16 +750,16 @@ function AnnualBoardMapView({
     <div data-testid="annual-board-mobile-list" className="grid gap-3 md:hidden">
       {loading ? (
         Array.from({ length: 3 }).map((_, index) => (
-          <div key={`annual-board-mobile-loading-${index}`} className="rounded-[6px] border border-[#D9E1EA] bg-white p-3">
-            <div className="h-4 w-28 rounded bg-slate-100" />
+          <div key={`annual-board-mobile-loading-${index}`} className="rounded-[var(--radius-surface)] border bg-card p-4">
+            <div className="h-4 w-28 rounded bg-secondary" />
             <div className="mt-3 grid gap-2">
-              <div className="h-16 rounded bg-slate-50" />
-              <div className="h-16 rounded bg-slate-50" />
+              <div className="h-16 rounded bg-muted" />
+              <div className="h-16 rounded bg-muted" />
             </div>
           </div>
         ))
       ) : groupedSchoolRows.length === 0 ? (
-        <div className="rounded-[6px] border border-dashed border-[#D9E1EA] bg-white px-4 py-10 text-center text-sm font-medium text-[#475467]">
+        <div className="px-4 py-10 text-center text-sm text-muted-foreground">
           조건에 맞는 일정 없음
         </div>
       ) : (
@@ -761,29 +767,29 @@ function AnnualBoardMapView({
           <section
             key={`annual-board-mobile-${schoolRow.schoolKey}`}
             data-testid={`annual-board-mobile-school-${schoolRow.schoolKey}`}
-            className="rounded-[6px] border border-[#D9E1EA] bg-white"
+            className="border-b bg-card last:border-b-0"
           >
-            <div className="border-b border-[#D9E1EA] px-3 py-2.5">
-              <p className="truncate text-[14px] font-semibold text-[#172033]">{schoolRow.schoolName}</p>
+            <div className="border-b px-4 py-3">
+              <p className="break-words text-sm font-semibold text-foreground">{schoolRow.schoolName}</p>
             </div>
-            <div className="grid gap-3 p-3">
+            <div className="grid gap-5 p-4">
               {gradeColumnLabels.map((gradeLabel) => {
                 const gradeRow = schoolRow.gradeMap.get(gradeLabel) || null;
 
                 return (
-                  <div key={`annual-board-mobile-${schoolRow.schoolKey}-${gradeLabel}`} className="rounded-[5px] border border-[#E6EBF1]">
-                    <div className="border-b border-[#E6EBF1] bg-[#F8FAFC] px-2.5 py-2 text-[12px] font-semibold text-[#344054]">
+                  <div key={`annual-board-mobile-${schoolRow.schoolKey}-${gradeLabel}`} className="min-w-0">
+                    <div className="border-b pb-2 text-sm font-semibold text-foreground">
                       {gradeLabel}
                     </div>
                     {gradeRow ? (
-                      <div className="grid gap-2 p-2">
+                      <div className="grid gap-4 pt-3">
                         {termRows.map((termRow) => {
                           if (termRow.kind === "event") {
                             const entries = getEventEntriesForSemester(gradeRow, termRow.type, selectedSemester);
                             const state = getCellStateForEntries(entries, termRow.type);
                             return (
                               <div key={`${gradeRow.id}-mobile-${termRow.key}`} className="grid gap-1">
-                                <p className="text-[11px] font-semibold text-[#667085]">{termRow.label}</p>
+                                <p className="text-xs font-medium text-muted-foreground">{termRow.label}</p>
                                 <AnnualBoardValueCell
                                   schoolRow={schoolRow}
                                   gradeLabel={gradeLabel}
@@ -816,11 +822,12 @@ function AnnualBoardMapView({
 
                           return (
                             <div key={`${gradeRow.id}-mobile-${termRow.key}`} className="grid gap-1">
-                              <p className="text-[11px] font-semibold text-[#667085]">{termRow.label}</p>
-                              <div className="grid grid-cols-4 gap-1">
+                              <p className="text-xs font-medium text-muted-foreground">{termRow.label}</p>
+                              <div className="grid grid-cols-3 gap-2">
                                 {cells.map((cell) => (
-                                  <AnnualBoardValueCell
-                                    key={`${gradeRow.id}-mobile-${termRow.key}-${cell.type}`}
+                                  <div key={`${gradeRow.id}-mobile-${termRow.key}-${cell.type}`} className={cn("min-w-0", cell.type === "시험기간" && "col-span-3")}>
+                                    <p className="mb-1 text-xs text-muted-foreground">{getTypeLabel(cell.type)}</p>
+                                    <AnnualBoardValueCell
                                     schoolRow={schoolRow}
                                     gradeLabel={gradeLabel}
                                     row={gradeRow}
@@ -834,7 +841,8 @@ function AnnualBoardMapView({
                                     onHoverCell={onHoverCell}
                                     onEntryEdit={onEntryEdit}
                                     onCellCreate={onCellCreate}
-                                  />
+                                    />
+                                  </div>
                                 ))}
                               </div>
                             </div>
@@ -842,7 +850,7 @@ function AnnualBoardMapView({
                         })}
                       </div>
                     ) : (
-                      <div className="px-3 py-6 text-center text-[12px] font-medium text-[#98A2B3]">없음</div>
+                      <div className="px-3 py-6 text-center text-[12px] font-medium text-muted-foreground">없음</div>
                     )}
                   </div>
                 );
@@ -853,21 +861,21 @@ function AnnualBoardMapView({
       )}
     </div>
 
-    <div className="annual-board-export-scroll hidden overflow-x-auto md:block">
+    <div role="region" aria-label="학교별 연간 일정 비교" tabIndex={0} className="annual-board-export-scroll hidden overflow-x-auto md:block [&>[data-slot=table-container]]:overflow-visible">
       <Table className="annual-board-table min-w-[1228px] table-fixed border-separate border-spacing-0 text-[12px]">
         <TableHeader>
           <TableRow className="annual-board-table-header">
-            <TableHead className="sticky left-0 z-20 w-[96px] border-b border-r border-[#D9E1EA] bg-[#FFFFFF] px-2 py-2 text-[11px] font-semibold text-[#475467]">
+            <TableHead className="sticky left-0 z-20 w-[128px] border-b border-r border-border bg-card px-2 py-2 text-[11px] font-semibold text-muted-foreground">
               학교
             </TableHead>
-            <TableHead className="w-[52px] border-b border-r border-[#D9E1EA] bg-[#FFFFFF] px-2 py-2 text-[11px] font-semibold text-[#475467]">
+            <TableHead className="w-[92px] border-b border-r border-border bg-card px-2 py-2 text-[11px] font-semibold text-muted-foreground">
               시기
             </TableHead>
             {gradeColumnLabels.map((gradeLabel) => (
               <TableHead
                 key={gradeLabel}
                 className={cn(
-                  "w-[360px] border-b border-r border-[#D9E1EA] bg-[#FFFFFF] px-2 py-2 text-[11px] font-semibold text-[#475467]",
+                  "w-[336px] border-b border-r border-border bg-card px-2 py-2 text-[11px] font-semibold text-muted-foreground",
                   hoveredCell?.gradeLabel === gradeLabel && "annual-board-column-active",
                 )}
               >
@@ -881,7 +889,7 @@ function AnnualBoardMapView({
             <AnnualBoardSkeleton columns={["시기", ...gradeColumnLabels]} />
           ) : groupedSchoolRows.length === 0 ? (
             <TableRow>
-              <TableCell colSpan={gradeColumnLabels.length + 2} className="h-40 text-center text-sm font-medium text-[#475467]">
+              <TableCell colSpan={gradeColumnLabels.length + 2} className="h-40 text-center text-sm font-medium text-muted-foreground">
                 조건에 맞는 일정 없음
               </TableCell>
             </TableRow>
@@ -894,12 +902,12 @@ function AnnualBoardMapView({
                   className={cn("annual-board-map-row align-top", rowIndex % 2 === 1 && "annual-board-map-row-alt", rowActive && "annual-board-row-active")}
                   style={rowStyle}
                 >
-                  <TableCell className="annual-board-school-cell sticky left-0 z-10 w-[96px] border-b border-r border-[#D9E1EA] px-2 py-3 align-top">
-                    <span className={cn("annual-board-school-name block truncate text-[13px] font-semibold", rowActive && "annual-board-school-name-active")}>
+                  <TableCell className="annual-board-school-cell sticky left-0 z-10 w-[128px] border-b border-r border-border px-2 py-3 align-top">
+                    <span className={cn("annual-board-school-name block whitespace-normal break-words text-[13px] font-semibold", rowActive && "annual-board-school-name-active")}>
                       {schoolRow.schoolName}
                     </span>
                   </TableCell>
-                  <TableCell className="border-b border-r border-[#D9E1EA] p-0 align-top">
+                  <TableCell className="border-b border-r border-border p-0 align-top">
                     <div className="annual-board-term-stack">
                       <div className="annual-board-grade-subheader">시기</div>
                       {termRows.map((termRow) => (
@@ -923,12 +931,12 @@ function AnnualBoardMapView({
                     return (
                       <TableCell
                         key={`map-${schoolRow.schoolKey}-${gradeLabel}`}
-                        className={cn("annual-board-grade-cell border-b border-r border-[#D9E1EA] p-0 align-top", columnActive && "annual-board-column-active")}
+                        className={cn("annual-board-grade-cell border-b border-r border-border p-0 align-top", columnActive && "annual-board-column-active")}
                       >
                         {gradeRow ? (
                           <div
                             className="annual-board-grade-grid"
-                            style={{ gridTemplateColumns: "minmax(120px,1.5fr) repeat(3,minmax(70px,1fr))" }}
+                            style={{ gridTemplateColumns: "minmax(132px,1.5fr) repeat(3,minmax(68px,1fr))" }}
                           >
                             <div className="annual-board-grade-subheader">시험기간</div>
                             <div className="annual-board-grade-subheader">영어</div>
@@ -1056,6 +1064,7 @@ export function AcademicAnnualBoardWorkspace() {
   }, [invalidateBoardDetailRequest]);
   const [isSavingBoardImage, setIsSavingBoardImage] = useState(false);
   const annualBoardExportRef = useRef<HTMLDivElement | null>(null);
+  const editorReturnFocusRef = useRef<HTMLElement | null>(null);
   const annualRequest = useMemo(() => ({
     mode: "annual" as const,
     academicYear: Number(selectedYear) || new Date().getFullYear(),
@@ -1602,12 +1611,17 @@ export function AcademicAnnualBoardWorkspace() {
   };
 
   return (
-    <div className="annual-board-workspace flex flex-col gap-4">
+    <div className="annual-board-workspace flex min-w-0 flex-col gap-4" onFocusCapture={(event) => {
+      if (event.target instanceof HTMLElement && event.target.dataset.annualBoardFocusReturn === "true") {
+        editorReturnFocusRef.current = event.target;
+      }
+    }}>
       {error || mutationError ? (
         <div className="annual-board-non-print px-4 sm:px-5 lg:px-6">
           <Alert variant="destructive">
             <AlertDescription className="flex items-center justify-between gap-3">
               <span>{error || mutationError}</span>
+              {error ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>다시 시도</Button> : null}
               {pendingBoardEntryEdit ? (
                 <Button type="button" variant="outline" size="sm" disabled={boardDetailLoading} onClick={retryPendingBoardEntryEdit}>
                   상세 다시 불러오기
@@ -1637,116 +1651,54 @@ export function AcademicAnnualBoardWorkspace() {
       ) : null}
 
       <div className="px-4 sm:px-5 lg:px-6">
-        <div className="annual-board-print-surface overflow-hidden border">
+        <div className="annual-board-print-surface min-w-0 overflow-hidden rounded-[var(--radius-surface)] border">
           <div className="annual-board-print-header hidden border-b px-4 py-3 print:block">
             <h2 className="text-sm font-semibold text-foreground">{printSummary}</h2>
           </div>
 
-          <div className="annual-board-non-print flex flex-wrap items-end gap-3 border-b px-4 py-3">
-            <div className="grid min-w-0 flex-1 gap-3 xl:grid-cols-[112px_168px_168px_minmax(168px,1fr)]">
-              <div className="grid gap-2">
-                <Label htmlFor="annual-board-year" className="text-[11px] text-muted-foreground">연도</Label>
+          <DataTableToolbar className="annual-board-non-print xl:flex-row xl:items-end">
+            <div className="grid min-w-0 flex-1 grid-cols-2 gap-3 lg:grid-cols-[112px_120px_140px_minmax(180px,1fr)]">
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="annual-board-year">연도</Label>
                 <Select value={model.selectedYear} onValueChange={handleSelectedYearChange}>
-                  <SelectTrigger id="annual-board-year" className="h-9 w-full rounded-sm text-[12px] font-medium">
-                    <SelectValue placeholder="연도 선택" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {model.yearOptions.map((year) => (
-                      <SelectItem key={year} value={year}>
-                        {year}년
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
+                  <SelectTrigger id="annual-board-year" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{[...new Set([model.selectedYear, ...model.yearOptions])].map((year) => <SelectItem key={year} value={year}>{year}년</SelectItem>)}</SelectContent>
                 </Select>
               </div>
-              <div className="grid gap-2">
-                <Label className="text-[11px] text-muted-foreground">학교 분류</Label>
-                <div className="flex h-9 w-full items-center gap-1 rounded-sm border border-border/70 bg-muted/15 p-1">
-                  {[
-                    { value: "high", label: "고등" },
-                    { value: "middle", label: "중등" },
-                  ].map((option) => (
-                    <Button
-                      key={option.value}
-                      type="button"
-                      size="sm"
-                      variant={selectedCategory === option.value ? "default" : "ghost"}
-                      onClick={() => handleSelectedCategoryChange(option.value as "high" | "middle")}
-                      className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium"
-                    >
-                      {option.label}
-                    </Button>
-                  ))}
-                </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="annual-board-category">학교 분류</Label>
+                <Select value={selectedCategory} onValueChange={(value) => handleSelectedCategoryChange(value as "high" | "middle")}>
+                  <SelectTrigger id="annual-board-category" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="high">고등학교</SelectItem><SelectItem value="middle">중학교</SelectItem></SelectContent>
+                </Select>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="annual-board-semester" className="text-[11px] text-muted-foreground">시기</Label>
-                <div id="annual-board-semester" className="flex h-9 w-full items-center gap-1 rounded-sm border border-border/70 bg-muted/15 p-1">
-                  {SEMESTER_FILTER_OPTIONS.map((option) => (
-                    <Button
-                      key={option}
-                      type="button"
-                      size="sm"
-                      variant={selectedSemester === option ? "default" : "ghost"}
-                      onClick={() => handleSelectedSemesterChange(option)}
-                      className="h-7 flex-1 rounded-sm px-3 text-[12px] font-medium"
-                    >
-                      {option}
-                    </Button>
-                  ))}
-                </div>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="annual-board-semester">시기</Label>
+                <Select value={selectedSemester} onValueChange={(value) => handleSelectedSemesterChange(value as SemesterFilter)}>
+                  <SelectTrigger id="annual-board-semester" className="w-full"><SelectValue /></SelectTrigger>
+                  <SelectContent>{SEMESTER_FILTER_OPTIONS.map((option) => <SelectItem key={option} value={option}>{option}</SelectItem>)}</SelectContent>
+                </Select>
               </div>
-              <div className="grid gap-2">
-                <Label htmlFor="annual-board-school" className="text-[11px] text-muted-foreground">학교</Label>
+              <div className="grid min-w-0 gap-2">
+                <Label htmlFor="annual-board-school">학교</Label>
                 <Select value={selectedSchoolId || "all"} onValueChange={(value) => handleSelectedSchoolChange(value === "all" ? "" : value)}>
-                  <SelectTrigger id="annual-board-school" className="h-9 w-full rounded-sm text-[12px] font-medium">
-                    <SelectValue placeholder="학교 선택" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {schoolOptions.map((option) => (
-                      <SelectItem key={option.value || "all-schools"} value={option.value}>
-                        {option.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
+                  <SelectTrigger id="annual-board-school" className="w-full"><SelectValue placeholder="학교 선택" /></SelectTrigger>
+                  <SelectContent>{schoolOptions.map((option) => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}</SelectContent>
                 </Select>
               </div>
             </div>
             <div className="ml-auto flex w-full shrink-0 justify-end gap-2 sm:w-auto">
-              {hasActiveFilters ? (
-                <Button type="button" variant="ghost" className="h-9 rounded-sm px-3 text-[12px] font-medium text-muted-foreground" onClick={handleResetFilters}>
-                  필터 초기화
-                </Button>
-              ) : null}
+              {hasActiveFilters ? <Button type="button" variant="ghost" onClick={handleResetFilters}>초기화</Button> : null}
               {model.summary.eventCount === 0 && !readOnly ? (
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  className="h-9 rounded-sm px-4 text-[12px] font-medium"
-                  disabled={loading || catalogSchoolsForSelectedCategory.length === 0}
-                  onClick={handleFirstBoardEventCreate}
-                >
-                  <Plus data-icon="inline-start" />
-                  첫 일정 추가
+                <Button type="button" data-annual-board-focus-return="true" variant="outline" size="form" disabled={loading || Boolean(error) || catalogSchoolsForSelectedCategory.length === 0} onClick={handleFirstBoardEventCreate}>
+                  <Plus aria-hidden="true" />첫 일정 추가
                 </Button>
               ) : null}
-              <Button
-                type="button"
-                size="sm"
-                className="h-9 rounded-sm px-4 text-[12px] font-medium"
-                disabled={loading || isSavingBoardImage}
-                onClick={handleSaveBoardImage}
-              >
-                {isSavingBoardImage ? (
-                  <Loader2 data-icon="inline-start" className="animate-spin" />
-                ) : (
-                  <ImageDown data-icon="inline-start" />
-                )}
-                이미지 저장
+              <Button type="button" variant="outline" size="form" disabled={loading || isSavingBoardImage || Boolean(error)} onClick={handleSaveBoardImage}>
+                {isSavingBoardImage ? <Loader2 aria-hidden="true" className="animate-spin" /> : <ImageDown aria-hidden="true" />}이미지 저장
               </Button>
             </div>
-          </div>
+          </DataTableToolbar>
 
           <div ref={annualBoardExportRef} className="annual-board-image-export-surface bg-background">
             <div className="annual-board-non-print border-b px-4 py-2.5">
@@ -1772,6 +1724,12 @@ export function AcademicAnnualBoardWorkspace() {
       </div>
 
       <EventForm
+        onCloseAutoFocus={(event) => {
+          event.preventDefault();
+          const target = editorReturnFocusRef.current;
+          if (target?.isConnected) target.focus({ preventScroll: true });
+          else document.getElementById("annual-board-year")?.focus({ preventScroll: true });
+        }}
         event={editingBoardEvent}
         open={showBoardEventForm}
         readOnly={readOnly}

@@ -34,6 +34,7 @@ function TimetableBlock({
   const classNames = [
     'timetable-block',
     'is-' + density,
+    (block.endSlot - block.startSlot) * slotHeight < 76 ? 'is-short' : '',
     block.clickable && !isGhost ? 'clickable' : '',
     block.editable ? 'editable' : '',
     isGhost ? 'ghost' : '',
@@ -153,7 +154,7 @@ function TimetableBlock({
           color: block.textColor || 'var(--text-primary)',
           height: String((block.endSlot - block.startSlot) * slotHeight - 2) + 'px',
           position: 'relative',
-          cursor: isGhost ? 'grabbing' : block.editable ? 'grab' : block.clickable ? 'pointer' : 'default',
+          cursor: isGhost ? 'grabbing' : block.editable ? 'grab' : block.clickable || isReadOnlyDetail ? 'pointer' : 'default',
         }}
       >
         {block.variantDot ? (
@@ -200,8 +201,8 @@ function TimetableBlock({
           </>
         ) : null}
 
-        {subjectLabel ? <div className="block-subject">{subjectLabel}</div> : null}
         <div className="block-name">{block.title}</div>
+        {subjectLabel ? <div className="block-subject">{subjectLabel}</div> : null}
         {(block.detailLines || []).map((line, index) => (
           <div
             key={block.key + '-detail-' + index}
