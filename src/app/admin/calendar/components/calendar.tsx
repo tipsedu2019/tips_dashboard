@@ -380,7 +380,7 @@ export function Calendar({
         <section data-testid="operations-seven-day-agenda" className="space-y-4">
           <div className="flex flex-wrap items-center justify-between gap-3">
             <h2 className="text-base font-semibold">한 주 일정 <span className="text-sm font-normal">{recoveryRange.dateFrom} ~ {recoveryRange.dateTo}</span></h2>
-            <Button type="button" variant="outline" size="sm" onClick={onRecoveryExit}>월간 보기</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => { invalidateDetailRequest(); onRecoveryExit?.(); }}>월간 보기</Button>
           </div>
           <div className="grid gap-3 lg:grid-cols-7">
             {eachDayOfInterval({ start: new Date(`${recoveryRange.dateFrom}T12:00:00`), end: new Date(`${recoveryRange.dateTo}T12:00:00`) }).map((day) => {

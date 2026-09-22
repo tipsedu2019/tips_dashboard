@@ -1042,12 +1042,14 @@ function MakeupRequestFilterSelect({
   ariaLabel,
   value,
   allLabel,
+  includeAll = true,
   options,
   onChange,
 }: {
   ariaLabel: string
   value: string
   allLabel: string
+  includeAll?: boolean
   options: MakeupRequestSelectFilterOption[]
   onChange: (value: string) => void
 }) {
@@ -1057,7 +1059,7 @@ function MakeupRequestFilterSelect({
         <SelectValue placeholder={allLabel} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="all">{allLabel}</SelectItem>
+        {includeAll ? <SelectItem value="all">{allLabel}</SelectItem> : null}
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {option.label}{option.count ? ` ${option.count}` : ""}
@@ -1217,7 +1219,7 @@ function MakeupRequestDataTable({
       <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
         <DataTableToolbar aria-label="휴보강 전체 필터">
           <div className="flex min-w-0 flex-wrap items-center gap-2">
-            <MakeupRequestFilterSelect ariaLabel="휴보강 검색 범위" value={filterColumnKey} allLabel="수업" options={MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
+            <MakeupRequestFilterSelect ariaLabel="휴보강 검색 범위" includeAll={false} value={filterColumnKey} allLabel="수업" options={MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
             <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="휴보강 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
             {columnSettingsControl}
           </div>
@@ -1648,11 +1650,19 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const controllerRef = useRef<ReturnType<typeof createNumberedPageController<MakeupRequest>> | null>(null)
   const acceptedFilters: MakeupNumberedFilters = useMemo(() => pageState.scope ? JSON.parse(pageState.scope).filters : navigation.filters, [pageState.scope, navigation.filters])
   const view = acceptedFilters.view
+  const acceptedCriteriaLabel = [
+    MAKEUP_REQUEST_VIEW_TABS.find(tab => tab.id === acceptedFilters.view)?.label,
+    acceptedFilters.search ? `${MAKEUP_REQUEST_TABLE_COLUMNS.find(column => column.columnKey === acceptedFilters.filterColumn)?.label || "검색"} “${acceptedFilters.search}”` : "검색어 없음",
+    acceptedFilters.subject !== "all" ? acceptedFilters.subject : null,
+    acceptedFilters.teacher !== "all" ? acceptedFilters.teacher : null,
+    acceptedFilters.period === "all" ? "전체 기간" : `${acceptedFilters.dateFrom || "시작일 전체"} ~ ${acceptedFilters.dateTo || "종료일 전체"}`,
+    `${pageState.page}페이지`,
+  ].filter(Boolean).join(" · ")
   const todayKey = useMemo(() => toDateKey(new Date()), [])
   const customDates = useRef(makeupCustomDatesFromUrl(new URLSearchParams(searchParams.toString()), navigation.filters))
   const changeFilters = useCallback((patch: Partial<MakeupNumberedFilters>) => {
     setNavigation((current) => {
-      const filters = { ...(pageState.error ? acceptedFilters : current.filters), ...patch }
+      const filters = { ...current.filters, ...patch }
       if (patch.dateFrom !== undefined || patch.dateTo !== undefined) customDates.current = { dateFrom: patch.dateFrom ?? customDates.current.dateFrom, dateTo: patch.dateTo ?? customDates.current.dateTo }
       if (patch.period) {
         const range = filters.period === "week" ? getMakeupRequestWeekRange(todayKey) : filters.period === "month" ? getMakeupRequestMonthRange(todayKey) : { start: todayKey, end: todayKey }
@@ -1660,7 +1670,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       }
       return { filters, page: 1 }
     })
-  }, [todayKey, acceptedFilters, pageState.error])
+  }, [todayKey])
   const setView = useCallback((view: MakeupRequestView) => changeFilters({ view }), [changeFilters])
   const [catalogData, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -2354,7 +2364,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
 
       <WorkspaceTabsPanel className="flex flex-col gap-4">
       {message ? <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
-      {pageState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}{pageState.totalCount !== null ? " 이전 조회 결과를 표시합니다." : ""}<Button variant="outline" onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void controllerRef.current?.retry() }}>다시 시도</Button></div> : null}
+      {pageState.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}{pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}<Button variant="outline" onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void controllerRef.current?.retry() }}>다시 시도</Button></div> : null}
       {contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null}
       {error ? (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">

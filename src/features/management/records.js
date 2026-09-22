@@ -206,8 +206,19 @@ export function normalizeClassManagementRecord(row = {}) {
   const scheduleLines = normalizeScheduleLines(schedule);
   const teacher = text(row.teacher || row.teacher_name || row.teacherName) || "담당 미정";
   const classroom = text(row.classroom || row.room) || "강의실 미정";
-  const registeredCount = studentIds.length || Number(row.student_count || row.studentCount || 0);
-  const waitlistCount = waitlistStudentIds.length || Number(row.waitlist_count || row.waitlistCount || 0);
+  // Detail relations are paged. An explicit (even unavailable) total must not
+  // be replaced by the loaded relation length; legacy complete rows still derive it.
+  const hasRegisteredTotal = Object.hasOwn(row, "registered_students_relation_page");
+  const registeredTotal = row.registered_count ?? row.registeredCount;
+  const registeredCount = hasRegisteredTotal
+    ? (Number.isSafeInteger(registeredTotal) && registeredTotal >= 0 ? registeredTotal : undefined)
+    : studentIds.length || Number(row.student_count || row.studentCount || 0);
+  const hasWaitlistTotal = Object.hasOwn(row, "waitlisted_students_relation_page");
+  const waitlistTotal = row.waitlist_count ?? row.waitlistCount;
+  const waitlistCount = hasWaitlistTotal
+    ? (Number.isSafeInteger(waitlistTotal) && waitlistTotal >= 0 ? waitlistTotal : undefined)
+    : waitlistStudentIds.length || Number(row.waitlist_count || row.waitlistCount || 0);
+  const registeredCountLabel = registeredCount === undefined ? "확인 중" : String(registeredCount);
   const weeklyMinutes = computeWeeklyClassMinutes(schedule);
   const weeklyHoursLabel = formatDurationLabel(weeklyMinutes);
   const tuitionLabel = formatCurrency(row.fee || row.tuition);
@@ -232,8 +243,8 @@ export function normalizeClassManagementRecord(row = {}) {
       text(row.grade),
       classroom,
       capacity > 0
-        ? `정원 ${registeredCount}/${capacity}`
-        : `수강 ${registeredCount}명`,
+        ? `정원 ${registeredCountLabel}/${capacity}`
+        : registeredCount === undefined ? "등록 인원 확인 중" : `수강 ${registeredCount}명`,
       `교재 ${textbookCount}권`,
       tuitionLabel,
     ]),
@@ -273,8 +284,8 @@ export function normalizeClassManagementRecord(row = {}) {
       registeredCount,
       waitlist_count: waitlistCount,
       waitlistCount,
-      capacity_status: capacity > 0 ? `${registeredCount}/${capacity}` : `${registeredCount}`,
-      capacityStatus: capacity > 0 ? `${registeredCount}/${capacity}` : `${registeredCount}`,
+      capacity_status: capacity > 0 ? `${registeredCountLabel}/${capacity}` : registeredCountLabel,
+      capacityStatus: capacity > 0 ? `${registeredCountLabel}/${capacity}` : registeredCountLabel,
       tuition_label: tuitionLabel,
       tuitionLabel,
     },

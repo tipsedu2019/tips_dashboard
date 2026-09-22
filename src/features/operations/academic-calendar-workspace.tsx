@@ -424,7 +424,7 @@ export function AcademicCalendarWorkspace() {
         <div className="px-4 sm:px-5 lg:px-6">
           <Alert>
             <AlertDescription className="flex items-center justify-between gap-3">
-              <span>{requestedRangeLabel} 일정이 너무 많아 이전 달력을 유지합니다.</span>
+              <span>{requestedRangeLabel} 일정이 너무 많습니다. {acceptedRange ? "이전 달력을 유지합니다." : "한 주 보기로 범위를 좁혀 주세요."}</span>
               <Button type="button" variant="outline" size="sm" onClick={handleOneWeekView}>한 주 보기</Button>
             </AlertDescription>
           </Alert>
@@ -449,7 +449,7 @@ export function AcademicCalendarWorkspace() {
 
       <div className="px-4 sm:px-5 lg:px-6">
         <Calendar
-          readState={!acceptedRange ? (error ? "error" : "loading") : undefined}
+          readState={!acceptedRange ? (error || densityError ? "error" : "loading") : undefined}
           recoveryRange={isConfirmedSevenDayRange && acceptedRange ? acceptedRange : undefined}
           onRecoveryExit={() => setRecoveryRange(null)}
           events={calendarModel.events}

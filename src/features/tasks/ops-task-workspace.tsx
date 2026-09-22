@@ -5797,6 +5797,7 @@ function WithdrawalFilterSelect({
   label,
   value,
   allLabel,
+  includeAll = true,
   options,
   onChange,
   onOpen,
@@ -5804,6 +5805,7 @@ function WithdrawalFilterSelect({
   label: string
   value: string
   allLabel: string
+  includeAll?: boolean
   options: TaskListboxOption[]
   onChange: (value: string) => void
   onOpen?: () => void
@@ -5813,7 +5815,7 @@ function WithdrawalFilterSelect({
       <TaskListboxField
         label={<span className="sr-only">{label}</span>}
         value={value}
-        options={[{ value: "all", label: allLabel }, ...options]}
+        options={includeAll ? [{ value: "all", label: allLabel }, ...options] : options}
         onChange={onChange}
       />
     </div>
@@ -6208,7 +6210,7 @@ function WithdrawalDataTable({
     <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
       <DataTableToolbar aria-label="퇴원 전체 필터">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <WithdrawalFilterSelect label="퇴원 검색 범위" value={filterColumnKey} allLabel="학생" options={WITHDRAWAL_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as WithdrawalTableColumnKey)} />
+          <WithdrawalFilterSelect label="퇴원 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={WITHDRAWAL_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as WithdrawalTableColumnKey)} />
           <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="퇴원 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
           {columnSettingsControl}
         </div>
@@ -6660,7 +6662,7 @@ function TransferDataTable({
     <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
       <DataTableToolbar aria-label="전반 전체 필터">
         <div className="flex min-w-0 flex-wrap items-center gap-2">
-          <WithdrawalFilterSelect label="전반 검색 범위" value={filterColumnKey} allLabel="학생" options={TRANSFER_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as TransferTableColumnKey)} />
+          <WithdrawalFilterSelect label="전반 검색 범위" includeAll={false} value={filterColumnKey} allLabel="학생" options={TRANSFER_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as TransferTableColumnKey)} />
           <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="전반 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
           {columnSettingsControl}
         </div>
@@ -9065,6 +9067,21 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     && registrationConsultationOwnerScope === "mine"
     ? registrationViewerId
     : undefined
+  const acceptedCriteriaLabel = useMemo(() => {
+    if (!numberedPage.scope) return ""
+    const { filters } = JSON.parse(numberedPage.scope) as { filters: OpsTaskPageFilters }
+    if (filters.taskType === "transfer" || filters.taskType === "withdrawal") {
+      const columns = filters.taskType === "transfer" ? TRANSFER_TABLE_COLUMNS : WITHDRAWAL_TABLE_COLUMNS
+      return [
+        WITHDRAWAL_VIEW_TABS.find(tab => tab.key === filters.view)?.label,
+        filters.search ? `${columns.find(column => column.columnKey === filters.filterColumn)?.label || "검색"} “${filters.search}”` : "검색어 없음",
+        filters.subject, filters.teacher,
+        filters.period === "all" ? "전체 기간" : `${filters.dateFrom || "시작일 전체"} ~ ${filters.dateTo || "종료일 전체"}`,
+        `${numberedPage.page}페이지`,
+      ].filter(Boolean).join(" · ")
+    }
+    return [filters.search ? `검색 “${filters.search}”` : "검색어 없음", `${numberedPage.page}페이지`].join(" · ")
+  }, [numberedPage.scope, numberedPage.page])
   const displayedRegistrationFilters = useMemo(() => {
     const current = { view: registrationView, consultationOwnerId }
     if (!numberedServerPage || !numberedPage.scope) return current
@@ -12635,9 +12652,9 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         ) : null}
 
         {numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
-          목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? " 이전 조회 결과를 표시합니다." : ""}
+          목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}
           <Button variant="outline" size="sm" disabled={numberedPage.loading} onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void numberedPage.retry() }}>다시 시도</Button>
-        </div> : numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과를 표시합니다.</div> : null}
+        </div> : numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과: {acceptedCriteriaLabel}</div> : null}
 
 	        {loading && !isWithdrawalWorkspace && !isTransferWorkspace ? (
           isRegistrationWorkspace ? (

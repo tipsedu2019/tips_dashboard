@@ -29,7 +29,7 @@ function deferred() {
 }
 function box(tag) { return function TestBox({ children, ...props }) { return createElement(tag, props, children) } }
 
-test("accepted calendar range survives failure, ignores reverse responses, and retries the failed range after seven-day recovery", async () => {
+for (const firstDense of [false, true]) test(`accepted calendar range survives failure, ignores reverse responses, and retries the failed range after seven-day recovery (firstDense=${firstDense})`, async () => {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "http://localhost/admin/academic-calendar" })
   for (const key of ["window", "document", "HTMLElement", "Event", "Node"]) {
     Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] })
@@ -66,6 +66,12 @@ test("accepted calendar range survives failure, ignores reverse responses, and r
   try {
     await act(async () => renderer.render(createElement(AcademicCalendarWorkspace)))
     assert.equal(calendarProps.readState, "loading")
+    if (firstDense) {
+      await act(async () => latest().resolve({ok:false,code:"visible_range_too_dense",range:latest().request,rows:[],observedRowsAtLeast:2001,suggestedDays:7}));
+      assert.equal(calendarProps.readState, "error", "a completed dense first read must not remain loading");
+      await click("한 주 보기");
+      await act(async () => calendarProps.onRecoveryExit());
+    }
     await act(async () => latest().reject(new Error("private first-read timeout")))
     assert.equal(calendarProps.readState, "error", "first failure must not render an empty calendar")
     await click("다시 불러오기")
@@ -244,7 +250,8 @@ test("seven-day recovery opens exact event detail and retains the read-only boun
     Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] })
   }
   let form
-  const detail = deferred(), detailIds = []
+  const detail = deferred(), lateDetail = deferred(), detailIds = []
+  let monthlyNavigationRequested = 0
   const summary = { id: "week-event", title: "긴 이름의 학사 일정", date: new Date(2026, 8, 21, 12), schoolName: "합성학교" }
   const mocks = new Map([
     ["@/components/ui/alert", { Alert: box("div"), AlertDescription: box("div") }],
@@ -261,7 +268,8 @@ test("seven-day recovery opens exact event detail and retains the read-only boun
     await act(async () => renderer.render(createElement(Calendar, {
       events: [summary], eventDates: [], readOnly: true,
       recoveryRange: { dateFrom: "2026-09-20", dateTo: "2026-09-26" },
-      onLoadEventDetail: (id) => { detailIds.push(id); return detail.promise },
+      onLoadEventDetail: (id) => { detailIds.push(id); return detailIds.length === 1 ? detail.promise : lateDetail.promise },
+      onRecoveryExit: () => { monthlyNavigationRequested++ },
     })))
     const opener = [...container.querySelectorAll('button')].find(b => b.textContent.includes(summary.title))
     assert.ok(opener, "recovery must expose an event detail action")
@@ -278,5 +286,12 @@ test("seven-day recovery opens exact event detail and retains the read-only boun
     opener.blur()
     form.onCloseAutoFocus(new Event("closeAutoFocus", {cancelable:true}))
     assert.equal(document.activeElement, opener)
+    await act(async () => form.onOpenChange(false));
+    await act(async () => opener.click());
+    const exit = [...container.querySelectorAll('button')].find(button => button.textContent === "월간 보기");
+    await act(async () => exit.click());
+    assert.equal(monthlyNavigationRequested, 1);
+    await act(async () => lateDetail.resolve({...summary, description:"late detail"}));
+    assert.equal(form.open, false, "monthly navigation invalidates weekly detail before the month is accepted");
   } finally { await act(async () => renderer.unmount()); dom.window.close() }
 })

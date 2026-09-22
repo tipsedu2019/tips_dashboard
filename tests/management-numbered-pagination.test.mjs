@@ -677,3 +677,23 @@ test("new student enrollment column preserves saved visibility, size and order",
   assert.equal(headers.at(-3).style.width, "88px");
   assert.ok(!headers.some(el => el.textContent === "학교"));
 });
+
+test("class detail totals remain exact beyond the 30-row relation page and missing totals stay unknown", async t => {
+  const dom=new JSDOM('<div id="root"></div>',{url:'https://test.invalid/admin/classes'});
+  globalThis.window=dom.window;globalThis.document=dom.window.document;
+  const io=transport(), rpc=io.supabase.rpc;
+  let total, state;
+  io.supabase.rpc=(name,args)=> name==='get_management_detail_v1'?{abortSignal(){return this},retry:async()=>({error:null,data:{kind:'classes',record:{id:args.p_id,name:'합성 수업',subject:'영어',status:'수강'},registeredCount:total,waitlistCount:total,registeredStudents:{page:{rows:Array.from({length:Math.min(total??30,30)},(_,i)=>({id:`student-${i}`,name:`학생 ${i}`})),hasMore:(total??31)>30}},waitlistedStudents:{page:{rows:[],hasMore:false}}}})}:rpc(name,args);
+  const {useManagementRecords}=loadHook(io.supabase);
+  function Probe(){const value=useManagementRecords('classes',{kind:'classes',search:'',periodId:'period',status:'수강',subject:null,grade:null,teacher:null,classroom:null},{pageSize:10,authorizationScope:'synthetic:admin'});useEffect(()=>{state=value},[value]);return null}
+  const root=createRoot(document.getElementById('root'));
+  t.after(async()=>{await act(async()=>root.unmount());dom.window.close()});
+  await act(async()=>root.render(createElement(Probe)));
+  for(total of [0,30,31,65,undefined]) {
+    let detail;
+    await act(async()=>{detail=await state.loadDetail('class')});
+    assert.equal(detail.raw.registered_count,total);
+    assert.equal(detail.raw.waitlist_count,total);
+    assert.ok(detail.raw.student_ids.length<=30,'detail must not replace paging with an unbounded roster');
+  }
+});

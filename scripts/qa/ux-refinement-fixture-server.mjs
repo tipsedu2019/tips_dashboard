@@ -90,6 +90,125 @@ const makeupRow = (n, patch = {}) => ({ id: id(n), status: 'approval_pending', s
 const counts = { mine: 1, approvalPending: 112, makeupPending: 2, refundPending: 1, closed: 3 };
 const facets = { subjectOptions: ['영어', '수학', '과학'].map((value, i) => ({ value, label: value, count: i ? 0 : 112 })), teacherOptions: [{ value: 'name:교사', label: '교사', count: 112 }] };
 
+const RULE_REVISION = "9007199254740993"
+const TEMPLATE_VERSION = "9007199254740995"
+const CONNECTION_REVISION = "9007199254740997"
+
+const VISIT_SCHEDULED_CONTENT_CONTRACT = {
+  contractVersion: "1",
+  availableVariables: [
+    { key: "student_name", token: "학생", piiClass: "student_name" },
+    { key: "subjects", token: "과목", piiClass: "none" },
+    { key: "after_schedule", token: "새일정", piiClass: "schedule" },
+    { key: "after_place", token: "새장소", piiClass: "location" },
+    { key: "progress_line", token: "진행정보", piiClass: "none" },
+  ],
+  requiredTokens: ["학생", "과목", "새일정", "새장소"],
+  optionalLineTokens: ["진행정보"],
+  mustHaveFacts: ["target", "event", "schedule", "location"],
+  supportedPayloadVersions: [2],
+  destinationPolicy: {
+    allowedConnectionKeys: ["google_chat.management"],
+    subjectScoped: false,
+  },
+  freeTextVisibility: {},
+  freeTextPriority: [],
+  fieldPresence: {
+    student_name: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    subjects: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    after_schedule: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    after_place: {
+      required: true,
+      nullBehavior: "reject",
+      nullDisplay: null,
+      emptyArrayBehavior: "reject",
+    },
+    progress_line: {
+      required: false,
+      nullBehavior: "omit",
+      nullDisplay: null,
+      emptyArrayBehavior: "omit",
+    },
+  },
+}
+
+function createWireSnapshot(overrides = {}) {
+  return {
+    scope_key: "global",
+    workflow_key: "registration",
+    rules: [
+      {
+        id: "rule-registration-visit-management",
+        workflow_key: "registration",
+        event_key: "registration.visit_scheduled",
+        channel_key: "google_chat",
+        audience_key: "management_team",
+        rule_variant_key: "immediate",
+        delivery_mode: "immediate",
+        schedule_key: null,
+        schedule_config: null,
+        enabled: false,
+        configuration_kind: "fixed_policy_editable_template",
+        activation_locked: true,
+        content_contract: VISIT_SCHEDULED_CONTENT_CONTRACT,
+        template_compliance: {
+          contract_version: "1",
+          compliance: "conformant",
+          violations: [],
+        },
+        active_template_id: "template-registration-visit-management",
+        revision: RULE_REVISION,
+        template: {
+          id: "template-registration-visit-management",
+          rule_id: "rule-registration-visit-management",
+          version: TEMPLATE_VERSION,
+          title_template: "[방문상담] {student_name}",
+          body_template: "[학생] {student_name}\n[과목] {subjects}\n[일정] {after_schedule}\n[장소] {after_place}\n{progress_line}",
+          allowed_variables: [
+            { key: "student_name", token: "학생", pii_class: "student_name" },
+          ],
+          payload_schema_version: 2,
+          content_contract_version: null,
+        },
+      },
+    ],
+    connections: [
+      {
+        connection_key: "google_chat.management",
+        connection_state: "encrypted_active",
+        revision: CONNECTION_REVISION,
+        webhook_url_mask: "chat.googleapis.com/…/management",
+        last_verified_at: "2026-07-16T08:00:00.000Z",
+        last_error_code: null,
+      },
+    ],
+    delivery_summary: {
+      pending_count: 2,
+      sent_count: 11,
+      failed_count: 1,
+      unknown_count: 0,
+      latest_delivery_at: "2026-07-16T08:30:00.000Z",
+    },
+    ...overrides,
+  }
+}
+
+
 let mode = "normal";
 const calls = [];
 function json(res, data, status = 200) {
@@ -157,7 +276,9 @@ async function api(req, res) {
       const patch=operationPatch(type,`합성 학생 ${i+1}`);
       const display={status:'접수',student:`합성 학생 ${i+1}`,className:'고등학교 2학년 영어 심화 독해와 문법 긴 수업 이름',fromClassName:'고등학교 2학년 영어 심화 독해와 문법 기존 수업',toClassName:'고등학교 2학년 영어 상위권 독해와 문법 다음 수업',teacher:'합성 선생님',withdrawalDate:'2026. 9. 30.',toClassStartDate:'2026. 10. 1.'};
       for(const key of Object.keys(patch.displayValues)) if(key in display) patch.displayValues[key]=display[key];
-      return row(i+1,patch);
+      if(type==='withdrawal') Object.assign(patch.inlineState,{teacherName:display.teacher,withdrawalDate:'2026-09-30',withdrawalSession:'4회차',customerReason:'일정 변경으로 인한 합성 퇴원 요청',completedLessonHours:4,fourWeekLessonHours:8});
+      if(type==='transfer') Object.assign(patch.inlineState,{fromClassName:display.fromClassName,toClassName:display.toClassName,fromTeacherName:display.teacher,toTeacherName:display.teacher,fromClassEndDate:'2026-09-30',toClassStartDate:'2026-10-01',transferReason:'합성 진도 조정 요청'});
+      return row(i+1,{...patch,className:display.className,subject:'영어'});
     })});
   }
   if (path.endsWith('/get_ops_task_list_stats_v1')) return json(res,{total:3,byStatus:{requested:3},byView:{requested:3},metrics:{},facets:{}});
@@ -168,7 +289,9 @@ async function api(req, res) {
   }
   if (path==='/api/admin/public-content' && req.method==='GET') return json(res,{entries:mode==='empty'?[]:[{id:id(91),kind:url.searchParams.get('kind')||'teacher',version:1,sortOrder:1,isPublished:false,createdAt:now,updatedAt:now,data:{name:'합성 선생님 긴 소개 제목',subject:'영어',description:'학생의 학습 과정을 함께 확인하는 합성 소개',content:'학습 습관과 수업 변화를 담은 합성 후기'},previewUrls:{}}],totalCount:mode==='empty'?0:1});
   if (path==='/api/admin/recruiting/applications' && req.method==='GET') return json(res,{applications:mode==='empty'?[]:Array.from({length:3},(_,i)=>({id:id(80+i),name:`합성 지원자 ${i+1}`,subject:'영어',phone:'010-0000-0000',createdAt:now,expiresAt:'2026-12-22T00:00:00Z'})),totalCount:mode==='empty'?0:3,retentionLastSucceededAt:now});
-  if (path.endsWith('/get_notification_runtime_flags_v1')) return json(res,{message:'Synthetic unavailable channel'},503);
+  if (path.endsWith('/get_notification_runtime_flags_v1')) return mode==='error'?json(res,{message:'Synthetic unavailable channel'},503):json(res,{flags:{notification_control_plane_settings_ui_enabled:{enabled:true}}});
+  if (path==='/api/notifications/control-plane' && req.method==='GET') return json(res,createWireSnapshot());
+  if (path==='/api/notifications/mention-settings' && req.method==='GET') return json(res,{settings:[]});
   if (path.endsWith('/common_notification_control_plane_runtime_version')) return json(res,1);
   if (req.method==='GET' && ['/teacher_catalogs','/classroom_catalogs','/academic_schools','/class_schedule_plans','/class_lesson_sessions','/academic_events','/classes','/students','/textbooks'].some(name=>path.endsWith(name))) return json(res,path.endsWith('/teacher_catalogs')?teacherCatalogs:path.endsWith('/academic_schools')?schools:[]);
   return json(res, { message: `Unmocked route ${path}` }, 501)

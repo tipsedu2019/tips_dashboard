@@ -1450,8 +1450,8 @@ export function NotificationControlPanel({
         {activeSection !== "customer" ? <Button type="button" variant="outline" className="min-h-10" disabled={saving} onClick={() => changeSection("connections")}><MessageSquareText aria-hidden="true" />수신 채팅방</Button> : null}
       </div>
       <TabsList className="h-auto w-full justify-start" aria-label="알림 채널">
-        <TabsTrigger value="rules" className="min-h-9 px-3">직원 알림 · Google Chat</TabsTrigger>
-        {customerGuidance ? <TabsTrigger value="customer" className="min-h-9 px-3">고객 안내 · 알림톡</TabsTrigger> : null}
+        <TabsTrigger value="rules" data-notification-channel="rules" className="min-h-9 px-3">직원 알림 · Google Chat</TabsTrigger>
+        {customerGuidance ? <TabsTrigger value="customer" data-notification-channel="customer" className="min-h-9 px-3">고객 안내 · 알림톡</TabsTrigger> : null}
       </TabsList>
       {presentation === "page" && activeSection !== "customer" ? (
         <nav

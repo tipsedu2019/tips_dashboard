@@ -82,3 +82,67 @@ test('deleting the last recruiting row restores focus to refresh after the opene
   assert.match(document.body.textContent,/보관 중인 지원서가 없습니다/);
   assert.equal(requests.filter(r=>r.options.method==='DELETE').length,1);
 });
+
+test('notification retry keeps focus through capability loading and panel replacement',async t=>{
+  const p=await setup(t), retryRead=Promise.withResolvers();let flagReads=0;
+  globalThis.fetch=async()=>({ok:false,status:503,json:async()=>({code:'unavailable'})});
+  const supabase={auth:{async getSession(){return {data:{session:{access_token:'fixture'}},error:null}}},async rpc(name){
+    if(name==='common_notification_control_plane_runtime_version') return {data:1,error:null};
+    return ++flagReads===1?{data:null,error:{message:'Synthetic error'}}:retryRead.promise;
+  }};
+  const {NotificationSettingsWorkspace}=loadNotificationComponent('src/features/notifications/notification-settings-workspace.tsx',new Map([['@/lib/supabase',{supabase}]]));
+  await p.render(React.createElement(NotificationSettingsWorkspace,{customerGuidance:React.createElement('p',null,'고객 안내')}));await p.settle();
+  const retry=button('다시 불러오기');
+  await React.act(async()=>{retry.focus();retry.click()});
+  assert.equal(document.activeElement?.getAttribute('role'),'tab','retry returns focus before its button disappears');
+  await React.act(async()=>retryRead.resolve({data:{flags:{notification_control_plane_settings_ui_enabled:{enabled:true}}},error:null}));await p.settle();
+  assert.equal(document.activeElement?.getAttribute('role'),'tab','the enabled panel must retain channel focus');
+  assert.equal(document.activeElement?.getAttribute('aria-selected'),'true');
+});
+
+for(const error of [{code:'reauthentication_needed',message:'Sensitive provider detail'},{code:'session_expired',message:'Sensitive provider detail'}]) test(`profile ${error.code} offers reauthentication guidance and preserves the draft`,async t=>{
+  const p=await setup(t);
+  const sidebar=loadNotificationComponent('src/components/ui/sidebar.tsx');
+  const {NavUser}=loadNotificationComponent('src/components/nav-user.tsx',new Map([
+    ['@/components/ui/sidebar',sidebar],
+    ['next/navigation',{useRouter:()=>({replace(){}}),usePathname:()=>'/admin/settings/notifications'}],
+    ['@/providers/auth-provider',{useAuth:()=>({user:{user_metadata:{}},logout(){}})}],
+    ['@/lib/supabase',{supabase:{auth:{updateUser:async()=>({error})}}}],
+  ]));
+  await p.render(React.createElement(sidebar.SidebarProvider,null,React.createElement(NavUser,{user:{name:'합성 사용자',email:'fixture@example.invalid',avatar:''}})));
+  await key(document.querySelector('[data-testid="admin-user-menu-trigger"]'),'Enter');await p.settle();
+  await React.act(async()=>document.querySelector('[data-testid="admin-user-profile-settings"]').click());await p.settle();
+  const avatar=document.querySelector('[data-testid^="admin-profile-avatar-"][aria-pressed="false"]');
+  await React.act(async()=>avatar.click());
+  await React.act(async()=>document.querySelector('[role="dialog"] form').dispatchEvent(new window.Event('submit',{bubbles:true,cancelable:true})));await p.settle();
+  assert.match(document.querySelector('[role="alert"]').textContent,/다시 로그인/);
+  assert.doesNotMatch(document.body.textContent,/Sensitive provider detail/);
+  assert.equal(avatar.getAttribute('aria-pressed'),'true');
+  assert.equal(button('저장').disabled,false);
+});
+
+test('profile stays open with its draft when the responsive sidebar replaces the account menu host',async t=>{
+  const p=await setup(t);
+  const sidebar=loadNotificationComponent('src/components/ui/sidebar.tsx');
+  const {NavUser}=loadNotificationComponent('src/components/nav-user.tsx',new Map([
+    ['@/components/ui/sidebar',sidebar],['next/navigation',{useRouter:()=>({replace(){}})}],
+    ['@/providers/auth-provider',{useAuth:()=>({user:{user_metadata:{}},logout(){}})}],
+  ]));
+  let host=document.createElement('div');document.body.appendChild(host);
+  const render=()=>p.render(React.createElement(sidebar.SidebarProvider,null,React.createElement(NavUser,{user:{name:'합성 사용자',email:'fixture@example.invalid',avatar:''},menuContainer:host})));
+  await render();
+  assert.ok(host.querySelector('[data-testid="admin-user-menu-trigger"]'),'account menu renders in the current sidebar footer');
+  await key(host.querySelector('[data-testid="admin-user-menu-trigger"]'),'Enter');await p.settle();
+  await React.act(async()=>document.querySelector('[data-testid="admin-user-profile-settings"]').click());await p.settle();
+  const avatar=document.querySelector('[data-testid^="admin-profile-avatar-"][aria-pressed="false"]');
+  await React.act(async()=>avatar.click());
+  const selected=avatar.getAttribute('data-testid'),dialog=document.querySelector('[role="dialog"]');
+  host.remove();host=document.createElement('div');document.body.appendChild(host);
+  await render();await p.settle();
+  assert.equal(document.querySelector('[role="dialog"]'),dialog,'dialog DOM survives sidebar breakpoint changes');
+  assert.equal(document.querySelector(`[data-testid="${selected}"]`).getAttribute('aria-pressed'),'true');
+  const main=document.createElement('main');main.id='admin-workspace';main.tabIndex=-1;document.body.appendChild(main);
+  host.remove();host=null;await render();await p.settle();
+  await React.act(async()=>button('닫기').click());await p.settle();
+  assert.equal(document.activeElement,main,'after a removed menu opener, closing returns focus to the workspace');
+});

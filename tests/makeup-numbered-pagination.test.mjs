@@ -569,3 +569,36 @@ test('makeup pending submission locks all form fields and same-tick duplicate ac
  await act(async()=>mutation.resolve({data:null,error:{message:'합성 저장 실패'}}));
  assert.equal(reason.matches(':disabled'),false);assert.equal(reason.value,createInput.reason);assert.match(document.body.textContent,/합성 저장 실패/);
 });
+
+test('sorting after a failed search preserves the requested search scope and value', async t => {
+  const p = await setup(t);
+  await act(async () => p.finish(p.numbered()[0], 1, {rows:[row(1)]}));
+  await act(async () => p.observed.changeFilters({filterColumn:'reason', search:'원하는사유'}));
+  const failed = p.numbered().at(-1);
+  await act(async () => failed.resolve({data:null,error:{message:'Synthetic failure'}}));
+  assert.equal(document.querySelector('input[type="search"]').value,'원하는사유');
+  await act(async () => button('선생님 정렬').click());
+  const requested = p.numbered().at(-1).args.p_filters;
+  assert.equal(requested.filterColumn,'reason');
+  assert.equal(requested.search,'원하는사유');
+  assert.equal(requested.sortColumn,'teacher');
+});
+
+
+test('makeup search scope contains only real columns without an all sentinel',async t=>{
+  const p=await setup(t);
+  await act(async()=>p.finish(p.numbered()[0],0));
+  const scope=document.querySelector('[aria-label="휴보강 검색 범위"]');
+  await act(async()=>scope.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})));
+  const options=[...document.querySelectorAll('[role="option"]')].filter(node=>node.textContent.trim()==='수업');
+  assert.equal(options.length,1);
+});
+
+test('makeup failed filters identify the accepted search and dates beside retained rows', async t => {
+  const p = await setup(t, {search:`?view=approvalPending&makeupFilters=${encodeURIComponent(JSON.stringify({filterColumn:'reason',search:'기존사유',period:'custom',dateFrom:'2026-09-01',dateTo:'2026-09-10'}))}`});
+  await act(async () => p.finish(p.numbered()[0], 1, {rows:[row(1)]}));
+  await act(async () => p.observed.changeFilters({search:'새사유'}));
+  await act(async () => p.numbered().at(-1).reject(new Error('Synthetic unavailable')));
+  const alert=document.querySelector('[role="alert"]').textContent;
+  assert.match(alert,/기존사유/);assert.match(alert,/2026-09-01/);assert.doesNotMatch(alert,/새사유/);
+});

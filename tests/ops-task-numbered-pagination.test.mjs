@@ -1075,4 +1075,22 @@ for (const type of ['withdrawal', 'transfer']) test(`${type} search is visible a
   assert.equal(controls.filterColumn, 'student');
   assert.equal(controls.search, '가온');
   assert.equal(controls.sortColumn, 'status');
+  await act(async () => document.querySelector('[role="combobox"]').click());
+  const studentOptions=[...document.querySelectorAll('[role="option"]')].filter(node=>node.textContent.trim()==='학생');
+  assert.equal(studentOptions.length,1,'search scope contains only the valid student column, without an all sentinel');
+  await act(async () => studentOptions[0].click());
+  assert.equal(controls.filterColumn,'student');
+});
+
+for(const type of ['withdrawal','transfer']) test(`${type} failed search identifies the accepted criteria beside retained rows`,async t=>{
+  const p=await workspace(t,{workspace:type});
+  const table=()=>currentComponentProps(type==='withdrawal'?'WithdrawalDataTable':'TransferDataTable');
+  await act(async()=>p.finish(0,1,[operationPatch(type,'기존학생')]));
+  await act(async()=>table().onPageControlsChange({...table().initialControls,search:'기존학생',filterColumn:'student'}));
+  const reads=()=>p.requests.filter(r=>r.name==='list_ops_task_numbered_page_v1');
+  await act(async()=>p.finish(p.requests.indexOf(reads().at(-1)),1,[operationPatch(type,'기존학생')]));
+  await act(async()=>table().onPageControlsChange({...table().initialControls,search:'새학생',filterColumn:'student'}));
+  await act(async()=>reads().at(-1).reject(new Error('Synthetic unavailable')));
+  const alert=document.querySelector('[role="alert"]').textContent;
+  assert.match(alert,/기존학생/);assert.doesNotMatch(alert,/새학생/);
 });
