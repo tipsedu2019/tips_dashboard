@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2 } from 'lucide-react';
 
@@ -14,6 +14,7 @@ function TimetableBlock({
   slotHeight = 48,
   density = 'comfortable',
 }) {
+  const tooltipId = useId();
   const blockRef = useRef(null);
   const tooltipRef = useRef(null);
   const [isTooltipOpen, setIsTooltipOpen] = useState(false);
@@ -24,6 +25,7 @@ function TimetableBlock({
       (tooltipDetails.title || tooltipDetails.schedule || tooltipDetails.teacher || tooltipDetails.classroom)
   );
   const hasTooltip = hasStructuredTooltip || Boolean(block.tooltip);
+  const isReadOnlyDetail = hasTooltip && !isGhost && !block.editable && !block.clickable;
   const subjectLabel = block.subject || (block.header ? String(block.header).replace(/^\[|\]$/g, '') : '');
   const tooltipBadgeItems = tooltipDetails
     ? [tooltipDetails.teacher, tooltipDetails.classroom].filter(Boolean)
@@ -129,7 +131,18 @@ function TimetableBlock({
       <div
         ref={blockRef}
         className={classNames}
-        onClick={block.clickable && !isGhost && !suppressClick ? onClick : undefined}
+        role={isReadOnlyDetail ? "button" : undefined}
+        tabIndex={isReadOnlyDetail ? 0 : undefined}
+        aria-label={isReadOnlyDetail ? [block.title, tooltipDetails?.schedule, tooltipDetails?.teacher, tooltipDetails?.classroom].filter(Boolean).join(", ") : undefined}
+        aria-expanded={isReadOnlyDetail ? isTooltipOpen : undefined}
+        aria-describedby={isReadOnlyDetail && isTooltipOpen ? tooltipId : undefined}
+        onFocus={isReadOnlyDetail ? openTooltip : undefined}
+        onBlur={isReadOnlyDetail ? closeTooltip : undefined}
+        onKeyDown={isReadOnlyDetail ? (event) => {
+          if (event.key === "Escape") { event.stopPropagation(); closeTooltip(); }
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTooltip(); }
+        } : undefined}
+        onClick={block.clickable && !isGhost && !suppressClick ? onClick : isReadOnlyDetail ? openTooltip : undefined}
         onMouseDown={isGhost ? undefined : onMouseDown}
         onMouseEnter={openTooltip}
         onMouseLeave={closeTooltip}
@@ -209,6 +222,8 @@ function TimetableBlock({
         ? createPortal(
             <div
               ref={tooltipRef}
+              id={tooltipId}
+              role="tooltip"
               className={'timetable-floating-tooltip is-' + tooltipLayout.placement}
               style={{
                 top: tooltipLayout.top,

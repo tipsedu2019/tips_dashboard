@@ -69,7 +69,7 @@ test("timetable mode performs one range RPC and never reads curriculum detail so
     mode: "timetable",
     dateFrom: "2026-08-03",
     dateTo: "2026-08-16",
-    filters: { classGroupId: null, status: "수강", subject: "수학" },
+    filters: { classGroupId: "retired-saved-period", status: "수강", subject: "수학" },
   }), response);
   assert.deepEqual(calls.filter(([name]) => name.startsWith("get_") || name.startsWith("list_")), [[
     "get_academic_timetable_range_v1",

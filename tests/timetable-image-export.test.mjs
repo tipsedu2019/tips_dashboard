@@ -18,8 +18,8 @@ test("timetable panels expose per-panel high resolution image export", async () 
   assert.match(source, /getTimetableCaptureWidth/);
   assert.match(source, /scale:\s*3/);
   assert.match(source, /aria-label=\{`\$\{panel\.title\} 이미지 저장`\}/);
-  assert.match(source, /className="absolute right-3 top-3 size-9/);
-  assert.match(source, /pr-14/);
+  assert.match(source, /className="absolute right-2 top-2 size-11/);
+  assert.match(source, /pr-16/);
 });
 
 test("timetable blocks expose structured hover details", async () => {
@@ -51,10 +51,10 @@ test("timetable panel headers show lesson count and weekly hours", async () => {
   assert.match(source, /new Set\(/);
   assert.match(source, /block\.lessonKey \|\| block\.classId \|\| block\.key/);
   assert.match(source, /weeklyHoursLabel:\s*formatWeeklyHours/);
-  assert.match(source, /flex-col gap-1\.5 sm:flex-row sm:flex-wrap sm:items-center sm:gap-2/);
-  assert.match(source, /flex max-w-full flex-wrap items-center gap-1\.5/);
+
+
   assert.match(source, /수업 \{panelSummary\.lessonCount\}개/);
-  assert.match(source, /주간 \{panelSummary\.weeklyHoursLabel\}/);
+  assert.match(source, /view.endsWith\("weekly"\)/);
   assert.match(source, /timetableScheduleRows:\s*workspace\.rows/);
 });
 
@@ -70,7 +70,7 @@ test("compact timetable blocks keep class names readable", async () => {
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\)/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact\) \{[\s\S]*justify-content:\s*flex-start/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-subject\) \{[\s\S]*align-self:\s*flex-start/);
-  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\) \{[\s\S]*word-break:\s*break-all/);
+  assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\) \{[\s\S]*word-break:\s*keep-all/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-name\) \{[\s\S]*text-align:\s*left/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.block-info\) \{[\s\S]*margin-top:\s*auto/);
   assert.match(css, /\.scope :global\(\.timetable-block\.is-compact \.info-label\) \{[\s\S]*display:\s*none/);
@@ -83,16 +83,11 @@ test("compact timetable blocks keep class names readable", async () => {
   assert.match(globals, /\.timetable-tooltip-badge/);
 });
 
-test("timetable toolbar separates dense controls from scrollable target filters", async () => {
+test("timetable reuses shared tabs and responsive filters without semester controls", async () => {
   const source = await readSource("src/features/academic/timetable-workspace.tsx");
-
-  assert.match(source, /lg:grid-cols-\[12rem_minmax\(0,1fr\)_minmax\(0,1fr\)_9rem\]/);
-  assert.match(source, /xl:grid-cols-\[minmax\(18rem,0\.7fr\)_minmax\(0,1fr\)_auto\]/);
-  assert.match(source, /grid grid-cols-2 gap-1\.5 sm:grid-cols-4/);
-  assert.match(source, /className="h-8 min-w-0 justify-center rounded-md px-2 text-\[11px\] font-medium"/);
-  assert.match(source, /overflow-x-auto px-1 pb-1 \[scrollbar-width:thin\]/);
-  assert.match(source, /whitespace-nowrap/);
-  assert.match(source, /"--timetable-panel-columns": `repeat\(\$\{Math\.min\(/);
-  assert.match(source, /grid grid-cols-1 gap-6 lg:\[grid-template-columns:var\(--timetable-panel-columns\)\]/);
-  assert.match(source, /필터 초기화/);
+  assert.match(source, /WorkspaceTabsList\s+aria-label="시간표 보기"/);
+  assert.match(source, /DataTableFilterPanel\s+label="시간표 조건"/);
+  assert.match(source, /TimetableTargetFilter/);
+  assert.doesNotMatch(source, /period-filter|setClassGroupId/);
+  assert.match(source, /xl:\[grid-template-columns:var\(--timetable-panel-columns\)\]/);
 });

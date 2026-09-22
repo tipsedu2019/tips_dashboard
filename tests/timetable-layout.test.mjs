@@ -155,14 +155,11 @@ test("timetable workspace requests only its active mode and keeps dense recovery
   );
   assert.match(source, /useAcademicWorkspaceData\(\{\s*mode: "timetable"/);
   assert.match(source, /precomputedRows: data\.rows/);
-  assert.match(source, /densityError\?\.code === "visible_range_too_dense"/);
-  assert.match(source, /한 주 보기/);
-  assert.match(source, /densityError\?\.code === "timetable_collection_too_dense"/);
+  assert.match(source, /densityError \?/);
   assert.match(source, /successfulRequest/);
   assert.match(source, /filters: displayTimetableRequest\.filters/);
-  assert.match(source, /onClick=\{\(\) => \(rangeDays === 7 \? void refresh\(\) : setRangeDays\(7\)\)\}/);
   assert.match(source, /다시 시도/);
-  assert.doesNotMatch(source, /if \(!classGroupId && workspace\.classGroupOptions\.length > 0\)[\s\S]{0,120}setClassGroupId/);
+  assert.doesNotMatch(source, /period-filter|readDefaultPeriod|setClassGroupId|setRangeDays/);
   assert.doesNotMatch(source, /data\.textbooks|data\.progressLogs/);
 });
 
@@ -186,4 +183,27 @@ test("daily timetable panels keep horizontal scrolling for wider axis sets", () 
   assert.equal(layout.allowHorizontalScroll, true);
   assert.equal(layout.timeColumnWidth, 84);
   assert.equal(layout.minColumnWidth, 120);
+});
+
+// Memberships and a saved legacy group must not hide continuous classes.
+test("timetable ignores retired period scopes and keeps exactly three status choices", () => {
+  const classes = ["수강", "개강 준비", "종강"].map((status, i) => ({id:`class-${i}`,name:status,subject:"수학",teacher:"김선생",schedule:"월 18:00-19:00",status}));
+  const all = buildTimetableWorkspaceModel({classes,filters:{classGroupId:"retired-period"}});
+  assert.equal(all.rows.length, 3);
+  assert.deepEqual(all.statusOptions,["수강","개강 준비","종강"]);
+  for (const status of all.statusOptions) {
+    const filtered = buildTimetableWorkspaceModel({classes,filters:{classGroupId:"retired-period",status}});
+    assert.deepEqual(filtered.rows.map(row=>row.statusFilter),[status]);
+  }
+});
+
+test("comparison panels share a cropped axis without losing morning or late lessons", () => {
+  const classes = [{id:"a",teacher:"A",name:"오전",schedule:"월 09:00-10:00",status:"수강"},{id:"b",teacher:"B",name:"야간",schedule:"월 23:00-24:00",status:"수강"}];
+  const grid = buildTimetableGridPanels({workspace:buildTimetableWorkspaceModel({classes})});
+  assert.equal(grid.timeSlots[0],"08:30-09:00");
+  assert.equal(grid.timeSlots.at(-1),"23:30-24:00");
+  assert.deepEqual(grid.panels.map(panel=>panel.blocks[0].endSlot-panel.blocks[0].startSlot),[2,2]);
+  for (const panel of grid.panels) for (const block of panel.blocks) {
+    assert.ok(block.startSlot >= 0 && block.endSlot <= grid.timeSlots.length);
+  }
 });

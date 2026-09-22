@@ -484,6 +484,11 @@
       "fileName": "20260921144020_student_enrollment_status.sql",
       "status": "final",
       "sha256": "8340be5894d4147aea02e66b008456755a8e7b4ff277de63e1effd42b6600a5e"
+    },
+    {
+      "fileName": "20260922023940_timetable_continuous_class_scope.sql",
+      "status": "final",
+      "sha256": "ce83b2692195757381ff73e946cd24ff2080d61ebe231cacac1c5516e0648757"
     }
   ]
 }
