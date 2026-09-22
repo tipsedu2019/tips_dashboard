@@ -129,6 +129,7 @@ export function NavMain({
     title: string
     url: string
     icon?: LucideIcon
+    target?: string
     isActive?: boolean
     items?: {
       title: string
@@ -295,6 +296,20 @@ export function NavMain({
                       </SidebarMenuSub>
                     </CollapsibleContent>
                   </>
+                ) : item.target === "_blank" ? (
+                  <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer">
+                    <a
+                      href={item.url}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      aria-label={`${item.title} (새 창)`}
+                      title={`${item.title} (새 창)`}
+                      data-testid={`admin-nav-link-${itemTargetId}`}
+                    >
+                      {item.icon && <item.icon />}
+                      <span>{item.title}</span>
+                    </a>
+                  </SidebarMenuButton>
                 ) : (
                   <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isUrlActive(item.url)}>
                     <Link

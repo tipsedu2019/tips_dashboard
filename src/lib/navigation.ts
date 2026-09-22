@@ -3,6 +3,7 @@ import {
   BookOpen,
   CalendarDays,
   CalendarClock,
+  ExternalLink,
   GraduationCap,
   ChartNoAxesCombined,
   LayoutDashboard,
@@ -372,7 +373,10 @@ export function buildAdminNavGroups({
     overview,
     {
       label: "영어",
-      items: [{ title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck }],
+      items: [
+        { title: "영어 단어 재시험", url: "/admin/word-retests", icon: SpellCheck },
+        { title: "TIPS English Studio", url: "https://tipsedu.co.kr/test-gen", icon: ExternalLink, target: "_blank" },
+      ],
     },
   ]
 
