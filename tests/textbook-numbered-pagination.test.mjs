@@ -126,7 +126,7 @@ test('master cleanup confirmation keeps the complete long title and selection wh
   await h.resolve(h.requests.find(request => request.name === 'get_textbook_master_summary_v1'), masterSummary(1));
   await h.act(() => document.querySelector('[data-prepared-surface="master-desktop"] [role="checkbox"]').click());
   await h.act(() => button('선택 교재 작업').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', bubbles: true })));
-  await h.act(() => document.querySelector('[role="menuitem"][aria-label="선택 교재 삭제"]').click());
+  await h.act(() => document.querySelector('[role="menuitem"][aria-label="선택 교재 정리"]').click());
 
   const dialog = document.querySelector('[role="alertdialog"]');
   assert.ok(dialog);

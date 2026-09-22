@@ -2227,7 +2227,7 @@ test("textbook workspace third-pass polish tightens navigation and action ergono
   assert.match(workspaceSource, /const title = normalizedStage === "receive" \? "교재 입고" : normalizedStage === "order" \? "교재 주문" : "교재 요청"/);
   assert.match(workspaceSource, /title="선택 요청 일괄 주문"/);
   assert.match(workspaceSource, /aria-label="선택 요청 일괄 주문"/);
-  assert.match(workspaceSource, /aria-label="선택 교재 삭제"/);
+  assert.match(workspaceSource, /aria-label="선택 교재 정리"/);
   assert.match(workspaceSource, /aria-label="선택 교재 선택 해제"/);
   assert.match(workspaceSource, /aria-label="재고 실사 목록"/);
   assert.match(workspaceSource, /aria-label="교재 재고"/);
@@ -2735,7 +2735,7 @@ test("textbook workspace locks 50 cleanup confirmation safeguards", async () => 
     /confirmationPendingRef\.current = true/,
     /const ok = await action\(\)/,
     /if \(ok\) \{/,
-    /선택 교재 삭제/,
+    /선택 교재 정리/,
     /선택 교재 선택 해제/,
     /setSelectedTextbookIds\(\[\]\)/,
     /교재를 삭제했습니다/,
