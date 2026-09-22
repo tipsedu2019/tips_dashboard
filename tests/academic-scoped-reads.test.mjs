@@ -393,9 +393,9 @@ test("continuation loading and last-good display are synchronously bound to the 
 test("curriculum CTA prioritizes missing sessions while textbook counts remain independent", () => {
   assert.equal(typeof getCurriculumDesignAction, "function");
   assert.deepEqual(getCurriculumDesignAction({ textbookCount: 0, totalSessions: 0 }), {
-    label: "일정", tab: "schedule", sectionId: "lesson-design-periods", sessionId: "", reason: "회차 생성 필요",
+    label: "일정 편성", tab: "schedule", sectionId: "lesson-design-periods", sessionId: "", reason: "회차 생성 필요",
   });
-  assert.equal(getCurriculumDesignAction({ textbookCount: 0, totalSessions: 2 }).reason, "교재 연결 필요");
+  assert.equal(getCurriculumDesignAction({ textbookCount: 0, totalSessions: 2 }).reason, "수업일 확인 및 조정");
 });
 
 test("current-scope rendering requires data and display fingerprints to both match", () => {

@@ -14,7 +14,7 @@ const academicRow = {
   textbookCount: 1, textbookCatalog: [], textbookTitles: [], textbookSummary: '1권 연결', textbookOverflowCount: 0, textbookScopeLabels: [],
   totalSessions: 1, completedSessions: 2, updatedSessions: 2, delayedSessions: 0, plannedSessions: 2, progressTargetSessions: 1,
   delayedProgressSessions: 0, plannedProgressSessions: 2, progressPercent: 200, progressTargetPercent: 200,
-  lastUpdatedAt: '2026-08-31 10:00:00+09', stateLabel: '계획 완료', latestNoteSummary: '', latestNoteSessionLabel: '',
+  lastUpdatedAt: '2026-08-31 10:00:00+09', stateLabel: '일정 편성', latestNoteSummary: '', latestNoteSessionLabel: '',
   pendingSessionLabels: [], nextSession: null, sessionSummaries: [], searchText: '수업 10',
 };
 const nextSession = {

@@ -1,17 +1,18 @@
 "use client";
 
 import Link from "next/link";
+import { preserveScheduleLearningContent, scheduleOnlyDraft } from "./schedule-only-plan";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { AlertTriangle, ArrowLeft, ArrowUpRight, BookOpen, Plus, Trash2, X } from "lucide-react";
+import { AlertTriangle, ArrowLeft, ArrowUpRight, Trash2, X } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { NativeSelect } from "@/components/ui/native-select";
-import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Textarea } from "@/components/ui/textarea";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -27,18 +28,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AcademicFilterToolbar } from "@/features/academic/filter-toolbar";
-import {
-  applyCalendarDateSubstitution,
-  applyCalendarDateToggle,
-  applyTextbookPlanRangeField,
-  applyTextbookSessionRanges,
-  buildLessonContentPatch,
-  buildSchedulePlanForSave,
-  computeAutoEndDate,
-  getNextBillingPeriodMonth,
-  getSuggestedNextStartDate,
-  normalizeSchedulePlan,
-} from "@/lib/class-schedule-planner";
+import { applyCalendarDateSubstitution, applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, getNextBillingPeriodMonth, getSuggestedNextStartDate, normalizeSchedulePlan } from "@/lib/class-schedule-planner";
 import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { supabase } from "@/lib/supabase";
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js";
@@ -55,11 +45,7 @@ import type { SaveClassLessonSessionInput } from "@/features/academic/continuous
 import { probeContinuousScheduleRuntime, resetContinuousScheduleRuntimeProbe } from "@/features/academic/continuous-class-schedule-runtime-probe";
 import { useContinuousClassSchedule } from "./use-continuous-class-schedule";
 import { createContinuousScheduleMutationAction } from "@/features/academic/continuous-class-schedule-service";
-import {
-  createLessonProgressDraft,
-  updateLessonProgressDraftEntry,
-  type LessonProgressDraftEntry,
-} from "./lesson-progress-draft";
+
 import { formatClassScheduleProgress, getClassScheduleProgressState } from "./class-schedule-presentation.js";
 import { useOperationsWorkspaceData } from "./use-operations-workspace-data";
 import {
@@ -168,67 +154,6 @@ function getTextbookSubject(book: Record<string, unknown> | null | undefined) {
   return text(book?.subject);
 }
 
-function normalizeLessonSubjectKey(value: unknown) {
-  const normalized = text(value).replace(/\s+/g, "").toLowerCase();
-  if (!normalized) {
-    return "";
-  }
-  if (normalized.includes("수학") || normalized.includes("math")) {
-    return "math";
-  }
-  if (normalized.includes("영어") || normalized.includes("english")) {
-    return "english";
-  }
-  if (normalized.includes("과학") || normalized.includes("science")) {
-    return "science";
-  }
-  if (normalized.includes("기타") || normalized.includes("other")) {
-    return "other";
-  }
-  return normalized;
-}
-
-function getLessonSubjectDisplayLabel(value: unknown) {
-  const subjectKey = normalizeLessonSubjectKey(value);
-  if (subjectKey === "math") {
-    return "수학";
-  }
-  if (subjectKey === "english") {
-    return "영어";
-  }
-  if (subjectKey === "science") {
-    return "과학";
-  }
-  if (subjectKey === "other") {
-    return "기타";
-  }
-  return text(value);
-}
-
-function buildLessonTextbookFilterOptions(
-  books: Record<string, unknown>[],
-  getter: (book: Record<string, unknown>) => string,
-) {
-  return [
-    ...new Set(
-      books
-        .map((book) => getter(book))
-        .map((value) => text(value))
-        .filter(Boolean),
-    ),
-  ].sort((left, right) => left.localeCompare(right, "ko"));
-}
-
-function matchesLessonTextbookFilter(value: string, filter: string) {
-  return !filter || filter === "all" || value === filter;
-}
-
-function getLessonSessionOptionLabel(session: Record<string, unknown> | null | undefined) {
-  const label = text(session?.label);
-  const dateLabel = text(session?.dateLabel);
-  return [label, dateLabel].filter(Boolean).join(" · ");
-}
-
 function getLessonSessionSortTime(session: Record<string, unknown>) {
   const dateValue = text(session.date || session.session_date || session.dateValue);
   const time = Date.parse(`${dateValue}T00:00:00`);
@@ -286,97 +211,6 @@ function findMatchingLessonSessionRecord(
     sessions.find((session) => Number(session?.sessionNumber || session?.session_number || 0) === sessionNumber) ||
     null
   );
-}
-
-const LESSON_GRADE_TOKENS = ["중1", "중2", "중3", "고1", "고2", "고3"];
-const LESSON_MATCH_TOKENS = [
-  "공통수학2",
-  "공통수학1",
-  "공통수학",
-  "수학2",
-  "수학1",
-  "미적분",
-  "확률과통계",
-  "확통",
-  "기하",
-  "독해",
-  "어법",
-  "문법",
-  "듣기",
-  "내신",
-  "수능",
-  "모의고사",
-];
-
-function normalizeLessonMatchText(value: unknown) {
-  return text(value).replace(/\s+/g, "").toLowerCase();
-}
-
-function extractLessonGradeTokens(value: unknown) {
-  const normalized = normalizeLessonMatchText(value);
-  return LESSON_GRADE_TOKENS.filter((token) => normalized.includes(token));
-}
-
-function extractLessonMatchTokens(value: unknown) {
-  const normalized = normalizeLessonMatchText(value);
-  return [
-    ...new Set(
-      LESSON_MATCH_TOKENS.filter((token) => normalized.includes(normalizeLessonMatchText(token))),
-    ),
-  ];
-}
-
-function buildTextbookMatchCorpus(book: Record<string, unknown> | null | undefined) {
-  return normalizeLessonMatchText(
-    [
-      getTextbookTitle(book),
-      getTextbookPublisher(book),
-      getTextbookCategory(book),
-      getTextbookSubject(book),
-    ].join(" "),
-  );
-}
-
-function scoreLessonTextbookCandidate(
-  book: Record<string, unknown>,
-  context: {
-    plannerClassName?: string;
-    plannerSubject?: string;
-    plannerGrade?: string;
-  } | null,
-) {
-  const plannerSubject = text(context?.plannerSubject) === "과목 미정" ? "" : text(context?.plannerSubject);
-  const bookSubject = getTextbookSubject(book);
-  const plannerSubjectKey = normalizeLessonSubjectKey(plannerSubject);
-  const bookSubjectKey = normalizeLessonSubjectKey(bookSubject);
-  const corpus = buildTextbookMatchCorpus(book);
-  let score = 0;
-
-  if (plannerSubjectKey && bookSubjectKey) {
-    score += bookSubjectKey === plannerSubjectKey ? 80 : -120;
-  }
-
-  const classText = `${text(context?.plannerClassName)} ${text(context?.plannerGrade)}`;
-  const classGrades = extractLessonGradeTokens(classText);
-  const bookGrades = extractLessonGradeTokens(corpus);
-  classGrades.forEach((gradeToken) => {
-    score += bookGrades.includes(gradeToken) ? 45 : 0;
-  });
-  if (classGrades.length > 0 && bookGrades.some((gradeToken) => !classGrades.includes(gradeToken))) {
-    score -= 35;
-  }
-
-  extractLessonMatchTokens(classText).forEach((token) => {
-    if (corpus.includes(normalizeLessonMatchText(token))) {
-      score += token.length >= 4 ? 30 : 20;
-    }
-  });
-
-  if (classGrades.some((gradeToken) => gradeToken === "고1" || gradeToken === "고2") && corpus.includes("수능대비")) {
-    score -= 15;
-  }
-
-  return score;
 }
 
 function formatUpdatedDate(value: string) {
@@ -608,8 +442,6 @@ function buildLessonDesignSaveReadiness({
   periodRange,
   billingPeriods,
   sessionCount,
-  textbookTitles,
-  sessions,
 }: {
   plannerClassName: string;
   plannerSubject: string;
@@ -624,11 +456,6 @@ function buildLessonDesignSaveReadiness({
     sessionCount: number;
   }>;
   sessionCount: number;
-  textbookTitles: string[];
-  sessions: Array<{
-    rangeLabel: string;
-    textbookEntries: Array<{ hasPlanContent: boolean }>;
-  }>;
 }) {
   const blockers: string[] = [];
   const warnings: string[] = [];
@@ -656,12 +483,6 @@ function buildLessonDesignSaveReadiness({
       return startDate.getTime() <= candidateEnd.getTime() && endDate.getTime() >= candidateStart.getTime();
     });
   });
-  const plannedTemplateCount = sessions.filter(
-    (session) =>
-      session.rangeLabel !== "범위 기록 없음" ||
-      session.textbookEntries.some((entry) => entry.hasPlanContent),
-  ).length;
-
   if (plannerClassName === "수업명 미정") {
     blockers.push("공식 수업명이 아직 정리되지 않았습니다.");
   }
@@ -682,13 +503,6 @@ function buildLessonDesignSaveReadiness({
   }
   if (sessionCount === 0) {
     blockers.push("생성된 회차가 아직 없습니다.");
-  }
-
-  if (textbookTitles.length === 0) {
-    warnings.push("연결 교재가 아직 없습니다.");
-  }
-  if (plannedTemplateCount === 0) {
-    warnings.push("회차별 계획 범위 기록이 아직 없습니다.");
   }
 
   const ready = blockers.length === 0;
@@ -735,6 +549,7 @@ const LESSON_DESIGN_SCHEDULE_STATE_VALUES = new Set([
 
 function resolveLessonDesignSectionId(sectionId: string) {
   const resolvedSectionId = text(sectionId);
+  if (resolvedSectionId === LESSON_DESIGN_SECTION_IDS.textbooks || resolvedSectionId === LESSON_DESIGN_SECTION_IDS.board) return LESSON_DESIGN_SECTION_IDS.periods;
   return LESSON_DESIGN_SECTION_VALUES.has(resolvedSectionId) ? resolvedSectionId : "";
 }
 
@@ -1776,8 +1591,6 @@ function buildLessonDesignSnapshot(
         : "운영 기간 미정",
     billingPeriods: periodSummariesWithSessionCounts,
     sessionCount: sessions.length,
-    textbookTitles,
-    sessions,
   });
 
   return {
@@ -2403,93 +2216,6 @@ function buildLessonPreviewBadges<
   return badges;
 }
 
-function toComparableLessonTime(value: string) {
-  const parsed = parseScheduleDateValue(value);
-  if (!parsed) {
-    return Number.POSITIVE_INFINITY;
-  }
-
-  parsed.setHours(0, 0, 0, 0);
-  return parsed.getTime();
-}
-
-function buildLessonFlowStepKey(
-  groupKey: string,
-  session: { id: string; dateValue: string; sessionNumber: number; scheduleState: string },
-) {
-  return [
-    groupKey,
-    text(session.id),
-    text(session.dateValue) || "undated",
-    Number(session.sessionNumber || 0) || "na",
-    text(session.scheduleState) || "active",
-  ].join("::");
-}
-
-function buildLessonFlowStateMap<
-  T extends {
-    key: string;
-    sessions: Array<{
-      id: string;
-      dateValue: string;
-      sessionNumber: number;
-      scheduleState: string;
-    }>;
-  },
->(sessionGroups: T[] = [], referenceDate = new Date()) {
-  const comparisonDate = new Date(referenceDate);
-  comparisonDate.setHours(0, 0, 0, 0);
-
-  const timeline = sessionGroups
-    .flatMap((group, groupIndex) =>
-      group.sessions.map((session, sessionIndex) => ({
-        groupKey: group.key,
-        session,
-        groupIndex,
-        sessionIndex,
-        sortKey: buildLessonFlowStepKey(group.key, session),
-      })),
-    )
-    .sort((left, right) => {
-      const timeGap = toComparableLessonTime(left.session.dateValue) - toComparableLessonTime(right.session.dateValue);
-      if (timeGap !== 0) {
-        return timeGap;
-      }
-      const sessionNumberGap = Number(left.session.sessionNumber || 0) - Number(right.session.sessionNumber || 0);
-      if (sessionNumberGap !== 0) {
-        return sessionNumberGap;
-      }
-      const groupIndexGap = left.groupIndex - right.groupIndex;
-      if (groupIndexGap !== 0) {
-        return groupIndexGap;
-      }
-      const sessionIndexGap = left.sessionIndex - right.sessionIndex;
-      if (sessionIndexGap !== 0) {
-        return sessionIndexGap;
-      }
-      return text(left.sortKey).localeCompare(text(right.sortKey));
-    });
-
-  let activeTimelineIndex = -1;
-  timeline.forEach((entry, index) => {
-    if (toComparableLessonTime(entry.session.dateValue) <= comparisonDate.getTime()) {
-      activeTimelineIndex = index;
-    }
-  });
-
-  return new Map(
-    timeline.map((entry, index) => {
-      const flowState =
-        index < activeTimelineIndex
-          ? "done"
-          : index === activeTimelineIndex
-            ? "active"
-            : "pending";
-      return [text(entry.session.id), flowState] as const;
-    }),
-  );
-}
-
 function buildSelectedRowSnapshot(
   selectedRow: Record<string, unknown> | null,
   textbooks: Record<string, unknown>[] = [],
@@ -2676,7 +2402,7 @@ export function ClassScheduleWorkspace() {
   const [isLessonReadRetrying, setIsLessonReadRetrying] = useState(false);
   const [normalizedLessonSessionBaselines, setNormalizedLessonSessionBaselines] = useState<Record<string, SaveClassLessonSessionInput>>({});
   const normalizedLessonSessionDraftsRef = useRef<Record<string, Partial<SaveClassLessonSessionInput>>>({});
-  const [lessonProgressBaseline, setLessonProgressBaseline] = useState<LessonProgressDraftEntry[]>([]);
+  
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
   const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
@@ -2687,33 +2413,22 @@ export function ClassScheduleWorkspace() {
   const [normalizedLessonSessionDrafts, setNormalizedLessonSessionDrafts] = useState<Record<string, Partial<SaveClassLessonSessionInput>>>({});
   const [normalizedLessonSessionDetailsOpenSessionId, setNormalizedLessonSessionDetailsOpenSessionId] = useState("");
   const [isNormalizedLessonSessionSaving, setIsNormalizedLessonSessionSaving] = useState(false);
-  const [lessonTextbookSearch, setLessonTextbookSearch] = useState("");
-  const [lessonTextbookCategoryFilter, setLessonTextbookCategoryFilter] = useState("all");
-  const [lessonTextbookPublisherFilter, setLessonTextbookPublisherFilter] = useState("all");
-  const [isLessonTextbookFinderOpen, setIsLessonTextbookFinderOpen] = useState(false);
-  const [progressDialogSessionId, setProgressDialogSessionId] = useState("");
-  const [lessonProgressDraft, setLessonProgressDraft] = useState<LessonProgressDraftEntry[]>([]);
+
   const [selectedLessonCalendarDate, setSelectedLessonCalendarDate] = useState("");
   const [lessonCalendarDragSource, setLessonCalendarDragSource] = useState("");
   const [lessonCalendarDropTarget, setLessonCalendarDropTarget] = useState("");
   const [lessonDesignDetail, setLessonDesignDetail] = useState<Record<string, unknown> | null>(null);
   const [lessonDesignDetailLoading, setLessonDesignDetailLoading] = useState(false);
   const [lessonDesignDetailError, setLessonDesignDetailError] = useState("");
-  const [lessonTextbookCandidatePage, setLessonTextbookCandidatePage] = useState<{
-    rows: Record<string, unknown>[];
-    hasMore: boolean;
-    nextCursor: { title: string; id: string } | null;
-  }>({ rows: [], hasMore: false, nextCursor: null });
-  const [lessonTextbookCandidateLoading, setLessonTextbookCandidateLoading] = useState(false);
-  const [lessonTextbookCandidateError, setLessonTextbookCandidateError] = useState("");
+
   const lessonDesignDetailRevisionRef = useRef(0);
-  const lessonTextbookCandidateRevisionRef = useRef(0);
+  
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
   const pendingLessonDesignDialogScrollTopRef = useRef<number | null>(null);
   const pendingLessonDesignCalendarPointerScrollTopRef = useRef<number | null>(null);
   const pendingLessonDesignPairSessionIdRef = useRef("");
-  const deferredLessonTextbookSearch = useDeferredValue(lessonTextbookSearch);
+  
   selectedClassIdRef.current = selectedClassId;
   const operationsRequest = useMemo(
     () => ({
@@ -2737,14 +2452,13 @@ export function ClassScheduleWorkspace() {
     refresh,
     loadClassScheduleDetail,
     loadClassLessonDesignDetail,
-    loadLessonTextbookCandidates,
-  } = useOperationsWorkspaceData(operationsRequest);
+  } = useOperationsWorkspaceData(operationsRequest, { enabled: !isLessonDesignRouteActive });
   const lessonPlanDirty = Boolean(lessonPlanBaseline && lessonPlanDraft && !lessonDraftEqual(lessonPlanDraft, lessonPlanBaseline));
   const lessonSessionDirty = Object.entries(normalizedLessonSessionDrafts).some(([id, draft]) =>
     !lessonDraftEqual(draft, normalizedLessonSessionBaselines[id]));
-  const lessonProgressDirty = Boolean(progressDialogSessionId && !lessonDraftEqual(lessonProgressDraft, lessonProgressBaseline));
-  const { requestNavigation, requestLocalAction, confirmation: draftNavigationConfirmation } = useDraftNavigation({
-    dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty || lessonProgressDirty)),
+  
+  const { requestNavigation, confirmation: draftNavigationConfirmation } = useDraftNavigation({
+    dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty)),
   });
   const handlePageChange = (page: number) => {
     if (totalCount === null || displayRequest.mode !== "class_schedule") return;
@@ -2758,23 +2472,23 @@ export function ClassScheduleWorkspace() {
     setEditorActorScope(actorScope);
     lessonMutationLifecycleRef.current?.revoke();
     lessonDesignDetailRevisionRef.current++;
-    lessonTextbookCandidateRevisionRef.current++;
+    
     selectedClassIdRef.current = "";
     lessonPlanDraftRef.current = null;
     lessonPlanSourceKeyRef.current = "";
     lessonPlanBaselineRef.current = null; lessonPlanOwnerRef.current = "";
     lessonPlanSaveRef.current = null; lessonSessionSaveRef.current = null; lessonGenerationRequestRef.current = null;
     normalizedLessonSessionDraftsRef.current = {};
-    setLessonPlanBaseline(null); setNormalizedLessonSessionBaselines({}); setLessonProgressBaseline([]);
+    setLessonPlanBaseline(null); setNormalizedLessonSessionBaselines({}); 
     setLessonReadRetryNeeded(false); setIsLessonReadRetrying(false);
     setSelectedClassId(""); setLessonDesignOpen(false);
     setLessonDesignDetail(null); setLessonDesignDetailError(""); setLessonDesignDetailLoading(false);
-    setLessonPlanDraft(null); setLessonProgressDraft([]); setProgressDialogSessionId("");
-    setLessonTextbookCandidatePage({ rows: [], hasMore: false, nextCursor: null });
-    setLessonTextbookCandidateError(""); setLessonTextbookCandidateLoading(false);
+    setLessonPlanDraft(null);  
+    
+     
     setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionDetailsOpenSessionId("");
     setSelectedLessonSessionId(""); setSelectedLessonMonthKeys([]); setFocusedLessonMonthKey("");
-    setLessonTextbookSearch(""); setIsLessonTextbookFinderOpen(false);
+     
     setGenerationPreview(null); setGenerationSaving(false); setIsLessonDesignSaving(false);
     setIsNormalizedLessonSessionSaving(false); setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
   }
@@ -3105,18 +2819,7 @@ export function ClassScheduleWorkspace() {
       : [],
     [lessonDesignDetail],
   );
-  const lessonDesignEditorTextbooks = useMemo(() => {
-    const merged = new Map<string, Record<string, unknown>>();
-    lessonDesignTextbooks.forEach((book) => {
-      const id = text(book.id);
-      if (id) merged.set(id, book);
-    });
-    lessonTextbookCandidatePage.rows.forEach((book) => {
-      const id = text(book.id);
-      if (id && !merged.has(id)) merged.set(id, book);
-    });
-    return [...merged.values()];
-  }, [lessonDesignTextbooks, lessonTextbookCandidatePage.rows]);
+  const lessonDesignEditorTextbooks = lessonDesignTextbooks;
   const lessonDesignTeacherCatalogs = useMemo(
     () => Array.isArray(lessonDesignDetail?.teacherCatalogs)
       ? lessonDesignDetail.teacherCatalogs as Record<string, unknown>[]
@@ -3205,20 +2908,6 @@ export function ClassScheduleWorkspace() {
   const generationScopeRef = useRef(generationScope);
   generationScopeRef.current = generationScope;
   useEffect(() => { setGenerationPreview(null); }, [generationScope]);
-  const normalizedContentContext = useMemo(() => (
-    normalizedScheduleRead.status === "ready" && normalizedScheduleRead.value.source === "normalized"
-      ? {
-        classId: selectedRow?.id || "",
-        expectedContentHash: text(normalizedScheduleRead.value.data.contentHash),
-        sessionKeys: Array.isArray(normalizedScheduleRead.value.data.sessions)
-          ? normalizedScheduleRead.value.data.sessions
-            .map((session) => text((session as Record<string, unknown>)?.session_key || (session as Record<string, unknown>)?.sessionKey))
-            .filter(Boolean)
-          : [],
-      }
-      : null
-  ), [normalizedScheduleRead, selectedRow?.id]);
-
   const selectedRowClassItem = useMemo(
     () => {
       const classItem = ((selectedRow?.raw || null) as Record<string, unknown> | null)?.classItem as Record<string, unknown> | null;
@@ -3243,7 +2932,6 @@ export function ClassScheduleWorkspace() {
   }, [selectedRow?.id, selectedRowClassItem]);
   const lessonPlanDefaults = useMemo(() => {
     const savedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || null) as Record<string, unknown> | null;
-    const rawTextbookIds = selectedRowClassItem?.textbook_ids || selectedRowClassItem?.textbookIds;
     return {
       className:
         text(savedPlan?.className || savedPlan?.class_name || selectedRowClassItem?.className || selectedRow?.title) ||
@@ -3252,21 +2940,15 @@ export function ClassScheduleWorkspace() {
       schedule: text(savedPlan?.schedule || selectedRowClassItem?.schedule || selectedRow?.scheduleLabel) || "",
       startDate: text(selectedRowClassItem?.start_date || selectedRowClassItem?.startDate),
       endDate: text(selectedRowClassItem?.end_date || selectedRowClassItem?.endDate),
-      textbooks: lessonDesignEditorTextbooks,
-      textbookIds: Array.isArray(rawTextbookIds)
-        ? rawTextbookIds.map((value) => text(value)).filter(Boolean)
-        : [],
+      textbooks: [],
+      textbookIds: [],
     };
-  }, [lessonDesignEditorTextbooks, selectedRow, selectedRowClassItem]);
+  }, [selectedRow, selectedRowClassItem]);
   const normalizeLessonDraft = useCallback((plan: Record<string, unknown>) => {
-    const normalized = normalizeSchedulePlan(plan, lessonPlanDefaults) as Record<string, unknown>;
+    const normalized = normalizeSchedulePlan(scheduleOnlyDraft(plan), { ...lessonPlanDefaults, textbooks: [], textbookIds: [] }) as Record<string, unknown>;
     if (!isNormalizedLessonSchedule) return normalized;
-    // Authoritative rows may move off the weekly pattern or share the same date.
-    // Reuse the existing textbook range rules without regenerating their schedule.
-    return { ...normalized, sessions: applyTextbookSessionRanges(
-      (plan.sessions as Record<string, unknown>[] || []).slice().sort(sortLessonSessionRecords),
-      normalized.textbooks as Record<string, unknown>[] || [],
-    ) };
+    // Authoritative rows may move off the weekly pattern or share a date.
+    return { ...normalized, sessions: (scheduleOnlyDraft(plan).sessions as Record<string, unknown>[]).slice().sort(sortLessonSessionRecords) };
   }, [isNormalizedLessonSchedule, lessonPlanDefaults]);
   const normalizedLessonPlan = useMemo(
     () => (lessonPlanDraft ? normalizeLessonDraft(lessonPlanDraft) : null),
@@ -3303,101 +2985,6 @@ export function ClassScheduleWorkspace() {
       totalSessions: (displayPlan.sessions as Record<string, unknown>[] || []).filter((session) => isDateWithinRange(text(session.date), text(period.startDate), text(period.endDate))).length,
     })) });
   }, [lessonDesignEditorTextbooks, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem]);
-  const connectedLessonTextbookIds = useMemo(
-    () =>
-      new Set(
-        (lessonDesignSnapshot?.textbookCatalog || [])
-          .map((book) => text(book?.textbookId))
-          .filter(Boolean),
-      ),
-    [lessonDesignSnapshot],
-  );
-  const lessonPlannerSubjectKey = useMemo(() => {
-    const plannerSubject =
-      text(lessonDesignSnapshot?.plannerSubject) === "과목 미정"
-        ? ""
-        : text(lessonDesignSnapshot?.plannerSubject);
-    return normalizeLessonSubjectKey(plannerSubject);
-  }, [lessonDesignSnapshot]);
-  const lessonTextbookSubjectBooks = useMemo(
-    () =>
-      lessonPlannerSubjectKey
-        ? lessonTextbookCandidatePage.rows.filter(
-            (book) => normalizeLessonSubjectKey(getTextbookSubject(book)) === lessonPlannerSubjectKey,
-          )
-        : [],
-    [lessonPlannerSubjectKey, lessonTextbookCandidatePage.rows],
-  );
-  const lessonTextbookFilterOptions = useMemo(
-    () => ({
-      categories: buildLessonTextbookFilterOptions(lessonTextbookSubjectBooks, getTextbookCategory),
-      publishers: buildLessonTextbookFilterOptions(lessonTextbookSubjectBooks, getTextbookPublisher),
-    }),
-    [lessonTextbookSubjectBooks],
-  );
-  useEffect(() => {
-    setLessonTextbookCategoryFilter((current) =>
-      current === "all" || lessonTextbookFilterOptions.categories.includes(current) ? current : "all",
-    );
-    setLessonTextbookPublisherFilter((current) =>
-      current === "all" || lessonTextbookFilterOptions.publishers.includes(current) ? current : "all",
-    );
-  }, [lessonTextbookFilterOptions]);
-  const lessonTextbookOptions = useMemo(() => {
-    const query = text(deferredLessonTextbookSearch).toLowerCase();
-    const candidates: Array<{ book: Record<string, unknown>; score: number; title: string }> = [];
-
-    for (const book of lessonTextbookSubjectBooks) {
-      const id = text(book.id);
-      if (!id || connectedLessonTextbookIds.has(id)) {
-        continue;
-      }
-
-      const bookSubject = getTextbookSubject(book);
-      const category = getTextbookCategory(book);
-      const publisher = getTextbookPublisher(book);
-      if (
-        !matchesLessonTextbookFilter(category, lessonTextbookCategoryFilter) ||
-        !matchesLessonTextbookFilter(publisher, lessonTextbookPublisherFilter)
-      ) {
-        continue;
-      }
-
-      const title = getTextbookTitle(book);
-      if (
-        query &&
-        ![title, publisher, category, bookSubject]
-          .join(" ")
-          .toLowerCase()
-          .includes(query)
-      ) {
-        continue;
-      }
-
-      candidates.push({
-        book,
-        score: scoreLessonTextbookCandidate(book, lessonDesignSnapshot),
-        title,
-      });
-    }
-
-    return candidates
-      .sort((left, right) => {
-        const scoreGap =
-          right.score - left.score;
-        return scoreGap || left.title.localeCompare(right.title, "ko");
-      })
-      .slice(0, 18)
-      .map((item) => item.book);
-  }, [
-    connectedLessonTextbookIds,
-    deferredLessonTextbookSearch,
-    lessonDesignSnapshot,
-    lessonTextbookCategoryFilter,
-    lessonTextbookPublisherFilter,
-    lessonTextbookSubjectBooks,
-  ]);
-
   useEffect(() => {
     const owner = isLessonDesignRouteActive ? requestedClassId : text(selectedRow?.id);
     const ownerChanged = lessonPlanOwnerRef.current !== owner;
@@ -3410,7 +2997,7 @@ export function ClassScheduleWorkspace() {
       setLessonPlanDraft(null); setLessonPlanBaseline(null);
       normalizedLessonSessionDraftsRef.current = {};
       setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionBaselines({});
-      setProgressDialogSessionId(""); setLessonProgressDraft([]); setLessonProgressBaseline([]);
+        
       return;
     }
     if (!ownerChanged && lessonPlanSourceKeyRef.current === lessonPlanSourceKey) return;
@@ -3440,7 +3027,7 @@ export function ClassScheduleWorkspace() {
     if (ownerChanged) {
       normalizedLessonSessionDraftsRef.current = {};
       setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionBaselines({});
-      setProgressDialogSessionId(""); setLessonProgressDraft([]); setLessonProgressBaseline([]);
+        
       lessonPlanSaveRef.current = null; lessonSessionSaveRef.current = null; lessonGenerationRequestRef.current = null;
       setLessonReadRetryNeeded(false); setIsLessonReadRetrying(false);
       setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
@@ -3457,10 +3044,7 @@ export function ClassScheduleWorkspace() {
       setFocusedLessonMonthKey("");
       setSelectedLessonPeriodId("all");
       setSelectedLessonScheduleState("all");
-      setLessonTextbookSearch("");
-      setLessonTextbookCategoryFilter("all");
-      setLessonTextbookPublisherFilter("all");
-      setIsLessonTextbookFinderOpen(false);
+
       return;
     }
 
@@ -3597,11 +3181,6 @@ export function ClassScheduleWorkspace() {
     return () => window.clearTimeout(timeoutId);
   }, [lessonFlowReferenceDate]);
 
-  const lessonFlowStateMap = useMemo(
-    () => buildLessonFlowStateMap(lessonSessionGroups, lessonFlowReferenceDate),
-    [lessonSessionGroups, lessonFlowReferenceDate],
-  );
-
   const focusLessonMonthKey = (monthKey: string) => {
     const monthSummaries = lessonDesignSnapshot?.monthSummaries || [];
     const focusedMonthKeys = normalizeSelectedLessonMonthKeys(
@@ -3702,120 +3281,7 @@ export function ClassScheduleWorkspace() {
     setSelectedLessonCalendarDate("");
   }, [selectedClassId]);
 
-  const lessonTextbookProgressSessions = useMemo(
-    () => filteredLessonSessions.filter((session) => session.textbookEntries.length > 0),
-    [filteredLessonSessions],
-  );
-  const lessonTextbookCompletedSessionCount = useMemo(
-    () =>
-      lessonTextbookProgressSessions.filter((session) =>
-        session.textbookEntries.every((entry) => entry.hasPlanContent),
-      ).length,
-    [lessonTextbookProgressSessions],
-  );
-  const lessonTextbookSelectedCount = lessonDesignSnapshot?.textbookCatalog.length || 0;
-  const hasLessonTextbooks = lessonTextbookSelectedCount > 0;
-  const lessonTextbookPendingSessionCount =
-    lessonTextbookProgressSessions.length - lessonTextbookCompletedSessionCount;
-  useEffect(() => {
-    const revision = lessonTextbookCandidateRevisionRef.current + 1;
-    lessonTextbookCandidateRevisionRef.current = revision;
-    const classId = text(selectedRow?.id);
-    const shouldLoad = Boolean(
-      isLessonDesignRouteActive
-      && classId
-      && (!hasLessonTextbooks || isLessonTextbookFinderOpen || text(deferredLessonTextbookSearch)),
-    );
-    if (!shouldLoad) {
-      setLessonTextbookCandidatePage({ rows: [], hasMore: false, nextCursor: null });
-      setLessonTextbookCandidateError("");
-      setLessonTextbookCandidateLoading(false);
-      return;
-    }
-
-    setLessonTextbookCandidateLoading(true);
-    setLessonTextbookCandidateError("");
-    void loadLessonTextbookCandidates({
-      classId,
-      search: deferredLessonTextbookSearch,
-      cursor: null,
-    })
-      .then((page) => {
-        if (lessonTextbookCandidateRevisionRef.current !== revision) return;
-        setLessonTextbookCandidatePage(page as {
-          rows: Record<string, unknown>[];
-          hasMore: boolean;
-          nextCursor: { title: string; id: string } | null;
-        });
-      })
-      .catch((candidateError) => {
-        if (lessonTextbookCandidateRevisionRef.current !== revision) return;
-        setLessonTextbookCandidatePage({ rows: [], hasMore: false, nextCursor: null });
-        setLessonTextbookCandidateError(
-          candidateError instanceof Error ? candidateError.message : "교재 후보를 불러오지 못했습니다.",
-        );
-      })
-      .finally(() => {
-        if (lessonTextbookCandidateRevisionRef.current === revision) {
-          setLessonTextbookCandidateLoading(false);
-        }
-      });
-  }, [
-    deferredLessonTextbookSearch,
-    hasLessonTextbooks,
-    isLessonDesignRouteActive,
-    isLessonTextbookFinderOpen,
-    loadLessonTextbookCandidates,
-    selectedRow?.id,
-  ]);
-  const loadMoreLessonTextbookCandidates = useCallback(async () => {
-    const classId = text(selectedRow?.id);
-    const cursor = lessonTextbookCandidatePage.nextCursor;
-    if (!classId || !cursor || lessonTextbookCandidateLoading) return;
-    const expectedRevision = lessonTextbookCandidateRevisionRef.current;
-    setLessonTextbookCandidateLoading(true);
-    setLessonTextbookCandidateError("");
-    try {
-      const nextPage = await loadLessonTextbookCandidates({
-        classId,
-        search: deferredLessonTextbookSearch,
-        cursor,
-      }) as {
-        rows: Record<string, unknown>[];
-        hasMore: boolean;
-        nextCursor: { title: string; id: string } | null;
-      };
-      if (lessonTextbookCandidateRevisionRef.current !== expectedRevision || text(selectedRow?.id) !== classId) return;
-      setLessonTextbookCandidatePage((current) => {
-        const merged = new Map(current.rows.map((book) => [text(book.id), book]));
-        nextPage.rows.forEach((book) => {
-          const id = text(book.id);
-          if (id) merged.set(id, book);
-        });
-        return { ...nextPage, rows: [...merged.values()] };
-      });
-    } catch (candidateError) {
-      if (lessonTextbookCandidateRevisionRef.current === expectedRevision) {
-        setLessonTextbookCandidateError(
-          candidateError instanceof Error ? candidateError.message : "교재 후보를 불러오지 못했습니다.",
-        );
-      }
-    } finally {
-      if (lessonTextbookCandidateRevisionRef.current === expectedRevision) {
-        setLessonTextbookCandidateLoading(false);
-      }
-    }
-  }, [
-    deferredLessonTextbookSearch,
-    lessonTextbookCandidateLoading,
-    lessonTextbookCandidatePage.nextCursor,
-    loadLessonTextbookCandidates,
-    selectedRow?.id,
-  ]);
-  const progressDialogSession = useMemo(
-    () => lessonDesignSnapshot?.sessions.find((session) => session.id === progressDialogSessionId) || null,
-    [lessonDesignSnapshot, progressDialogSessionId],
-  );
+  
   const updateLessonPlanDraft = useCallback(
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       setLessonPlanDraft((current) => {
@@ -3836,107 +3302,7 @@ export function ClassScheduleWorkspace() {
     },
     [normalizeLessonDraft],
   );
-  const handleAddLessonTextbook = useCallback((nextTextbookId: string) => {
-    const textbookId = text(nextTextbookId);
-    if (!textbookId) {
-      return;
-    }
-    const textbook = lessonDesignEditorTextbooks.find((book) => text(book.id) === textbookId);
-    const firstSessionId = text(filteredLessonSessions[0]?.id);
-    const selectedSessionId = text(selectedLessonSession?.id);
-    const endSessionId = text(filteredLessonSessions[filteredLessonSessions.length - 1]?.id);
 
-    updateLessonPlanDraft((current) => {
-      const currentBooks = Array.isArray(current.textbooks)
-        ? (current.textbooks as Record<string, unknown>[])
-        : [];
-      if (currentBooks.some((book) => text(book.textbookId || book.id) === textbookId)) {
-        return current;
-      }
-
-      return {
-        ...current,
-        textbooks: [
-          ...currentBooks,
-          {
-            textbookId,
-            order: currentBooks.length,
-            role: currentBooks.length === 0 ? "main" : "supplement",
-            alias: getTextbookTitle(textbook),
-            area: getTextbookCategory(textbook),
-            subSubject: "",
-            startSessionId: currentBooks.length === 0 ? firstSessionId : selectedSessionId || firstSessionId,
-            endSessionId,
-          },
-        ],
-      };
-    });
-    setLessonTextbookSearch("");
-    setIsLessonTextbookFinderOpen(false);
-  }, [filteredLessonSessions, lessonDesignEditorTextbooks, selectedLessonSession, updateLessonPlanDraft]);
-  const handleRemoveLessonTextbook = useCallback(
-    (textbookId: string) => {
-      const targetTextbookId = text(textbookId);
-      if (!targetTextbookId) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const remainingBooks = (Array.isArray(current.textbooks)
-          ? (current.textbooks as Record<string, unknown>[])
-          : []
-        )
-          .filter((book) => text(book.textbookId || book.id) !== targetTextbookId)
-          .map((book, index) => ({
-            ...book,
-            order: index,
-            role: index === 0 ? "main" : text(book.role) || "supplement",
-          }));
-
-        return {
-          ...current,
-          textbooks: remainingBooks,
-        };
-      });
-    },
-    [updateLessonPlanDraft],
-  );
-  const handleLessonTextbookCatalogChange = useCallback(
-    (
-      textbookId: string,
-      field: "role" | "alias" | "area" | "subSubject" | "startSessionId" | "endSessionId",
-      value: string,
-    ) => {
-      const targetTextbookId = text(textbookId);
-      if (!targetTextbookId) {
-        return;
-      }
-
-      updateLessonPlanDraft((current) => {
-        const currentBooks = Array.isArray(current.textbooks)
-          ? (current.textbooks as Record<string, unknown>[])
-          : [];
-        return {
-          ...current,
-          textbooks: currentBooks.map((book, index) => {
-            const isTarget = text(book.textbookId || book.id) === targetTextbookId;
-            if (!isTarget && field === "role" && value === "main") {
-              return { ...book, role: "supplement", order: index };
-            }
-            if (!isTarget) {
-              return { ...book, order: index };
-            }
-            return {
-              ...book,
-              order: index,
-              [field]: field === "role" ? (value === "main" ? "main" : "supplement") : value,
-            };
-          }),
-        };
-      });
-    },
-    [updateLessonPlanDraft],
-  );
   const syncLessonDesignDraftSnapshot = useCallback(
     (
       nextDraft: Record<string, unknown>,
@@ -4401,84 +3767,9 @@ export function ClassScheduleWorkspace() {
     },
     [isNormalizedLessonSchedule, lessonScheduleReadReady, updateLessonPlanDraft],
   );
-  const discardLessonProgressDraft = useCallback(() => {
-    setProgressDialogSessionId(""); setLessonProgressDraft([]); setLessonProgressBaseline([]);
-  }, []);
-  const closeLessonProgressDialog = useCallback(() => {
-    requestLocalAction(discardLessonProgressDraft, { skipConfirmation: !lessonProgressDirty });
-  }, [discardLessonProgressDraft, lessonProgressDirty, requestLocalAction]);
-  const openLessonProgressDialog = useCallback(
-    (sessionId: string) => {
-      const session = lessonDesignSnapshot?.sessions.find((item) => item.id === sessionId) || null;
-      if (!session || session.textbookEntries.length === 0) {
-        return;
-      }
 
-      setProgressDialogSessionId(session.id);
-      const draft = createLessonProgressDraft(
-          session.textbookEntries.map((entry) => ({
-            id: entry.id,
-            planStart: entry.planStart,
-            planEnd: entry.planEnd,
-            planLabel: entry.planLabel === "계획 범위 미지정" ? "" : entry.planLabel,
-            planMemo: entry.planMemo === "계획 메모 없음" ? "" : entry.planMemo,
-          })),
-        );
-      setLessonProgressDraft(draft); setLessonProgressBaseline(draft);
-    },
-    [lessonDesignSnapshot],
-  );
-  const applyLessonProgressDraft = useCallback(() => {
-    if (!progressDialogSessionId || lessonProgressDraft.length === 0) {
-      discardLessonProgressDraft();
-      return;
-    }
-
-    updateLessonPlanDraft((current) => {
-      if (isNormalizedLessonSchedule) {
-        return { ...current, sessions: (current.sessions as Record<string, unknown>[] || []).map((session) => text(session.id) !== progressDialogSessionId ? session : {
-          ...session, textbookEntries: (session.textbookEntries as Record<string, unknown>[] || []).map((entry, index) => {
-            const id = text(entry.id) || `${text(entry.textbookId || entry.textbook_id || entry.id) || "textbook"}-${index}`;
-            const draft = lessonProgressDraft.find((item) => item.id === id);
-            return draft ? { ...entry, plan: { ...((entry.plan || {}) as Record<string, unknown>), start: draft.planStart, end: draft.planEnd, label: draft.planLabel, memo: draft.planMemo } } : entry;
-          }),
-        }) };
-      }
-      return lessonProgressDraft.reduce(
-        (nextPlan, entry) => {
-          const fields: Array<["start" | "end" | "label" | "memo", string]> = [
-            ["start", entry.planStart],
-            ["end", entry.planEnd],
-            ["label", entry.planLabel],
-            ["memo", entry.planMemo],
-          ];
-          return fields.reduce(
-            (nextEntryPlan, [field, value]) =>
-              applyTextbookPlanRangeField(nextEntryPlan, lessonPlanDefaults, {
-                sessionId: progressDialogSessionId,
-                entryId: entry.id,
-                field,
-                value,
-              }) as Record<string, unknown>,
-            nextPlan,
-          );
-        },
-        current,
-      );
-    });
-    markPendingLessonSessionSelection(progressDialogSessionId);
-    discardLessonProgressDraft();
-  }, [
-    discardLessonProgressDraft,
-    isNormalizedLessonSchedule,
-    lessonPlanDefaults,
-    lessonProgressDraft,
-    markPendingLessonSessionSelection,
-    progressDialogSessionId,
-    updateLessonPlanDraft,
-  ]);
   const handleSaveLessonPlan = useCallback(async () => {
-    if (!selectedRow || !lessonPlanForSave || !supabase || lessonPlanSaveRef.current) {
+    if (!selectedRow || !lessonPlanForSave || !supabase || isNormalizedLessonSchedule || lessonPlanSaveRef.current) {
       return;
     }
     if (!lessonScheduleReadReady) {
@@ -4495,18 +3786,6 @@ export function ClassScheduleWorkspace() {
     const acceptSubmission = () => {
       if (!submittedDraft || !lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) return;
       let accepted = submittedDraft;
-      if (normalizedContentContext && lessonPlanBaselineRef.current) {
-        // The content RPC accepts only textbooks and entries within its bounded session keys.
-        const allowed = new Set(normalizedContentContext.sessionKeys);
-        const submittedSessions = new Map((submittedDraft.sessions as Record<string, unknown>[] || [])
-          .map((session) => [text(session.sessionKey || session.session_key || session.id), session]));
-        accepted = { ...lessonPlanBaselineRef.current, textbooks: submittedDraft.textbooks,
-          sessions: (lessonPlanBaselineRef.current.sessions as Record<string, unknown>[] || []).map((session) => {
-            const key = text(session.sessionKey || session.session_key || session.id);
-            const submitted = submittedSessions.get(key);
-            return allowed.has(key) && submitted ? { ...session, textbookEntries: submitted.textbookEntries } : session;
-          }) };
-      }
       accepted = normalizeLessonDraft(accepted);
       lessonPlanBaselineRef.current = accepted; setLessonPlanBaseline(accepted);
     };
@@ -4518,26 +3797,9 @@ export function ClassScheduleWorkspace() {
       token: mutationToken,
       isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
       mutate: async () => {
-        if (normalizedContentContext) {
-          if (!normalizedContentContext.expectedContentHash) {
-            throw new Error("최신 일정 내용을 다시 불러온 뒤 저장해 주세요.");
-          }
-          const action = createContinuousScheduleMutationAction({
-            rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters),
-          });
-          const result = await action.saveContent({
-            classId: normalizedContentContext.classId,
-            expectedContentHash: normalizedContentContext.expectedContentHash,
-            contentPatch: buildLessonContentPatch(lessonPlanForSave, {
-              sessionKeys: normalizedContentContext.sessionKeys,
-            }),
-          });
-          acceptSubmission();
-          return result;
-        }
         const { error: updateError } = await client
           .from("classes")
-          .update({ schedule_plan: lessonPlanForSave })
+          .update({ schedule_plan: preserveScheduleLearningContent(lessonPlanForSave, (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>) })
           .select("id")
           .eq("id", text(selectedRow.id))
           .order("id")
@@ -4550,7 +3812,7 @@ export function ClassScheduleWorkspace() {
       },
       afterCommit: async () => await invalidatePublicClassesCacheAfterMutation(client, "schedule"),
       onSuccess: async (_result: unknown, refreshReceipt: { status?: string } | undefined) => {
-        const saved = normalizedContentContext ? "수업 내용을 저장했습니다." : "수업계획을 저장했습니다.";
+        const saved = "수업일정을 저장했습니다.";
         setLessonDesignSaveNotice(refreshReceipt?.status === "pending" ? `${saved} 공개 수업 캐시 갱신 대기 중입니다.` : saved);
         try { await refreshSelectedLessonDetail(mutationToken); }
         catch {
@@ -4564,7 +3826,7 @@ export function ClassScheduleWorkspace() {
         setIsLessonDesignSaving(false);
       },
     });
-  }, [lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, normalizedContentContext, refreshSelectedLessonDetail, selectedRow]);
+  }, [lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow]);
 
   const retryLessonDesignRead = useCallback(async () => {
     const token = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
@@ -5176,10 +4438,10 @@ export function ClassScheduleWorkspace() {
     selectedRow,
   ]);
 
-  const lessonDesignTitle = selectedRow?.title || "수업 설계";
+  const lessonDesignTitle = selectedRow?.title || "일정 편성";
   const lessonDesignDescription = selectedRow
     ? selectedRow.teacher || "선생님 미정"
-    : "수업 설계";
+    : "일정 편성";
   const lessonDesignTeacherName = text(
     selectedLessonSession?.teacherNameSnapshot || selectedRow?.teacher || selectedRowClassItem?.teacher,
   );
@@ -5202,29 +4464,6 @@ export function ClassScheduleWorkspace() {
     return <ClassScheduleSkeleton />;
   }
 
-  const lessonDesignRequestedProgressMode =
-    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.board ||
-    requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.textbooks;
-  const lessonDesignActiveMode = lessonDesignRequestedProgressMode ? "progress" : "schedule";
-  const isLessonDesignProgressMode = lessonDesignActiveMode === "progress";
-  const lessonTextbookCategoryFilterLabel =
-    lessonTextbookCategoryFilter === "all" ? "전체 구분" : lessonTextbookCategoryFilter;
-  const lessonTextbookPublisherFilterLabel =
-    lessonTextbookPublisherFilter === "all" ? "전체 출판사" : lessonTextbookPublisherFilter;
-  const lessonTextbookFilterSummary = [
-    lessonTextbookCategoryFilter !== "all" ? lessonTextbookCategoryFilterLabel : "",
-    lessonTextbookPublisherFilter !== "all" ? lessonTextbookPublisherFilterLabel : "",
-  ]
-    .filter(Boolean)
-    .join(" · ");
-  const activeLessonTextbookFilterCount = [
-    lessonTextbookCategoryFilter !== "all",
-    lessonTextbookPublisherFilter !== "all",
-  ].filter(Boolean).length;
-  const lessonTextbookFinderHasQuery =
-    Boolean(text(lessonTextbookSearch)) || activeLessonTextbookFilterCount > 0;
-  const isLessonTextbookFinderVisible =
-    !hasLessonTextbooks || isLessonTextbookFinderOpen || lessonTextbookFinderHasQuery;
   const renderLessonMonthSessionDetails = (
     sessions: typeof filteredLessonSessions,
     options: { showScheduleControls?: boolean } = {},
@@ -5249,7 +4488,7 @@ export function ClassScheduleWorkspace() {
                   data-lesson-period-session-id={session.id}
                   data-lesson-selected-editor={isSelectedSession ? "true" : "false"}
                   className={cn(
-                    "relative overflow-hidden rounded-[1rem] border bg-background scroll-mt-28",
+                    "relative overflow-hidden rounded-md border bg-background scroll-mt-28",
                     isSelectedSession && "border-primary/50 shadow-sm",
                 )}
               >
@@ -5492,8 +4731,8 @@ export function ClassScheduleWorkspace() {
       <div className="bg-background">
         <div
           className={cn(
-            "grid min-w-0 gap-0 p-4 pb-24 lg:p-6 lg:pb-24",
-            isLessonDesignProgressMode ? "grid-cols-1" : "xl:grid-cols-2",
+            "grid min-w-0 gap-x-6 p-4 lg:p-6",
+            "xl:grid-cols-2",
           )}
         >
           {lessonDesignSaveError ? (
@@ -5509,376 +4748,8 @@ export function ClassScheduleWorkspace() {
               <AlertDescription>{lessonDesignSaveNotice}</AlertDescription>
             </Alert>
           ) : null}
-          <div className="border-b bg-background pb-4 pt-1 xl:col-span-full">
-            <div className="flex flex-wrap items-center gap-2">
-              <div
-                data-testid="lesson-design-mode-tabs"
-                className="grid min-w-0 flex-1 basis-[20rem] grid-cols-2 gap-1 rounded-lg border bg-muted/30 p-1"
-              >
-                <Button
-                  type="button"
-                  aria-pressed={!isLessonDesignProgressMode}
-                  className="h-10"
-                  variant={!isLessonDesignProgressMode ? "default" : "ghost"}
-                  onClick={() => navigateToLessonDesignSection(LESSON_DESIGN_SECTION_IDS.periods)}
-                >
-                  일정 생성
-                </Button>
-                <Button
-                  type="button"
-                  aria-pressed={isLessonDesignProgressMode}
-                  className="h-10"
-                  variant={isLessonDesignProgressMode ? "default" : "ghost"}
-                  onClick={() => navigateToLessonDesignSection(LESSON_DESIGN_SECTION_IDS.board)}
-                >
-                  진도 생성
-                </Button>
-              </div>
-            </div>
-          </div>
 
-          {isLessonDesignProgressMode ? (
-          <section id={LESSON_DESIGN_SECTION_IDS.textbooks} className="min-w-0 scroll-mt-28 border-b bg-background py-3 2xl:col-span-full">
-            <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex min-w-0 items-center gap-2">
-                <BookOpen className="size-4 text-muted-foreground" />
-                <div className="min-w-0">
-                  <p className="text-lg font-semibold text-foreground">수업교재</p>
-                </div>
-              </div>
-              <div className="flex w-full flex-wrap justify-end gap-2 sm:min-w-[18rem] sm:flex-1">
-                {isLessonTextbookFinderVisible ? (
-                  <div className="relative min-w-[14rem] flex-1 sm:max-w-md">
-                    <Input
-                      type="search"
-                      value={lessonTextbookSearch}
-                      onChange={(event) => {
-                        setLessonTextbookSearch(event.target.value);
-                        setIsLessonTextbookFinderOpen(true);
-                      }}
-                      className="w-full pr-9"
-                      placeholder="교재명, 출판사 검색"
-                      aria-label="수업교재 검색"
-                      autoComplete="off"
-                      enterKeyHint="search"
-                    />
-                    {lessonTextbookSearch ? (
-                      <Button
-                        type="button"
-                        size="icon"
-                        variant="ghost"
-                        className="absolute right-1 top-1/2 size-7 -translate-y-1/2 rounded-md"
-                        aria-label="수업교재 검색 지우기"
-                        onClick={() => {
-                          setLessonTextbookSearch("");
-                          if (!hasLessonTextbooks) {
-                            setIsLessonTextbookFinderOpen(true);
-                          }
-                        }}
-                      >
-                        <X className="size-3.5" />
-                      </Button>
-                    ) : null}
-                  </div>
-                ) : null}
-                {hasLessonTextbooks ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={isLessonTextbookFinderVisible ? "secondary" : "outline"}
-                    className="h-9 shrink-0 rounded-md"
-                    aria-expanded={isLessonTextbookFinderVisible}
-                    aria-controls="lesson-textbook-finder"
-                    onClick={() => {
-                      if (isLessonTextbookFinderVisible) {
-                        setIsLessonTextbookFinderOpen(false);
-                        setLessonTextbookSearch("");
-                        setLessonTextbookCategoryFilter("all");
-                        setLessonTextbookPublisherFilter("all");
-                        return;
-                      }
-                      setIsLessonTextbookFinderOpen(true);
-                    }}
-                  >
-                    <Plus className="mr-2 size-3.5" />
-                    {isLessonTextbookFinderVisible ? "목록 닫기" : "교재 추가"}
-                  </Button>
-                ) : null}
-              </div>
-            </div>
-
-            <div
-              className={cn(
-                "mt-3 grid min-w-0 grid-cols-1 gap-4",
-                isLessonTextbookFinderVisible && hasLessonTextbooks
-                  ? "xl:grid-cols-2"
-                  : "xl:grid-cols-1",
-              )}
-            >
-              {isLessonTextbookFinderVisible ? (
-              <div id="lesson-textbook-finder" className="order-2 rounded-lg border bg-background p-3 shadow-xs">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div className="flex items-center gap-2">
-                    <p className="text-sm font-semibold text-foreground">교재 찾기</p>
-                    <Badge variant="outline">후보 {lessonTextbookOptions.length}</Badge>
-                  </div>
-                  <div className="flex min-w-0 items-center gap-2">
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          className="h-8 max-w-[16rem] justify-start rounded-md"
-                          aria-label={`교재 필터: ${lessonTextbookFilterSummary || "기본"}`}
-                        >
-                          <span className="shrink-0">필터</span>
-                          <span className="text-muted-foreground">·</span>
-                          <span className="truncate">{lessonTextbookFilterSummary || "기본"}</span>
-                          {activeLessonTextbookFilterCount > 0 ? (
-                            <span className="ml-2 rounded bg-primary/10 px-1.5 text-[11px] font-semibold text-primary">
-                              {activeLessonTextbookFilterCount}
-                            </span>
-                          ) : null}
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent
-                        align="end"
-                        sideOffset={8}
-                        className="max-h-[min(28rem,calc(100vh-10rem))] w-[min(22rem,calc(100vw-2rem))] overflow-y-auto p-3"
-                      >
-                        <div className="grid gap-3">
-                          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                            <span>구분</span>
-                            <NativeSelect
-                              value={lessonTextbookCategoryFilter}
-                              onChange={(event) => setLessonTextbookCategoryFilter(event.target.value)}
-                              className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                              aria-label="교재 구분 필터"
-                            >
-                              <option value="all">전체 구분</option>
-                              {lessonTextbookFilterOptions.categories.map((category) => (
-                                <option key={`lesson-textbook-category-${category}`} value={category}>
-                                  {category}
-                                </option>
-                              ))}
-                            </NativeSelect>
-                          </label>
-                          <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                            <span>출판사</span>
-                            <NativeSelect
-                              value={lessonTextbookPublisherFilter}
-                              onChange={(event) => setLessonTextbookPublisherFilter(event.target.value)}
-                              className="border-input bg-background h-9 rounded-md border px-2 text-sm shadow-xs outline-none transition-colors focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px]"
-                              aria-label="교재 출판사 필터"
-                            >
-                              <option value="all">전체 출판사</option>
-                              {lessonTextbookFilterOptions.publishers.map((publisher) => (
-                                <option key={`lesson-textbook-publisher-${publisher}`} value={publisher}>
-                                  {publisher}
-                                </option>
-                              ))}
-                            </NativeSelect>
-                          </label>
-                          {activeLessonTextbookFilterCount > 0 ? (
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="sm"
-                              className="h-8 justify-start rounded-md"
-                              onClick={() => {
-                                setLessonTextbookCategoryFilter("all");
-                                setLessonTextbookPublisherFilter("all");
-                              }}
-                            >
-                              필터 초기화
-                            </Button>
-                          ) : null}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
-                  </div>
-                </div>
-                {activeLessonTextbookFilterCount > 0 ? (
-                  <div
-                    data-testid="lesson-textbook-filter-chips"
-                    className="mt-3 flex flex-wrap items-center gap-2 border-t pt-3"
-                  >
-                    {[lessonTextbookCategoryFilterLabel, lessonTextbookPublisherFilterLabel]
-                      .filter((label) => label && label !== "전체 구분" && label !== "전체 출판사")
-                      .map((label) => (
-                        <Badge key={`lesson-textbook-filter-chip-${label}`} variant="secondary" className="rounded-md">
-                          {label}
-                        </Badge>
-                      ))}
-                    <Button
-                      type="button"
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 rounded-md px-2 text-xs"
-                      onClick={() => {
-                        setLessonTextbookCategoryFilter("all");
-                        setLessonTextbookPublisherFilter("all");
-                      }}
-                    >
-                      필터 해제
-                    </Button>
-                  </div>
-                ) : null}
-                <div
-                  className={cn(
-                    "mt-3 overflow-y-auto rounded-lg border bg-muted/20 p-2",
-                    lessonTextbookSelectedCount > 0 ? "max-h-44" : "max-h-[22rem]",
-                  )}
-                >
-            {lessonTextbookOptions.length > 0 ? (
-              <div className="grid gap-2 md:grid-cols-2">
-                {lessonTextbookOptions.map((book) => {
-                  const bookId = text(book.id);
-                  return (
-                    <button
-                      key={bookId}
-                      type="button"
-                      data-testid={`lesson-textbook-candidate-${bookId}`}
-                      className="flex min-h-11 min-w-0 items-center justify-between gap-3 rounded-md border bg-background px-3 py-2 text-left text-sm shadow-xs transition-all hover:border-primary/50 hover:bg-primary/5 active:scale-[0.99] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none"
-                      onClick={() => handleAddLessonTextbook(bookId)}
-                    >
-                      <span className="min-w-0">
-                        <span className="block truncate font-medium text-foreground">{getTextbookTitle(book)}</span>
-                        <span className="block truncate text-xs text-muted-foreground">
-                          {[getTextbookPublisher(book), getTextbookCategory(book), getLessonSubjectDisplayLabel(getTextbookSubject(book))]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </span>
-                      </span>
-                      <Plus className="size-4 shrink-0 text-primary" />
-                    </button>
-                  );
-                })}
-              </div>
-            ) : (
-              <div className="rounded-md border border-dashed px-3 py-3 text-sm font-medium text-muted-foreground">
-                {lessonTextbookCandidateLoading ? "교재 후보를 불러오는 중입니다." : "후보 없음"}
-              </div>
-            )}
-            {lessonTextbookCandidateError ? (
-              <p className="mt-2 text-xs font-medium text-destructive">{lessonTextbookCandidateError}</p>
-            ) : null}
-            {lessonTextbookCandidatePage.hasMore ? (
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                className="mt-2 w-full rounded-md"
-                disabled={lessonTextbookCandidateLoading}
-                onClick={() => void loadMoreLessonTextbookCandidates()}
-              >
-                다음 30건
-              </Button>
-            ) : null}
-                </div>
-              </div>
-              ) : null}
-
-              {hasLessonTextbooks ? (
-              <div
-                className={cn(
-                  "order-1 min-w-0 rounded-lg border border-primary/20 bg-primary/5 p-2 shadow-xs",
-                  !isLessonTextbookFinderVisible && "xl:max-w-3xl",
-                )}
-              >
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <p className="text-sm font-semibold text-foreground">교재 설정</p>
-                  <Badge variant="secondary">연결 {lessonTextbookSelectedCount}권</Badge>
-                </div>
-
-              <div className="mt-2 grid min-w-0 grid-cols-1 gap-2">
-                {lessonDesignSnapshot.textbookCatalog.map((book) => (
-                  <div key={book.textbookId} className="min-w-0 rounded-lg border bg-background p-2 shadow-xs">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-foreground">{book.title}</p>
-                        <p className="mt-1 truncate text-xs text-muted-foreground">
-                          {[book.publisher, book.area, book.subSubject, getLessonSubjectDisplayLabel(book.subject)]
-                            .filter(Boolean)
-                            .join(" · ")}
-                        </p>
-                      </div>
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="ghost"
-                        className="h-8 shrink-0 rounded-md px-2 text-xs"
-                        data-testid={`lesson-textbook-remove-${book.textbookId}`}
-                        aria-label={`${book.title} 연결 해제`}
-                        onClick={() => handleRemoveLessonTextbook(book.textbookId)}
-                      >
-                        <X className="mr-1 size-3.5" />
-                        연결 해제
-                      </Button>
-                    </div>
-                    <div className="mt-2 grid gap-2 md:grid-cols-[6rem_minmax(8rem,1fr)_minmax(8rem,1fr)]">
-                      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                        <span>역할</span>
-                        <NativeSelect
-                          value={book.role === "main" ? "main" : "supplement"}
-                          onChange={(event) =>
-                            handleLessonTextbookCatalogChange(book.textbookId, "role", event.target.value)
-                          }
-                          className="px-2"
-                          aria-label={`${book.title} 역할`}
-                        >
-                          <option value="main">주교재</option>
-                          <option value="supplement">부교재</option>
-                        </NativeSelect>
-                      </label>
-                      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                        <span>시작</span>
-                        <NativeSelect
-                          value={book.startSessionId || ""}
-                          onChange={(event) =>
-                            handleLessonTextbookCatalogChange(book.textbookId, "startSessionId", event.target.value)
-                          }
-                          className="px-2"
-                          aria-label={`${book.title} 시작 회차`}
-                        >
-                          <option value="">첫 회차</option>
-                          {lessonDesignSnapshot.sessions.map((session) => (
-                            <option key={`${book.textbookId}-start-${session.id}`} value={session.id}>
-                              {getLessonSessionOptionLabel(session)}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </label>
-                      <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                        <span>종료</span>
-                        <NativeSelect
-                          value={book.endSessionId || ""}
-                          onChange={(event) =>
-                            handleLessonTextbookCatalogChange(book.textbookId, "endSessionId", event.target.value)
-                          }
-                          className="px-2"
-                          aria-label={`${book.title} 종료 회차`}
-                        >
-                          <option value="">마지막 회차</option>
-                          {lessonDesignSnapshot.sessions.map((session) => (
-                            <option key={`${book.textbookId}-end-${session.id}`} value={session.id}>
-                              {getLessonSessionOptionLabel(session)}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </label>
-                    </div>
-                  </div>
-                ))}
-              </div>
-              </div>
-              ) : null}
-            </div>
-          </section>
-          ) : null}
-
-          {!isLessonDesignProgressMode ? (
+          (
             <>
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
@@ -6016,7 +4887,7 @@ export function ClassScheduleWorkspace() {
                     );
                   })
                 ) : (
-                  <div className="rounded-[1.25rem] border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                  <div className="rounded-[var(--radius-surface)] border border-dashed px-4 py-6 text-sm text-muted-foreground">
                     생성 구간이 없습니다.
                   </div>
                 )}
@@ -6060,7 +4931,7 @@ export function ClassScheduleWorkspace() {
                             <div
                               key={month.key}
                               data-lesson-calendar-month={month.key}
-                              className="rounded-[1.25rem] border px-4 py-5 shadow-xs"
+                              className="rounded-[var(--radius-surface)] border px-4 py-5 shadow-xs"
                               style={monthSurfaceStyle}
                             >
                               <div className="flex flex-wrap items-center justify-between gap-3">
@@ -6153,7 +5024,6 @@ export function ClassScheduleWorkspace() {
                                         primarySessionAccentColor,
                                       )
                                     : undefined;
-                                  const activeTextbookEntries = isLessonDesignProgressMode ? primarySession?.textbookEntries || [] : [];
                                   const isSelectedCalendarSession = daySessions.some(
                                     (session) => session.id === selectedLessonSession?.id,
                                   ) || selectedLessonCalendarDate === dateKey;
@@ -6221,7 +5091,7 @@ export function ClassScheduleWorkspace() {
                                         });
                                       }}
                                       className={cn(
-                                        "flex min-h-[7rem] min-w-0 flex-col overflow-hidden rounded-[1rem] border px-2 py-2 text-left align-top transition-colors",
+                                        "flex min-h-[7rem] min-w-0 flex-col overflow-hidden rounded-md border px-2 py-2 text-left align-top transition-colors",
                                         primarySession
                                           ? primaryScheduleSurface?.className
                                           : canToggleCalendarDate
@@ -6269,23 +5139,7 @@ export function ClassScheduleWorkspace() {
                                               추가 {daySessions.length - 1}건
                                             </p>
                                           ) : null}
-                                          {activeTextbookEntries.length > 0 ? (
-                                            <div className="flex max-w-full flex-wrap justify-center gap-1">
-                                              {activeTextbookEntries.slice(0, 2).map((entry) => (
-                                                <span
-                                                  key={`${primarySession.id}-${entry.id}`}
-                                                  className="max-w-[5.5rem] truncate rounded-full bg-primary/10 px-1.5 py-0.5 text-[10px] font-medium text-primary"
-                                                >
-                                                  {entry.textbookTitle}
-                                                </span>
-                                              ))}
-                                              {activeTextbookEntries.length > 2 ? (
-                                                <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                                                  +{activeTextbookEntries.length - 2}
-                                                </span>
-                                              ) : null}
-                                            </div>
-                                          ) : null}
+                                          
                                         </div>
                                       ) : null}
                                     </CellTag>
@@ -6298,7 +5152,7 @@ export function ClassScheduleWorkspace() {
                         })}
                       </div>
                     ) : (
-                      <div className="rounded-[1.25rem] border border-dashed px-4 py-6 text-sm text-muted-foreground">
+                      <div className="rounded-[var(--radius-surface)] border border-dashed px-4 py-6 text-sm text-muted-foreground">
                         <div className="space-y-3">
                           <p className="font-medium text-foreground">현재 필터에 맞는 생성 일정이 없습니다.</p>
                           {lessonScopeSummaryBadges.length > 0 ? (
@@ -6325,199 +5179,17 @@ export function ClassScheduleWorkspace() {
                   </div>
           </section>
             </>
-          ) : null}
-
-          {isLessonDesignProgressMode && hasLessonTextbooks ? (
-          <section
-            id={LESSON_DESIGN_SECTION_IDS.board}
-            className="relative z-[1] min-w-0 border-t bg-background py-6"
-          >
-                    <div className="flex flex-wrap items-start justify-between gap-3">
-	                      <div className="space-y-1">
-	                        <p className="text-lg font-semibold text-foreground">회차 목록</p>
-	                      </div>
-	                    </div>
-
-	                    <div className="mt-4">
-                      {lessonSessionGroups.length > 0 ? (
-                        <div className="space-y-4">
-                          {lessonSessionGroups.map((group) => (
-                            <div key={group.key} className="border-t pt-4 first:border-t-0">
-                              <div className="flex flex-wrap items-center justify-between gap-3">
-                                <div className="space-y-1">
-                                  <div className="flex flex-wrap items-center gap-2">
-                                    <Badge variant="secondary">{group.billingLabel}</Badge>
-                                        <Badge variant="outline">{group.sessionCount}회</Badge>
-                                        {hasLessonTextbooks ? (
-                                          <>
-                                            <Badge variant="outline">
-                                              대상 {group.textbookSessionCount}
-                                            </Badge>
-                                            {group.outsideTextbookRangeCount > 0 ? (
-                                              <Badge variant="outline">
-                                                기간 밖 {group.outsideTextbookRangeCount}
-                                              </Badge>
-                                            ) : null}
-                                          </>
-                                    ) : null}
-                                  </div>
-                                  <p className="text-xs text-muted-foreground">{group.rangeLabel}</p>
-                                </div>
-                              </div>
-
-                              <div className="mt-4 space-y-3">
-	                                {group.sessions.map((session, sessionIndex) => {
-	                                  const isSelected = selectedLessonSession?.id === session.id;
-	                                  const lessonFlowState = lessonFlowStateMap.get(session.id) || "pending";
-	                                  const isDoneFlow = lessonFlowState === "done";
-	                                  const isCurrentFlow = lessonFlowState === "active";
-                                  const isFirstFlowItem = sessionIndex === 0;
-                                  const isLastFlowItem = sessionIndex === group.sessions.length - 1;
-                                  const sessionMemoLine = [text(session.memo), session.noteSummary !== "기록 메모 없음" ? session.noteSummary : ""]
-                                    .map((value) => text(value))
-                                    .filter(Boolean)
-                                    .join(" · ");
-                                  const textbookPreviewLine =
-                                    session.textbookEntryPreview !== "교재 범위 미지정"
-                                      ? session.textbookEntryPreview
-                                      : "";
-                                  const isSessionOutsideTextbookRange =
-                                    hasLessonTextbooks && session.textbookEntries.length === 0;
-                                  const plannedTextbookCount = session.textbookEntries.filter((entry) => entry.hasPlanContent).length;
-                                  const sessionPlanStateLabel = isSessionOutsideTextbookRange
-                                    ? "기간 밖"
-                                    : session.textbookEntries.length > 0
-                                      ? `${plannedTextbookCount}/${session.textbookEntries.length}권`
-                                      : "교재 없음";
-                                  const isSessionPlanComplete =
-                                    session.textbookEntries.length > 0 &&
-                                    plannedTextbookCount === session.textbookEntries.length;
-                                  const sessionDetailLine = [
-                                    textbookPreviewLine,
-                                    sessionMemoLine,
-                                    session.scheduleConnectionLabel,
-                                  ]
-                                    .map((value) => text(value))
-                                    .filter(Boolean)
-                                    .join(" · ");
-	                                  return (
-                                    <div key={session.id} className="relative pl-9 [contain-intrinsic-size:84px] [content-visibility:auto]">
-                                      <span
-                                        aria-hidden="true"
-                                        className={cn(
-                                          "absolute left-3 w-px -translate-x-1/2 bg-border",
-                                          isFirstFlowItem ? "top-1/2" : "-top-3",
-                                          isLastFlowItem ? "bottom-1/2" : "-bottom-3",
-                                        )}
-                                      />
-                                      <span
-                                        aria-hidden="true"
-                                        className={cn(
-                                          "absolute left-3 top-1/2 z-10 flex size-4 -translate-x-1/2 -translate-y-1/2 items-center justify-center rounded-full border-2 border-background",
-                                          isDoneFlow
-                                            ? "bg-primary border-primary/20"
-                                            : isCurrentFlow
-                                              ? "bg-primary/15 border-primary text-primary"
-                                              : "bg-muted border-border text-muted-foreground",
-                                        )}
-                                      />
-                                      <button
-                                      type="button"
-                                      data-testid={`lesson-board-session-${session.id}`}
-                                      data-session-id={session.id}
-                                      data-lesson-session-selected={isSelected ? "true" : "false"}
-                                      aria-pressed={isSelected}
-                                      aria-current={isSelected ? "true" : undefined}
-                                      className={cn(
-                                        "relative flex min-h-[4.25rem] w-full cursor-pointer items-start gap-3 rounded-lg border border-l-4 border-l-transparent bg-background px-4 py-3 text-left shadow-xs transition-all hover:border-primary/30 hover:bg-muted/30 active:scale-[0.995] focus-visible:border-ring focus-visible:ring-ring/50 focus-visible:ring-[3px] focus-visible:outline-none",
-                                        isSessionOutsideTextbookRange && "bg-muted/20 text-muted-foreground shadow-none hover:bg-muted/40",
-                                        isSelected && "border-primary border-l-primary bg-primary/5 shadow-sm ring-1 ring-primary/10",
-                                      )}
-                                      onPointerDown={() => markPendingLessonSessionSelection(session.id)}
-                                      onMouseDown={() => markPendingLessonSessionSelection(session.id)}
-                                      onClick={() => {
-                                        focusLessonDesignSession(session.id, {
-                                          sectionId: LESSON_DESIGN_SECTION_IDS.board,
-                                          scrollMode: "none",
-                                        });
-                                        openLessonProgressDialog(session.id);
-                                      }}
-                                    >
-	                                      <div className="min-w-0 flex-1 space-y-2">
-	                                        <div className="flex min-w-0 flex-wrap items-center justify-between gap-2">
-	                                          <span className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
-	                                            <span className="font-medium text-foreground">{session.label}</span>
-	                                            <span className="text-xs text-muted-foreground">{session.dateLabel}</span>
-	                                          </span>
-                                            <span className="flex shrink-0 flex-wrap items-center gap-1.5">
-                                              <Badge
-                                                variant={isSessionPlanComplete ? "secondary" : "outline"}
-                                                className="h-5 rounded-md px-1.5 text-[11px]"
-                                              >
-                                                {sessionPlanStateLabel}
-                                              </Badge>
-	                                            {session.scheduleStateLabel !== "정상" ? (
-                                                  <Badge variant={getScheduleStateTone(session.scheduleState)}>
-                                                    {session.scheduleStateLabel}
-                                                  </Badge>
-                                                ) : null}
-                                            </span>
-	                                        </div>
-
-                                        {sessionDetailLine ? (
-                                          <p className="truncate text-xs text-muted-foreground">{sessionDetailLine}</p>
-                                        ) : null}
-	                                      </div>
-	                                    </button>
-                                    </div>
-	                                  );
-                                })}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      ) : (
-                        <div className="rounded-[1.25rem] border border-dashed px-4 py-6 text-sm text-muted-foreground">
-                          <div className="space-y-3">
-                            <p className="font-medium text-foreground">현재 필터에 맞는 회차 목록이 없습니다.</p>
-                            {lessonScopeSummaryBadges.length > 0 ? (
-                              <div className="flex flex-wrap gap-2">
-                                {lessonScopeSummaryBadges.map((item) => (
-                                  <Badge key={`board-empty-${item.key}`} variant="outline">
-                                    {item.label}
-                                  </Badge>
-                                ))}
-                              </div>
-                            ) : null}
-                            <div className="flex flex-wrap gap-2">
-                              <Button type="button" size="sm" variant="outline" onClick={() => resetLessonDesignFilters("default")}>
-                                월 선택으로 돌아가기
-                              </Button>
-                              <Button type="button" size="sm" onClick={() => resetLessonDesignFilters("all")}>
-                                모든 월 보기
-                              </Button>
-                            </div>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-
-          </section>
-          ) : null}
+          )
 
           <div
             data-testid="lesson-design-bottom-action-bar"
-            className="fixed bottom-4 right-4 z-30 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-xl border bg-background/95 px-3 py-2 shadow-lg shadow-black/5 backdrop-blur sm:right-6"
+            className="sticky bottom-0 z-30 col-span-full flex flex-wrap items-center justify-end gap-2 border-t bg-background px-4 py-3"
           >
             <div className="flex min-w-0 items-center gap-2">
               <Badge variant={lessonDesignSnapshot.saveReadiness.ready ? "secondary" : "outline"}>
-                {isLessonDesignProgressMode ? "진도 생성" : "일정 생성"}
+                
               </Badge>
-              {isLessonDesignProgressMode && lessonTextbookProgressSessions.length > 0 ? (
-                <Badge variant={lessonTextbookPendingSessionCount > 0 ? "outline" : "secondary"}>
-                  {lessonTextbookCompletedSessionCount}/{lessonTextbookProgressSessions.length}
-                </Badge>
-              ) : null}
+              
             </div>
             {requestedLessonReturnPath ? (
               <Button
@@ -6543,6 +5215,7 @@ export function ClassScheduleWorkspace() {
                 </Button>
               )
             ) : null}
+            {!isNormalizedLessonSchedule ? (
             <Button
               type="button"
               className="h-9 rounded-md px-5 shadow-none"
@@ -6550,12 +5223,12 @@ export function ClassScheduleWorkspace() {
               disabled={
                 isLessonDesignSaving ||
                 !lessonScheduleReadReady ||
-                !lessonDesignSnapshot.saveReadiness.ready ||
-                (isLessonDesignProgressMode && !hasLessonTextbooks)
+                !lessonDesignSnapshot.saveReadiness.ready
               }
             >
-              {isLessonDesignSaving ? "저장 중" : isLessonDesignProgressMode && !hasLessonTextbooks ? "교재 연결 필요" : "저장"}
+              {isLessonDesignSaving ? "일정 저장 중" : "일정 저장"}
             </Button>
+            ) : null}
           </div>
         </div>
       </div>
@@ -6780,7 +5453,7 @@ export function ClassScheduleWorkspace() {
 	                                  rememberClassScheduleListPosition();
 	                                }}
 	                              >
-                                수업 설계
+                                일정 편성
                               </Link>
                             </Button>
                           </div>
@@ -6970,7 +5643,7 @@ export function ClassScheduleWorkspace() {
         <div
           data-testid="lesson-design-page-scroll"
           role="region"
-          aria-label="수업 설계 작업 영역"
+          aria-label="일정 편성 작업 영역"
           tabIndex={0}
           className="h-[calc(100dvh-var(--header-height)-2rem)] overflow-y-auto overscroll-contain px-4 pb-28 outline-none lg:px-6"
         >
@@ -6998,7 +5671,7 @@ export function ClassScheduleWorkspace() {
               {lessonDesignWorkspaceContent}
             </div>
           ) : (
-            <div className="rounded-3xl border border-dashed px-6 py-10 text-sm text-muted-foreground">
+            <div className="rounded-[var(--radius-surface)] border border-dashed px-6 py-10 text-sm text-muted-foreground">
               <div className="space-y-4">
                 <p className="text-lg font-semibold text-foreground">연결된 수업계획이 없습니다.</p>
                 <div className="grid gap-3 md:grid-cols-3">
@@ -7012,12 +5685,7 @@ export function ClassScheduleWorkspace() {
                   >
                     반 목록 점검
                   </Link>
-                  <Link
-                    href="/admin/textbooks"
-                    className="inline-flex h-10 items-center justify-center rounded-md border px-4 text-sm font-medium text-foreground transition-colors hover:bg-muted"
-                  >
-                    교재 목록 점검
-                  </Link>
+                  
                 </div>
               </div>
             </div>
@@ -7045,7 +5713,7 @@ export function ClassScheduleWorkspace() {
 	                </div>
 	              </div>
 	              <DialogDescription className="sr-only">
-	                수업 일정과 수업교재를 연결하고 회차별 진도를 설계합니다.
+	                수업일을 편성하고 휴강·보강 일정을 조정합니다.
 	              </DialogDescription>
 	            </DialogHeader>
 	            <div
@@ -7058,110 +5726,7 @@ export function ClassScheduleWorkspace() {
           </DialogContent>
         </Dialog>
       )}
-      <Dialog
-        open={Boolean(progressDialogSession)}
-        onOpenChange={(open) => {
-          if (!open) {
-            closeLessonProgressDialog();
-          }
-        }}
-      >
-        <DialogContent
-          data-testid="lesson-progress-dialog"
-          className="z-[90] flex max-h-[calc(100dvh-5rem)] w-[calc(100vw-2rem)] max-w-3xl flex-col overflow-hidden p-0"
-        >
-          <DialogHeader className="border-b px-4 py-3 sm:px-5">
-            <DialogTitle>{progressDialogSession ? `${progressDialogSession.label} 진도 입력` : "진도 입력"}</DialogTitle>
-            <DialogDescription>
-              적용을 눌러야 이 회차의 진도가 수업계획 초안에 반영됩니다.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="min-h-0 flex-1 space-y-3 overflow-y-auto p-4 sm:p-5">
-            {progressDialogSession?.textbookEntries.map((entry) => {
-              const draft = lessonProgressDraft.find((item) => item.id === entry.id);
-              if (!draft) {
-                return null;
-              }
-
-              return (
-                <div key={`lesson-progress-dialog-${entry.id}`} className="rounded-lg border p-3">
-                  <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground">{entry.textbookTitle}</p>
-                      {entry.scopeLabel ? <p className="text-xs text-muted-foreground">{entry.scopeLabel}</p> : null}
-                    </div>
-                    <Badge variant={entry.hasPlanContent ? "secondary" : "outline"}>
-                      {entry.hasPlanContent ? entry.planLabel : "미배정"}
-                    </Badge>
-                  </div>
-                  <div className="grid gap-3 sm:grid-cols-2">
-                    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                      <span>시작 범위</span>
-                      <Input
-                        value={draft.planStart}
-                        aria-label={`${entry.textbookTitle} ${progressDialogSession.label} 시작 범위`}
-                        placeholder="예: p.12"
-                        onChange={(event) =>
-                          setLessonProgressDraft((current) =>
-                            updateLessonProgressDraftEntry(current, entry.id, "planStart", event.target.value),
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground">
-                      <span>종료 범위</span>
-                      <Input
-                        value={draft.planEnd}
-                        aria-label={`${entry.textbookTitle} ${progressDialogSession.label} 종료 범위`}
-                        placeholder="예: p.18"
-                        onChange={(event) =>
-                          setLessonProgressDraft((current) =>
-                            updateLessonProgressDraftEntry(current, entry.id, "planEnd", event.target.value),
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2">
-                      <span>표시 문구</span>
-                      <Input
-                        value={draft.planLabel}
-                        aria-label={`${entry.textbookTitle} ${progressDialogSession.label} 표시 문구`}
-                        placeholder="예: 1단원 개념"
-                        onChange={(event) =>
-                          setLessonProgressDraft((current) =>
-                            updateLessonProgressDraftEntry(current, entry.id, "planLabel", event.target.value),
-                          )
-                        }
-                      />
-                    </label>
-                    <label className="grid gap-1.5 text-xs font-medium text-muted-foreground sm:col-span-2">
-                      <span>계획 메모</span>
-                      <Textarea
-                        value={draft.planMemo}
-                        aria-label={`${entry.textbookTitle} ${progressDialogSession.label} 계획 메모`}
-                        placeholder="메모"
-                        onChange={(event) =>
-                          setLessonProgressDraft((current) =>
-                            updateLessonProgressDraftEntry(current, entry.id, "planMemo", event.target.value),
-                          )
-                        }
-                      />
-                    </label>
-                  </div>
-                </div>
-              );
-            })}
-          </div>
-          <div className="flex justify-end gap-2 border-t px-4 py-3 sm:px-5">
-            <Button type="button" variant="outline" onClick={closeLessonProgressDialog}>
-              취소
-            </Button>
-            <Button type="button" onClick={applyLessonProgressDraft}>
-              적용
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
+      
     </>
   );
 }

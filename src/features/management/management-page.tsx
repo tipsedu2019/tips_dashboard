@@ -48,6 +48,7 @@ import { useDataTablePageSize } from "@/hooks/use-data-table-page-size";
 import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard";
 import type { DataTablePageSizePreference } from "@/lib/numbered-pagination";
 import { managementTableStorageKey, readManagementNumberedQuery, replaceManagementNumberedQuery, type ManagementNumberedQuery } from "./management-numbered-state";
+import { readClassTextbookUsage, buildClassTextbookUsage, classTextbookUsageError } from "./class-textbook-usage";
 import { ClassTextbookPicker } from "./class-textbook-picker";
 import { ManagementRelationCombobox } from "./management-relation-combobox";
 import {
@@ -773,6 +774,7 @@ function initialForm(kind: ManagementKind, row?: ManagementRow | null): FormStat
   const nextForm = Object.fromEntries(FORM_FIELDS[kind].map((field) => [field.name, valueFor(field.name)]));
   if (kind === "classes") {
     nextForm.textbookIds = JSON.stringify(idList(raw.textbook_ids || raw.textbookIds));
+    nextForm.textbookUsage = JSON.stringify(readClassTextbookUsage(raw.textbook_usage || raw.textbookUsage));
   }
   return nextForm;
 }
@@ -794,6 +796,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
 
   delete payload.classGroupIds;
   delete payload.textbookIds;
+  delete payload.textbookUsage;
   if (payload.parentContact) payload.parent_contact = payload.parentContact;
   if (payload.classroom) payload.room = payload.classroom;
   if (payload.name && kind === "classes") {
@@ -806,6 +809,7 @@ function compact(formState: FormState, kind: ManagementKind, row?: ManagementRow
     const textbookIds = parseTextbookIds(formState.textbookIds);
     payload.textbook_ids = textbookIds;
     payload.textbookIds = textbookIds;
+    payload.textbook_usage = buildClassTextbookUsage(formState.textbookUsage, textbookIds);
   }
 
   return payload;
@@ -3333,9 +3337,25 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     const visibleCandidateRows = textbookCandidateScopeMatches ? textbookCandidateRows : [];
     const catalog = [...new Map([...assignedTextbooks, ...visibleCandidateRows].map((textbook) => [textbook.id, textbook])).values()];
     const selectedIds = parseTextbookIds(form.textbookIds);
+    const usage = readClassTextbookUsage(form.textbookUsage);
+    const updateUsage = (id: string, field: "startDate" | "endDate", value: string) => {
+      setForm((current) => {
+        const values = readClassTextbookUsage(current.textbookUsage);
+        return { ...current, textbookUsage: JSON.stringify({ ...values, [id]: { ...(values[id] || { startDate: "", endDate: "", title: "" }), [field]: value } }) };
+      });
+      setSaveNotice("");
+    };
     const catalogById = new Map(catalog.map((textbook) => [textbook.id, textbook]));
     const updateSelectedIds = (nextIds: string[]) => {
-      setForm((current) => ({ ...current, textbookIds: JSON.stringify(nextIds) }));
+      setForm((current) => {
+        const previous = readClassTextbookUsage(current.textbookUsage);
+        const nextUsage = Object.fromEntries(nextIds.map((id) => [id, {
+          startDate: previous[id]?.startDate || "",
+          endDate: previous[id]?.endDate || "",
+          title: catalogById.get(id)?.title || previous[id]?.title || "",
+        }]));
+        return { ...current, textbookIds: JSON.stringify(nextIds), textbookUsage: JSON.stringify(nextUsage) };
+      });
       setSaveNotice("");
     };
 
@@ -3386,7 +3406,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
         </div>
         <div className="overflow-hidden rounded-md border bg-background">
           <div className="flex items-center justify-between gap-2 border-b px-3 py-2">
-            <div className="text-sm font-semibold">연결 교재</div>
+            <div className="text-sm font-semibold">사용 교재</div>
             <Badge variant="secondary">{selectedIds.length}권</Badge>
           </div>
           {selectedIds.length === 0 ? (
@@ -3396,9 +3416,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
               {selectedIds.map((id) => {
                 const textbook = catalogById.get(id);
                 return (
-                  <div key={id} className="flex min-w-0 items-center justify-between gap-3 px-3 py-2.5">
+                  <div key={id} className="grid min-w-0 grid-cols-[minmax(0,1fr)_auto] gap-3 px-3 py-3">
                     <div className="min-w-0">
-                      <div className="whitespace-normal break-words text-sm font-semibold leading-5">{textbook?.title || "교재 정보 확인 필요"}</div>
+                      <div className="whitespace-normal break-words text-sm font-semibold leading-5">{textbook?.title || usage[id]?.title || "교재 정보 확인 필요"}</div>
                       {textbook ? (
                         <PickerMetaPills
                           className="mt-1"
@@ -3421,6 +3441,23 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     >
                       <X className="size-4" aria-hidden="true" />
                     </Button>
+                    <div className="col-span-full grid grid-cols-2 gap-3">
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`textbook-${id}-start`}>사용 시작일</Label>
+                        <Input id={`textbook-${id}-start`} type="date" value={usage[id]?.startDate || ""}
+                          disabled={!canMutateRows} aria-label={`${textbook?.title || usage[id]?.title || "교재"} 사용 시작일`}
+                          aria-invalid={Boolean(classTextbookUsageError(usage[id]))} aria-describedby={classTextbookUsageError(usage[id]) ? `textbook-${id}-error` : undefined}
+                          onChange={(event) => updateUsage(id, "startDate", event.target.value)} />
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor={`textbook-${id}-end`}>사용 종료일</Label>
+                        <Input id={`textbook-${id}-end`} type="date" value={usage[id]?.endDate || ""}
+                          disabled={!canMutateRows} aria-label={`${textbook?.title || usage[id]?.title || "교재"} 사용 종료일`}
+                          aria-invalid={Boolean(classTextbookUsageError(usage[id]))} aria-describedby={classTextbookUsageError(usage[id]) ? `textbook-${id}-error` : undefined}
+                          onChange={(event) => updateUsage(id, "endDate", event.target.value)} />
+                      </div>
+                      {classTextbookUsageError(usage[id]) ? <p id={`textbook-${id}-error`} role="alert" className="col-span-full text-sm text-destructive">{classTextbookUsageError(usage[id])}</p> : null}
+                    </div>
                   </div>
                 );
               })}

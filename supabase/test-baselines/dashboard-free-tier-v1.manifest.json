@@ -504,6 +504,11 @@
       "fileName": "20260922023940_timetable_continuous_class_scope.sql",
       "status": "final",
       "sha256": "ce83b2692195757381ff73e946cd24ff2080d61ebe231cacac1c5516e0648757"
+    },
+    {
+      "fileName": "20260922054047_curriculum_schedule_and_class_textbooks.sql",
+      "status": "final",
+      "sha256": "2a0d7db2e34fd2ffa6936ce4a3d499ab92d9504fc3ba9e0c532cdd73647dfd3e"
     }
   ]
 }

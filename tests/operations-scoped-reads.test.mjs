@@ -869,7 +869,7 @@ test("class mutations capture lifecycle before writes and editor close revokes i
   const source = await readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8");
 
   assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => \{\s*const result = await action\.saveSession/);
-  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\.id\)[\s\S]*?const result = await action\.saveContent/);
+  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\.id\)[\s\S]*?const \{ error: updateError \} = await client/);
   assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => await action\.generateSessions/);
   assert.match(source, /requestLessonDesignClose[\s\S]*?lessonMutationLifecycleRef\.current\?\.revoke\(\)/);
   assert.match(source, /runClassMutationWithLifecycle/);
@@ -896,7 +896,7 @@ test("operations workspaces issue mode requests and expose dense-range recovery 
     readFile(new URL("src/features/operations/class-schedule-workspace.tsx", root), "utf8"),
   ]);
 
-  assert.match(hook, /useOperationsWorkspaceData\(request:\s*OperationsWorkspaceRequest\)/);
+  assert.match(hook, /useOperationsWorkspaceData\(request:\s*OperationsWorkspaceRequest,/);
   assert.doesNotMatch(hook, /readTable|Promise\.all\(\[|\.select\("\*"\)/);
   assert.match(calendar, /mode:\s*"calendar"/);
   assert.match(calendar, /visible_range_too_dense/);

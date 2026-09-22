@@ -18,7 +18,7 @@ function modules(supabase, overrides) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     let inputSource = readFileSync(file, 'utf8');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource = inputSource.replace('  const classScheduleWorkspaceContent = (',
-      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonProgressDraft, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, openLessonProgressDialog, closeLessonProgressDialog, applyLessonProgressDraft, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
     const source = ts.transpileModule(inputSource, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -131,10 +131,10 @@ const detail = () => ({ classItem: { id: id(999), name: 'SAFE CURRICULUM', subje
 async function editor(t, route = 'class-schedule') {
   const page = await setup(t, 'operations', { workspace: true, search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`, route });
   await act(async () => page.requests.find(r => r.name === 'get_operations_class_lesson_design_detail_v1').resolve({error: null, data: detail()}));
-  await act(async () => page.finish(page.numbered()[0]));
+  if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
   return page;
 }
-function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, textbooks: p.textbooks.map((book, index) => index ? book : {...book, alias: name}) }))); }
+function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, billingPeriods: p.billingPeriods.map((period, index) => index ? period : {...period, label: name}) }))); }
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_'));
 async function finishSave(page, data = null, failRead = false) {
@@ -155,16 +155,16 @@ test('plan: same-class refreshed source preserves an authored draft', async t =>
   const page = await editor(t); await editPlan(page, 'ADDITIONAL INPUT');
   const next = detail(); next.classItem.schedulePlan.className = 'SERVER REFRESH';
   await refreshDetail(page, next);
-  assert.equal(page.observed.lessonPlanDraft.textbooks[0].alias, 'ADDITIONAL INPUT');
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'ADDITIONAL INPUT');
 });
 test('plan: accepted save preserves input added while pending and failed re-read does not claim write failure', async t => {
   const page = await editor(t); await editPlan(page, 'SUBMITTED');
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 1);
-  assert.equal(saveRequests(page)[0].args.schedule_plan.textbooks[0].alias, 'SUBMITTED');
+  assert.equal(saveRequests(page)[0].args.schedule_plan.billingPeriods[0].label, 'SUBMITTED');
   await editPlan(page, 'ADDED WHILE SAVING');
   await finishSave(page, null, true);
-  assert.equal(page.observed.lessonPlanDraft.textbooks[0].alias, 'ADDED WHILE SAVING');
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'ADDED WHILE SAVING');
   assert.match(page.observed.lessonDesignSaveNotice, /저장/);
   assert.match(page.observed.lessonDesignSaveError, /다시 불러/);
   assert.equal(saveRequests(page).length, 1);
@@ -180,16 +180,6 @@ test('normalized session: real save reaches the service once and preserves edits
   await finishSave(page, {revision: 2});
   assert.equal(page.observed.normalizedLessonSessionDrafts[id(600)]?.memo, 'ADDITIONAL INPUT');
 });
-test('progress: local cancellation confirms before dropping input', async t => {
-  const page = await editor(t);
-  await act(async () => page.observed.openLessonProgressDialog(page.observed.lessonDesignSnapshot.sessions[0].id));
-  const input = document.querySelector('input[aria-label$="표시 문구"]'); assert.ok(input);
-  const props = input[Object.keys(input).find(k => k.startsWith('__reactProps'))];
-  await act(async () => props.onChange({target: {value: 'LOCAL DRAFT'}}));
-  await act(async () => page.observed.closeLessonProgressDialog());
-  assert.ok(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'));
-  assert.equal(page.observed.lessonProgressDraft[0].planLabel, 'LOCAL DRAFT');
-});
 
 function dirty() { const event = new window.Event('beforeunload', {cancelable: true}); window.dispatchEvent(event); return event.defaultPrevented; }
 async function confirm(text) {
@@ -199,13 +189,13 @@ async function confirm(text) {
 }
 for (const route of ['class-schedule', 'curriculum', 'curriculum/lesson-design']) test(`${route}: clean read, revert, protected close and confirmed destination`, async t => {
   const page = await editor(t, route); assert.equal(dirty(), false);
-  const original = page.observed.lessonPlanDraft.textbooks[0].alias;
+  const original = page.observed.lessonPlanDraft.billingPeriods[0].label;
   await editPlan(page, 'CHANGED'); assert.equal(dirty(), true);
   await editPlan(page, original); assert.equal(dirty(), false);
   await editPlan(page, 'KEEP');
   await act(async () => page.observed.requestLessonDesignClose());
   assert.ok(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'));
-  await confirm('계속 편집'); assert.equal(page.observed.lessonPlanDraft.textbooks[0].alias, 'KEEP');
+  await confirm('계속 편집'); assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'KEEP');
   await act(async () => page.observed.requestLessonDesignClose());
   await confirm('변경사항 버리기');
   await act(async () => { await new Promise(resolve => setTimeout(resolve, 50)); });
@@ -213,13 +203,13 @@ for (const route of ['class-schedule', 'curriculum', 'curriculum/lesson-design']
   assert.equal(new URLSearchParams(window.location.search).has('classId'), false);
 });
 test('plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked', async t => {
-  const page = await editor(t), original = page.observed.lessonPlanDraft.textbooks[0].alias;
+  const page = await editor(t), original = page.observed.lessonPlanDraft.billingPeriods[0].label;
   await editPlan(page, 'SUBMITTED');
   await act(async () => { void page.observed.handleSaveLessonPlan(); void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 1);
   await editPlan(page, original); assert.equal(dirty(), false);
   await finishSave(page);
-  assert.equal(page.observed.lessonPlanDraft.textbooks[0].alias, original);
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, original);
   assert.equal(dirty(), true, 'the accepted value changed even though the user reverted before the response');
 });
 test('normalized session: unchanged/reverted draft is clean and accepted revision is reused', async t => {
@@ -241,46 +231,16 @@ test('normalized read: a loading read must never fall through to a legacy classe
   assert.equal(saveRequests(page).length, 0);
   assert.equal(dirty(), true);
 });
-test('progress: apply transfers draft to plan; nested cancel preserves another dirty editor', async t => {
-  const page = await editor(t); await editPlan(page, 'PARENT DRAFT');
-  await act(async () => page.observed.openLessonProgressDialog(page.observed.lessonDesignSnapshot.sessions[0].id));
-  await act(async () => page.observed.closeLessonProgressDialog());
-  assert.equal(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'), null, 'clean popup closes without asking about retained parent');
-  assert.equal(dirty(), true);
-  await act(async () => page.observed.openLessonProgressDialog(page.observed.lessonDesignSnapshot.sessions[0].id));
-  const input = document.querySelector('input[aria-label$="표시 문구"]');
-  const props = input[Object.keys(input).find(k => k.startsWith('__reactProps'))];
-  await act(async () => props.onChange({target: {value: 'APPLIED PROGRESS'}}));
-  await act(async () => page.observed.applyLessonProgressDraft());
-  assert.equal(document.querySelector('[data-testid="draft-navigation-confirm-dialog"]'), null);
-  assert.equal(dirty(), true);
-  assert.ok(JSON.stringify(page.observed.lessonPlanDraft).includes('APPLIED PROGRESS'));
-  assert.equal(saveRequests(page).length, 0, 'apply transfers to parent; it is not a backend save');
-});
-
-test('normalized content: accepted content clears its authored fields without accepting schedule edits', async t => {
-  const page = await normalizedEditor(t); await editPlan(page, 'SAVED CONTENT');
-  await act(async () => { void page.observed.handleSaveLessonPlan(); });
-  assert.equal(saveRequests(page)[0].name, 'save_class_lesson_content_v1');
-  assert.equal(saveRequests(page)[0].args.p_expected_content_hash, 'safe-hash');
-  await finishSave(page, {contentHash: 'updated'}, true);
-  assert.equal(dirty(), false, 'accepted content fields should be clean');
-  await act(async () => page.observed.updateLessonPlanDraft(p => ({...p, billingPeriods: p.billingPeriods.map((period, i) => i ? period : {...period, endDate: '2026-09-07'})})));
-  await act(async () => { void page.observed.handleSaveLessonPlan(); });
-  assert.equal(dirty(), true, 'actual authored schedule difference exists before content save');
-  await finishSave(page, {contentHash: 'updated-again'}, true);
-  assert.equal(dirty(), true, 'content-only save must not accept schedule changes');
-});
 test('plan: failed write retains its draft and a retry submits the current values', async t => {
   const page = await editor(t); await editPlan(page, 'RETRY DRAFT');
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   await act(async () => saveRequests(page)[0].resolve({error: new Error('internal synthetic save error'), data: null}));
-  assert.equal(dirty(), true); assert.equal(page.observed.lessonPlanDraft.textbooks[0].alias, 'RETRY DRAFT');
+  assert.equal(dirty(), true); assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].label, 'RETRY DRAFT');
   assert.match(page.observed.lessonDesignSaveError, /다시 저장/);
   assert.equal(page.observed.lessonDesignSaveError.includes('internal'), false);
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 2);
-  assert.equal(saveRequests(page).at(-1).args.schedule_plan.textbooks[0].alias, 'RETRY DRAFT');
+  assert.equal(saveRequests(page).at(-1).args.schedule_plan.billingPeriods[0].label, 'RETRY DRAFT');
 });
 test('actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled', async t => {
   const page = await editor(t); await editPlan(page, 'OLD ACTOR');
@@ -319,21 +279,6 @@ test('normalized schedule: calendar opens authoritative session editing without 
   assert.ok(document.querySelector('input[aria-label="일정 조회·생성 월"]'));
 });
 
-test('normalized content: actual progress editing retains the authoritative session key in its bounded payload', async t => {
-  const page = await normalizedEditor(t);
-  await act(async () => page.observed.openLessonProgressDialog(id(600)));
-  const input = document.querySelector('input[aria-label$="표시 문구"]');assert.ok(input);
-  const props = input[Object.keys(input).find(k=>k.startsWith('__reactProps'))];
-  await act(async () => props.onChange({target:{value:'NORMALIZED CONTENT'}}));
-  await act(async () => page.observed.applyLessonProgressDraft());
-  assert.ok(JSON.stringify(page.observed.lessonDesignSnapshot).includes('NORMALIZED CONTENT'));
-  await act(async () => {void page.observed.handleSaveLessonPlan();});
-  const payload=saveRequests(page).at(-1).args.p_content_patch;
-  assert.equal(payload.sessions.length,1);
-  assert.equal(payload.sessions[0].sessionKey,'session-one');
-  assert.ok(JSON.stringify(payload.sessions[0].textbookEntries).includes('NORMALIZED CONTENT'));
-});
-
 test('normalized generation: a late preview from another month cannot authorize current-month creation', async t => {
  const page = await normalizedEditor(t);
  await act(async()=>{void page.observed.previewLessonSessionGeneration();});
@@ -349,37 +294,4 @@ test('normalized generation: preview and creation each reject same-turn duplicat
  await act(async()=>previews[0].resolve({error:null,data:{creatableCount:1,existingCount:0,resourceConflictCount:0}}));
  await act(async()=>{void page.observed.confirmLessonSessionGeneration();void page.observed.confirmLessonSessionGeneration();});
  assert.equal(page.requests.filter(r=>r.name==='generate_class_lesson_sessions_v1').length,1);
-});
-test('normalized new month: newly read sessions accept progress without dropping another month draft', async t => {
- const page = await normalizedEditor(t);await editPlan(page,'KEPT CATALOG DRAFT');
- await act(async()=>page.observed.setFocusedLessonMonthKey('2026-10'));
- await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:1,contentHash:'oct-hash',sessions:[
-  {id:id(601),session_key:'generated-oct',session_date:'2026-10-05',session_number:1,revision:1,schedule_state:'active',memo:''},
- ]}}});
- assert.equal(page.observed.lessonPlanDraft.textbooks[0].alias,'KEPT CATALOG DRAFT');
- await act(async()=>page.observed.openLessonProgressDialog(id(601)));
- const input=document.querySelector('input[aria-label$="표시 문구"]');assert.ok(input,'new normalized month has the linked textbook progress editor');
- const props=input[Object.keys(input).find(k=>k.startsWith('__reactProps'))];await act(async()=>props.onChange({target:{value:'OCTOBER CONTENT'}}));
- await act(async()=>page.observed.applyLessonProgressDraft());
- await act(async()=>{void page.observed.handleSaveLessonPlan();});
- const payload=saveRequests(page).at(-1).args.p_content_patch;
- assert.equal(payload.textbooks[0].alias,'KEPT CATALOG DRAFT');
- assert.equal(payload.sessions.length,1);assert.equal(payload.sessions[0].sessionKey,'generated-oct');
- assert.ok(JSON.stringify(payload.sessions[0]).includes('OCTOBER CONTENT'));
-});
-for (const scenario of ['off-weekday','same-date-second-slot']) test(`normalized ${scenario}: real session progress stays in the bounded content save`, async t => {
- const page=await normalizedEditor(t);
- const sessions=scenario==='off-weekday'?[{id:id(600),session_key:'session-one',session_date:'2026-08-04',session_number:1,revision:2,schedule_state:'active'}]:[
-  {id:id(600),session_key:'session-one',session_date:'2026-08-03',session_number:1,revision:1,schedule_state:'active'},
-  {id:id(601),session_key:'second-slot',session_date:'2026-08-03',session_number:2,revision:1,schedule_state:'active'},
- ];
- await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:1,contentHash:'actual',sessions}}});
- const target=sessions.at(-1);await act(async()=>page.observed.openLessonProgressDialog(target.id));
- const input=document.querySelector('input[aria-label$="표시 문구"]');assert.ok(input);
- const props=input[Object.keys(input).find(k=>k.startsWith('__reactProps'))];await act(async()=>props.onChange({target:{value:'PERSIST REAL SESSION'}}));
- await act(async()=>page.observed.applyLessonProgressDraft());
- await act(async()=>{void page.observed.handleSaveLessonPlan();});
- const payload=saveRequests(page).at(-1).args.p_content_patch;
- const saved=payload.sessions.find(s=>s.sessionKey===target.session_key);assert.ok(saved,'actual session must survive serialization');
- assert.ok(JSON.stringify(saved).includes('PERSIST REAL SESSION'));
 });

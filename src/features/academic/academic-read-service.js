@@ -159,12 +159,12 @@ function validCurriculumNumberedRow(row) {
     || !CURRICULUM_ARRAY_FIELDS.every((key) => academicStrings(row[key])) || !row.classGroupIds.every((id) => NUMBERED_UUID.test(id))
     || !CURRICULUM_EMPTY_FIELDS.every((key) => Array.isArray(row[key]) && row[key].length === 0)
     || row.textbookOverflowCount !== 0 || !CURRICULUM_STATUSES.includes(row.status) || !CURRICULUM_STATUSES.includes(row.statusFilter)
-    || !['회차 미생성','교재 미연결','진도 미배정','계획 완료'].includes(row.stateLabel)) return false;
+    || !['회차 미생성','일정 연장 필요','일정 편성'].includes(row.stateLabel)) return false;
   if (row.nextSession === null) return true;
   const next = row.nextSession;
   const strings = ['sessionId','sessionKey','label','progressStatus','updatedAt','noteSummary','dateValue','dateLabel','periodLabel','scheduleState','scheduleMemo','makeupMemo','makeupDate','planSummary'];
   return exactAcademicKeys(next, [...strings,'sessionOrder','hasActualContent','hasPlanContent','textbookEntryCount','textbookEntries'])
-    && strings.every((key) => typeof next[key] === 'string') && NUMBERED_UUID.test(next.sessionId) && next.sessionKey.length > 0
+    && strings.every((key) => typeof next[key] === 'string') && next.sessionId.length > 0 && next.sessionKey.length > 0
     && DATE_KEY.test(next.dateValue) && DATE_KEY.test(next.dateLabel) && DATE_KEY.test(next.label)
     && ['active','exception','makeup','tbd'].includes(next.scheduleState)
     && next.sessionOrder === 0 && next.progressStatus === 'pending' && next.hasActualContent === false && next.hasPlanContent === false
@@ -287,44 +287,12 @@ export function isAcademicResultCurrentForScope(
 }
 
 export function getCurriculumDesignAction(row = {}) {
-  const nextSession = row.nextSession && typeof row.nextSession === "object"
-    ? row.nextSession
-    : {};
-  const sessionId = text(nextSession.id || nextSession.sessionId);
-
-  if (Number(row.totalSessions || 0) <= 0) {
-    return {
-      label: "일정",
-      tab: "schedule",
-      sectionId: "lesson-design-periods",
-      sessionId: "",
-      reason: "회차 생성 필요",
-    };
-  }
-  if (Number(row.textbookCount || 0) <= 0) {
-    return {
-      label: "교재",
-      tab: "curriculum",
-      sectionId: "lesson-design-textbooks",
-      sessionId: "",
-      reason: "교재 연결 필요",
-    };
-  }
-  if (Number(row.delayedProgressSessions || 0) > 0) {
-    return {
-      label: "진도",
-      tab: "curriculum",
-      sectionId: "lesson-design-board",
-      sessionId,
-      reason: `미배정 ${Number(row.delayedProgressSessions || 0)}회`,
-    };
-  }
   return {
-    label: "보기",
-    tab: "basic",
-    sectionId: "",
+    label: "일정 편성",
+    tab: "schedule",
+    sectionId: "lesson-design-periods",
     sessionId: "",
-    reason: "기본 정보 확인",
+    reason: Number(row.totalSessions || 0) > 0 ? "수업일 확인 및 조정" : "회차 생성 필요",
   };
 }
 

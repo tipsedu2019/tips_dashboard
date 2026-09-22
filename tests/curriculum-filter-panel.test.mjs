@@ -39,7 +39,7 @@ test("curriculum workspace does not construct or restore legacy period options",
 test("curriculum work queue shows actionable planning workload without a repeated summary", async () => {
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
 
-  assert.match(source, /value: "update", label: "진도 미배정"/);
+  assert.match(source, /value: "update", label: "일정 연장 필요"/);
   assert.doesNotMatch(source, /summaryLabel=/);
   assert.doesNotMatch(source, /미배정 회차 \$\{model\.summary\.pendingSessions\}회/);
 });
@@ -83,21 +83,14 @@ test("curriculum overview has a PC-first work queue, dense table shell, and shar
   assert.doesNotMatch(source, /data-selected/);
   assert.match(source, /setViewMode\(item\.value\)/);
   assert.match(source, /viewMode === item\.value/);
-  assert.match(source, /교재 미연결/);
-  assert.match(source, /진도 미배정/);
+  assert.match(source, /일정 연장 필요/);
   assert.match(source, /DataTableHeaderCell/);
-  assert.match(source, /min-w-\[920px\]/);
-  assert.match(source, /다음 작업<\/DataTableHeaderCell>/);
-  assert.match(source, /const hasLinkedTextbooks = row\.textbookCount > 0/);
+  assert.match(source, /min-w-\[760px\]/);
 
   assert.match(modelSource, /const progressTargetSessions = textbookCount > 0/);
   assert.match(modelSource, /Number\(session\.textbookEntryCount \|\| 0\) > 0/);
   assert.doesNotMatch(modelSource, /scheduleState !== "exception" && scheduleState !== "tbd"/);
-  assert.match(source, /const progressTargetSessionCount = row\.progressTargetSessions \?\? row\.totalSessions/);
-  assert.match(source, /formatProgressPrimary\(row\.plannedProgressSessions, progressTargetSessionCount\)/);
-  assert.match(source, /value=\{row\.progressTargetPercent\}/);
 
-  assert.match(source, /교재 연결 필요/);
   assert.doesNotMatch(source, /교재를 연결한 뒤 회차별 진도를 배정합니다\./);
 });
 
@@ -164,16 +157,9 @@ test("curriculum row action opens the lesson design modal route", async () => {
   assert.doesNotMatch(source, /return `\/admin\/classes\?\$\{params\.toString\(\)\}`/);
   assert.doesNotMatch(source, /params\.set\("tab", tab \|\| "basic"\)/);
   assert.match(source, /return resolveCurriculumDesignAction\(row\)/);
-  assert.match(actionSource, /Number\(row\.textbookCount \|\| 0\) <= 0/);
-  assert.match(actionSource, /label: "교재"/);
-  assert.match(actionSource, /tab: "curriculum"/);
-  assert.match(actionSource, /sectionId: "lesson-design-textbooks"/);
-  assert.match(actionSource, /Number\(row\.totalSessions \|\| 0\) <= 0/);
   assert.match(actionSource, /tab: "schedule"/);
-  assert.match(actionSource, /Number\(row\.delayedProgressSessions \|\| 0\) > 0/);
   assert.doesNotMatch(actionSource, /Number\(row\.delayedSessions \|\| 0\) > 0/);
   assert.match(actionSource, /sectionId: "lesson-design-periods"/);
-  assert.match(actionSource, /sectionId: "lesson-design-board"/);
   assert.match(source, /rowDesignAction\.label/);
   assert.match(source, /buildLessonDesignHref\(\s*row\.id,\s*rowDesignAction\.sectionId,\s*rowDesignAction\.sessionId,\s*curriculumReturnPath,\s*\)/);
 });
@@ -182,20 +168,17 @@ test("curriculum row actions show the next work reason before navigation", async
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
   const actionSource = await readFile(new URL("src/features/academic/academic-read-service.js", root), "utf8");
 
-  assert.match(actionSource, /reason: "교재 연결 필요"/);
-  assert.match(actionSource, /reason: "회차 생성 필요"/);
-  assert.match(actionSource, /reason: `미배정 \$\{Number\(row\.delayedProgressSessions \|\| 0\)\}회`/);
-  assert.match(actionSource, /reason: "기본 정보 확인"/);
   assert.match(source, /data-testid="curriculum-row-next-action"/);
   assert.match(source, /rowDesignAction\.reason/);
   assert.match(source, /aria-label=\{`\$\{row\.title\} \$\{rowDesignAction\.label\} \$\{rowDesignAction\.reason\}`\}/);
 });
 
-test("completed curriculum rows open basic class detail without stale section targets", async () => {
-  const source = await readFile(new URL("src/features/academic/academic-read-service.js", root), "utf8");
-
-  assert.match(source, /return \{[\s\S]*?label: "보기",[\s\S]*?tab: "basic",[\s\S]*?sectionId: "",[\s\S]*?sessionId: "",[\s\S]*?reason: "기본 정보 확인",[\s\S]*?\};/);
-  assert.doesNotMatch(source, /label: "보기",[\s\S]*?tab: "basic",[\s\S]*?sectionId: "lesson-design-board"/);
+test("all curriculum rows use the same scheduling destination", async () => {
+  const { getCurriculumDesignAction } = await import("../src/features/academic/academic-read-service.js");
+  for (const row of [{ totalSessions: 0 }, { totalSessions: 12, textbookCount: 0 }, { totalSessions: 12, textbookCount: 3, delayedProgressSessions: 12 }]) {
+    assert.equal(getCurriculumDesignAction(row).sectionId, "lesson-design-periods");
+    assert.equal(getCurriculumDesignAction(row).label, "일정 편성");
+  }
 });
 
 test("curriculum rows open lesson design without a duplicated preview", async () => {

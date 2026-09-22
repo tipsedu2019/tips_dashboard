@@ -747,6 +747,7 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
       student_ids: registeredStudents.map((row) => row.id),
       waitlist_ids: waitlistedStudents.map((row) => row.id),
       textbook_ids: assignedTextbookIds,
+      textbook_usage: record.textbookUsage || record.textbook_usage || {},
       textbookIds: assignedTextbookIds,
       registered_students: registeredStudents,
       registeredStudents,
