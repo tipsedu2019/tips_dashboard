@@ -141,6 +141,8 @@ jobs:
             --test supabase/tests/textbook_sale_transition_atomic_test.sql \
             --probe tests/probe-textbook-sale-transition-concurrency.mjs \
             --test supabase/tests/dashboard_statistics_sources_test.sql \
+            --test supabase/tests/dashboard_workload_test.sql \
+            --probe tests/probe-dashboard-workload-dto.mjs \
             --test supabase/tests/dashboard_conflict_task_producer_test.sql \
             --test supabase/tests/ops_task_page_reads_test.sql \
             --test supabase/tests/ops_task_numbered_pages_test.sql \
