@@ -9,6 +9,32 @@ $$;
 create function pg_temp.filters(extra jsonb default '{}') returns jsonb language sql as $$
  select jsonb_build_object('periodId',null,'search','__schedule_only__','status',null,'subject',null,'grade',null,'teacher',null,'classroom',null,'viewMode','all')||extra
 $$;
+-- Reproduce a class with a valid audit predecessor from before the new column.
+insert into public.classes(id,name,status) values(pg_temp.fid(801),'__schema_event_fixture__','개강 준비');
+update public.dashboard_audit_logs set
+  after_record=after_record-'textbook_usage',
+  after_hash=encode(extensions.digest((after_record-'textbook_usage')::text,'sha256'),'hex')
+where entity_table='classes' and entity_id=pg_temp.fid(801)::text;
+create temporary table schema_predecessor as select * from public.dashboard_audit_logs where entity_table='classes' and entity_id=pg_temp.fid(801)::text;
+select lives_ok($$select dashboard_private.append_class_textbook_usage_schema_event_v1(pg_temp.fid(801))$$,'new column appends a schema event without resetting the audit chain');
+create temporary table schema_event as select * from public.dashboard_audit_logs where entity_table='classes' and entity_id=pg_temp.fid(801)::text order by event_sequence desc limit 1;
+select is((select audit_chain_id from schema_event),(select audit_chain_id from schema_predecessor),'schema event retains original chain identity');
+select is((select predecessor_event_id from schema_event),(select id from schema_predecessor),'schema event points to the actual predecessor');
+select is((select before_hash from schema_event),(select after_hash from schema_predecessor),'schema event retains hash continuity');
+select is((select chain_ordinal from schema_event),(select chain_ordinal+1 from schema_predecessor),'schema event advances one ordinal');
+select is((select after_record from public.dashboard_audit_logs where id=(select id from schema_predecessor)),(select after_record from schema_predecessor),'schema transition leaves original audit row unchanged');
+select is((select dashboard_private.dashboard_audit_forward_patch_v2(p.after_record,e.change_patch) from schema_predecessor p,schema_event e),(select to_jsonb(c) from public.classes c where id=pg_temp.fid(801)),'forward schema patch reconstructs the complete new row');
+select is((select dashboard_private.dashboard_audit_reverse_patch_v2(to_jsonb(c),e.change_patch) from public.classes c,schema_event e where c.id=pg_temp.fid(801)),(select after_record from schema_predecessor),'reverse schema patch removes the formerly absent key');
+select lives_ok($$select dashboard_private.append_class_textbook_usage_schema_event_v1(pg_temp.fid(801))$$,'repeating an already-recorded transition is idempotent');
+select is((select count(*)::int from public.dashboard_audit_logs where entity_table='classes' and entity_id=pg_temp.fid(801)::text),2,'idempotent transition writes no duplicate event');
+select lives_ok($$update public.classes set name='__schema_event_fixture_updated__' where id=pg_temp.fid(801)$$,'ordinary class mutation continues through the unchanged strict audit trigger');
+select is(dashboard_private.dashboard_audit_reverse_patch_v2('{"a":2}'::jsonb,'{"a":{"before":null,"after":2}}'::jsonb),'{"a":null}'::jsonb,'ordinary historical patches still distinguish SQL-key absence from JSON null');
+update public.dashboard_audit_logs set after_hash='corrupt-fixture' where entity_table='classes' and entity_id=pg_temp.fid(801)::text and event_sequence=(select max(event_sequence) from public.dashboard_audit_logs where entity_table='classes' and entity_id=pg_temp.fid(801)::text);
+select throws_ok($$select dashboard_private.append_class_textbook_usage_schema_event_v1(pg_temp.fid(801))$$,'55000','audit_chain_continuity_invalid','schema transition refuses unrelated corrupt history');
+select throws_ok($$update public.classes set name='should-not-save' where id=pg_temp.fid(801)$$,'55000','audit_chain_continuity_invalid','normal class writes still fail closed on audit corruption');
+select ok(not has_function_privilege('authenticated','dashboard_private.append_class_textbook_usage_schema_event_v1(uuid)','execute'),'authenticated users cannot invoke the migration-only schema event');
+select ok(not has_function_privilege('service_role','dashboard_private.append_class_textbook_usage_schema_event_v1(uuid)','execute'),'service role cannot invoke the migration-only schema event');
+
 insert into auth.users(id,instance_id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values(pg_temp.fid(900),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','schedule-only@example.invalid','{}','{}',now(),now()),
 (pg_temp.fid(901),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','schedule-viewer@example.invalid','{}','{}',now(),now());

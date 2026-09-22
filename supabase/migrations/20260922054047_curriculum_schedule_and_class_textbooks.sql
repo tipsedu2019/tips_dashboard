@@ -4,6 +4,61 @@ set local statement_timeout = '120s';
 
 alter table public.classes add column textbook_usage jsonb not null default '{}'::jsonb;
 
+-- A new column changes to_jsonb(classes) even before its value is updated.
+-- Append a reversible schema event to existing chains instead of resetting
+-- hashes or bypassing the normal fail-closed audit trigger.
+create or replace function dashboard_private.dashboard_audit_forward_patch_v2(record_value jsonb, patch jsonb)
+returns jsonb language sql immutable security invoker set search_path = '' as $$
+  select (record_value - coalesce((select array_agg(entry.key) from jsonb_each(patch) entry where entry.value->'afterExists'='false'::jsonb), '{}'::text[]))
+    || coalesce((select jsonb_object_agg(entry.key,entry.value->'after') from jsonb_each(patch) entry where entry.value->'afterExists' is distinct from 'false'::jsonb),'{}'::jsonb)
+$$;
+create or replace function dashboard_private.dashboard_audit_reverse_patch_v2(record_value jsonb, patch jsonb)
+returns jsonb language sql immutable security invoker set search_path = '' as $$
+  select (record_value - coalesce((select array_agg(entry.key) from jsonb_each(patch) entry where entry.value->'beforeExists'='false'::jsonb), '{}'::text[]))
+    || coalesce((select jsonb_object_agg(entry.key,entry.value->'before') from jsonb_each(patch) entry where entry.value->'beforeExists' is distinct from 'false'::jsonb),'{}'::jsonb)
+$$;
+
+create function dashboard_private.append_class_textbook_usage_schema_event_v1(p_class_id uuid)
+returns void language plpgsql security invoker set search_path = '' as $$
+declare current_row jsonb; previous_row jsonb; previous_hash text; current_hash text; predecessor public.dashboard_audit_logs%rowtype;
+begin
+  select to_jsonb(c) into current_row from public.classes c where id=p_class_id for update;
+  if not found then return; end if;
+  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtext('classes'),pg_catalog.hashtext(p_class_id::text));
+  select * into predecessor from public.dashboard_audit_logs
+    where entity_table='classes' and entity_id=p_class_id::text and record_format in('full_v2','diff_v2')
+    order by event_sequence desc limit 1;
+  if not found then return; end if;
+  previous_row := current_row - 'textbook_usage';
+  previous_hash := encode(extensions.digest(previous_row::text,'sha256'),'hex');
+  current_hash := encode(extensions.digest(current_row::text,'sha256'),'hex');
+  if predecessor.action='DELETE' or predecessor.audit_chain_id is null or predecessor.chain_ordinal is null then
+    raise exception 'audit_chain_continuity_invalid' using errcode='55000';
+  end if;
+  if predecessor.after_hash=current_hash then return; end if;
+  if current_row->'textbook_usage' <> '{}'::jsonb or predecessor.after_hash is distinct from previous_hash then
+    raise exception 'audit_chain_continuity_invalid' using errcode='55000';
+  end if;
+  insert into public.dashboard_audit_logs (
+    actor_profile_id,actor_email,actor_role,action,entity_table,entity_id,entity_label,class_id,
+    request_operation,change_reason,record_format,change_patch,before_hash,after_hash,event_sequence,
+    audit_chain_id,chain_ordinal,predecessor_event_id,predecessor_after_hash
+  ) values (
+    null,'','migration','UPDATE','classes',p_class_id::text,current_row->>'name',p_class_id,
+    'class_textbook_usage_schema_v1','교재 사용기간 필드 추가','diff_v2',
+    jsonb_build_object('textbook_usage',jsonb_build_object('before',null,'beforeExists',false,'after','{}'::jsonb)),
+    previous_hash,current_hash,nextval('dashboard_private.dashboard_audit_event_sequence_v2'::regclass),
+    predecessor.audit_chain_id,predecessor.chain_ordinal+1,predecessor.id,predecessor.after_hash
+  );
+end;
+$$;
+revoke all on function dashboard_private.append_class_textbook_usage_schema_event_v1(uuid) from public,anon,authenticated,service_role;
+do $$
+begin
+  perform dashboard_private.append_class_textbook_usage_schema_event_v1(id) from public.classes order by id;
+end;
+$$;
+
 create function dashboard_private.class_textbook_usage_valid_v1(p_usage jsonb, p_ids jsonb)
 returns boolean language plpgsql immutable security invoker set search_path = '' as $$
 declare item record; start_date date; end_date date;
