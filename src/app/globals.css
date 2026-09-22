@@ -254,13 +254,13 @@
   max-width: min(340px, calc(100vw - 24px));
   padding: 12px;
   border: 1px solid var(--border);
-  border-radius: 12px;
+  border-radius: var(--radius-surface);
   background: var(--popover);
   color: var(--popover-foreground);
   white-space: normal;
   font-size: 12px;
   line-height: 1.55;
-  box-shadow: 0 18px 42px rgba(15, 23, 42, 0.18);
+  box-shadow: var(--shadow-popover);
   pointer-events: none;
 }
 
@@ -272,7 +272,7 @@
   margin-bottom: 4px;
   color: var(--foreground);
   font-size: 13px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0;
   overflow-wrap: anywhere;
   word-break: keep-all;
@@ -281,14 +281,14 @@
 .timetable-tooltip-schedule {
   color: var(--foreground);
   font-size: 12px;
-  font-weight: 800;
+  font-weight: 600;
   letter-spacing: 0;
 }
 
 .timetable-tooltip-badges {
   display: flex;
   flex-wrap: wrap;
-  gap: 6px;
+  gap: 6px 12px;
   margin-top: 8px;
 }
 
@@ -296,13 +296,10 @@
   display: inline-flex;
   max-width: 100%;
   align-items: center;
-  border: 1px solid var(--border);
-  border-radius: 999px;
-  background: var(--muted);
-  padding: 3px 8px;
+  padding: 0;
   color: var(--foreground);
   font-size: 11px;
-  font-weight: 800;
+  font-weight: 600;
   line-height: 1.2;
   overflow-wrap: anywhere;
   word-break: keep-all;
@@ -340,17 +337,17 @@ html {
 }
 
 .annual-board-workspace {
-  --annual-board-bg: #f6f8fb;
-  --annual-board-surface: #ffffff;
-  --annual-board-row-alt: #f8fafd;
-  --annual-board-subheader: #f6f8fb;
-  --annual-board-value-bg: #f8fafd;
-  --annual-board-value-active-bg: #ffffff;
-  --annual-board-text: #172033;
-  --annual-board-muted: #667085;
-  --annual-board-border: #d9e1ea;
-  --annual-board-hover: #eaf2ff;
-  --annual-board-primary: #2f6fed;
+  --annual-board-bg: var(--workspace-background);
+  --annual-board-surface: var(--card);
+  --annual-board-row-alt: var(--muted);
+  --annual-board-subheader: var(--muted);
+  --annual-board-value-bg: transparent;
+  --annual-board-value-active-bg: var(--secondary);
+  --annual-board-text: var(--foreground);
+  --annual-board-muted: var(--muted-foreground);
+  --annual-board-border: var(--border);
+  --annual-board-hover: var(--muted);
+  --annual-board-primary: var(--primary);
   --annual-board-period-bg: #edf4ff;
   --annual-board-period-border: #bfd1fb;
   --annual-board-english-bg: #fff8ec;
@@ -365,23 +362,12 @@ html {
   --annual-board-vacation-bg: #eff8ef;
   --annual-board-vacation-border: #bddcbd;
   --annual-board-vacation-text: #276d3f;
-  --annual-board-empty-bg: #fff4f2;
-  --annual-board-empty-border: #f2c4bb;
-  --annual-board-empty-text: #c2412d;
+  --annual-board-empty-bg: transparent;
+  --annual-board-empty-border: transparent;
+  --annual-board-empty-text: var(--muted-foreground);
 }
 
 .dark .annual-board-workspace {
-  --annual-board-bg: #151515;
-  --annual-board-surface: #1f1f1f;
-  --annual-board-row-alt: #242424;
-  --annual-board-subheader: #272727;
-  --annual-board-value-bg: #232323;
-  --annual-board-value-active-bg: #292929;
-  --annual-board-text: #f4f4f5;
-  --annual-board-muted: #a1a1aa;
-  --annual-board-border: #3f3f46;
-  --annual-board-hover: #1f2f4a;
-  --annual-board-primary: #6ea2ff;
   --annual-board-period-bg: #16233b;
   --annual-board-period-border: #31558f;
   --annual-board-english-bg: #332611;
@@ -396,9 +382,6 @@ html {
   --annual-board-vacation-bg: #17301e;
   --annual-board-vacation-border: #3d7b4c;
   --annual-board-vacation-text: #8dd99b;
-  --annual-board-empty-bg: #351b18;
-  --annual-board-empty-border: #8b433a;
-  --annual-board-empty-text: #ff9c8e;
 }
 
 .annual-board-print-surface {
@@ -421,7 +404,7 @@ html {
   background: var(--annual-board-surface) !important;
   border-color: var(--annual-board-border) !important;
   color: var(--annual-board-muted) !important;
-  height: 2rem;
+  height: var(--table-header-height);
 }
 
 .annual-board-map-row {
@@ -456,27 +439,27 @@ html {
 
 .annual-board-term-stack {
   display: grid;
-  grid-template-rows: 1.75rem repeat(var(--annual-board-row-count), 2.25rem);
-  min-height: calc(1.75rem + (var(--annual-board-row-count) * 2.25rem));
+  grid-template-rows: 2rem repeat(var(--annual-board-row-count), 2.75rem);
+  min-height: calc(2rem + (var(--annual-board-row-count) * 2.75rem));
 }
 
 .annual-board-grade-grid {
   display: grid;
   grid-template-columns: minmax(132px, 1.6fr) repeat(3, minmax(76px, 1fr));
-  grid-template-rows: 1.75rem repeat(var(--annual-board-row-count), 2.25rem);
-  min-height: calc(1.75rem + (var(--annual-board-row-count) * 2.25rem));
+  grid-template-rows: 2rem repeat(var(--annual-board-row-count), 2.75rem);
+  min-height: calc(2rem + (var(--annual-board-row-count) * 2.75rem));
 }
 
 .annual-board-grade-subheader {
   display: flex;
   align-items: center;
   border-bottom: 1px solid var(--annual-board-border);
-  border-right: 1px solid var(--annual-board-border);
-  background: color-mix(in srgb, var(--annual-board-subheader) 84%, var(--annual-board-surface));
+  border-right: 0;
+  background: var(--annual-board-subheader);
   padding: 0 0.5rem;
   color: var(--annual-board-muted);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .annual-board-grade-grid .annual-board-grade-subheader:nth-child(4n) {
@@ -486,7 +469,7 @@ html {
 .annual-board-term-cell,
 .annual-board-exam-cell,
 .annual-board-event-row {
-  min-height: 2.25rem;
+  min-height: 2.75rem;
   border-bottom: 1px solid color-mix(in srgb, var(--annual-board-border) 72%, transparent);
 }
 
@@ -502,19 +485,19 @@ html {
 .annual-board-term-cell {
   display: flex;
   align-items: center;
-  border-right: 1px solid var(--annual-board-border);
+  border-right: 0;
   padding: 0 0.5rem;
   color: var(--annual-board-muted);
-  font-size: 10px;
-  font-weight: 700;
+  font-size: 12px;
+  font-weight: 500;
 }
 
 .annual-board-term-first {
-  box-shadow: inset 3px 0 0 #2f6fed;
+  color: var(--annual-board-text);
 }
 
 .annual-board-term-second {
-  box-shadow: inset 3px 0 0 #2e7d4f;
+  color: var(--annual-board-text);
 }
 
 .annual-board-term-active {
@@ -545,34 +528,34 @@ html {
 .annual-board-value-active {
   border-color: var(--annual-board-primary);
   background: var(--annual-board-value-active-bg);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--annual-board-primary) 40%, transparent);
+  box-shadow: none;
 }
 
 .annual-board-value-period {
-  border-color: var(--annual-board-period-border);
+  border-color: transparent;
   background: var(--annual-board-period-bg);
 }
 
 .annual-board-value-english {
-  border-color: var(--annual-board-english-border);
+  border-color: transparent;
   background: var(--annual-board-english-bg);
   color: var(--annual-board-english-text);
 }
 
 .annual-board-value-math {
-  border-color: var(--annual-board-math-border);
+  border-color: transparent;
   background: var(--annual-board-math-bg);
   color: var(--annual-board-math-text);
 }
 
 .annual-board-value-experience {
-  border-color: var(--annual-board-experience-border);
+  border-color: transparent;
   background: var(--annual-board-experience-bg);
   color: var(--annual-board-experience-text);
 }
 
 .annual-board-value-vacation {
-  border-color: var(--annual-board-vacation-border);
+  border-color: transparent;
   background: var(--annual-board-vacation-bg);
   color: var(--annual-board-vacation-text);
 }
@@ -581,7 +564,7 @@ html {
   border-color: var(--annual-board-empty-border);
   background: var(--annual-board-empty-bg);
   color: var(--annual-board-empty-text);
-  font-weight: 600;
+  font-weight: 400;
 }
 
 .annual-board-image-export-surface[data-image-exporting="true"] .annual-board-value > span {
@@ -620,13 +603,13 @@ html {
 }
 
 .annual-board-scope-empty {
-  background: color-mix(in srgb, var(--destructive) 12%, var(--popover));
-  border-color: color-mix(in srgb, var(--destructive) 36%, var(--border));
-  color: var(--destructive);
+  background: var(--muted);
+  border-color: var(--border);
+  color: var(--muted-foreground);
 }
 
 .annual-board-status-empty {
-  color: var(--destructive);
+  color: var(--muted-foreground);
 }
 
 .annual-board-status-warning {
@@ -643,6 +626,19 @@ html {
 
 .dark .annual-board-status-complete {
   color: #5bc4b5;
+}
+
+.annual-board-value:hover,
+.annual-board-value:focus-visible,
+.annual-board-value[aria-expanded="true"] {
+  background: var(--secondary);
+  border-color: var(--border);
+  color: var(--foreground);
+}
+
+@media (max-width: 767px) {
+  .annual-board-value { min-height: var(--touch-target-height); font-size: 13px; }
+  .annual-board-value > span { white-space: normal; overflow-wrap: anywhere; }
 }
 
 @page {

@@ -321,10 +321,11 @@ test("annual board exposes only 전체, 1학기, 2학기 period filtering", asyn
   assert.match(source, /row\.semester === selectedSemester/);
 });
 
-test("annual board hover popover shows subject scope and opens existing edit modal", async () => {
+test("annual board accessible popover shows subject scope and opens existing edit modal", async () => {
   const source = await readSource("src/features/operations/academic-annual-board-workspace.tsx");
 
-  assert.match(source, /HoverCard/);
+  assert.match(source, /<Popover open=\{open\} onOpenChange=\{setOpen\}>/);
+  assert.match(source, /aria-label=\{`\$\{schoolRow.schoolName\}/);
   assert.match(source, /교재 시험범위/);
   assert.match(source, /부교재 시험범위/);
   assert.match(source, /getStructuredScopeItems/);
@@ -388,8 +389,8 @@ test("annual board keeps the school column compact", async () => {
   assert.match(source, /data-testid="annual-board-mobile-list"/);
   assert.match(source, /data-testid=\{`annual-board-mobile-school-\$\{schoolRow\.schoolKey\}`\}/);
   assert.match(source, /annual-board-export-scroll hidden overflow-x-auto md:block/);
-  assert.match(source, /sticky left-0 z-20 w-\[96px\]/);
-  assert.match(source, /annual-board-school-cell sticky left-0 z-10 w-\[96px\]/);
+  assert.match(source, /sticky left-0 z-20 w-\[128px\]/);
+  assert.match(source, /annual-board-school-cell sticky left-0 z-10 w-\[128px\]/);
   assert.doesNotMatch(source, /w-\[148px\]/);
 });
 
@@ -488,8 +489,8 @@ test("annual board context setters and search-param effects invalidate pending d
   }
   assert.match(source, /useEffect\(\(\) => \{\s*invalidateBoardDetailRequest\(\);\s*const initialYear/);
   assert.match(source, /onValueChange=\{handleSelectedYearChange\}/);
-  assert.match(source, /onClick=\{\(\) => handleSelectedCategoryChange/);
-  assert.match(source, /onClick=\{\(\) => handleSelectedSemesterChange/);
+  assert.match(source, /onValueChange=\{\(value\) => handleSelectedCategoryChange/);
+  assert.match(source, /onValueChange=\{\(value\) => handleSelectedSemesterChange/);
   assert.match(source, /onValueChange=\{\(value\) => handleSelectedSchoolChange/);
 });
 
