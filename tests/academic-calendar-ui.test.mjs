@@ -126,7 +126,7 @@ test("academic calendar month bars stay below the day number row", async () => {
   );
 
   assert.match(source, /const MONTH_GRID_DAY_HEADER_HEIGHT = 44/);
-  assert.match(source, /const MONTH_GRID_EVENT_LANE_HEIGHT = 26/);
+  assert.match(source, /const MONTH_GRID_EVENT_LANE_HEIGHT = 44/);
   assert.match(source, /const MONTH_GRID_CELL_BODY_HEIGHT = 70/);
   assert.match(source, /segmentOffset = MONTH_GRID_DAY_HEADER_HEIGHT \+ laneCount \* MONTH_GRID_EVENT_LANE_HEIGHT/);
   assert.match(source, /style=\{\{ top: `\$\{MONTH_GRID_DAY_HEADER_HEIGHT\}px` \}\}/);

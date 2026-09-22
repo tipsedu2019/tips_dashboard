@@ -188,7 +188,11 @@ function Sidebar({
             const opener = mobileOpenerRef.current
             mobileOpenerRef.current = null
             // A menu navigation may already have focused the new page.
-            if (window.location.pathname !== mobileOpenPathRef.current) return
+            if (window.location.pathname !== mobileOpenPathRef.current) {
+              const destination = document.querySelector<HTMLElement>("#admin-workspace")
+              destination?.focus({ preventScroll: true })
+              return
+            }
             if (opener?.isConnected
               && !opener.matches(":disabled")
               && !opener.closest("[hidden], [inert]")

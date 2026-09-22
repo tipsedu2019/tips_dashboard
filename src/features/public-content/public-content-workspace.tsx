@@ -7,7 +7,6 @@ import {
   ExternalLink,
   Plus,
   RefreshCw,
-  Search,
   Upload,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,7 +20,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs";
+import { DataTableToolbar, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME } from "@/components/data-table/data-table-surface";
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field";
 import {
   Dialog,
   DialogContent,
@@ -617,21 +618,16 @@ export function PublicContentWorkspace({
     });
   };
   return (
-    <div className="space-y-5 px-4 sm:px-5 lg:px-6">
+    <WorkspaceTabs value={kind} onValueChange={value => switchKind(value as ContentKind)} className="space-y-4 px-4 sm:px-5 lg:px-6">
       {draftConfirmation}
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <Tabs
-          value={kind}
-          onValueChange={(value) => switchKind(value as ContentKind)}
-        >
-          <TabsList aria-label="홈페이지 콘텐츠 종류">
+          <WorkspaceTabsList aria-label="홈페이지 콘텐츠 종류">
             {CONTENT_KINDS.map((value) => (
-              <TabsTrigger key={value} value={value}>
+              <WorkspaceTabsTrigger key={value} value={value}>
                 {KIND_LABELS[value]}
-              </TabsTrigger>
+              </WorkspaceTabsTrigger>
             ))}
-          </TabsList>
-        </Tabs>
+          </WorkspaceTabsList>
         <div className="flex flex-wrap gap-2">
           <Button
             variant="outline"
@@ -660,24 +656,9 @@ export function PublicContentWorkspace({
           </Button>
         </div>
       </div>
-      <div className="flex flex-col gap-3 sm:flex-row">
-        <div className="relative min-w-0 flex-1">
-          <Search className="absolute left-3 top-2.5 size-4 text-muted-foreground" />
-          <Input
-            className="pl-9"
-            aria-label="콘텐츠 검색"
-            placeholder={
-              kind === "result"
-                ? "학교, 공개 이름, 시험 검색"
-                : kind === "review"
-                  ? "공개 이름, 후기 내용 검색"
-                  : "선생님 이름 검색"
-            }
-            value={query}
-            maxLength={100}
-            onChange={(event) => setQuery(event.target.value)}
-          />
-        </div>
+      <WorkspaceTabsPanel className={DATA_TABLE_LAYOUT_CLASS_NAME}>
+      <DataTableToolbar className="sm:flex-row">
+        <DataTableSearchField value={query} onValueChange={value => setQuery(value.slice(0, 100))} label="콘텐츠 검색" placeholder={kind === "result" ? "학교, 공개 이름, 시험 검색" : kind === "review" ? "공개 이름, 후기 내용 검색" : "선생님 이름 검색"} />
         <div className="grid grid-cols-2 gap-3 sm:w-72">
           {options(
             subject,
@@ -711,7 +692,7 @@ export function PublicContentWorkspace({
             "공개 상태 필터",
           )}
         </div>
-      </div>
+      </DataTableToolbar>
       {notice && (
         <p role="status" className="text-sm">
           {notice} 공개 화면에 반영되기까지 최대 1분 정도 걸릴 수 있습니다.
@@ -734,7 +715,7 @@ export function PublicContentWorkspace({
             자료를 불러오고 있습니다.
           </p>
         ) : !error && !rows.length ? (
-          <div className="space-y-4 rounded-xl border py-16 text-center">
+          <div className="space-y-4 py-16 text-center">
             <p className="text-muted-foreground">
               {q || subject || status !== "all"
                 ? "조건에 맞는 자료가 없습니다."
@@ -747,7 +728,7 @@ export function PublicContentWorkspace({
             )}
           </div>
         ) : (
-          <ul className="divide-y rounded-xl border">
+          <ul className="divide-y">
             {rows.map((entry, index) => (
               <li
                 key={entry.id}
@@ -835,6 +816,7 @@ export function PublicContentWorkspace({
           </ul>
         )}
       </section>
+      <div className={DATA_TABLE_PAGER_CLASS_NAME}>
       <DataTablePagination
         page={page}
         pageSize={pageSize}
@@ -846,6 +828,8 @@ export function PublicContentWorkspace({
           setPage(1);
         }}
       />
+      </div>
+      </WorkspaceTabsPanel>
       <div className="flex justify-end">
         <a
           className="inline-flex items-center gap-2 text-sm text-primary underline-offset-4 hover:underline"
@@ -1284,6 +1268,6 @@ export function PublicContentWorkspace({
           </DialogFooter>
         </DialogContent>
       </Dialog>
-    </div>
+    </WorkspaceTabs>
   );
 }

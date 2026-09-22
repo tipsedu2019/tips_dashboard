@@ -749,6 +749,8 @@ function detailToSourceRow(kind: ManagementKind, detail: unknown): Record<string
       textbook_ids: assignedTextbookIds,
       textbook_usage: record.textbookUsage || record.textbook_usage || {},
       textbookIds: assignedTextbookIds,
+      registered_count: source.registeredCount,
+      waitlist_count: source.waitlistCount,
       registered_students: registeredStudents,
       registeredStudents,
       waitlist_students: waitlistedStudents,

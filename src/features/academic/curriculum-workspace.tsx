@@ -549,7 +549,7 @@ export function AcademicCurriculumWorkspace() {
       {error ? (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>수업계획을 불러오지 못했습니다. 다시 시도해 주세요.</span>
+            <span>수업계획을 불러오지 못했습니다.{renderData ? " 이전 조회 결과를 표시합니다." : " 다시 시도해 주세요."}</span>
             <Button type="button" size="sm" variant="outline" onClick={() => void refresh()}>
               다시 시도
             </Button>

@@ -32,6 +32,8 @@ export function RecruitingInbox({ accessToken }: { accessToken: string }) {
   const [confirmDelete, setConfirmDelete] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [notice, setNotice] = useState("");
+  const refreshButton = useRef<HTMLButtonElement | null>(null);
+  const deletedOpener = useRef(false);
   const trigger = useRef<HTMLButtonElement | null>(null);
   const deletePending = useRef(false);
 
@@ -80,19 +82,19 @@ export function RecruitingInbox({ accessToken }: { accessToken: string }) {
     try {
       const response = await fetch(`${BASE}/${selectedId}`, { method: "DELETE", headers: { Authorization: `Bearer ${accessToken}`, "Content-Type": "application/json" }, body: JSON.stringify({ confirm: true }), cache: "no-store", signal: AbortSignal.timeout(10000) });
       if (!response.ok && response.status !== 404) throw new Error();
-      deletePending.current = false; close(); setNotice("지원서가 삭제되었습니다."); setRevision((value) => value + 1);
+      deletedOpener.current = true; deletePending.current = false; close(); setNotice("지원서가 삭제되었습니다."); setRevision((value) => value + 1);
     } catch { setDetailError("삭제를 확인하지 못했습니다. 다시 시도해 주세요."); }
     finally { deletePending.current = false; setDeleting(false); }
   }
   const retentionStale = list && (!list.retentionLastSucceededAt || Date.now() - Date.parse(list.retentionLastSucceededAt) >= 3 * 60 * 60 * 1000);
   const portfolio = safePortfolio(detail?.portfolioUrl ?? null);
   return <div className="space-y-5 px-4 sm:px-5 lg:px-6">
-    <div className="flex items-center justify-between gap-4"><h1 className="text-2xl font-semibold">채용 지원서</h1><Button variant="outline" disabled={loading} onClick={() => setRevision((value) => value + 1)}>새로고침</Button></div>
+    <div className="flex items-center justify-between gap-4"><span className="text-sm text-muted-foreground">{list ? `${list.totalCount}건` : "채용 지원서"}</span><Button ref={refreshButton} variant="outline" aria-disabled={loading} onClick={() => { if (!loading) setRevision((value) => value + 1); }}>새로고침</Button></div>
     {notice && <p role="status" className="text-sm">{notice}</p>}
-    {retentionStale && <p role="alert" className="rounded-md border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950">자동 파기 작업을 확인해야 합니다. 새 지원서 접수는 일시 중단됩니다. 운영 담당자가 보관기간 정리 작업을 복구해 주세요.</p>}
+    {retentionStale && <p role="alert" className="rounded-md border border-border bg-muted p-4 text-sm text-foreground">자동 파기 작업을 확인해야 합니다. 새 지원서 접수는 일시 중단됩니다. 운영 담당자가 보관기간 정리 작업을 복구해 주세요.</p>}
     {loading ? <p role="status" className="py-12 text-center text-muted-foreground">지원서를 불러오고 있습니다.</p> : listError ? <div role="alert" className="space-y-3 rounded-lg border p-6"><p>{listError}</p><Button variant="outline" onClick={() => setRevision((value) => value + 1)}>다시 시도</Button></div> : !list?.applications.length ? <p className="rounded-lg border py-16 text-center text-muted-foreground">보관 중인 지원서가 없습니다.</p> : <ul className="divide-y rounded-lg border" aria-label="보관 중인 지원서">
       {list.applications.map((application) => <li key={application.id}>
-        <button type="button" className="flex w-full flex-col gap-2 p-5 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring md:flex-row md:items-center md:justify-between" onClick={(event) => { trigger.current = event.currentTarget; setDetail(null); setDetailError(""); setConfirmDelete(false); setSelectedId(application.id); }}>
+        <button type="button" className="flex w-full flex-col gap-2 px-4 py-3 text-left hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-ring md:flex-row md:items-center md:justify-between" onClick={(event) => { trigger.current = event.currentTarget; setDetail(null); setDetailError(""); setConfirmDelete(false); setSelectedId(application.id); }}>
           <span className="space-y-1"><span className="block font-medium">{application.name} <span className="ml-2 font-normal text-muted-foreground">{application.subject}</span></span><span className="block text-sm">{application.phone}</span></span>
           <span className="text-sm leading-6 text-muted-foreground">접수 {date(application.createdAt)}<span className="block">보관 만료 {date(application.expiresAt)}</span></span>
         </button>
@@ -100,7 +102,7 @@ export function RecruitingInbox({ accessToken }: { accessToken: string }) {
     </ul>}
     <DataTablePagination page={page} pageSize={pageSize} totalCount={list?.totalCount ?? null} loading={loading || Boolean(listError)} onPageChange={setPage} onPageSizeChange={(size) => { setPage(1); setPreference(size); }} ariaLabel="지원서 페이지 탐색" />
     <Dialog open={Boolean(selectedId)} onOpenChange={(open) => { if (!open) close(); }}>
-      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl" showCloseButton={!deleting} onCloseAutoFocus={(event) => { event.preventDefault(); trigger.current?.focus(); }} onEscapeKeyDown={(event) => { if (deleting) event.preventDefault(); }} onPointerDownOutside={(event) => { if (deleting) event.preventDefault(); }}>
+      <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-2xl" showCloseButton={!deleting} onCloseAutoFocus={(event) => { event.preventDefault(); const target = !deletedOpener.current && trigger.current?.isConnected ? trigger.current : refreshButton.current; deletedOpener.current = false; target?.focus(); }} onEscapeKeyDown={(event) => { if (deleting) event.preventDefault(); }} onPointerDownOutside={(event) => { if (deleting) event.preventDefault(); }}>
         <DialogHeader><DialogTitle>{confirmDelete ? "지원서를 영구 삭제할까요?" : detail ? `${detail.name} · ${detail.subject}` : "지원서"}</DialogTitle><DialogDescription>{confirmDelete ? "지원자 본인의 삭제 요청을 확인한 뒤 진행하세요. 이름, 연락처와 지원 내용이 삭제되며 되돌릴 수 없습니다." : "보관기간 안에 있는 인재풀 지원서입니다."}</DialogDescription></DialogHeader>
         {detailError && <p role="alert" className="text-sm text-destructive">{detailError}</p>}
         {!confirmDelete && (!detail ? !detailError && <p role="status">지원서를 불러오고 있습니다.</p> : <div className="space-y-5 break-words">

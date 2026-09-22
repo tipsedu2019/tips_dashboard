@@ -280,7 +280,7 @@ test('off-page exact detail preserves editor identity and draft through page bac
 test('context errors retain approval safety, explicit retry succeeds and old context cannot replace a new scope', async (t) => {
   const p = await setup(t, { search: '?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0])); await p.catalogs();
   const failed = p.context().at(-1); await act(async () => failed.reject(new Error('CONTEXT FAILURE')));
-  assert.match(document.body.textContent, /CONTEXT FAILURE/);
+  assert.match(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
   await act(async () => button('예약 다시 확인').click()); await p.catalogs();
   const retry = p.context().at(-1); assert.notEqual(retry, failed);
@@ -293,7 +293,7 @@ test('context errors retain approval safety, explicit retry succeeds and old con
 test('required collision catalog failure cannot become empty confirmed availability', async (t) => {
   const p = await setup(t, { search:'?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0]));
   const catalog = p.requests.find((r) => r.table==='academic_events'); await act(async () => catalog.resolve({data:null,error:{code:'42501',message:'CATALOG DENIED'}}));
-  assert.equal(p.context().length,0); assert.match(document.body.textContent,/CATALOG DENIED/);
+  assert.equal(p.context().length,0); assert.match(document.body.textContent,/처리 권한 또는 로그인 상태/);
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
 });
 test('service rejects invalid filters, malformed page/detail/context, caller cancellation and missing RPC without fallback', async () => {
@@ -568,4 +568,37 @@ test('makeup pending submission locks all form fields and same-tick duplicate ac
  assert.equal(p.requests.filter(r=>r.name==='create_makeup_request_v2').length,1);
  await act(async()=>mutation.resolve({data:null,error:{message:'합성 저장 실패'}}));
  assert.equal(reason.matches(':disabled'),false);assert.equal(reason.value,createInput.reason);assert.match(document.body.textContent,/합성 저장 실패/);
+});
+
+test('sorting after a failed search preserves the requested search scope and value', async t => {
+  const p = await setup(t);
+  await act(async () => p.finish(p.numbered()[0], 1, {rows:[row(1)]}));
+  await act(async () => p.observed.changeFilters({filterColumn:'reason', search:'원하는사유'}));
+  const failed = p.numbered().at(-1);
+  await act(async () => failed.resolve({data:null,error:{message:'Synthetic failure'}}));
+  assert.equal(document.querySelector('input[type="search"]').value,'원하는사유');
+  await act(async () => button('선생님 정렬').click());
+  const requested = p.numbered().at(-1).args.p_filters;
+  assert.equal(requested.filterColumn,'reason');
+  assert.equal(requested.search,'원하는사유');
+  assert.equal(requested.sortColumn,'teacher');
+});
+
+
+test('makeup search scope contains only real columns without an all sentinel',async t=>{
+  const p=await setup(t);
+  await act(async()=>p.finish(p.numbered()[0],0));
+  const scope=document.querySelector('[aria-label="휴보강 검색 범위"]');
+  await act(async()=>scope.dispatchEvent(new window.KeyboardEvent('keydown',{key:'ArrowDown',bubbles:true,cancelable:true})));
+  const options=[...document.querySelectorAll('[role="option"]')].filter(node=>node.textContent.trim()==='수업');
+  assert.equal(options.length,1);
+});
+
+test('makeup failed filters identify the accepted search and dates beside retained rows', async t => {
+  const p = await setup(t, {search:`?view=approvalPending&makeupFilters=${encodeURIComponent(JSON.stringify({filterColumn:'reason',search:'기존사유',period:'custom',dateFrom:'2026-09-01',dateTo:'2026-09-10'}))}`});
+  await act(async () => p.finish(p.numbered()[0], 1, {rows:[row(1)]}));
+  await act(async () => p.observed.changeFilters({search:'새사유'}));
+  await act(async () => p.numbered().at(-1).reject(new Error('Synthetic unavailable')));
+  const alert=document.querySelector('[role="alert"]').textContent;
+  assert.match(alert,/기존사유/);assert.match(alert,/2026-09-01/);assert.doesNotMatch(alert,/새사유/);
 });

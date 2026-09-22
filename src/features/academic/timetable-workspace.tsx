@@ -458,7 +458,7 @@ export function AcademicTimetableWorkspace() {
       {error ? (
         <Alert variant="destructive">
           <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
-            <span>{error}</span>
+            <span>시간표를 불러오지 못했습니다. 다시 시도해 주세요.</span>
             <Button
               type="button"
               size="sm"
@@ -628,7 +628,7 @@ export function AcademicTimetableWorkspace() {
             {displayTimetableRequest.filters.subject || "전체 과목"}
           </p>
         ) : null}
-        {filteredRows.length === 0 || grid.panels.length === 0 ? (
+        {!timetableData && (loading || error || densityError) ? <div role="status" className="grid min-h-64 place-items-center text-sm text-muted-foreground">{loading ? "시간표를 불러오는 중입니다." : "시간표 조회 결과를 확인할 수 없습니다."}</div> : filteredRows.length === 0 || grid.panels.length === 0 ? (
           <div className="flex min-h-64 items-center justify-center rounded-xl border bg-card px-6 text-center text-sm text-muted-foreground">
             조건에 맞는 시간표가 없습니다.
           </div>

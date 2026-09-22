@@ -29,7 +29,7 @@ function deferred() {
 }
 function box(tag) { return function TestBox({ children, ...props }) { return createElement(tag, props, children) } }
 
-test("accepted calendar range survives failure, ignores reverse responses, and retries the failed range after seven-day recovery", async () => {
+for (const firstDense of [false, true]) test(`accepted calendar range survives failure, ignores reverse responses, and retries the failed range after seven-day recovery (firstDense=${firstDense})`, async () => {
   const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "http://localhost/admin/academic-calendar" })
   for (const key of ["window", "document", "HTMLElement", "Event", "Node"]) {
     Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] })
@@ -65,7 +65,18 @@ test("accepted calendar range survives failure, ignores reverse responses, and r
   const month = () => calendarProps.navigation.displayedDate.getMonth() + 1
   try {
     await act(async () => renderer.render(createElement(AcademicCalendarWorkspace)))
+    assert.equal(calendarProps.readState, "loading")
+    if (firstDense) {
+      await act(async () => latest().resolve({ok:false,code:"visible_range_too_dense",range:latest().request,rows:[],observedRowsAtLeast:2001,suggestedDays:7}));
+      assert.equal(calendarProps.readState, "error", "a completed dense first read must not remain loading");
+      await click("한 주 보기");
+      await act(async () => calendarProps.onRecoveryExit());
+    }
+    await act(async () => latest().reject(new Error("private first-read timeout")))
+    assert.equal(calendarProps.readState, "error", "first failure must not render an empty calendar")
+    await click("다시 불러오기")
     await succeed(latest(), "September")
+    assert.equal(calendarProps.readState, undefined)
     assert.equal(month(), 9)
     await move(10)
     const october = latest()
@@ -92,18 +103,18 @@ test("accepted calendar range survives failure, ignores reverse responses, and r
     await click("한 주 보기"); const week = latest()
     assert.deepEqual(buildSevenDayRangeKeys(week.request.dateFrom).at(-1), week.request.dateTo)
     await succeed(week, "Week event")
-    assert.equal(container.querySelectorAll('[data-testid="operations-seven-day-agenda"] article').length, 7)
+    assert.deepEqual(calendarProps.recoveryRange, week.request)
     assert.match(container.textContent, /Week event/)
-    await click("월간 보기"); const back = latest()
+    await act(async () => calendarProps.onRecoveryExit()); const back = latest()
     assert.deepEqual(back.request, denseMonth.request)
-    assert.equal(container.querySelectorAll('[data-testid="operations-seven-day-agenda"] article').length, 7)
+    assert.deepEqual(calendarProps.recoveryRange, week.request)
     await act(async () => back.reject(new Error("month failed again")))
     assert.match(container.textContent, /Week event/)
     await click("다시 불러오기")
     assert.deepEqual(latest().request, back.request)
     await succeed(latest(), "January")
     assert.equal(month(), 1)
-    assert.equal(container.querySelector('[data-testid="operations-seven-day-agenda"]'), null)
+    assert.equal(calendarProps.recoveryRange, undefined)
     assert.deepEqual(calendarProps.events.map(e => e.title), ["January"])
   } finally { await act(async () => renderer.unmount()); dom.window.close() }
 })
@@ -230,5 +241,57 @@ test("calendar form sessions retain only their own usable opener and invalidate 
       if (guard === "route") dom.window.history.replaceState({}, "", "/admin/academic-calendar")
       if (guard === "detached") openerParent.append(opener)
     }
+  } finally { await act(async () => renderer.unmount()); dom.window.close() }
+})
+
+test("seven-day recovery opens exact event detail and retains the read-only boundary", async () => {
+  const dom = new JSDOM("<!doctype html><div id='root'></div>", { url: "http://localhost/admin/academic-calendar" })
+  for (const key of ["window", "document", "HTMLElement", "Event", "Node"]) {
+    Object.defineProperty(globalThis, key, { configurable: true, value: key === "window" ? dom.window : dom.window[key] })
+  }
+  let form
+  const detail = deferred(), lateDetail = deferred(), detailIds = []
+  let monthlyNavigationRequested = 0
+  const summary = { id: "week-event", title: "긴 이름의 학사 일정", date: new Date(2026, 8, 21, 12), schoolName: "합성학교" }
+  const mocks = new Map([
+    ["@/components/ui/alert", { Alert: box("div"), AlertDescription: box("div") }],
+    ["@/components/ui/button", { Button: box("button") }],
+    ["@/components/ui/sheet", { Sheet: () => null, SheetContent: box("div"), SheetHeader: box("div"), SheetTitle: box("h2") }],
+    ["@/features/operations/academic-event-utils.js", eventUtils],
+    ["./calendar-main", { CalendarMain: () => null }],
+    ["./calendar-sidebar", { CalendarSidebar: () => null }],
+    ["./event-form", { EventForm: (props) => { form = props; return null } }],
+  ])
+  const { Calendar } = await load("src/app/admin/calendar/components/calendar.tsx", mocks)
+  const container = document.getElementById("root"), renderer = createRoot(container)
+  try {
+    await act(async () => renderer.render(createElement(Calendar, {
+      events: [summary], eventDates: [], readOnly: true,
+      recoveryRange: { dateFrom: "2026-09-20", dateTo: "2026-09-26" },
+      onLoadEventDetail: (id) => { detailIds.push(id); return detailIds.length === 1 ? detail.promise : lateDetail.promise },
+      onRecoveryExit: () => { monthlyNavigationRequested++ },
+    })))
+    const opener = [...container.querySelectorAll('button')].find(b => b.textContent.includes(summary.title))
+    assert.ok(opener, "recovery must expose an event detail action")
+    Object.defineProperty(opener, "getClientRects", { value: () => [{width:100,height:40}] })
+    opener.focus()
+    await act(async () => opener.click())
+    assert.deepEqual(detailIds, ["week-event"])
+    assert.equal(form.open, false, "summary must not open as authoritative detail")
+    await act(async () => detail.resolve({...summary, description:"authoritative detail"}))
+    assert.equal(form.open, true)
+    assert.equal(form.event.description, "authoritative detail")
+    assert.equal(form.readOnly, true)
+    assert.equal(form.onDelete, undefined)
+    opener.blur()
+    form.onCloseAutoFocus(new Event("closeAutoFocus", {cancelable:true}))
+    assert.equal(document.activeElement, opener)
+    await act(async () => form.onOpenChange(false));
+    await act(async () => opener.click());
+    const exit = [...container.querySelectorAll('button')].find(button => button.textContent === "월간 보기");
+    await act(async () => exit.click());
+    assert.equal(monthlyNavigationRequested, 1);
+    await act(async () => lateDetail.resolve({...summary, description:"late detail"}));
+    assert.equal(form.open, false, "monthly navigation invalidates weekly detail before the month is accepted");
   } finally { await act(async () => renderer.unmount()); dom.window.close() }
 })

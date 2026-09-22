@@ -6135,8 +6135,8 @@ function TextbookSelectionActions({ selectedCount, saving, metadataReady, contro
         <DropdownMenuItem disabled={saving === "textbook-bulk-status"} aria-label="선택 교재 사용 전환" onSelect={() => onSetStatus("active")}><Check />사용 전환</DropdownMenuItem>
         <DropdownMenuItem disabled={saving === "textbook-bulk-status"} aria-label="선택 교재 미사용 처리" onSelect={() => onSetStatus("inactive")}><X />미사용 처리</DropdownMenuItem>
         <DropdownMenuSeparator />
-        <DropdownMenuItem variant="destructive" disabled={saving === "textbook-bulk-delete"} aria-label="선택 교재 삭제"
-          title="이력이 없는 교재는 삭제, 이력이 있는 교재는 미사용 전환" onSelect={onDelete}><Trash2 />삭제</DropdownMenuItem>
+        <DropdownMenuItem variant="destructive" disabled={saving === "textbook-bulk-delete"} aria-label="선택 교재 정리"
+          title="이력이 없는 교재는 삭제, 이력이 있는 교재는 미사용 전환" onSelect={onDelete}><Trash2 />정리</DropdownMenuItem>
       </DataTableRowActions>
       <Button type="button" size="icon" variant="ghost" className="size-11 shrink-0 sm:size-9" aria-label="선택 교재 선택 해제" title="선택 해제" onClick={onClear}><X className="size-4" /></Button>
     </div>

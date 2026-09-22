@@ -21,7 +21,7 @@ function modules(supabase, overrides = {}) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     // Observe private production consumers without adding production exports or replacing them.
     const testExports = file.endsWith('/ops-task-workspace.tsx')
-      ? '\nexport { WithdrawalDetailPanel, mergeOpsTaskWorkspaceOptionData };' : '';
+      ? '\nexport { WithdrawalDetailPanel, WithdrawalDataTable, TransferDataTable, mergeOpsTaskWorkspaceOptionData };' : '';
     const source = ts.transpileModule(readFileSync(file, 'utf8') + testExports, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -1039,4 +1039,58 @@ test('retired task hotkeys do not move focus or request form submission', async 
   }
   assert.equal(submissions, 0);
   assert.equal(page.requests.length, before);
+});
+
+for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} first read failure is recoverable without a false empty result`, async t => {
+  const page = await workspace(t, { workspace: type });
+  const request = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => request.resolve({ error: { message: 'private timeout' }, data: null }));
+  assert.equal(document.body.textContent.includes(type === 'word_retest' ? '영어 단어 재시험 없음' : type === 'transfer' ? '전반 신청 없음' : '퇴원 신청 없음'), false);
+  const alert = document.querySelector('[role="alert"]');
+  assert.ok(alert?.textContent.includes('불러오지 못했습니다'));
+  assert.equal(document.body.textContent.includes('private timeout'), false);
+  const retry = [...alert.querySelectorAll('button')].find(b => b.textContent.includes('다시'));
+  await act(async () => { retry.focus(); retry.click(); });
+  if (type !== "word_retest") assert.equal(document.activeElement?.getAttribute("type"), "search");
+  const replacement = page.requests.filter(r => r.name === request.name).at(-1);
+  assert.notEqual(replacement, request);
+  await act(async () => page.finish(page.requests.indexOf(replacement), 1, [operationPatch(type, '복구 학생')]));
+  assert.ok(document.body.textContent.includes('복구 학생'));
+  assert.equal(document.querySelector('[role="alert"]'), null);
+});
+for (const type of ['withdrawal', 'transfer']) test(`${type} search is visible and header sorting cannot change its explicit scope`, async t => {
+  const { root } = await setup(t);
+  const load = modules({}, { '@/providers/auth-provider': { useAuth: () => ({}) } });
+  const Table = load('src/features/tasks/ops-task-workspace.tsx')[type === 'withdrawal' ? 'WithdrawalDataTable' : 'TransferDataTable'];
+  let controls;
+  await act(async () => root.render(createElement(Table, {
+    tasks: [], todayKey: '2026-09-22', loading: false, onOpen() {}, onEdit() {}, onStatusChange() {}, onChecklistChange() {}, onCreate() {},
+    initialControls: { search: '가온', subject: null, teacher: null, period: 'all', dateFrom: null, dateTo: null, filterColumn: 'student', sortColumn: null, sortDirection: null },
+    onPageControlsChange(value) { controls = value; },
+  })));
+  assert.ok(document.querySelector('input[type="search"]'), 'search remains available for an empty list');
+  const header = document.querySelector('[role="columnheader"] button[aria-label="상태 정렬"]');
+  assert.ok(header);
+  await act(async () => header.click());
+  assert.equal(controls.filterColumn, 'student');
+  assert.equal(controls.search, '가온');
+  assert.equal(controls.sortColumn, 'status');
+  await act(async () => document.querySelector('[role="combobox"]').click());
+  const studentOptions=[...document.querySelectorAll('[role="option"]')].filter(node=>node.textContent.trim()==='학생');
+  assert.equal(studentOptions.length,1,'search scope contains only the valid student column, without an all sentinel');
+  await act(async () => studentOptions[0].click());
+  assert.equal(controls.filterColumn,'student');
+});
+
+for(const type of ['withdrawal','transfer']) test(`${type} failed search identifies the accepted criteria beside retained rows`,async t=>{
+  const p=await workspace(t,{workspace:type});
+  const table=()=>currentComponentProps(type==='withdrawal'?'WithdrawalDataTable':'TransferDataTable');
+  await act(async()=>p.finish(0,1,[operationPatch(type,'기존학생')]));
+  await act(async()=>table().onPageControlsChange({...table().initialControls,search:'기존학생',filterColumn:'student'}));
+  const reads=()=>p.requests.filter(r=>r.name==='list_ops_task_numbered_page_v1');
+  await act(async()=>p.finish(p.requests.indexOf(reads().at(-1)),1,[operationPatch(type,'기존학생')]));
+  await act(async()=>table().onPageControlsChange({...table().initialControls,search:'새학생',filterColumn:'student'}));
+  await act(async()=>reads().at(-1).reject(new Error('Synthetic unavailable')));
+  const alert=document.querySelector('[role="alert"]').textContent;
+  assert.match(alert,/기존학생/);assert.doesNotMatch(alert,/새학생/);
 });

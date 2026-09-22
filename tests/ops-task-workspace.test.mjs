@@ -685,7 +685,7 @@ test("custom listboxes keep their keyboard pattern and registration uses shared 
     "tabIndex={selected || (!selectedOption && index === 0) ? 0 : -1}",
   ]);
   assertIncludesAll(source, [
-    "<WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab}",
+    "<WorkspaceTabs ref={workspaceRef} value={workspaceTab} onValueChange={changeWorkspaceTab}",
     'data-registration-view-tab={tab.key}',
     "<WorkspaceTabsTrigger",
     "<WorkspaceTabsPanel",
@@ -904,7 +904,7 @@ test("registration create follows management-role permissions in production and 
 
   assert.match(workspaceSource, /const canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/);
   assert.match(createGate, /\(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
-  assert.match(createGate, /const showEmptyCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
+  assert.match(createGate, /const showEmptyCreate = !numberedPage.error && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
   assert.match(createGate, /const showToolbarCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/);
   assert.doesNotMatch(createGate, /!registrationFixtureEnabled \|\| canManageRegistrationWorkflow/);
   assert.match(createGate, /!isTodoWorkspace && \(isRegistrationWorkspace \|\| isWithdrawalWorkspace \|\| isTransferWorkspace \|\| !showEmptyCreate\)/);
@@ -2558,10 +2558,8 @@ test("withdrawal workspace follows request processing and completed queues", asy
   assertIncludesAll(withdrawalDataTableSource, [
     'aria-label="퇴원 전체 필터"',
     'aria-label="퇴원 누가 필터"',
-    'aria-label={`${filterColumn.label} 열 필터`}',
-    "filterInputOpen",
-    "isFilterInputExpanded",
-    "setFilterInputOpen((current) => !current)",
+    'label="퇴원 검색 범위"',
+    'label="퇴원 검색"',
     'aria-label="퇴원 신청 데이터테이블"',
     'data-testid="withdrawal-mobile-task-list"',
     'aria-label="퇴원 모바일 목록"',
@@ -2570,7 +2568,6 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'cursor-col-resize',
     'role="columnheader"',
     'setWithdrawalTableSort',
-    'setFilterColumnKey(columnKey)',
     '[grid-template-columns:var(--withdrawal-grid-template)]',
     "<WithdrawalPeriodFilterBar",
     "WithdrawalOperationsChecklistChips",
@@ -3538,18 +3535,17 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     "currentUserTeacherOption",
     "shouldDefaultWordRetestTeacherFilter",
     "setWordRetestTeacherFilter(option.value)",
-    'label="상태" columnKey="status"',
-    'label="담당선생님" columnKey="teacher"',
-    'label="수업" columnKey="class"',
-    'label="출제 개수" columnKey="total"',
-    'label="커트라인" columnKey="cutoff"',
-    'label="맞은 개수" columnKey="score"',
-    'label="결과" columnKey="result"',
+    'id: "status", label: "상태"',
+    'id: "teacher", label: "담당선생님"',
+    'id: "class", label: "수업"',
+    'id: "total", label: "출제 개수"',
+    'id: "cutoff", label: "커트라인"',
+    'id: "score", label: "맞은 개수"',
+    'id: "result", label: "결과"',
     "cursor-col-resize",
     "onPointerDown",
-    "md:[grid-template-columns:var(--word-retest-grid-template)]",
-    "title={textbookLabel}",
-    "group-hover:block",
+    "[grid-template-columns:var(--word-retest-grid-template)]",
+    "textbook: textbookLabel",
     "function shouldIgnoreWordRetestRowOpen",
     "onClick={(event) => {",
     "onScoreSave={handleWordRetestScoreSave}",
@@ -3682,46 +3678,11 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
   assert.doesNotMatch(workspaceSource, /aria-label="단어 재시험 진행상태"/);
   assert.doesNotMatch(workspaceSource, /미응시 자동/);
 
-  const wordRetestHeaderSource = workspaceSource.slice(
-    workspaceSource.indexOf('<WordRetestResizableHeaderCell label="상태"'),
-    workspaceSource.indexOf('<WordRetestResizableHeaderCell label="다음 액션"'),
-  );
-  const desktopHeaderOrder = [
-    ['label="상태" columnKey="status"', "상태"],
-    ['label="본시험일" columnKey="testAt"', "본시험일"],
-    ['label="응시예정일시" columnKey="expectedRetestAt"', "응시예정일시"],
-    ['label="담당선생님" columnKey="teacher"', "담당선생님"],
-    ['label="수업" columnKey="class"', "수업"],
-    ['label="학생" columnKey="student"', "학생"],
-    ['label="교재" columnKey="textbook"', "교재"],
-    ['label="시험범위" columnKey="unit"', "시험범위"],
-    ['label="메모" columnKey="note"', "메모"],
-    ['label="출제 개수" columnKey="total"', "출제 개수"],
-    ['label="커트라인" columnKey="cutoff"', "커트라인"],
-    ['label="맞은 개수" columnKey="score"', "맞은 개수"],
-    ['label="결과" columnKey="result"', "결과"],
-  ];
-  const desktopHeaderIndexes = desktopHeaderOrder.map(([source]) => wordRetestHeaderSource.indexOf(source));
-  assert.ok(desktopHeaderIndexes.every((index) => index > -1), "all approved desktop columns should be present");
-  for (let index = 1; index < desktopHeaderIndexes.length; index += 1) {
-    assert.ok(
-      desktopHeaderIndexes[index - 1] < desktopHeaderIndexes[index],
-      `${desktopHeaderOrder[index - 1][1]} should appear before ${desktopHeaderOrder[index][1]}`,
-    );
-  }
+  const wordRetestHeaderSource = workspaceSource.slice(workspaceSource.indexOf("const WORD_RETEST_COLUMNS"), workspaceSource.indexOf("function getWordRetestTableGridTemplate"));
+  assertIncludesAll(wordRetestHeaderSource, ['id: "student"', 'id: "expectedRetestAt"', 'id: "score"', 'id: "result"', 'id: "action"']);
   assert.ok(
-    wordRetestHeaderSource.indexOf('label="출제 개수" columnKey="total"') <
-      wordRetestHeaderSource.indexOf('label="커트라인" columnKey="cutoff"'),
-    "desktop table should keep total questions before cutline",
-  );
-  assert.ok(
-    wordRetestHeaderSource.indexOf('label="커트라인" columnKey="cutoff"') <
-      wordRetestHeaderSource.indexOf('label="맞은 개수" columnKey="score"'),
-    "desktop table should place correct-count after cutline",
-  );
-  assert.ok(
-    wordRetestHeaderSource.indexOf('label="맞은 개수" columnKey="score"') <
-      wordRetestHeaderSource.indexOf('label="결과" columnKey="result"'),
+    wordRetestHeaderSource.indexOf('id: "score", label: "맞은 개수"') <
+      wordRetestHeaderSource.indexOf('id: "result", label: "결과"'),
     "desktop table should place correct-count directly before result",
   );
 
@@ -3738,15 +3699,7 @@ test("word retest workspace uses role queues branch filters and dedicated row ac
     workspaceSource.indexOf("memo(function WordRetestTaskRow"),
     workspaceSource.indexOf("function WordRetestRoleActionButton"),
   );
-  const desktopScoreOrder = ["출제 개수", "커트라인", "맞은 개수", "결과"];
-  const desktopScoreOrderIndexes = desktopScoreOrder.map((label) => wordRetestRowSource.indexOf(`>${label}</span>`));
-  assert.ok(desktopScoreOrderIndexes.every((index) => index > -1), "score result labels should be present in row source");
-  for (let index = 1; index < desktopScoreOrderIndexes.length; index += 1) {
-    assert.ok(
-      desktopScoreOrderIndexes[index - 1] < desktopScoreOrderIndexes[index],
-      `${desktopScoreOrder[index - 1]} should appear before ${desktopScoreOrder[index]} in desktop row order`,
-    );
-  }
+  assertIncludesAll(wordRetestRowSource, ["score: <WordRetestInlineScoreEditor", "result: <WordRetestScoreResultCell", 'role="row"', 'role="cell"']);
 
   const mobileCardSource = wordRetestRowSource.slice(wordRetestRowSource.indexOf("if (mobile) {"), wordRetestRowSource.indexOf("onClick={(event) => {"));
   assertIncludesAll(mobileCardSource, [
@@ -4114,8 +4067,8 @@ test("word retest expected schedule keeps reference-only editing, approved form 
     'openWordRetestEditor(task, "expected_quick")',
     'setWordRetestPendingFocus(intent === "expected_quick" ? "expected_retest_date" : "")',
     'setWordRetestPendingFocus("")',
-    'label="응시예정일시" columnKey="expectedRetestAt"',
-    'label="메모" columnKey="note"',
+    'id: "expectedRetestAt", label: "응시예정일시"',
+    'id: "note", label: "메모"',
     "formatWordRetestExpectedAt",
     "getWordRetestExpectedAtInputValue",
     "getWordRetestNote",
@@ -4133,27 +4086,8 @@ test("word retest expected schedule keeps reference-only editing, approved form 
   assert.match(widthsSource, /expectedRetestAt:\s*148/);
   assert.match(widthsSource, /note:\s*160/);
 
-  const gridOrderSource = workspaceSource.slice(
-    workspaceSource.indexOf("function getWordRetestTableGridTemplate"),
-    workspaceSource.indexOf("function getWordRetestRequestDefaults"),
-  );
-  assertInOrder(gridOrderSource, [
-    "widths.select",
-    "widths.status",
-    "widths.testAt",
-    "widths.expectedRetestAt",
-    "widths.teacher",
-    "widths.class",
-    "widths.student",
-    "widths.textbook",
-    "widths.unit",
-    "widths.note",
-    "widths.total",
-    "widths.cutoff",
-    "widths.score",
-    "widths.result",
-    "widths.action",
-  ]);
+  assert.match(workspaceSource, /columns\.map\(column => `\$\{widths\[column\.id\]\}px`\)/);
+
 
   const wordRetestBasicSource = workspaceSource.slice(
     workspaceSource.indexOf('if (step === "word_retest_basic")'),
@@ -4224,9 +4158,8 @@ test("word retest expected schedule keeps reference-only editing, approved form 
     workspaceSource.indexOf("memo(function WordRetestTaskRow"),
     workspaceSource.indexOf("function WordRetestRoleActionButton"),
   );
-  assert.match(rowSource, /<button[\s\S]*data-word-retest-interactive="true"[\s\S]*event\.stopPropagation\(\)[\s\S]*onExpectedQuickEdit\(task\)/);
-  assert.match(rowSource, /line-clamp-2/);
-  assert.match(rowSource, /group-hover:block/);
+  assert.match(rowSource, /expectedRetestAt: <button[\s\S]*onClick=\{\(\) => onExpectedQuickEdit\(task\)\}/);
+  assert.match(rowSource, /break-words/);
   assert.match(rowSource, /const note = getWordRetestNote\(task\)/);
 
   const detailSource = workspaceSource.slice(

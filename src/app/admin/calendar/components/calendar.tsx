@@ -1,6 +1,6 @@
 "use client"
 
-import { isSameDay, isSameMonth } from "date-fns"
+import { eachDayOfInterval, format, isSameDay, isSameMonth } from "date-fns"
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -24,6 +24,9 @@ interface SchoolOption {
 
 interface CalendarProps {
   navigation?: CalendarNavigation
+  readState?: "loading" | "error"
+  recoveryRange?: { dateFrom: string; dateTo: string }
+  onRecoveryExit?: () => void
   events: CalendarEvent[]
   eventDates: Array<{ date: Date; count: number }>
   readOnly?: boolean
@@ -95,6 +98,9 @@ function buildDefaultCalendarFilters(calendars?: CalendarGroup[]) {
 
 export function Calendar({
   navigation,
+  recoveryRange,
+  readState,
+  onRecoveryExit,
   events,
   eventDates,
   readOnly = false,
@@ -350,6 +356,14 @@ export function Calendar({
     onVisibleRangeChange?.(range)
   }, [invalidateDetailRequest, onVisibleRangeChange])
 
+  const recoveryKey = `${recoveryRange?.dateFrom || ""}:${recoveryRange?.dateTo || ""}`
+  const previousRecoveryKey = useRef(recoveryKey)
+  useEffect(() => {
+    if (previousRecoveryKey.current === recoveryKey) return
+    previousRecoveryKey.current = recoveryKey
+    invalidateDetailRequest()
+  }, [recoveryKey, invalidateDetailRequest])
+
   return (
     <>
       {detailLoadError ? (
@@ -362,25 +376,48 @@ export function Calendar({
           </AlertDescription>
         </Alert>
       ) : null}
-      <div className="relative rounded-lg border bg-background">
-        <div className="flex min-h-[800px]">
-          <div className="hidden w-80 shrink-0 border-r xl:block">
+      {recoveryRange ? (
+        <section data-testid="operations-seven-day-agenda" className="space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <h2 className="text-base font-semibold">한 주 일정 <span className="text-sm font-normal">{recoveryRange.dateFrom} ~ {recoveryRange.dateTo}</span></h2>
+            <Button type="button" variant="outline" size="sm" onClick={() => { invalidateDetailRequest(); onRecoveryExit?.(); }}>월간 보기</Button>
+          </div>
+          <div className="grid gap-3 lg:grid-cols-7">
+            {eachDayOfInterval({ start: new Date(`${recoveryRange.dateFrom}T12:00:00`), end: new Date(`${recoveryRange.dateTo}T12:00:00`) }).map((day) => {
+              const dateKey = format(day, "yyyy-MM-dd")
+              const dayEvents = visibleEvents.filter(event => toCalendarDayKey(event.date) <= dateKey && toCalendarDayKey(event.endDate || event.date) >= dateKey)
+              return <article key={dateKey} className="min-h-32 rounded-[var(--radius-surface)] border bg-background p-3">
+                <h3 className="text-sm font-medium">{dateKey}</h3>
+                <div className="mt-3 space-y-2">
+                  {dayEvents.length === 0 ? <p className="text-xs text-muted-foreground">일정 없음</p> : null}
+                  {dayEvents.map(event => <Button key={event.id} type="button" variant="ghost" className="h-auto min-h-11 w-full flex-col items-start whitespace-normal px-2 py-2 text-left" onClick={() => void handleEditEvent(event)}>
+                    <span className="break-words">{event.title}</span>
+                    {event.schoolName ? <span className="text-xs font-normal text-muted-foreground">{event.schoolName}</span> : null}
+                  </Button>)}
+                </div>
+              </article>
+            })}
+          </div>
+        </section>
+      ) : <div className="relative rounded-[var(--radius-surface)] border bg-background">
+        <div className="flex min-h-[640px]">
+          <div className="hidden w-64 shrink-0 border-r xl:block">
             <CalendarSidebar
               navigation={controlledNavigation}
               selectedDate={visibleSelectedDate}
               onDateSelect={handleDateSelect}
-              onNewEvent={handleNewEvent}
               onCalendarToggle={handleCalendarToggle}
               events={visibleEventDates}
               calendars={calendars}
-              addButtonLabel={addButtonLabel}
-              readOnly={readOnly}
               className="h-full"
             />
           </div>
 
           <div className="min-w-0 flex-1">
             <CalendarMain
+              readState={readState}
+              onNewEvent={() => handleNewEvent()}
+              addButtonLabel={addButtonLabel}
               navigation={controlledNavigation}
               selectedDate={visibleSelectedDate}
               onDateSelect={handleDateSelect}
@@ -418,17 +455,14 @@ export function Calendar({
               navigation={controlledNavigation}
               selectedDate={visibleSelectedDate}
               onDateSelect={handleDateSelect}
-              onNewEvent={handleNewEvent}
               onCalendarToggle={handleCalendarToggle}
               events={visibleEventDates}
               calendars={calendars}
-              addButtonLabel={addButtonLabel}
-              readOnly={readOnly}
               className="h-full"
             />
           </SheetContent>
         </Sheet>
-      </div>
+      </div>}
 
       <EventForm
         onCloseAutoFocus={(event) => {

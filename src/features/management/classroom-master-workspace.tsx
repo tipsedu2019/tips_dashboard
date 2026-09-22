@@ -527,13 +527,13 @@ function ClassroomMasterEditor({ canEdit, accessRole }: { canEdit: boolean; acce
                       )}
                     </div>
                     <div className="flex shrink-0 gap-1.5">
-                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={editBlocked || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
+                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={editBlocked || currentIndex <= 0} aria-label={`${row.name || "새 강의실"} 순서 위로 이동`}>
                         <ArrowUp className="size-4" />
                       </Button>
-                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={editBlocked || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
+                      <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={editBlocked || currentIndex === rows.length - 1} aria-label={`${row.name || "새 강의실"} 순서 아래로 이동`}>
                         <ArrowDown className="size-4" />
                       </Button>
-                      <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={editBlocked} aria-label="강의실 삭제">
+                      <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={editBlocked} aria-label={`${row.name || "새 강의실"} 삭제`}>
                         <Trash2 className="size-4" />
                       </Button>
                     </div>
@@ -564,7 +564,7 @@ function ClassroomMasterEditor({ canEdit, accessRole }: { canEdit: boolean; acce
                     <label className="flex items-center justify-between rounded-md border px-3 py-2 text-sm">
                       <span>표시</span>
                       <Checkbox
-                        aria-label="강의실 표시 여부"
+                        aria-label={`${row.name || "새 강의실"} 표시 여부`}
                         disabled={editBlocked}
                         checked={row.isVisible}
                         onCheckedChange={(checked) => handleFieldChange(row.id, "isVisible", checked === true)}
@@ -639,7 +639,7 @@ function ClassroomMasterEditor({ canEdit, accessRole }: { canEdit: boolean; acce
                     {isColumnVisible("visible") ? <TableCell className={`${settingsTableCellClass} text-center`}>
                       <div className="flex justify-center">
                         <Checkbox
-                          aria-label="강의실 표시 여부"
+                          aria-label={`${row.name || "새 강의실"} 표시 여부`}
                           disabled={editBlocked}
                           checked={row.isVisible}
                           onCheckedChange={(checked) => handleFieldChange(row.id, "isVisible", checked === true)}
@@ -648,13 +648,13 @@ function ClassroomMasterEditor({ canEdit, accessRole }: { canEdit: boolean; acce
                     </TableCell> : null}
                     {isColumnVisible("action") ? <TableCell className={settingsTableActionCellClass}>
                       <div className="flex justify-end gap-2">
-                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={editBlocked || currentIndex <= 0} aria-label="강의실 순서 위로 이동">
+                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "up")} disabled={editBlocked || currentIndex <= 0} aria-label={`${row.name || "새 강의실"} 순서 위로 이동`}>
                           <ArrowUp className="size-4" />
                         </Button>
-                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={editBlocked || currentIndex === rows.length - 1} aria-label="강의실 순서 아래로 이동">
+                        <Button type="button" variant="outline" size="icon" className="size-8" onClick={() => handleMoveRow(row.id, "down")} disabled={editBlocked || currentIndex === rows.length - 1} aria-label={`${row.name || "새 강의실"} 순서 아래로 이동`}>
                           <ArrowDown className="size-4" />
                         </Button>
-                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={editBlocked} aria-label="강의실 삭제">
+                        <Button type="button" variant="destructive-ghost" size="icon" className="size-8" onClick={() => handleDelete(row)} disabled={editBlocked} aria-label={`${row.name || "새 강의실"} 삭제`}>
                           <Trash2 className="size-4" />
                         </Button>
                       </div>

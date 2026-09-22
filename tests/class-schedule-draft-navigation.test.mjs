@@ -321,3 +321,19 @@ test('normalized generation: preview and creation each reject same-turn duplicat
  await act(async()=>{void page.observed.confirmLessonSessionGeneration();void page.observed.confirmLessonSessionGeneration();});
  assert.equal(page.requests.filter(r=>r.name==='generate_class_lesson_sessions_v1').length,1);
 });
+
+test('normalized generation previews dates without mutating saved sessions and disables an all-existing confirmation', async t => {
+ const page = await normalizedEditor(t);
+ const original = page.observed.lessonDesignSnapshot.sessions.map(session => session.id);
+ await act(async()=>{void page.observed.previewLessonSessionGeneration();});
+ const preview = page.requests.filter(request => request.name === 'preview_class_lesson_session_generation_v1').at(-1);
+ const month = preview.args.p_date_from.slice(0,7);
+ await act(async()=>preview.resolve({error:null,data:{creatableCount:0,existingCount:1,candidates:[{sessionKey:'existing-key',sessionDate:`${month}-03`,status:'existing'}]}}));
+ const list = document.querySelector('[aria-label="일정 생성 미리보기"]');
+ assert.ok(list?.textContent.includes(`${month}-03`));
+ assert.ok(list.textContent.includes('기존'));
+ const button = [...document.querySelectorAll('button')].find(node => node.textContent === '추가할 일정 없음');
+ assert.equal(button?.disabled,true);
+ assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(session => session.id),original);
+ assert.equal(page.requests.some(request => request.name === 'generate_class_lesson_sessions_v1'), false);
+});

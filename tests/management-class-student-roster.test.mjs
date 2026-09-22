@@ -593,7 +593,8 @@ test("class official summary removes redundant identity and state badges", async
   assert.match(pageSource, /\{ label: "강의실", value: classroom \}/);
   assert.match(pageSource, /renderEditableFields\("detail", \[[\s\S]*"fee"[\s\S]*"status"[\s\S]*\]\)/);
   assert.match(pageSource, /data-testid="class-official-summary-bar" className="class-detail-header border-b bg-background"/);
-  assert.match(pageSource, /const capacitySummary = capacity > 0[\s\S]*\? `\$\{registeredCount\}명 \(\$\{waitlistCount\}명\) \/ \$\{capacity\}명`[\s\S]*: `\$\{registeredCount\}명 \(\$\{waitlistCount\}명\)`/);
+  assert.match(pageSource, /registeredCount === null \? "등록 인원 확인 중"/);
+  assert.match(pageSource, /waitlistCount === null \? "대기 인원 확인 중"/);
   assert.match(pageSource, />학생 명단 · 등록 \(대기\) \/ 정원<\/div>/);
   assert.match(pageSource, /\{capacitySummary\}/);
   assert.doesNotMatch(pageSource, />등록\/대기<\/div>/);

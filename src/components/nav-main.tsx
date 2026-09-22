@@ -11,6 +11,7 @@ import {
   CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
+  useSidebar,
   SidebarGroup,
   SidebarGroupLabel,
   SidebarMenu,
@@ -137,6 +138,7 @@ export function NavMain({
     }[]
   }[]
 }) {
+  const { setOpenMobile } = useSidebar()
   const router = useRouter()
   const pathname = usePathname()
   const searchParams = useSearchParams()
@@ -145,6 +147,16 @@ export function NavMain({
   const currentHref = React.useMemo(() => (
     currentSearch ? `${currentPath}?${currentSearch}` : currentPath
   ), [currentPath, currentSearch])
+  const lastLocation = React.useRef(currentHref)
+  React.useEffect(() => {
+    if (lastLocation.current !== currentHref) {
+      lastLocation.current = currentHref
+      setOpenMobile(false)
+    }
+  }, [currentHref, setOpenMobile])
+  const closeCurrentMenu = (event: React.MouseEvent<HTMLAnchorElement>, href: string) => {
+    if (!event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && normalizeHref(href) === normalizeHref(currentHref)) setOpenMobile(false)
+  }
   const prefetchedRoutesRef = React.useRef(new Set<string>())
 
   const prefetchRoute = React.useCallback((url: string) => {
@@ -166,6 +178,11 @@ export function NavMain({
       }
     }
 
+    const activePaths = [...routes].filter(([, active]) => active).map(([url]) => splitInternalHref(url).path)
+    for (const [url, active] of routes) {
+      const path = splitInternalHref(url).path
+      if (active && activePaths.some(other => other !== path && other.startsWith(`${path}/`))) routes.set(url, false)
+    }
     return routes
   }, [currentHref, items])
 
@@ -230,6 +247,8 @@ export function NavMain({
                     <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isParentActive}>
                       <Link
                         href={item.url}
+                        onClick={(event) => closeCurrentMenu(event, item.url)}
+                        aria-current={isUrlActive(item.url) ? "page" : undefined}
                         aria-label={getNavMoveLabel(item.title)}
                         title={item.title}
                         data-testid={`admin-nav-link-${itemTargetId}`}
@@ -261,6 +280,8 @@ export function NavMain({
                             <SidebarMenuSubButton asChild className="cursor-pointer" isActive={isUrlActive(subItem.url)}>
                               <Link
                                 href={subItem.url}
+                                onClick={(event) => closeCurrentMenu(event, subItem.url)}
+                                aria-current={isUrlActive(subItem.url) ? "page" : undefined}
                                 aria-label={getNavMoveLabel(subItem.title)}
                                 title={subItem.title}
                                 data-testid={`admin-nav-sublink-${navigationTargetId(subItem.url)}`}
@@ -293,7 +314,9 @@ export function NavMain({
                   <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isUrlActive(item.url)}>
                     <Link
                       href={item.url}
-                      aria-label={getNavMoveLabel(item.title)}
+                        onClick={(event) => closeCurrentMenu(event, item.url)}
+                      aria-current={isUrlActive(item.url) ? "page" : undefined}
+                        aria-label={getNavMoveLabel(item.title)}
                       title={item.title}
                       data-testid={`admin-nav-link-${itemTargetId}`}
                       onPointerEnter={() => prefetchRoute(item.url)}

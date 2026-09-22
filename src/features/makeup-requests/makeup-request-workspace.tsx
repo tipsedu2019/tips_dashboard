@@ -12,8 +12,12 @@ import {
   type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react"
-import { ArrowDown, ArrowUp, Check, ChevronRight, ChevronsUpDown, Filter, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, ChevronRight, ChevronsUpDown, Plus, RotateCcw, Send, Trash2, X } from "lucide-react"
 import { useSearchParams } from "next/navigation"
+import { DataTableToolbar, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
+import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel"
+import { useDataTableColumns } from "@/components/data-table/data-table-columns"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
 import { createNumberedPageController, type NumberedPageSnapshot } from "@/lib/numbered-page-controller"
@@ -32,7 +36,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import {
   Select,
@@ -243,19 +246,9 @@ function getMakeupActionErrorMessage(error: unknown, fallback: string) {
   if (message === "makeup_request_input_invalid" || code === "22023") {
     return "휴보강 신청 정보를 저장할 수 없습니다. 수업·담당 선생님·결재자 연결을 확인해 주세요."
   }
-  if (error instanceof Error && error.message) return error.message
-  if (error && typeof error === "object") {
-    const detail = [
-      (error as { message?: unknown }).message,
-      (error as { details?: unknown }).details,
-      (error as { hint?: unknown }).hint,
-      (error as { code?: unknown }).code,
-    ]
-      .map((value) => String(value || "").trim())
-      .filter(Boolean)
-      .join(" · ")
-    if (detail) return detail
-  }
+  if (code === "42501" || code === "PGRST301") return "처리 권한 또는 로그인 상태를 확인한 후 다시 시도해 주세요."
+  if (code === "40001" || code === "55P03") return "다른 작업이 처리 중입니다. 잠시 후 다시 시도해 주세요."
+  if (/[가-힣]/.test(message) && !/SQL|rpc_|timeout|schema/i.test(message)) return message
   return fallback
 }
 
@@ -513,8 +506,8 @@ const MAKEUP_REQUEST_TABLE_COLUMN_MIN_WIDTHS = MAKEUP_REQUEST_TABLE_COLUMNS.redu
   return widths
 }, {} as Record<MakeupRequestTableColumnKey, number>)
 
-function getMakeupRequestTableGridTemplate(columnWidths: Record<MakeupRequestTableColumnKey, number>) {
-  return MAKEUP_REQUEST_TABLE_COLUMNS.map((column) => `${columnWidths[column.columnKey]}px`).join(" ")
+function getMakeupRequestTableGridTemplate(columnWidths: Record<MakeupRequestTableColumnKey, number>, columns = MAKEUP_REQUEST_TABLE_COLUMNS) {
+  return columns.map((column) => `${columnWidths[column.columnKey]}px`).join(" ")
 }
 
 function formatRequestSlotTime(slot: ReturnType<typeof getRequestSlots>[number], request: MakeupRequest) {
@@ -761,7 +754,7 @@ function MakeupRequestDetailCard({
 }) {
   const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
   const isCompact = variant === "compact"
-  const detailColumns = getVisibleMakeupRequestCardColumns(request)
+  const detailColumns = getVisibleMakeupRequestCardColumns(request).filter(column => !isCompact || ["reason", "cancelDate", "makeupAt", "makeupRoom", "returnedReason", "rejectedReason", "finalNote"].includes(column.columnKey))
   const title = request.className || "휴보강 신청"
   const subtitle = [request.subject, request.teacherLabel].filter(Boolean).join(" · ")
   if (variant === "detail") {
@@ -783,9 +776,6 @@ function MakeupRequestDetailCard({
             </div>
           ) : null}
           <dl className="grid gap-3 text-sm md:grid-cols-2">
-            <MakeupDetailInfo label="수업" value={request.className || "미지정"} />
-            <MakeupDetailInfo label="과목" value={request.subject || "미지정"} />
-            <MakeupDetailInfo label="선생님" value={request.teacherLabel || "미지정"} />
             <MakeupDetailInfo label="사유" value={request.reason || "-"} />
             <MakeupDetailInfo label="휴강일" value={request.cancelDate || "-"} />
             <MakeupDetailInfo label="보강일시" value={formatRequestSlotsTime(request)} />
@@ -835,13 +825,13 @@ function MakeupRequestDetailCard({
 
   const headerText = (
     <span className="grid min-w-0 gap-0.5">
-      <span className={["truncate font-semibold", isCompact ? "text-base" : "text-lg"].join(" ")}>{title}</span>
+      <span className={["whitespace-normal break-words font-semibold", isCompact ? "text-base" : "text-lg"].join(" ")}>{title}</span>
       {subtitle ? <span className="truncate text-xs text-muted-foreground">{subtitle}</span> : null}
     </span>
   )
 
   return (
-    <div className={["rounded-lg border bg-card text-card-foreground shadow-sm", isCompact ? "p-3" : "p-4"].join(" ")}>
+    <div className={DATA_TABLE_MOBILE_ITEM_CLASS_NAME}>
       <div className="flex min-w-0 items-start justify-between gap-3">
         {onOpenDetail ? (
           <button
@@ -869,7 +859,7 @@ function MakeupRequestDetailCard({
         {detailColumns.map((column) => {
           const value = getMakeupRequestCardValue(request, column.columnKey)
           return (
-            <div key={column.columnKey} className="min-w-0 rounded-md border bg-muted/10 px-3 py-2">
+            <div key={column.columnKey} className="min-w-0">
               <div className="text-[11px] font-medium text-muted-foreground">{column.label}</div>
               <div className="mt-1 min-w-0 whitespace-pre-wrap break-words text-sm">{value}</div>
             </div>
@@ -990,7 +980,7 @@ function MakeupRequestResizableHeaderCell({
       <button
         type="button"
         disabled={!sortable}
-        aria-label={`${label} 필터/정렬`}
+        aria-label={`${label} 정렬`}
         onClick={() => onHeaderSelect(columnKey)}
         className={[
           "flex w-full min-w-0 items-center gap-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
@@ -1052,12 +1042,14 @@ function MakeupRequestFilterSelect({
   ariaLabel,
   value,
   allLabel,
+  includeAll = true,
   options,
   onChange,
 }: {
   ariaLabel: string
   value: string
   allLabel: string
+  includeAll?: boolean
   options: MakeupRequestSelectFilterOption[]
   onChange: (value: string) => void
 }) {
@@ -1067,7 +1059,7 @@ function MakeupRequestFilterSelect({
         <SelectValue placeholder={allLabel} />
       </SelectTrigger>
       <SelectContent>
-        <SelectItem value="all">{allLabel}</SelectItem>
+        {includeAll ? <SelectItem value="all">{allLabel}</SelectItem> : null}
         {options.map((option) => (
           <SelectItem key={option.value} value={option.value}>
             {option.label}{option.count ? ` ${option.count}` : ""}
@@ -1135,6 +1127,7 @@ function MakeupRequestPeriodFilterBar({
 function MakeupRequestDataTable({
   requests,
   loading,
+  readError = false,
   data,
   currentUserId,
   canManage,
@@ -1155,6 +1148,7 @@ function MakeupRequestDataTable({
 }: {
   requests: MakeupRequest[]
   loading: boolean
+  readError?: boolean
   data: MakeupRequestWorkspaceData
   currentUserId: string
   canManage: boolean
@@ -1178,27 +1172,27 @@ function MakeupRequestDataTable({
   const filterColumnKey = filters.filterColumn
   const filterValue = filters.search
   const setFilterValue = (search: string) => onFiltersChange({ search })
-  const [filterInputOpen, setFilterInputOpen] = useState(false)
   const selectedSubjectFilter = filters.subject
   const selectedTeacherFilter = filters.teacher
   const makeupPeriodFilter = filters.period
   const makeupPeriodStartDate = filters.dateFrom
   const makeupPeriodEndDate = filters.dateTo
-  const filterInputRef = useRef<HTMLInputElement>(null)
-  const gridTemplateColumns = getMakeupRequestTableGridTemplate(columnWidths)
+  const columnDefinitions = useMemo(() => MAKEUP_REQUEST_TABLE_COLUMNS.map(column => ({
+    id: column.columnKey, label: column.label, required: ["className", "action"].includes(column.columnKey),
+    defaultVisible: ["className", "status", "teacher", "cancelDate", "makeupAt", "action"].includes(column.columnKey)
+      || filters.view === "closed" && column.columnKey === "approvedAt",
+  })), [filters.view])
+  const { isColumnVisible, columnSettingsControl } = useDataTableColumns(`tips:makeup:${filters.view}:columns`, columnDefinitions)
+  const visibleColumns = MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => isColumnVisible(column.columnKey))
+  const gridTemplateColumns = getMakeupRequestTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--makeup-request-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = MAKEUP_REQUEST_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || MAKEUP_REQUEST_TABLE_COLUMNS[1]
-  const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
   const visibleRequests = requests
-
-  useEffect(() => {
-    if (filterInputOpen) filterInputRef.current?.focus()
-  }, [filterInputOpen])
 
   function handleHeaderSelect(columnKey: MakeupRequestTableColumnKey) {
     if (columnKey === "action") return
     const direction = !makeupTableSort || makeupTableSort.columnKey !== columnKey ? "asc" : makeupTableSort.direction === "asc" ? "desc" : null
-    onFiltersChange({ filterColumn: columnKey, sortColumn: direction ? columnKey : null, sortDirection: direction })
+    onFiltersChange({ sortColumn: direction ? columnKey : null, sortDirection: direction })
   }
 
   function startColumnResize(key: MakeupRequestTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
@@ -1222,8 +1216,19 @@ function MakeupRequestDataTable({
 
   return (
     <div className="grid min-w-0 gap-2">
-      <div className="overflow-hidden rounded-md border bg-card">
-        <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2" aria-label="휴보강 전체 필터">
+      <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
+        <DataTableToolbar aria-label="휴보강 전체 필터">
+          <div className="flex min-w-0 flex-wrap items-center gap-2">
+            <MakeupRequestFilterSelect ariaLabel="휴보강 검색 범위" includeAll={false} value={filterColumnKey} allLabel="수업" options={MAKEUP_REQUEST_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({value: column.columnKey, label: column.label, count: 0}))} onChange={value => onFiltersChange({filterColumn: value as MakeupNumberedFilters["filterColumn"]})} />
+            <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="휴보강 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
+            {columnSettingsControl}
+          </div>
+          <DataTableFilterPanel label="휴보강 검색 조건" activeFilters={[
+            ...(selectedSubjectFilter !== "all" ? [{label: "과목", value: selectedSubjectFilter}] : []),
+            ...(selectedTeacherFilter !== "all" ? [{label: "선생님", value: teacherFilterOptions.find(option => option.value === selectedTeacherFilter)?.label || "선택됨"}] : []),
+            ...(makeupPeriodFilter !== "all" ? [{label: "기간", value: MAKEUP_REQUEST_PERIOD_FILTERS.find(item => item.key === makeupPeriodFilter)?.label || "기간"}] : []),
+          ]}>
+          <div className="flex flex-wrap items-center gap-2">
           <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="휴보강 선택 필터">
             <MakeupRequestFilterSelect
               ariaLabel="과목 필터"
@@ -1250,45 +1255,9 @@ function MakeupRequestDataTable({
             onStartDateChange={(dateFrom) => onFiltersChange({ dateFrom })}
             onEndDateChange={(dateTo) => onFiltersChange({ dateTo })}
           />
-          <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium">
-            <Button
-              type="button"
-              variant={isFilterInputExpanded ? "secondary" : "outline"}
-              size="sm"
-              className="size-8 px-0"
-              aria-label={isFilterInputExpanded ? `${filterColumn.label} 검색 접기` : `${filterColumn.label} 검색 펼치기`}
-              aria-expanded={isFilterInputExpanded}
-              onClick={() => setFilterInputOpen((current) => !current)}
-            >
-              <Filter className="size-4" aria-hidden="true" />
-            </Button>
-            {isFilterInputExpanded ? (
-              <div className="flex min-w-0 items-center gap-2">
-                <Input
-                  ref={filterInputRef}
-                  aria-label={`${filterColumn.label} 필터`}
-                  value={filterValue}
-                  onChange={(event) => setFilterValue(event.target.value)}
-                  placeholder={`${filterColumn.label} 값 입력`}
-                  className="h-8 min-w-0 flex-1 sm:w-48"
-                />
-                {filterValue ? (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => {
-                      setFilterValue("")
-                      setFilterInputOpen(false)
-                    }}
-                  >
-                    지우기
-                  </Button>
-                ) : null}
-              </div>
-            ) : null}
           </div>
-        </div>
+          </DataTableFilterPanel>
+        </DataTableToolbar>
         <div className="hidden md:block">
           <div className="w-full overflow-x-auto" role="table" aria-label="휴보강 신청 데이터테이블">
             <div
@@ -1296,7 +1265,7 @@ function MakeupRequestDataTable({
               className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--makeup-request-grid-template)]"
               style={gridTemplateStyle}
             >
-              {MAKEUP_REQUEST_TABLE_COLUMNS.map((column) => (
+              {visibleColumns.map((column) => (
                 <MakeupRequestResizableHeaderCell
                   key={column.columnKey}
                   column={column}
@@ -1308,7 +1277,7 @@ function MakeupRequestDataTable({
             </div>
             {loading && visibleRequests.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-            ) : visibleRequests.length === 0 ? (
+            ) : readError && visibleRequests.length === 0 ? null : visibleRequests.length === 0 ? (
               <div className="px-4 py-12 text-center text-sm text-muted-foreground">표시할 신청서가 없습니다.</div>
             ) : visibleRequests.map((request) => {
               const hasRoomCollision = hasMakeupRequestRoomCollision(request, data)
@@ -1319,7 +1288,7 @@ function MakeupRequestDataTable({
                   className="grid min-w-full border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--makeup-request-grid-template)]"
                   style={gridTemplateStyle}
                 >
-                  {MAKEUP_REQUEST_TABLE_COLUMNS.map((column) => {
+                  {visibleColumns.map((column) => {
                     const value = getMakeupRequestTableValue(request, column.columnKey)
                     if (column.columnKey === "status") {
                       return (
@@ -1367,7 +1336,7 @@ function MakeupRequestDataTable({
           </div>
         </div>
       </div>
-      <MakeupRequestCardList
+      {!(readError && visibleRequests.length === 0) && <MakeupRequestCardList
         requests={visibleRequests}
         loading={loading && visibleRequests.length === 0}
         data={data}
@@ -1383,7 +1352,7 @@ function MakeupRequestDataTable({
         onRequestRefund={onRequestRefund}
         onCompleteRefund={onCompleteRefund}
         onFinalCancel={onFinalCancel}
-      />
+      />}
     </div>
   )
 }
@@ -1664,6 +1633,7 @@ export function MakeupRequestWorkspace() {
 }
 
 function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const { user, role } = useAuth()
   const searchParams = useSearchParams()
   const searchParamString = searchParams.toString()
@@ -1680,11 +1650,19 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const controllerRef = useRef<ReturnType<typeof createNumberedPageController<MakeupRequest>> | null>(null)
   const acceptedFilters: MakeupNumberedFilters = useMemo(() => pageState.scope ? JSON.parse(pageState.scope).filters : navigation.filters, [pageState.scope, navigation.filters])
   const view = acceptedFilters.view
+  const acceptedCriteriaLabel = [
+    MAKEUP_REQUEST_VIEW_TABS.find(tab => tab.id === acceptedFilters.view)?.label,
+    acceptedFilters.search ? `${MAKEUP_REQUEST_TABLE_COLUMNS.find(column => column.columnKey === acceptedFilters.filterColumn)?.label || "검색"} “${acceptedFilters.search}”` : "검색어 없음",
+    acceptedFilters.subject !== "all" ? acceptedFilters.subject : null,
+    acceptedFilters.teacher !== "all" ? acceptedFilters.teacher : null,
+    acceptedFilters.period === "all" ? "전체 기간" : `${acceptedFilters.dateFrom || "시작일 전체"} ~ ${acceptedFilters.dateTo || "종료일 전체"}`,
+    `${pageState.page}페이지`,
+  ].filter(Boolean).join(" · ")
   const todayKey = useMemo(() => toDateKey(new Date()), [])
   const customDates = useRef(makeupCustomDatesFromUrl(new URLSearchParams(searchParams.toString()), navigation.filters))
   const changeFilters = useCallback((patch: Partial<MakeupNumberedFilters>) => {
     setNavigation((current) => {
-      const filters = { ...(pageState.error ? acceptedFilters : current.filters), ...patch }
+      const filters = { ...current.filters, ...patch }
       if (patch.dateFrom !== undefined || patch.dateTo !== undefined) customDates.current = { dateFrom: patch.dateFrom ?? customDates.current.dateFrom, dateTo: patch.dateTo ?? customDates.current.dateTo }
       if (patch.period) {
         const range = filters.period === "week" ? getMakeupRequestWeekRange(todayKey) : filters.period === "month" ? getMakeupRequestMonthRange(todayKey) : { start: todayKey, end: todayKey }
@@ -1692,7 +1670,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       }
       return { filters, page: 1 }
     })
-  }, [todayKey, acceptedFilters, pageState.error])
+  }, [todayKey])
   const setView = useCallback((view: MakeupRequestView) => changeFilters({ view }), [changeFilters])
   const [catalogData, setData] = useState<MakeupRequestWorkspaceData>({
     schemaReady: true,
@@ -1720,6 +1698,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const savingRef = useRef(false)
   const [message, setMessage] = useState("")
   const [error, setError] = useState("")
+  const [dialogError, setDialogError] = useState("")
   const [approvalRequest, setApprovalRequest] = useState<MakeupRequest | null>(null)
   const [approvalNote, setApprovalNote] = useState("")
   const [actionNoteRequest, setActionNoteRequest] = useState<{ request: MakeupRequest; kind: MakeupActionNoteKind } | null>(null)
@@ -2087,6 +2066,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [])
 
   const resetForm = useCallback(() => {
+    setDialogError("")
     setRequestDraftBaseline(JSON.stringify([EMPTY_INPUT, "", ""]))
     setInput(EMPTY_INPUT)
     setSelectedSubject("")
@@ -2113,7 +2093,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const handleSubmit = useCallback(async () => {
     if (!lifetime.current || savingRef.current) return
     if (!currentUserId) {
-      setError("로그인 세션을 확인할 수 없습니다.")
+      setDialogError("로그인 세션을 확인할 수 없습니다.")
       return
     }
     const makeupSlots = materializeSlots(input)
@@ -2128,27 +2108,27 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       isManager,
     })
     if (!input.classId || !input.reason || !submissionApproverTeacherCatalogId) {
-      setError("필수 항목을 모두 입력해 주세요.")
+      setDialogError("필수 항목을 모두 입력해 주세요.")
       return
     }
     if (hasIncompleteStartedMakeupSlot(input)) {
-      setError("보강일시의 날짜, 시작시각, 종료시각을 모두 입력해 주세요.")
+      setDialogError("보강일시의 날짜, 시작시각, 종료시각을 모두 입력해 주세요.")
       return
     }
     if (!requestHasCancel && !requestHasMakeup) {
-      setError("휴강일 또는 보강일시를 입력해 주세요.")
+      setDialogError("휴강일 또는 보강일시를 입력해 주세요.")
       return
     }
     if (requestHasMakeup && makeupSlots.some((slot) => !slot.classroom)) {
-      setError("각 보강일시의 강의실을 선택해 주세요.")
+      setDialogError("각 보강일시의 강의실을 선택해 주세요.")
       return
     }
     if (!formCatalogReady || requestHasMakeup && !data.collisionContextReady) {
-      setError("예약 및 신청 기준정보를 확인한 후 다시 시도해 주세요.")
+      setDialogError("예약 및 신청 기준정보를 확인한 후 다시 시도해 주세요.")
       return
     }
     if (requestHasMakeup && selectedRoomHasCollision) {
-      setError("충돌이 없는 보강 강의실을 선택해 주세요.")
+      setDialogError("충돌이 없는 보강 강의실을 선택해 주세요.")
       return
     }
     if (submissionApproverTeacherCatalogId !== input.approverTeacherCatalogId) {
@@ -2157,7 +2137,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
 
     savingRef.current = true
     setSaving(true)
-    setError("")
+    setDialogError("")
     setMessage("")
     try {
       const payload = {
@@ -2182,7 +2162,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       await refresh()
     } catch (submitError) {
       if (!lifetime.current) return
-      setError(getMakeupActionErrorMessage(submitError, "휴보강 신청서 저장에 실패했습니다."))
+      setDialogError(getMakeupActionErrorMessage(submitError, "휴보강 신청서 저장에 실패했습니다."))
     } finally {
       savingRef.current = false
       if (lifetime.current) setSaving(false)
@@ -2193,7 +2173,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     if (!lifetime.current || savingRef.current) return false
     savingRef.current = true
     setSaving(true)
-    setError("")
+    setDialogError("")
     setMessage("")
     try {
       await action()
@@ -2203,7 +2183,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       return lifetime.current
     } catch (actionError) {
       if (!lifetime.current) return false
-      setError(getMakeupActionErrorMessage(actionError, "요청 처리에 실패했습니다."))
+      setDialogError(getMakeupActionErrorMessage(actionError, "요청 처리에 실패했습니다."))
       return false
     } finally {
       savingRef.current = false
@@ -2237,6 +2217,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [approvalNote, approvalRequest, closeDetailRequest, currentUserId, runAction, data])
 
   const handleOpenActionNoteRequest = useCallback((request: MakeupRequest, kind: MakeupActionNoteKind) => {
+    setDialogError("")
     setActionNoteRequest({ request, kind })
     setActionNote("")
   }, [])
@@ -2253,7 +2234,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     if (!actionNoteRequest) return
     const note = actionNote.trim()
     if (!note && actionNoteConfig.required !== false) {
-      setError(`${actionNoteConfig.label}를 입력해 주세요.`)
+      setDialogError(`${actionNoteConfig.label}를 입력해 주세요.`)
       return
     }
 
@@ -2358,7 +2339,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   }, [closeDetailRequest, data.classes, selectedSubject, selectedTeacherKey, setView])
 
   return (
-    <WorkspaceTabs value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
+    <WorkspaceTabs ref={workspaceRef} value={view} onValueChange={(value) => setView(value as MakeupRequestView)} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       <div className="grid min-w-0 gap-2">
         <div className="flex min-w-0 flex-col gap-2 lg:flex-row lg:items-start lg:justify-between">
           <WorkspaceTabsList aria-label="휴보강 흐름" className="lg:w-auto">
@@ -2383,7 +2364,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
 
       <WorkspaceTabsPanel className="flex flex-col gap-4">
       {message ? <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
-      {pageState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}<Button variant="outline" onClick={() => void controllerRef.current?.retry()}>다시 시도</Button></div> : null}
+      {pageState.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}{pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}<Button variant="outline" onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void controllerRef.current?.retry() }}>다시 시도</Button></div> : null}
       {contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null}
       {error ? (
         <div role="alert" className="flex items-center justify-between gap-3 rounded-md border border-destructive/20 bg-destructive/5 px-3 py-2 text-sm text-destructive">
@@ -2425,6 +2406,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
                 휴보강 신청 정보를 입력하고 결재자에게 상신합니다.
               </DialogDescription>
             </DialogHeader>
+            {dialogError || error ? <div role="alert" className="text-sm text-destructive">{dialogError || error}</div> : null}
             <fieldset disabled={saving} aria-busy={saving} className="grid min-w-0 gap-4">
             <div className="grid gap-3 sm:grid-cols-3">
               <div className="grid gap-1.5">
@@ -2678,19 +2660,22 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
         </Dialog>
 
         <MakeupRequestDataTable
+          key={`makeup:${navigation.filters.view}`}
           requests={filteredRequests}
+          readError={Boolean(pageState.error)}
           loading={loading}
           data={data}
           currentUserId={currentUserId}
           canManage={isManager}
           saving={saving}
-          filters={pageState.error ? acceptedFilters : navigation.filters}
+          filters={navigation.filters}
           onFiltersChange={changeFilters}
           subjectFilterOptions={pageState.subjectOptions || []}
           teacherFilterOptions={pageState.teacherOptions || []}
           onEditForRevision={handleEditForRevision}
           onSchedulePendingMakeup={handleSchedulePendingMakeup}
           onApprove={(request) => {
+            setDialogError("")
             setApprovalRequest(request)
             setApprovalNote("")
           }}
@@ -2699,6 +2684,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
           onRequestRefund={(request) => handleOpenActionNoteRequest(request, "refund")}
           onCompleteRefund={(request) => handleOpenActionNoteRequest(request, "refundComplete")}
           onFinalCancel={(request) => {
+            setDialogError("")
             setFinalCancelRequest(request)
             setFinalCancelNote("")
           }}
@@ -2736,7 +2722,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               onSchedulePendingMakeup={handleSchedulePendingMakeup}
               onApprove={(request) => {
                 closeDetailRequest()
-                setApprovalRequest(request)
+                setDialogError("")
+            setApprovalRequest(request)
                 setApprovalNote("")
               }}
               onRequestRevision={(request) => handleOpenActionNoteRequest(request, "revision")}
@@ -2745,7 +2732,8 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
               onCompleteRefund={(request) => handleOpenActionNoteRequest(request, "refundComplete")}
               onFinalCancel={(request) => {
                 closeDetailRequest()
-                setFinalCancelRequest(request)
+                setDialogError("")
+            setFinalCancelRequest(request)
                 setFinalCancelNote("")
               }}
               variant="detail"
@@ -2757,13 +2745,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       <Dialog open={Boolean(approvalRequest)} onOpenChange={(open) => {
         if (!open) closeApprovalDialog()
       }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>승인 메모</DialogTitle>
             <DialogDescription>
               수업일정과 캘린더에 바로 반영됩니다.
             </DialogDescription>
           </DialogHeader>
+          {dialogError ? <div role="alert" className="text-sm text-destructive">{dialogError}</div> : null}
           <div className="grid gap-2">
             <Label htmlFor="makeup-approval-note">승인 메모</Label>
             <Textarea
@@ -2790,13 +2779,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       <Dialog open={Boolean(actionNoteRequest)} onOpenChange={(open) => {
         if (!open) closeActionNoteDialog()
       }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>{actionNoteConfig.title}</DialogTitle>
             <DialogDescription>
               {actionNoteConfig.description}
             </DialogDescription>
           </DialogHeader>
+          {dialogError ? <div role="alert" className="text-sm text-destructive">{dialogError}</div> : null}
           <div className="grid gap-2">
             <Label htmlFor="makeup-action-note">{actionNoteConfig.label}</Label>
             <Textarea
@@ -2822,13 +2812,14 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       <Dialog open={Boolean(finalCancelRequest)} onOpenChange={(open) => {
         if (!open) closeFinalCancelDialog()
       }}>
-        <DialogContent className="sm:max-w-md">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] overflow-y-auto sm:max-w-md">
           <DialogHeader>
             <DialogTitle>승인 취소</DialogTitle>
             <DialogDescription>
               수업일정과 캘린더 반영을 되돌립니다.
             </DialogDescription>
           </DialogHeader>
+          {dialogError ? <div role="alert" className="text-sm text-destructive">{dialogError}</div> : null}
           <div className="grid gap-2">
             <Label htmlFor="makeup-final-cancel-note">취소 메모</Label>
             <Textarea

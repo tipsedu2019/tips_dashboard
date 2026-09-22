@@ -4,7 +4,7 @@ import { JSDOM } from "jsdom"
 import * as React from "react"
 import { loadNotificationComponent } from "./helpers/notification-component-loader.mjs"
 
-async function setup(t, { mobile = true, defaultOpen = true, menuTooltip = false } = {}) {
+async function setup(t, { mobile = true, defaultOpen = true, menuTooltip = false, realNavigation = false } = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: "https://test.invalid/admin/word-retests" })
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   globalThis.window = dom.window
@@ -20,18 +20,26 @@ async function setup(t, { mobile = true, defaultOpen = true, menuTooltip = false
     return this.hidden || this.style.display === "none" ? [] : [{ width: 32, height: 32 }]
   }
   const { createRoot } = await import("react-dom/client")
-  const { Sidebar, SidebarProvider, SidebarTrigger, SidebarMenuButton, useSidebar } = loadNotificationComponent(
+  const sidebarModule = loadNotificationComponent(
     "src/components/ui/sidebar.tsx",
     new Map([["@/hooks/use-mobile", { useIsMobile: () => mobile }]]),
   )
+  const { Sidebar, SidebarProvider, SidebarTrigger, SidebarMenuButton, useSidebar } = sidebarModule
   const h = React.createElement
+  let navigate = () => {}
+  const { NavMain } = loadNotificationComponent("src/components/nav-main.tsx", new Map([
+    ["@/components/ui/sidebar", sidebarModule],
+    ["next/navigation", {useRouter: () => ({prefetch() {}}), usePathname: () => window.location.pathname, useSearchParams: () => new URLSearchParams(window.location.search)}],
+    ["next/link", {__esModule: true, default: React.forwardRef(function Link({href, children, onClick, ...props}, ref) {return h("a", {...props, ref, href, onClick(event) {onClick?.(event); if (!event.defaultPrevented) {event.preventDefault(); navigate(href)} }}, children)})}],
+  ]))
   function Content() {
     const { setOpenMobile } = useSidebar()
     const [route, setRoute] = React.useState("original")
-    React.useEffect(() => { if (route === "next") document.querySelector("h1")?.focus() }, [route])
+    navigate = href => { window.history.pushState({}, "", href); setRoute("next") }
+    React.useEffect(() => { if (route === "next" && !realNavigation) document.querySelector("h1")?.focus() }, [route])
     return h(React.Fragment, null,
       h(Sidebar, null,
-        h(menuTooltip ? SidebarMenuButton : React.Fragment, menuTooltip ? { asChild: true, tooltip: "다른 화면 이동" } : null, h("a", { href: "/admin/next", onClick: event => {
+        realNavigation ? h(NavMain, {label: "메뉴", items:[{title:"다른 화면", url:"/admin/next"}]}) : h(menuTooltip ? SidebarMenuButton : React.Fragment, menuTooltip ? { asChild: true, tooltip: "다른 화면 이동" } : null, h("a", { href: "/admin/next", onClick: event => {
           event.preventDefault()
           window.history.pushState({}, "", "/admin/next")
           setRoute("next")
@@ -39,7 +47,7 @@ async function setup(t, { mobile = true, defaultOpen = true, menuTooltip = false
         } }, "다른 화면 이동"))),
       h(SidebarTrigger),
       h("input", { "aria-label": "검색" }),
-      h("h1", { tabIndex: -1 }, route === "next" ? "새 화면" : "현재 화면"))
+      h("h1", { id: "admin-workspace", tabIndex: -1 }, route === "next" ? "새 화면" : "현재 화면"))
   }
   const root = createRoot(document.getElementById("root"))
   await React.act(async () => root.render(h(SidebarProvider, { defaultOpen }, h(Content))))
@@ -161,4 +169,14 @@ test("desktop menu expansion clears tooltip state without changing its control m
     assert.ok(document.querySelector('[role="tooltip"]'));
     assert.deepEqual(warnings, []);
   } finally { console.warn = warn; }
+});
+
+test("real NavMain route selection closes the mobile sheet without a fake Link close callback", async t => {
+  const p = await setup(t, {realNavigation:true});
+  await p.open();
+  await React.act(async () => document.querySelector('[role="dialog"] a').click());
+  await p.settle();
+  assert.equal(window.location.pathname, "/admin/next");
+  assert.equal(document.querySelector('[role="dialog"]'), null);
+  assert.equal(document.activeElement, document.querySelector('h1'));
 });

@@ -12,6 +12,7 @@ export type DataTableColumn = {
   id: string;
   label: string;
   required?: boolean;
+  defaultVisible?: boolean;
 };
 
 export type DataTableColumnsOptions = {
@@ -24,7 +25,7 @@ const getHydratedSnapshot = () => true;
 const getServerHydratedSnapshot = () => false;
 
 function buildDefaultVisibility(columns: DataTableColumn[]) {
-  return Object.fromEntries(columns.map((column) => [column.id, true])) as Record<string, boolean>;
+  return Object.fromEntries(columns.map((column) => [column.id, column.required || column.defaultVisible !== false])) as Record<string, boolean>;
 }
 
 function sanitizeVisibility(columns: DataTableColumn[], value: unknown) {
@@ -37,7 +38,7 @@ function sanitizeVisibility(columns: DataTableColumn[], value: unknown) {
   return Object.fromEntries(
     columns.map((column) => [
       column.id,
-      column.required ? true : typeof saved[column.id] === "boolean" ? Boolean(saved[column.id]) : true,
+      column.required ? true : typeof saved[column.id] === "boolean" ? Boolean(saved[column.id]) : column.defaultVisible !== false,
     ]),
   ) as Record<string, boolean>;
 }

@@ -19,6 +19,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
 
 function pickFirstString(...values: unknown[]) {
@@ -29,6 +30,8 @@ function pickFirstString(...values: unknown[]) {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { isMobile, setOpenMobile } = useSidebar()
+  const [userMenuContainer, setUserMenuContainer] = React.useState<HTMLDivElement | null>(null)
   const { user, isAdmin, canManageAll, canEditCurriculumPlanning, canUseAssistantOperations } = useAuth()
   const navGroups = React.useMemo(
     () => buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin }),
@@ -52,55 +55,59 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
   }
 
   return (
-    <Sidebar {...props}>
-      <SidebarHeader className="min-h-[var(--shell-header-height)] justify-center px-3 py-2 group-data-[collapsible=icon]:px-1">
-        <SidebarMenu>
-          <SidebarMenuItem>
-            <SidebarMenuButton
-              size="lg"
-              asChild
-              className="group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center"
-            >
-              <Link
-                href={sidebarBrand.href}
-                aria-label="대시보드 홈으로 이동"
-                title="대시보드"
-                data-testid="admin-sidebar-brand"
+    <>
+      <Sidebar {...props}>
+        <SidebarHeader className="min-h-[var(--shell-header-height)] justify-center px-3 py-2 group-data-[collapsible=icon]:px-1">
+          <SidebarMenu>
+            <SidebarMenuItem>
+              <SidebarMenuButton
+                size="lg"
+                asChild
+                className="group-data-[collapsible=icon]:size-9! group-data-[collapsible=icon]:justify-center"
               >
-                <div className="flex aspect-square size-[var(--shell-logo-size)] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white">
-                  <Image
-                    src={sidebarBrand.src}
-                    alt={sidebarBrand.alt}
-                    width={36}
-                    height={36}
-                    priority
-                    className="size-[var(--shell-logo-size)] object-contain"
-                  />
-                </div>
-                <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
-                  <span className="truncate text-base font-semibold tracking-tight">TIPS <span className="text-sm font-normal tracking-normal text-muted-foreground">Dashboard</span></span>
-                  <span className="mt-0.5 truncate text-xs text-muted-foreground">운영 포털</span>
-                </div>
-              </Link>
-            </SidebarMenuButton>
-          </SidebarMenuItem>
-        </SidebarMenu>
-      </SidebarHeader>
-      <SidebarContent className="gap-3 px-2 pb-4 group-data-[collapsible=icon]:px-0">
-        {navGroups.map((group) => (
-          <NavMain key={group.label} label={group.label} items={group.items} />
-        ))}
-      </SidebarContent>
-      <SidebarFooter className="border-t border-sidebar-border/60 p-3 group-data-[collapsible=icon]:p-2">
-        {!user?.isFallbackRole && user?.email ? null : (
-          <div className="flex items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/70">
-            <Lock className="size-3.5" />
-            <span className="truncate">임시 권한</span>
-          </div>
-        )}
-        <NavUser user={displayUser} />
-      </SidebarFooter>
-      <SidebarRail />
-    </Sidebar>
+                <Link
+                  href={sidebarBrand.href}
+                  onClick={(event) => { if (isMobile && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && window.location.pathname === sidebarBrand.href) setOpenMobile(false) }}
+                  aria-label="대시보드 홈으로 이동"
+                  title="대시보드"
+                  data-testid="admin-sidebar-brand"
+                >
+                  <div className="flex aspect-square size-[var(--shell-logo-size)] shrink-0 items-center justify-center overflow-hidden rounded-md bg-white">
+                    <Image
+                      src={sidebarBrand.src}
+                      alt={sidebarBrand.alt}
+                      width={36}
+                      height={36}
+                      priority
+                      className="size-[var(--shell-logo-size)] object-contain"
+                    />
+                  </div>
+                  <div className="grid min-w-0 flex-1 text-left text-sm leading-tight group-data-[collapsible=icon]:hidden">
+                    <span className="truncate text-base font-semibold tracking-tight">TIPS <span className="text-sm font-normal tracking-normal text-muted-foreground">Dashboard</span></span>
+                    <span className="mt-0.5 truncate text-xs text-muted-foreground">운영 포털</span>
+                  </div>
+                </Link>
+              </SidebarMenuButton>
+            </SidebarMenuItem>
+          </SidebarMenu>
+        </SidebarHeader>
+        <SidebarContent className="gap-3 px-2 pb-4 group-data-[collapsible=icon]:px-0">
+          {navGroups.map((group) => (
+            <NavMain key={group.label} label={group.label} items={group.items} />
+          ))}
+        </SidebarContent>
+        <SidebarFooter className="border-t border-sidebar-border/60 p-3 group-data-[collapsible=icon]:p-2">
+          {!user?.isFallbackRole && user?.email ? null : (
+            <div className="flex items-center gap-2 rounded-md border border-dashed border-sidebar-border px-2.5 py-1.5 text-xs font-medium text-sidebar-foreground/70">
+              <Lock className="size-3.5" />
+              <span className="truncate">임시 권한</span>
+            </div>
+          )}
+          <div ref={setUserMenuContainer} />
+        </SidebarFooter>
+        <SidebarRail />
+      </Sidebar>
+      <NavUser user={displayUser} menuContainer={userMenuContainer} />
+    </>
   )
 }
