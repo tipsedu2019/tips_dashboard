@@ -149,7 +149,7 @@ function issueCodes(result) {
   return result.issues.map((issue) => issue.code)
 }
 
-test("keeps the exact seven workflow keys, order, and Korean labels", () => {
+test("keeps the exact six active workflow keys, order, and Korean labels", () => {
   assert.deepEqual(NOTIFICATION_WORKFLOW_OPTIONS, [
     { key: "tasks", label: "할 일" },
     { key: "word_retests", label: "영어 단어 재시험" },
@@ -157,7 +157,6 @@ test("keeps the exact seven workflow keys, order, and Korean labels", () => {
     { key: "transfer", label: "전반" },
     { key: "withdrawal", label: "퇴원" },
     { key: "makeup_requests", label: "휴보강" },
-    { key: "approvals", label: "전자결재" },
   ])
 })
 

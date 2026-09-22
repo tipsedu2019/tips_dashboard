@@ -3,7 +3,6 @@ import {
   BookOpen,
   CalendarDays,
   CalendarClock,
-  FileCheck2,
   GraduationCap,
   ChartNoAxesCombined,
   LayoutDashboard,
@@ -270,14 +269,6 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
-    match: "/admin/approvals",
-    meta: {
-      section: "운영",
-      title: "전자결재",
-      summary: "월간 보고서 제출과 결재 대기 문서를 처리합니다.",
-    },
-  },
-  {
     match: "/admin/tasks",
     meta: {
       section: "운영",
@@ -324,7 +315,6 @@ export function buildAdminNavGroups({
     { title: "전반", url: "/admin/transfer", icon: Repeat2 },
     { title: "퇴원", url: "/admin/withdrawal", icon: UserMinus },
     { title: "휴보강", url: "/admin/makeup-requests", icon: CalendarClock },
-    { title: "전자결재", url: "/admin/approvals", icon: FileCheck2 },
     {
       title: "학사일정",
       url: "/admin/academic-calendar",

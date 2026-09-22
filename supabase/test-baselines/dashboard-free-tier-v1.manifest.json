@@ -491,6 +491,16 @@
       "sha256": "06ae08ae68e241b14b2e9ed78cee6905c29c8bf38bb665340f8ff7ace31872d1"
     },
     {
+      "fileName": "20260922021144_retire_standalone_approvals.sql",
+      "status": "final",
+      "sha256": "b66a9a4ec4bab1af127eec6783c29179ff3f24cb69c1fa14f2fe54600c50915c"
+    },
+    {
+      "fileName": "20260922021343_validate_standalone_approvals_retirement.sql",
+      "status": "final",
+      "sha256": "88dcbdbdaddae37cc78a299101a329af1414ac18d39e7fb54322a687e237a6a9"
+    },
+    {
       "fileName": "20260922023940_timetable_continuous_class_scope.sql",
       "status": "final",
       "sha256": "ce83b2692195757381ff73e946cd24ff2080d61ebe231cacac1c5516e0648757"

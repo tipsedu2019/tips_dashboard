@@ -1,5 +1,7 @@
 # Notification Workflow Adapters Implementation Plan
 
+> 2026-09-22: 전자결재 기능 폐기. 이 문서의 전자결재 관련 개선·구현·활성화 항목은 모두 취소하며, 과거 기록으로만 보존한다. 휴보강 결재는 유지한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Connect tasks, word retests, registration, transfer, withdrawal, makeup requests, and approvals to the common notification control plane with atomic producers, preserved legacy intent, seven settings entry points, and duplicate-safe cutovers.

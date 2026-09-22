@@ -1,5 +1,7 @@
 # Dashboard Google Chat Profile Mentions Implementation Plan
 
+> 2026-09-22: 전자결재 기능 폐기. 이 문서의 전자결재 관련 개선·구현·활성화 항목은 모두 취소하며, 과거 기록으로만 보존한다. 휴보강 결재는 유지한다.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** 대시보드 프로필과 검증된 Google Workspace 사용자 ID를 연결하고, 규칙별 설정과 현재 담당 사실을 이용해 Google Chat 메시지에서 필요한 사람만 안전하게 멘션하는 공용 기반을 만든다.

@@ -5,13 +5,10 @@ import test from "node:test"
 import { subjectSupports } from "../src/lib/academic-subject-registry.ts"
 
 const taskWorkspaceSource = readFileSync("src/features/tasks/ops-task-workspace.tsx", "utf8")
-const approvalWorkspaceSource = readFileSync("src/features/approvals/approval-workspace.tsx", "utf8")
 
-test("science has no word-retest or monthly-approval capability", () => {
+test("science has no word-retest capability", () => {
   assert.equal(subjectSupports("과학", "word_retest"), false)
   assert.equal(subjectSupports("science", "word_retest"), false)
-  assert.equal(subjectSupports("과학", "monthly_approval"), false)
-  assert.equal(subjectSupports("science", "monthly_approval"), false)
 })
 
 test("word-retest class and teacher options never fall back to science resources", () => {
@@ -40,10 +37,4 @@ test("word-retest textbooks reject canonical subjects without the capability", (
     taskWorkspaceSource,
     /function isWordRetestTextbookOption[\s\S]*canonicalSubject[\s\S]*subjectSupports\(canonicalSubject, "word_retest"\)/,
   )
-})
-
-test("monthly approval templates remain English and math only", () => {
-  assert.match(approvalWorkspaceSource, /english_monthly/)
-  assert.match(approvalWorkspaceSource, /math_monthly/)
-  assert.doesNotMatch(approvalWorkspaceSource, /science_monthly|과학 월간 보고서|subject:\s*"science"/)
 })

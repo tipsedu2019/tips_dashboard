@@ -4,7 +4,7 @@
 
 ## 적용
 
-최상위 feature/page 소유자에서 `px-4 sm:px-5 lg:px-6`로 모바일16/중간20/desktop24를 맞췄다. 전역 선택자나 중복 wrapper를 추가하지 않았다. 대상은 dashboard, academic-calendar, annual-board, timetable, OpsTask의 최상위 WorkspaceTabs만, makeup, approvals, recruiting/CMS 및 권한 확인 placeholder다. settings는 기존 SettingsWorkspaceShell이 이미 동일한 기준이므로 중복 여백을 추가하지 않았다.
+최상위 feature/page 소유자에서 `px-4 sm:px-5 lg:px-6`로 모바일16/중간20/desktop24를 맞췄다. 전역 선택자나 중복 wrapper를 추가하지 않았다. 대상은 dashboard, academic-calendar, annual-board, timetable, OpsTask의 최상위 WorkspaceTabs만, makeup, recruiting/CMS 및 권한 확인 placeholder다. settings는 기존 SettingsWorkspaceShell이 이미 동일한 기준이므로 중복 여백을 추가하지 않았다.
 
 브라우저에서 휴보강 신청창을 Escape로 닫으면 포커스가 사라지는 문제를 재현했다. 실제 opener를 기억하고 Dialog의 onCloseAutoFocus로 복원하며, 재상신 등에서 원래 opener가 사라지거나 숨겨졌으면 `휴보강 신청` 버튼으로 복귀한다. 기존 draft 확인·saving 차단·상신 경로는 유지했다.
 
@@ -23,7 +23,6 @@
 | /admin/withdrawal | 퇴원 신청, 퇴원 없음 | 오늘 기간 버튼 Enter | deep link/전이/날짜 계산 보존 |
 | /admin/word-retests | 대상 추가, 재시험 없음 | 별관 버튼 Enter | role/branch/period URL 및 기존 추가 동작 보존 |
 | /admin/makeup-requests | 휴보강 신청, 신청 없음 | 신청창 열기→Escape→opener 복원 | 포커스 보정 후 별도1440/390 재검증 통과 |
-| /admin/approvals | 서식 선택, 문서 없음 | 자유 서식 Enter | composer 열림·기존 checklist/상신 경로 유지 |
 | /admin/recruiting | 새로고침, 지원서 없음+retention 경고 | 새로고침 Enter | 합성 retentionLastSucceededAt=null로 경고 확인; 실제 운영 자동파기 상태 증거 아님 |
 | /admin/public-content | 선생님 추가, 자료 없음 | 추가→Escape→opener 복원 | 기존 CMS draft/공개/업로드 경로 보존; 실제 자료 가져오기 미실행 |
 | /admin/class-schedule | identity-only 수업, 진도 미조회 | 상세 href·키보드 focus·중첩 anchor0 | T15 source/표현 경계는 T15.md 참고 |
@@ -38,9 +37,9 @@
 
 현재 `src/app/admin/**/page.tsx`48개 중 render27개, redirect21개다. 과거 inventory의 users/terms/connections/manual은 활성 화면이 아니므로 복원하지 않았다.
 
-활성27개:
+활성26개 (전자결재 폐기 반영):
 
-- 운영: dashboard, statistics, tasks, registration, transfer, withdrawal, word-retests, makeup-requests, approvals.
+- 운영: dashboard, statistics, tasks, registration, transfer, withdrawal, word-retests, makeup-requests.
 - 학사: academic-calendar, academic-calendar/annual-board, timetable, class-schedule, curriculum, curriculum/lesson-design.
 - 관리: students, classes, textbooks, recruiting, public-content.
 - 설정: settings/schools, settings/classrooms, settings/class-groups, settings/teachers, settings/subjects, settings/textbook-suppliers, settings/notifications.

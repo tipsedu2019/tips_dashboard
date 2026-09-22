@@ -113,7 +113,7 @@ test("cutover registry and owner order are exact and all flags remain false", as
   const verifier = await import(verifierUrl.href)
   assert.equal(verifier.NOTIFICATION_RUNTIME_FLAG_KEYS.length, 12)
   assert.deepEqual(verifier.NOTIFICATION_CUTOVER_ORDER, [
-    "tasks", "word_retests", "approvals", "transfer", "withdrawal", "makeup_requests",
+    "tasks", "word_retests", "transfer", "withdrawal", "makeup_requests",
     "registration", "registration_phone", "registration_visit", "registration_solapi",
   ])
   assert.deepEqual(verifier.verifyNotificationCutoverReadiness(healthyEvidence()), {
@@ -207,8 +207,8 @@ test("every simulated rollout and rollback point has exactly one side-effect own
     }), { passed: true, blockers: [] })
   }
   assert.deepEqual(verifier.verifyExclusiveNotificationOwnership({
-    canonicalOwners: ["tasks", "approvals"],
-    legacyOwners: verifier.NOTIFICATION_CUTOVER_ORDER.filter((owner) => owner !== "tasks" && owner !== "approvals"),
+    canonicalOwners: ["tasks", "transfer"],
+    legacyOwners: verifier.NOTIFICATION_CUTOVER_ORDER.filter((owner) => owner !== "tasks" && owner !== "transfer"),
   }), { passed: true, blockers: [] })
   const duplicate = verifier.verifyExclusiveNotificationOwnership({
     canonicalOwners: ["tasks"],

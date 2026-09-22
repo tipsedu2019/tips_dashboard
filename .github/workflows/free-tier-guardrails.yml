@@ -59,6 +59,8 @@ jobs:
             tests/data-table-pagination.test.mjs \
             tests/data-table-search-field.test.mjs \
             tests/workspace-tabs.test.mjs
+      - name: Verify standalone approvals retirement
+        run: node --test --experimental-strip-types tests/standalone-approvals-retirement.test.mjs
       - name: Verify retired custom hotkeys preserve normal controls
         run: node --test --experimental-strip-types --test-name-pattern="retired" tests/ops-task-numbered-pagination.test.mjs tests/textbook-no-shortcuts.test.mjs
       - name: Verify public class schedule parity and privacy

@@ -18,7 +18,6 @@ import {
 export const NOTIFICATION_SHADOW_PREVIEW_SCOPES = Object.freeze([
   "tasks",
   "word_retests",
-  "approvals",
   "transfer",
   "withdrawal",
   "makeup_requests",
@@ -40,7 +39,7 @@ function contentIdentityKey(identity) {
 
 const CONTENT_COVERAGE = listNotificationContentCoverage()
 const IN_SCOPE_CONTENT_IDENTITIES = CONTENT_COVERAGE
-  .filter((entry) => entry.scopeState === "in_scope")
+  .filter((entry) => entry.scopeState === "in_scope" && entry.workflowKey !== "approvals")
   .map((entry) => Object.freeze({
     workflowKey: entry.workflowKey,
     eventKey: entry.eventKey,
@@ -207,12 +206,6 @@ const CANONICAL_SEED_TEMPLATES = Object.freeze({
     1,
   ),
   word_retests: canonicalSeedTemplate(
-    "[{workflow_label}] {event_label}",
-    "{event_label} · {occurred_at}\n{deep_link}",
-    canonicalGenericVariables(),
-    1,
-  ),
-  approvals: canonicalSeedTemplate(
     "[{workflow_label}] {event_label}",
     "{event_label} · {occurred_at}\n{deep_link}",
     canonicalGenericVariables(),
@@ -520,38 +513,6 @@ function buildFixtures() {
   }
 
   {
-    const scopeKey = "approvals"
-    const approvalId = deterministicUuid(scopeKey, "approval")
-    const recipient = deterministicUuid(scopeKey, "approver")
-    const href = `/admin/approvals?approvalId=${approvalId}`
-    const legacyTemplate = legacyTemplateDeclaration(
-      "[{workflow_label}] {event_label}",
-      "{event_label} · {occurred_at}\n{deep_link}",
-      legacyGenericVariables(),
-      1,
-    )
-    fixtures.push(baseFixture(scopeKey, {
-      workflowKey: "approvals",
-      eventKey: "approval.submitted",
-      sourceType: "approval_event",
-      payloadSchemaVersion: 1,
-      payload: { approval_id: approvalId, approver_profile_id: recipient, occurred_at: FIXED_OCCURRED_AT },
-      rule: { audienceKey: "approver_profile", channelKey: "in_app" },
-      legacy: {
-        template: legacyTemplate,
-        context: {
-          workflow_label: "전자결재",
-          event_label: "제출",
-          occurred_at: FIXED_OCCURRED_AT,
-          deep_link: href,
-        },
-        href,
-        targets: [profileTarget(recipient)],
-      },
-    }))
-  }
-
-  {
     const scopeKey = "transfer"
     const taskId = deterministicUuid(scopeKey, "task")
     const requester = deterministicUuid(scopeKey, "requester")
@@ -853,7 +814,6 @@ function identityHref(identity) {
   const id = deterministicUuid(contentIdentityKey(identity), "content-entity")
   if (identity.workflowKey === "tasks") return `/admin/tasks?taskId=${id}`
   if (identity.workflowKey === "word_retests") return `/admin/word-retests?taskId=${id}`
-  if (identity.workflowKey === "approvals") return `/admin/approvals?approvalId=${id}`
   if (identity.workflowKey === "transfer") return `/admin/transfer?flow=operations&taskId=${id}`
   if (identity.workflowKey === "withdrawal") return `/admin/withdrawal?flow=operations&taskId=${id}`
   if (identity.workflowKey === "makeup_requests") return `/admin/makeup-requests?request=${id}`

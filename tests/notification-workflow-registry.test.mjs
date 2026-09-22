@@ -98,9 +98,9 @@ const MAKEUP_ALLOWED_VARIABLES = [
 test("registry has seven exclusive ordered workflow owners", async () => {
   const source = await readFile(registryUrl, "utf8")
   assert.deepEqual(
-    [...source.matchAll(/^\s{2}(tasks|word_retests|registration|transfer|withdrawal|makeup_requests|approvals):/gm)]
+    [...source.matchAll(/^\s{2}(tasks|word_retests|registration|transfer|withdrawal|makeup_requests):/gm)]
       .map((match) => match[1]),
-    ["tasks", "word_retests", "registration", "transfer", "withdrawal", "makeup_requests", "approvals"],
+    ["tasks", "word_retests", "registration", "transfer", "withdrawal", "makeup_requests"],
   )
   assert.match(source, /registrationNotificationAdapter/)
   assert.match(source, /return adapters\[workflowKey as NotificationWorkflowKey\] \?\? null/)
@@ -235,21 +235,6 @@ test("six immediate adapters render the installed seed templates with canonical 
       body: "중1 A · 2026-07-18 휴강 / 2026-07-19 14:00 · 301호 보강",
       href: `/admin/makeup-requests?request=${PROFILE_A}`,
     },
-    {
-      workflowKey: "approvals",
-      eventKey: "approval.created",
-      sourceType: "approval_event",
-      payload: { approval_id: PROFILE_A, occurred_at: occurredAt },
-      template: {
-        titleTemplate: "[{workflow_label}] {event_label}",
-        bodyTemplate: "{event_label} · {occurred_at}\n{deep_link}",
-        allowedVariables: STANDARD_ALLOWED_VARIABLES,
-        payloadSchemaVersion: 1,
-      },
-      title: "[전자결재] 생성",
-      body: `생성 · ${occurredAt}\n/admin/approvals?approvalId=${PROFILE_A}`,
-      href: `/admin/approvals?approvalId=${PROFILE_A}`,
-    },
   ]
 
   for (const fixture of cases) {
@@ -291,7 +276,7 @@ test("six immediate adapters render the installed seed templates with canonical 
 
 test("six immediate adapters resolve one deterministic sorted target set and own no reconciler", async () => {
   const registry = await import(registryUrl.href)
-  const immediateKeys = ["tasks", "word_retests", "transfer", "withdrawal", "makeup_requests", "approvals"]
+  const immediateKeys = ["tasks", "word_retests", "transfer", "withdrawal", "makeup_requests"]
   for (const workflowKey of immediateKeys) {
     const adapter = registry.getNotificationWorkflowAdapter(workflowKey)
     assert.equal(adapter?.workflowKey, workflowKey)
@@ -405,11 +390,11 @@ test("production immediate source reader uses one closed service-role RPC and re
     targetSnapshot: { profile_id: PROFILE_A },
   }
   const input = {
-    workflowKey: "approvals",
+    workflowKey: "transfer",
     eventId: resolveInput().eventId,
     deliveryId: "00000000-0000-4000-8000-000000000041",
-    eventKey: "approval.approver_changed",
-    sourceType: "approval_event",
+    eventKey: "transfer.details_changed",
+    sourceType: "ops_task_event",
     sourceId: resolveInput().sourceId,
     sourceRevision: null,
     ruleId: RULE_ID,
@@ -426,11 +411,11 @@ test("production immediate source reader uses one closed service-role RPC and re
   assert.deepEqual(calls, [{
     name: "revalidate_immediate_notification_delivery_v1",
     parameters: {
-      p_workflow_key: "approvals",
+      p_workflow_key: "transfer",
       p_event_id: resolveInput().eventId,
       p_delivery_id: "00000000-0000-4000-8000-000000000041",
-      p_event_key: "approval.approver_changed",
-      p_source_type: "approval_event",
+      p_event_key: "transfer.details_changed",
+      p_source_type: "ops_task_event",
       p_source_id: resolveInput().sourceId,
       p_source_revision: null,
       p_rule_id: RULE_ID,
@@ -543,7 +528,6 @@ test("six immediate adapters resolve only their exact profile and Chat audiences
     transfer: "ops_task_event",
     withdrawal: "ops_task_event",
     makeup_requests: "makeup_request_event",
-    approvals: "approval_event",
   }
   const cases = [
     ["tasks", "requester_profile", "in_app", [`profile:${PROFILE_A}`]],
@@ -564,9 +548,6 @@ test("six immediate adapters resolve only their exact profile and Chat audiences
     ["makeup_requests", "management_team", "in_app", [`profile:${PROFILE_A}`, `profile:${PROFILE_D}`]],
     ["makeup_requests", "executive_team", "google_chat", ["connection:google_chat.executive"]],
     ["makeup_requests", "subject_team", "google_chat", ["connection:google_chat.math"]],
-    ["approvals", "requester_profile", "in_app", [`profile:${PROFILE_A}`]],
-    ["approvals", "approver_profile", "in_app", [`profile:${PROFILE_B}`]],
-    ["approvals", "management_team", "google_chat", ["connection:google_chat.management"]],
   ]
   for (const [workflowKey, audienceKey, channelKey, expected] of cases) {
     const adapter = registry.getNotificationWorkflowAdapter(workflowKey)

@@ -133,13 +133,6 @@ const CORE_ADMIN_PUBLIC_SMOKE_ROUTES = [
     expectedSearchIncludes: "next=%2Fadmin%2Ftasks%3FtaskId%3Dmissing-task-for-smoke",
   },
   {
-    path: "/admin/approvals",
-    name: "protected-approvals-redirect",
-    expectedTexts: SIGN_IN_EXPECTED_TEXTS,
-    expectedPath: "/sign-in",
-    expectedSearchIncludes: "next=%2Fadmin%2Fapprovals",
-  },
-  {
     path: "/admin/registration",
     name: "protected-registration-redirect",
     expectedTexts: SIGN_IN_EXPECTED_TEXTS,
@@ -461,7 +454,6 @@ const ROUTES = [
     fixtureRole: "admin",
   },
   { path: "/admin/makeup-requests", name: "makeup-requests", expectedTexts: ["휴보강", "신청"], interaction: "makeup-request" },
-  { path: "/admin/approvals", name: "approvals", expectedTexts: ["전자결재", "영어", "수학", "자유"], interaction: "approval-draft" },
   ...AUTHENTICATED_CORE_SMOKE_ROUTES,
 ]
 
@@ -2740,67 +2732,6 @@ async function verifyWordRetestModeInteraction(page) {
   if (!assistantSelected) throw new Error("Word retest assistant mode did not become selected.")
 }
 
-async function verifyApprovalDraftInteraction(page) {
-  const bodyText = await page.locator("body").innerText({ timeout: 5000 })
-  if (bodyText.includes("저장 서식\n저장 서식")) throw new Error("Approval saved-template label is duplicated.")
-  if (bodyText.includes("대상") || bodyText.includes("상신")) throw new Error("Approval composer should start collapsed.")
-
-  const templateButtons = page.getByRole("button", { name: /영어|수학|자유/ })
-  if ((await templateButtons.count().catch(() => 0)) < 3) throw new Error("Approval template buttons were not found.")
-  await templateButtons.first().click()
-
-  const expandedBodyText = await page.locator("body").innerText({ timeout: 5000 })
-  if (!/영어\s*·\s*\d+\/\d+/.test(expandedBodyText)) throw new Error("Approval progress badge was not found.")
-
-  const monthInput = page.locator('input[type="month"]').first()
-  if (!(await monthInput.count().catch(() => 0))) throw new Error("Approval month input was not found.")
-  const targetInput = page.locator('input[placeholder*="고1 영어A"]').first()
-  if (!(await targetInput.count().catch(() => 0))) throw new Error("Approval target input was not found.")
-  const checklistToggle = page.getByRole("button", { name: /점검/ }).first()
-  if (!(await checklistToggle.count().catch(() => 0))) throw new Error("Approval checklist toggle was not found.")
-  await checklistToggle.click()
-  const doneButtons = page.getByRole("button", { name: "완료" })
-  const notApplicableButtons = page.getByRole("button", { name: "해당 없음" })
-  if (!(await doneButtons.count().catch(() => 0))) throw new Error("Approval done state buttons were not found.")
-  if (!(await notApplicableButtons.count().catch(() => 0))) throw new Error("Approval not-applicable state buttons were not found.")
-  const textareas = page.locator("textarea")
-  if ((await textareas.count().catch(() => 0)) < 2) throw new Error("Approval body and attachment textareas were not found.")
-  const body = textareas.first()
-  const attachments = textareas.nth(1)
-  const titleInput = page.locator('label:has-text("제목") input').first()
-  await monthInput.fill("2026-05")
-  await page.waitForTimeout(50)
-  await monthInput.fill("2026-07")
-  await page.waitForTimeout(50)
-  const titleValue = await titleInput.inputValue().catch(() => "")
-  const bodyValue = await body.inputValue().catch(() => "")
-  const attachmentValue = await attachments.inputValue().catch(() => "")
-  if (!titleValue.includes("2026년 07월")) throw new Error("Approval title did not refresh when report month changed.")
-  if (!bodyValue.includes("## 7월") || bodyValue.includes("## 5월")) throw new Error("Approval body kept a stale monthly section after report month changed.")
-  if (!attachmentValue.includes("07월") || attachmentValue.includes("05월")) throw new Error("Approval attachment template kept stale month labels.")
-  const submitButton = page.getByRole("button", { name: "상신" }).last()
-  await body.fill("브라우저 검증")
-  if (await submitButton.isDisabled().catch(() => true)) {
-    const approverSelect = page.getByRole("combobox", { name: "결재자" }).first()
-    if (await approverSelect.count().catch(() => 0)) {
-      await approverSelect.click()
-      const options = page.getByRole("option")
-      const optionCount = await options.count().catch(() => 0)
-      for (let index = 0; index < optionCount; index += 1) {
-        const option = options.nth(index)
-        const optionText = await option.innerText().catch(() => "")
-        if (optionText && !optionText.includes("미정")) {
-          await option.click()
-          break
-        }
-      }
-    }
-  }
-  if (await submitButton.isDisabled().catch(() => true)) throw new Error("Approval submit button stayed disabled after body input.")
-  await body.fill("")
-  if (!(await submitButton.isDisabled().catch(() => false))) throw new Error("Approval submit button stayed enabled without a body.")
-}
-
 async function verifyMakeupRequestInteraction(page) {
   const expectedColumns = [
     "상태",
@@ -2937,7 +2868,6 @@ async function verifyRouteInteraction(page, route, options = {}) {
   if (route.interaction === "makeup-request") return verifyMakeupRequestInteraction(page)
   if (route.interaction === "quick-add") return verifyQuickAddInteraction(page, options.quickAddSampleCount)
   if (route.interaction === "open-create") return verifyCreateDialogInteraction(page, route, options.operationSampleCount)
-  if (route.interaction === "approval-draft") return verifyApprovalDraftInteraction(page)
   if (route.interaction === "registration-subject-track-fixture") return verifyRegistrationSubjectTrackFixture(page, options)
   if (route.interaction === "word-retest-expected-schedule-fixture") {
     return verifyWordRetestExpectedScheduleFixture(page, route, options.wordRetestFixtureSafety)

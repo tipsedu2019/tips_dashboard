@@ -36,7 +36,6 @@ const expectedPgTapFiles = Object.freeze([
   "supabase/tests/notification_registration_handoffs_test.sql",
   "supabase/tests/notification_transfer_withdrawal_adapters_test.sql",
   "supabase/tests/notification_makeup_adapter_test.sql",
-  "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
   "supabase/tests/notification_worker_production_schedule_test.sql",
   "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
@@ -260,7 +259,7 @@ function fixtureContractFixture() {
       sha256: "d".repeat(64),
     },
     pgTap: {
-      fileCount: 14,
+      fileCount: 13,
       sha256: "e".repeat(64),
       files: expectedPgTapFiles.map((relativePath, index) => ({
         relativePath,
@@ -437,8 +436,8 @@ function successfulStepEvidence(step, manifest) {
       }
     case "pgtap":
       return {
-        fileCount: 14,
-        passed: 14,
+        fileCount: 13,
+        passed: 13,
         failed: 0,
         files: expectedPgTapFiles,
       }
@@ -2353,7 +2352,7 @@ test("CLI 기본 모드는 무료 티어 계획만 출력하고 자원을 만들
         rules: 197,
         operationalRows: 0,
       },
-      pgTapFileCount: 14,
+      pgTapFileCount: 13,
       pgTapFiles: expectedPgTapFiles,
       providerEgressBlocked: true,
       remoteCollector: {
@@ -2771,28 +2770,28 @@ test("dry-run은 stdout·stderr를 합쳐 exact pending filename 집합만 허�
   }
 })
 
-test("pgTAP은 raw plan line 대신 pg_prove의 exact 14-file PASS summary를 판정한다", async () => {
+test("pgTAP은 raw plan line 대신 pg_prove의 exact 13-file PASS summary를 판정한다", async () => {
   const { assertNotificationPgTapSummary } = await loadSubject()
   const success = [
     "All tests successful.",
-    "Files=14, Tests=59,  3 wallclock secs",
+    "Files=13, Tests=59,  3 wallclock secs",
     "Result: PASS",
   ].join("\n")
-  assert.deepEqual(assertNotificationPgTapSummary(success, 14), {
-    fileCount: 14,
+  assert.deepEqual(assertNotificationPgTapSummary(success, 13), {
+    fileCount: 13,
     testCount: 59,
   })
 
   for (const output of [
-    "All tests successful.\nFiles=13, Tests=59\nResult: PASS",
-    "All tests successful.\nFiles=14, Tests=0\nResult: PASS",
-    "Files=14, Tests=59\nResult: PASS",
-    "All tests successful.\nFiles=14, Tests=59\nResult: FAIL",
-    "All tests successful.\nFiles=14, Tests=59\nResult: PASS\nDubious, test returned 1",
-    "All tests successful.\nFiles=14, Tests=59\nResult: PASS\nnot ok 3",
+    "All tests successful.\nFiles=12, Tests=59\nResult: PASS",
+    "All tests successful.\nFiles=13, Tests=0\nResult: PASS",
+    "Files=13, Tests=59\nResult: PASS",
+    "All tests successful.\nFiles=13, Tests=59\nResult: FAIL",
+    "All tests successful.\nFiles=13, Tests=59\nResult: PASS\nDubious, test returned 1",
+    "All tests successful.\nFiles=13, Tests=59\nResult: PASS\nnot ok 3",
   ]) {
     assert.throws(
-      () => assertNotificationPgTapSummary(output, 14),
+      () => assertNotificationPgTapSummary(output, 13),
       /notification_local_db_pgtap_failed/u,
     )
   }
@@ -3044,7 +3043,7 @@ test("trusted executor는 fake subprocess transcript로 17단계 command를 실�
       ))
     }
     if (call.step === "pgtap" && args[0] === "test") {
-      return success("All tests successful.\nFiles=14, Tests=59, 1 wallclock secs\nResult: PASS\n")
+      return success("All tests successful.\nFiles=13, Tests=59, 1 wallclock secs\nResult: PASS\n")
     }
     if (call.step === "cleanup") return success()
     if (args[0] === "db" && args[1] === "query") return success()
@@ -3063,7 +3062,7 @@ test("trusted executor는 fake subprocess transcript로 17단계 command를 실�
 
   assert.equal(result.status, "passed")
   assert.equal(localConfigContractChecked, true)
-  assert.equal(result.pgTap.fileCount, 14)
+  assert.equal(result.pgTap.fileCount, 13)
   const networkCreate = processCalls.find(({ step, args }) => (
     step === "internal-network-create" && args[1] === "create"
   ))
@@ -3236,7 +3235,7 @@ test("fake executor로 17개 local orchestration을 exact order로 실행하고 
   assert.deepEqual(result.orchestration.steps, exactLocalOrchestrationSteps)
   assert.equal(result.orchestration.localStartAttempted, true)
   assert.deepEqual(result.counts, expectedFixtureCounts)
-  assert.deepEqual(result.pgTap, { fileCount: 14, passed: 14, failed: 0 })
+  assert.deepEqual(result.pgTap, { fileCount: 13, passed: 13, failed: 0 })
   assert.deepEqual(result.safety, {
     productionRowDataCopied: 0,
     productionMutationCount: 0,
