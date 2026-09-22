@@ -41,6 +41,7 @@ const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_po
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
   "tests/probe-dashboard-workload-dto.mjs": ["src/features/dashboard/workload-contract.ts"],
   "tests/probe-registration-visit-cancellation-dto.mjs": [
     "src/features/tasks/registration-visit-cancellation-service.ts", "src/lib/promise-timeout.ts",
@@ -649,7 +650,12 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       const stagedProbe = join(runtime.tempRoot, probe.path);
       await stageContents(probe.contents, stagedProbe);
       const probeResult = await executeProcess({ command: process.execPath, args: [stagedProbe], cwd: runtime.tempRoot, env: { ...cleanEnvironment, TASK_LOCAL_DB_URL: localDbUrl, TASK_LOCAL_DB_NONCE: nonce } });
-      if (probeResult.code !== 0) fail("isolated_supabase_db_probe_failed");
+      if (probeResult.code !== 0) {
+        log(JSON.stringify({ event: "isolated_supabase_db_probe_failed", probe: probe.path,
+          stdout: sanitizeChildDiagnostic(probeResult.stdout), stderr: sanitizeChildDiagnostic(probeResult.stderr) }));
+        fail("isolated_supabase_db_probe_failed");
+      }
+      log(JSON.stringify({ event: "isolated_supabase_db_probe_passed", probe: probe.path, stdout: sanitizeChildDiagnostic(probeResult.stdout) }));
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath } };
   } catch (error) {

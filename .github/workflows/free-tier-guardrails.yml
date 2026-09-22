@@ -59,6 +59,8 @@ jobs:
             tests/data-table-pagination.test.mjs \
             tests/data-table-search-field.test.mjs \
             tests/workspace-tabs.test.mjs
+      - name: Verify schedule-only curriculum and class textbook usage
+        run: node --test --experimental-strip-types tests/class-textbook-usage.test.mjs tests/schedule-only-plan.test.mjs tests/curriculum-filter-panel.test.mjs tests/class-schedule-draft-navigation.test.mjs
       - name: Verify standalone approvals retirement
         run: node --test --experimental-strip-types tests/standalone-approvals-retirement.test.mjs
       - name: Verify retired custom hotkeys preserve normal controls

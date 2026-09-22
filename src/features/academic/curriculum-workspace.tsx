@@ -8,7 +8,6 @@ import { ArrowUpRight, ClipboardList } from "lucide-react";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Progress } from "@/components/ui/progress";
 import { Skeleton } from "@/components/ui/skeleton";
 import { DataTablePagination } from "@/components/data-table/data-table-pagination";
 import {
@@ -33,30 +32,20 @@ import {
   type ClassFilterPanelSelect,
 } from "@/features/management/class-filter-panel";
 import { getCurriculumDesignAction as resolveCurriculumDesignAction } from "./academic-read-service.js";
-import { buildCurriculumWorkspaceModel, type CurriculumRow } from "./records.js";
+import type { CurriculumRow } from "./records.js";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 
 const DEFAULT_CURRICULUM_STATUS_FILTER = "수강";
 const CURRICULUM_VIEW_MODES = [
   { value: "all", label: "전체" },
-  { value: "unlinked", label: "교재 미연결" },
-  { value: "unscheduled", label: "회차 미생성" },
-  { value: "update", label: "진도 미배정" },
-  { value: "done", label: "계획 완료" },
+  { value: "unscheduled", label: "일정 없음" },
+  { value: "update", label: "일정 연장 필요" },
+  { value: "done", label: "일정 편성" },
 ] as const;
 const CURRICULUM_SCROLL_STORAGE_PREFIX = "tips:curriculum-work-queue-scroll:";
 
 function getStateVariant(stateLabel: string) {
-  if (stateLabel.includes("완료")) {
-    return "secondary" as const;
-  }
-  if (stateLabel.includes("미배정")) {
-    return "destructive" as const;
-  }
-  if (stateLabel.includes("미생성") || stateLabel.includes("미연결")) {
-    return "outline" as const;
-  }
-  return "secondary" as const;
+  return stateLabel === "일정 편성" ? "secondary" as const : "outline" as const;
 }
 
 function text(value: unknown) {
@@ -177,18 +166,6 @@ function getCurriculumDesignAction(row: Record<string, unknown>) {
   return resolveCurriculumDesignAction(row);
 }
 
-function formatTextbookCount(count: number) {
-  return count > 0 ? `${count}권 연결` : "교재 미연결";
-}
-
-function formatProgressPrimary(plannedSessions: number, totalSessions: number) {
-  if (totalSessions <= 0) {
-    return "회차 설계 전";
-  }
-
-  return `진도 ${plannedSessions}/${totalSessions}회`;
-}
-
 function CurriculumClassIdentity({ row }: { row: CurriculumRow }) {
   return (
     <div className="min-w-0 space-y-1.5">
@@ -205,45 +182,16 @@ function CurriculumSchedule({ row }: { row: CurriculumRow }) {
   return (
     <div className="min-w-0 space-y-1 text-sm leading-5">
       <p className="break-words">{row.schedule || "시간표 미정"}</p>
-      <p className="break-words text-xs text-muted-foreground">{row.nextSession?.label || "회차 미생성"}</p>
+      <p className="break-words text-xs text-muted-foreground">{row.classroomSummary || "강의실 미정"}</p>
     </div>
   );
 }
 
-function CurriculumTextbooks({ row }: { row: CurriculumRow }) {
-  const scopeLabel = row.textbookScopeLabels?.slice(0, 2).join(", ");
-  return (
-    <div className="min-w-0 space-y-1 text-sm leading-5">
-      <p className={row.textbookCount > 0 ? "break-words" : "text-muted-foreground"}>
-        {row.textbookSummary || formatTextbookCount(row.textbookCount)}
-        {row.textbookOverflowCount > 0 ? ` 외 ${row.textbookOverflowCount}권` : ""}
-      </p>
-      {scopeLabel ? <p className="break-words text-xs text-muted-foreground">{scopeLabel}</p> : null}
-    </div>
-  );
-}
-
-function CurriculumProgress({ row }: { row: CurriculumRow }) {
-  const hasLinkedTextbooks = row.textbookCount > 0;
-  const progressTargetSessionCount = row.progressTargetSessions ?? row.totalSessions;
-  if (!hasLinkedTextbooks) {
-    return <p className="text-xs leading-5 text-muted-foreground">교재 연결 필요</p>;
-  }
-  return (
-    <div className="min-w-0 space-y-2">
-      <p className="text-sm tabular-nums leading-5">
-        {formatProgressPrimary(row.plannedProgressSessions, progressTargetSessionCount)}
-      </p>
-      {progressTargetSessionCount > 0 ? (
-        <Progress
-          value={row.progressTargetPercent}
-          aria-label={`${row.title} 진도 배정`}
-          aria-valuetext={`${row.plannedProgressSessions}/${progressTargetSessionCount}회 배정`}
-          className="h-1.5"
-        />
-      ) : null}
-    </div>
-  );
+function CurriculumSessions({ row }: { row: CurriculumRow }) {
+  return <div className="space-y-1 text-sm tabular-nums">
+    <p>{row.totalSessions > 0 ? `${row.totalSessions}회` : "—"}</p>
+    <p className="text-xs text-muted-foreground">{row.nextSession?.label ? `다음 ${row.nextSession.label}` : row.totalSessions > 0 ? "예정된 일정 없음" : ""}</p>
+  </div>;
 }
 
 function CurriculumWorkspaceSkeleton() {
@@ -348,29 +296,23 @@ export function AcademicCurriculumWorkspace() {
     [renderData?.filterOptions],
   );
   const model = useMemo(() => {
-    const derived = buildCurriculumWorkspaceModel({
-      precomputedRows: Array.isArray(page.rows) ? page.rows : [],
-      numbered: true,
-    });
     const optionValues = (key: string) => Array.isArray(filterOptions[key])
       ? (filterOptions[key] as unknown[]).map((value) => text(value)).filter(Boolean)
       : [];
     return {
-      ...derived,
+      rows: Array.isArray(page.rows) ? page.rows : [],
       statusOptions: optionValues("statuses"),
       subjectOptions: optionValues("subjects"),
       gradeOptions: optionValues("grades"),
       teacherOptions: optionValues("teachers"),
       classroomOptions: optionValues("classrooms"),
       summary: {
-        ...derived.summary,
+
         classCount: Number(stats.total || 0),
         managedClassCount: Number(stats.managedClassCount || 0),
         totalSessions: Number(stats.totalSessions || 0),
         completedSessions: Number(stats.completedSessions || 0),
         pendingSessions: Number(stats.pendingSessions || 0),
-        linkedTextbooks: Number(stats.linkedTextbooks || 0),
-        unlinkedClassCount: Number(stats.unlinkedClassCount || 0),
         noScheduleClassCount: Number(stats.noScheduleClassCount || 0),
         updateNeededClassCount: Number(stats.updateNeededClassCount || 0),
         completedClassCount: Number(stats.completedClassCount || 0),
@@ -580,8 +522,7 @@ export function AcademicCurriculumWorkspace() {
     const rowDesignAction = getCurriculumDesignAction(row);
     return (
       <div className="flex items-center justify-between gap-3 md:grid md:justify-normal md:justify-items-end md:gap-2" data-testid="curriculum-row-next-action">
-        <p className="min-w-0 break-words text-xs leading-5 text-muted-foreground md:text-right">{rowDesignAction.reason}</p>
-        <Button asChild variant="outline" size="sm" className="h-9 shrink-0 gap-1.5 rounded-md px-2.5 text-xs md:h-8">
+        <Button asChild variant="outline" size="sm" className="shrink-0 gap-1.5">
           <Link
             href={buildLessonDesignHref(
               row.id,
@@ -633,21 +574,17 @@ export function AcademicCurriculumWorkspace() {
           className="flex flex-wrap gap-1 border-b border-border/70 bg-muted/30 p-2 sm:px-3"
         >
           {curriculumWorkQueueItems.map((item) => (
-            <button
+            <Button
               key={`curriculum-work-queue-${item.value}`}
               type="button"
+              size="sm"
+              variant={viewMode === item.value ? "secondary" : "ghost"}
               aria-pressed={viewMode === item.value}
-              className={[
-                "flex min-h-9 items-center gap-2 rounded-md border px-2.5 text-xs font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring motion-reduce:transition-none",
-                viewMode === item.value
-                  ? "border-border/70 bg-background text-foreground shadow-xs"
-                  : "border-transparent text-muted-foreground hover:bg-background/70 hover:text-foreground active:bg-muted",
-              ].join(" ")}
               onClick={() => setViewMode(item.value)}
             >
               <span className="whitespace-nowrap">{item.label}</span>
               <span className="tabular-nums text-muted-foreground">{renderData ? item.count : "—"}</span>
-            </button>
+            </Button>
           ))}
         </div>
         <p role="status" className="sr-only">
@@ -686,10 +623,8 @@ export function AcademicCurriculumWorkspace() {
                       <dl className="grid grid-cols-[2.5rem_minmax(0,1fr)] gap-x-3 gap-y-3">
                         <dt className="text-xs leading-5 text-muted-foreground">일정</dt>
                         <dd><CurriculumSchedule row={row} /></dd>
-                        <dt className="text-xs leading-5 text-muted-foreground">교재</dt>
-                        <dd><CurriculumTextbooks row={row} /></dd>
-                        <dt className="text-xs leading-5 text-muted-foreground">진도</dt>
-                        <dd><CurriculumProgress row={row} /></dd>
+                        <dt className="text-xs leading-5 text-muted-foreground">회차</dt>
+                        <dd><CurriculumSessions row={row} /></dd>
                       </dl>
                       <div className="border-t border-border/60 pt-3">{renderRowAction(row)}</div>
                     </article>
@@ -704,14 +639,13 @@ export function AcademicCurriculumWorkspace() {
                   aria-label="수업계획 목록"
                   tabIndex={0}
                 >
-                  <Table className="min-w-[920px] table-fixed">
+                  <Table className="w-full min-w-[760px] table-fixed">
                     <TableHeader>
                       <DataTableHeaderRow>
-                        <DataTableHeaderCell className="z-10 w-[25%]">수업</DataTableHeaderCell>
-                        <DataTableHeaderCell className="z-10 w-[20%]">일정</DataTableHeaderCell>
-                        <DataTableHeaderCell className="z-10 w-[24%]">수업교재</DataTableHeaderCell>
-                        <DataTableHeaderCell className="z-10 w-[17%]">진도 배정</DataTableHeaderCell>
-                        <DataTableHeaderCell className="z-10 w-[14%] text-right">다음 작업</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[30%]">수업</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[35%]">정규 시간표</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[23%]">편성 회차</DataTableHeaderCell>
+                        <DataTableHeaderCell className="w-[12%] text-right"><span className="sr-only">일정 편성</span></DataTableHeaderCell>
                       </DataTableHeaderRow>
                     </TableHeader>
                     <TableBody>
@@ -729,8 +663,7 @@ export function AcademicCurriculumWorkspace() {
                           >
                             <DataTableBodyCell wrap className="py-3 align-top"><CurriculumClassIdentity row={row} /></DataTableBodyCell>
                             <DataTableBodyCell wrap className="py-3 align-top"><CurriculumSchedule row={row} /></DataTableBodyCell>
-                            <DataTableBodyCell wrap className="py-3 align-top"><CurriculumTextbooks row={row} /></DataTableBodyCell>
-                            <DataTableBodyCell wrap className="py-3 align-top"><CurriculumProgress row={row} /></DataTableBodyCell>
+                            <DataTableBodyCell wrap className="py-3 align-top"><CurriculumSessions row={row} /></DataTableBodyCell>
                             <DataTableBodyCell wrap className="py-3 align-top">{renderRowAction(row)}</DataTableBodyCell>
                           </DataTableBodyRow>
                         );

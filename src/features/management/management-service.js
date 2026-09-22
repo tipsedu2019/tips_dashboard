@@ -1,3 +1,4 @@
+import { buildClassTextbookUsage } from "./class-textbook-usage.ts";
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
 import {
   ACADEMIC_SUBJECT_VALUES,
@@ -1454,6 +1455,9 @@ export function buildClassPayload(record = {}, options = {}) {
       ? getArrayField(record, "waitlist_ids", "waitlistIds")
       : getArrayField(record, "waitlist_student_ids", "waitlistStudentIds"),
     textbook_ids: getArrayField(record, "textbook_ids", "textbookIds"),
+    ...(Object.hasOwn(record, "textbook_usage") || Object.hasOwn(record, "textbookUsage")
+      ? { textbook_usage: buildClassTextbookUsage(record.textbook_usage ?? record.textbookUsage, getArrayField(record, "textbook_ids", "textbookIds")) }
+      : {}),
   };
 }
 

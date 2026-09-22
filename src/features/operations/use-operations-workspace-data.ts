@@ -55,7 +55,7 @@ function isDenseResult(value: unknown): value is DenseResult {
 type NumberedResult = import("./operations-read-service.js").ClassScheduleNumberedPage;
 type PageState = import("@/lib/numbered-page-controller").NumberedPageSnapshot<NumberedResult["rows"][number]> & Partial<NumberedResult>;
 
-export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) {
+export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest, { enabled = true }: { enabled?: boolean } = {}) {
   const { user, role, loading: authLoading } = useAuth();
   const actorScope = !authLoading && user?.id && role ? `${user.id}:${role}` : null;
   const service = useMemo(() => supabase && actorScope
@@ -117,7 +117,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
   useEffect(() => {
     const acknowledgingPageScope = pageScopeAdoption.current;
     pageScopeAdoption.current = false;
-    if (!service || !isNumbered || !size.ready) return;
+    if (!enabled || !service || !isNumbered || !size.ready) return;
     const previous = desired.current;
     const restored = !previous || previous.service !== service || previous.navigationKey !== navigationKey;
     const scopeChanged = !previous || previous.fingerprint !== fingerprint;
@@ -127,10 +127,10 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     const scope = !restored && !scopeChanged ? previous.scope : fingerprint;
     desired.current = { service, fingerprint, navigationKey, scope, pageSize: size.pageSize, preferenceRevision };
     void controller.current?.load({ scope, page: restored ? restoredPage : 1, pageSize: size.pageSize });
-  }, [controller, fingerprint, isNumbered, navigationKey, preferenceRevision, restoredPage, service, size.pageSize, size.ready]);
+  }, [controller, enabled, fingerprint, isNumbered, navigationKey, preferenceRevision, restoredPage, service, size.pageSize, size.ready]);
 
   const loadRange = useCallback(async () => {
-    if (!service || isNumbered || serviceRef.current !== service) return;
+    if (!enabled || !service || isNumbered || serviceRef.current !== service) return;
     const revision = ++rangeRevision.current;
     setRangeLoading(true); setRangeError(null);
     try {
@@ -144,7 +144,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     } finally {
       if (serviceRef.current === service && revision === rangeRevision.current) setRangeLoading(false);
     }
-  }, [fingerprint, isNumbered, service, stableRequest]);
+  }, [enabled, fingerprint, isNumbered, service, stableRequest]);
   useEffect(() => {
     void loadRange();
     const revision = rangeRevision.current;
@@ -155,7 +155,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
   const [catalogError, setCatalogError] = useState<{ service: typeof service; message: string } | null>(null);
   const catalogRevision = useRef(0);
   const loadCatalogs = useCallback(async () => {
-    if (!service || serviceRef.current !== service) return;
+    if (!enabled || !service || serviceRef.current !== service) return;
     const revision = ++catalogRevision.current;
     setCatalogError(null);
     try {
@@ -165,7 +165,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
       if (serviceRef.current === service && catalogRevision.current === revision)
         setCatalogError({ service, message: getErrorMessage(error, "운영 선택 목록을 불러오지 못했습니다.") });
     }
-  }, [service]);
+  }, [enabled, service]);
   useEffect(() => {
     setCatalogs(null); setCatalogError(null);
     void loadCatalogs();
@@ -202,10 +202,10 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest) 
     setPreferenceRevision((revision) => revision + 1);
   }, [service, persistPageSizePreference]);
   const refresh = useCallback(() => {
-    if (!service || serviceRef.current !== service) return Promise.resolve();
+    if (!enabled || !service || serviceRef.current !== service) return Promise.resolve();
     if (catalogError?.service === service) void loadCatalogs();
     return isNumbered ? controller.current?.retry() || Promise.resolve() : loadRange();
-  }, [catalogError, controller, isNumbered, loadCatalogs, loadRange, service]);
+  }, [enabled, catalogError, controller, isNumbered, loadCatalogs, loadRange, service]);
   const loadEventDetail = useCallback(async (input: Parameters<NonNullable<typeof service>["loadEventDetail"]>[0]) => {
     if (!service || serviceRef.current !== service) throw new Error("operations_client_missing");
     const detail = await service.loadEventDetail(input);
