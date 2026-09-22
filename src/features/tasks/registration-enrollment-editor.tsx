@@ -18,6 +18,7 @@ import { Textarea } from "@/components/ui/textarea"
 
 import { RegistrationAdmissionChecklist } from "./registration-admission-progress"
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationTextbookSelect } from "./registration-textbook-select"
 import { RegistrationSaveButton } from "./registration-save-button"
 
 import {
@@ -530,14 +531,14 @@ export function RegistrationEnrollmentEditor({
       let changed = false
       const next = current.map((row) => {
         const detail = row.classId ? classDetailById[row.classId] : null
-        if (!detail || row.textbookId || row.textbookExplicitlyCleared) return row
+        if (!detail || row.textbookIds.length > 0 || row.textbookExplicitlyCleared) return row
         const withDefault = applyRegistrationEnrollmentClassSelection(row, {
           classItem: detail,
           availableTextbookIds: textbookIds,
         })
         if (!withDefault.textbookId) return row
         changed = true
-        return { ...row, textbookId: withDefault.textbookId }
+        return { ...row, textbookId: withDefault.textbookId, textbookIds: withDefault.textbookIds }
       })
       return changed ? next : current
     })
@@ -816,23 +817,24 @@ export function RegistrationEnrollmentEditor({
                 disabled={!canEditRows || saving}
               />
             </Label>
-            <Label className="grid gap-1.5">
-              <span>교재</span>
-              <RegistrationSelect
-                aria-label={`${track.subject} 수업 ${index + 1} 교재 선택`}
-                value={row.textbookId}
-                placeholder="선택 안 함 · 이미 보유"
-                options={[
-                  { value: "", label: "선택 안 함 · 이미 보유" },
-                  ...linkedTextbooks.map((textbook) => ({ value: textbook.id, label: textbook.label })),
-                ]}
-                onValueChange={(value) => updateRow(row.clientKey, {
-                  textbookId: value,
-                  textbookExplicitlyCleared: value === "",
-                })}
+            <div className="grid min-w-0 gap-1.5">
+              <Label htmlFor={`registration-textbooks-${row.clientKey}`}>교재</Label>
+              <RegistrationTextbookSelect
+                id={`registration-textbooks-${row.clientKey}`}
+                label={`${track.subject} 수업 ${index + 1} 교재 선택`}
+                values={row.textbookIds}
+                options={linkedTextbooks}
+                onValuesChange={(values) => {
+                  setRowsValidationError("")
+                  updateRow(row.clientKey, {
+                    textbookId: values[0] || "",
+                    textbookIds: values,
+                    textbookExplicitlyCleared: values.length === 0,
+                  })
+                }}
                 disabled={!canEditRows || saving || !row.classId}
               />
-            </Label>
+            </div>
             <Label className="grid gap-1.5">
               <span>수업 시작 일정</span>
               {observationSelected && currentMatchingObservation ? (

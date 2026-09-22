@@ -211,6 +211,7 @@ test("new enrollment rows keep stable keys and selecting a class defaults its li
   assert.deepEqual(serializeRegistrationEnrollmentRows([selected])[0], {
     classId: "eng-a",
     textbookId: "book-a",
+    textbookIds: ["book-a"],
     classStartDate: null,
     classStartSessionKey: null,
     classStartLessonSessionId: null,
@@ -630,7 +631,7 @@ test("admission processing validates selected schedule and optional textbook per
   ])
   assert.deepEqual(getRegistrationEnrollmentBlockers({
     subject: "영어",
-    rows: [{ ...row, textbookId: "", classStartSessionKey: "2026-07-20:1", classStartSession: "1회차" }],
+    rows: [{ ...row, textbookId: "", textbookIds: [], classStartSessionKey: "2026-07-20:1", classStartSession: "1회차" }],
     classes: [{ id: "eng-a", subject: "영어" }],
     availableTextbookIds: ["book-a"],
     validScheduleSessionKeysByClassId: { "eng-a": ["2026-07-20:1"] },
@@ -1383,4 +1384,39 @@ test("canceling an add-class batch restores a track that still has enrolled clas
     hasSurvivingEnrolledRows: false,
     destination: "waiting",
   }), "waiting")
+})
+
+
+test("multiple enrollment textbooks survive save hydration while legacy and explicit empty selections remain distinct", () => {
+  const legacy = restoreRegistrationEnrollmentDraft({ id: "old-row", textbookId: "book-a" })
+  assert.deepEqual(legacy.textbookIds, ["book-a"])
+  const multiple = createRegistrationEnrollmentDraft({ clientKey: "multi", classId: "eng-a", textbookIds: ["book-a", "book-b", "book-a"] })
+  const payload = serializeRegistrationEnrollmentRows([multiple])[0]
+  assert.equal(payload.textbookId, "book-a")
+  assert.deepEqual(payload.textbookIds, ["book-a", "book-b"])
+  const [saved] = mergeSavedRegistrationEnrollmentRows([multiple], [{ ...payload, id: "saved-row" }])
+  assert.equal(saved.clientKey, "multi")
+  assert.deepEqual(restoreRegistrationEnrollmentDraft(saved).textbookIds, ["book-a", "book-b"])
+  const cleared = restoreRegistrationEnrollmentDraft({ ...saved, textbookIds: [], textbookId: null })
+  assert.equal(cleared.textbookExplicitlyCleared, true)
+  assert.deepEqual(serializeRegistrationEnrollmentRows([cleared])[0].textbookIds, [])
+  assert.deepEqual(applyRegistrationEnrollmentClassSelection(saved, {
+    classItem: { id: "eng-b", textbookIds: ["book-c", "book-d"] },
+    availableTextbookIds: ["book-a", "book-b", "book-c", "book-d"],
+  }).textbookIds, ["book-c"])
+})
+
+test("every selected textbook must be available and linked to the enrollment class", () => {
+  const input = {
+    subject: "영어", classes: [{ id: "eng-a", subject: "영어" }],
+    availableTextbookIds: ["book-a", "book-b"],
+    validTextbookIdsByClassId: { "eng-a": ["book-a"] },
+  }
+  const row = createRegistrationEnrollmentDraft({ clientKey: "multi", classId: "eng-a", textbookIds: ["book-a", "book-b"] })
+  assert.deepEqual(getRegistrationEnrollmentBlockers({ ...input, rows: [row] }), [
+    { rowId: "multi", field: "textbookId", message: "선택한 수업에 연결되지 않은 교재" },
+  ])
+  assert.deepEqual(getRegistrationEnrollmentBlockers({ ...input, rows: [{ ...row, textbookIds: ["book-a", "missing"] }] }), [
+    { rowId: "multi", field: "textbookId", message: "선택할 수 없는 교재" },
+  ])
 })

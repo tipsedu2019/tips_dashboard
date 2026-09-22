@@ -519,6 +519,11 @@
       "fileName": "20260922095634_exclude_closed_observation_classes.sql",
       "status": "final",
       "sha256": "d7ee31a9cf9d28edaca22eb491fdc0a37583cc9a683a59dd55b15a996c5de820"
+    },
+    {
+      "fileName": "20260922105632_registration_multiple_textbooks.sql",
+      "status": "final",
+      "sha256": "ac78bfbe76c223ae9467b1c70809aeebc8a431ee85954e65c3b60b80748314d9"
     }
   ]
 }

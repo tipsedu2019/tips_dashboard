@@ -8338,7 +8338,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     }
     if (registrationFixtureRequested) {
       if (registrationFixtureEnabled) {
-        setData(registrationFixtureStateRef.current!.workspaceData)
+        const fixtureData = registrationFixtureStateRef.current!.workspaceData
+        setData(registrationOptionsDataRef.current
+          ? mergeOpsTaskWorkspaceOptionData(fixtureData, registrationOptionsDataRef.current)
+          : fixtureData)
         setLoading(false)
       }
       return

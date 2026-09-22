@@ -1852,7 +1852,7 @@ test("track summary loader uses the exact safe projection and skips profile look
     observationSummaryVisible: true,
   });
   assert.deepEqual(JSON.parse(JSON.stringify(enrollmentDetailRows)), [{
-      classId: "class-1", textbookId: null, classStartDate: "2026-08-10",
+      classId: "class-1", textbookId: null, textbookIds: [], classStartDate: "2026-08-10",
       classStartSessionKey: null, classStartLessonSessionId: null,
       classStartSession: "청강 회차",
       classStartSourceObservationId: "75000000-0000-4000-8000-000000000001",
@@ -4645,4 +4645,31 @@ test("consultation records use their dedicated data-only RPC", async () => {
     outcome: "waiting",
     note: "보호자가 다음 학기 반을 요청함",
   });
+});
+
+
+test("enrollment detail save sends and hydrates every selected textbook, including explicit clearing", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const books = ["74000000-0000-4000-8000-000000000041", "74000000-0000-4000-8000-000000000042"];
+  const harness = createClient({ rpcHandler(name, args) {
+    assert.equal(name, "save_registration_enrollment_details_v1");
+    return { data: { trackId: args.p_track_id, rows: args.p_rows }, error: null };
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  for (const selected of [books, []]) {
+    const result = await service.saveRegistrationEnrollmentDetails({
+      trackId: "74000000-0000-4000-8000-000000000030",
+      rows: [{ classId: "74000000-0000-4000-8000-000000000010", textbookIds: selected }],
+      requestKey: `textbooks-${selected.length}`,
+    });
+    assert.deepEqual(Array.from(harness.rpcCalls.at(-1)[1].p_rows[0].textbookIds), selected);
+    assert.deepEqual(Array.from(result.rows[0].textbookIds), selected);
+    assert.equal(result.rows[0].textbookId, selected[0] ?? null);
+  }
+  const legacy = await service.saveRegistrationEnrollmentDetails({
+    trackId: "74000000-0000-4000-8000-000000000030",
+    rows: [{ classId: "74000000-0000-4000-8000-000000000010", textbookId: books[0] }],
+    requestKey: "legacy-textbook",
+  });
+  assert.deepEqual(Array.from(legacy.rows[0].textbookIds), [books[0]]);
 });

@@ -13,7 +13,7 @@ import {
   getRegistrationObservationListSummary,
   type RegistrationCaseListViewItem,
 } from "./registration-case-list-model"
-import { getRegistrationSummaryActionPermissions } from "./registration-track-model.js"
+import { getRegistrationEnrollmentTextbookIds, getRegistrationSummaryActionPermissions } from "./registration-track-model.js"
 import type { OpsClassOption, OpsTextbookOption } from "./ops-task-service"
 import type { OpsRegistrationWorkflowStatus } from "./registration-track-service"
 import type { RegistrationObservationTrackWorkflowStatus } from "./registration-observation-model"
@@ -273,7 +273,10 @@ function RegistrationCaseProcessCells({
     return labels.length > 0 ? labels.join(", ") : item.task.className || "미정"
   }
   const enrollmentTextbookLabel = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => {
-    const labels = enrollmentRows(track).map((row) => row.textbookId ? textbookLabelById.get(row.textbookId) || "교재 정보 확인 필요" : "보유").filter(Boolean)
+    const labels = enrollmentRows(track).map((row) => {
+      const ids = getRegistrationEnrollmentTextbookIds(row)
+      return ids.length ? ids.map((id) => textbookLabelById.get(id) || "교재 정보 확인 필요").join(", ") : "보유"
+    }).filter(Boolean)
     return labels.length > 0 ? labels.join(", ") : registration?.textbookPreparation || "미정"
   }
   const enrollmentStartLabel = (track: RegistrationCaseListViewItem["matchingTracks"][number]) => {
