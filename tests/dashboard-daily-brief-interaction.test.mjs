@@ -206,7 +206,6 @@ test("daily brief renders dated counts, real timestamps, full source links, empt
   assert.equal(container.querySelectorAll("ul li").length, 5)
   assert.match(container.textContent, /이전 조회 일정을 표시/)
   assert.match(container.textContent, /14:30 기준/)
-  assert.deepEqual([...container.querySelectorAll("nav a")].map((link) => link.getAttribute("href")), ["/admin/registration", "/admin/academic-calendar", "/admin/statistics"])
   await act(async () => container.querySelector("button[aria-label='일정 새로고침']").dispatchEvent(new dom.window.MouseEvent("click", { bubbles: true })))
   assert.equal(retries, 2)
 })

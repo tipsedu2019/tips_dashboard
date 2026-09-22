@@ -13,12 +13,6 @@ const countItems = [
   { key: "observationClasses", label: "청강", kind: "observation" },
 ] as const
 
-const shortcuts = [
-  { href: "/admin/registration", label: "등록" },
-  { href: "/admin/academic-calendar", label: "학사" },
-  { href: "/admin/statistics", label: "통계" },
-]
-
 const dateFormatter = new Intl.DateTimeFormat("ko-KR", {
   timeZone: "Asia/Seoul",
   month: "long",
@@ -124,12 +118,6 @@ export function DashboardDailyBrief() {
         ) : null}
         {brief && total > 5 && brief.upcoming.length > 0 ? <Link href="/admin/registration?view=calendar" className={`${registrationLinkClass} justify-self-start`}>등록 일정 보기</Link> : null}
       </div>
-
-      <nav className="flex flex-wrap gap-x-6" aria-label="바로가기">
-        {shortcuts.map((shortcut) => (
-          <Link key={shortcut.href} href={shortcut.href} className="inline-flex min-h-11 items-center text-sm text-muted-foreground underline-offset-4 hover:text-foreground hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">{shortcut.label}</Link>
-        ))}
-      </nav>
     </section>
   )
 }
