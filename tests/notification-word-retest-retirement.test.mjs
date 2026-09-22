@@ -10,7 +10,7 @@ const englishResultContract = getNotificationContentContract({ workflowKey: "wor
 
 test("Google Chat settings exclude all task and word retest rules", async () => {
   assert.deepEqual(types.NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS?.map(({ key }) => key), [
-    "registration", "transfer", "withdrawal", "makeup_requests", "approvals",
+    "registration", "transfer", "withdrawal", "makeup_requests",
   ])
   assert.ok(types.NOTIFICATION_EVENT_KEYS_BY_WORKFLOW.word_retests.includes("word_retest.result_reported"))
   const panel = await readFile(new URL("../src/features/notifications/notification-control-panel.tsx", import.meta.url), "utf8")
