@@ -166,22 +166,40 @@
   justify-content: flex-start;
   gap: 5px;
   overflow: hidden;
-  border: 0;
-  border-left: 3px solid;
-  border-radius: var(--radius-control);
-  padding: 9px 8px;
+  border: 1px solid color-mix(in srgb, var(--timetable-block-accent) 24%, transparent);
+  border-radius: var(--radius-surface);
+  padding: 10px 10px 10px 14px;
   text-align: left;
   line-height: 1.4;
-  transition: filter var(--motion-duration-control) var(--motion-easing-control);
+  transition: border-color var(--motion-duration-control) var(--motion-easing-control), filter var(--motion-duration-control) var(--motion-easing-control);
+}
+
+.scope :global(.timetable-block::before) {
+  content: '';
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 5px;
+  width: 2px;
+  border-radius: var(--radius-control);
+  background: var(--timetable-block-accent);
+  pointer-events: none;
 }
 
 .scope :global(.timetable-block:hover) {
-  filter: brightness(0.97);
+  border-color: var(--timetable-block-accent);
+  filter: brightness(0.98);
 }
 
 .scope :global(.timetable-block.is-compact) {
   gap: 4px;
-  padding: 7px 5px;
+  padding: 8px 7px 8px 12px;
+}
+
+.scope :global(.timetable-block.is-compact::before) {
+  top: 8px;
+  bottom: 8px;
+  left: 4px;
 }
 
 .scope :global(.block-name) {
@@ -193,7 +211,7 @@
   -webkit-line-clamp: 3;
   overflow-wrap: anywhere;
   word-break: keep-all;
-  color: var(--foreground);
+  color: color-mix(in srgb, currentColor 45%, var(--foreground));
   font-size: 13px;
   font-weight: 600;
   letter-spacing: 0;
@@ -208,6 +226,16 @@
   line-height: 1.4;
 }
 
+.scope :global(.block-details) {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  min-height: 0;
+  overflow: hidden;
+  color: var(--muted-foreground);
+}
+
 .scope :global(.block-subject) {
   flex-shrink: 0;
   white-space: nowrap;
@@ -217,8 +245,7 @@
 .scope :global(.block-info) {
   display: flex;
   gap: 4px;
-  margin-top: auto;
-  color: var(--foreground);
+  margin-top: 0;
 }
 
 .scope :global(.info-label) { flex: 0 0 auto; }
@@ -235,8 +262,7 @@
 .scope :global(.timetable-block.is-compact .block-name) { font-size: 12px; }
 .scope :global(.timetable-block.is-short) { padding-block: 4px; gap: 2px; }
 .scope :global(.timetable-block.is-short .block-name) { -webkit-line-clamp: 2; }
-.scope :global(.timetable-block.is-short .block-info),
-.scope :global(.timetable-block.is-short .block-subject) { display: none; }
+.scope :global(.timetable-block.is-short .block-details) { display: none; }
 
 @media (prefers-reduced-motion: reduce) {
   .scope :global(.timetable-block) { transition: none; }

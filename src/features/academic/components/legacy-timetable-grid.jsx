@@ -150,7 +150,7 @@ function TimetableBlock({
         title={!block.editable && !isGhost && block.editableReason ? block.editableReason : undefined}
         style={{
           backgroundColor: block.backgroundColor || 'var(--bg-surface)',
-          borderLeftColor: block.borderColor || 'var(--border-color)',
+          '--timetable-block-accent': block.borderColor || 'var(--border)',
           color: block.textColor || 'var(--text-primary)',
           height: String((block.endSlot - block.startSlot) * slotHeight - 2) + 'px',
           position: 'relative',
@@ -202,21 +202,23 @@ function TimetableBlock({
         ) : null}
 
         <div className="block-name">{block.title}</div>
-        {subjectLabel ? <div className="block-subject">{subjectLabel}</div> : null}
-        {(block.detailLines || []).map((line, index) => (
-          <div
-            key={block.key + '-detail-' + index}
-            className="block-info"
-            style={line.subtle ? { marginTop: 2, fontSize: 10, color: 'var(--text-muted)' } : undefined}
-          >
-            {line.label ? (
-              <span className="info-label" style={line.subtle ? { opacity: 0.7 } : undefined}>
-                {line.label}
-              </span>
-            ) : null}
-            <span className="block-value">{line.value}</span>
-          </div>
-        ))}
+        <div className="block-details">
+          {subjectLabel ? <div className="block-subject">{subjectLabel}</div> : null}
+          {(block.detailLines || []).map((line, index) => (
+            <div
+              key={block.key + '-detail-' + index}
+              className="block-info"
+              style={line.subtle ? { marginTop: 2, fontSize: 10, color: 'var(--text-muted)' } : undefined}
+            >
+              {line.label ? (
+                <span className="info-label" style={line.subtle ? { opacity: 0.7 } : undefined}>
+                  {line.label}
+                </span>
+              ) : null}
+              <span className="block-value">{line.value}</span>
+            </div>
+          ))}
+        </div>
       </div>
 
       {hasTooltip && isTooltipOpen && typeof document !== 'undefined'
