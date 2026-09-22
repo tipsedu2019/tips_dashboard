@@ -1618,7 +1618,7 @@ test("workspace derives tab counts from application cases before filtering the s
   assert.match(source, /emptyLabel=\{registrationEmptyLabel\}/);
   assert.match(
     source,
-    /loading \? \(\s*isRegistrationWorkspace \? \([\s\S]*?등록 업무를 불러오는 중입니다\./,
+    /loading && !isWithdrawalWorkspace && !isTransferWorkspace \? \(\s*isRegistrationWorkspace \? \([\s\S]*?등록 업무를 불러오는 중입니다\./,
   );
 });
 
