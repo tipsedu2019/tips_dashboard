@@ -1921,6 +1921,7 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
     const ranges = changedLineRanges({ root, baseSha, headSha, includeWorktree, file, baselineExists: baselineSource !== null })
     const baseDebt = baselineSource === null ? new Map() : countedViolations(baselineSource, owner, file)
     const baseOccurrences = baselineSource === null ? new Set() : occurrenceKeys(baselineSource, owner, file)
+    const baseViolations = baselineSource === null ? [] : inspectQuerySurfaceSource({ surface: owner, file, source: baselineSource })
     const sourceViolations = inspectQuerySurfaceSource({ surface: owner, file, source })
     const sourceDebt = countedViolations(source, owner, file)
     for (const violation of sourceViolations) {
@@ -1928,7 +1929,14 @@ export async function verifyQuerySurfaceBudget({ surface, baseSha, headSha, incl
         const expected = manifestDebt.get(key)
         const allowedDebt = manifestDebt.has(key) && baseDebt.has(key)
           && sourceDebt.get(key) <= baseDebt.get(key)
-          && baseOccurrences.has(`${key}\u0000${expected.occurrenceFingerprint}`)
+          // A harmless predecessor insertion is allowed by the occurrence
+          // comparison. It must remain allowed when that commit becomes the
+          // next diff base, even though its predecessor hash has changed.
+          // Compare both historical and actual-base positions so moving across
+          // a newly introduced statement cannot inherit the allowance.
+          && baseViolations.some((baseline) => exactDebtKey(baseline) === key
+            && !queryOccurrenceRelocated(expected.occurrenceContext, baseline.occurrenceContext)
+            && !queryOccurrenceRelocated(baseline.occurrenceContext, violation.occurrenceContext))
           && !queryOccurrenceRelocated(expected.occurrenceContext, violation.occurrenceContext)
         // An immutable deadline may be declared outside the query function.
         // Compare raw baseline diagnostics by exact chain/occurrence so a

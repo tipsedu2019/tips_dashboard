@@ -1762,6 +1762,44 @@ test("an occurrence-bound manifest debt permits a harmless predecessor insertion
   assert.deepEqual(result, { ok: true, violations: [] })
 })
 
+test("a permitted predecessor insertion remains valid as the next diff baseline", async () => {
+  const file = "src/features/tasks/list-tasks.ts"
+  const original = `async function load(client) {
+  const marker = 1
+  const result = client.from("ops_tasks").select("*").limit(30).order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return result
+}
+`
+  const root = await createFixtureRepository({ [file]: original })
+  try {
+    const historicalSha = execFileSync("git", ["rev-parse", "HEAD"], { cwd: root, encoding: "utf8" }).trim()
+    const debt = inspectQuerySurfaceSource({ surface: "tasks", file, source: original })
+      .find((violation) => violation.reason === "list_select_star")
+    const debtManifest = [{ surface: "tasks", file, symbol: "load", violation: debt.reason,
+      baselineSha: historicalSha, fingerprint: debt.fingerprint, occurrenceFingerprint: debt.occurrenceFingerprint }]
+    const inserted = original.replace("  const result", "  const harmless = true\n  const result")
+    await writeFile(join(root, file), inserted)
+    const baseSha = commitFixture(root)
+    assert.deepEqual(await verifyQuerySurfaceBudget({ surface: "tasks", baseSha: historicalSha, headSha: baseSha, root, debtManifest }), { ok: true, violations: [] })
+
+    const candidate = inserted.replace("  return result", "  const anotherHarmless = true\n  return result")
+    await writeFile(join(root, file), candidate)
+    const headSha = commitFixture(root)
+    assert.deepEqual(await verifyQuerySurfaceBudget({ surface: "tasks", baseSha, headSha, root, debtManifest }), { ok: true, violations: [] })
+
+    // The insertion is not a new allowance for moving the query across a
+    // statement that already existed in the actual diff baseline.
+    const moved = candidate.replace("  const harmless = true\n", "")
+      .replace("  return result", "  const harmless = true\n  return result")
+    await writeFile(join(root, file), moved)
+    const movedSha = commitFixture(root)
+    assert.ok((await verifyQuerySurfaceBudget({ surface: "tasks", baseSha, headSha: movedSha, root, debtManifest })).violations
+      .some((violation) => violation.reason === "list_select_star"))
+  } finally {
+    await rm(root, { recursive: true, force: true })
+  }
+})
+
 test("root controls fail closed for spread, shorthand, and aliased relation options", async () => {
   const result = await verifyFixture({
     source: `async function load(client, foreignTable) {
