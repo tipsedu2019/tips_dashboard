@@ -1,5 +1,6 @@
 begin;
 select no_plan();
+select ok((select convalidated from pg_constraint where conrelid='public.classes'::regclass and conname='classes_textbook_usage_valid'),'textbook usage constraint is validated by the separate final migration');
 set local timezone='Asia/Seoul';
 set local statement_timeout='45s';
 create function pg_temp.fid(n integer) returns uuid language sql immutable as $$

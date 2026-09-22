@@ -508,7 +508,12 @@
     {
       "fileName": "20260922054047_curriculum_schedule_and_class_textbooks.sql",
       "status": "final",
-      "sha256": "d600782819e5509c431fd375c5948707d7e9e7e548317597ac878ccf0848c4e5"
+      "sha256": "98bb874ad81b391cfe4f404db53820713f62817b478c626b6f673d993598e9a3"
+    },
+    {
+      "fileName": "20260922064700_validate_class_textbook_usage.sql",
+      "status": "final",
+      "sha256": "6f4cb5e2df771c54eeb00100b62c3a512749fa4942384be141fbdd8565239da5"
     }
   ]
 }

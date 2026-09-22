@@ -74,7 +74,6 @@ create trigger class_textbook_usage_prune before insert or update of textbook_id
 for each row execute function dashboard_private.prune_class_textbook_usage_v1();
 alter table public.classes add constraint classes_textbook_usage_valid
 check (dashboard_private.class_textbook_usage_valid_v1(textbook_usage,textbook_ids)) not valid;
-alter table public.classes validate constraint classes_textbook_usage_valid;
 
 -- Patch the final active reader; retain its student status, ACL and all other branches.
 do $$
