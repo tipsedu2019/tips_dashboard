@@ -45,6 +45,8 @@ jobs:
             tests/management-student-lifecycle-history.test.mjs
       - name: Verify dialog and sidebar focus restoration
         run: node --test --experimental-strip-types tests/dialog-opener-focus.test.mjs tests/sidebar-focus-return.test.mjs tests/command-search-navigation.test.mjs
+      - name: Verify dashboard workload reads and refresh isolation
+        run: node --test --experimental-strip-types tests/dashboard-workload.test.mjs tests/dashboard-workload-interaction.test.mjs
       - name: Verify shared dashboard design contracts
         run: |
           node --test --experimental-strip-types \

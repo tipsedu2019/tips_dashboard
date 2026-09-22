@@ -484,6 +484,11 @@
       "fileName": "20260921144020_student_enrollment_status.sql",
       "status": "final",
       "sha256": "8340be5894d4147aea02e66b008456755a8e7b4ff277de63e1effd42b6600a5e"
+    },
+    {
+      "fileName": "20260922012306_dashboard_workload_reads.sql",
+      "status": "final",
+      "sha256": "317cc7f0f90cb94d4ceeaeeea18d02c3a8c2c369e733893a8364154aaef5cfb1"
     }
   ]
 }
