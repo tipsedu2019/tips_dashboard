@@ -39,21 +39,6 @@ export const SECONDARY_PLAN_SCENARIOS = [
     noSendSql: "(select count(*) from public.ops_tasks)=(select ops_tasks from task5_probe_read_before)",
   },
   {
-    name: "approval-list",
-    fixturePath: "supabase/tests/approval_numbered_pages_test.sql",
-    fixtureSha256: "9c72c420667649b46e32f4e5414f157fc21f79a74aa97f90befccfa3d8353cdd",
-    marker: "create temp table approval_eleven as",
-    actorRole: "authenticated teacher fixture actor 801",
-    functionSignature: "public.list_approval_numbered_page_v1(text,integer,integer)",
-    migrationProvenance: [
-      "20260831061736_approval_numbered_pages.sql:f371ec311759886788112090fc0aeaeb9242ffb7f86d98348216eb553cbc799d",
-      "20260831063537_approval_detail_trim_parity.sql:6fb6efd7e5ba2441aa1ce91d23f2903d975c79567e42bea9d061aa5d6bf74c9b",
-    ],
-    countSql: "(public.list_approval_numbered_page_v1('mine',1,10)->>'totalCount')::integer",
-    selectSql: (page) => `public.list_approval_numbered_page_v1('mine',${page},10)`,
-    noSendSql: "(select count(*) from public.approval_events)=(select approval_events from task5_probe_read_before) and (select count(*) from public.approval_comments)=(select approval_comments from task5_probe_read_before)",
-  },
-  {
     name: "makeup-list",
     fixturePath: "supabase/tests/makeup_numbered_pages_test.sql",
     fixtureSha256: "0bb90fcc4ed8b5f7850df7bf69733739ae5f1b023e4a0c8c54e9afb072eeaa75",

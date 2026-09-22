@@ -311,7 +311,7 @@ pnpm build
 
 ## T20 — 남은 화면에 기준을 적용할 작은 카드를 만든다
 
-- 대상: 학사일정, 시간표, 전반, 퇴원, 휴보강, 전자결재, 단어 재시험, 설정.
+- 대상: 학사일정, 시간표, 전반, 퇴원, 휴보강, 단어 재시험, 설정.
 - 첫 산출: 경로별 실제 screenshot, 주요 행동1개, 복잡한 상태1개, shared component 적용 차이표.
 - 그다음: 경로당 카드1개로 title/actions/filters/table/dialog token 정렬. 한 번에 모든 ops-task-workspace를 수정하지 않음.
 - 캘린더에는 목록 pagination을 추가하지 않는다. 동일 기능의 오늘/이전/다음 날짜 제어 위치를 정렬.

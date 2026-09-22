@@ -18,7 +18,6 @@ export const NOTIFICATION_RUNTIME_FLAG_KEYS = Object.freeze([
 export const NOTIFICATION_CUTOVER_ORDER = Object.freeze([
   "tasks",
   "word_retests",
-  "approvals",
   "transfer",
   "withdrawal",
   "makeup_requests",
@@ -31,7 +30,6 @@ export const NOTIFICATION_CUTOVER_ORDER = Object.freeze([
 const OWNER_FLAG = Object.freeze({
   tasks: "notification_control_plane_dispatch_tasks_enabled",
   word_retests: "notification_control_plane_dispatch_word_retests_enabled",
-  approvals: "notification_control_plane_dispatch_approvals_enabled",
   transfer: "notification_control_plane_dispatch_transfer_enabled",
   withdrawal: "notification_control_plane_dispatch_withdrawal_enabled",
   makeup_requests: "notification_control_plane_dispatch_makeup_requests_enabled",
@@ -91,6 +89,9 @@ const METRIC_BLOCKERS = Object.freeze([
 
 export function verifyNotificationCutoverReadiness(evidence) {
   const blockers = []
+  if (evidence?.flags?.notification_control_plane_dispatch_approvals_enabled === true) {
+    blockers.push("approvals_retired")
+  }
   if (!isRecord(evidence) || !exactFlagRegistry(evidence.flags)) {
     blockers.push("runtime_flag_registry_invalid")
   }

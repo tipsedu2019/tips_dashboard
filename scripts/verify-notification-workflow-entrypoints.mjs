@@ -8,7 +8,6 @@ export const NOTIFICATION_WORKFLOW_ENTRYPOINTS = Object.freeze([
   { workflowKey: "transfer", route: "/admin/transfer", page: "src/app/admin/transfer/page.tsx", workspace: "transfer" },
   { workflowKey: "withdrawal", route: "/admin/withdrawal", page: "src/app/admin/withdrawal/page.tsx", workspace: "withdrawal" },
   { workflowKey: "makeup_requests", route: "/admin/makeup-requests", page: "src/app/admin/makeup-requests/page.tsx", workspace: null },
-  { workflowKey: "approvals", route: "/admin/approvals", page: "src/app/admin/approvals/page.tsx", workspace: null },
 ])
 
 export function verifyNotificationWorkflowEntrypoints(evidence) {
@@ -81,7 +80,6 @@ export async function scanNotificationWorkflowEntrypoints(rootUrl) {
   const blockers = []
   const taskWorkspace = await sourceAt(rootUrl, "src/features/tasks/ops-task-workspace.tsx")
   const makeupWorkspace = await sourceAt(rootUrl, "src/features/makeup-requests/makeup-request-workspace.tsx")
-  const approvalWorkspace = await sourceAt(rootUrl, "src/features/approvals/approval-workspace.tsx")
   const settingsPage = await sourceAt(rootUrl, "src/app/admin/settings/notifications/page.tsx")
   const settingsWorkspace = await sourceAt(rootUrl, "src/features/notifications/notification-settings-workspace.tsx")
   const controlPanel = await sourceAt(rootUrl, "src/features/notifications/notification-control-panel.tsx")
@@ -108,13 +106,11 @@ export async function scanNotificationWorkflowEntrypoints(rootUrl) {
     ["transfer", taskWorkspace],
     ["withdrawal", taskWorkspace],
     ["makeup_requests", makeupWorkspace],
-    ["approvals", approvalWorkspace],
   ])
   const routeLocalSourcePaths = new Set([
     ...NOTIFICATION_WORKFLOW_ENTRYPOINTS.map((entry) => entry.page),
     "src/features/tasks/ops-task-workspace.tsx",
     "src/features/makeup-requests/makeup-request-workspace.tsx",
-    "src/features/approvals/approval-workspace.tsx",
   ])
 
   for (const entry of NOTIFICATION_WORKFLOW_ENTRYPOINTS) {

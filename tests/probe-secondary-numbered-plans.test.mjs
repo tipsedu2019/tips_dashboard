@@ -81,17 +81,19 @@ test("accepts only the runner-issued loopback database contract without starting
   );
 });
 
-test("generates approval EXPLAIN SQL without interpolating its literal view through a quoted format string", () => {
-  const approval = SECONDARY_PLAN_SCENARIOS.find((scenario) => scenario.name === "approval-list");
-  const sql = buildMeasurementSql(approval);
-
-  assert.match(sql, /format\(\$plan\$explain \(analyze, buffers, settings, format json\) select public\.list_approval_numbered_page_v1\('mine',%s,10\)\$plan\$,p_page\)/u);
-  assert.doesNotMatch(sql, /format\('.*'mine'/su);
+test("generates EXPLAIN SQL without interpolating literal arguments through a quoted format string", () => {
+  const makeup = SECONDARY_PLAN_SCENARIOS.find((scenario) => scenario.name === "makeup-list");
+  const sql = buildMeasurementSql({
+    ...makeup,
+    selectSql: (page) => `public.list_makeup_numbered_page_v1('{"view":"all"}'::jsonb,${page},10)`,
+  });
+  assert.ok(sql.includes(`format($plan$explain (analyze, buffers, settings, format json) select public.list_makeup_numbered_page_v1('{"view":"all"}'::jsonb,%s,10)$plan$,p_page)`));
+  assert.doesNotMatch(sql, /format\('.*'\{/su);
 });
 
 test("appends private pgTAP bootstrap metadata only after resetting the measured authenticated role", () => {
-  const approval = SECONDARY_PLAN_SCENARIOS.find((scenario) => scenario.name === "approval-list");
-  const sql = buildMeasurementSql(approval);
+  const makeup = SECONDARY_PLAN_SCENARIOS.find((scenario) => scenario.name === "makeup-list");
+  const sql = buildMeasurementSql(makeup);
   const payloadEnd = sql.indexOf("reset role;", sql.indexOf("create temp table task5_probe_payload"));
   const bootstrapMetadata = sql.indexOf("pgtapBootstrap");
 

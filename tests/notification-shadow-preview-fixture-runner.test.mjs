@@ -22,7 +22,7 @@ const identityKey = ({ workflowKey, eventKey, audienceKey, channelKey, ruleVaria
   [workflowKey, eventKey, audienceKey, channelKey, ruleVariantKey].join("|")
 
 const EXPECTED_IDENTITIES = coverageFixture.ruleGroups
-  .filter((group) => group.scopeState === "in_scope")
+  .filter((group) => group.scopeState === "in_scope" && group.workflowKey !== "approvals")
   .flatMap((group) => group.eventKeys.flatMap((eventKey) => (
     group.cells.flatMap((cell) => cell.ruleVariantKeys.map((ruleVariantKey) => ({
       workflowKey: group.workflowKey,
@@ -36,7 +36,7 @@ const EXPECTED_IDENTITIES = coverageFixture.ruleGroups
   .sort((left, right) => identityKey(left).localeCompare(identityKey(right)))
 
 const EXPECTED_IDENTITY_KEYS = EXPECTED_IDENTITIES.map(identityKey)
-const EXPECTED_IDENTITY_COUNT = 200
+const EXPECTED_IDENTITY_COUNT = 164
 
 test("preview fixture runner는 전체 in-scope identity를 exact content와 단일 destination으로 독립 비교한다", async () => {
   const originalFetch = globalThis.fetch

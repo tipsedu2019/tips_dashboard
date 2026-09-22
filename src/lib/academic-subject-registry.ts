@@ -5,7 +5,7 @@ export const ACADEMIC_SUBJECTS = [
     team: "영어팀",
     sortOrder: 10,
     grades: ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3", "고1", "고2", "고3"],
-    capabilities: ["registration", "level_test", "classes", "textbooks", "academic_exam", "subject_chat", "word_retest", "monthly_approval"],
+    capabilities: ["registration", "level_test", "classes", "textbooks", "academic_exam", "subject_chat", "word_retest"],
   },
   {
     key: "math",
@@ -13,7 +13,7 @@ export const ACADEMIC_SUBJECTS = [
     team: "수학팀",
     sortOrder: 20,
     grades: ["초1", "초2", "초3", "초4", "초5", "초6", "중1", "중2", "중3", "고1", "고2", "고3"],
-    capabilities: ["registration", "level_test", "classes", "textbooks", "academic_exam", "subject_chat", "monthly_approval"],
+    capabilities: ["registration", "level_test", "classes", "textbooks", "academic_exam", "subject_chat"],
   },
   {
     key: "science",

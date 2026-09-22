@@ -29,7 +29,6 @@ export const NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES = Object.freeze([
   "supabase/tests/notification_registration_handoffs_test.sql",
   "supabase/tests/notification_transfer_withdrawal_adapters_test.sql",
   "supabase/tests/notification_makeup_adapter_test.sql",
-  "supabase/tests/notification_approval_adapter_test.sql",
   "supabase/tests/notification_system_template_vnext_test.sql",
   "supabase/tests/notification_worker_production_schedule_test.sql",
   "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
@@ -626,8 +625,8 @@ function assertPgTapSource(value) {
 
 async function loadPgTapContract() {
   if (
-    NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES.length !== 14
-    || new Set(NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES).size !== 14
+    NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES.length !== 13
+    || new Set(NOTIFICATION_CONTENT_LOCAL_QA_PGTAP_FILES).size !== 13
   ) {
     fileRefused()
   }

@@ -22,6 +22,8 @@
 - Keep authenticated homepage management and the landing site's existing public data/content APIs in this repository, including their privacy, caching, and invalidation contracts.
 - Do not add custom keyboard shortcuts or shortcut hints. Preserve standard keyboard access, text input, dialog dismissal, and focus restoration.
 
+- Standalone 전자결재 (`/admin/approvals`) is retired. Exclude it from future roadmaps, menu polish, notification activation, and implementation tasks. Historical migrations and audit records are not active feature specifications. 휴보강 approval remains part of its independent workflow.
+
 ### Issue tracker
 
 Issues, PRDs, and decomposed implementation tasks live in this repo's GitHub Issues. See `docs/agents/issue-tracker.md`.

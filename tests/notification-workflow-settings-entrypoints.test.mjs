@@ -3,7 +3,6 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 
 const workspacePaths = [
-  "../src/features/approvals/approval-workspace.tsx",
   "../src/features/makeup-requests/makeup-request-workspace.tsx",
   "../src/features/tasks/ops-task-workspace.tsx",
 ]

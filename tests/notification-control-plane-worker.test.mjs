@@ -32,10 +32,6 @@ const registrationAdapterModuleUrl = new URL(
   "../src/features/notifications/server/adapters/registration-notification-adapter.ts",
   import.meta.url,
 )
-const approvalAdapterModuleUrl = new URL(
-  "../src/features/notifications/server/adapters/approvals-notification-adapter.ts",
-  import.meta.url,
-)
 const workerModuleUrl = new URL(
   "../src/features/notifications/server/notification-worker.ts",
   import.meta.url,
@@ -2081,62 +2077,63 @@ test("worker는 adapter 선검증 취소를 begin-send보다 먼저 확정하고
   assertNoSensitiveValue(finalize.parameters)
 })
 
-test("retired web-push is canceled before the approvals adapter or provider runs", async () => {
-  const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
-  const { createApprovalsNotificationAdapter } = await import(approvalAdapterModuleUrl)
-  const sourceId = "70000000-0000-4000-8000-000000000071"
-  let authoritativeInput = null
-  let providerLookups = 0
-  const adapter = createApprovalsNotificationAdapter({
-    async revalidateAuthoritativeSource(input) {
-      authoritativeInput = clone(input)
-      return { ok: false, status: "canceled", reason: "recipient_revoked" }
-    },
-  })
-  const claim = createDeliveryClaim({
-    workflow_key: "approvals",
-    event_key: "approval.submitted",
-    source_type: "approval_event",
-    source_id: sourceId,
-    source_revision: null,
-    target_generation: "0",
-    channel_key: "web_push",
-    target: {
-      target_kind: "profile",
-      target_key: `profile:${PROFILE_ID}`,
-      target_profile_id: PROFILE_ID,
-      connection_key: null,
-      target_snapshot: { profile_id: PROFILE_ID },
-    },
-  })
-  const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim] })
-  const worker = createNotificationWorkerRuntime({
-    getAdapter: (workflowKey) => workflowKey === "approvals" ? adapter : null,
-    rpc: harness.rpc,
-    getProvider: () => {
-      providerLookups += 1
-      return {
-        async send() {
-          throw new Error("비활성 전자결재 수신자에게 provider를 호출하면 안 됩니다.")
-        },
-      }
-    },
-    createRunId: () => RUN_ID,
-  })
+for (const channel of ["web_push", "in_app", "google_chat", "customer_message"]) {
+  test(`retired approvals ${channel} is canceled before the adapter or provider runs`, async () => {
+    const { createNotificationWorkerRuntime } = await import(workerModuleUrl)
+    const sourceId = "70000000-0000-4000-8000-000000000071"
+    let authoritativeInput = null
+    let providerLookups = 0
+    const adapter = {
+      async revalidateAuthoritativeSource(input) {
+        authoritativeInput = clone(input)
+        return { ok: false, status: "canceled", reason: "recipient_revoked" }
+      },
+    }
+    const claim = createDeliveryClaim({
+      workflow_key: "approvals",
+      event_key: "approval.submitted",
+      source_type: "approval_event",
+      source_id: sourceId,
+      source_revision: null,
+      target_generation: "0",
+      channel_key: channel,
+      target: {
+        target_kind: "profile",
+        target_key: `profile:${PROFILE_ID}`,
+        target_profile_id: PROFILE_ID,
+        connection_key: null,
+        target_snapshot: { profile_id: PROFILE_ID },
+      },
+    })
+    const harness = createRpcHarness({ claim_notification_deliveries_v1: [claim] })
+    const worker = createNotificationWorkerRuntime({
+      getAdapter: (workflowKey) => workflowKey === "approvals" ? adapter : null,
+      rpc: harness.rpc,
+      getProvider: () => {
+        providerLookups += 1
+        return {
+          async send() {
+            throw new Error("비활성 전자결재 수신자에게 provider를 호출하면 안 됩니다.")
+          },
+        }
+      },
+      createRunId: () => RUN_ID,
+    })
 
-  const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
+    const result = await worker.runBatch({ workerId: "worker-fixture", batchSize: 2, leaseSeconds: 30 })
 
-  assert.equal(result.deliveries, 1)
-  assert.equal(authoritativeInput, null)
-  assert.equal(providerLookups, 0)
-  assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
-  const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
-  assert.equal(finalize.parameters.p_status, "canceled")
-  assert.equal(finalize.parameters.p_status_reason, "cutover_rollback")
-  assert.equal(finalize.parameters.p_provider_message_id, null)
-  assert.equal(finalize.parameters.p_provider_response_code, null)
-  assertNoSensitiveValue(finalize.parameters)
-})
+    assert.equal(result.deliveries, 1)
+    assert.equal(authoritativeInput, null)
+    assert.equal(providerLookups, 0)
+    assert.equal(harness.calls.some((call) => call.name === "begin_notification_delivery_send_v1"), false)
+    const finalize = harness.calls.find((call) => call.name === "finalize_notification_delivery_v1")
+    assert.equal(finalize.parameters.p_status, "canceled")
+    assert.equal(finalize.parameters.p_status_reason, "cutover_rollback")
+    assert.equal(finalize.parameters.p_provider_message_id, null)
+    assert.equal(finalize.parameters.p_provider_response_code, null)
+    assertNoSensitiveValue(finalize.parameters)
+  })
+}
 
 test("worker는 begun payload의 위조 workflow를 덮고 claim workflow context 하나만 provider에 넘긴다", async () => {
   const { createNotificationWorkerRuntime } = await import(workerModuleUrl)

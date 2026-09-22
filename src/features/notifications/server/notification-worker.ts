@@ -103,7 +103,7 @@ type RenderedNotificationSnapshot = Readonly<{
 }>
 
 const WORKFLOW_KEY_SET = new Set<string>(
-  NOTIFICATION_WORKFLOW_OPTIONS.map((workflow) => workflow.key),
+  [...NOTIFICATION_WORKFLOW_OPTIONS.map((workflow) => workflow.key), "approvals"],
 )
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -1696,7 +1696,7 @@ async function processDelivery(
   input: NotificationWorkerRuntimeInput,
 ) {
   validateDeliveryClaim(claim)
-  if (["tasks", "word_retests"].includes(requiredWorkflowKey(claim.workflow_key))
+  if (["tasks", "word_retests", "approvals"].includes(requiredWorkflowKey(claim.workflow_key))
     || ["in_app", "web_push"].includes(requiredString(claim.channel_key))) {
     await finalizeDelivery(claim, "canceled", "cutover_rollback", input.rpc)
     return
