@@ -109,7 +109,7 @@ const SHADOW_KEYS = Object.freeze([
 const DECIMAL = /^(?:0|[1-9]\d*)$/
 const WORKFLOWS = new Set([
   "tasks", "word_retests", "registration", "transfer", "withdrawal",
-  "makeup_requests",
+  "makeup_requests", "approvals", // Retained historical delivery metrics remain readable.
 ])
 const CHANNELS = new Set(["in_app", "web_push", "google_chat", "customer_message", "all"])
 

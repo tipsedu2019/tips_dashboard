@@ -79,6 +79,19 @@ test("운영 metrics mapper는 닫힌 숫자 계약만 반환하고 PII 키를 �
   )
 })
 
+test("retired approval delivery history remains readable in operations metrics", async () => {
+  const { normalizeNotificationOperationsMetrics } = await import(metricsUrl.href)
+  const input = healthyMetrics()
+  input.closed_reasons = [{ workflow_key: "approvals", status: "canceled", status_reason: "cutover_rollback", count: 2 }]
+  input.queue = [{ workflow_key: "approvals", channel_key: "google_chat", status: "unknown", count: 1, oldest_pending_age_seconds: 0 }]
+  const mapped = normalizeNotificationOperationsMetrics(input)
+  assert.deepEqual(mapped.closedReasons, [{ workflowKey: "approvals", status: "canceled", statusReason: "cutover_rollback", count: 2 }])
+  assert.equal(mapped.queue[0].workflowKey, "approvals")
+  assert.equal(mapped.queue[0].status, "unknown")
+  input.closed_reasons[0].workflow_key = "unsupported"
+  assert.throws(() => normalizeNotificationOperationsMetrics(input), /notification_operations_metrics_invalid/)
+})
+
 test("등록 처리 준비도는 전용 고정 RPC를 읽고 worker와 watchdog 상태만 반환한다", async () => {
   const operations = await import(metricsUrl.href)
   assert.equal(typeof operations.createRegistrationProcessingReadinessReader, "function")

@@ -35,21 +35,21 @@
 
 ## 실제 활성 경로와 redirect 분리
 
-현재 `src/app/admin/**/page.tsx`48개 중 render27개, redirect21개다. 과거 inventory의 users/terms/connections/manual은 활성 화면이 아니므로 복원하지 않았다.
+현재 `src/app/admin/**/page.tsx`44개 중 render25개, redirect19개다. 과거 inventory의 users/terms/connections/manual은 활성 화면이 아니므로 복원하지 않았다.
 
-활성26개 (전자결재 폐기 반영):
+활성25개 (2026-09-22 전자결재·수업그룹 폐기 반영):
 
 - 운영: dashboard, statistics, tasks, registration, transfer, withdrawal, word-retests, makeup-requests.
 - 학사: academic-calendar, academic-calendar/annual-board, timetable, class-schedule, curriculum, curriculum/lesson-design.
 - 관리: students, classes, textbooks, recruiting, public-content.
-- 설정: settings/schools, settings/classrooms, settings/class-groups, settings/teachers, settings/subjects, settings/textbook-suppliers, settings/notifications.
+- 설정: settings/schools, settings/classrooms, settings/teachers, settings/subjects, settings/textbook-suppliers, settings/notifications.
 
-모든 이름의 prefix는 `/admin/`. 설정7경로는 관리/통합 검수 소유이며 이번11경로 evidence로 대신하지 않는다. students/classes/textbooks/statistics/registration/curriculum도 각 카드 evidence를 사용한다.
+모든 이름의 prefix는 `/admin/`. 설정6경로는 관리/통합 검수 소유이며 이번11경로 evidence로 대신하지 않는다. students/classes/textbooks/statistics/registration/curriculum도 각 카드 evidence를 사용한다.
 
-redirect21개: `/admin`, `/admin/settings`, 그리고 `/admin/` 아래 calendar, chat, class-schedule/lesson-design, classrooms, dashboard-2, faqs, mail, manual, pricing, schools, settings/account, settings/appearance, settings/billing, settings/connections, settings/terms, settings/user, teachers, terms, users. `/admin/settings/users`는 존재하지 않는다.
+redirect19개: `/admin`, `/admin/settings`, 그리고 `/admin/` 아래 calendar, chat, class-schedule/lesson-design, classrooms, dashboard-2, faqs, mail, manual, pricing, schools, settings/account, settings/appearance, settings/billing, settings/connections, settings/user, teachers, users. `/admin/settings/users`는 존재하지 않는다.
 
 ## 검사와 남은 경계
 
 - calendar/timetable/class-group/approval/makeup/recruiting/public-content 관련 집중 테스트134건 통과. makeup의 old gutter source assertion은16/20/24 계약으로 수정했다.
 - 수정 파일 ESLint0 errors. timetable257의 불필요한 useMemo dependency 경고1건은 수정 전에도 존재하며 이번 데이터/성능 범위 밖이다.
-- actual route 빈 상태·공통 제어와 대표 읽기 동작은 확인했다. 데이터가 많은 표·각 업무의 전체 전이·실패/재시도 matrix·설정7경로 독립 증거는 이 기록의 완료 주장에 포함하지 않는다. UI 회귀 evidence와 실제 운영 데이터/배포 evidence는 별도다.
+- actual route 빈 상태·공통 제어와 대표 읽기 동작은 확인했다. 데이터가 많은 표·각 업무의 전체 전이·실패/재시도 matrix·설정6경로 독립 증거는 이 기록의 완료 주장에 포함하지 않는다. UI 회귀 evidence와 실제 운영 데이터/배포 evidence는 별도다.
