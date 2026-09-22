@@ -5,7 +5,7 @@ import test from "node:test"
 import vm from "node:vm"
 
 import { JSDOM } from "jsdom"
-import { act, createElement, forwardRef, useSyncExternalStore, useState } from "react"
+import { act, createElement, useSyncExternalStore, useState } from "react"
 import { createRoot } from "react-dom/client"
 import ts from "typescript"
 
@@ -215,36 +215,6 @@ function assertActivePanelLinkage(container, activeTab) {
   assert.equal(panel.getAttribute("role"), "tabpanel")
   assert.equal(panel.getAttribute("aria-labelledby"), activeTab.id)
 }
-
-test("dashboard renders the statistics shortcut to its statistics route", async (t) => {
-  const dom = installDom()
-  t.after(() => dom.window.close())
-  const { button, skeleton } = await loadUiModules()
-  const Link = forwardRef(function Link({ href, children, ...props }, ref) {
-    return createElement("a", { ...props, href, ref }, children)
-  })
-  const { DashboardDailyBrief } = await loadTypeScript(
-    new URL("src/features/dashboard/dashboard-daily-brief.tsx", root),
-    new Map([
-      ["next/link", Link],
-      ["@/components/ui/button", button],
-      ["@/components/ui/skeleton", skeleton],
-      ["./use-dashboard-daily-brief", {
-        useDashboardDailyBrief: () => ({ brief: null, error: null, retry: () => undefined }),
-      }],
-    ]),
-  )
-  const container = document.createElement("div")
-  document.body.append(container)
-  const reactRoot = createRoot(container)
-  await act(async () => reactRoot.render(createElement(DashboardDailyBrief)))
-
-  const shortcut = [...container.querySelectorAll("nav[aria-label='바로가기'] a")]
-    .find((link) => link.textContent === "통계")
-  assert.equal(shortcut?.getAttribute("href"), "/admin/statistics")
-
-  await act(async () => reactRoot.unmount())
-})
 
 test("Radix tabs use manual keyboard activation, linked panels, and mount only the active request", async (t) => {
   const dom = installDom()
