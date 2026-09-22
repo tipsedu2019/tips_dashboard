@@ -99,6 +99,7 @@ CommandItem.displayName = CommandPrimitive.Item.displayName
 interface SearchItem {
   title: string
   url: string
+  target?: string
   group: string
   icon?: LucideIcon
 }
@@ -155,6 +156,7 @@ function createSearchItems({
         navigationItems.push({
           title: item.title,
           url: item.url,
+          target: item.target,
           group: groupLabel,
           icon: item.icon,
         })
@@ -211,6 +213,7 @@ export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSea
   }, [open])
 
   const prefetchCommandRoute = React.useCallback((url: string) => {
+    if (!url.startsWith("/")) return
     const targetPath = normalizeCommandPath(url)
     if (targetPath === currentPath || prefetchedCommandRoutesRef.current.has(targetPath)) return
 
@@ -228,9 +231,15 @@ export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSea
     [groupedItems, open],
   )
 
-  const handleSelect = React.useCallback((url: string) => {
+  const handleSelect = React.useCallback((url: string, target?: string) => {
     if (selectedRef.current) return
     selectedRef.current = true
+    if (target === "_blank") {
+      pendingTargetRef.current = null
+      window.open(url, "_blank", "noopener,noreferrer")
+      onOpenChange(false)
+      return
+    }
     const targetPath = normalizeCommandPath(url)
     pendingTargetRef.current = targetPath === currentPath ? null : targetPath
 
@@ -291,11 +300,11 @@ export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSea
                       value={`${item.title} ${item.group} ${item.url}`}
                       keywords={[item.group, item.url]}
                       aria-current={isCurrent ? "page" : undefined}
-                      aria-label={`빠른 이동: ${item.title}`}
+                      aria-label={`빠른 이동: ${item.title}${item.target === "_blank" ? " (새 창)" : ""}`}
                       data-testid={`admin-quick-search-item-${itemTargetId}`}
                       onPointerEnter={() => prefetchCommandRoute(item.url)}
                       onFocus={() => prefetchCommandRoute(item.url)}
-                      onSelect={() => handleSelect(item.url)}
+                      onSelect={() => handleSelect(item.url, item.target)}
                       className={isCurrent ? "bg-primary/5 text-primary data-[selected=true]:bg-primary/10 data-[selected=true]:text-primary" : undefined}
                     >
                       {Icon ? (
