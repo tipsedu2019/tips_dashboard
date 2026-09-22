@@ -1727,7 +1727,12 @@ export function AcademicAnnualBoardWorkspace() {
         onCloseAutoFocus={(event) => {
           event.preventDefault();
           const target = editorReturnFocusRef.current;
-          if (target?.isConnected) target.focus({ preventScroll: true });
+          editorReturnFocusRef.current = null;
+          const canRestore = target?.isConnected
+            && !target.matches(':disabled, [aria-disabled="true"]')
+            && !target.closest("[hidden], [inert]")
+            && target.getClientRects().length > 0;
+          if (canRestore) target.focus({ preventScroll: true });
           else document.getElementById("annual-board-year")?.focus({ preventScroll: true });
         }}
         event={editingBoardEvent}

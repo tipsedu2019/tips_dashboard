@@ -22,6 +22,7 @@
 - 시간표 긴 수업명 상세가 클릭/Enter로 열리고 Escape로 닫힘: [상세](timetable-detail.png).
 - 연간 일정표 셀 클릭/Enter로 시험범위 상세가 열리고 Escape로 원래 셀에 복귀: [상세](annual-detail-desktop.png).
 - 상세 → 기존 일정 편집창 → 취소/Escape 후 원래 셀로 포커스 복귀 확인. 합성 편집창은 저장하지 않음.
+- 편집창을 연 상태에서 데스크톱 → 390px로 변경한 뒤 닫으면 숨겨진 셀 대신 연도 필터로 복귀: [포커스](annual-resize-focus-mobile.png). 최종 재검증 탭의 콘솔 오류 0건.
 - 학교 분류(고등/중등), 학교, 학기 필터 적용과 초기화 확인. 2학기는 해당 두 시험 시기만 표시.
 - [로딩](annual-loading-mobile.png), [빈 일정](annual-empty-mobile.png), [조회 오류](annual-error-mobile.png) 확인. 오류에서는 추가/내보내기 비활성, 다시 시도로 정상 복구. 빈 일정에서도 선택 연도 유지.
 - 실제 이미지 저장 버튼으로 다운로드한 [PNG](annual-export.png): 3684×2295, 전체 학교와 3개 학년·모든 과목 포함. 저장 후 버튼과 화면 복구.
@@ -30,6 +31,7 @@
 
 - 시간표 layout/image-export, annual-board, academic-calendar UI 및 shared dashboard design contract 13개 파일: **112 passed**.
 - 마지막 빈 일정 연도 표시 보완 후 annual-board/image-export: **26 passed**.
+- 화면 폭 변경 시 포커스 보완 후 annual-board/dialog-opener-focus: **31 passed**, TypeScript·변경 파일 ESLint 재통과.
 - `pnpm exec tsc --noEmit`, 변경 React 파일 ESLint, `git diff --check`: 통과.
 - `pnpm build` (합성 로컬 Supabase 환경): 통과. 최종 배포 빌드/운영 확인은 PR CI와 배포 기록에서 별도로 확인.
 
