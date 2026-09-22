@@ -645,7 +645,7 @@ test("quick search remains a discoverable menu search", async () => {
   assert.match(source, /keywords=\{\[item\.group, item\.url\]\}/);
   assert.match(source, /value=\{`\$\{item\.title\} \$\{item\.group\} \$\{item\.url\}`\}/);
   assert.match(source, /aria-current=\{isCurrent \? "page" : undefined\}/);
-  assert.match(source, /aria-label=\{`빠른 이동: \$\{item\.title\}`\}/);
+  assert.match(source, /aria-label=\{`빠른 이동: \$\{item\.title\}/);
   assert.match(source, /현재/);
   assert.match(source, /<ArrowRight/);
   assert.match(source, /heading=\{`\$\{group\} \$\{items\.length\}개`\}/);
@@ -751,7 +751,7 @@ test("global shell exposes stable browser-use targets", async () => {
   assert.match(commandSearchSource, /data-testid="admin-quick-search-trigger"/);
   assert.match(commandSearchSource, /data-testid="admin-quick-search-dialog"/);
   assert.match(commandSearchSource, /data-testid=\{`admin-quick-search-item-\$\{itemTargetId\}`\}/);
-  assert.match(commandSearchSource, /onSelect=\{\(\) => handleSelect\(item\.url\)\}/);
+  assert.match(commandSearchSource, /onSelect=\{\(\) => handleSelect\(item\.url, item\.target\)\}/);
   assert.match(commandSearchSource, /flushSync\(\(\) => \{/);
   assert.match(commandSearchSource, /aria-label="빠른 이동 검색"/);
   assert.match(headerSource, /setSearchOpen\(false\)[\s\S]*\[pathname\]/);
