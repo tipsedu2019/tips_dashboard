@@ -1,3 +1,7 @@
+begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+
 -- Read-only workload projection. Every source and profile read retains caller RLS.
 create or replace function dashboard_private.dashboard_workload_items_v1()
 returns table (
@@ -125,3 +129,5 @@ revoke all on function public.list_dashboard_workload_page_v1(text,text,text,tex
 grant execute on function dashboard_private.dashboard_workload_items_v1() to authenticated;
 grant execute on function public.get_dashboard_workload_v1() to authenticated;
 grant execute on function public.list_dashboard_workload_page_v1(text,text,text,text,boolean,integer,integer) to authenticated;
+
+commit;
