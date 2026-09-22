@@ -126,6 +126,8 @@ jobs:
             --test supabase/tests/management_numbered_pages_test.sql \
             --test supabase/tests/management_page_reads_test.sql \
             --test supabase/tests/class_period_membership_optional_test.sql \
+            --test supabase/tests/curriculum_scheduling_textbook_usage_test.sql \
+            --probe tests/probe-curriculum-scheduling-dto.mjs \
             --test supabase/tests/academic_curriculum_unscoped_period_test.sql \
             --test supabase/tests/academic_scoped_reads_test.sql \
             --test supabase/tests/timetable_continuous_class_scope_test.sql \

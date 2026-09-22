@@ -383,7 +383,7 @@ export function createAcademicReadService(options = {}) {
       validatePageSize(pageSize);
       if (!Number.isInteger(page) || page < 1 || page > 2147483647 || typeof includeScopeMetadata !== 'boolean') throw academicError('academic_numbered_request_invalid');
       const filters = assertCurriculumNumberedFilters(rawFilters);
-      const { data, error } = await client.rpc('get_academic_curriculum_numbered_page_v1', {
+      const { data, error } = await client.rpc('get_academic_curriculum_numbered_page_v2', {
         p_filters: filters, p_page: page, p_page_size: pageSize, p_include_scope_metadata: includeScopeMetadata,
       }).abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000)).retry(false);
       if (error) throw error;

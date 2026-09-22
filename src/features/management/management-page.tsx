@@ -3441,7 +3441,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     >
                       <X className="size-4" aria-hidden="true" />
                     </Button>
-                    <div className="col-span-full grid grid-cols-2 gap-3">
+                    <div className="col-span-full grid gap-3 sm:grid-cols-2">
                       <div className="space-y-1.5">
                         <Label htmlFor={`textbook-${id}-start`}>사용 시작일</Label>
                         <Input id={`textbook-${id}-start`} type="date" value={usage[id]?.startDate || ""}

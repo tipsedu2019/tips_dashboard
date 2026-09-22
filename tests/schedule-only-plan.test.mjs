@@ -31,3 +31,15 @@ test('legacy regeneration keeps stable keys so history survives schedule saves',
   assert.equal(saved.sessions[0].teacherNote, '원래 기록');
   assert.deepEqual(saved.sessions[0].textbookEntries, [{ textbookId: 'b1', planStart: '7' }]);
 });
+
+
+test('changing a legacy lesson to a holiday preserves its learning history despite a new generated ID', () => {
+  const original = buildSchedulePlanForSave({ selectedDays: [1], billingPeriods: [{ id: 'p1', month: 9, startDate: '2026-09-01', endDate: '2026-09-30', totalSessions: 4 }] });
+  original.sessions[0].teacherNote = '보존할 기록';
+  const draft = scheduleOnlyDraft(original);
+  draft.sessionStates = { [original.sessions[0].date]: { state: 'exception', memo: '휴강' } };
+  const saved = preserveScheduleLearningContent(buildSchedulePlanForSave(draft), original);
+  const changed = saved.sessions.find(row => row.date === original.sessions[0].date);
+  assert.equal(changed.scheduleState, 'exception');
+  assert.equal(changed.teacherNote, '보존할 기록');
+});

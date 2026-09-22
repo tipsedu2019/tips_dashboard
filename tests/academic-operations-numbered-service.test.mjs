@@ -31,7 +31,7 @@ const operationsRow = { id, name: '[가] 수업 10', subject: '수학', grade: '
   teacherName: null, termName: null, syncGroupId: null, syncGroupName: null, status: '', updatedAt: null };
 const operationsOptions = { terms: [], subjects: ['수학'], grades: ['고1'], teachers: [], syncGroups: [{ value: groupId, label: '그룹' }] };
 const domains = [
-  { name: 'academic', factory: createAcademicReadService, method: 'readCurriculumNumberedPage', rpc: 'get_academic_curriculum_numbered_page_v1', filters: academicFilters,
+  { name: 'academic', factory: createAcademicReadService, method: 'readCurriculumNumberedPage', rpc: 'get_academic_curriculum_numbered_page_v2', filters: academicFilters,
     response: { rows: [academicRow], page: 11, pageSize: 10, totalCount: 260, resolvedPeriodId: groupId, stats: academicStats, filterOptions: academicOptions } },
   { name: 'operations', factory: createOperationsReadService, method: 'readClassScheduleNumberedPage', rpc: 'get_operations_class_schedule_numbered_page_v1', filters: operationsFilters,
     response: { rows: [operationsRow], page: 11, pageSize: 10, totalCount: 260, stats: { total: 260, active: 200, draft: 60 }, filterOptions: operationsOptions,

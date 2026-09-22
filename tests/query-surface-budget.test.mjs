@@ -1429,8 +1429,8 @@ test("actual task numbered service retains timeout, retry and bounded RPC contra
   assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source }), [])
 })
 
-test("secondary numbered RPCs allow only the two final-SQL-proven 10/15/20 contracts", () => {
-  for (const [surface, name] of [["academic", "get_academic_curriculum_numbered_page_v1"], ["operations", "get_operations_class_schedule_numbered_page_v1"]]) {
+test("secondary numbered RPCs allow only the final-SQL-proven 10/15/20 contracts", () => {
+  for (const [surface, name] of [["academic", "get_academic_curriculum_numbered_page_v1"], ["academic", "get_academic_curriculum_numbered_page_v2"], ["operations", "get_operations_class_schedule_numbered_page_v1"]]) {
     const inspect = (rpc, args, suffix = '.abortSignal(AbortSignal.timeout(8000)).retry(false)') => inspectQuerySurfaceSource({
       surface, file: `src/features/${surface}/numbered-fixture.ts`,
       source: `async function load(client, request) { return client.rpc(${JSON.stringify(rpc)}, ${args})${suffix} }`,
@@ -1439,7 +1439,7 @@ test("secondary numbered RPCs allow only the two final-SQL-proven 10/15/20 contr
     for (const size of ["5", "30", "11", "null", '"10"']) assert.deepEqual(inspect(name, `{p_page_size:${size}}`), ["rpc_page_limit_invalid"])
     assert.deepEqual(inspect(name, "{}"), ["rpc_page_limit_missing"])
     assert.deepEqual(inspect(name, "{...request,p_page_size:10}"), ["rpc_page_limit_unresolved"])
-    assert.deepEqual(inspect(name.replace("v1", "v2"), "{p_page_size:10}"), ["rpc_page_limit_missing"])
+    assert.deepEqual(inspect(name.replace(/v[12]$/, "v3"), "{p_page_size:10}"), ["rpc_page_limit_missing"])
     assert.deepEqual(inspect(name.replace("_numbered", ""), "{p_page_size:10}"), ["rpc_page_limit_missing"])
     assert.ok(inspect(name, "{p_page_size:10}", ".retry(false)").includes("list_abort_signal_missing"))
     assert.ok(inspect(name, "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))

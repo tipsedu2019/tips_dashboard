@@ -807,55 +807,25 @@ function getNextRegularScheduleState(scheduleState: string, hasSubstitution = fa
 function getScheduleStateSurface(scheduleState: string) {
   if (scheduleState === "exception") {
     return {
-      className: "border-red-500 bg-red-600 text-white shadow-sm hover:bg-red-700",
-      mutedClassName: "text-white/85",
+      className: "border-destructive/30 bg-destructive/10 text-foreground hover:bg-destructive/15",
+      mutedClassName: "text-muted-foreground",
     };
   }
   if (scheduleState === "makeup") {
     return {
-      className: "border-blue-500 bg-blue-600 text-white shadow-sm hover:bg-blue-700",
-      mutedClassName: "text-white/85",
+      className: "border-primary/30 bg-primary/10 text-foreground hover:bg-primary/15",
+      mutedClassName: "text-muted-foreground",
     };
   }
   if (scheduleState === "tbd") {
     return {
-      className: "border-amber-500 bg-amber-500 text-white shadow-sm hover:bg-amber-600",
-      mutedClassName: "text-white/85",
+      className: "border-amber-500/30 bg-amber-500/10 text-foreground hover:bg-amber-500/15",
+      mutedClassName: "text-muted-foreground",
     };
   }
   return {
-    className: "border-emerald-500 bg-emerald-600 text-white shadow-sm hover:bg-emerald-700",
-    mutedClassName: "text-white/85",
-  };
-}
-
-function colorWithAlpha(color: string, alpha: number) {
-  const normalized = text(color);
-  const hex = normalized.replace("#", "");
-  const safeAlpha = Math.max(0, Math.min(1, alpha));
-
-  if (/^[0-9a-f]{3}$/i.test(hex)) {
-    const [r, g, b] = hex.split("").map((part) => parseInt(`${part}${part}`, 16));
-    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
-  }
-
-  if (/^[0-9a-f]{6}$/i.test(hex)) {
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    return `rgba(${r}, ${g}, ${b}, ${safeAlpha})`;
-  }
-
-  return normalized || "#216e4e";
-}
-
-function getLessonCalendarMonthSurfaceStyle(accentColor: string): CSSProperties {
-  const color = text(accentColor) || "#216e4e";
-
-  return {
-    background: `linear-gradient(135deg, ${colorWithAlpha(color, 0.14)} 0%, ${colorWithAlpha(color, 0.045)} 100%)`,
-    borderColor: colorWithAlpha(color, 0.32),
-    boxShadow: `inset 4px 0 0 ${colorWithAlpha(color, 0.72)}`,
+    className: "border-border bg-muted/30 text-foreground hover:bg-accent",
+    mutedClassName: "text-muted-foreground",
   };
 }
 
@@ -868,8 +838,8 @@ function getLessonCalendarSessionSurfaceStyle(scheduleState: string, accentColor
   }
 
   return {
-    backgroundColor: color,
-    borderColor: color,
+    backgroundColor: `color-mix(in srgb, ${color} 10%, var(--background))`,
+    borderColor: `color-mix(in srgb, ${color} 30%, var(--border))`,
   };
 }
 
@@ -2111,111 +2081,6 @@ function compareLessonSessionsByDate<
   return text(left.label).localeCompare(text(right.label), "ko");
 }
 
-function buildLessonSessionGroups<
-  T extends {
-    id: string;
-    label: string;
-    sessionNumber: number;
-    dateValue: string;
-    monthLabel: string;
-    billingId: string;
-    billingLabel: string;
-    billingColor: string;
-    periodId: string;
-    periodLabel: string;
-    progressStatus: string;
-    scheduleState: string;
-    textbookEntries?: Array<{ hasPlanContent?: boolean }>;
-  },
->( 
-  sessions: T[] = [],
-  billingPeriods: Array<{ id: string; label: string; color: string; rangeLabel: string }> = [],
-) {
-  const groupMap = new Map(
-    billingPeriods.map((period, index) => [
-      period.id,
-      {
-        key: period.id,
-        label: period.label || `${index + 1}구간`,
-        billingLabel: period.label || `${index + 1}구간`,
-        billingColor: period.color || "#216e4e",
-        rangeLabel: period.rangeLabel || "생성 구간 정보 없음",
-        sessions: [] as T[],
-      },
-    ]),
-  );
-
-  sessions.forEach((session) => {
-    const groupKey = text(session.billingId || session.periodId) || "unassigned";
-    const existingGroup = groupMap.get(groupKey) || {
-      key: groupKey,
-      label: text(session.monthLabel) || text(session.periodLabel) || "구간 미지정",
-      billingLabel: text(session.billingLabel) || text(session.periodLabel) || "구간 미지정",
-      billingColor: text(session.billingColor) || "#216e4e",
-      rangeLabel: text(session.monthLabel) || "생성 구간 정보 없음",
-      sessions: [] as T[],
-    };
-    existingGroup.sessions.push(session);
-    groupMap.set(groupKey, existingGroup);
-  });
-
-  return [...groupMap.values()]
-    .filter((group) => group.sessions.length > 0)
-    .map((group) => {
-      const normalizedSessions = [...group.sessions].sort(compareLessonSessionsByDate);
-
-      let textbookSessionCount = 0;
-      let outsideTextbookRangeCount = 0;
-      let pendingCount = 0;
-      for (const session of normalizedSessions) {
-        if (session.progressStatus !== "done") {
-          pendingCount += 1;
-        }
-        const textbookEntries = Array.isArray(session.textbookEntries) ? session.textbookEntries : [];
-        if (textbookEntries.length > 0) {
-          textbookSessionCount += 1;
-        } else {
-          outsideTextbookRangeCount += 1;
-        }
-      }
-
-      return {
-        ...group,
-        label: normalizedSessions[0]?.monthLabel || group.label,
-        billingLabel:
-          group.billingLabel || normalizedSessions[0]?.billingLabel || normalizedSessions[0]?.periodLabel || "구간 미지정",
-        billingColor: group.billingColor || normalizedSessions[0]?.billingColor || "#216e4e",
-        sessions: normalizedSessions,
-        sessionCount: countLessonGroupSessions(normalizedSessions),
-        pendingCount,
-        textbookSessionCount,
-        outsideTextbookRangeCount,
-      };
-    });
-}
-
-function buildLessonPreviewBadges<
-  T extends {
-    key: string;
-    label: string;
-    billingLabel: string;
-    billingColor: string;
-    sessionCount: number;
-  },
->(sessionGroups: T[] = []) {
-  const badges: Array<{ key: string; label: string; color: string }> = [];
-
-  sessionGroups.forEach((group) => {
-    badges.push({
-      key: `period-${group.key}`,
-      label: `${group.billingLabel || group.label} ${group.sessionCount}회`,
-      color: group.billingColor || "#216e4e",
-    });
-  });
-
-  return badges;
-}
-
 function buildSelectedRowSnapshot(
   selectedRow: Record<string, unknown> | null,
   textbooks: Record<string, unknown>[] = [],
@@ -2354,7 +2219,7 @@ export function ClassScheduleWorkspace() {
   const pathname = usePathname();
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
-  const isLessonDesignPage = pathname.endsWith("/lesson-design");
+  const isLessonDesignPage = pathname.endsWith("/lesson-design") || (pathname.endsWith("/curriculum") && searchParams.get("lessonDesign") === "1");
   const isLessonDesignRouteActive = isLessonDesignPage || searchParams.get("lessonDesign") === "1";
   const isLessonDesignModalRoute = searchParams.get("lessonDesign") === "1" && !isLessonDesignPage;
   const requestedClassId = text(searchParams.get("classId"));
@@ -2402,7 +2267,7 @@ export function ClassScheduleWorkspace() {
   const [isLessonReadRetrying, setIsLessonReadRetrying] = useState(false);
   const [normalizedLessonSessionBaselines, setNormalizedLessonSessionBaselines] = useState<Record<string, SaveClassLessonSessionInput>>({});
   const normalizedLessonSessionDraftsRef = useRef<Record<string, Partial<SaveClassLessonSessionInput>>>({});
-  
+
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
   const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
@@ -2422,13 +2287,13 @@ export function ClassScheduleWorkspace() {
   const [lessonDesignDetailError, setLessonDesignDetailError] = useState("");
 
   const lessonDesignDetailRevisionRef = useRef(0);
-  
+
   const lessonPlanDraftRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanSourceKeyRef = useRef("");
   const pendingLessonDesignDialogScrollTopRef = useRef<number | null>(null);
   const pendingLessonDesignCalendarPointerScrollTopRef = useRef<number | null>(null);
   const pendingLessonDesignPairSessionIdRef = useRef("");
-  
+
   selectedClassIdRef.current = selectedClassId;
   const operationsRequest = useMemo(
     () => ({
@@ -2456,7 +2321,7 @@ export function ClassScheduleWorkspace() {
   const lessonPlanDirty = Boolean(lessonPlanBaseline && lessonPlanDraft && !lessonDraftEqual(lessonPlanDraft, lessonPlanBaseline));
   const lessonSessionDirty = Object.entries(normalizedLessonSessionDrafts).some(([id, draft]) =>
     !lessonDraftEqual(draft, normalizedLessonSessionBaselines[id]));
-  
+
   const { requestNavigation, confirmation: draftNavigationConfirmation } = useDraftNavigation({
     dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty)),
   });
@@ -2472,23 +2337,23 @@ export function ClassScheduleWorkspace() {
     setEditorActorScope(actorScope);
     lessonMutationLifecycleRef.current?.revoke();
     lessonDesignDetailRevisionRef.current++;
-    
+
     selectedClassIdRef.current = "";
     lessonPlanDraftRef.current = null;
     lessonPlanSourceKeyRef.current = "";
     lessonPlanBaselineRef.current = null; lessonPlanOwnerRef.current = "";
     lessonPlanSaveRef.current = null; lessonSessionSaveRef.current = null; lessonGenerationRequestRef.current = null;
     normalizedLessonSessionDraftsRef.current = {};
-    setLessonPlanBaseline(null); setNormalizedLessonSessionBaselines({}); 
+    setLessonPlanBaseline(null); setNormalizedLessonSessionBaselines({});
     setLessonReadRetryNeeded(false); setIsLessonReadRetrying(false);
     setSelectedClassId(""); setLessonDesignOpen(false);
     setLessonDesignDetail(null); setLessonDesignDetailError(""); setLessonDesignDetailLoading(false);
-    setLessonPlanDraft(null);  
-    
-     
+    setLessonPlanDraft(null);
+
+
     setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionDetailsOpenSessionId("");
     setSelectedLessonSessionId(""); setSelectedLessonMonthKeys([]); setFocusedLessonMonthKey("");
-     
+
     setGenerationPreview(null); setGenerationSaving(false); setIsLessonDesignSaving(false);
     setIsNormalizedLessonSessionSaving(false); setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
   }
@@ -2997,7 +2862,7 @@ export function ClassScheduleWorkspace() {
       setLessonPlanDraft(null); setLessonPlanBaseline(null);
       normalizedLessonSessionDraftsRef.current = {};
       setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionBaselines({});
-        
+
       return;
     }
     if (!ownerChanged && lessonPlanSourceKeyRef.current === lessonPlanSourceKey) return;
@@ -3027,7 +2892,7 @@ export function ClassScheduleWorkspace() {
     if (ownerChanged) {
       normalizedLessonSessionDraftsRef.current = {};
       setNormalizedLessonSessionDrafts({}); setNormalizedLessonSessionBaselines({});
-        
+
       lessonPlanSaveRef.current = null; lessonSessionSaveRef.current = null; lessonGenerationRequestRef.current = null;
       setLessonReadRetryNeeded(false); setIsLessonReadRetrying(false);
       setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
@@ -3160,14 +3025,8 @@ export function ClassScheduleWorkspace() {
     () => buildLessonCalendarMonths(filteredLessonSessions),
     [filteredLessonSessions],
   );
-  const lessonSessionGroups = useMemo(
-    () => buildLessonSessionGroups(filteredLessonSessions, lessonDesignSnapshot?.billingPeriods || []),
-    [filteredLessonSessions, lessonDesignSnapshot],
-  );
-  const lessonPreviewBadges = useMemo(
-    () => buildLessonPreviewBadges(lessonSessionGroups),
-    [lessonSessionGroups],
-  );
+
+
   const [lessonFlowReferenceDate, setLessonFlowReferenceDate] = useState(() => new Date());
 
   useEffect(() => {
@@ -3223,7 +3082,7 @@ export function ClassScheduleWorkspace() {
     [lessonDesignSnapshot],
   );
   const firstPendingLessonSession = useMemo(
-    () => filteredLessonSessions.find((session) => session.progressLabel !== "완료") || filteredLessonSessions[0] || null,
+    () => filteredLessonSessions.find((session) => session.scheduleState === "active") || filteredLessonSessions[0] || null,
     [filteredLessonSessions],
   );
 
@@ -3281,7 +3140,7 @@ export function ClassScheduleWorkspace() {
     setSelectedLessonCalendarDate("");
   }, [selectedClassId]);
 
-  
+
   const updateLessonPlanDraft = useCallback(
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       setLessonPlanDraft((current) => {
@@ -3937,7 +3796,7 @@ export function ClassScheduleWorkspace() {
       setSelectedLessonScheduleState("all");
       setSelectedLessonSessionId(
         targetSession?.id ||
-          nextLessonDesignSnapshot.sessions.find((session) => session.progressLabel !== "완료")?.id ||
+          nextLessonDesignSnapshot.sessions.find((session) => session.scheduleState === "active")?.id ||
           nextLessonDesignSnapshot.sessions[0]?.id ||
           "",
       );
@@ -4156,6 +4015,7 @@ export function ClassScheduleWorkspace() {
     }
     lastScrolledLessonDesignSectionKeyRef.current = scrollKey;
 
+    if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods && !requestedSessionId) return;
     const selectedSessionId = text(selectedLessonSession?.id);
     const animationFrameId = window.requestAnimationFrame(() => {
       if (requestedLessonDesignSectionId === LESSON_DESIGN_SECTION_IDS.periods && selectedSessionId) {
@@ -4171,6 +4031,7 @@ export function ClassScheduleWorkspace() {
     isLessonDesignPage,
     lessonDesignSnapshot,
     requestedLessonDesignSectionId,
+    requestedSessionId,
     selectedLessonSession,
     selectedRow,
   ]);
@@ -4179,6 +4040,7 @@ export function ClassScheduleWorkspace() {
     if (
       !isLessonDesignPage ||
       requestedLessonDesignSectionId !== LESSON_DESIGN_SECTION_IDS.periods ||
+      !requestedSessionId ||
       !selectedLessonSession?.id
     ) {
       lastSyncedLessonSessionPairKeyRef.current = "";
@@ -4195,6 +4057,7 @@ export function ClassScheduleWorkspace() {
   }, [
     isLessonDesignPage,
     requestedLessonDesignSectionId,
+    requestedSessionId,
     selectedLessonSession,
     selectedRow,
   ]);
@@ -4208,7 +4071,7 @@ export function ClassScheduleWorkspace() {
   }, [requestLessonDesignClose]);
 
   useEffect(() => {
-  
+
   if (!actorScope || lessonDesignDetailLoading || (!exactLessonDesignRow && !lessonDesignDetailError)) {
       return;
     }
@@ -4726,15 +4589,64 @@ export function ClassScheduleWorkspace() {
     );
   };
 
+  const lessonDesignActions = (
+          <div
+            data-testid="lesson-design-bottom-action-bar"
+            className="flex flex-wrap items-center justify-end gap-2"
+          >
+            {requestedLessonReturnPath && !isLessonDesignPage ? (
+              <Button
+                type="button"
+                variant="outline"
+                className="h-9 rounded-md px-3 shadow-none"
+                data-testid="lesson-design-bottom-return"
+                aria-label={lessonDesignReturnActionLabel}
+                onClick={requestLessonDesignClose}
+              >
+                <ArrowLeft className="mr-1.5 size-4" />
+                {lessonDesignReturnLabel}
+              </Button>
+            ) : null}
+            {normalizedGenerationContext ? (
+              generationPreview ? (
+                <Button type="button" className="h-9 rounded-md px-4" onClick={() => void confirmLessonSessionGeneration()} disabled={generationSaving}>
+                  {generationSaving ? "생성 중" : `생성 확정 · 추가 ${Number(generationPreview.creatableCount || 0)}`}
+                </Button>
+              ) : (
+                <Button type="button" variant="outline" className="h-9 rounded-md px-4" onClick={() => void previewLessonSessionGeneration()} disabled={generationSaving}>
+                  {generationSaving ? "미리보기 중" : "일정 미리보기"}
+                </Button>
+              )
+            ) : null}
+            {!isNormalizedLessonSchedule ? (
+            <Button
+              type="button"
+              className="h-9 rounded-md px-5 shadow-none"
+              onClick={handleSaveLessonPlan}
+              disabled={
+                isLessonDesignSaving ||
+                !lessonScheduleReadReady ||
+                !lessonDesignSnapshot?.saveReadiness.ready
+              }
+            >
+              {isLessonDesignSaving ? "일정 저장 중" : "일정 저장"}
+            </Button>
+            ) : null}
+          </div>
+  );
+
   const lessonDesignWorkspaceContent = (
     lessonDesignSnapshot ? (
       <div className="bg-background">
         <div
           className={cn(
             "grid min-w-0 gap-x-6 p-4 lg:p-6",
-            "xl:grid-cols-2",
+            "xl:grid-cols-[minmax(20rem,0.8fr)_minmax(0,1.2fr)]",
           )}
         >
+          {lessonPlanDirty && !lessonDesignSnapshot.saveReadiness.ready ? (
+            <p role="alert" className="col-span-full text-sm text-destructive">{lessonDesignSnapshot.saveReadiness.blockers[0]}</p>
+          ) : null}
           {lessonDesignSaveError ? (
             <Alert variant="destructive" className="xl:col-span-2 2xl:col-span-full">
               <AlertDescription>
@@ -4749,8 +4661,7 @@ export function ClassScheduleWorkspace() {
             </Alert>
           ) : null}
 
-          (
-            <>
+          <>
           <section
             id={LESSON_DESIGN_SECTION_IDS.periods}
             data-lesson-period-sidebar="true"
@@ -4832,7 +4743,7 @@ export function ClassScheduleWorkspace() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium text-foreground">{period.label}</p>
-                            <Badge variant="secondary">{period.sessionCount || 0}회</Badge>
+                            <Badge variant="secondary">{countLessonGroupSessions(periodSessions)}회</Badge>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {periodSessions.length > 0 ? (
@@ -4904,19 +4815,7 @@ export function ClassScheduleWorkspace() {
 	                      <p className="text-lg font-semibold text-foreground">캘린더</p>
 	                    </div>
 	                  </div>
-                    {lessonPreviewBadges.length > 0 ? (
-                      <div className="mt-3 flex flex-wrap items-center gap-2">
-                        {lessonPreviewBadges.map((badge) => (
-                          <span
-                            key={badge.key}
-                            className="inline-flex items-center rounded-full px-2.5 py-1 text-xs font-medium text-white shadow-sm"
-                            style={{ backgroundColor: badge.color }}
-                          >
-                            {badge.label}
-                          </span>
-                        ))}
-                      </div>
-                    ) : null}
+
 
 	                  <div className="mt-4">
                     {lessonCalendarMonths.length > 0 ? (
@@ -4924,21 +4823,19 @@ export function ClassScheduleWorkspace() {
                         {lessonCalendarMonths.map((month) => {
                           const monthPreviewSessions = Array.from(month.sessionsByDate.values()).flat();
                           const accentColor = monthPreviewSessions[0]?.billingColor || "#216e4e";
-                          const monthSurfaceStyle = getLessonCalendarMonthSurfaceStyle(accentColor);
                           const cells = buildLessonCalendarCells(month.year, month.month);
 
                           return (
                             <div
                               key={month.key}
                               data-lesson-calendar-month={month.key}
-                              className="rounded-[var(--radius-surface)] border px-4 py-5 shadow-xs"
-                              style={monthSurfaceStyle}
+                              className="rounded-[var(--radius-surface)] border bg-background p-3 sm:p-4"
                             >
                               <div className="flex flex-wrap items-center justify-between gap-3">
                                 <div className="flex items-center gap-3">
-                                  <span className="h-10 w-1.5 rounded-full" style={{ backgroundColor: accentColor }} />
+                                  <span className="size-2.5 rounded-full" style={{ backgroundColor: accentColor }} />
                                   <div className="space-y-1">
-                                    <p className="text-xl font-semibold text-foreground">
+                                    <p className="text-base font-semibold text-foreground">
                                       {month.year}년 {month.month + 1}월
                                     </p>
                                   </div>
@@ -4962,7 +4859,7 @@ export function ClassScheduleWorkspace() {
                                         type="button"
                                         style={mobileSessionSurfaceStyle}
                                         className={cn(
-                                          "flex min-h-14 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left shadow-xs transition-colors",
+                                          "flex min-h-14 items-center justify-between gap-3 rounded-lg border px-3 py-2 text-left transition-colors",
                                           mobileSessionSurface.className,
                                           isSelectedMobileSession &&
                                             "ring-2 ring-primary/70 ring-offset-2 ring-offset-background",
@@ -5091,7 +4988,7 @@ export function ClassScheduleWorkspace() {
                                         });
                                       }}
                                       className={cn(
-                                        "flex min-h-[7rem] min-w-0 flex-col overflow-hidden rounded-md border px-2 py-2 text-left align-top transition-colors",
+                                        "flex min-h-[5.25rem] min-w-0 flex-col overflow-hidden rounded-md border px-2 py-2 text-left align-top transition-colors",
                                         primarySession
                                           ? primaryScheduleSurface?.className
                                           : canToggleCalendarDate
@@ -5114,7 +5011,7 @@ export function ClassScheduleWorkspace() {
                                     >
                                       <p className="text-[11px] font-semibold">{cell.date.getDate()}</p>
                                       {primarySession ? (
-                                        <div className="flex min-h-[4.75rem] flex-1 flex-col items-center justify-center gap-1.5 text-center">
+                                        <div className="flex min-h-[3rem] flex-1 flex-col items-center justify-center gap-1.5 text-center">
                                           <Badge
                                             variant="secondary"
                                             className="max-w-full truncate rounded-full px-2.5 py-1 text-xs font-semibold"
@@ -5139,7 +5036,7 @@ export function ClassScheduleWorkspace() {
                                               추가 {daySessions.length - 1}건
                                             </p>
                                           ) : null}
-                                          
+
                                         </div>
                                       ) : null}
                                     </CellTag>
@@ -5178,58 +5075,9 @@ export function ClassScheduleWorkspace() {
                     )}
                   </div>
           </section>
-            </>
-          )
+          </>
 
-          <div
-            data-testid="lesson-design-bottom-action-bar"
-            className="sticky bottom-0 z-30 col-span-full flex flex-wrap items-center justify-end gap-2 border-t bg-background px-4 py-3"
-          >
-            <div className="flex min-w-0 items-center gap-2">
-              <Badge variant={lessonDesignSnapshot.saveReadiness.ready ? "secondary" : "outline"}>
-                
-              </Badge>
-              
-            </div>
-            {requestedLessonReturnPath ? (
-              <Button
-                type="button"
-                variant="outline"
-                className="h-9 rounded-md px-3 shadow-none"
-                data-testid="lesson-design-bottom-return"
-                aria-label={lessonDesignReturnActionLabel}
-                onClick={requestLessonDesignClose}
-              >
-                <ArrowLeft className="mr-1.5 size-4" />
-                {lessonDesignReturnLabel}
-              </Button>
-            ) : null}
-            {normalizedGenerationContext ? (
-              generationPreview ? (
-                <Button type="button" className="h-9 rounded-md px-4" onClick={() => void confirmLessonSessionGeneration()} disabled={generationSaving}>
-                  {generationSaving ? "생성 중" : `생성 확정 · 추가 ${Number(generationPreview.creatableCount || 0)}`}
-                </Button>
-              ) : (
-                <Button type="button" variant="outline" className="h-9 rounded-md px-4" onClick={() => void previewLessonSessionGeneration()} disabled={generationSaving}>
-                  {generationSaving ? "미리보기 중" : "일정 미리보기"}
-                </Button>
-              )
-            ) : null}
-            {!isNormalizedLessonSchedule ? (
-            <Button
-              type="button"
-              className="h-9 rounded-md px-5 shadow-none"
-              onClick={handleSaveLessonPlan}
-              disabled={
-                isLessonDesignSaving ||
-                !lessonScheduleReadReady ||
-                !lessonDesignSnapshot.saveReadiness.ready
-              }
-            >
-              {isLessonDesignSaving ? "일정 저장 중" : "일정 저장"}
-            </Button>
-            ) : null}
-          </div>
+          {!isLessonDesignPage ? lessonDesignActions : null}
         </div>
       </div>
     ) : null
@@ -5294,7 +5142,7 @@ export function ClassScheduleWorkspace() {
             </div>
             <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
               <span>{model.syncGroupCards.length}개 동기 그룹</span>
-              
+
             </div>
           </div>
 
@@ -5645,17 +5493,20 @@ export function ClassScheduleWorkspace() {
           role="region"
           aria-label="일정 편성 작업 영역"
           tabIndex={0}
-          className="h-[calc(100dvh-var(--header-height)-2rem)] overflow-y-auto overscroll-contain px-4 pb-28 outline-none lg:px-6"
+          className="min-w-0 space-y-5 outline-none"
         >
-          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 border-b pb-3">
+          <div className="sticky top-[var(--header-height)] z-30 flex flex-wrap items-center justify-between gap-3 border-b bg-background px-4 py-3">
             <div className="min-w-0">
               <p className="truncate text-xl font-semibold text-foreground">{lessonDesignTitle}</p>
               <p className="text-sm text-muted-foreground">{lessonDesignDescription}</p>
             </div>
-            <Button type="button" variant="outline" onClick={requestLessonDesignClose}>
-              <ArrowLeft className="mr-2 size-4" />
-              {lessonDesignReturnActionLabel}
-            </Button>
+            <div className="flex flex-wrap items-center gap-2">
+              <Button type="button" variant="outline" onClick={requestLessonDesignClose}>
+                <ArrowLeft className="mr-2 size-4" />
+                {lessonDesignReturnActionLabel}
+              </Button>
+              {lessonDesignActions}
+            </div>
           </div>
           {lessonDesignDetailError ? (
             <Alert variant="destructive">
@@ -5667,7 +5518,7 @@ export function ClassScheduleWorkspace() {
               <Skeleton className="h-64 w-full" />
             </div>
           ) : lessonDesignSnapshot ? (
-            <div className="bg-background">
+            <div className="overflow-hidden rounded-[var(--radius-surface)] border bg-background">
               {lessonDesignWorkspaceContent}
             </div>
           ) : (
@@ -5685,7 +5536,7 @@ export function ClassScheduleWorkspace() {
                   >
                     반 목록 점검
                   </Link>
-                  
+
                 </div>
               </div>
             </div>
@@ -5726,7 +5577,7 @@ export function ClassScheduleWorkspace() {
           </DialogContent>
         </Dialog>
       )}
-      
+
     </>
   );
 }

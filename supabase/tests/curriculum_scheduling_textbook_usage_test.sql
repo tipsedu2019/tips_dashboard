@@ -41,7 +41,7 @@ insert into public.class_lesson_sessions(class_id,session_key,session_date,sched
 (pg_temp.fid(3),'normalized-future',current_date+3,'active','manual'),
 (pg_temp.fid(3),'skipped',current_date+2,'skipped','manual');
 set local role authenticated;
-create temporary table result as select public.get_academic_curriculum_numbered_page_v1(pg_temp.filters(),1,10,true) as data;
+create temporary table result as select public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,true) as data;
 select is((select (r->>'totalSessions')::int from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),2,'legacy count comes from valid saved sessions');
 select is((select (r->>'totalSessions')::int from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(2)::text),2,'shadow does not double count normalized copies');
 select is((select (r->>'totalSessions')::int from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(3)::text),1,'normalized storage uses authoritative rows and excludes skipped sessions');
@@ -49,11 +49,11 @@ select is((select r#>>'{nextSession,sessionId}' from result,jsonb_array_elements
 select is((select r->>'stateLabel' from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'일정 편성','book assignments do not determine schedule readiness');
 select is((select r->>'stateLabel' from result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(4)::text),'일정 연장 필요','past-only active class needs a new schedule');
 select is((select data#>>'{stats,noScheduleClassCount}' from result),'1','only truly empty class is unscheduled');
-select is(public.get_academic_curriculum_numbered_page_v1(pg_temp.filters('{"viewMode":"update"}'),1,10,true)->>'totalCount','1','schedule queue filters on expired schedules');
+select is(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters('{"viewMode":"update"}'),1,10,true)->>'totalCount','1','schedule queue filters on expired schedules');
 select is(public.get_operations_class_lesson_design_detail_v1(pg_temp.fid(1))->'textbooks','[]'::jsonb,'scheduling detail does not load a textbook catalog');
 reset role;
-select ok(not has_function_privilege('anon','public.get_academic_curriculum_numbered_page_v1(jsonb,integer,integer,boolean)','execute'),'anonymous cannot read schedules');
-select ok(not p.prosecdef and p.proconfig in(array['search_path='],array['search_path=""']),'final schedule reader stays security invoker with fixed search path') from pg_proc p where oid='public.get_academic_curriculum_numbered_page_v1(jsonb,integer,integer,boolean)'::regprocedure;
+select ok(not has_function_privilege('anon','public.get_academic_curriculum_numbered_page_v2(jsonb,integer,integer,boolean)','execute'),'anonymous cannot read schedules');
+select ok(not p.prosecdef and p.proconfig in(array['search_path='],array['search_path=""']),'final schedule reader stays security invoker with fixed search path') from pg_proc p where oid='public.get_academic_curriculum_numbered_page_v2(jsonb,integer,integer,boolean)'::regprocedure;
 select set_config('request.jwt.claim.sub',pg_temp.fid(901)::text,true);
 select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.fid(901),'role','authenticated')::text,true);
 set local role authenticated;

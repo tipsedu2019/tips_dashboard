@@ -45,16 +45,7 @@ const CURRICULUM_VIEW_MODES = [
 const CURRICULUM_SCROLL_STORAGE_PREFIX = "tips:curriculum-work-queue-scroll:";
 
 function getStateVariant(stateLabel: string) {
-  if (stateLabel.includes("완료")) {
-    return "secondary" as const;
-  }
-  if (stateLabel.includes("미배정")) {
-    return "destructive" as const;
-  }
-  if (stateLabel.includes("미생성") || stateLabel.includes("미연결")) {
-    return "outline" as const;
-  }
-  return "secondary" as const;
+  return stateLabel === "일정 편성" ? "secondary" as const : "outline" as const;
 }
 
 function text(value: unknown) {

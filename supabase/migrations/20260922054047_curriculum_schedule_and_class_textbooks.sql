@@ -88,7 +88,8 @@ begin
 end;
 $$;
 
-create or replace function public.get_academic_curriculum_numbered_page_v1(
+-- Keep v1 intact for already-open clients during the staged rollout.
+create function public.get_academic_curriculum_numbered_page_v2(
   p_filters jsonb,
   p_page integer,
   p_page_size integer,
@@ -370,9 +371,9 @@ end;
 $$;
 
 revoke all on function public.get_academic_curriculum_page_v1(jsonb,text,uuid,integer,boolean) from public, anon, authenticated;
-revoke all on function public.get_academic_curriculum_numbered_page_v1(jsonb,integer,integer,boolean) from public, anon, authenticated;
+revoke all on function public.get_academic_curriculum_numbered_page_v2(jsonb,integer,integer,boolean) from public, anon, authenticated;
 grant execute on function public.get_academic_curriculum_page_v1(jsonb,text,uuid,integer,boolean) to authenticated;
-grant execute on function public.get_academic_curriculum_numbered_page_v1(jsonb,integer,integer,boolean) to authenticated;
+grant execute on function public.get_academic_curriculum_numbered_page_v2(jsonb,integer,integer,boolean) to authenticated;
 
 notify pgrst, 'reload schema';
 -- The scheduling reader no longer scans or returns the textbook catalog.

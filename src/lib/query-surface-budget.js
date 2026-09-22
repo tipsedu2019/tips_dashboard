@@ -122,6 +122,7 @@ const EXACT_NUMBERED_RPC_CONTRACTS = new Map([
   ["list_management_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_ops_task_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["get_academic_curriculum_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
+  ["get_academic_curriculum_numbered_page_v2", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["get_operations_class_schedule_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_makeup_numbered_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
   ["list_textbook_master_page_v1", { parameter: "p_page_size", sizes: [10, 15, 20] }],
