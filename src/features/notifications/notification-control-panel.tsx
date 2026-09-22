@@ -893,13 +893,16 @@ function ConnectionsView({
   )
 }
 
-export function useNotificationControlPlaneAvailability(): NotificationControlPlaneAvailability {
+export function useNotificationControlPlaneAvailability(): NotificationControlPlaneAvailability & { retry: () => void } {
+  const [attempt, setAttempt] = React.useState(0)
+  const retry = React.useCallback(() => setAttempt(value => value + 1), [])
   const [status, setStatus] = React.useState<NotificationControlPlaneAvailability["status"]>(
     "loading",
   )
 
   React.useEffect(() => {
     let active = true
+    setStatus("loading")
     if (!supabase) {
       setStatus("unavailable")
       return () => {
@@ -936,9 +939,9 @@ export function useNotificationControlPlaneAvailability(): NotificationControlPl
     return () => {
       active = false
     }
-  }, [])
+  }, [attempt])
 
-  return { status }
+  return { status, retry }
 }
 
 export function NotificationControlPanel({
@@ -1443,25 +1446,25 @@ export function NotificationControlPanel({
   const pageNavigation = presentation === "page" ? (
     <div className="space-y-4">
       <div className="flex flex-wrap items-center justify-between gap-3">
-        <h1 className="text-xl font-semibold tracking-tight">{activeSection === "customer" ? "등록 고객 안내" : `${getWorkflowLabel(activeWorkflow)} 알림`}</h1>
+        <h2 className="text-lg font-semibold tracking-tight">{activeSection === "customer" ? "등록 고객 안내" : `${getWorkflowLabel(activeWorkflow)} 알림`}</h2>
         {activeSection !== "customer" ? <Button type="button" variant="outline" className="min-h-10" disabled={saving} onClick={() => changeSection("connections")}><MessageSquareText aria-hidden="true" />수신 채팅방</Button> : null}
       </div>
-      <TabsList className="h-auto w-full justify-start gap-2 rounded-none border-b bg-transparent p-0" aria-label="알림 채널">
-        <TabsTrigger value="rules" className="min-h-11 rounded-none border-0 border-b-2 border-transparent px-3 data-[state=active]:border-primary data-[state=active]:shadow-none">직원 알림 · Google Chat</TabsTrigger>
-        {customerGuidance ? <TabsTrigger value="customer" className="min-h-11 rounded-none border-0 border-b-2 border-transparent px-3 data-[state=active]:border-primary data-[state=active]:shadow-none">고객 안내 · 알림톡</TabsTrigger> : null}
+      <TabsList className="h-auto w-full justify-start" aria-label="알림 채널">
+        <TabsTrigger value="rules" className="min-h-9 px-3">직원 알림 · Google Chat</TabsTrigger>
+        {customerGuidance ? <TabsTrigger value="customer" className="min-h-9 px-3">고객 안내 · 알림톡</TabsTrigger> : null}
       </TabsList>
       {presentation === "page" && activeSection !== "customer" ? (
         <nav
           aria-label="알림 업무 선택"
-          className="grid grid-cols-2 gap-1 rounded-lg border bg-muted/35 p-1 sm:grid-cols-3 xl:grid-cols-6 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+          className="flex flex-wrap gap-1"
         >
           {NOTIFICATION_GOOGLE_CHAT_WORKFLOW_OPTIONS.map((option) => (
             <Button
               key={option.key}
               type="button"
               size="sm"
-              variant={activeWorkflow === option.key ? "default" : "ghost"}
-              className="h-10 w-full px-3"
+              variant={activeWorkflow === option.key ? "secondary" : "ghost"}
+              className="h-9 px-3"
               disabled={saving}
               aria-pressed={activeWorkflow === option.key}
               onClick={() => {
@@ -1610,7 +1613,7 @@ export function NotificationControlPanel({
       ) : null}
 
       <div
-        className="sticky bottom-3 z-20 -mx-1 flex flex-col gap-2 rounded-lg border bg-background/95 px-3 py-2 shadow-lg backdrop-blur supports-[backdrop-filter]:bg-background/80 sm:flex-row sm:items-center sm:justify-between"
+        className="sticky bottom-0 z-20 flex flex-col gap-2 border-t border-border/70 bg-background px-3 py-3 sm:flex-row sm:items-center sm:justify-between"
         role="region"
         aria-label="알림 설정 저장"
       >

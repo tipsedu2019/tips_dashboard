@@ -451,3 +451,19 @@ test("unchanged column definitions do not repeat synchronous storage writes duri
     }
   });
 });
+
+test("compact defaults preserve saved visibility and required columns", async () => {
+  await withDom(async ({ root }) => {
+    const { useDataTableColumns } = await loadDataTableColumns();
+    const harness = createHarness(useDataTableColumns);
+    const columns = [
+      { id: "student", label: "학생", required: true, defaultVisible: false },
+      { id: "memo", label: "메모", defaultVisible: false },
+      { id: "date", label: "날짜" },
+    ];
+    await act(async () => root.render(createElement(harness.Harness, { columns })));
+    assert.equal(harness.latest().isColumnVisible("student"), true);
+    assert.equal(harness.latest().isColumnVisible("memo"), false);
+    assert.equal(harness.latest().isColumnVisible("date"), true);
+  });
+});

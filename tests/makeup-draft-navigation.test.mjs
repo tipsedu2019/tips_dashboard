@@ -48,3 +48,28 @@ test('refund completion note shares navigation protection without triggering its
   await act(async()=>requestAppNavigation(()=>calls.push('route')));await click('변경사항 버리기');assert.deepEqual(calls,['route']);
   assert.equal(p.requests.some(r=>/transition_makeup/.test(r.name||'')),false);
 });
+
+test('refund failure stays inside the open processing dialog with its note and retry', async t => {
+  const p = await ready(t, true);
+  await click('환불완료');
+  await act(async () => p.observed.patchActionNote('환불 처리 의견'));
+  const dialog = document.querySelector('[role="dialog"]');
+  const submit = [...dialog.querySelectorAll('button')].find(b => b.textContent.trim() === '환불완료');
+  assert.ok(submit);
+  const before = p.requests.length;
+  await act(async () => submit.click());
+  const processingRead = p.requests.slice(before).find(r => r.table);
+  assert.ok(processingRead, 'processing validates current data before mutation');
+  await act(async () => processingRead.reject(new Error('temporary upstream failure')));
+  assert.ok(dialog.querySelector('[role="alert"]'), 'failure belongs to the current dialog');
+  assert.equal(dialog.querySelector('textarea').value, '환불 처리 의견');
+  assert.equal(submit.disabled, false);
+});
+
+test('makeup first read failure preserves search and does not claim no applications', async t => {
+  const p = await setup(t);
+  await act(async () => p.numbered()[0].reject(new Error('private read timeout')));
+  assert.equal(document.body.textContent.includes('표시할 신청서가 없습니다.'), false);
+  assert.equal(document.body.textContent.includes('private read timeout'), false);
+  assert.ok(document.querySelector('input[type="search"]'));
+});

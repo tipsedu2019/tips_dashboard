@@ -70,6 +70,7 @@ const servicePath = 'src/features/makeup-requests/makeup-numbered-service.ts';
 async function setup(t, initial = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: `https://test.invalid/admin/makeup-requests${initial.search || ''}` });
   globalThis.window = dom.window; globalThis.document = dom.window.document; globalThis.self = dom.window;
+  window.matchMedia = media => ({media, matches: false, addEventListener() {}, removeEventListener() {}});
   for (const key of ['HTMLElement', 'Element', 'DocumentFragment', 'MutationObserver', 'CustomEvent', 'Event', 'Node', 'NodeFilter', 'HTMLInputElement']) globalThis[key] = dom.window[key];
   globalThis.getComputedStyle = dom.window.getComputedStyle; globalThis.ResizeObserver = class { observe() {} disconnect() {} };
   window.requestAnimationFrame = (callback) => window.setTimeout(callback, 0); window.cancelAnimationFrame = window.clearTimeout; window.scrollTo = () => {};

@@ -283,3 +283,17 @@ for (const spec of cases) {
     } finally { await ui.close(); }
   });
 }
+
+test('school display sorting cannot rewrite saved order during a name edit', async () => {
+  const spec = cases[0], ui = await mount(spec);
+  try {
+    await ui.flush(() => ui.requests[0].resolve({data: [{...spec.row, id:'z', name:'하늘학교', sort_order:7}, {...spec.row, id:'a', name:'가온학교', sort_order:12}], error:null}));
+    const sort = [...document.querySelectorAll('button')].find(b => b.textContent.includes('학교명') && b.textContent.includes('↕'));
+    assert.ok(sort);
+    await ui.flush(() => sort.click());
+    assert.equal(ui.button('변경 저장').disabled, true, 'display sorting creates no draft');
+    await ui.edit('가온학교 수정');
+    await ui.flush(() => ui.button('변경 저장').click());
+    assert.deepEqual(ui.writes[0].payload.map(r => [r.id,r.sortOrder]), [['z',7],['a',12]]);
+  } finally { await ui.close(); }
+});

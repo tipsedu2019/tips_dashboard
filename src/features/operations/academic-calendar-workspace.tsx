@@ -1,7 +1,7 @@
 "use client";
 
 import { useSearchParams } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { toast } from "sonner";
 
 import { useAuth } from "@/providers/auth-provider";
@@ -104,6 +104,7 @@ function buildSidebarGroups(events: Array<Record<string, unknown>>) {
 }
 
 export function AcademicCalendarWorkspace() {
+  const workspaceRef = useRef<HTMLDivElement>(null);
   const searchParams = useSearchParams();
   const { canManageAll } = useAuth();
   const [mutationError, setMutationError] = useState<string | null>(null);
@@ -239,11 +240,6 @@ export function AcademicCalendarWorkspace() {
     const dateKeys = buildSevenDayRangeKeys(densityError.range.dateFrom);
     setRecoveryRange({ dateFrom: dateKeys[0], dateTo: dateKeys[dateKeys.length - 1] });
   }, [densityError]);
-
-  const sevenDayKeys = useMemo(
-    () => isConfirmedSevenDayRange && acceptedRange ? buildSevenDayRangeKeys(acceptedRange.dateFrom) : [],
-    [acceptedRange, isConfirmedSevenDayRange],
-  );
 
   const handleLoadEventDetail = useCallback(async (eventId: string) => {
     const detail = await loadEventDetail(eventId) as Record<string, unknown>;
@@ -407,14 +403,14 @@ export function AcademicCalendarWorkspace() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div ref={workspaceRef} className="flex flex-col gap-6">
 
       {error || mutationError ? (
         <div className="px-4 sm:px-5 lg:px-6">
           <Alert variant="destructive">
             <AlertDescription className="flex flex-wrap items-center justify-between gap-3">
               <span>{error ? `${requestedRangeLabel} 일정을 불러오지 못했습니다.` : mutationError}</span>
-              {error ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void refresh()}>다시 불러오기</Button> : null}
+              {error ? <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => { workspaceRef.current?.querySelector<HTMLElement>('[data-calendar-heading]')?.focus(); void refresh(); }}>다시 불러오기</Button> : null}
             </AlertDescription>
           </Alert>
         </div>
@@ -452,38 +448,10 @@ export function AcademicCalendarWorkspace() {
       ) : null}
 
       <div className="px-4 sm:px-5 lg:px-6">
-        {isConfirmedSevenDayRange ? (
-          <section data-testid="operations-seven-day-agenda" className="space-y-4">
-            <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base font-semibold">한 주 일정 <span className="text-sm font-normal">{acceptedRange?.dateFrom} ~ {acceptedRange?.dateTo}</span></h2>
-              <Button type="button" variant="outline" size="sm" onClick={() => setRecoveryRange(null)}>월간 보기</Button>
-            </div>
-            <div className="grid gap-3 lg:grid-cols-7">
-              {sevenDayKeys.map((dateKey) => {
-                const dayEvents = calendarModel.events.filter((event) => {
-                  const startsAt = toDateKey(event.date);
-                  const endsAt = toDateKey(event.endDate || event.date);
-                  return startsAt <= dateKey && dateKey <= endsAt;
-                });
-                return (
-                  <article key={dateKey} className="min-h-32 rounded-lg border border-border/70 bg-background p-3">
-                    <h3 className="text-sm font-medium">{dateKey}</h3>
-                    <div className="mt-3 space-y-2">
-                      {dayEvents.length === 0 ? <p className="text-xs text-muted-foreground">일정 없음</p> : null}
-                      {dayEvents.map((event) => (
-                        <div key={`${dateKey}:${event.id}`} className="rounded-md bg-muted/50 px-2 py-1.5 text-xs">
-                          <p className="font-medium">{event.title}</p>
-                          {event.schoolName ? <p className="mt-0.5 text-muted-foreground">{event.schoolName}</p> : null}
-                        </div>
-                      ))}
-                    </div>
-                  </article>
-                );
-              })}
-            </div>
-          </section>
-        ) : (
         <Calendar
+          readState={!acceptedRange ? (error ? "error" : "loading") : undefined}
+          recoveryRange={isConfirmedSevenDayRange && acceptedRange ? acceptedRange : undefined}
+          onRecoveryExit={() => setRecoveryRange(null)}
           events={calendarModel.events}
           eventDates={calendarModel.eventDates}
           initialDate={initialDate || undefined}
@@ -500,7 +468,6 @@ export function AcademicCalendarWorkspace() {
           navigation={{ displayedDate, requestedDate, onDateChange: handleNavigationDateChange }}
           onLoadEventDetail={handleLoadEventDetail}
         />
-        )}
       </div>
     </div>
   );

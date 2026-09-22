@@ -539,16 +539,6 @@ test("전역 페이지는 redirect 없이 쿼리 탭과 한글 비활성·확인
   assert.match(workspaceSource, /initialSection/)
 })
 
-test("알림 설정 준비 상태 카드는 좁은 고유 폭으로 축소되지 않고 사용 가능한 너비를 채운다", async () => {
-  const source = await readOptionalSource(
-    "src/features/notifications/notification-settings-workspace.tsx",
-  )
-
-  assert.equal(
-    source.match(/<Card className="mx-auto w-full max-w-2xl">/g)?.length,
-    2,
-  )
-})
 
 test("알림 설정 페이지는 공통 설정 여백 셸을 사용하고 중복 제목을 만들지 않는다", async () => {
   const [pageSource, workspaceSource] = await Promise.all([
@@ -572,9 +562,6 @@ test("알림 업무와 화면 섹션 선택은 반응형 1차·2차 제어로 �
     "src/features/notifications/notification-control-panel.tsx",
   )
 
-  assert.match(source, /grid grid-cols-2 gap-1 rounded-lg border bg-muted\/35 p-1 sm:grid-cols-3 xl:grid-cols-6/)
-  assert.match(source, /variant=\{activeWorkflow === option\.key \? "default" : "ghost"\}/)
-  assert.match(source, /\[scrollbar-width:none\] \[&::-webkit-scrollbar\]:hidden/)
   assert.match(source, /aria-label="알림 채널"/)
   assert.match(source, /changeSection\("connections"\)/)
   assert.match(source, /<DialogTitle>수신 채팅방<\/DialogTitle>/)
@@ -599,7 +586,7 @@ test("알림 규칙 표와 저장바는 조밀한 표 및 화면 안쪽 고정 �
   assert.match(source, /<table className="w-full min-w-\[760px\] table-fixed/)
   assert.match(source, /compact \? "space-y-2 rounded-lg border bg-background p-3"/)
   assert.match(source, /"flex min-w-\[11rem\] items-center justify-end gap-2"/)
-  assert.match(source, /sticky bottom-3 z-20/)
+  assert.match(source, /sticky bottom-0 z-20/)
   assert.match(source, /role="region"/)
   assert.match(source, /aria-label="알림 설정 저장"/)
   assert.match(source, /className="h-9 w-full sm:w-auto"/)

@@ -280,7 +280,7 @@ test('off-page exact detail preserves editor identity and draft through page bac
 test('context errors retain approval safety, explicit retry succeeds and old context cannot replace a new scope', async (t) => {
   const p = await setup(t, { search: '?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0])); await p.catalogs();
   const failed = p.context().at(-1); await act(async () => failed.reject(new Error('CONTEXT FAILURE')));
-  assert.match(document.body.textContent, /CONTEXT FAILURE/);
+  assert.match(document.body.textContent, /예약 충돌 정보를 불러오지 못했습니다/);
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
   await act(async () => button('예약 다시 확인').click()); await p.catalogs();
   const retry = p.context().at(-1); assert.notEqual(retry, failed);
@@ -293,7 +293,7 @@ test('context errors retain approval safety, explicit retry succeeds and old con
 test('required collision catalog failure cannot become empty confirmed availability', async (t) => {
   const p = await setup(t, { search:'?view=approvalPending' }); await act(async () => p.finish(p.numbered()[0]));
   const catalog = p.requests.find((r) => r.table==='academic_events'); await act(async () => catalog.resolve({data:null,error:{code:'42501',message:'CATALOG DENIED'}}));
-  assert.equal(p.context().length,0); assert.match(document.body.textContent,/CATALOG DENIED/);
+  assert.equal(p.context().length,0); assert.match(document.body.textContent,/처리 권한 또는 로그인 상태/);
   assert.ok([...document.querySelectorAll('button')].filter((b) => b.textContent.trim()==='승인').every((b) => b.disabled));
 });
 test('service rejects invalid filters, malformed page/detail/context, caller cancellation and missing RPC without fallback', async () => {

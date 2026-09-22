@@ -19,6 +19,7 @@ import {
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarRail,
+  useSidebar,
 } from "@/components/ui/sidebar"
 
 function pickFirstString(...values: unknown[]) {
@@ -29,6 +30,7 @@ function pickFirstString(...values: unknown[]) {
 }
 
 export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
+  const { isMobile, setOpenMobile } = useSidebar()
   const { user, isAdmin, canManageAll, canEditCurriculumPlanning, canUseAssistantOperations } = useAuth()
   const navGroups = React.useMemo(
     () => buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin }),
@@ -63,6 +65,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
             >
               <Link
                 href={sidebarBrand.href}
+                onClick={(event) => { if (isMobile && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && window.location.pathname === sidebarBrand.href) setOpenMobile(false) }}
                 aria-label="대시보드 홈으로 이동"
                 title="대시보드"
                 data-testid="admin-sidebar-brand"

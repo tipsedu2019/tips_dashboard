@@ -143,11 +143,13 @@ export function NavUser({ user }: { user: NavUserRecord }) {
     const shouldChangePassword = newPassword.length > 0 || confirmPassword.length > 0
     if (shouldChangePassword && newPassword.length < 8) {
       setFeedback({ type: "error", message: "비밀번호는 8자 이상 입력해 주세요." })
+      document.getElementById("profile-new-password")?.focus()
       return
     }
 
     if (shouldChangePassword && newPassword !== confirmPassword) {
       setFeedback({ type: "error", message: "새 비밀번호와 확인 값이 다릅니다." })
+      document.getElementById("profile-confirm-password")?.focus()
       return
     }
 
@@ -249,14 +251,14 @@ export function NavUser({ user }: { user: NavUserRecord }) {
             data-testid="admin-profile-dialog"
             className="max-h-[calc(100dvh-2rem)] w-[min(920px,calc(100vw-2rem))] !max-w-[920px] overflow-hidden p-0"
           >
-            <form onSubmit={handleProfileSave} className="grid min-h-0">
-              <DialogHeader className="border-b px-5 py-4 sm:px-6">
+            <form onSubmit={handleProfileSave} className="flex max-h-[calc(100dvh-2rem)] min-h-0 flex-col">
+              <DialogHeader className="shrink-0 border-b px-5 py-4 sm:px-6">
                 <DialogTitle>프로필 설정</DialogTitle>
                 <DialogDescription className="sr-only">
                   아바타를 고르고 새 비밀번호를 입력하면 계정에 바로 반영됩니다.
                 </DialogDescription>
               </DialogHeader>
-              <div className="grid min-h-0 gap-5 px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.35fr)_20rem]">
+              <div className="grid min-h-0 gap-5 overflow-y-auto overscroll-contain px-5 py-5 sm:px-6 lg:grid-cols-[minmax(0,1.35fr)_20rem]">
                 <section className="min-w-0 rounded-xl border bg-muted/20">
                   <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
                     <div>
@@ -338,6 +340,8 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                         <Label htmlFor="profile-new-password">새 비밀번호</Label>
                         <Input
                           id="profile-new-password"
+                          aria-invalid={Boolean(feedback?.type === "error" && newPassword.length > 0 && newPassword.length < 8)}
+                          aria-describedby={feedback ? "profile-feedback" : undefined}
                           type="password"
                           autoComplete="new-password"
                           value={newPassword}
@@ -349,6 +353,8 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                         <Label htmlFor="profile-confirm-password">새 비밀번호 확인</Label>
                         <Input
                           id="profile-confirm-password"
+                          aria-invalid={Boolean(feedback?.type === "error" && newPassword !== confirmPassword)}
+                          aria-describedby={feedback ? "profile-feedback" : undefined}
                           type="password"
                           autoComplete="new-password"
                           value={confirmPassword}
@@ -359,7 +365,7 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                     </div>
                   </div>
                   {feedback ? (
-                    <div
+                    <div id="profile-feedback" role={feedback.type === "error" ? "alert" : "status"}
                       className={cn(
                         "rounded-xl border px-3 py-2 text-sm",
                         feedback.type === "success"
@@ -372,7 +378,7 @@ export function NavUser({ user }: { user: NavUserRecord }) {
                   ) : null}
                 </section>
               </div>
-              <DialogFooter className="border-t bg-background px-5 py-4 sm:px-6">
+              <DialogFooter className="shrink-0 border-t bg-background px-5 py-4 sm:px-6">
                 <Button type="button" variant="outline" onClick={() => setProfileOpen(false)}>
                   닫기
                 </Button>

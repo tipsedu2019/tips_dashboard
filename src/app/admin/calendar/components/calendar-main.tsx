@@ -28,6 +28,7 @@ import {
 } from "date-fns"
 import { ko } from "date-fns/locale"
 
+import { DataTableToolbar } from "@/components/data-table/data-table-surface"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { buildAcademicAnnualBoardHref } from "@/features/operations/academic-calendar-links"
@@ -63,6 +64,9 @@ import {
 
 interface CalendarMainProps {
   navigation?: CalendarNavigation
+  readState?: "loading" | "error"
+  onNewEvent?: () => void
+  addButtonLabel?: string
   selectedDate?: Date
   initialQuery?: string
   onDateSelect?: (date: Date) => void
@@ -94,7 +98,7 @@ type ScienceCalendarEvent = CalendarEvent & {
 }
 
 const MONTH_GRID_DAY_HEADER_HEIGHT = 44
-const MONTH_GRID_EVENT_LANE_HEIGHT = 26
+const MONTH_GRID_EVENT_LANE_HEIGHT = 44
 const MONTH_GRID_CELL_BODY_HEIGHT = 70
 
 function formatEventRange(event: CalendarEvent) {
@@ -209,7 +213,7 @@ function renderEventContextBadges(event: CalendarEvent, size: "month" | "list" =
 
   const badgeClassName =
     size === "month"
-      ? "h-4 px-1 text-[9px] leading-none text-white/95 border-white/20 bg-white/10"
+      ? "h-auto border-0 bg-transparent px-0 text-[10px] font-normal leading-4 text-muted-foreground"
       : "h-5 px-1.5 text-[10px]"
 
   return (
@@ -268,6 +272,9 @@ function matchesCalendarQuery(event: CalendarEvent, query: string) {
 
 export function CalendarMain({
   navigation,
+  readState,
+  onNewEvent,
+  addButtonLabel = "새 일정 추가",
   selectedDate,
   initialQuery,
   onDateSelect,
@@ -691,11 +698,13 @@ export function CalendarMain({
                             <div
                               key={event.id}
                               className={cn(
-                                "flex items-stretch gap-1 rounded-md text-white shadow-sm transition-all hover:-translate-y-px hover:shadow-md",
-                                event.color,
+                                "relative flex items-stretch gap-1 overflow-hidden rounded-md border bg-muted/30 text-foreground transition-colors hover:bg-accent",
                               )}
                             >
+                              <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-1", event.color)} />
                               <button
+                                type="button"
+                                aria-label={`${event.title} 상세 보기`}
                                 draggable={!readOnly}
                                 className="min-w-0 flex-1 cursor-pointer rounded-md bg-transparent px-2 py-1.5 text-left text-[11px]"
                                 onPointerDown={(pointerEvent) => {
@@ -724,14 +733,13 @@ export function CalendarMain({
                                 }}
                               >
                                 <div className="flex flex-wrap items-center gap-1">
-                                  {renderExamScopeHover(event)}
-                                  <span className="block truncate font-medium">{event.title}</span>
+                                  <span className="block w-full break-words font-medium leading-4">{event.title}</span>
                                   {renderEventContextBadges(event, "month")}
                                 </div>
                               </button>
                               <Link
                                 href={annualBoardHref}
-                                className="inline-flex w-6 shrink-0 items-center justify-center rounded-md bg-black/10 text-white/90 transition-colors hover:bg-black/20"
+                                className="inline-flex w-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                                 aria-label={`${event.title} 연간 일정표 바로가기`}
                                 title="연간 일정표 바로가기"
                                 onPointerDown={(pointerEvent) => {
@@ -788,9 +796,9 @@ export function CalendarMain({
                         <button
                           type="button"
                           draggable={!readOnly}
+                          aria-label={`${event.title} 상세 보기`}
                           className={cn(
-                            "flex h-6 w-full items-center gap-1 overflow-hidden rounded-md px-2 pr-8 text-left text-[11px] font-medium text-white shadow-sm transition-all hover:-translate-y-px hover:shadow-md",
-                            event.color,
+                            "relative flex h-10 w-full items-center gap-2 overflow-hidden rounded-md border bg-muted/40 px-2 pr-7 text-left text-[11px] font-medium text-foreground transition-colors hover:bg-accent",
                           )}
                           onPointerDown={(pointerEvent) => {
                             pointerEvent.stopPropagation()
@@ -821,15 +829,15 @@ export function CalendarMain({
                             onEventClick?.(event)
                           }}
                         >
-                          {segment.continuesBefore ? <span className="text-white/80">‹</span> : null}
-                          {renderExamScopeHover(event, "h-4 px-1 text-[9px]")}
-                          <span className="truncate">{event.title}</span>
-                          {renderEventContextBadges(event, "month")}
-                          {segment.continuesAfter ? <span className="text-white/80">›</span> : null}
+                          <span aria-hidden="true" className={cn("absolute inset-y-0 left-0 w-1", event.color)} />
+                          {segment.continuesBefore ? <span aria-hidden="true">‹</span> : null}
+                          <span className="min-w-0 flex-1 line-clamp-2 break-words leading-4">{event.title}</span>
+                          <span className="shrink-0 text-[10px] font-normal text-muted-foreground">{[event.schoolName, ...getGradeBadgeLabels(event.grade)].filter(Boolean).join(" · ")}</span>
+                          {segment.continuesAfter ? <span aria-hidden="true">›</span> : null}
                         </button>
                         <Link
                           href={annualBoardHref}
-                          className="absolute right-1 top-1/2 inline-flex size-4 -translate-y-1/2 items-center justify-center rounded-sm bg-black/15 text-white/90 transition-colors hover:bg-black/25"
+                          className="absolute right-1 top-1/2 inline-flex size-6 -translate-y-1/2 items-center justify-center rounded-sm text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
                           aria-label={`${event.title} 연간 일정표 바로가기`}
                           title="연간 일정표 바로가기"
                           onPointerDown={(pointerEvent) => {
@@ -943,13 +951,15 @@ export function CalendarMain({
   return (
     <>
       <div className="flex h-full flex-col">
-        <div className="flex min-w-0 flex-col gap-4 border-b px-4 py-4 sm:px-6 md:flex-row md:flex-wrap md:items-center md:justify-between">
-          <div className="flex flex-wrap items-center gap-3">
+        <DataTableToolbar>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center gap-2">
             <Button variant="outline" size="icon" className="cursor-pointer xl:hidden" onClick={onMenuClick} aria-label="학사일정 메뉴 열기">
               <Menu className="size-4" />
             </Button>
 
-            <div className="flex items-center gap-1 rounded-lg border bg-muted/20 p-1">
+            <h2 data-calendar-heading tabIndex={-1} className="text-base font-semibold sm:text-lg">{format(currentDate, "yyyy년 M월", { locale: ko })}</h2>
+            <div role="group" aria-label="날짜 이동" className="flex items-center gap-1">
               <Button variant="ghost" size="icon" onClick={() => navigateMonth("prev")} className="cursor-pointer rounded-md" aria-label="이전 달">
                 <ChevronLeft className="size-4" />
               </Button>
@@ -961,13 +971,12 @@ export function CalendarMain({
               </Button>
             </div>
 
-            <div className="min-w-0">
-              <h1 className="text-xl font-semibold tracking-tight sm:text-2xl">{format(currentDate, "yyyy년 M월", { locale: ko })}</h1>
-            </div>
+          </div>
+          {!readOnly ? <Button type="button" onClick={onNewEvent}><Plus className="size-4" />{addButtonLabel}</Button> : null}
           </div>
 
-          <div className="flex min-w-0 max-w-full flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-            <div className="relative min-w-0 flex-1 sm:w-64" role="search" aria-label="학사일정 검색">
+          <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">
+            <div className="relative min-w-0 basis-full sm:basis-auto sm:flex-1 sm:max-w-sm" role="search" aria-label="학사일정 검색">
               <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
               <Input
                 type="search"
@@ -997,7 +1006,7 @@ export function CalendarMain({
               ) : null}
             </div>
 
-            <div className="inline-flex w-fit items-center rounded-lg border bg-muted/20 p-1">
+            <div role="group" aria-label="일정 보기" className="inline-flex items-center gap-1">
               <Button
                 type="button"
                 size="sm"
@@ -1033,9 +1042,9 @@ export function CalendarMain({
               </Link>
             </Button>
           </div>
-        </div>
+        </DataTableToolbar>
 
-        {viewMode === "month" ? renderCalendarGrid() : renderListView()}
+        {readState ? <div className="flex min-h-64 items-center justify-center p-6 text-sm text-muted-foreground" role="status">{readState === "error" ? "일정 조회 결과를 확인할 수 없습니다." : "일정을 불러오는 중…"}</div> : viewMode === "month" ? renderCalendarGrid() : renderListView()}
       </div>
 
       <Dialog open={Boolean(overflowDate)} onOpenChange={(open) => !open && setOverflowDate(null)}>
@@ -1096,7 +1105,7 @@ export function CalendarMain({
                   <div className="min-w-0 flex-1 space-y-2">
                     <div className="flex flex-wrap items-center gap-2">
                       {renderExamScopeHover(event)}
-                      <p className="truncate font-medium">{event.title}</p>
+                      <p className="break-words font-medium">{event.title}</p>
                       <Badge variant="outline">{getAcademicEventTypeLabel(event.typeLabel || event.type)}</Badge>
                     </div>
                     <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">

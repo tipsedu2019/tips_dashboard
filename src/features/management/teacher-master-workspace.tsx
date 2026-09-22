@@ -913,7 +913,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                   <div className="flex shrink-0 items-center gap-2">
                     <Checkbox
                       disabled={editBlocked}
-                      aria-label="선생님 표시 여부"
+                      aria-label={`${row.name || "새 선생님"} 표시 여부`}
                       checked={row.isVisible}
                       onCheckedChange={(checked) =>
                         handleFieldChange(row.id, "isVisible", checked === true)
@@ -931,7 +931,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                       value={normalizeTeamValue(row.subjects)}
                       onValueChange={(value) => handleTeamChange(row.id, value as TeamOption)}
                     >
-                      <SelectTrigger className="h-9">
+                      <SelectTrigger className="h-9" aria-label={`${row.name || "새 선생님"} 팀`}>
                         <SelectValue placeholder="팀" />
                       </SelectTrigger>
                       <SelectContent>
@@ -979,7 +979,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                       onValueChange={(value) => handleRoleChange(row.id, value)}
                       disabled={editBlocked || !isAccountSchemaReady}
                     >
-                      <SelectTrigger className="h-9">
+                      <SelectTrigger className="h-9" aria-label={`${row.name || "새 선생님"} 권한`}>
                         <SelectValue placeholder="권한" />
                       </SelectTrigger>
                       <SelectContent>
@@ -1000,7 +1000,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                       className="size-8"
                       onClick={() => handleMoveRowWithinTeam(row.id, "up")}
                       disabled={editBlocked || currentIndex <= 0}
-                      aria-label="선생님 순서 위로 이동"
+                      aria-label={`${row.name || "새 선생님"} 순서 위로 이동`}
                     >
                       <ArrowUp className="size-4" />
                     </Button>
@@ -1011,7 +1011,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                       className="size-8"
                       onClick={() => handleMoveRowWithinTeam(row.id, "down")}
                       disabled={editBlocked || currentIndex === teamRows.length - 1}
-                      aria-label="선생님 순서 아래로 이동"
+                      aria-label={`${row.name || "새 선생님"} 순서 아래로 이동`}
                     >
                       <ArrowDown className="size-4" />
                     </Button>
@@ -1022,7 +1022,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                       className="size-8"
                       onClick={() => handleDelete(row)}
                       disabled={editBlocked}
-                      aria-label="선생님 삭제"
+                      aria-label={`${row.name || "새 선생님"} 삭제`}
                     >
                       <Trash2 className="size-4" />
                     </Button>
@@ -1114,7 +1114,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                               handleTeamChange(row.id, value as TeamOption)
                             }
                           >
-                            <SelectTrigger className="h-9 w-full">
+                            <SelectTrigger className="h-9 w-full" aria-label={`${row.name || "새 선생님"} 팀`}>
                               <SelectValue placeholder="팀" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1161,7 +1161,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                             }
                             disabled={editBlocked || !isAccountSchemaReady}
                           >
-                            <SelectTrigger className="h-9 w-full">
+                            <SelectTrigger className="h-9 w-full" aria-label={`${row.name || "새 선생님"} 권한`}>
                               <SelectValue placeholder="권한" />
                             </SelectTrigger>
                             <SelectContent>
@@ -1176,7 +1176,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                           <div className="flex h-9 items-center justify-center gap-2">
                             <Checkbox
                               disabled={editBlocked}
-                              aria-label="선생님 표시 여부"
+                              aria-label={`${row.name || "새 선생님"} 표시 여부`}
                               checked={row.isVisible}
                               onCheckedChange={(checked) =>
                                 handleFieldChange(
@@ -1197,7 +1197,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                               className="size-8"
                               onClick={() => handleMoveRowWithinTeam(row.id, "up")}
                               disabled={editBlocked || currentIndex <= 0}
-                              aria-label="선생님 순서 위로 이동"
+                              aria-label={`${row.name || "새 선생님"} 순서 위로 이동`}
                             >
                               <ArrowUp className="size-4" />
                             </Button>
@@ -1210,7 +1210,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                               disabled={
                                 editBlocked || currentIndex === teamRows.length - 1
                               }
-                              aria-label="선생님 순서 아래로 이동"
+                              aria-label={`${row.name || "새 선생님"} 순서 아래로 이동`}
                             >
                               <ArrowDown className="size-4" />
                             </Button>
@@ -1221,7 +1221,7 @@ function TeacherMasterEditor({ canEdit, accessRole }: { canEdit: boolean; access
                               className="size-8"
                               onClick={() => handleDelete(row)}
                               disabled={editBlocked}
-                              aria-label="선생님 삭제"
+                              aria-label={`${row.name || "새 선생님"} 삭제`}
                             >
                               <Trash2 className="size-4" />
                             </Button>

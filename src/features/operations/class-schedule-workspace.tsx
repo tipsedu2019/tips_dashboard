@@ -3743,10 +3743,10 @@ export function ClassScheduleWorkspace() {
       isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
       mutate: async () => await action.generateSessions({ ...normalizedGenerationContext, reason: null }),
       afterCommit: async () => await invalidatePublicClassesCacheAfterMutation(client, "schedule"),
-      onSuccess: async (result: unknown, refreshReceipt: { status?: string } | undefined) => {
+      onSuccess: async (_result: unknown, refreshReceipt: { status?: string } | undefined) => {
         if (generationScopeRef.current !== submittedScope) return;
         setGenerationPreview(null);
-        const saved = `추가 ${Number((result as Record<string, unknown>)?.generatedCount || 0)} · 기존 ${Number(generationPreview.existingCount || 0)} · 확인 필요 ${Number(generationPreview.resourceConflictCount || 0)}`;
+        const saved = `일정 생성 완료 · 기존 ${Number(generationPreview.existingCount || 0)}`;
         setLessonDesignSaveNotice(refreshReceipt?.status === "pending" ? `${saved} · 공개 수업 캐시 갱신 대기 중` : saved);
         try { await refreshSelectedLessonDetail(mutationToken); }
         catch {
@@ -4589,7 +4589,17 @@ export function ClassScheduleWorkspace() {
     );
   };
 
+  const generationCandidates = generationPreview && Array.isArray(generationPreview.candidates)
+    ? (generationPreview.candidates as Record<string, unknown>[]).filter(candidate => candidate.sessionDate && ["existing", "creatable"].includes(text(candidate.status))) : [];
+  const generationPreviewList = generationPreview ? <div aria-label="일정 생성 미리보기" className="border-t py-3">
+    <p className="mb-2 text-sm font-medium">{formatLessonMonthLabel(focusedLessonMonthKey)} 생성 미리보기</p>
+    {generationCandidates.length ? <ul className="flex flex-wrap gap-x-5 gap-y-2 text-sm">{generationCandidates.map(candidate => <li key={text(candidate.sessionKey)}>
+      <time>{text(candidate.sessionDate)}</time> <span className="text-muted-foreground">{candidate.status === "existing" ? "기존" : "신규"}</span>
+    </li>)}</ul> : <p className="text-sm text-muted-foreground">추가할 일정 없음</p>}
+  </div> : null;
   const lessonDesignActions = (
+    <div className="min-w-0">
+      {generationPreviewList}
           <div
             data-testid="lesson-design-bottom-action-bar"
             className="flex flex-wrap items-center justify-end gap-2"
@@ -4609,8 +4619,8 @@ export function ClassScheduleWorkspace() {
             ) : null}
             {normalizedGenerationContext ? (
               generationPreview ? (
-                <Button type="button" className="h-9 rounded-md px-4" onClick={() => void confirmLessonSessionGeneration()} disabled={generationSaving}>
-                  {generationSaving ? "생성 중" : `생성 확정 · 추가 ${Number(generationPreview.creatableCount || 0)}`}
+                <Button type="button" className="h-9 rounded-md px-4" onClick={() => void confirmLessonSessionGeneration()} disabled={generationSaving || Number(generationPreview.creatableCount || 0) === 0}>
+                  {generationSaving ? "생성 중" : Number(generationPreview.creatableCount || 0) === 0 ? "추가할 일정 없음" : `생성 확정 · 추가 ${Number(generationPreview.creatableCount || 0)}`}
                 </Button>
               ) : (
                 <Button type="button" variant="outline" className="h-9 rounded-md px-4" onClick={() => void previewLessonSessionGeneration()} disabled={generationSaving}>
@@ -4633,6 +4643,7 @@ export function ClassScheduleWorkspace() {
             </Button>
             ) : null}
           </div>
+    </div>
   );
 
   const lessonDesignWorkspaceContent = (
@@ -4898,6 +4909,7 @@ export function ClassScheduleWorkspace() {
                                   {cells.map((cell) => {
                                   const dateKey = `${cell.date.getFullYear()}-${String(cell.date.getMonth() + 1).padStart(2, "0")}-${String(cell.date.getDate()).padStart(2, "0")}`;
                                   const daySessions = month.sessionsByDate.get(dateKey) || [];
+                                  const previewCandidates = generationCandidates.filter(candidate => candidate.sessionDate === dateKey);
                                   const primarySession = getLessonCalendarPrimarySession(daySessions);
                                   const calendarStateEntry =
                                     ((normalizedLessonPlan?.sessionStates || {}) as Record<
@@ -5010,6 +5022,7 @@ export function ClassScheduleWorkspace() {
                                       }}
                                     >
                                       <p className="text-[11px] font-semibold">{cell.date.getDate()}</p>
+                                      {previewCandidates.map(candidate => <span key={text(candidate.sessionKey)} className="text-xs text-muted-foreground">{candidate.status === "creatable" ? "생성 예정" : "기존 일정"}</span>)}
                                       {primarySession ? (
                                         <div className="flex min-h-[3rem] flex-1 flex-col items-center justify-center gap-1.5 text-center">
                                           <Badge

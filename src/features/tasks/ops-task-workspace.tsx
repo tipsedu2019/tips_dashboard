@@ -1,13 +1,15 @@
 "use client"
 
-import { DataTableCommandRow, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableToolbar, DataTableCommandRow, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
+import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
+import { useDataTableColumns } from "@/components/data-table/data-table-columns"
 import { cn } from "@/lib/utils"
 import { DataTableFilterPanel } from "@/components/data-table/data-table-filter-panel"
 import { useIsMobile } from "@/hooks/use-mobile"
 import { DataTableSelectionActions, DataTableSelectionCheckbox } from "@/components/data-table/data-table-selection"
 import { usePathname, useRouter, useSearchParams } from "next/navigation"
 import { memo, useCallback, useDeferredValue, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type FormEvent, type KeyboardEvent, type PointerEvent as ReactPointerEvent, type ReactNode, type Ref, type TouchEvent, type WheelEvent } from "react"
-import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Filter, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
+import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, ChevronsUpDown, CircleHelp, FileText, Inbox, List, Plus, RefreshCw, Search, Trash2, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
@@ -504,7 +506,7 @@ const WITHDRAWAL_TABLE_COLUMNS: Array<{
   { columnKey: "status", label: "상태", width: 104, minWidth: 88 },
   { columnKey: "subject", label: "과목", width: 88, minWidth: 72 },
   { columnKey: "teacher", label: "선생님", width: 116, minWidth: 96 },
-  { columnKey: "className", label: "수업", width: 170, minWidth: 130 },
+  { columnKey: "className", label: "수업", width: 150, minWidth: 130 },
   { columnKey: "student", label: "학생", width: 118, minWidth: 96 },
   { columnKey: "customerReason", label: "고객 퇴원사유", width: 210, minWidth: 150 },
   { columnKey: "teacherOpinion", label: "선생님 의견", width: 190, minWidth: 140 },
@@ -514,9 +516,14 @@ const WITHDRAWAL_TABLE_COLUMNS: Array<{
   { columnKey: "completedLessonHours", label: "진행 수업시수", width: 120, minWidth: 104, align: "right" },
   { columnKey: "fourWeekLessonHours", label: "4주 기준 수업시수", width: 138, minWidth: 120, align: "right" },
   { columnKey: "progress", label: "수업진행률", width: 108, minWidth: 96, align: "right" },
-  { columnKey: "operationsChecklist", label: "처리 확인", width: 218, minWidth: 180 },
-  { columnKey: "action", label: "액션", width: 246, minWidth: 210, align: "right" },
+  { columnKey: "operationsChecklist", label: "처리 확인", width: 170, minWidth: 180 },
+  { columnKey: "action", label: "액션", width: 200, minWidth: 210, align: "right" },
 ]
+const WITHDRAWAL_DEFAULT_COLUMNS = ["student", "status", "className", "teacher", "withdrawalDate", "operationsChecklist", "action"]
+const WITHDRAWAL_COLUMN_SETTINGS = WITHDRAWAL_TABLE_COLUMNS.map((column) => ({
+  id: column.columnKey, label: column.label, required: column.columnKey === "student" || column.columnKey === "action",
+  defaultVisible: WITHDRAWAL_DEFAULT_COLUMNS.includes(column.columnKey),
+}))
 const WITHDRAWAL_TABLE_COLUMN_WIDTHS = WITHDRAWAL_TABLE_COLUMNS.reduce((widths, column) => {
   widths[column.columnKey] = column.width
   return widths
@@ -546,9 +553,14 @@ const TRANSFER_TABLE_COLUMNS: Array<{
   { columnKey: "toClassStartDate", label: "후 수업 시작일", width: 122, minWidth: 108 },
   { columnKey: "toClassStartSession", label: "후 시작회차", width: 112, minWidth: 96 },
   { columnKey: "toUndistributedTextbooks", label: "후 미배부 교재", width: 160, minWidth: 128 },
-  { columnKey: "operationsChecklist", label: "처리 확인", width: 218, minWidth: 180 },
+  { columnKey: "operationsChecklist", label: "처리 확인", width: 170, minWidth: 180 },
   { columnKey: "action", label: "액션", width: 188, minWidth: 160, align: "right" },
 ]
+const TRANSFER_DEFAULT_COLUMNS = ["student", "status", "fromClassName", "toClassName", "toClassStartDate", "operationsChecklist", "action"]
+const TRANSFER_COLUMN_SETTINGS = TRANSFER_TABLE_COLUMNS.map((column) => ({
+  id: column.columnKey, label: column.label, required: column.columnKey === "student" || column.columnKey === "action",
+  defaultVisible: TRANSFER_DEFAULT_COLUMNS.includes(column.columnKey),
+}))
 const TRANSFER_TABLE_COLUMN_WIDTHS = TRANSFER_TABLE_COLUMNS.reduce((widths, column) => {
   widths[column.columnKey] = column.width
   return widths
@@ -1943,12 +1955,12 @@ function sortWordRetestTasksByTestAt(tasks: OpsTask[]) {
   })
 }
 
-function getWithdrawalTableGridTemplate(widths: Record<WithdrawalTableColumnKey, number>) {
-  return WITHDRAWAL_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
+function getWithdrawalTableGridTemplate(widths: Record<WithdrawalTableColumnKey, number>, columns = WITHDRAWAL_TABLE_COLUMNS) {
+  return columns.map((column) => `minmax(${widths[column.columnKey]}px, ${column.columnKey === "className" ? "1fr" : `${widths[column.columnKey]}px`})`).join(" ")
 }
 
-function getTransferTableGridTemplate(widths: Record<TransferTableColumnKey, number>) {
-  return TRANSFER_TABLE_COLUMNS.map((column) => `${widths[column.columnKey]}px`).join(" ")
+function getTransferTableGridTemplate(widths: Record<TransferTableColumnKey, number>, columns = TRANSFER_TABLE_COLUMNS) {
+  return columns.map((column) => `minmax(${widths[column.columnKey]}px, ${column.columnKey === "toClassName" ? "1fr" : `${widths[column.columnKey]}px`})`).join(" ")
 }
 
 function getWithdrawalOperationsChecklist(withdrawal?: OpsTask["withdrawal"]) {
@@ -2087,24 +2099,17 @@ function TransferOperationsChecklistChips({
   )
 }
 
-function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey, number>) {
-  return [
-    widths.select,
-    widths.status,
-    widths.testAt,
-    widths.expectedRetestAt,
-    widths.teacher,
-    widths.class,
-    widths.student,
-    widths.textbook,
-    widths.unit,
-    widths.note,
-    widths.total,
-    widths.cutoff,
-    widths.score,
-    widths.result,
-    widths.action,
-  ].map((width) => `${width}px`).join(" ")
+const WORD_RETEST_COLUMNS: Array<{id: WordRetestTableColumnKey; label: string; required?: boolean; defaultVisible?: boolean}> = [
+  {id: "select", label: "선택", required: true}, {id: "student", label: "학생", required: true},
+  {id: "status", label: "상태"}, {id: "expectedRetestAt", label: "응시예정일시"},
+  {id: "score", label: "맞은 개수", required: true}, {id: "result", label: "결과"}, {id: "action", label: "다음 행동", required: true},
+  {id: "teacher", label: "담당선생님", defaultVisible: false}, {id: "class", label: "수업", defaultVisible: false},
+  {id: "testAt", label: "본시험일", defaultVisible: false}, {id: "textbook", label: "교재", defaultVisible: false},
+  {id: "unit", label: "시험범위", defaultVisible: false}, {id: "note", label: "메모", defaultVisible: false},
+  {id: "total", label: "출제 개수", defaultVisible: false}, {id: "cutoff", label: "커트라인", defaultVisible: false},
+]
+function getWordRetestTableGridTemplate(widths: Record<WordRetestTableColumnKey, number>, columns = WORD_RETEST_COLUMNS) {
+  return columns.map(column => `${widths[column.id]}px`).join(" ")
 }
 
 function getWordRetestRequestDefaults(type: OpsTaskType, currentUserId: string, currentUserTaskTeam: string, teacher?: OpsTeacherOption): Partial<OpsTaskInput> {
@@ -5897,7 +5902,7 @@ function WithdrawalResizableHeaderCell({
       <button
         type="button"
         disabled={!sortable}
-        aria-label={`${label} 필터/정렬`}
+        aria-label={`${label} 정렬`}
         onClick={() => onHeaderSelect(columnKey)}
         className={[
           "flex w-full min-w-0 items-center gap-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
@@ -5943,7 +5948,7 @@ function TransferResizableHeaderCell({
       <button
         type="button"
         disabled={!sortable}
-        aria-label={`${label} 필터/정렬`}
+        aria-label={`${label} 정렬`}
         onClick={() => onHeaderSelect(columnKey)}
         className={[
           "flex w-full min-w-0 items-center gap-1 text-left text-xs font-medium text-muted-foreground hover:text-foreground disabled:pointer-events-none disabled:opacity-60",
@@ -5979,7 +5984,7 @@ function WithdrawalDataCell({
   detailAriaLabel?: string
   className?: string
 }) {
-  const content = children || <span className="block truncate" title={value}>{value}</span>
+  const content = children || <span className="block whitespace-normal break-words" title={value}>{value}</span>
   return (
     <div role="cell" className={["min-w-0 border-r px-2 py-2 text-sm last:border-r-0", align === "right" ? "text-right" : "", className].join(" ")}>
       {onOpenDetail ? (
@@ -6049,6 +6054,7 @@ function WithdrawalDataTable({
   tasks,
   todayKey,
   loading,
+  readError = false,
   onOpen,
   onEdit,
   onStatusChange,
@@ -6069,6 +6075,7 @@ function WithdrawalDataTable({
   tasks: OpsTask[]
   todayKey: string
   loading: boolean
+  readError?: boolean
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
@@ -6088,19 +6095,18 @@ function WithdrawalDataTable({
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<WithdrawalTableColumnKey, number>>(WITHDRAWAL_TABLE_COLUMN_WIDTHS)
   const [withdrawalTableSort, setWithdrawalTableSort] = useState<WithdrawalTableSort>(() => initialControls.sortColumn && initialControls.sortDirection ? { columnKey: initialControls.sortColumn as WithdrawalTableColumnKey, direction: initialControls.sortDirection } : null)
-  const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>((initialControls.filterColumn || "className") as WithdrawalTableColumnKey)
+  const [filterColumnKey, setFilterColumnKey] = useState<WithdrawalTableColumnKey>((initialControls.filterColumn || "student") as WithdrawalTableColumnKey)
   const [filterValue, setFilterValue] = useState(initialControls.search)
-  const [filterInputOpen, setFilterInputOpen] = useState(false)
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(initialControls.subject || "all")
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(initialControls.teacher || "all")
   const [withdrawalPeriodFilter, setWithdrawalPeriodFilter] = useState<WithdrawalPeriodFilter>(initialControls.period)
   const [withdrawalPeriodStartDate, setWithdrawalPeriodStartDate] = useState(initialControls.dateFrom || "")
   const [withdrawalPeriodEndDate, setWithdrawalPeriodEndDate] = useState(initialControls.dateTo || "")
-  const filterInputRef = useRef<HTMLInputElement>(null)
-  const gridTemplateColumns = getWithdrawalTableGridTemplate(columnWidths)
+  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:withdrawal:columns", WITHDRAWAL_COLUMN_SETTINGS)
+  const visibleColumns = [...WITHDRAWAL_TABLE_COLUMNS].sort((a, b) => (a.columnKey === "student" ? -1 : b.columnKey === "student" ? 1 : 0)).filter((column) => isColumnVisible(column.columnKey))
+  const gridTemplateColumns = getWithdrawalTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--withdrawal-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = WITHDRAWAL_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || WITHDRAWAL_TABLE_COLUMNS[3]
-  const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
 
   const subjectFilterOptions = useMemo(() => (
     serverPaged && serverFilterOptions
@@ -6172,17 +6178,12 @@ function WithdrawalDataTable({
 
   function handleHeaderSelect(columnKey: WithdrawalTableColumnKey) {
     if (columnKey === "action") return
-    setFilterColumnKey(columnKey)
     setWithdrawalTableSort((current) => {
       if (!current || current.columnKey !== columnKey) return { columnKey, direction: "asc" }
       if (current.direction === "asc") return { columnKey, direction: "desc" }
       return null
     })
   }
-
-  useEffect(() => {
-    if (filterInputOpen) filterInputRef.current?.focus()
-  }, [filterInputOpen])
 
   function startColumnResize(key: WithdrawalTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -6204,8 +6205,19 @@ function WithdrawalDataTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
-      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2" aria-label="퇴원 전체 필터">
+    <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
+      <DataTableToolbar aria-label="퇴원 전체 필터">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <WithdrawalFilterSelect label="퇴원 검색 범위" value={filterColumnKey} allLabel="학생" options={WITHDRAWAL_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as WithdrawalTableColumnKey)} />
+          <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="퇴원 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
+          {columnSettingsControl}
+        </div>
+        <DataTableFilterPanel label="퇴원 검색 조건" activeFilters={[
+          ...(selectedSubjectFilter !== "all" ? [{label: "과목", value: selectedSubjectFilter}] : []),
+          ...(selectedTeacherFilter !== "all" ? [{label: "선생님", value: selectedTeacherFilter}] : []),
+          ...(withdrawalPeriodFilter !== "all" ? [{label: "기간", value: WITHDRAWAL_PERIOD_FILTERS.find(item => item.key === withdrawalPeriodFilter)?.label || "기간"}] : []),
+        ]}>
+          <div className="flex flex-wrap items-center gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="퇴원 누가 필터">
           <WithdrawalFilterSelect
             label="과목 필터"
@@ -6235,49 +6247,13 @@ function WithdrawalDataTable({
           onStartDateChange={setWithdrawalPeriodStartDate}
           onEndDateChange={setWithdrawalPeriodEndDate}
         />
-        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium" aria-label="퇴원 데이터테이블 열 필터">
-          <Button
-            type="button"
-            variant={isFilterInputExpanded ? "secondary" : "outline"}
-            size="sm"
-            className="size-8 px-0"
-            aria-label={isFilterInputExpanded ? `${filterColumn.label} 열 필터 접기` : `${filterColumn.label} 열 필터 펼치기`}
-            aria-expanded={isFilterInputExpanded}
-            onClick={() => setFilterInputOpen((current) => !current)}
-          >
-            <Filter className="size-4" aria-hidden="true" />
-          </Button>
-          {isFilterInputExpanded ? (
-            <div className="flex min-w-0 items-center gap-2">
-              <Input
-                ref={filterInputRef}
-                aria-label={`${filterColumn.label} 열 필터`}
-                value={filterValue}
-                onChange={(event) => setFilterValue(event.target.value)}
-                placeholder={`${filterColumn.label} 값 입력`}
-                className="h-8 min-w-0 flex-1 sm:w-48"
-              />
-              {filterValue ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setFilterValue("")
-                    setFilterInputOpen(false)
-                  }}
-                >
-                  지우기
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
+          </div>
+        </DataTableFilterPanel>
+      </DataTableToolbar>
       <div data-testid="withdrawal-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="퇴원 모바일 목록">
         {loading ? (
           <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-        ) : visibleWithdrawalTasks.length === 0 ? (
+        ) : readError && tasks.length === 0 ? null : visibleWithdrawalTasks.length === 0 ? (
           <div className="grid gap-3 px-3 py-10 text-center text-sm text-muted-foreground">
             <span>{tasks.length === 0 ? emptyLabel : "표시할 퇴원 신청이 없습니다."}</span>
             {tasks.length === 0 && showEmptyAction ? (
@@ -6301,15 +6277,15 @@ function WithdrawalDataTable({
           const detailAriaLabel = getWithdrawalTaskDetailAriaLabel(task)
 
           return (
-            <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 퇴원 신청`}>
+            <article key={task.id} className={cn(DATA_TABLE_MOBILE_ITEM_CLASS_NAME, "grid gap-3")} aria-label={`${task.title} 퇴원 신청`}>
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <WithdrawalWorkflowStatusBadge status={task.status} />
                 <Badge variant="outline">{task.subject || "과목 미정"}</Badge>
                 <Badge variant="secondary">{withdrawal.teacherName || task.assigneeLabel || "선생님 미정"}</Badge>
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-foreground">{task.className || task.title}</div>
-                <div className="truncate text-xs text-muted-foreground">{task.studentName || "학생 미정"}</div>
+                <div className="break-words text-sm font-semibold text-foreground">{task.studentName || "학생 미정"}</div>
+                <div className="break-words text-sm text-muted-foreground">{task.className || task.title}</div>
               </div>
               <dl className="grid gap-2 text-xs">
                 <div className="grid grid-cols-2 gap-2">
@@ -6404,7 +6380,7 @@ function WithdrawalDataTable({
           className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--withdrawal-grid-template)]"
           style={gridTemplateStyle}
         >
-          {WITHDRAWAL_TABLE_COLUMNS.map((column) => (
+          {visibleColumns.map((column) => (
             <WithdrawalResizableHeaderCell
               key={column.columnKey}
               column={column}
@@ -6416,7 +6392,7 @@ function WithdrawalDataTable({
         </div>
         {loading ? (
           <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-        ) : visibleWithdrawalTasks.length === 0 ? (
+        ) : readError && tasks.length === 0 ? null : visibleWithdrawalTasks.length === 0 ? (
           <div className="grid gap-3 px-4 py-12 text-center text-sm text-muted-foreground">
             <span>{tasks.length === 0 ? emptyLabel : "표시할 퇴원 신청이 없습니다."}</span>
             {tasks.length === 0 && showEmptyAction ? (
@@ -6444,7 +6420,7 @@ function WithdrawalDataTable({
               className="grid min-w-full border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--withdrawal-grid-template)]"
               style={gridTemplateStyle}
             >
-              {WITHDRAWAL_TABLE_COLUMNS.map((column) => {
+              {visibleColumns.map((column) => {
                 const value = getWithdrawalTableValue(task, column.columnKey)
                 if (column.columnKey === "status") {
                   return (
@@ -6526,6 +6502,7 @@ function TransferDataTable({
   tasks,
   todayKey,
   loading,
+  readError = false,
   onOpen,
   onEdit,
   onStatusChange,
@@ -6546,6 +6523,7 @@ function TransferDataTable({
   tasks: OpsTask[]
   todayKey: string
   loading: boolean
+  readError?: boolean
   onOpen: (task: OpsTask) => void
   onEdit: (task: OpsTask, blockers?: string[]) => void
   onStatusChange: (task: OpsTask, status: OpsTaskStatus) => void
@@ -6565,19 +6543,18 @@ function TransferDataTable({
 }) {
   const [columnWidths, setColumnWidths] = useState<Record<TransferTableColumnKey, number>>(TRANSFER_TABLE_COLUMN_WIDTHS)
   const [transferTableSort, setTransferTableSort] = useState<TransferTableSort>(() => initialControls.sortColumn && initialControls.sortDirection ? { columnKey: initialControls.sortColumn as TransferTableColumnKey, direction: initialControls.sortDirection } : null)
-  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>((initialControls.filterColumn || "fromClassName") as TransferTableColumnKey)
+  const [filterColumnKey, setFilterColumnKey] = useState<TransferTableColumnKey>((initialControls.filterColumn || "student") as TransferTableColumnKey)
   const [filterValue, setFilterValue] = useState(initialControls.search)
-  const [filterInputOpen, setFilterInputOpen] = useState(false)
   const [selectedSubjectFilter, setSelectedSubjectFilter] = useState(initialControls.subject || "all")
   const [selectedTeacherFilter, setSelectedTeacherFilter] = useState(initialControls.teacher || "all")
   const [transferPeriodFilter, setTransferPeriodFilter] = useState<WithdrawalPeriodFilter>(initialControls.period)
   const [transferPeriodStartDate, setTransferPeriodStartDate] = useState(initialControls.dateFrom || "")
   const [transferPeriodEndDate, setTransferPeriodEndDate] = useState(initialControls.dateTo || "")
-  const filterInputRef = useRef<HTMLInputElement>(null)
-  const gridTemplateColumns = getTransferTableGridTemplate(columnWidths)
+  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:transfer:columns", TRANSFER_COLUMN_SETTINGS)
+  const visibleColumns = [...TRANSFER_TABLE_COLUMNS].sort((a, b) => (a.columnKey === "student" ? -1 : b.columnKey === "student" ? 1 : 0)).filter((column) => isColumnVisible(column.columnKey))
+  const gridTemplateColumns = getTransferTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--transfer-grid-template": gridTemplateColumns } as CSSProperties
   const filterColumn = TRANSFER_TABLE_COLUMNS.find((column) => column.columnKey === filterColumnKey) || TRANSFER_TABLE_COLUMNS[3]
-  const isFilterInputExpanded = filterInputOpen || Boolean(filterValue)
 
   const subjectFilterOptions = useMemo(() => (
     serverPaged && serverFilterOptions
@@ -6653,17 +6630,12 @@ function TransferDataTable({
 
   function handleHeaderSelect(columnKey: TransferTableColumnKey) {
     if (columnKey === "action") return
-    setFilterColumnKey(columnKey)
     setTransferTableSort((current) => {
       if (!current || current.columnKey !== columnKey) return { columnKey, direction: "asc" }
       if (current.direction === "asc") return { columnKey, direction: "desc" }
       return null
     })
   }
-
-  useEffect(() => {
-    if (filterInputOpen) filterInputRef.current?.focus()
-  }, [filterInputOpen])
 
   function startColumnResize(key: TransferTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) {
     event.preventDefault()
@@ -6685,8 +6657,19 @@ function TransferDataTable({
   }
 
   return (
-    <div className="overflow-hidden rounded-md border bg-card">
-      <div className="flex flex-wrap items-center gap-2 border-b bg-muted/20 px-3 py-2" aria-label="전반 전체 필터">
+    <div className={DATA_TABLE_LAYOUT_CLASS_NAME}>
+      <DataTableToolbar aria-label="전반 전체 필터">
+        <div className="flex min-w-0 flex-wrap items-center gap-2">
+          <WithdrawalFilterSelect label="전반 검색 범위" value={filterColumnKey} allLabel="학생" options={TRANSFER_TABLE_COLUMNS.filter(column => column.columnKey !== "action").map(column => ({ value: column.columnKey, label: column.label }))} onChange={value => setFilterColumnKey(value as TransferTableColumnKey)} />
+          <DataTableSearchField value={filterValue} onValueChange={setFilterValue} label="전반 검색" placeholder={`${filterColumn.label} 검색`} className="min-w-32" />
+          {columnSettingsControl}
+        </div>
+        <DataTableFilterPanel label="전반 검색 조건" activeFilters={[
+          ...(selectedSubjectFilter !== "all" ? [{label: "과목", value: selectedSubjectFilter}] : []),
+          ...(selectedTeacherFilter !== "all" ? [{label: "선생님", value: selectedTeacherFilter}] : []),
+          ...(transferPeriodFilter !== "all" ? [{label: "기간", value: WITHDRAWAL_PERIOD_FILTERS.find(item => item.key === transferPeriodFilter)?.label || "기간"}] : []),
+        ]}>
+          <div className="flex flex-wrap items-center gap-2">
         <div className="flex min-w-0 flex-wrap items-center gap-2" aria-label="전반 누가 필터">
           <WithdrawalFilterSelect
             label="과목 필터"
@@ -6717,49 +6700,13 @@ function TransferDataTable({
           onStartDateChange={setTransferPeriodStartDate}
           onEndDateChange={setTransferPeriodEndDate}
         />
-        <div className="ml-auto flex min-w-0 items-center gap-2 text-sm font-medium" aria-label="전반 데이터테이블 열 필터">
-          <Button
-            type="button"
-            variant={isFilterInputExpanded ? "secondary" : "outline"}
-            size="sm"
-            className="size-8 px-0"
-            aria-label={isFilterInputExpanded ? `${filterColumn.label} 열 필터 접기` : `${filterColumn.label} 열 필터 펼치기`}
-            aria-expanded={isFilterInputExpanded}
-            onClick={() => setFilterInputOpen((current) => !current)}
-          >
-            <Filter className="size-4" aria-hidden="true" />
-          </Button>
-          {isFilterInputExpanded ? (
-            <div className="flex min-w-0 items-center gap-2">
-              <Input
-                ref={filterInputRef}
-                aria-label={`${filterColumn.label} 열 필터`}
-                value={filterValue}
-                onChange={(event) => setFilterValue(event.target.value)}
-                placeholder={`${filterColumn.label} 값 입력`}
-                className="h-8 min-w-0 flex-1 sm:w-48"
-              />
-              {filterValue ? (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() => {
-                    setFilterValue("")
-                    setFilterInputOpen(false)
-                  }}
-                >
-                  지우기
-                </Button>
-              ) : null}
-            </div>
-          ) : null}
-        </div>
-      </div>
+          </div>
+        </DataTableFilterPanel>
+      </DataTableToolbar>
       <div data-testid="transfer-mobile-task-list" className="grid gap-2 p-3 md:hidden" aria-label="전반 모바일 목록">
         {loading ? (
           <div className="px-3 py-10 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-        ) : visibleTransferTasks.length === 0 ? (
+        ) : readError && tasks.length === 0 ? null : visibleTransferTasks.length === 0 ? (
           <div className="grid gap-3 px-3 py-10 text-center text-sm text-muted-foreground">
             <span>{tasks.length === 0 ? emptyLabel : "표시할 전반 신청이 없습니다."}</span>
             {tasks.length === 0 && showEmptyAction ? (
@@ -6782,7 +6729,7 @@ function TransferDataTable({
           const detailAriaLabel = getTransferTaskDetailAriaLabel(task)
 
           return (
-            <article key={task.id} className="grid gap-3 rounded-md border bg-background p-3 shadow-xs" aria-label={`${task.title} 전반 신청`}>
+            <article key={task.id} className={cn(DATA_TABLE_MOBILE_ITEM_CLASS_NAME, "grid gap-3")} aria-label={`${task.title} 전반 신청`}>
               <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                 <WithdrawalWorkflowStatusBadge status={task.status} />
                 <Badge variant="outline">{task.subject || "과목 미정"}</Badge>
@@ -6790,10 +6737,11 @@ function TransferDataTable({
                 <Badge variant="secondary">{transfer.toTeacherName || "후 선생님 미정"}</Badge>
               </div>
               <div className="min-w-0">
-                <div className="truncate text-sm font-semibold text-foreground">
+                <div className="break-words text-sm font-semibold">{task.studentName || "학생 미정"}</div>
+                <div className="break-words text-sm text-muted-foreground">
                   {[transfer.fromClassName, transfer.toClassName || task.className].filter(Boolean).join(" → ") || task.title}
                 </div>
-                <div className="truncate text-xs text-muted-foreground">{task.studentName || "학생 미정"}</div>
+
               </div>
               <dl className="grid gap-2 text-xs">
                 <div className="grid grid-cols-2 gap-2">
@@ -6886,7 +6834,7 @@ function TransferDataTable({
           className="grid min-w-full border-b bg-muted/45 text-xs [grid-template-columns:var(--transfer-grid-template)]"
           style={gridTemplateStyle}
         >
-          {TRANSFER_TABLE_COLUMNS.map((column) => (
+          {visibleColumns.map((column) => (
             <TransferResizableHeaderCell
               key={column.columnKey}
               column={column}
@@ -6898,7 +6846,7 @@ function TransferDataTable({
         </div>
         {loading ? (
           <div className="px-4 py-12 text-center text-sm text-muted-foreground">불러오는 중입니다.</div>
-        ) : visibleTransferTasks.length === 0 ? (
+        ) : readError && tasks.length === 0 ? null : visibleTransferTasks.length === 0 ? (
           <div className="grid gap-3 px-4 py-12 text-center text-sm text-muted-foreground">
             <span>{tasks.length === 0 ? emptyLabel : "표시할 전반 신청이 없습니다."}</span>
             {tasks.length === 0 && showEmptyAction ? (
@@ -6926,7 +6874,7 @@ function TransferDataTable({
               className="grid min-w-full border-b last:border-b-0 hover:bg-muted/30 [grid-template-columns:var(--transfer-grid-template)]"
               style={gridTemplateStyle}
             >
-              {TRANSFER_TABLE_COLUMNS.map((column) => {
+              {visibleColumns.map((column) => {
                 const value = getTransferTableValue(task, column.columnKey)
                 if (column.columnKey === "status") {
                   return (
@@ -7781,6 +7729,7 @@ export function OpsTaskWorkspace({ workspace = "todo" }: { workspace?: Workspace
 }
 
 function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
+  const workspaceRef = useRef<HTMLDivElement>(null)
   const router = useRouter()
   const pathname = usePathname()
   const scopedTaskType = WORKSPACE_TASK_TYPE[workspace]
@@ -9393,7 +9342,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
   const visibleWorkspaceItemCount = isRegistrationWorkspace
     ? visibleRegistrationCaseItems.length
     : visibleTasks.length
-  const showEmptyCreate = (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
+  const showEmptyCreate = !numberedPage.error && (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0
   const showToolbarCreate = (!isRegistrationWorkspace || canManageRegistrationWorkflow) && !isTodoWorkspace && (isRegistrationWorkspace || isWithdrawalWorkspace || isTransferWorkspace || !showEmptyCreate)
   const hasLoadBlocker = Boolean(data && !data.schemaReady)
   const canOpenCreate = isTodoWorkspace || (!loading && !hasLoadBlocker)
@@ -9407,7 +9356,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
       : scopedTasks.some((task) => showClosed || isOpenTask(task))
   const showSearch = isRegistrationWorkspace
     ? registrationMode === "list"
-    : !isWithdrawalWorkspace && !isTransferWorkspace && (isTodoWorkspace || hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
+    : !isWithdrawalWorkspace && !isTransferWorkspace && (isWordRetestWorkspace || isTodoWorkspace || hasQuery || visibleTasks.length > 0 || hasSearchableScopedTasks)
   const emptyActionLabel = getWorkspaceCreateActionLabel(workspace, workspaceLabel)
   const emptyTaskLabel = isTodoWorkspace
     ? getTodoEmptyLabel(todoView, isFilteredEmpty)
@@ -12300,12 +12249,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     <div className="min-w-0 flex-1" />
   )
 
-  const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace
+  const workspaceSurfaceClassName = isWithdrawalWorkspace || isTransferWorkspace || isRegistrationWorkspace || isWordRetestWorkspace
     ? "flex flex-col gap-2"
     : "flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-xs"
 
   return (
-    <WorkspaceTabs value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
+    <WorkspaceTabs ref={workspaceRef} value={workspaceTab} onValueChange={changeWorkspaceTab} className="flex flex-col gap-4 px-4 pb-6 sm:px-5 lg:px-6">
       {!isTodoWorkspace && !isRegistrationWorkspace && !isWithdrawalWorkspace && !isTransferWorkspace && !isWordRetestWorkspace && visibleOperationMetrics.length > 0 && (
         <div className={HORIZONTAL_CHIP_BAR_CLASS}>
           {visibleOperationMetrics.map((metric) => (
@@ -12685,7 +12634,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           </div>
         ) : null}
 
-	        {loading ? (
+        {numberedPage.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">
+          목록을 불러오지 못했습니다.{numberedPage.totalCount !== null ? " 이전 조회 결과를 표시합니다." : ""}
+          <Button variant="outline" size="sm" disabled={numberedPage.loading} onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void numberedPage.retry() }}>다시 시도</Button>
+        </div> : numberedPage.loading && numberedPage.totalCount !== null ? <div role="status" className="text-sm text-muted-foreground">목록을 갱신하는 중입니다. 이전 조회 결과를 표시합니다.</div> : null}
+
+	        {loading && !isWithdrawalWorkspace && !isTransferWorkspace ? (
           isRegistrationWorkspace ? (
             <div role="status" aria-live="polite" className="grid min-h-32 place-items-center rounded-md border bg-background px-4 py-10 text-sm text-muted-foreground">
               등록 업무를 불러오는 중입니다.
@@ -12733,6 +12687,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            tasks={visibleTasks}
 	            todayKey={todayKey}
 	            loading={loading}
+                readError={Boolean(numberedPage.error)}
 	            onOpen={openDetail}
 	            onEdit={openEdit}
 	            onStatusChange={(task, status) => void changeStatus(task, status)}
@@ -12756,6 +12711,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            tasks={visibleTasks}
 	            todayKey={todayKey}
 	            loading={loading}
+                readError={Boolean(numberedPage.error)}
 	            onOpen={openDetail}
 	            onEdit={openEdit}
 	            onStatusChange={(task, status) => void changeStatus(task, status)}
@@ -12772,7 +12728,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 	            onFilterOpen={() => void ensureTaskOptions()}
 	            onPageControlsChange={setOperationTablePageControls}
 	          />
-	        ) : isWordRetestWorkspace ? (
+	        ) : isWordRetestWorkspace && numberedPage.error && visibleTasks.length === 0 ? null : isWordRetestWorkspace ? (
 		          <WordRetestTaskList
 	            key={`word_retest:${navigationRestore.key}`}
 	            initialSort={wordRetestTablePageSort}
@@ -12871,10 +12827,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         )}
         {!(isRegistrationWorkspace && registrationMode === "calendar") ? (
           <div className={isRegistrationList ? cn(DATA_TABLE_PAGER_CLASS_NAME, "sm:flex-col sm:items-stretch") : "grid gap-2 border-t pt-3"}>
-            {numberedPage.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">
-              페이지를 불러오지 못했습니다.
-              <Button variant="outline" size="sm" onClick={() => void numberedPage.retry()}>다시 시도</Button>
-            </div> : null}
+
             <DataTablePagination
               page={listNumberedPage.page}
               pageSize={listNumberedPage.pageSize}
@@ -15697,7 +15650,9 @@ function WordRetestTaskList({
   const [columnWidths, setColumnWidths] = useState<Record<WordRetestTableColumnKey, number>>(WORD_RETEST_TABLE_COLUMN_WIDTHS)
   const [wordRetestTableSort, setWordRetestTableSort] = useState<WordRetestTableSort>(() => initialSort?.column && initialSort.direction
     ? { columnKey: initialSort.column as WordRetestTableColumnKey, direction: initialSort.direction } : null)
-  const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths)
+  const { isColumnVisible, columnSettingsControl } = useDataTableColumns("tips:word-retest:columns", WORD_RETEST_COLUMNS)
+  const visibleColumns = WORD_RETEST_COLUMNS.filter(column => isColumnVisible(column.id))
+  const gridTemplateColumns = getWordRetestTableGridTemplate(columnWidths, visibleColumns)
   const gridTemplateStyle = { "--word-retest-grid-template": gridTemplateColumns } as CSSProperties
   const visibleWordRetestTasks = useMemo(() => {
     if (serverPaged) return tasks
@@ -15763,34 +15718,15 @@ function WordRetestTaskList({
   }
 
   return (
-    <div className="grid gap-2.5 bg-muted/50 p-3 md:block md:overflow-x-auto md:rounded-[var(--radius-surface)] md:border md:bg-background md:p-0">
-      <div
-        className="hidden min-h-[var(--table-header-height)] min-w-max border-b bg-muted/50 px-3 py-0.5 text-xs font-medium text-muted-foreground md:grid md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
-        style={gridTemplateStyle}
-      >
-        <span className="flex min-w-0 items-center justify-center">
-          <DataTableSelectionCheckbox
-            aria-label="보이는 단어 재시험 전체 선택"
-            checked={allVisibleSelected || (partiallySelected && "indeterminate")}
-            disabled={selectableTasks.length === 0 || statusActionDisabled}
-            onCheckedChange={(checked) => onSelectAll(checked === true, visibleWordRetestTasks)}
-          />
-        </span>
-        <WordRetestResizableHeaderCell label="상태" columnKey="status" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="본시험일" columnKey="testAt" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="응시예정일시" columnKey="expectedRetestAt" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="담당선생님" columnKey="teacher" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="수업" columnKey="class" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="학생" columnKey="student" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="교재" columnKey="textbook" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="시험범위" columnKey="unit" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="메모" columnKey="note" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="출제 개수" columnKey="total" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="커트라인" columnKey="cutoff" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="맞은 개수" columnKey="score" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="결과" columnKey="result" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-        <WordRetestResizableHeaderCell label="다음 액션" columnKey="action" align="right" sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize} />
-      </div>
+    <div className="min-w-0">
+      <div className="flex justify-end border-b px-3 py-2">{columnSettingsControl}</div>
+      <div role={mobile ? undefined : "table"} aria-label="단어 재시험 목록" className="grid gap-2.5 bg-muted/50 p-3 md:block md:overflow-x-auto md:bg-background md:p-0">
+      {!mobile && <div role="row" className="grid min-h-[var(--table-header-height)] min-w-max items-center gap-3 border-b bg-muted px-3 py-2 text-xs text-muted-foreground [grid-template-columns:var(--word-retest-grid-template)]" style={gridTemplateStyle}>
+        {visibleColumns.map(column => column.id === "select" ? <span key={column.id} role="columnheader">
+          <DataTableSelectionCheckbox aria-label="보이는 단어 재시험 전체 선택" checked={allVisibleSelected || (partiallySelected && "indeterminate")} disabled={selectableTasks.length === 0 || statusActionDisabled} onCheckedChange={checked => onSelectAll(checked === true, visibleWordRetestTasks)} />
+        </span> : <WordRetestResizableHeaderCell key={column.id} label={column.label} columnKey={column.id} sort={wordRetestTableSort} onHeaderSelect={handleHeaderSelect} onResizeStart={startColumnResize}
+          onResizeByKeyboard={(key, delta) => setColumnWidths(current => ({...current, [key]: Math.max(WORD_RETEST_TABLE_COLUMN_MIN_WIDTHS[key], current[key] + delta)}))} />)}
+      </div>}
       {visibleWordRetestTasks.map((task) => (
         <WordRetestTaskRow
           key={task.id}
@@ -15813,9 +15749,11 @@ function WordRetestTaskList({
           selected={selectedTaskIds.has(task.id)}
           selectable={canSelectTask(task)}
           onSelectTask={onSelectTask}
+          visibleColumns={visibleColumns}
           gridTemplateColumns={gridTemplateColumns}
         />
       ))}
+      </div>
     </div>
   )
 }
@@ -15827,12 +15765,14 @@ function WordRetestResizableHeaderCell({
   sort,
   onHeaderSelect,
   onResizeStart,
+  onResizeByKeyboard,
 }: {
   label: string
   columnKey: WordRetestTableColumnKey
   align?: "left" | "right"
   sort: WordRetestTableSort
   onHeaderSelect: (columnKey: WordRetestTableColumnKey) => void
+  onResizeByKeyboard: (key: WordRetestTableColumnKey, delta: number) => void
   onResizeStart: (key: WordRetestTableColumnKey, event: ReactPointerEvent<HTMLButtonElement>) => void
 }) {
   const isActiveSort = sort?.columnKey === columnKey
@@ -15859,6 +15799,11 @@ function WordRetestResizableHeaderCell({
         type="button"
         aria-label={`${label} 열 너비 조절`}
         onPointerDown={(event) => onResizeStart(columnKey, event)}
+        onKeyDown={event => {
+          if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return
+          event.preventDefault()
+          onResizeByKeyboard(columnKey, event.key === "ArrowLeft" ? -16 : 16)
+        }}
         className="absolute -right-1 top-1/2 h-5 w-2 -translate-y-1/2 cursor-col-resize rounded-full hover:bg-primary/25 focus-visible:bg-primary/25 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
       />
     </span>
@@ -15891,6 +15836,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   selectable,
   onSelectTask,
   gridTemplateColumns,
+  visibleColumns,
 }: {
   task: OpsTask
   mobile: boolean
@@ -15912,6 +15858,7 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
   selectable: boolean
   onSelectTask: (task: OpsTask, selected: boolean) => void
   gridTemplateColumns: string
+  visibleColumns: typeof WORD_RETEST_COLUMNS
 }) {
   const wordRetest = task.wordRetest || {}
   const primaryActions = getWordRetestPrimaryActions(task, mode, completionBlockers)
@@ -15987,150 +15934,23 @@ const WordRetestTaskRow = memo(function WordRetestTaskRow({
     )
   }
 
+  const cells: Record<WordRetestTableColumnKey, ReactNode> = {
+    select: <DataTableSelectionCheckbox aria-label={`${studentLabel} 단어 재시험 선택`} checked={selected} disabled={!selectable || statusActionDisabled} onCheckedChange={checked => onSelectTask(task, checked === true)} />,
+    student: <button type="button" aria-label={`${studentLabel} 단어 재시험 수정`} onClick={() => onOpen(task)} className="w-full break-words text-left font-semibold hover:text-primary focus-visible:ring-2 focus-visible:ring-ring">{studentLabel}{teacherAccountLinkRequired && !visibleColumns.some(column => column.id === "teacher") ? <span className="block text-xs font-normal text-destructive">담당선생님 계정 연결 필요</span> : null}</button>,
+    status: <div className="flex flex-wrap gap-1"><WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} /><WordRetestLineageBadges wordRetest={wordRetest} /></div>,
+    expectedRetestAt: <button type="button" aria-label={`${studentLabel} 응시예정일시 ${expectedRetestLabel} 수정`} onClick={() => onExpectedQuickEdit(task)} className="w-full text-left font-medium hover:text-primary focus-visible:ring-2 focus-visible:ring-ring">{expectedRetestLabel}</button>,
+    teacher: <span>{teacherLabel}{teacherAccountLinkRequired ? <span className="block text-xs text-destructive">담당선생님 계정 연결 필요</span> : null}</span>,
+    class: classLabel, testAt: dateOnlyLabel(wordRetest.testAt || task.dueAt || ""), textbook: textbookLabel, unit: unitLabel, note: note || "—",
+    total: wordRetest.totalQuestionCount || "—", cutoff: wordRetest.cutoffQuestionCount || "—",
+    score: <WordRetestInlineScoreEditor task={task} draft={resolvedScoreDraft} disabled={statusActionDisabled || absent || isClosedOpsTask(task) || !scoreEditingAllowed} onDraftChange={onScoreDraftChange} onSave={onScoreSave} />,
+    result: <WordRetestScoreResultCell wordRetest={scorePreviewWordRetest} />,
+    action: <span className="flex flex-wrap justify-end gap-1.5">{primaryActions.map(action => <WordRetestRoleActionButton key={`${action.kind}-${action.label}`} task={task} action={action} onEdit={onEdit} onStatusChange={onStatusChange} onComplete={onComplete} onRetry={onRetry} disabled={statusActionDisabled} />)}</span>,
+  }
   return (
-    <div
-      onClick={(event) => {
-        if (shouldIgnoreWordRetestRowOpen(event.target)) return
-        onOpen(task)
-      }}
-      data-state={selected ? "selected" : undefined}
-      className="relative hidden cursor-pointer gap-2 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 data-[state=selected]:bg-accent md:grid md:min-w-max md:items-center md:gap-3 md:[grid-template-columns:var(--word-retest-grid-template)]"
-      style={{ "--word-retest-grid-template": gridTemplateColumns } as CSSProperties}
-    >
-      <span className="absolute right-3 top-3 flex min-w-0 items-center justify-end md:static md:justify-center">
-        <DataTableSelectionCheckbox
-          aria-label={`${studentLabel} 단어 재시험 선택`}
-          checked={selected}
-          disabled={!selectable || statusActionDisabled}
-          onCheckedChange={(checked) => onSelectTask(task, checked === true)}
-          onClick={(event) => event.stopPropagation()}
-        />
-      </span>
-      <span className="order-1 flex min-h-10 min-w-0 items-center pr-12 md:order-none md:min-h-0 md:block md:pr-0">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">진행상태</span>
-        <span className="inline-flex min-w-0 flex-wrap items-center gap-1 align-middle">
-          <WordRetestStatusBadge value={wordRetest.retestStatus} taskStatus={task.status} wordRetest={wordRetest} />
-          <WordRetestLineageBadges wordRetest={wordRetest} />
-        </span>
-      </span>
-      <span className="order-5 min-w-0 md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">본시험일</span>
-        <span className="font-medium">{dateOnlyLabel(wordRetest.testAt || task.dueAt || "")}</span>
-      </span>
-      <button
-        type="button"
-        data-word-retest-interactive="true"
-        aria-label={`${studentLabel} 응시예정일시 ${expectedRetestLabel} 수정`}
-        onClick={(event) => {
-          event.stopPropagation()
-          onExpectedQuickEdit(task)
-        }}
-        className="order-6 min-w-0 text-left font-medium hover:text-primary focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring/40 md:order-none"
-      >
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">응시예정일시</span>
-        {expectedRetestLabel}
-      </button>
-      <span className="order-2 grid min-w-0 gap-0.5 font-medium md:order-none">
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">담당선생님</span>
-        <span className="truncate">{teacherLabel}</span>
-        {teacherAccountLinkRequired ? (
-          <span className="text-[10px] font-medium leading-tight text-amber-700 dark:text-amber-300">
-            담당선생님 계정 연결 필요
-          </span>
-        ) : null}
-      </span>
-      <span className="order-3 min-w-0 truncate md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">수업</span>
-        {classLabel}
-      </span>
-      <button
-        type="button"
-        aria-label={`${studentLabel} 단어 재시험 수정`}
-        onClick={(event) => {
-          event.stopPropagation()
-          onOpen(task)
-        }}
-        className="order-4 min-w-0 truncate text-left font-semibold hover:text-primary md:order-none"
-      >
-        <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">학생</span>
-        {studentLabel}
-      </button>
-      <span className="order-7 min-w-0 md:hidden">
-        <span className="mr-2 text-xs text-muted-foreground">장소</span>
-        <Badge variant="secondary">{branch}</Badge>
-      </span>
-      <span className="group relative order-8 min-w-0 truncate md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">교재</span>
-        <span tabIndex={0} title={textbookLabel} className="outline-none focus-visible:text-primary">
-          {textbookLabel}
-        </span>
-        {textbookLabel !== "미지정" && (
-          <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden max-w-sm whitespace-normal rounded-md border bg-popover px-2 py-1.5 text-xs font-medium text-popover-foreground shadow-lg group-hover:block group-focus-within:block">
-            {textbookLabel}
-          </span>
-        )}
-      </span>
-      <span className="order-9 min-w-0 truncate text-muted-foreground md:order-none md:text-foreground">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">시험범위</span>
-        {unitLabel}
-      </span>
-      <span className="order-10 min-w-0 md:order-none">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">메모</span>
-        <span className="line-clamp-2 text-muted-foreground md:hidden">{note || "-"}</span>
-        <span className="group relative hidden min-w-0 md:block">
-          <span
-            tabIndex={0}
-            title={note || "-"}
-            className="block truncate outline-none focus-visible:text-primary"
-          >
-            {note || "-"}
-          </span>
-          {note ? (
-            <span className="pointer-events-none absolute left-0 top-full z-50 mt-1 hidden max-w-sm whitespace-normal rounded-md border bg-popover px-2 py-1.5 text-xs font-medium text-popover-foreground shadow-lg group-hover:block group-focus-within:block">
-              {note}
-            </span>
-          ) : null}
-        </span>
-      </span>
-      <div className="order-11 grid min-w-0 gap-2 md:contents">
-        <span className="min-w-0 font-medium">
-          <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">출제 개수</span>
-          {wordRetest.totalQuestionCount || "-"}
-        </span>
-        <span className="min-w-0 font-medium">
-          <span className="mr-2 text-xs font-normal text-muted-foreground md:hidden">커트라인</span>
-          {wordRetest.cutoffQuestionCount || "-"}
-        </span>
-        <span className="min-w-0">
-          <span className="mr-2 text-xs text-muted-foreground md:hidden">맞은 개수</span>
-          <WordRetestInlineScoreEditor
-            task={task}
-            draft={resolvedScoreDraft}
-            disabled={statusActionDisabled || absent || isClosedOpsTask(task) || !scoreEditingAllowed}
-            onDraftChange={onScoreDraftChange}
-            onSave={onScoreSave}
-          />
-        </span>
-        <span className="min-w-0">
-          <span className="mr-2 text-xs text-muted-foreground md:hidden">결과</span>
-          <WordRetestScoreResultCell wordRetest={scorePreviewWordRetest} />
-        </span>
-      </div>
-      <span className="order-last flex flex-wrap justify-start gap-1.5 md:order-none md:justify-end">
-        <span className="mr-2 text-xs text-muted-foreground md:hidden">다음 액션</span>
-        {primaryActions.map((action) => (
-          <WordRetestRoleActionButton
-            key={`${action.kind}-${action.label}`}
-            task={task}
-            action={action}
-            onEdit={onEdit}
-            onStatusChange={onStatusChange}
-            onComplete={onComplete}
-            onRetry={onRetry}
-            disabled={statusActionDisabled}
-          />
-        ))}
-      </span>
+    <div role="row" data-state={selected ? "selected" : undefined} onClick={event => { if (!shouldIgnoreWordRetestRowOpen(event.target)) onOpen(task) }}
+      className="grid min-w-max items-center gap-3 border-b px-3 py-3 text-sm last:border-b-0 hover:bg-muted/35 data-[state=selected]:bg-accent [grid-template-columns:var(--word-retest-grid-template)]"
+      style={{"--word-retest-grid-template": gridTemplateColumns} as CSSProperties}>
+      {visibleColumns.map(column => <div key={column.id} role="cell" className="min-w-0 break-words">{cells[column.id]}</div>)}
     </div>
   )
 })
