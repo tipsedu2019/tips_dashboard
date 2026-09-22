@@ -514,6 +514,11 @@
       "fileName": "20260922064700_validate_class_textbook_usage.sql",
       "status": "final",
       "sha256": "6f4cb5e2df771c54eeb00100b62c3a512749fa4942384be141fbdd8565239da5"
+    },
+    {
+      "fileName": "20260922095634_exclude_closed_observation_classes.sql",
+      "status": "final",
+      "sha256": "d7ee31a9cf9d28edaca22eb491fdc0a37583cc9a683a59dd55b15a996c5de820"
     }
   ]
 }

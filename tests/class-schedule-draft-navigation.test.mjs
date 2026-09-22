@@ -137,6 +137,32 @@ async function editor(t, route = 'class-schedule') {
 function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, billingPeriods: p.billingPeriods.map((period, index) => index ? period : {...period, color: name}) }))); }
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_'));
+
+test('calendar: holiday cancellation and linked makeup on the same day are both named', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  const next = detail();
+  next.classItem.schedulePlan = {
+    selectedDays: [2, 4, 6],
+    billingPeriods: [
+      { id: 'september', label: '9월', month: 9, startDate: '2026-09-01', endDate: '2026-10-01' },
+      { id: 'october', label: '10월', month: 10, startDate: '2026-10-03', endDate: '2026-10-31' },
+    ],
+    sessionStates: {
+      '2026-09-26': { state: 'exception' },
+      '2026-10-10': { state: 'exception', makeupDate: '2026-09-26', makeupMemo: '보강 11:00-13:00' },
+    },
+    sessions: [],
+  };
+  await refreshDetail(page, next);
+  const cell = document.querySelector('[data-lesson-calendar-date="2026-09-26"]');
+  assert.ok(cell);
+  assert.match(cell.textContent, /휴강/);
+  assert.match(cell.textContent, /보강/);
+  assert.match(cell.getAttribute('aria-label'), /휴강.*보강/);
+  assert.equal(page.observed.lessonDesignSnapshot.sessions.filter(s => s.dateValue === '2026-09-26').length, 2);
+  assert.equal(saveRequests(page).length, 0);
+  assert.equal(dirty(), false);
+});
 async function finishSave(page, data = null, failRead = false) {
   await act(async () => saveRequests(page).at(-1).resolve({error: null, data}));
   const read = page.requests.filter(r => r.name === 'get_operations_class_lesson_design_detail_v1').at(-1);

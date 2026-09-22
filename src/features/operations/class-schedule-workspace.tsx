@@ -4939,7 +4939,7 @@ export function ClassScheduleWorkspace() {
                                       {...(canToggleCalendarDate ? { type: "button" as const } : {})}
                                       aria-label={
                                         canToggleCalendarDate
-                                          ? `${dateKey} ${calendarState === "skipped" ? "해제된 일정" : getScheduleStateLabel(calendarState)}`
+                                          ? `${dateKey} ${daySessions.length > 1 ? daySessions.map((session) => session.scheduleStateLabel).join(" · ") : calendarState === "skipped" ? "해제된 일정" : getScheduleStateLabel(calendarState)}`
                                           : undefined
                                       }
                                       draggable={!isNormalizedLessonSchedule && lessonScheduleReadReady && Boolean(primarySession) && primarySession?.scheduleState !== "makeup"}
@@ -5026,16 +5026,17 @@ export function ClassScheduleWorkspace() {
                                           >
                                             {primarySession.scheduleStateLabel}
                                           </p>
-                                          {daySessions.length > 1 ? (
+                                          {daySessions.filter((session) => session.id !== primarySession.id).map((session) => (
                                             <p
+                                              key={session.id}
                                               className={cn(
                                                 "text-[11px]",
-                                                primaryScheduleSurface?.mutedClassName,
+                                                getScheduleStateSurface(session.scheduleState)?.mutedClassName,
                                               )}
                                             >
-                                              추가 {daySessions.length - 1}건
+                                              {session.label} · {session.scheduleStateLabel}
                                             </p>
-                                          ) : null}
+                                          ))}
 
                                         </div>
                                       ) : null}
