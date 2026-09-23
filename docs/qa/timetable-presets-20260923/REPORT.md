@@ -43,6 +43,18 @@ SQL별 plan은 continuous 12, guard 12, makeup SQLSTATE 25, normalized 22, opera
 
 Root의 직접 CUA는 prep A/B와 네 legacy 후보/teacher-weekly preview, 취소 focus를 읽기 전용으로 확인했다([dated note](evidence/history/task-9-root-browser.md)). 원래 기술 key label을 읽기 쉬운 과목/보기/중립 이전초안명으로 바꿨다. root CUA 스크린샷은 inline으로만 보았으며 저장 PNG가 없다. 위 PNG들은 별도 자동화 산출물이다.
 
+## Task9 review I1 수정 — 미저장 입력 보호 소유자
+
+`49faaa8e` review I1을 수정했다. picker/editor/transfer dirty를 독립적으로 보관해 OR하며, 새 plan 선택이나 transfer의 false 알림이 picker의 후속 rename을 해제하지 않는다. plan unmount는 자기 editor/transfer만 정리한다. 미제출 폼 autosave는 추가하지 않았다.
+
+새 [실제 browser regression](../../../scripts/qa/timetable-dirty-owner-browser.mjs)은 create/clone × save/discard를 검증한다. 실제 commit 응답 손실→후속 입력→reload→동일 요청 receipt→새 plan/transfer mount 뒤 원래 metadata storage가 비어 있어도 guard 유지→native beforeunload 경고를 dismiss→저장/명시적 취소 후 guard 해제다. **RED 4/4 동일 guard 실패 → GREEN 4/4** ([RED JSON](evidence/task9-fix1-dirty-red.json), [GREEN JSON](task9-dirty-owner-results.json), [raw](evidence/task9-fix1-dirty-green.log)).
+
+수정 covering Node56/56, fulltsc exit0, touchedlint0warning/error, safeenvbuild exit0이다 ([command/results](evidence/task9-fix1-command-results.json), [Node](evidence/task9-fix1-focused.log), [tsc](evidence/task9-fix1-tsc.log), [lint](evidence/task9-fix1-lint.log), **[최신 release build](evidence/task9-fix1-build.log)**). 기존 synthetic public read403 네 블록(M1)은 그대로 남고, narrow date wrapping(M2)도 deferred Minor다. SQL/넓은 Node/shared design/browser9/export/performance를 반복했다고 주장하지 않는다. 세부 명령·검토 disposition은 [누적 Task9 report](evidence/history/task-9-report.md#fix-round-1--review-i1-2026-09-24), [review1](evidence/history/task-9-review-1.md)에 있다.
+
+추가 인접 테스트 경계: 최초 covering command에 포함한 `class-schedule-draft-navigation.test.mjs`는 현재/수정전49faaa8e에서15/19, 전체기능 시작점 `eb23d7d8e1e629ffcf58d0f286aafa1d33deec72`에서19/19였다. 동일 test blob을 사용했다. [현재 combined log](evidence/task9-fix1-node.log), [pre-I1 comparison](evidence/task9-fix1-unrelated-baseline.log), [origin comparison](evidence/task9-fix1-unrelated-origin.log). 테스트 helper는 update:/save_와 args.schedule_plan만 인식하지만 branch가 guarded update_class_operational_v1 + p_patch.schedule_plan으로 변경되어 네 lifecycle assertions가 새 RPC를 집계하지 못한다. **기능 이전부터 있던 실패로 면제하지 않는다.** 제품 저장 실패 자체를 증명하는 결과도 아니며, controller 지시대로 이 I1 수정에서는 인접 코드를 고치지 않고 전체 branch 검토에 넘긴다.
+
+최신 runtime: proxy/API PID51424/session83624, releaseNext PID51931/session62682; loopback3260/3262 및3261. 모든 browser contexts 닫힘. DB reset/migration/production 작업 없음. 아래 최초 패키징 runtime은 역사값이다.
+
 ## 기존 Task1–8 증거와 현재 판정
 
 [acceptance map](evidence/history/root-acceptance-map.md), [Task6 root 실제 UI+DB](evidence/history/task-6-root-browser.md), [Task6 report](evidence/history/task-6-report.md), [Task7 report](evidence/history/task-7-report.md), [Task8 report](evidence/history/task-8-report.md)와 [보존 파일 목록](evidence/history/INDEX.json)을 함께 본다. 과거 보고서의 당시 pending/initial bug는 이후 report/review disposition으로 읽어야 하며 현재 미해결로 재분류하지 않는다. `progress.md`와 모든 [Ruling 연대순](evidence/history/RULINGS.md), [Task9 추가 지시](evidence/history/task-9-controller-notes.md)를 보존했다.

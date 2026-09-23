@@ -1,0 +1,44 @@
+{
+  "base": "49faaa8ef5fbfa082f747fe24b5b266cf2c8b483",
+  "origin": "eb23d7d8e1e629ffcf58d0f286aafa1d33deec72",
+  "node": "v24.19.0",
+  "focused": {
+    "tests": 56,
+    "pass": 56,
+    "exit": 0
+  },
+  "tscExit": 0,
+  "eslintExit": 0,
+  "buildExit": 0,
+  "actualBrowserRed": {
+    "checks": 4,
+    "failed": 4,
+    "exit": 1
+  },
+  "actualBrowserGreen": {
+    "checks": 4,
+    "pass": 4,
+    "exit": 0
+  },
+  "adjacentComparison": {
+    "command": "node --test --experimental-strip-types tests/class-schedule-draft-navigation.test.mjs",
+    "testBlobBoth": "771c73bae005a58cb7f656a8a7e84c1eb2edb2c6",
+    "origin": {
+      "pass": 19,
+      "fail": 0,
+      "exit": 0
+    },
+    "preFixBase": {
+      "pass": 15,
+      "fail": 4,
+      "exit": 1
+    },
+    "currentCombinedRun": {
+      "pass": 71,
+      "fail": 4,
+      "total": 75,
+      "exit": 1
+    },
+    "reason": "saveRequests helper accepts update:/save_ only and asserts args.schedule_plan, but branch legacy writer now calls update_class_operational_v1 with p_patch.schedule_plan; lifecycle assertions do not exercise the new RPC contract. Deferred for whole-branch triage; not classified pre-feature-existing."
+  }
+}

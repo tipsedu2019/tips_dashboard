@@ -218,7 +218,9 @@ export function AcademicTimetableWorkspace() {
   const [planId, setPlanId] = useState<string | null>(null);
   const operationalRefresh = useRef<(() => Promise<void>) | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
-  const [formDirty, setFormDirty] = useState(false);
+  const [pickerDirty, setPickerDirty] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [transferDirty, setTransferDirty] = useState(false);
   const plan = useTimetablePlan(planId);
   const handleTransferred = useCallback(async (_result: import('./timetable-plan-contract').TransferResult, request: import('./timetable-plan-contract').TransferRequest) => {
     setReloadNonce(value => value + 1);
@@ -235,19 +237,19 @@ export function AcademicTimetableWorkspace() {
       let current = true;
       queueMicrotask(() => { if (current) {
         if (plan.service && planId) clearTimetablePlanRecovery(plan.service.actorScope, planId);
-        setFormDirty(false); setPlanId(null); setReloadNonce(value => value + 1);
+        setPlanId(null); setReloadNonce(value => value + 1);
       } });
       return () => { current = false; };
     }
   }, [plan.error, plan.service, planId]);
-  const navigation = useDraftNavigation({ dirty: plan.dirty || formDirty });
+  const navigation = useDraftNavigation({ dirty: plan.dirty || pickerDirty || editorDirty || transferDirty });
   const changePlan = (id: string | null) => navigation.requestLocalAction(() => {
-    setFormDirty(false); setPlanId(id);
+    setPlanId(id);
   });
   return <div className="space-y-4">
-    {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && plan.referenceStatus !== 'verified'} onCommitted={id => { setFormDirty(false); setPlanId(id); }} onFormDirty={setFormDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
+    {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && plan.referenceStatus !== 'verified'} onCommitted={id => { setPlanId(id); }} onFormDirty={setPickerDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
     <div hidden={Boolean(planId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
-    {planId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onFormDirty={setFormDirty} requestAction={navigation.requestLocalAction}/> : null}
+    {planId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onEditorDirty={setEditorDirty} onTransferDirty={setTransferDirty} requestAction={navigation.requestLocalAction}/> : null}
     {navigation.confirmation}
   </div>;
 }

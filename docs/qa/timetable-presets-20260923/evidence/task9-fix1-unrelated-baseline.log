@@ -1,0 +1,81 @@
+✔ schedule-only page exposes one save and return action even for a legacy progress URL (361.064917ms)
+✔ schedule-only return keeps an edited draft when the operator continues editing (245.952333ms)
+✔ calendar: holiday cancellation and linked makeup on the same day are both named (204.460333ms)
+✔ plan: same-class refreshed source preserves an authored draft (230.14375ms)
+✖ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (161.622541ms)
+✔ normalized session: real save reaches the service once and preserves edits made while pending (202.77275ms)
+✔ class-schedule: clean read, revert, protected close and confirmed destination (266.756083ms)
+✔ curriculum: clean read, revert, protected close and confirmed destination (271.235042ms)
+✔ curriculum/lesson-design: clean read, revert, protected close and confirmed destination (270.431125ms)
+✖ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (160.90175ms)
+✔ normalized session: unchanged/reverted draft is clean and accepted revision is reused (176.039083ms)
+✔ normalized read: a loading read must never fall through to a legacy classes update (172.294334ms)
+✖ plan: failed write retains its draft and a retry submits the current values (229.951541ms)
+✖ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (175.65ms)
+✔ normalized session: accepted trimmed input becomes clean and later authoritative data replaces clean overrides (166.706ms)
+✔ normalized schedule: calendar opens authoritative session editing without creating a legacy draft (156.400125ms)
+✔ normalized generation: a late preview from another month cannot authorize current-month creation (153.945334ms)
+✔ normalized generation: preview and creation each reject same-turn duplicate clicks (149.96325ms)
+✔ normalized generation previews dates without mutating saved sessions and disables an all-existing confirmation (221.544042ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 15
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4277.273875
+
+✖ failing tests:
+
+test at tests/class-schedule-draft-navigation.test.mjs:223:1
+✖ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (161.622541ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///private/tmp/task9-i1-baseline-9bydmz3h/tests/class-schedule-draft-navigation.test.mjs:226:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-draft-navigation.test.mjs:268:1
+✖ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (160.90175ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///private/tmp/task9-i1-baseline-9bydmz3h/tests/class-schedule-draft-navigation.test.mjs:272:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-draft-navigation.test.mjs:297:1
+✖ plan: failed write retains its draft and a retry submits the current values (229.951541ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at file:///private/tmp/task9-i1-baseline-9bydmz3h/tests/class-schedule-draft-navigation.test.mjs:300:46
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/task9-i1-baseline-9bydmz3h/tests/class-schedule-draft-navigation.test.mjs:300:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/class-schedule-draft-navigation.test.mjs:308:1
+✖ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (175.65ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at file:///private/tmp/task9-i1-baseline-9bydmz3h/tests/class-schedule-draft-navigation.test.mjs:313:33
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/task9-i1-baseline-9bydmz3h/tests/class-schedule-draft-navigation.test.mjs:313:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

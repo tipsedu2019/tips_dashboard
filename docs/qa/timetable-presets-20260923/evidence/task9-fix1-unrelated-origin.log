@@ -1,0 +1,27 @@
+✔ schedule-only page exposes one save and return action even for a legacy progress URL (340.829708ms)
+✔ schedule-only return keeps an edited draft when the operator continues editing (248.867917ms)
+✔ calendar: holiday cancellation and linked makeup on the same day are both named (200.420875ms)
+✔ plan: same-class refreshed source preserves an authored draft (234.00275ms)
+✔ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (188.92425ms)
+✔ normalized session: real save reaches the service once and preserves edits made while pending (195.577791ms)
+✔ class-schedule: clean read, revert, protected close and confirmed destination (269.338542ms)
+✔ curriculum: clean read, revert, protected close and confirmed destination (267.812083ms)
+✔ curriculum/lesson-design: clean read, revert, protected close and confirmed destination (272.0775ms)
+✔ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (178.466042ms)
+✔ normalized session: unchanged/reverted draft is clean and accepted revision is reused (179.0745ms)
+✔ normalized read: a loading read must never fall through to a legacy classes update (164.949708ms)
+✔ plan: failed write retains its draft and a retry submits the current values (258.836958ms)
+✔ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (149.776916ms)
+✔ normalized session: accepted trimmed input becomes clean and later authoritative data replaces clean overrides (162.880292ms)
+✔ normalized schedule: calendar opens authoritative session editing without creating a legacy draft (149.97125ms)
+✔ normalized generation: a late preview from another month cannot authorize current-month creation (150.559459ms)
+✔ normalized generation: preview and creation each reject same-turn duplicate clicks (145.725625ms)
+✔ normalized generation previews dates without mutating saved sessions and disables an all-existing confirmation (211.561792ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4272.696542

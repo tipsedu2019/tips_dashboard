@@ -1,0 +1,29 @@
+{
+  "boundary": "local production Next, actual isolated DB committed-response loss; real parent/picker/transfer mount, native beforeunload close dismissed; no unsubmitted autosave",
+  "results": [
+    {
+      "operation": "create",
+      "finish": "save",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: follow-up guard survives resulting plan/transfer mount\n\nfalse !== true\n\n    at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/scripts/qa/timetable-dirty-owner-browser.mjs:31:11"
+    },
+    {
+      "operation": "create",
+      "finish": "discard",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: follow-up guard survives resulting plan/transfer mount\n\nfalse !== true\n\n    at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/scripts/qa/timetable-dirty-owner-browser.mjs:31:11"
+    },
+    {
+      "operation": "clone",
+      "finish": "save",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: follow-up guard survives resulting plan/transfer mount\n\nfalse !== true\n\n    at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/scripts/qa/timetable-dirty-owner-browser.mjs:31:11"
+    },
+    {
+      "operation": "clone",
+      "finish": "discard",
+      "passed": false,
+      "error": "AssertionError [ERR_ASSERTION]: follow-up guard survives resulting plan/transfer mount\n\nfalse !== true\n\n    at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/scripts/qa/timetable-dirty-owner-browser.mjs:31:11"
+    }
+  ]
+}

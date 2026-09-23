@@ -72,16 +72,19 @@ function TimetablePointerFeedback({ control, panelRefs, visibleStartMinute, slot
         <div data-plan-pointer-preview aria-hidden="true" className="pointer-events-none absolute left-0 right-0 border-2 border-primary bg-primary/10"
             style={{ top: (preview.startMinute - visibleStartMinute) / 30 * slotHeight, height: (preview.endMinute - preview.startMinute) / 30 * slotHeight }} />, column) : null}</>;
 }
-export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty, requestAction, onTransferred }: {
+export function TimetablePlanWorkspace({ state, view, onViewChange, onEditorDirty, onTransferDirty, requestAction, onTransferred }: {
     onTransferred: (result: TransferResult, request: TransferRequest) => Promise<void>;
     state: ReturnType<typeof useTimetablePlan>;
     view: TimetableView;
     onViewChange: (view: TimetableView) => void;
-    onFormDirty: (dirty: boolean) => void;
+    onEditorDirty: (dirty: boolean) => void;
+    onTransferDirty: (dirty: boolean) => void;
     requestAction: (action: () => void) => void;
 }) {
     const snapshot = state.draft;
-    const onTransferPending = useCallback((pending: boolean) => { setTransferPending(pending); onFormDirty(pending); }, [onFormDirty]);
+    const onTransferPending = useCallback((pending: boolean) => { setTransferPending(pending); onTransferDirty(pending); }, [onTransferDirty]);
+    // Each plan owns only its editor/transfer guards; picker continuations live above it.
+    useEffect(() => () => { onEditorDirty(false); onTransferDirty(false); }, [onEditorDirty, onTransferDirty]);
     const [returnToTransfer, setReturnToTransfer] = useState(false);
     const [transferOpen, setTransferOpen] = useState(false), [transferPending, setTransferPending] = useState(false);
     const [subject, setSubject] = useState(''), [targets, setTargets] = useState<Record<string, string[]>>({}), [gridCount, setGridCount] = useState(2), [axisMode, setAxisMode] = useState('default');
@@ -109,7 +112,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
     useEffect(() => { if (snapshot)
         setSelectedItemIds(ids => ids.filter(id => snapshot.items.some(item => item.id === id && item.state === 'draft'))); }, [snapshot]);
     const openEditor = useCallback((draft: PlacementEditorDraft) => requestAction(() => { setEditor({ ...draft, revision: state.controller?.snapshot().snapshot?.items.find(i => i.id === draft.item.id)?.revision ?? null }); setDetail(null); }), [requestAction, state.controller]);
-    const closeEditor = (saved = false) => { const close = () => { setEditor(null); onFormDirty(false); if (returnToTransfer) { setReturnToTransfer(false); setTransferOpen(true); } }; if (saved)
+    const closeEditor = (saved = false) => { const close = () => { setEditor(null); onEditorDirty(false); if (returnToTransfer) { setReturnToTransfer(false); setTransferOpen(true); } }; if (saved)
         close();
     else
         requestAction(close); };
@@ -296,7 +299,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
                 openEditor({ item: itemDraft(item), slots: snapshot.slots.filter(s => s.itemId === item.id), slotId: block.id });
         } }, onPointerStart: startPointer }}/></TimetableRenderPanel></div><Button variant="ghost" size="icon" aria-label={`${panel.name} 이미지 저장`} disabled={!!exporting || state.dirty || state.saveState === 'saving'} onClick={() => void exportPanel(panel.id)} className="absolute right-2 top-2 size-11 sm:size-9"><ImageDown /></Button></section>)}</div>}</div></div></WorkspaceTabsPanel>
  <Sheet open={sheetOpen} onOpenChange={setSheetOpen}><SheetContent className="overflow-y-auto"><SheetHeader><SheetTitle>수업 목록</SheetTitle><SheetDescription>수업을 선택한 뒤 시간표의 셀 또는 편집 폼에서 배치합니다.</SheetDescription></SheetHeader>{classList}</SheetContent></Sheet>
- {editor ? <TimetablePlacementEditor key={editor.item.id + ':' + (editor.pendingResolutionId || editor.slotId || 'new') + ':' + JSON.stringify(editor.target)} draft={editor} snapshot={snapshot} loadScienceSubjectAreas={state.service?.listScienceSubjectAreas} onSave={save} onClose={closeEditor} onDirty={onFormDirty} canEdit={canEdit} failureKind={state.failureKind(editor.item.id)} onRetry={async () => { await state.retry(editor.item.id); const current = state.controller?.snapshot().snapshot; setEditor(previous => previous ? { ...previous, revision: current?.items.find(i => i.id === previous.item.id)?.revision ?? null } : null); }} onDiscard={() => state.discardRejected(editor.item.id)} onAcceptServer={() => state.resolveStale(editor.item.id, 'accept_server')} serverSummary={`${state.snapshot?.items.find(i => i.id === editor.item.id)?.name || '삭제된 수업'} · ${state.snapshot?.slots.filter(s => s.itemId === editor.item.id).map(s => `${PLAN_DAYS[s.weekday]} ${formatPlanTime(s.startMinute)}–${formatPlanTime(s.endMinute)}`).join(', ')}`}/> : null}
+ {editor ? <TimetablePlacementEditor key={editor.item.id + ':' + (editor.pendingResolutionId || editor.slotId || 'new') + ':' + JSON.stringify(editor.target)} draft={editor} snapshot={snapshot} loadScienceSubjectAreas={state.service?.listScienceSubjectAreas} onSave={save} onClose={closeEditor} onDirty={onEditorDirty} canEdit={canEdit} failureKind={state.failureKind(editor.item.id)} onRetry={async () => { await state.retry(editor.item.id); const current = state.controller?.snapshot().snapshot; setEditor(previous => previous ? { ...previous, revision: current?.items.find(i => i.id === previous.item.id)?.revision ?? null } : null); }} onDiscard={() => state.discardRejected(editor.item.id)} onAcceptServer={() => state.resolveStale(editor.item.id, 'accept_server')} serverSummary={`${state.snapshot?.items.find(i => i.id === editor.item.id)?.name || '삭제된 수업'} · ${state.snapshot?.slots.filter(s => s.itemId === editor.item.id).map(s => `${PLAN_DAYS[s.weekday]} ${formatPlanTime(s.startMinute)}–${formatPlanTime(s.endMinute)}`).join(', ')}`}/> : null}
  <Dialog open={!!detail} onOpenChange={open => { if (!open)
         setDetail(null); }}><DialogContent restoreFocusToOpener><DialogHeader><DialogTitle>{detail?.title}</DialogTitle><DialogDescription>기존 수업 · 운영 시간표에서 자리를 점유합니다.</DialogDescription></DialogHeader><p>{detail ? `${PLAN_DAYS[detail.slot.weekday]} ${formatPlanTime(detail.startMinute)}–${formatPlanTime(detail.endMinute)} · ${detail.teacher} · ${detail.classroom}` : ''}</p><DialogFooter><Button variant="outline" onClick={() => setDetail(null)}>닫기</Button><Button disabled={!canEdit} onClick={() => { if (!detail)
         return; const source = snapshot.shadowClasses.find(c => c.id === detail.itemId); const item: PlanItemDraft = { ...blankPlanItem(snapshot.plan.id), name: detail.title, subject: detail.subject, grade: source?.grade || '', defaultTeacherId: detail.slot.teacherId, defaultClassroomId: detail.slot.classroomId, durationMinutes: detail.endMinute - detail.startMinute }; openEditor({ item, slots: [] }); }}>이 수업으로 새 초안 만들기</Button></DialogFooter></DialogContent></Dialog>
