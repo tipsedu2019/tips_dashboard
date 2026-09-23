@@ -64,6 +64,8 @@ export type PendingSlot = {
 };
 
 export type OccupancyBlocker = {
+  /** Opaque identity for the unresolved occupancy; names/notes are excluded. */
+  occupancyFingerprint?: string;
   classId: string;
   label: string;
   scope: "all" | "resource";
@@ -79,6 +81,7 @@ export type DropTarget = {
 };
 
 export type TimetableConflict = {
+  date?: string;
   kind: "teacher" | "classroom" | "same_class";
   slotId: string;
   otherSlotId: string;
@@ -120,12 +123,32 @@ export type ShadowClass = {
   status: "수강";
   revision: number;
 };
+export type DatedTimetableSession = {
+  id: string;
+  classId: string;
+  sourceSlotId: string | null;
+  date: string;
+  state: "active" | "exception" | "makeup" | "skipped" | "tbd";
+  startMinute: number | null;
+  endMinute: number | null;
+  teacherId: string | null;
+  classroomId: string | null;
+  revision: number;
+};
+export type DatedOccupancyBlocker = OccupancyBlocker & { date: string | null; sessionId?: string };
 export type TimetableOperatingReference = {
+  /** Server business date in Asia/Seoul; weekly defaults never rewrite history. */
+  asOfDate: string;
   shadowSlots: ShadowSlot[];
   shadowClasses: ShadowClass[];
   catalogs: { teachers: ResourceOption[]; classrooms: ResourceOption[] };
   unresolvedOccupancies: OccupancyBlocker[];
   shadowFingerprint: string;
+  /** Includes all actual sessions, regardless of class status; no student/content fields. */
+  datedSessions: DatedTimetableSession[];
+  datedUnresolvedOccupancies: DatedOccupancyBlocker[];
+  datedFingerprint: string;
+  datedComplete: boolean;
   complete: boolean;
 };
 export type PlanAccess = {
@@ -183,10 +206,13 @@ export type PlanMutationResult = {
   slots: PlanSlot[];
   removedItemIds: string[];
 };
+export type TimetableTargetPeriod =
+  | { targetStartDate?: null; targetEndDate?: null }
+  | { targetStartDate: string; targetEndDate: string };
 export type PlanCommand =
-  | { operation: "create"; planId: string; name: string; targetStartDate?: string | null; targetEndDate?: string | null; requestKey: string }
+  | ({ operation: "create"; planId: string; name: string; requestKey: string } & TimetableTargetPeriod)
   | { operation: "clone"; planId: string; sourcePlanId: string; expectedMetaRevision: number; name: string; requestKey: string }
-  | { operation: "rename"; planId: string; expectedMetaRevision: number; name: string; targetStartDate?: string | null; targetEndDate?: string | null; requestKey: string }
+  | ({ operation: "rename"; planId: string; expectedMetaRevision: number; name: string; requestKey: string } & TimetableTargetPeriod)
   | { operation: "archive" | "restore"; planId: string; expectedMetaRevision: number; requestKey: string }
   | { operation: "share"; planId: string; expectedMetaRevision: number; members: Array<Pick<PlanMember, "userId" | "access">>; requestKey: string };
 export type PlanRevision = Pick<PlanMutationResult, "planId" | "metaRevision" | "changeSequence" | "shadowFingerprint"> & { complete: boolean };
@@ -200,6 +226,7 @@ export type TimetableInvalidationSignal = {
   updated_at: string;
 };
 export type TimetablePlanRpcContract = {
+  get_timetable_operational_reference_v1: { Args: Record<string, never>; Returns: TimetableOperatingReference };
   list_timetable_plans_v1: { Args: { p_search?: string; p_archived?: boolean; p_page?: number; p_page_size?: number }; Returns: PlanList };
   get_timetable_plan_v1: { Args: { p_plan_id: string }; Returns: PlanSnapshot };
   get_timetable_plan_revision_v1: { Args: { p_plan_id: string }; Returns: PlanRevision };

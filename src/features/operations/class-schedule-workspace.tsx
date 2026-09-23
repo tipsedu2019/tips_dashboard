@@ -1,5 +1,6 @@
 "use client";
 
+import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
 import Link from "next/link";
 import { preserveScheduleLearningContent, scheduleOnlyDraft } from "./schedule-only-plan";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -2262,7 +2263,9 @@ export function ClassScheduleWorkspace() {
   const lessonPlanBaselineRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanOwnerRef = useRef("");
   const lessonPlanSaveRef = useRef<symbol | null>(null);
+  const legacyScheduleRequestRef = useRef<{ body: string; key: string } | null>(null);
   const lessonSessionSaveRef = useRef<symbol | null>(null);
+  const normalizedScheduleRequestKeys = useRef(new Map<string, string>());
   const [lessonReadRetryNeeded, setLessonReadRetryNeeded] = useState(false);
   const [isLessonReadRetrying, setIsLessonReadRetrying] = useState(false);
   const [normalizedLessonSessionBaselines, setNormalizedLessonSessionBaselines] = useState<Record<string, SaveClassLessonSessionInput>>({});
@@ -3298,12 +3301,15 @@ export function ClassScheduleWorkspace() {
     if (!mutationToken) return;
     const submission = Symbol(); lessonSessionSaveRef.current = submission;
     setIsNormalizedLessonSessionSaving(true); setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
-    const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
+    const requestBody = JSON.stringify({ operation: "session", input });
+    if (!normalizedScheduleRequestKeys.current.has(requestBody)) normalizedScheduleRequestKeys.current.set(requestBody, crypto.randomUUID());
+    const action = createContinuousScheduleMutationAction({ createRequestKey: () => normalizedScheduleRequestKeys.current.get(requestBody)!, rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
     await runClassMutationWithLifecycle({
       token: mutationToken,
       isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
       mutate: async () => {
         const result = await action.saveSession(input);
+        normalizedScheduleRequestKeys.current.delete(requestBody);
         if (lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) {
           const revision = Number((result as Record<string, unknown>)?.revision);
           const accepted = { ...input, ...(Number.isFinite(revision) ? { expectedRevision: revision } : {}) };
@@ -3326,7 +3332,7 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("저장한 일정을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async () => setLessonDesignSaveError("일정을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요."),
+      onError: async (error: unknown) => setLessonDesignSaveError(timetableOperationalErrorMessage(error, "일정을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
       onSettled: async () => {
         if (lessonSessionSaveRef.current === submission) lessonSessionSaveRef.current = null;
         setIsNormalizedLessonSessionSaving(false);
@@ -3656,15 +3662,14 @@ export function ClassScheduleWorkspace() {
       token: mutationToken,
       isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
       mutate: async () => {
-        const { error: updateError } = await client
-          .from("classes")
-          .update({ schedule_plan: preserveScheduleLearningContent(lessonPlanForSave, (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>) })
-          .select("id")
-          .eq("id", text(selectedRow.id))
-          .order("id")
-          .limit(1)
-          .abortSignal(AbortSignal.timeout(8_000))
-          .retry(false);
+        const schedulePlan = preserveScheduleLearningContent(lessonPlanForSave, (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>);
+        const expectedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
+        const body = JSON.stringify({ classId: selectedRow.id, schedulePlan, expectedPlan });
+        if (legacyScheduleRequestRef.current?.body !== body) legacyScheduleRequestRef.current = { body, key: crypto.randomUUID() };
+        const { error: updateError } = await client.rpc("update_class_operational_v1", {
+          p_class_id: text(selectedRow.id), p_patch: { schedule_plan: schedulePlan },
+          p_request_key: legacyScheduleRequestRef.current.key, p_expected_schedule_plan: expectedPlan,
+        }).abortSignal(AbortSignal.timeout(8_000)).retry(false);
         if (updateError) throw updateError;
         acceptSubmission();
         return null;
@@ -3679,7 +3684,7 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("저장한 내용을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async () => setLessonDesignSaveError("수업계획을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요."),
+      onError: async (error: unknown) => setLessonDesignSaveError(timetableOperationalErrorMessage(error, "수업계획을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
       onSettled: async () => {
         if (lessonPlanSaveRef.current === submission) lessonPlanSaveRef.current = null;
         setIsLessonDesignSaving(false);
@@ -3737,11 +3742,17 @@ export function ClassScheduleWorkspace() {
     const submittedScope = generationScopeRef.current;
     setGenerationSaving(true);
     setLessonDesignSaveError("");
-    const action = createContinuousScheduleMutationAction({ rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
+    const requestBody = JSON.stringify({ operation: "generate", input: normalizedGenerationContext });
+    if (!normalizedScheduleRequestKeys.current.has(requestBody)) normalizedScheduleRequestKeys.current.set(requestBody, crypto.randomUUID());
+    const action = createContinuousScheduleMutationAction({ createRequestKey: () => normalizedScheduleRequestKeys.current.get(requestBody)!, rpc: async (name, parameters) => await invokeContinuousScheduleRpc(client, name, parameters) });
     await runClassMutationWithLifecycle({
       token: mutationToken,
       isCurrent: (token: { revision: number; classId: string }) => lessonMutationLifecycleRef.current?.isCurrent(token) === true,
-      mutate: async () => await action.generateSessions({ ...normalizedGenerationContext, reason: null }),
+      mutate: async () => {
+        const result = await action.generateSessions({ ...normalizedGenerationContext, reason: null });
+        normalizedScheduleRequestKeys.current.delete(requestBody);
+        return result;
+      },
       afterCommit: async () => await invalidatePublicClassesCacheAfterMutation(client, "schedule"),
       onSuccess: async (_result: unknown, refreshReceipt: { status?: string } | undefined) => {
         if (generationScopeRef.current !== submittedScope) return;
@@ -3754,9 +3765,9 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("생성한 일정을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async () => {
+      onError: async (error: unknown) => {
         if (generationScopeRef.current !== submittedScope) return;
-        setLessonDesignSaveError("일정을 생성하지 못했습니다. 미리보기를 다시 확인해 주세요.");
+        setLessonDesignSaveError(timetableOperationalErrorMessage(error, "일정을 생성하지 못했습니다. 미리보기를 다시 확인해 주세요."));
         setGenerationPreview(null);
       },
       onSettled: async () => {

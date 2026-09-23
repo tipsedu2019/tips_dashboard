@@ -368,9 +368,10 @@ function makeClassUpsertClient(errorColumn) {
     from(table) {
       assert.equal(table, "classes");
       return {
-        upsert(payload) {
+        update(payload) {
           calls.push(payload);
           return {
+            eq(column, id) { assert.equal(column, "id"); assert.equal(id, "class-1"); return this; },
             async select() {
               if (Object.prototype.hasOwnProperty.call(payload, errorColumn)) {
                 return {
@@ -711,7 +712,7 @@ test("student upserts retry without optional counseling fields when the live sch
   assert.equal(client.calls[1].name, "김학생");
 });
 
-test("class upserts retry without the class type field when the live schema is stale", async () => {
+test("class metadata updates retry without optional class type while preserving operation fields", async () => {
   const client = makeClassUpsertClient("class_type");
   const service = createManagementService({
     supabase: client,
@@ -730,6 +731,7 @@ test("class upserts retry without the class type field when the live schema is s
   assert.equal(client.calls[0].class_type, "선행");
   assert.ok(!Object.prototype.hasOwnProperty.call(client.calls[1], "class_type"));
   assert.equal(client.calls[1].name, "고1 공통수학");
+  for (const key of ["status", "schedule", "teacher", "room"]) assert.equal(key in client.calls[0], false);
 });
 
 test("student class relation changes update only canonical roster arrays", async () => {

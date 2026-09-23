@@ -1,3 +1,4 @@
+import { createTimetableOperationalMutation } from "../academic/timetable-operational-service.ts";
 import { buildClassTextbookUsage } from "./class-textbook-usage.ts";
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
 import {
@@ -1211,9 +1212,20 @@ async function upsertStudentRows(client, payload) {
   }
 }
 
-async function upsertClassRows(client, payload) {
+async function updateClassMetadataRows(client, payload) {
+  const write = async (value) => {
+    const { data, error } = await client.from("classes")
+      .update(stripPayloadFields(value, ["id"]))
+      .eq("id", payload.id)
+      .select();
+    if (error) throw error;
+    if (!Array.isArray(data) || data.length !== 1) {
+      throw Object.assign(new Error("수업을 찾을 수 없거나 수정 권한이 없습니다."), { code: "P0002" });
+    }
+    return data;
+  };
   try {
-    return await upsertRows(client, "classes", payload);
+    return await write(payload);
   } catch (error) {
     const optionalFields = trimText(payload?.subject) === "과학"
       ? ["class_type"]
@@ -1222,7 +1234,7 @@ async function upsertClassRows(client, payload) {
     if (fallbackFields.length === 0) {
       throw error;
     }
-    return upsertRows(client, "classes", stripPayloadFields(payload, fallbackFields));
+    return write(stripPayloadFields(payload, fallbackFields));
   }
 }
 
@@ -1525,6 +1537,7 @@ export function createManagementService(options = {}) {
   const refreshPublicClassesCache = options.refreshPublicClassesCache || ((reason) =>
     invalidatePublicClassesCacheAfterMutation(supabase, reason));
   const classCloseRequestKeys = new Map();
+  const operationalRequestKeys = new Map();
   const commitClassClose = async (client, classId, requestKey) => {
     const safeClassId = trimText(classId);
     if (!safeClassId) {
@@ -1697,16 +1710,22 @@ export function createManagementService(options = {}) {
       const payload = options.scheduleOwnership === "normalized"
         ? buildClassMetadataPayload(record, payloadOptions)
         : buildClassPayload(record, payloadOptions);
-      if (payload.status === ARCHIVED_CLASS_STATUS) {
-        const metadataPayload = stripPayloadFields(payload, ["status", "student_ids", "waitlist_ids"]);
-        await upsertClassRows(client, metadataPayload);
-        const closed = await commitClassClose(client, payload.id, options.requestKey);
-        await refreshPublicClassesCache("class");
-        return closed;
+      const operationalFields = ["status", "teacher", "teacherName", "teacher_name", "schedule", "room", "classroom"];
+      if (operationalFields.some((key) => Object.hasOwn(record, key))) {
+        const patch = stripPayloadFields(payload, ["id", "student_ids", "waitlist_ids"]);
+        const body = JSON.stringify({ classId: payload.id, patch });
+        const requestKey = options.requestKey || operationalRequestKeys.get(body) || generateId();
+        operationalRequestKeys.set(body, requestKey);
+        const action = createTimetableOperationalMutation({ requestKey,
+          rpc: (name, args) => client.rpc(name, args), refresh: () => refreshPublicClassesCache("class") });
+        const { data, refreshStatus } = await action.save({ classId: payload.id, patch });
+        operationalRequestKeys.delete(body);
+        const result = data?.closeResult || data?.classRow || data || null;
+        return result && typeof result === "object" ? { ...result, publicClassesCacheRefresh: { status: refreshStatus === "pending" ? "pending" : "complete" } } : result;
       }
-      const updated = await upsertClassRows(
+      const updated = await updateClassMetadataRows(
         client,
-        runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload),
+        stripPayloadFields(runtime.mode === "legacy" ? payload : stripReadyClassWriteFields(payload), ["status", "schedule", "teacher", "room"]),
       );
       await refreshPublicClassesCache("class");
       return Array.isArray(updated) ? updated[0] || null : updated || null;
@@ -1740,8 +1759,10 @@ export function createManagementService(options = {}) {
         p_reason: reason,
       });
       if (error) throw error;
-      await refreshPublicClassesCache("schedule");
-      return data || null;
+      let publicClassesCacheRefresh;
+      try { publicClassesCacheRefresh = await refreshPublicClassesCache("schedule"); }
+      catch { publicClassesCacheRefresh = { status: "pending" }; }
+      return data && typeof data === "object" ? { ...data, publicClassesCacheRefresh } : data || null;
     },
 
     async initializeClassSchedule({
@@ -1760,8 +1781,10 @@ export function createManagementService(options = {}) {
         p_request_key: trimText(requestKey),
       });
       if (error) throw error;
-      await refreshPublicClassesCache("schedule");
-      return data || null;
+      let publicClassesCacheRefresh;
+      try { publicClassesCacheRefresh = await refreshPublicClassesCache("schedule"); }
+      catch { publicClassesCacheRefresh = { status: "pending" }; }
+      return data && typeof data === "object" ? { ...data, publicClassesCacheRefresh } : data || null;
     },
 
     async replaceClassGroupMemberships({ classId, groupIds = [] } = {}) {

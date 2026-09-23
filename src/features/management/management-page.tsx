@@ -1,5 +1,6 @@
 "use client";
 
+import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
 import { Fragment, type FormEvent, type ReactNode, type TouchEvent, type WheelEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { ChevronDown, ChevronUp, Plus, Trash2, X } from "lucide-react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
@@ -1254,6 +1255,8 @@ function getDetailMetrics(kind: ManagementKind, row: ManagementRow) {
 }
 
 function getSaveErrorMessage(error: unknown) {
+  const operationalMessage = timetableOperationalErrorMessage(error, "");
+  if (operationalMessage) return operationalMessage;
   if (error instanceof Error && error.message) return error.message;
   if (error && typeof error === "object") {
     const details = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
@@ -2255,6 +2258,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       setNormalizedScheduleDefaults(nextDefaults);
       setScheduleDefaultsRequestKey("");
       setSaveNotice("기본 시간표 저장 완료");
+      reportPublicClassesCacheRefresh(result);
     } catch (error) {
       if (!request.isCurrent()) return;
       const message = getSaveErrorMessage(error);
@@ -2923,10 +2927,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     if (!isCurrent) return;
     setOperationError(null);
     try {
-      await service.initializeClassSchedule(pendingClassScheduleInitialization);
+      const result = await service.initializeClassSchedule(pendingClassScheduleInitialization);
       await reconcileManagementPage(pendingClassScheduleInitialization.classId);
       if (!isCurrent()) return;
       setPendingClassScheduleInitialization(null);
+      reportPublicClassesCacheRefresh(result);
       setDialogMode(null);
       setSelectedRow(null);
     } catch (error) {
@@ -2984,7 +2989,8 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             };
             if (isCurrent()) setPendingClassScheduleInitialization(initialization);
             try {
-              await service.initializeClassSchedule(initialization);
+              const initialized = await service.initializeClassSchedule(initialization);
+              savedResult = [savedResult, initialized];
               if (isCurrent()) setPendingClassScheduleInitialization(null);
             } catch (initializationError) {
               throw new Error(`수업은 생성됐습니다. 기본 시간표 초기화는 다시 시도해 주세요: ${getSaveErrorMessage(initializationError)}`);

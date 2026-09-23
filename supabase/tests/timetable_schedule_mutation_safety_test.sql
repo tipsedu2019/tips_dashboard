@@ -62,6 +62,8 @@ select lives_ok($$select public.save_class_schedule_defaults_v1(
  'ac230000-0000-4000-8000-000000000301',2,
  (select coalesce(jsonb_agg(jsonb_build_object('id',id,'weekday',weekday,'startTime',to_char(start_time,'HH24:MI'),'endTime',to_char(end_time,'HH24:MI'),'teacherCatalogId',teacher_catalog_id,'classroomCatalogId',classroom_catalog_id,'sortOrder',sort_order) order by sort_order),'[]'::jsonb) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301'),
  'ac230000-0000-4000-8000-000000000506',null)$$,'staff can idempotently save unchanged defaults');
+-- Unassigned defaults are editable while preparing; active occupancy now fails closed (Task 4 suite).
+update public.classes set status='개강 준비' where id='ac230000-0000-4000-8000-000000000301';
 create temporary table schedule_partial_save as select public.save_class_schedule_defaults_v1(
  'ac230000-0000-4000-8000-000000000301',2,
  '[{"id":"ac230000-0000-4000-8000-000000000401","weekday":1,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":"ac230000-0000-4000-8000-000000000201","sortOrder":0},{"id":"ac230000-0000-4000-8000-000000000402","weekday":2,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":null,"sortOrder":1},{"id":"ac230000-0000-4000-8000-000000000403","weekday":3,"startTime":"14:00","endTime":"15:30","teacherCatalogId":null,"classroomCatalogId":"ac230000-0000-4000-8000-000000000202","sortOrder":2},{"id":null,"weekday":5,"startTime":"16:00","endTime":"17:00","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":3}]'::jsonb,
