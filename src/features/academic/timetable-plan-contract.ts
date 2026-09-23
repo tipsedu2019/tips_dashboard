@@ -226,7 +226,9 @@ export type TimetableInvalidationSignal = {
   change_sequence: number;
   updated_at: string;
 };
+export type ScienceSubjectArea = { key: string; label: string };
 export type TimetablePlanRpcContract = {
+  list_active_science_subject_areas_v1: { Args: Record<string, never>; Returns: Array<{ subject: string; area_key: string; label: string; sort_order: number; is_active: boolean }> };
   preview_timetable_plan_transfer_v1: { Args: { p_request: TransferRequest }; Returns: TransferPreview };
   commit_timetable_plan_transfer_v1: { Args: { p_command: TransferCommitCommand }; Returns: TransferResult };
   get_timetable_operational_reference_v1: { Args: Record<string, never>; Returns: TimetableOperatingReference };

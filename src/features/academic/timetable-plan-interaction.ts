@@ -187,7 +187,7 @@ function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string
 
 export type PlacementEditorDraft = {
     item: PlanItemDraft; slots: PlanSlot[]; scope?: 'item' | 'slot' | 'add';
-    pendingResolutionId?: string;
+    pendingResolutionId?: string; weekdays?: number[];
     slotId?: string; target?: DropTarget; startMinute?: number; endMinute?: number; revision?: number | null;
 };
 export function pendingPlacementDraft(item: PlanItemDraft, slots: PlanSlot[], pendingId: string): PlacementEditorDraft {
@@ -202,10 +202,10 @@ export function pendingPlacementDraft(item: PlanItemDraft, slots: PlanSlot[], pe
         defaultClassroomId: pending.classroomId ?? item.defaultClassroomId,
         durationMinutes: pending.startMinute !== null && pending.endMinute !== null && pending.endMinute > pending.startMinute
             ? pending.endMinute - pending.startMinute : item.durationMinutes },
-        slots, scope: 'add', pendingResolutionId: pending.id, target, startMinute: pending.startMinute ?? undefined, endMinute: pending.endMinute ?? undefined };
+        slots, scope: 'add', pendingResolutionId: pending.id, weekdays: pending.weekday === null ? [] : [pending.weekday], target, startMinute: pending.startMinute ?? undefined, endMinute: pending.endMinute ?? undefined };
 }
 export type PlacementFormValues = {
-    name: string; subject: string; grade: string; teacher: string; room: string;
+    name: string; subject: string; subjectAreaKey: string; grade: string; teacher: string; room: string;
     duration: string; start: string; end: string; weekdays: number[]; capacity: string; tuition: string;
     applyTeacher: boolean; applyRoom: boolean; applyTime: boolean; applyWeekdays: boolean;
 };
@@ -218,12 +218,12 @@ export function placementFormDefaults(draft: PlacementEditorDraft): PlacementFor
     const initial = draft.target;
     const duration = draft.item.durationMinutes || 60;
     return {
-        name: draft.item.name, subject: draft.item.subject, grade: draft.item.grade,
+        name: draft.item.name, subject: draft.item.subject, subjectAreaKey: draft.item.subjectAreaKey ?? '', grade: draft.item.grade,
         teacher: initial?.teacherId || (whole ? draft.item.defaultTeacherId : slot?.teacherId) || slot?.teacherId || draft.item.defaultTeacherId || '',
         room: initial?.classroomId || (whole ? draft.item.defaultClassroomId : slot?.classroomId) || slot?.classroomId || draft.item.defaultClassroomId || '',
         duration: String(duration), start: formatPlanTime(initial?.startMinute ?? draft.startMinute ?? slot?.startMinute ?? 540),
         end: formatPlanTime(draft.endMinute ?? (initial ? Math.min(1440, initial.startMinute + duration) : slot?.endMinute ?? 600)),
-        weekdays: initial ? [initial.weekday] : whole ? PLAN_DAY_ORDER.filter(day => draft.slots.some(s => s.weekday === day)) : slot ? [slot.weekday] : [],
+        weekdays: draft.weekdays ?? (initial ? [initial.weekday] : whole ? PLAN_DAY_ORDER.filter(day => draft.slots.some(s => s.weekday === day)) : slot ? [slot.weekday] : []),
         capacity: draft.item.capacity === null ? '' : String(draft.item.capacity), tuition: draft.item.tuition === null ? '' : String(draft.item.tuition),
         applyTeacher: false, applyRoom: false, applyTime: false, applyWeekdays: false,
     };
@@ -235,7 +235,7 @@ export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: Plac
     if (!values.name.trim() || !values.subject.trim()) throw Error('수업명과 과목을 입력해 주세요.');
     for (const value of [values.capacity, values.tuition]) if (value && (!Number.isFinite(Number(value)) || Number(value) < 0)) throw Error('정원과 수업료는 0 이상의 수로 입력해 주세요.');
     const whole = placementScope(draft) === 'item' && draft.slots.length > 0;
-    const item = { ...itemDraft(draft.item), name: values.name.trim(), subject: values.subject.trim(), grade: values.grade,
+    const item = { ...itemDraft(draft.item), name: values.name.trim(), subject: values.subject.trim(), subjectAreaKey: values.subject.trim() === '과학' ? values.subjectAreaKey?.trim() || null : null, grade: values.grade,
         defaultTeacherId: whole && !values.applyTeacher ? draft.item.defaultTeacherId : values.teacher || null,
         defaultClassroomId: whole && !values.applyRoom ? draft.item.defaultClassroomId : values.room || null,
         durationMinutes: duration, capacity: values.capacity ? Number(values.capacity) : null, tuition: values.tuition ? Number(values.tuition) : null };

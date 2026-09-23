@@ -11,7 +11,8 @@ import { planErrorLabel, PLAN_DAYS, formatPlanTime } from './timetable-plan-inte
 import type { PlanMetadata, TransferRequest, TransferResult } from './timetable-plan-contract';
 import type { useTimetablePlan } from './use-timetable-plan';
 
-export function TimetableTransferDialog({ open, onOpenChange, state, selectedItemIds, setSelectedItemIds, onPending, onTransferred }: {
+export function TimetableTransferDialog({ open, onOpenChange, state, selectedItemIds, setSelectedItemIds, onPending, onTransferred, onEditItem }: {
+  onEditItem: (itemId: string) => void;
   open: boolean; onOpenChange: (open: boolean) => void; state: ReturnType<typeof useTimetablePlan>;
   selectedItemIds: string[]; setSelectedItemIds: (ids: string[]) => void; onPending: (pending: boolean) => void;
   onTransferred: (result: TransferResult, request: TransferRequest) => Promise<void>;
@@ -79,6 +80,7 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
             <div className="flex items-start gap-2"><Checkbox aria-label={`${item.name} 전송 선택`} checked disabled={locked || busy} onCheckedChange={() => setSelectedItemIds(selectedItemIds.filter(id => id !== item.id))} /><span className="break-words font-medium">{item.name}</span></div>
             <p className="text-muted-foreground">{item.subject} · {item.grade || '학년 미정'} · 정원 {item.capacity ?? '미정'} · 수업료 {item.tuition?.toLocaleString() ?? '미정'}</p>
             <p>{slots.map(slot => `${PLAN_DAYS[slot.weekday]} ${formatPlanTime(slot.startMinute)}–${formatPlanTime(slot.endMinute)} · ${slot.teacherName ?? snapshot.catalogs.teachers.find(t => t.id === slot.teacherId)?.name ?? '선생님 미정'} · ${slot.classroomName ?? snapshot.catalogs.classrooms.find(r => r.id === slot.classroomId)?.name ?? '강의실 미정'}`).join(' / ') || '미배치'}</p>
+            {item.state === 'draft' ? <Button size="sm" variant="outline" disabled={locked || busy || state.dirty || state.referenceStatus !== 'verified'} onClick={() => { if (locked || busy) return; session.reset(); onEditItem(item.id); }}>수업 정보 수정</Button> : null}
             {issues.map((issue, index) => <p key={index} className={displayedRequest.onConflict === 'keep_pending' ? 'text-muted-foreground' : 'text-destructive'}>{issue.label}{displayedRequest.onConflict === 'keep_pending' ? ' 미배치로 복사합니다.' : ''}</p>)}
           </div>;
         })}

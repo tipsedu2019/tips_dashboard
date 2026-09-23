@@ -1,7 +1,7 @@
 import type {
   DeletePlanItemCommand, PlanCommand, PlanItem, PlanMutationResult, PlanRevision, PlanSnapshot,
   SavePlanItemCommand, TimetableOperatingReference, TimetablePlanRpcContract, TransferCommitCommand, TransferPreview,
-  TransferRequest, TransferResult, PlanList, ShareCandidate,
+  TransferRequest, TransferResult, PlanList, ShareCandidate, ScienceSubjectArea,
 } from './timetable-plan-contract.ts';
 
 type RpcName = keyof TimetablePlanRpcContract | 'preview_timetable_plan_transfer_v1' | 'commit_timetable_plan_transfer_v1';
@@ -181,6 +181,12 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
       if (!record(result) || !Array.isArray(result.plans) || !result.plans.every(planMetadata)
         || !integer(result.total) || typeof result.canManage !== 'boolean') throw invalid();
       return result as PlanList;
+    },
+    listScienceSubjectAreas: async (options?: RequestOptions): Promise<ScienceSubjectArea[]> => {
+      const result = await invoke('list_active_science_subject_areas_v1', {}, options);
+      if (!Array.isArray(result) || !result.every(row => record(row) && row.subject === '과학'
+        && string(row.area_key) && !!row.area_key && string(row.label) && integer(row.sort_order) && row.is_active === true)) throw invalid();
+      return result.map(row => ({ key: row.area_key, label: row.label }));
     },
     shareCandidates: async (options?: RequestOptions) => {
       const result = await invoke('list_timetable_share_candidates_v1', {}, options);

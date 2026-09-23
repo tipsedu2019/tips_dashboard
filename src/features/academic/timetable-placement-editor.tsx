@@ -8,13 +8,15 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '@/components/ui/form';
-import type { DropTarget, PlanSnapshot, ResourceOption } from './timetable-plan-contract';
+import type { TimetablePlanService } from './timetable-plan-service';
+import type { DropTarget, PlanSnapshot, ResourceOption, ScienceSubjectArea } from './timetable-plan-contract';
 import type { TimetableItemEdit } from './timetable-plan-model';
 import { suggestPlacements } from './timetable-conflicts';
 import { PLAN_DAYS, PLAN_DAY_ORDER, formatPendingSlot, formatPlanTime, parsePlanTime, planErrorLabel, itemDraft, buildPlacementFormEdit, placementFormDefaults, placementScope, type PlacementEditorDraft, type PlacementFormValues } from './timetable-plan-interaction';
 export type { PlacementEditorDraft } from './timetable-plan-interaction';
 type Values = PlacementFormValues;
-export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onDirty, canEdit, failureKind, onRetry, onDiscard, onAcceptServer, serverSummary }: {
+export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onDirty, canEdit, failureKind, onRetry, onDiscard, onAcceptServer, serverSummary, loadScienceSubjectAreas }: {
+    loadScienceSubjectAreas?: TimetablePlanService['listScienceSubjectAreas'];
     draft: PlacementEditorDraft;
     snapshot: PlanSnapshot;
     onSave: (edit: TimetableItemEdit) => Promise<void>;
@@ -33,6 +35,16 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
     const form = useForm<Values>({ defaultValues: placementFormDefaults(draft) });
     const submittedValues = useRef<string | null>(null);
     const [error, setError] = useState(''), [busy, setBusy] = useState(false), [suggestions, setSuggestions] = useState<DropTarget[] | null>(null);
+    const science = form.watch('subject').trim() === '과학';
+    const [areas, setAreas] = useState<ScienceSubjectArea[]>([]), [areaError, setAreaError] = useState('');
+    useEffect(() => {
+        if (!science || !loadScienceSubjectAreas) return;
+        const abort = new AbortController();
+        void loadScienceSubjectAreas({ signal: abort.signal }).then(rows => {
+            if (!abort.signal.aborted) { setAreas(rows); setAreaError(''); }
+        }).catch(() => { if (!abort.signal.aborted) setAreaError('과학 영역을 불러오지 못했습니다. 창을 다시 열어 확인해 주세요.'); });
+        return () => abort.abort();
+    }, [science, loadScienceSubjectAreas]);
     useEffect(() => { onDirty(form.formState.isDirty); }, [form.formState.isDirty, onDirty]);
     const save = async (values: Values, candidate?: DropTarget) => { if (!canEdit || busy)
         return; setBusy(true); setError(''); try {
@@ -99,6 +111,8 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
                         </div> : null}
                         <div className="grid grid-cols-2 gap-3">
                             {input('subject', '과목', true)}{input('grade', '학년')}
+                            {science ? <FormField control={form.control} name="subjectAreaKey" render={({ field }) => <FormItem><FormLabel>과학 영역</FormLabel><Select value={field.value || 'none'} onValueChange={value => field.onChange(value === 'none' ? '' : value)}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="none">미정</SelectItem>{field.value && !areas.some(area => area.key === field.value) ? <SelectItem value={field.value} disabled>사용 불가</SelectItem> : null}{areas.map(area => <SelectItem key={area.key} value={area.key}>{area.label}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} /> : null}
+                            {science && areaError ? <p role="alert" className="text-sm text-destructive">{areaError}</p> : null}
                             {resource('teacher', '선생님', snapshot.catalogs.teachers)}
                             {resource('room', '강의실', snapshot.catalogs.classrooms)}
                             {input('capacity', '정원')}{input('tuition', '수업료')}

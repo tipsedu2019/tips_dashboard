@@ -31,3 +31,10 @@ if(process.env.TIMETABLE_TRANSFER_FIXTURE_DB==='1')test('actual plan-copy receip
   await controller.refresh();assert.equal(controller.snapshot().referenceStatus,'verified');assert.equal((await service.readPlan(target)).items.length,1);
  }finally{controller?.destroy();for(const planId of [source,target]){const snap=await service.readPlan(planId);await service.mutatePlan({operation:'archive',planId,expectedMetaRevision:snap.plan.metaRevision,requestKey:id()});}sql(`delete from public.teacher_catalogs where id='${teacher}';delete from public.classroom_catalogs where id='${room}';`);}
 });
+
+
+test('science choices come from the authenticated active catalog contract',async()=>{
+ const calls=[];const service=createTimetablePlanService({actorScope:'actor',client:{rpc:(...args)=>{calls.push(args);return Promise.resolve({data:[{subject:'과학',area_key:'dynamic-key',label:'실제 영역',sort_order:10,is_active:true}],error:null});}}});
+ assert.equal(typeof service.listScienceSubjectAreas,'function');
+ assert.deepEqual(await service.listScienceSubjectAreas(),[{key:'dynamic-key',label:'실제 영역'}]);assert.deepEqual(calls,[['list_active_science_subject_areas_v1',{}]]);
+});

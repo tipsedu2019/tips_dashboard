@@ -50,3 +50,21 @@ test('pending without a weekday retains original resources and duration until a 
  assert.equal(values.teacher,'original-teacher');assert.equal(values.room,'original-room');assert.equal(values.duration,'30');assert.equal(values.start,'17:13');assert.equal(values.end,'17:43');assert.deepEqual(values.weekdays,[]);
  assert.throws(()=>buildPlacementFormEdit(draft,values),/요일/);assert.throws(()=>buildPlacementFormEdit({...draft,scope:'item'},values),/추가 배치/);assert.deepEqual(item.pendingSlots,[pending]);
 });
+
+
+test('pending known weekday survives missing time independently',async()=>{
+ const {blankPlanItem,pendingPlacementDraft,placementFormDefaults}=await import('../src/features/academic/timetable-plan-interaction.ts');
+ const item={...blankPlanItem('plan'),pendingSlots:[{id:'pending',sourceText:'월 시간 미정',reason:'invalid_time',weekday:1,startMinute:null,endMinute:null,teacherId:null,classroomId:null}]};
+ const before=structuredClone(item);assert.deepEqual(placementFormDefaults(pendingPlacementDraft(item,[],'pending')).weekdays,[1]);assert.deepEqual(item,before);
+});
+
+test('science metadata correction saves the chosen catalog key and preserves placement IDs',async()=>{
+ const {blankPlanItem,placementFormDefaults,buildPlacementFormEdit}=await import('../src/features/academic/timetable-plan-interaction.ts');
+ const item={...blankPlanItem('plan'),name:'Science',subject:'과학',grade:'고1'};
+ const slot={id:'slot',itemId:item.id,planId:'plan',weekday:1,startMinute:1033,endMinute:1093,teacherId:'t',classroomId:'r',sourceSlotId:null};
+ const draft={item,slots:[slot],scope:'item'},values=placementFormDefaults(draft);
+ assert.equal(values.subjectAreaKey,'');
+ const edit=buildPlacementFormEdit(draft,{...values,subjectAreaKey:'catalog-provided-key'});
+ assert.equal(edit.item.subjectAreaKey,'catalog-provided-key');assert.deepEqual(edit.slots,[slot]);assert.equal(item.subjectAreaKey,null);
+ assert.equal(buildPlacementFormEdit(draft,{...values,subject:'영어',subjectAreaKey:'catalog-provided-key'}).item.subjectAreaKey,null);
+});
