@@ -901,7 +901,9 @@ test("operations workspaces issue mode requests and expose dense-range recovery 
   assert.match(calendar, /mode:\s*"calendar"/);
   assert.match(calendar, /visible_range_too_dense/);
   assert.match(calendar, /한 주 보기/);
-  assert.match(calendar, /operations-seven-day-agenda/);
+  assert.match(calendar, /recoveryRange=\{isConfirmedSevenDayRange/);
+  assert.match(calendar, /onLoadEventDetail=\{handleLoadEventDetail\}/);
+  assert.doesNotMatch(calendar, /operations-seven-day-agenda/);
   assert.match(annual, /mode:\s*"annual"/);
   assert.match(annual, /annual_board_too_dense/);
   assert.match(annual, /resolveAnnualBoardEntryParentId/);

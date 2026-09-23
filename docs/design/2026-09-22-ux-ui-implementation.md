@@ -2,6 +2,8 @@
 
 2026-09-22 · `codex/ux-ui-refinement-20260922` · 기준 `bc64ea648afeb38cce706795f0eda25a5d8696ff`
 
+이 문서는 로컬 구현 시점의 기록이다. 이후 PR #66을 운영에 반영했고 main DB 검사·Production READY·로그인 화면을 확인했다. 아래의 ‘배포 전’과 ‘기존 실패 13건’ 상태는 [2026-09-23 후속 점검 기록](../qa/2026-09-23-ux-ui-closeout.md)으로 갱신한다.
+
 [원본 리뷰](2026-09-22-full-ux-ui-review.md) · [승인된 실행 계획](2026-09-22-full-ux-ui-improvement-plan.md)
 
 ## 반영 범위
