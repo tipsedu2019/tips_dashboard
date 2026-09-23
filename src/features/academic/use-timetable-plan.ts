@@ -1,15 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useSyncExternalStore } from 'react';
+import { useCallback, useMemo } from 'react';
 import { supabase } from '@/lib/supabase';
 import { useAuth } from '@/providers/auth-provider';
-import { createTimetablePlanController, type TimetableItemEdit, type TimetableControllerState } from './timetable-plan-model.ts';
-import { createTimetablePlanService, watchTimetablePlan, type TimetableRpcClient, type TimetableSignalClient } from './timetable-plan-service.ts';
-
-const EMPTY: TimetableControllerState = { snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
-  referenceStatus: 'unknown', recoveryAvailable: true, dirty: false };
-const noSubscribe = () => () => {};
-const emptySnapshot = () => EMPTY;
+import { createTimetablePlanController, type TimetableItemEdit } from './timetable-plan-model.ts';
+import { createTimetablePlanService, type TimetableRpcClient, type TimetableSignalClient } from './timetable-plan-service.ts';
+import { useTimetablePlanSession } from './use-timetable-plan-session.ts';
 
 /** A scoped editor. Task 6 owns navigation confirmation via useDraftNavigation(state.dirty). */
 export function useTimetablePlan(planId: string | null) {
@@ -20,25 +16,8 @@ export function useTimetablePlan(planId: string | null) {
     const service = createTimetablePlanService({ client: supabase as unknown as TimetableRpcClient, actorScope });
     return createTimetablePlanController({ service, actorScope, planId });
   }, [actorScope, planId]);
-  const latestActor = useRef(actorScope);
-  useLayoutEffect(() => { latestActor.current = actorScope; }, [actorScope]);
-  useEffect(() => {
-    if (!controller || !planId) return;
-    void controller.load();
-    const stop = supabase ? watchTimetablePlan({
-      client: supabase as unknown as TimetableSignalClient, actorScope: actorScope!, planId,
-      onInvalidate: () => { void controller.refresh(); },
-      onPoll: () => { void controller.checkRevision(); },
-      environment: { document, window },
-    }) : () => {};
-    return () => {
-      stop();
-      if (latestActor.current !== actorScope) controller.clearSensitive();
-      controller.destroy();
-    };
-  }, [controller, actorScope, planId]);
-  const state = useSyncExternalStore(controller?.subscribe ?? noSubscribe,
-    controller?.snapshot ?? emptySnapshot, emptySnapshot);
+  const state = useTimetablePlanSession({ controller, actorScope, planId,
+    signalClient: supabase as unknown as TimetableSignalClient | null });
   const dispatch = useCallback((edit: TimetableItemEdit) => controller
     ? controller.dispatch(edit) : Promise.reject(Error('timetable_plan_scope_missing')), [controller]);
   const retry = useCallback((itemId?: string) => controller

@@ -36,8 +36,9 @@ import type {
   DeletePlanItemCommand, PlanItemDraft, PlanMutationResult, PlanSnapshot,
   SavePlanItemCommand, TimetableConflict, TransferResult,
 } from './timetable-plan-contract.ts';
-import type { TimetablePlanService } from './timetable-plan-service.ts';
+import { requireTimetableTransferResult, type TimetablePlanService } from './timetable-plan-service.ts';
 import { findConflicts, findOperatingConflicts, operatingReferenceComplete } from './timetable-conflicts.ts';
+import { availableTimetableSessionStorage, timetableDraftStorageKey, type TimetableDraftStorage } from './timetable-plan-recovery.ts';
 
 export type TimetableItemEdit =
   | { operation: 'save'; item: PlanItemDraft; slots: PlanSlot[] }
@@ -53,7 +54,7 @@ export type TimetableControllerState = {
   recoveryAvailable: boolean;
   dirty: boolean;
 };
-type StorageLike = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>;
+type StorageLike = TimetableDraftStorage;
 type Pending = {
   edit: TimetableItemEdit;
   submitted: SavePlanItemCommand | DeletePlanItemCommand | null;
@@ -63,8 +64,6 @@ type Pending = {
   reject?: (error: unknown) => void;
 };
 const isObject = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const availableSessionStorage = (): StorageLike | null => { try { return typeof sessionStorage === 'undefined' ? null : sessionStorage; } catch { return null; } };
-const storageKey = (actorScope: string, planId: string) => `tips:timetable:draft:v1:${encodeURIComponent(actorScope)}:${encodeURIComponent(planId)}`;
 const isAccessError = (error: unknown) => {
   const value = error as { code?: string; status?: number; message?: string } | null;
   return value?.code === '42501' || value?.code === '28000' || value?.code === '28P01'
@@ -97,11 +96,32 @@ function overlay(base: PlanSnapshot, pending: Pending[]): PlanSnapshot {
   }
   return draft;
 }
+function receiptMatchesCurrentItem(base: PlanSnapshot, result: PlanMutationResult): boolean {
+  if (result.item === null) return result.removedItemIds.every((id) => !base.items.some((item) => item.id === id));
+  const current = base.items.find((item) => item.id === result.item?.id);
+  if (!current || current.revision !== result.item.revision) return false;
+  const slots = base.slots.filter((slot) => slot.itemId === result.item?.id);
+  const position = (slot: PlanSlot) => [slot.id, slot.weekday, slot.startMinute, slot.endMinute,
+    slot.teacherId, slot.classroomId, slot.sourceSlotId].join(':');
+  return slots.length === result.slots.length
+    && slots.map(position).sort().every((value, index) => value === result.slots.map(position).sort()[index]);
+}
+function receiptSuperseded(base: PlanSnapshot, result: PlanMutationResult): boolean {
+  if (result.item) {
+    const current = base.items.find((item) => item.id === result.item?.id);
+    return current ? current.revision > result.item.revision
+      || (current.revision === result.item.revision && !receiptMatchesCurrentItem(base, result))
+      : result.changeSequence <= base.plan.changeSequence;
+  }
+  return result.changeSequence <= base.plan.changeSequence
+    && result.removedItemIds.some((id) => base.items.some((item) => item.id === id));
+}
 function mergeReceipt(base: PlanSnapshot, result: PlanMutationResult): PlanSnapshot {
   if (result.planId !== base.plan.id) throw new Error('timetable_plan_response_invalid');
   const next: PlanSnapshot = structuredClone(base);
   const previous = result.item && next.items.find((item) => item.id === result.item?.id);
-  if (result.item && (!previous || result.item.revision > previous.revision)) {
+  if (result.item && (previous ? result.item.revision > previous.revision
+    : result.changeSequence > base.plan.changeSequence)) {
     next.items = [...next.items.filter((item) => item.id !== result.item?.id), result.item];
     next.slots = [...next.slots.filter((slot) => slot.itemId !== result.item?.id), ...result.slots];
   }
@@ -121,13 +141,13 @@ function mergeReceipt(base: PlanSnapshot, result: PlanMutationResult): PlanSnaps
 }
 
 /** Pure state owner for one actor and one plan. UI subscribes; it never edits React internals for a retry. */
-export function createTimetablePlanController({ service, actorScope, planId, storage = availableSessionStorage(),
+export function createTimetablePlanController({ service, actorScope, planId, storage = availableTimetableSessionStorage(),
   requestKey = () => crypto.randomUUID() }: {
   service: Pick<TimetablePlanService, 'readPlan' | 'readRevision' | 'saveItem'>;
   actorScope: string; planId: string; storage?: StorageLike | null; requestKey?: () => string;
 }) {
   if (!actorScope || !planId) throw new Error('timetable_plan_scope_missing');
-  const key = storageKey(actorScope, planId);
+  const key = timetableDraftStorageKey(actorScope, planId);
   const listeners = new Set<() => void>();
   const queues = new Map<string, Pending[]>();
   const running = new Set<string>();
@@ -138,6 +158,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   const controllers = new Set<AbortController>();
   let epoch = 0;
   let disposed = false;
+  let paused = false;
   let lastUndo: { edit: TimetableItemEdit; expectedItemRevision: number | null } | null = null;
   let state: TimetableControllerState = { snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
     referenceStatus: 'unknown', recoveryAvailable: true, dirty: false };
@@ -207,6 +228,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     finally { controllers.delete(abort); }
   };
   const refresh = async () => {
+    if (paused || disposed) return;
     const token = epoch;
     const generation = ++readGeneration;
     try {
@@ -234,12 +256,13 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     }
   };
   const load = async () => {
+    if (paused || disposed) return;
     if (!state.snapshot && pending().length === 0) restore();
     await refresh();
     if (state.snapshot && pending().length) rebuild('stale');
   };
   const runQueue = (itemId: string) => {
-    if (running.has(itemId) || (staleItems.has(itemId) && !retrying.has(itemId)) || disposed || !state.snapshot || state.referenceStatus !== 'verified') return;
+    if (running.has(itemId) || (staleItems.has(itemId) && !retrying.has(itemId)) || paused || disposed || !state.snapshot || state.referenceStatus !== 'verified') return;
     const queue = queues.get(itemId);
     if (!queue?.length || queue[0].status === 'error') return;
     running.add(itemId);
@@ -247,7 +270,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     const generation = itemEpoch.get(itemId) ?? 0;
     void (async () => {
       try {
-        while (!disposed && token === epoch && generation === (itemEpoch.get(itemId) ?? 0)
+        while (!disposed && !paused && token === epoch && generation === (itemEpoch.get(itemId) ?? 0)
           && queue.length && queue[0].status !== 'error' && (!staleItems.has(itemId) || retrying.has(itemId))) {
           const entry = queue[0];
           const base = state.snapshot;
@@ -275,9 +298,17 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
             const response = await scoped((signal) => service.saveItem(submitted, { signal }));
             if (!response || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) break;
             if (!state.snapshot) break;
+            if (receiptSuperseded(state.snapshot, response)) {
+              const error = Error('timetable_stale');
+              entry.status = 'error'; staleItems.add(itemId); persist(); rebuild('stale', error);
+              entry.reject?.(error); break;
+            }
             const shadowChanged = response.shadowFingerprint !== state.snapshot.shadowFingerprint;
+            const ownResultAlreadyVisible = receiptMatchesCurrentItem(state.snapshot, response);
             const updated = mergeReceipt(state.snapshot, response);
-            queue.shift(); if (!queue.length) { queues.delete(itemId); staleItems.delete(itemId); }
+            queue.shift();
+            if (ownResultAlreadyVisible) staleItems.delete(itemId);
+            if (!queue.length) { queues.delete(itemId); staleItems.delete(itemId); }
             if (inverse) lastUndo = { edit: inverse, expectedItemRevision: response.item?.revision ?? null };
             publish({ snapshot: updated, error: null }); persist(); rebuild();
             entry.resolve?.();
@@ -298,6 +329,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     })();
   };
   const dispatch = (edit: TimetableItemEdit, expectedItemRevision?: number | null): Promise<void> => {
+    if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
     if (!state.snapshot || state.snapshot.plan.id !== planId || !state.snapshot.permissions.canEdit
       || state.snapshot.plan.state !== 'draft') return Promise.reject(Error('timetable_forbidden'));
     const itemId = edit.operation === 'save' ? edit.item.id : edit.itemId;
@@ -321,12 +353,14 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     return promise;
   };
   const undo = (): Promise<void> => {
+    if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
     if (!lastUndo) return Promise.reject(Error('timetable_undo_unavailable'));
     const inverse = structuredClone(lastUndo);
     lastUndo = null;
     return dispatch(inverse.edit, inverse.expectedItemRevision);
   };
   const retry = async (itemId?: string): Promise<void> => {
+    if (paused || disposed) throw Error('timetable_plan_inactive');
     if (!state.snapshot || state.referenceStatus !== 'verified') throw Error('timetable_reference_unverifiable');
     const targets = itemId ? [itemId] : [...queues.keys()];
     // Explicit retry reuses the submitted body; the server rechecks revisions and access.
@@ -345,6 +379,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     await Promise.all(promises);
   };
   const resolveStale = (itemId: string, choice: 'accept_server' | 'reapply_draft'): Promise<void> => {
+    if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
     if (!staleItems.has(itemId) || !state.snapshot || !state.draft) return Promise.reject(Error('timetable_stale_resolution_unavailable'));
     const oldQueue = queues.get(itemId);
     const desired = oldQueue?.[oldQueue.length - 1]?.edit;
@@ -367,7 +402,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     return dispatch(edit);
   };
   const checkRevision = async () => {
-    if (disposed || !state.snapshot) return;
+    if (disposed || paused || !state.snapshot) return;
     const token = epoch;
     try {
       const revision = await scoped((signal) => service.readRevision(planId, { signal }));
@@ -384,7 +419,9 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     }
   };
   const applyTransfer = (result: TransferResult) => {
+    if (paused || disposed) throw Error('timetable_plan_inactive');
     const base = state.snapshot;
+    if (base) requireTimetableTransferResult(result, planId);
     if (!base) return;
     if (result.snapshot) {
       if (result.snapshot.plan.id !== planId || result.snapshot.plan.changeSequence < base.plan.changeSequence) return;
@@ -412,5 +449,19 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   };
   return { snapshot: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     load, refresh, checkRevision, dispatch, undo, retry, resolveStale, applyTransfer, clearSensitive,
-    destroy: () => { disposed = true; epoch += 1; for (const controller of controllers) controller.abort(); controllers.clear(); listeners.clear(); } };
+    pause: () => {
+      if (disposed || paused) return;
+      paused = true; epoch += 1;
+      for (const controller of controllers) controller.abort();
+      controllers.clear();
+      for (const [id, queue] of queues) {
+        itemEpoch.set(id, (itemEpoch.get(id) ?? 0) + 1);
+        for (const entry of queue) if (entry.status === 'sending') entry.status = 'error';
+      }
+      // The submitted identity was persisted before the request. Cleanup must never
+      // recreate a key already purged by AuthProvider during logout.
+      running.clear(); retrying.clear(); rebuild(pending().length ? 'stale' : undefined);
+    },
+    resume: () => { if (disposed) throw Error('timetable_plan_inactive'); paused = false; },
+    destroy: () => { disposed = true; paused = true; epoch += 1; for (const controller of controllers) controller.abort(); controllers.clear(); listeners.clear(); } };
 }
