@@ -234,3 +234,26 @@ export type TimetablePlanRpcContract = {
   mutate_timetable_plan_v1: { Args: { p_command: PlanCommand }; Returns: { plan: PlanMetadata } };
   mutate_timetable_plan_item_v1: { Args: { p_command: SavePlanItemCommand | DeletePlanItemCommand }; Returns: PlanMutationResult };
 };
+
+/** Task 7 uses this same selection for preview and commit. */
+export type TimetableSpace = { kind: 'operational' } | { kind: 'plan'; planId: string };
+export type TransferRequest = {
+  source: { kind: 'plan'; planId: string }; target: TimetableSpace;
+  mode: 'copy' | 'move'; itemIds: string[]; onConflict: 'reject' | 'keep_pending';
+};
+export type TransferPreview = {
+  fingerprint: string; shadowFingerprint: string; request: TransferRequest;
+  mappings: Array<{ sourceId: string; action: 'create_active_class' | 'create_plan_item' }>;
+  blockers: Array<{ sourceId: string; code: string; label: string; relatedIds: string[] }>;
+};
+export type TransferCommitCommand = { request: TransferRequest; previewFingerprint: string; requestKey: string };
+export type TransferResult = {
+  transferId: string; shadowFingerprint: string;
+  mappings: Array<{ sourceId: string; targetId: string; targetClassId: string | null }>;
+  appliedItems: PlanItem[]; removedItemIds: string[]; addedShadowSlots: ShadowSlot[];
+  createdItems: PlanItem[]; createdSlots: PlanSlot[];
+  /** Server-provided labels permit one atomic source update; a complete authorized snapshot is equivalent. */
+  addedShadowClasses?: ShadowClass[]; snapshot?: PlanSnapshot;
+  /** A delta must carry all source metadata and operating reference for one canonical merge. */
+  sourcePlan?: PlanMetadata; operatingReference?: TimetableOperatingReference;
+};
