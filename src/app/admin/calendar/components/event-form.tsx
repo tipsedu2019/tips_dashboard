@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect as useDataEffect, useMemo, useRef, useState } from "react"
+import { useEffect as useDataEffect, useId, useMemo, useRef, useState } from "react"
 import { toast } from "sonner"
 
 import { Alert, AlertDescription } from "@/components/ui/alert"
@@ -288,6 +288,7 @@ export function EventForm({
   onSave,
   onDelete,
 }: EventFormProps) {
+  const fieldId = useId()
   const formResetKey = buildEventFormResetKey({ event, initialDraft, defaultDate, defaultEndDate, open, typeOptions })
   // A late catalog default is not a different event or a newly opened editor.
   const formOwnerKey = buildEventFormResetKey({ event, initialDraft, defaultDate, defaultEndDate, open, typeOptions: [] })
@@ -657,7 +658,7 @@ export function EventForm({
             </div>
 
             <div className="space-y-2">
-              <Label>일정 유형</Label>
+              <Label htmlFor={`${fieldId}-type`}>일정 유형</Label>
               <Select
                 value={formData.typeLabel}
                 disabled={isDisabled}
@@ -665,7 +666,7 @@ export function EventForm({
                   setFormData((prev) => ({ ...prev, typeLabel: value }))
                 }
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={`${fieldId}-type`} className="w-full">
                   <SelectValue placeholder="유형 선택" />
                 </SelectTrigger>
                 <SelectContent>
@@ -680,7 +681,7 @@ export function EventForm({
 
             {showExamTermField ? (
               <div className="space-y-2">
-                <Label>시기</Label>
+                <Label htmlFor={`${fieldId}-term`}>시기</Label>
                 <Select
                   value={formData.examTerm}
                   disabled={isDisabled}
@@ -688,7 +689,7 @@ export function EventForm({
                     setFormData((prev) => ({ ...prev, examTerm: value }))
                   }
                 >
-                  <SelectTrigger className="w-full">
+                  <SelectTrigger id={`${fieldId}-term`} className="w-full">
                     <SelectValue placeholder="시기 선택" />
                   </SelectTrigger>
                   <SelectContent>
@@ -704,7 +705,7 @@ export function EventForm({
 
             {showScienceAreaField ? (
               <div className="space-y-2">
-                <Label>과학 영역</Label>
+                <Label htmlFor={`${fieldId}-science-area`}>과학 영역</Label>
                 <Select
                   value={formData.scienceAreaKey}
                   disabled={isDisabled || loadingScienceAreas || (!readOnly && activeScienceAreas.length === 0)}
@@ -717,7 +718,7 @@ export function EventForm({
                     }))
                   }}
                 >
-                  <SelectTrigger className="w-full" aria-label="과학 영역 선택">
+                  <SelectTrigger id={`${fieldId}-science-area`} className="w-full" aria-label="과학 영역 선택">
                     <SelectValue placeholder={loadingScienceAreas ? "과학 영역 불러오는 중" : "과학 영역 선택"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -737,12 +738,12 @@ export function EventForm({
 
           <div className="grid gap-4 md:grid-cols-2">
             <div className="space-y-2">
-              <Label>학년</Label>
+              <Label htmlFor={`${fieldId}-grade`} id={`${fieldId}-grade-label`}>학년</Label>
               <div className="space-y-2">
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild disabled={isDisabled}>
-                    <Button variant="outline" className="w-full justify-between" disabled={isDisabled}>
-                      <span className="truncate">
+                    <Button id={`${fieldId}-grade`} aria-labelledby={`${fieldId}-grade-label ${fieldId}-grade-value`} variant="outline" size="form" className="w-full justify-between" disabled={isDisabled}>
+                      <span id={`${fieldId}-grade-value`} className="truncate">
                         {selectedGradeBadges.length > 0 ? selectedGradeBadges.join(" · ") : "학년 선택"}
                       </span>
                     </Button>
@@ -777,13 +778,13 @@ export function EventForm({
             </div>
 
             <div className="space-y-2">
-              <Label>학교</Label>
+              <Label htmlFor={`${fieldId}-school`}>학교</Label>
               <Select
                 value={formData.schoolId}
                 disabled={isDisabled}
                 onValueChange={handleSchoolChange}
               >
-                <SelectTrigger className="w-full">
+                <SelectTrigger id={`${fieldId}-school`} className="w-full">
                   <SelectValue placeholder={schoolRequired ? "학교 선택" : "선택 안 해도 됨"} />
                 </SelectTrigger>
                 <SelectContent>
@@ -865,12 +866,13 @@ export function EventForm({
           <div className="space-y-2 pt-2">
             <div className="flex gap-3">
               {!readOnly ? (
-                <Button onClick={handleSave} disabled={saving} className="flex-1 cursor-pointer">
+                <Button size="form" onClick={handleSave} disabled={saving} className="flex-1 cursor-pointer">
                   {pendingAction === "save" ? "저장 중" : isEditingPersistedEvent ? "변경 저장" : "일정 추가"}
                 </Button>
               ) : null}
               {!readOnly && isEditingPersistedEvent && onDelete ? (
                 <Button
+                  size="form"
                   onClick={handleDelete}
                   disabled={saving}
                   variant={deleteConfirming ? "destructive" : "outline"}
@@ -879,7 +881,7 @@ export function EventForm({
                   {pendingAction === "delete" ? "삭제 중" : deleteConfirming ? "삭제 확인" : "삭제"}
                 </Button>
               ) : null}
-              <Button onClick={requestClose} variant="outline" className="cursor-pointer">
+              <Button size="form" onClick={requestClose} variant="outline" className="cursor-pointer">
                 닫기
               </Button>
             </div>

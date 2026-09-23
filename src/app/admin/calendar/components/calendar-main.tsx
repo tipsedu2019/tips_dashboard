@@ -972,7 +972,7 @@ export function CalendarMain({
             </div>
 
           </div>
-          {!readOnly ? <Button type="button" onClick={onNewEvent}><Plus className="size-4" />{addButtonLabel}</Button> : null}
+          {!readOnly ? <Button type="button" size="form" onClick={onNewEvent}><Plus className="size-4" />{addButtonLabel}</Button> : null}
           </div>
 
           <div className="flex min-w-0 max-w-full flex-wrap items-center gap-2">

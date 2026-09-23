@@ -138,6 +138,43 @@ function editPlan(page, name) { return act(async () => page.observed.updateLesso
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_'));
 
+test('schedule-only page exposes one save and return action even for a legacy progress URL', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  const workspace = document.querySelector('[role="region"][aria-label="일정 편성 작업 영역"]');
+  assert.ok(workspace);
+  const buttons = [...workspace.querySelectorAll('button')];
+  assert.equal(buttons.filter(button => button.textContent.trim() === '일정 저장').length, 1);
+  const returns = buttons.filter(button => button.textContent.includes('돌아가기'));
+  assert.equal(returns.length, 1);
+  assert.equal(workspace.querySelector('[data-testid="lesson-design-mode-tabs"]'), null);
+  assert.equal(workspace.querySelector('[data-testid="lesson-progress-dialog"]'), null);
+  assert.equal(workspace.querySelector('#lesson-textbook-finder'), null);
+  assert.ok(workspace.querySelector('[data-testid="lesson-mobile-session-list"]'));
+  assert.ok(workspace.querySelector('[data-testid="lesson-desktop-calendar"]'));
+  assert.equal(saveRequests(page).length, 0);
+  assert.equal(dirty(), false);
+  await act(async () => returns[0].click());
+  assert.equal(window.location.pathname, '/admin/curriculum');
+  assert.equal(saveRequests(page).length, 0);
+});
+
+test('schedule-only return keeps an edited draft when the operator continues editing', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, 'UNSAVED SCHEDULE');
+  const returnButton = [...document.querySelectorAll('button')].find(button => button.textContent.includes('돌아가기'));
+  assert.ok(returnButton);
+  await act(async () => { returnButton.focus(); returnButton.click(); });
+  const confirmation = document.querySelector('[data-testid="draft-navigation-confirm-dialog"]');
+  assert.ok(confirmation);
+  const continueButton = [...confirmation.querySelectorAll('button')].find(button => button.textContent === '계속 편집');
+  assert.ok(continueButton);
+  await act(async () => continueButton.click());
+  assert.equal(window.location.pathname, '/admin/curriculum/lesson-design');
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'UNSAVED SCHEDULE');
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 0);
+});
+
 test('calendar: holiday cancellation and linked makeup on the same day are both named', async t => {
   const page = await editor(t, 'curriculum/lesson-design');
   const next = detail();

@@ -204,7 +204,7 @@ test("class textbook picker follows subject-detail then school-grade order and m
   assert.ok(schoolIndex > subSubjectIndex && gradeIndex > schoolIndex);
   assert.match(pageSource, /data-testid="class-textbook-picker-panel"/);
   assert.match(pageSource, /<Label>교재<\/Label>/);
-  assert.match(pageSource, /연결 교재/);
+  assert.match(pageSource, /사용 교재/);
   assert.match(pickerSource, /교재 검색 또는 선택/);
 });
 

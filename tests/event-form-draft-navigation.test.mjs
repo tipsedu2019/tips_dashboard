@@ -42,6 +42,22 @@ async function edit(value) { await act(async () => { const input = title(); Obje
 async function request(routes, value) { await act(async () => requestAppNavigation(() => routes.push(value))); }
 async function waitFor(predicate) { for (let i = 0; i < 60; i++) { if (predicate()) return; await act(async () => { await new Promise(resolve => setTimeout(resolve, 5)); }); } assert.ok(predicate()); }
 
+test('calendar form labels identify the real selectors, including conditional exam fields', async t => {
+  const h = await setup(t, { initialDraft: { ...initial, typeLabel: '과학시험일' } });
+  for (const name of ['일정 유형', '시기', '과학 영역', '학교', '학년']) {
+    const label = [...document.querySelectorAll('label')].find(node => node.textContent === name);
+    assert.ok(label, name);
+    assert.ok(label.control, `${name} must label its actual control`);
+    assert.equal(label.control.tagName, 'BUTTON');
+    if (name !== '학년') assert.equal(label.control.getAttribute('role'), 'combobox');
+    else {
+      const ids = label.control.getAttribute('aria-labelledby').split(' ');
+      assert.equal(ids.map(id => document.getElementById(id)?.textContent).join(' '), '학년 전체');
+    }
+  }
+  assert.equal(h.calls.length, 0);
+});
+
 test("actual event form protects a dirty route and local close, while clean selection and reverted values do not prompt", async t => {
   const h = await setup(t);
   await request(h.routes, "clean"); assert.deepEqual(h.routes, ["clean"]);
