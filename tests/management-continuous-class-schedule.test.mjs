@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   fromContinuousClassScheduleDefaults,
+  parseClassScheduleSlots,
   toContinuousClassScheduleSlots,
 } from "../src/features/management/class-schedule-slots.ts";
 import {
@@ -49,6 +50,21 @@ test("normalized defaults preserve slot and catalog IDs through the five-column 
     classroomCatalogId: CLASSROOM_ID,
     sortOrder: 3,
   }]);
+});
+
+test("legacy schedule consumer retains per-slot teacher and room after normalized save projection", () => {
+  const slots = parseClassScheduleSlots(
+    "월 09:00-10:00 (교사 A, 강의실 1)\n월 10:00-11:00 (교사 A, 강의실 1)\n수 14:00-15:30 (교사 B, 강의실 2)",
+    "교사 A, 교사 B",
+    "강의실 1(월), 강의실 1(월), 강의실 2(수)",
+  );
+  assert.deepEqual(slots.map(({ day, startTime, endTime, teacher, classroom }) => ({
+    day, startTime, endTime, teacher, classroom,
+  })), [
+    { day: "월", startTime: "09:00", endTime: "10:00", teacher: "교사 A", classroom: "강의실 1" },
+    { day: "월", startTime: "10:00", endTime: "11:00", teacher: "교사 A", classroom: "강의실 1" },
+    { day: "수", startTime: "14:00", endTime: "15:30", teacher: "교사 B", classroom: "강의실 2" },
+  ]);
 });
 
 test("normalized metadata writes omit schedule-owned legacy columns", () => {

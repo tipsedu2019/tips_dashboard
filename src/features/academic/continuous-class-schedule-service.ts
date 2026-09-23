@@ -145,7 +145,7 @@ function isMissingScheduleReadRpc(error: unknown): boolean {
 export function mapContinuousScheduleRpcError(error: unknown): ContinuousScheduleRpcError {
   const code = rpcCode(error);
   const message = rpcMessage(error);
-  if (code === "40001" || message.includes("class_schedule_stale")) {
+  if (message.includes("class_schedule_stale")) {
     return { kind: "stale", code };
   }
   if (code === "42501" || message.includes("class_schedule_forbidden")) {
