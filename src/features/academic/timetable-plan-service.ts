@@ -12,13 +12,25 @@ const invalid = () => new Error('timetable_plan_response_invalid');
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
 const string = (value: unknown): value is string => typeof value === 'string';
 const integer = (value: unknown): value is number => Number.isSafeInteger(value);
+const nullableString = (value: unknown) => value === null || string(value);
+const nullableNumber = (value: unknown) => value === null || (typeof value === 'number' && Number.isFinite(value));
+const nullableInteger = (value: unknown) => value === null || integer(value);
+const pendingSlot = (value: unknown) => record(value) && string(value.id) && string(value.sourceText)
+  && ['missing_resource', 'conflict', 'invalid_time'].includes(String(value.reason))
+  && nullableInteger(value.weekday) && nullableInteger(value.startMinute) && nullableInteger(value.endMinute)
+  && nullableString(value.teacherId) && nullableString(value.classroomId);
 const planItem = (value: unknown): value is PlanItem => record(value) && string(value.id) && string(value.planId)
-  && integer(value.revision) && (value.state === 'draft' || value.state === 'applied')
-  && Array.isArray(value.pendingSlots);
+  && integer(value.revision) && string(value.name) && string(value.subject)
+  && nullableString(value.subjectAreaKey) && string(value.grade) && nullableNumber(value.capacity)
+  && nullableNumber(value.tuition) && nullableString(value.defaultTeacherId)
+  && nullableString(value.defaultClassroomId) && nullableInteger(value.durationMinutes)
+  && nullableString(value.sourceClassId) && (value.state === 'draft' || value.state === 'applied')
+  && nullableString(value.appliedClassId) && nullableString(value.appliedTransferId)
+  && nullableString(value.appliedAt) && Array.isArray(value.pendingSlots)
+  && value.pendingSlots.every(pendingSlot);
 const planSlot = (value: unknown) => record(value) && string(value.id) && string(value.itemId)
   && string(value.planId) && integer(value.weekday) && integer(value.startMinute)
   && integer(value.endMinute) && string(value.teacherId) && string(value.classroomId);
-const nullableString = (value: unknown) => value === null || string(value);
 const dateKey = (value: unknown) => string(value) && /^\d{4}-\d{2}-\d{2}$/.test(value);
 const planMetadata = (value: unknown) => record(value) && string(value.id) && string(value.name)
   && (value.state === 'draft' || value.state === 'archived') && integer(value.metaRevision)
@@ -100,8 +112,14 @@ export function requireTimetableTransferResult(value: unknown, sourcePlanId: str
     || !Array.isArray(value.mappings) || !value.mappings.every((mapping: unknown) => record(mapping)
       && string(mapping.sourceId) && string(mapping.targetId) && nullableString(mapping.targetClassId))
     || !Array.isArray(value.appliedItems)
-    || !value.appliedItems.every(planItem) || !Array.isArray(value.removedItemIds)
-    || !value.removedItemIds.every(string) || !Array.isArray(value.addedShadowSlots)
+    || !value.appliedItems.every((item: unknown) => planItem(item) && item.planId === sourcePlanId
+      && item.state === 'applied' && item.appliedTransferId === value.transferId
+      && string(item.appliedAt) && !Number.isNaN(Date.parse(item.appliedAt)))
+    || new Set(value.appliedItems.map((item: PlanItem) => item.id)).size !== value.appliedItems.length
+    || !Array.isArray(value.removedItemIds)
+    || !value.removedItemIds.every(string)
+    || value.removedItemIds.some((id: string) => (value.appliedItems as PlanItem[]).some((item) => item.id === id))
+    || !Array.isArray(value.addedShadowSlots)
     || !value.addedShadowSlots.every(shadowSlot) || !Array.isArray(value.createdItems)
     || !value.createdItems.every(planItem) || !Array.isArray(value.createdSlots)
     || !value.createdSlots.every(planSlot)) throw invalid();

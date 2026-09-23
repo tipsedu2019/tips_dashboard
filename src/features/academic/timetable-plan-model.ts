@@ -106,31 +106,29 @@ function receiptMatchesCurrentItem(base: PlanSnapshot, result: PlanMutationResul
   return slots.length === result.slots.length
     && slots.map(position).sort().every((value, index) => value === result.slots.map(position).sort()[index]);
 }
-function receiptSuperseded(base: PlanSnapshot, result: PlanMutationResult): boolean {
+function receiptSuperseded(base: PlanSnapshot, result: PlanMutationResult, authoritativeReadSequence: number, itemReceiptSequence: Map<string, number>): boolean {
   if (result.item) {
     const current = base.items.find((item) => item.id === result.item?.id);
     return current ? current.revision > result.item.revision
       || (current.revision === result.item.revision && !receiptMatchesCurrentItem(base, result))
-      : result.changeSequence <= base.plan.changeSequence;
+      : result.changeSequence <= authoritativeReadSequence
+        || (itemReceiptSequence.get(result.item.id) ?? -1) >= result.changeSequence;
   }
-  return result.changeSequence <= base.plan.changeSequence
-    && result.removedItemIds.some((id) => base.items.some((item) => item.id === id));
+  return result.removedItemIds.some((id) => base.items.some((item) => item.id === id)
+    && (result.changeSequence <= authoritativeReadSequence
+      || (itemReceiptSequence.get(id) ?? -1) > result.changeSequence));
 }
 function mergeReceipt(base: PlanSnapshot, result: PlanMutationResult): PlanSnapshot {
   if (result.planId !== base.plan.id) throw new Error('timetable_plan_response_invalid');
   const next: PlanSnapshot = structuredClone(base);
   const previous = result.item && next.items.find((item) => item.id === result.item?.id);
-  if (result.item && (previous ? result.item.revision > previous.revision
-    : result.changeSequence > base.plan.changeSequence)) {
+  if (result.item && (!previous || result.item.revision > previous.revision)) {
     next.items = [...next.items.filter((item) => item.id !== result.item?.id), result.item];
     next.slots = [...next.slots.filter((slot) => slot.itemId !== result.item?.id), ...result.slots];
   }
   for (const id of result.removedItemIds) {
-    // An older receipt cannot remove an item that was recreated in a newer snapshot.
-    if (result.changeSequence >= base.plan.changeSequence) {
-      next.items = next.items.filter((item) => item.id !== id);
-      next.slots = next.slots.filter((slot) => slot.itemId !== id);
-    }
+    next.items = next.items.filter((item) => item.id !== id);
+    next.slots = next.slots.filter((slot) => slot.itemId !== id);
   }
   if (result.changeSequence >= base.plan.changeSequence) {
     next.plan.changeSequence = result.changeSequence;
@@ -154,6 +152,9 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   const staleItems = new Set<string>();
   const retrying = new Set<string>();
   const itemEpoch = new Map<string, number>();
+  // Only a complete authorized read proves absence across all items. A receipt proves only its own item.
+  const itemReceiptSequence = new Map<string, number>();
+  let authoritativeReadSequence = -1;
   let readGeneration = 0;
   const controllers = new Set<AbortController>();
   let epoch = 0;
@@ -194,7 +195,8 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   const clearSensitive = () => {
     epoch += 1;
     for (const controller of controllers) controller.abort();
-    controllers.clear(); queues.clear(); running.clear(); staleItems.clear(); retrying.clear(); itemEpoch.clear(); lastUndo = null;
+    controllers.clear(); queues.clear(); running.clear(); staleItems.clear(); retrying.clear(); itemEpoch.clear();
+    itemReceiptSequence.clear(); authoritativeReadSequence = -1; lastUndo = null;
     try { storage?.removeItem(key); } catch { /* Storage access can fail after logout. */ }
     publish({ snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
       referenceStatus: 'unknown', dirty: false });
@@ -239,6 +241,8 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
         || (next.plan.changeSequence === state.snapshot.plan.changeSequence
           && next.plan.metaRevision < state.snapshot.plan.metaRevision))) return;
       const old = state.snapshot;
+      authoritativeReadSequence = next.plan.changeSequence;
+      itemReceiptSequence.clear();
       for (const [id, queue] of queues) {
         if (!queue.length) continue;
         const currentRevision = next.items.find((item) => item.id === id)?.revision ?? null;
@@ -298,7 +302,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
             const response = await scoped((signal) => service.saveItem(submitted, { signal }));
             if (!response || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) break;
             if (!state.snapshot) break;
-            if (receiptSuperseded(state.snapshot, response)) {
+            if (receiptSuperseded(state.snapshot, response, authoritativeReadSequence, itemReceiptSequence)) {
               const error = Error('timetable_stale');
               entry.status = 'error'; staleItems.add(itemId); persist(); rebuild('stale', error);
               entry.reject?.(error); break;
@@ -306,6 +310,9 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
             const shadowChanged = response.shadowFingerprint !== state.snapshot.shadowFingerprint;
             const ownResultAlreadyVisible = receiptMatchesCurrentItem(state.snapshot, response);
             const updated = mergeReceipt(state.snapshot, response);
+            for (const id of [...(response.item ? [response.item.id] : []), ...response.removedItemIds]) {
+              itemReceiptSequence.set(id, Math.max(itemReceiptSequence.get(id) ?? -1, response.changeSequence));
+            }
             queue.shift();
             if (ownResultAlreadyVisible) staleItems.delete(itemId);
             if (!queue.length) { queues.delete(itemId); staleItems.delete(itemId); }
@@ -425,15 +432,22 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     if (!base) return;
     if (result.snapshot) {
       if (result.snapshot.plan.id !== planId || result.snapshot.plan.changeSequence < base.plan.changeSequence) return;
+      authoritativeReadSequence = result.snapshot.plan.changeSequence; itemReceiptSequence.clear();
       publish({ snapshot: result.snapshot, referenceStatus: 'verified', error: null }); rebuild(); return;
     }
     if (!result.addedShadowClasses || !result.sourcePlan || !result.operatingReference
       || result.sourcePlan.id !== planId || result.sourcePlan.changeSequence < base.plan.changeSequence
       || result.operatingReference.shadowFingerprint !== result.shadowFingerprint) throw Error('timetable_plan_response_invalid');
+    for (const applied of result.appliedItems) {
+      const source = base.items.find((item) => item.id === applied.id);
+      if (!source || (source.state !== 'draft' && source.appliedTransferId !== result.transferId)
+        || applied.revision < source.revision) throw Error('timetable_plan_response_invalid');
+    }
     const next = structuredClone(base);
     for (const applied of result.appliedItems) {
-      next.appliedSnapshots = [...next.appliedSnapshots.filter((entry) => entry.itemId !== applied.id),
-        { itemId: applied.id, slots: next.slots.filter((slot) => slot.itemId === applied.id) }];
+      const priorSlots = next.slots.filter((slot) => slot.itemId === applied.id);
+      if (priorSlots.length) next.appliedSnapshots = [...next.appliedSnapshots.filter((entry) => entry.itemId !== applied.id),
+        { itemId: applied.id, slots: priorSlots }];
     }
     next.items = [...next.items.filter((item) => !result.removedItemIds.includes(item.id)
       && !result.appliedItems.some((applied) => applied.id === item.id)), ...result.appliedItems,
@@ -442,6 +456,9 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       && !result.appliedItems.some((applied) => applied.id === slot.itemId)),
       ...result.createdSlots.filter((slot) => slot.planId === planId)];
     next.plan = result.sourcePlan;
+    for (const id of [...result.appliedItems.map((applied) => applied.id), ...result.removedItemIds]) {
+      itemReceiptSequence.set(id, Math.max(itemReceiptSequence.get(id) ?? -1, result.sourcePlan.changeSequence));
+    }
     Object.assign(next, result.operatingReference);
     next.capacity.itemCount = next.items.length;
     next.capacity.slotCount = next.slots.length;
