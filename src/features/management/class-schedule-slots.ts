@@ -136,6 +136,8 @@ export function parseClassScheduleSlots(
     const detailParts = text(match[4]).split(/[,，/]+/).map(text).filter(Boolean);
     const firstDetail = detailParts[0] || "";
     const firstDetailIsTeacher = Boolean(firstDetail && !looksLikeClassroomAlias(firstDetail));
+    const teacherExplicitlyUnassigned = firstDetail === "교사 미지정";
+    const classroomExplicitlyUnassigned = detailParts.includes("강의실 미지정");
 
     for (const day of days) {
       const slotIndex = slots.length;
@@ -144,9 +146,9 @@ export function parseClassScheduleSlots(
         day,
         startTime,
         endTime,
-        teacher: firstDetailIsTeacher ? firstDetail : getFallbackValue(teachers, slotIndex),
+        teacher: teacherExplicitlyUnassigned ? "" : firstDetailIsTeacher ? firstDetail : getFallbackValue(teachers, slotIndex),
         teacherCatalogId: null,
-        classroom: firstDetailIsTeacher
+        classroom: classroomExplicitlyUnassigned ? "" : firstDetailIsTeacher
           ? detailParts.slice(1).join(", ") || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex)
           : detailParts[detailParts.length - 1] || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex),
         classroomCatalogId: null,
@@ -188,14 +190,16 @@ export function formatClassScheduleSlots(slots: ClassScheduleSlot[]) {
     .filter((slot) => Object.values(slot).some(Boolean));
   const uniqueTeachers = uniqueTextValues(normalizedSlots.map((slot) => slot.teacher));
   const uniqueClassrooms = uniqueTextValues(normalizedSlots.map((slot) => slot.classroom));
-  const hasSharedScheduleDetails = uniqueTeachers.length <= 1 && uniqueClassrooms.length <= 1;
+  const hasSharedScheduleDetails = new Set(normalizedSlots.map((slot) => slot.teacher)).size <= 1
+    && new Set(normalizedSlots.map((slot) => slot.classroom)).size <= 1;
 
   const schedule = normalizedSlots.filter((slot) => slot.day || slot.startTime || slot.endTime).map((slot) => {
     const timeRange = slot.startTime && slot.endTime
       ? `${slot.startTime}-${slot.endTime}`
       : [slot.startTime, slot.endTime].filter(Boolean).join("-");
     const summary = [slot.day, timeRange].filter(Boolean).join(" ");
-    const details = hasSharedScheduleDetails ? "" : [slot.teacher, slot.classroom].filter(Boolean).join(", ");
+    const details = hasSharedScheduleDetails ? ""
+      : `${slot.teacher || "교사 미지정"}, ${slot.classroom || "강의실 미지정"}`;
     return [summary, details ? `(${details})` : ""].filter(Boolean).join(" ").trim();
   }).join("\n");
   const teacher = uniqueTeachers.join(", ");

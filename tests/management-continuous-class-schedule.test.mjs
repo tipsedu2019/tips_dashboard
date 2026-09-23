@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 
 import {
   fromContinuousClassScheduleDefaults,
+  formatClassScheduleSlots,
   parseClassScheduleSlots,
   toContinuousClassScheduleSlots,
 } from "../src/features/management/class-schedule-slots.ts";
@@ -65,6 +66,25 @@ test("legacy schedule consumer retains per-slot teacher and room after normalize
     { day: "월", startTime: "10:00", endTime: "11:00", teacher: "교사 A", classroom: "강의실 1" },
     { day: "수", startTime: "14:00", endTime: "15:30", teacher: "교사 B", classroom: "강의실 2" },
   ]);
+});
+
+test("projected mixed resource slots keep assigned and unassigned states in the legacy parser", () => {
+  const slots = parseClassScheduleSlots(
+    "월 09:00-10:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 미지정)\n수 14:00-15:30 (교사 미지정, 강의실 2)\n금 16:00-17:00 (교사 미지정, 강의실 미지정)",
+    "교사 A",
+    "강의실 1(월), 강의실 2(수)",
+  );
+  assert.deepEqual(slots.map(({ day, teacher, classroom }) => ({ day, teacher, classroom })), [
+    { day: "월", teacher: "교사 A", classroom: "강의실 1" },
+    { day: "화", teacher: "교사 A", classroom: "" },
+    { day: "수", teacher: "", classroom: "강의실 2" },
+    { day: "금", teacher: "", classroom: "" },
+  ]);
+  assert.deepEqual(formatClassScheduleSlots(slots), {
+    schedule: "월 09:00-10:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 미지정)\n수 14:00-15:30 (교사 미지정, 강의실 2)\n금 16:00-17:00 (교사 미지정, 강의실 미지정)",
+    teacher: "교사 A",
+    classroom: "강의실 1(월), 강의실 2(수)",
+  });
 });
 
 test("normalized metadata writes omit schedule-owned legacy columns", () => {

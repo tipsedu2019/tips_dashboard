@@ -62,6 +62,26 @@ select lives_ok($$select public.save_class_schedule_defaults_v1(
  'ac230000-0000-4000-8000-000000000301',2,
  (select coalesce(jsonb_agg(jsonb_build_object('id',id,'weekday',weekday,'startTime',to_char(start_time,'HH24:MI'),'endTime',to_char(end_time,'HH24:MI'),'teacherCatalogId',teacher_catalog_id,'classroomCatalogId',classroom_catalog_id,'sortOrder',sort_order) order by sort_order),'[]'::jsonb) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301'),
  'ac230000-0000-4000-8000-000000000506',null)$$,'staff can idempotently save unchanged defaults');
+create temporary table schedule_partial_save as select public.save_class_schedule_defaults_v1(
+ 'ac230000-0000-4000-8000-000000000301',2,
+ '[{"id":"ac230000-0000-4000-8000-000000000401","weekday":1,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":"ac230000-0000-4000-8000-000000000201","sortOrder":0},{"id":"ac230000-0000-4000-8000-000000000402","weekday":2,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":null,"sortOrder":1},{"id":"ac230000-0000-4000-8000-000000000403","weekday":3,"startTime":"14:00","endTime":"15:30","teacherCatalogId":null,"classroomCatalogId":"ac230000-0000-4000-8000-000000000202","sortOrder":2},{"id":null,"weekday":5,"startTime":"16:00","endTime":"17:00","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":3}]'::jsonb,
+ 'ac230000-0000-4000-8000-000000000509',null) as payload;
+select is((select schedule from public.classes where id='ac230000-0000-4000-8000-000000000301'),E'월 10:00-11:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 미지정)\n수 14:00-15:30 (교사 미지정, 강의실 2)\n금 16:00-17:00 (교사 미지정, 강의실 미지정)','mixed slots project explicit unassigned resources');
+select is((select teacher from public.classes where id='ac230000-0000-4000-8000-000000000301'),'교사 A','teacher summary only names assigned teachers');
+select is((select room from public.classes where id='ac230000-0000-4000-8000-000000000301'),'강의실 1(월), 강의실 2(수)','room summary only names assigned rooms');
+select is((select jsonb_build_object('teacher',teacher_name,'room',classroom_name) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301' and weekday=5),'{"teacher": "", "room": ""}'::jsonb,'both-unassigned normalized slot stays empty');
+create temporary table schedule_partial_timetable as
+select row.value as payload from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value)
+where row.value->>'classId'='ac230000-0000-4000-8000-000000000301';
+select is((select count(*)::integer from schedule_partial_timetable),4,'legacy timetable returns all four mixed slots');
+select is((select payload->>'teacher' from schedule_partial_timetable where payload->>'day'='월'),'교사 A','legacy timetable keeps fully assigned teacher');
+select is((select payload->>'classroom' from schedule_partial_timetable where payload->>'day'='월'),'강의실 1','legacy timetable keeps fully assigned classroom');
+select is((select payload->>'teacher' from schedule_partial_timetable where payload->>'day'='화'),'교사 A','legacy timetable keeps teacher-only teacher');
+select is((select payload->>'classroom' from schedule_partial_timetable where payload->>'day'='화'),'','legacy timetable does not borrow a room for teacher-only slot');
+select is((select payload->>'teacher' from schedule_partial_timetable where payload->>'day'='수'),'','legacy timetable does not borrow a teacher for room-only slot');
+select is((select payload->>'classroom' from schedule_partial_timetable where payload->>'day'='수'),'강의실 2','legacy timetable keeps room-only classroom');
+select is((select payload->>'teacher' from schedule_partial_timetable where payload->>'day'='금'),'','legacy timetable does not borrow a teacher for unassigned slot');
+select is((select payload->>'classroom' from schedule_partial_timetable where payload->>'day'='금'),'','legacy timetable does not borrow a room for unassigned slot');
 select dashboard_private.reconcile_continuous_schedule_shadow_slots_v1(
  'ac230000-0000-4000-8000-000000000302',
  '[{"weekday":2,"startTime":"11:00","endTime":"12:00","teacherName":"교사 B 보정","classroomName":"강의실 2","sortOrder":0}]'::jsonb);
