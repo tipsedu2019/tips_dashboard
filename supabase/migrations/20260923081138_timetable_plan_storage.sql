@@ -72,7 +72,7 @@ begin
 end $$;
 -- Shared lock entrypoint: operating mutations must call before locking classes.
 create function dashboard_private.lock_timetable_operating_resources_v1() returns void language sql volatile security definer set search_path='' as $$
- select pg_catalog.pg_advisory_xact_lock(194918,1)
+ select pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tips:timetable:operational',0))
 $$;
 create function dashboard_private.emit_timetable_plan_signal_v1() returns trigger language plpgsql security definer set search_path='' as $$
 begin
