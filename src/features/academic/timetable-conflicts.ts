@@ -23,19 +23,25 @@ function conflictKinds(left: PlanSlot, right: OccupiedSlot, sameItem: boolean): 
   return kinds;
 }
 
-export function findConflicts(slots: readonly PlanSlot[], shadows: readonly ShadowSlot[]): TimetableConflict[] {
+export function findConflicts(slots: readonly PlanSlot[], shadows: readonly ShadowSlot[], changedIds?: ReadonlySet<string>): TimetableConflict[] {
   const conflicts: TimetableConflict[] = [];
+  // Preserve canonical pair order while avoiding unrelated unchanged pairs.
+  const changedIndexes = changedIds ? slots.flatMap((slot, index) => changedIds.has(slot.id) ? [index] : []) : [];
+  const indexes = slots.map((_, index) => index);
   for (let i = 0; i < slots.length; i += 1) {
     const slot = slots[i];
     assertWeekday(slot.weekday);
     assertInterval(slot.startMinute, slot.endMinute);
-    for (let j = i + 1; j < slots.length; j += 1) {
+    const relevant = !changedIds || changedIds.has(slot.id);
+    for (const j of relevant ? indexes : changedIndexes) {
+      if (j <= i) continue;
       const other = slots[j];
       if (slot.planId === other.planId) {
         conflicts.push(...conflictKinds(slot, other, slot.itemId === other.itemId));
       }
     }
     for (const shadow of shadows) {
+      if (!relevant && !changedIds?.has(shadow.id)) continue;
       conflicts.push(...conflictKinds(slot, shadow, false));
     }
   }

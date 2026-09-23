@@ -861,7 +861,7 @@ test("승인 HTTP 응답 유실 뒤 같은 mutation ID는 최소 fingerprint로 
   })
   assert.deepEqual(needsEffects, { kind: "needs_effects" })
 
-  const fatal = { code: "40001", message: "makeup_request_stale_status" }
+  const fatal = { code: "P0001", message: "makeup_request_stale_status" }
   await assert.rejects(
     attemptMakeupApprovalReplay({
       client: { rpc: async () => ({ data: null, error: fatal }) },

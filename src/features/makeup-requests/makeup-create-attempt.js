@@ -1,3 +1,5 @@
+import { isMakeupDomainConflict } from "./makeup-domain-errors.js"
+
 const STORAGE_PREFIX = "tips.makeup.create-attempt.v1"
 const ATTEMPT_TTL_MS = 24 * 60 * 60 * 1000
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -104,7 +106,8 @@ function clearAttempt(storage, storageKey, requestId) {
 function isDefinitiveMutationError(error) {
   if (!error || typeof error !== "object") return false
   const code = String(error.code || "").trim()
-  return code === "22023"
+  return isMakeupDomainConflict(error)
+    || code === "22023"
     || code === "40001"
     || code === "42501"
     || code === "P0002"

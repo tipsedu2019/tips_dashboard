@@ -274,7 +274,7 @@ select throws_ok(
   $$select dashboard_private.notification_assert_makeup_room_available_v1(
     '91000000-0000-4000-8000-000000000402'
   )$$,
-  '40001',
+  '23P01',
   'makeup_room_collision',
   '먼저 승인된 일정과 겹치는 두 번째 승인을 거절한다'
 );

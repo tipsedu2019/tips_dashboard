@@ -1,0 +1,13 @@
+{
+  "mode": "local Next production webpack",
+  "items": 500,
+  "slots": 2000,
+  "lastPanelSlots": 100,
+  "midnightVisible": true,
+  "forcedFullRendering": true,
+  "width": 3369,
+  "height": 3369,
+  "bytes": 710202,
+  "mutations": 0,
+  "providerCalls": 0
+}

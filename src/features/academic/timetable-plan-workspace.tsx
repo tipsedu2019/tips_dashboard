@@ -1,5 +1,6 @@
 'use client';
-import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { useCallback, useEffect, useImperativeHandle, useLayoutEffect, useMemo, useRef, useState, type ReactNode, type RefObject, type ComponentType, type CSSProperties, type PointerEvent as ReactPointerEvent } from 'react';
+import { createPortal } from 'react-dom';
 import { ImageDown } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -35,6 +36,42 @@ type Preview = {
     startMinute: number;
     endMinute: number;
 };
+/** Keep the measured full grid height while the browser skips offscreen paint/layout. */
+function TimetableRenderPanel({ children, forceVisible }: { children: ReactNode; forceVisible: boolean }) {
+    const ref = useRef<HTMLDivElement | null>(null);
+    const [height, setHeight] = useState<number | null>(null);
+    useLayoutEffect(() => {
+        const node = ref.current;
+        if (!node) return;
+        const observer = new ResizeObserver(entries => {
+            const measured = entries[0]?.contentRect.height;
+            if (measured > 0) setHeight(measured);
+        });
+        observer.observe(node);
+        return () => observer.disconnect();
+    }, []);
+    return <div ref={ref} data-plan-render-panel className="min-w-0 p-3" style={{
+        contentVisibility: forceVisible || height === null ? 'visible' : 'auto',
+        containIntrinsicBlockSize: height === null ? undefined : `auto ${height}px`,
+    }}>{children}</div>;
+}
+type PointerFeedbackControl = { show: (preview: Preview | null, error?: string) => void };
+/** Pointer feedback updates without reconciling the unchanged class list and grids. */
+function TimetablePointerFeedback({ control, panelRefs, visibleStartMinute, slotHeight }: {
+    control: RefObject<PointerFeedbackControl | null>;
+    panelRefs: RefObject<Record<string, HTMLDivElement | null>>;
+    visibleStartMinute: number; slotHeight: number;
+}) {
+    const [feedback, setFeedback] = useState<{ preview: Preview | null; error: string }>({ preview: null, error: '' });
+    useImperativeHandle(control, () => ({ show: (preview, error = '') => setFeedback({ preview, error }) }), []);
+    const { preview, error } = feedback;
+    const panel = preview ? panelRefs.current[preview.panelKey] : null;
+    const column = preview && panel ? Array.from(panel.querySelectorAll<HTMLElement>('[data-plan-column]')).find(node =>
+        (JSON.parse(node.dataset.planColumn!) as GridTarget).columnKey === preview.columnKey) : null;
+    return <>{error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}{preview && column ? createPortal(
+        <div data-plan-pointer-preview aria-hidden="true" className="pointer-events-none absolute left-0 right-0 border-2 border-primary bg-primary/10"
+            style={{ top: (preview.startMinute - visibleStartMinute) / 30 * slotHeight, height: (preview.endMinute - preview.startMinute) / 30 * slotHeight }} />, column) : null}</>;
+}
 export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty, requestAction, onTransferred }: {
     onTransferred: (result: TransferResult, request: TransferRequest) => Promise<void>;
     state: ReturnType<typeof useTimetablePlan>;
@@ -49,11 +86,13 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
     const [transferOpen, setTransferOpen] = useState(false), [transferPending, setTransferPending] = useState(false);
     const [subject, setSubject] = useState(''), [targets, setTargets] = useState<Record<string, string[]>>({}), [gridCount, setGridCount] = useState(2), [axisMode, setAxisMode] = useState('default');
     const [search, setSearch] = useState(''), [listFilter, setListFilter] = useState('all'), [selectedItemIds, setSelectedItemIds] = useState<string[]>([]), [activeItemId, setActiveItemId] = useState<string | null>(null), [listOpen, setListOpen] = useState(true), [sheetOpen, setSheetOpen] = useState(false);
-    const [editor, setEditor] = useState<PlacementEditorDraft | null>(null), [detail, setDetail] = useState<PlanGridBlock | null>(null), [deleteId, setDeleteId] = useState<string | null>(null), [error, setError] = useState(''), [preview, setPreview] = useState<Preview | null>(null), [dragging, setDragging] = useState(false), [exporting, setExporting] = useState('');
+    const [editor, setEditor] = useState<PlacementEditorDraft | null>(null), [detail, setDetail] = useState<PlanGridBlock | null>(null), [deleteId, setDeleteId] = useState<string | null>(null), [error, setError] = useState(''), [dragging, setDragging] = useState(false), [exporting, setExporting] = useState('');
     const [exportStamp, setExportStamp] = useState('');
+    const pointerFeedback = useRef<PointerFeedbackControl | null>(null);
     const panelRefs = useRef<Record<string, HTMLDivElement | null>>({});
     const cleanupPointer = useRef<(() => void) | null>(null);
     const suppressClick = useRef(false);
+    const cleanupReleaseSuppression = useRef<(() => void) | null>(null);
     const frozenAxis = useRef({ start: 540, end: 1440 });
     const canEdit = !transferPending && !!snapshot?.permissions.canEdit && snapshot.plan.state === 'draft' && state.referenceStatus === 'verified';
     const allSlots = snapshot ? [...snapshot.slots, ...snapshot.shadowSlots] : [];
@@ -64,7 +103,8 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
     const visibleStartMinute = dragging || state.saveState === 'saving' ? frozenAxis.current.start : axisStart, visibleEndMinute = dragging || state.saveState === 'saving' ? frozenAxis.current.end : axisEnd;
     const panels = useMemo(() => snapshot ? buildPlanPanels(snapshot, view, subject, targets[view] || []) : [], [snapshot, view, subject, targets]);
     const layout = getTimetablePanelLayout({ view, gridCount });
-    useEffect(() => () => cleanupPointer.current?.(), []);
+    useEffect(() => () => { cleanupPointer.current?.(); cleanupReleaseSuppression.current?.(); }, []);
+    useEffect(() => { cleanupPointer.current?.(); cleanupReleaseSuppression.current?.(); suppressClick.current = false; }, [snapshot, view, subject, targets, gridCount, canEdit]);
     useEffect(() => { if (snapshot)
         setSelectedItemIds(ids => ids.filter(id => snapshot.items.some(item => item.id === id && item.state === 'draft'))); }, [snapshot]);
     const openEditor = useCallback((draft: PlacementEditorDraft) => requestAction(() => { setEditor({ ...draft, revision: state.controller?.snapshot().snapshot?.items.find(i => i.id === draft.item.id)?.revision ?? null }); setDetail(null); }), [requestAction, state.controller]);
@@ -98,6 +138,8 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
     const startPointer = (event: ReactPointerEvent<HTMLElement>, source: PointerStart) => {
         if (!snapshot || !canEdit || event.button !== 0 || cleanupPointer.current)
             return;
+        cleanupReleaseSuppression.current?.();
+        suppressClick.current = false;
         if (source.kind !== 'range') {
             event.preventDefault();
             event.stopPropagation();
@@ -111,6 +153,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
         const origin = source.kind === 'drop' ? null : hit(startX, startY) || source.target;
         let target = origin;
         frozenAxis.current = { start: visibleStartMinute, end: visibleEndMinute };
+        setError('');
         setDragging(true);
         try {
             element.setPointerCapture(pointerId);
@@ -120,7 +163,22 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
             const finalTarget = target;
             cleanup();
             suppressClick.current = true;
-            setTimeout(() => { suppressClick.current = false; }, 0);
+            if (reason === 'Escape') {
+                // Escape may precede physical release by many event-loop turns.
+                // Keep its later generated click from opening the editor.
+                const release = (event: PointerEvent) => {
+                    if (event.pointerId !== pointerId) return;
+                    cleanupReleaseSuppression.current?.();
+                    setTimeout(() => { suppressClick.current = false; }, 0);
+                };
+                cleanupReleaseSuppression.current = () => {
+                    window.removeEventListener('pointerup', release, true);
+                    window.removeEventListener('pointercancel', release, true);
+                    cleanupReleaseSuppression.current = null;
+                };
+                window.addEventListener('pointerup', release, true);
+                window.addEventListener('pointercancel', release, true);
+            } else setTimeout(() => { suppressClick.current = false; }, 0);
             if (reason !== 'pointerup' || !finalTarget)
                 return;
             try {
@@ -161,7 +219,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
         };
         const move = (e: PointerEvent) => { if (e.pointerId !== pointerId)
             return; moved ||= Math.hypot(e.clientX - startX, e.clientY - startY) > 4; target = hit(e.clientX, e.clientY); if (!target) {
-            setPreview(null);
+            pointerFeedback.current?.show(null);
             return;
         } let minute = resolveGridTarget({ ...target, rowPosition: Math.min(target.rowPosition, (1435 - target.visibleStartMinute) / 30) }).startMinute; let duration = 60; if (source.kind === 'move' || source.kind === 'resize') {
             const slot = snapshot.slots.find(s => s.id === source.slotId);
@@ -171,18 +229,17 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
                 duration = slot.endMinute - slot.startMinute + (source.kind === 'resize' ? delta : 0);
             }
         } if (source.kind === 'drop')
-            duration = snapshot.items.find(i => i.id === source.itemId)?.durationMinutes || 60; setPreview({ panelKey: target.panelKey, columnKey: target.columnKey, startMinute: Math.max(0, minute), endMinute: Math.min(1440, minute + duration) }); try {
+            duration = snapshot.items.find(i => i.id === source.itemId)?.durationMinutes || 60; const nextPreview = { panelKey: target.panelKey, columnKey: target.columnKey, startMinute: Math.max(0, minute), endMinute: Math.min(1440, minute + duration) }; let pointerError = ''; try {
             if (source.kind === 'move' && origin)
                 validatePlacementEdit(snapshot, placementEdit(snapshot, { kind: 'move', slotId: source.slotId!, origin, target }));
             else if (source.kind === 'drop')
                 validatePlacementEdit(snapshot, placementEdit(snapshot, { kind: 'drop', itemId: source.itemId, slotId: 'preview', target }));
             else if (source.kind === 'resize')
                 validatePlacementEdit(snapshot, placementEdit(snapshot, { kind: 'resize', slotId: source.slotId!, endMinute: minute + duration }));
-            setError('');
         }
         catch (e) {
-            setError(planErrorLabel(e));
-        } };
+            pointerError = planErrorLabel(e);
+        } pointerFeedback.current?.show(nextPreview, pointerError); };
         const up = (e: PointerEvent) => { if (e.pointerId === pointerId)
             end('pointerup'); };
         const cancel = (e: PointerEvent) => { if (e.pointerId === pointerId)
@@ -191,7 +248,7 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
             e.preventDefault();
             end('Escape');
         } };
-        const cleanup = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', cancel); window.removeEventListener('keydown', key); element.removeEventListener('lostpointercapture', cancel); cleanupPointer.current = null; setDragging(false); setPreview(null); try {
+        const cleanup = () => { window.removeEventListener('pointermove', move); window.removeEventListener('pointerup', up); window.removeEventListener('pointercancel', cancel); window.removeEventListener('keydown', key); element.removeEventListener('lostpointercapture', cancel); cleanupPointer.current = null; setDragging(false); pointerFeedback.current?.show(null); try {
             if (element.hasPointerCapture(pointerId))
                 element.releasePointerCapture(pointerId);
         }
@@ -228,14 +285,15 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
     } };
     return <WorkspaceTabs value={view} onValueChange={v => { cleanupPointer.current?.(); onViewChange(v as TimetableView); }} className={`${styles.scope} space-y-4 px-4 pb-6 sm:px-5 lg:px-6`}><div className="overflow-hidden rounded-xl border bg-card"><div className="flex flex-wrap justify-between gap-3 border-b p-3"><WorkspaceTabsList aria-label="시간표 보기" className="grid grid-cols-2 md:flex">{PLAN_VIEWS.map(v => <WorkspaceTabsTrigger className="h-11 md:h-9" key={v.id} value={v.id}>{v.label}</WorkspaceTabsTrigger>)}</WorkspaceTabsList><div className="flex flex-wrap items-center gap-2"><span data-testid="plan-selection-count" className="text-sm">{selectedItemIds.length ? `선택 ${selectedItemIds.length}개` : snapshot.plan.state === 'archived' ? '보관됨 · 읽기 전용' : ''}</span><Button variant="outline" disabled={!snapshot.permissions.canEdit || (!selectedItemIds.length && !transferPending) || state.dirty} onClick={() => { if (transferPending) setTransferOpen(true); else requestAction(() => setTransferOpen(true)); }}>{transferPending ? '전송 결과 확인' : '선택 이동·복사'}</Button><Button disabled={!canEdit} onClick={() => openEditor({ item: blankPlanItem(snapshot.plan.id), slots: [] })}>수업 추가</Button><Button variant="outline" className="hidden xl:inline-flex" onClick={() => setListOpen(!listOpen)}>수업 목록</Button><Button variant="outline" className="xl:hidden" onClick={() => setSheetOpen(true)}>수업 목록</Button></div></div><div className="p-3"><DataTableFilterPanel label="시간표 조건" activeFilters={subject ? [{ label: '과목', value: subject }] : []} onReset={() => { setSubject(''); setTargets({}); }} canReset={!!subject || Object.values(targets).some(v => v.length)}><div className="grid items-end gap-3 sm:grid-cols-2 lg:grid-cols-4"><div className="space-y-2"><Label htmlFor="plan-subject">과목</Label><Select value={subject || 'all'} onValueChange={v => setSubject(v === 'all' ? '' : v)}><SelectTrigger id="plan-subject"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">전체 과목</SelectItem>{[...new Set([...snapshot.items, ...snapshot.shadowClasses].map(i => i.subject).filter(Boolean))].map(s => <SelectItem key={s} value={s!}>{s}</SelectItem>)}</SelectContent></Select></div><TimetableTargetFilter label={targetLabel} options={resourceOptions.map(r => r.id)} optionLabels={Object.fromEntries(resourceOptions.map(r => [r.id, r.name]))} selected={targets[view] || []} onChange={values => setTargets(current => ({ ...current, [view]: values }))}/><div className="space-y-2"><Label htmlFor="plan-hours">시간 범위</Label><Select value={axisMode} onValueChange={setAxisMode} disabled={dragging}><SelectTrigger id="plan-hours"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="default">09:00–24:00</SelectItem><SelectItem value="full">00:00–24:00</SelectItem></SelectContent></Select></div><div className="hidden space-y-2 xl:block"><Label htmlFor="plan-layout">배치</Label><Select value={String(gridCount)} onValueChange={v => setGridCount(Number(v))}><SelectTrigger id="plan-layout"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="1">1단</SelectItem><SelectItem value="2">2단</SelectItem></SelectContent></Select></div></div></DataTableFilterPanel></div></div>
  <div className="flex flex-wrap items-center gap-2 text-sm" role="status"><span>{state.saveState === 'saving' ? '저장 중' : state.saveState === 'saved' ? '저장됨' : state.saveState === 'stale' ? '최신 내용 확인 필요' : state.saveState === 'error' ? '저장 실패' : canEdit ? '편집 가능' : '읽기 전용'}</span>{state.referenceStatus !== 'verified' ? <span>운영 시간표 확인 필요</span> : null}{state.conflicts.length ? <span className="text-destructive">충돌 해결 필요 · {state.conflicts.length}건</span> : null}{state.dirty ? <Button size="sm" variant="outline" onClick={() => void state.retry().catch(e => setError(planErrorLabel(e)))}>재시도</Button> : null}<Button size="sm" variant="ghost" onClick={() => void state.refresh()}>새로고침</Button><Button size="sm" variant="ghost" disabled={!canEdit || state.saveState !== 'saved'} onClick={() => void state.undo().catch(e => setError(planErrorLabel(e)))}>실행 취소</Button>{state.saveState === 'stale' ? snapshot.items.filter(i => i.state === 'draft' && state.failureKind(i.id) === 'stale').map(i => <div key={i.id} className="flex flex-wrap items-center gap-1"><span>{i.name}</span><Button size="sm" variant="outline" onClick={() => void state.resolveStale(i.id, 'accept_server').catch(e => setError(planErrorLabel(e)))}>최신 내용 사용</Button><Button size="sm" variant="outline" onClick={() => void state.resolveStale(i.id, 'reapply_draft').catch(e => setError(planErrorLabel(e)))}>내 입력 다시 적용</Button></div>) : null}</div>{error || state.error ? <p role="alert" className="text-sm text-destructive">{error || planErrorLabel(state.error)}</p> : null}
- <WorkspaceTabsPanel aria-label={PLAN_VIEWS.find(v => v.id === view)?.label}><div className="flex items-start gap-4">{listOpen ? <aside aria-label="프리셋 수업 목록" className="hidden w-[280px] shrink-0 overflow-hidden rounded-xl border bg-card xl:block">{classList}</aside> : null}<div className="min-w-0 flex-1">{!panels.length ? <div className="rounded-xl border p-8 text-sm">{(view.includes('teacher') ? snapshot.catalogs.teachers : snapshot.catalogs.classrooms).length ? '조건에 맞는 패널이 없습니다.' : <>등록된 자원이 없습니다. <Button asChild variant="outline"><a href={view.includes('teacher') ? '/admin/settings/teachers' : '/admin/settings/classrooms'}>자원 설정</a></Button></>}</div> : <div className="grid grid-cols-1 gap-4 xl:[grid-template-columns:var(--timetable-panel-columns)]" style={{ '--timetable-panel-columns': `repeat(${Math.min(gridCount, panels.length)},minmax(0,1fr))` } as CSSProperties}>{panels.map(panel => <section key={panel.id} className="relative min-w-0 overflow-hidden rounded-xl border bg-card"><div ref={node => { panelRefs.current[panel.id] = node; }} className="min-w-0 bg-background"><div className="flex min-h-16 flex-wrap items-center gap-3 border-b px-4 py-3 pr-16"><h2 className="break-words text-base font-semibold">{panel.name}</h2><p className="text-xs text-muted-foreground">수업 {new Set(panel.blocks.map(b => b.itemId)).size}개</p></div>{exportStamp ? <p className="px-4 py-2 text-xs">{snapshot.plan.name} · {PLAN_VIEWS.find(v => v.id === view)?.label} · {exportStamp}</p> : null}<div className="min-w-0 p-3"><LegacyGrid planGrid={{ panel, view, visibleStartMinute, visibleEndMinute, layout, editable: canEdit && !exportStamp, onCell: cell, onOpen: (block: PlanGridBlock) => { if (suppressClick.current)
+ <TimetablePointerFeedback control={pointerFeedback} panelRefs={panelRefs} visibleStartMinute={visibleStartMinute} slotHeight={layout.slotHeight} />
+ <WorkspaceTabsPanel aria-label={PLAN_VIEWS.find(v => v.id === view)?.label}><div className="flex items-start gap-4">{listOpen ? <aside aria-label="프리셋 수업 목록" className="hidden w-[280px] shrink-0 overflow-hidden rounded-xl border bg-card xl:block">{classList}</aside> : null}<div className="min-w-0 flex-1">{!panels.length ? <div className="rounded-xl border p-8 text-sm">{(view.includes('teacher') ? snapshot.catalogs.teachers : snapshot.catalogs.classrooms).length ? '조건에 맞는 패널이 없습니다.' : <>등록된 자원이 없습니다. <Button asChild variant="outline"><a href={view.includes('teacher') ? '/admin/settings/teachers' : '/admin/settings/classrooms'}>자원 설정</a></Button></>}</div> : <div className="grid grid-cols-1 gap-4 xl:[grid-template-columns:var(--timetable-panel-columns)]" style={{ '--timetable-panel-columns': `repeat(${Math.min(gridCount, panels.length)},minmax(0,1fr))` } as CSSProperties}>{panels.map(panel => <section key={panel.id} className="relative min-w-0 overflow-hidden rounded-xl border bg-card"><div ref={node => { panelRefs.current[panel.id] = node; }} className="min-w-0 bg-background"><div className="flex min-h-16 flex-wrap items-center gap-3 border-b px-4 py-3 pr-16"><h2 className="break-words text-base font-semibold">{panel.name}</h2><p className="text-xs text-muted-foreground">수업 {new Set(panel.blocks.map(b => b.itemId)).size}개</p></div>{exportStamp ? <p className="px-4 py-2 text-xs">{snapshot.plan.name} · {PLAN_VIEWS.find(v => v.id === view)?.label} · {exportStamp}</p> : null}<TimetableRenderPanel forceVisible={!!exportStamp}><LegacyGrid planGrid={{ panel, view, visibleStartMinute, visibleEndMinute, layout, editable: canEdit && !exportStamp, onCell: cell, onOpen: (block: PlanGridBlock) => { if (suppressClick.current)
             return; if (block.shadow)
             setDetail(block);
         else {
             const item = snapshot.items.find(i => i.id === block.itemId);
             if (item)
                 openEditor({ item: itemDraft(item), slots: snapshot.slots.filter(s => s.itemId === item.id), slotId: block.id });
-        } }, onPointerStart: startPointer, preview }}/></div></div><Button variant="ghost" size="icon" aria-label={`${panel.name} 이미지 저장`} disabled={!!exporting || state.dirty || state.saveState === 'saving'} onClick={() => void exportPanel(panel.id)} className="absolute right-2 top-2 size-11 sm:size-9"><ImageDown /></Button></section>)}</div>}</div></div></WorkspaceTabsPanel>
+        } }, onPointerStart: startPointer }}/></TimetableRenderPanel></div><Button variant="ghost" size="icon" aria-label={`${panel.name} 이미지 저장`} disabled={!!exporting || state.dirty || state.saveState === 'saving'} onClick={() => void exportPanel(panel.id)} className="absolute right-2 top-2 size-11 sm:size-9"><ImageDown /></Button></section>)}</div>}</div></div></WorkspaceTabsPanel>
  <Sheet open={sheetOpen} onOpenChange={setSheetOpen}><SheetContent className="overflow-y-auto"><SheetHeader><SheetTitle>수업 목록</SheetTitle><SheetDescription>수업을 선택한 뒤 시간표의 셀 또는 편집 폼에서 배치합니다.</SheetDescription></SheetHeader>{classList}</SheetContent></Sheet>
  {editor ? <TimetablePlacementEditor key={editor.item.id + ':' + (editor.pendingResolutionId || editor.slotId || 'new') + ':' + JSON.stringify(editor.target)} draft={editor} snapshot={snapshot} loadScienceSubjectAreas={state.service?.listScienceSubjectAreas} onSave={save} onClose={closeEditor} onDirty={onFormDirty} canEdit={canEdit} failureKind={state.failureKind(editor.item.id)} onRetry={async () => { await state.retry(editor.item.id); const current = state.controller?.snapshot().snapshot; setEditor(previous => previous ? { ...previous, revision: current?.items.find(i => i.id === previous.item.id)?.revision ?? null } : null); }} onDiscard={() => state.discardRejected(editor.item.id)} onAcceptServer={() => state.resolveStale(editor.item.id, 'accept_server')} serverSummary={`${state.snapshot?.items.find(i => i.id === editor.item.id)?.name || '삭제된 수업'} · ${state.snapshot?.slots.filter(s => s.itemId === editor.item.id).map(s => `${PLAN_DAYS[s.weekday]} ${formatPlanTime(s.startMinute)}–${formatPlanTime(s.endMinute)}`).join(', ')}`}/> : null}
  <Dialog open={!!detail} onOpenChange={open => { if (!open)

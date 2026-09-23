@@ -1,0 +1,84 @@
+{
+  "pgTAP": [
+    {
+      "suite": "sqlstate-final",
+      "plans": [
+        25
+      ],
+      "assertions": 25,
+      "failed": 0
+    },
+    {
+      "suite": "guard-green",
+      "plans": [
+        12
+      ],
+      "assertions": 12,
+      "failed": 0
+    },
+    {
+      "suite": "operational-final",
+      "plans": [
+        5,
+        5,
+        125
+      ],
+      "assertions": 135,
+      "failed": 0
+    },
+    {
+      "suite": "history-final",
+      "plans": [
+        132
+      ],
+      "assertions": 132,
+      "failed": 0
+    }
+  ],
+  "nodeFocused": {
+    "passed": 120,
+    "failed": 0
+  },
+  "browserPointer": {
+    "passed": 19,
+    "failed": 0,
+    "mode": "local Next production webpack; full actualDB catalog/slot/shadow data retained"
+  },
+  "limits": "full historical makeup suites are not counted as passed; see notification-suite-limits.json",
+  "finalConsumerRecheck": {
+    "passed": 44,
+    "failed": 0,
+    "actualPOST": [
+      "P0001/four named stale messages ->409",
+      "23P01/two named makeup conflicts plus timetable_resource_conflict ->409",
+      "unknownP0001/23P01 ->503",
+      "real40001 ->409"
+    ]
+  },
+  "actualOffscreenExport": {
+    "mode": "local Next production webpack",
+    "items": 500,
+    "slots": 2000,
+    "lastPanelSlots": 100,
+    "midnightVisible": true,
+    "forcedFullRendering": true,
+    "width": 3369,
+    "height": 3369,
+    "bytes": 710202,
+    "mutations": 0,
+    "providerCalls": 0,
+    "titleReadabilityLimit": "Some two-lane 30-minute blocks partially clip the second title line; complete axis/rows verified, not universal title readability."
+  },
+  "finalStaticChecks": {
+    "focusedESLint": {
+      "errors": 0,
+      "warnings": 0
+    },
+    "typescriptNoEmit": true,
+    "diffCheck": true,
+    "lintOnlyHarnessRenameActualPOSTRecheck": {
+      "passed": 1,
+      "failed": 0
+    }
+  }
+}

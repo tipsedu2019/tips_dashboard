@@ -172,7 +172,7 @@ export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableIte
     const same = (a: PlanSlot, b: PlanSlot) => a.weekday === b.weekday && a.startMinute === b.startMinute && a.endMinute === b.endMinute && a.teacherId === b.teacherId && a.classroomId === b.classroomId;
     const changed = edit.slots.filter(slot => !snapshot.slots.some(old => old.id === slot.id && same(old, slot)));
     const all = [...snapshot.slots.filter(s => s.itemId !== edit.item.id), ...edit.slots];
-    const conflicts = [...findConflicts(all, snapshot.shadowSlots), ...findOperatingConflicts(changed, snapshot, snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null)].filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
+    const conflicts = [...findConflicts(all, snapshot.shadowSlots, new Set(changed.map(slot => slot.id))), ...findOperatingConflicts(changed, snapshot, snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null)].filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
     if (conflicts.length) {
         const conflict = conflicts[0];
         const otherId = conflict.otherSlotId;

@@ -105,3 +105,15 @@ test("명확한 DB 검증 실패는 보존 ID를 제거해 수정 후 새 시도
   assert.notEqual(ids[0], ids[1])
   assert.equal(storage.size, 0)
 })
+
+for (const [code, message, definitive] of [
+  ['P0001', 'makeup_request_stale_status', true],
+  ['P0001', 'makeup_lesson_session_stale', true],
+  ['P0001', 'unknown_server_error', false],
+  ['40001', 'could not serialize access due to concurrent update', true],
+]) test(`exact makeup outcome ${code}/${message}`, async () => {
+  clearMakeupCreateAttemptMemoryForTest(); const storage=memoryStorage(), ids=[];
+  const input={actorId:'00000000-0000-4000-8000-000000000001',payload:{reason:message},storage,runtime};
+  for(let i=0;i<2;i++) await assert.rejects(runIdempotentMakeupCreate({...input,invoke:async id=>{ids.push(id);throw {code,message};}}));
+  assert.equal(ids[0]!==ids[1],definitive);
+});

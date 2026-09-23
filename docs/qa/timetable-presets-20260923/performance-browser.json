@@ -1,0 +1,129 @@
+{
+  "mode": "Next production webpack, final measured-height visible panels and pointer feedback",
+  "viewport": {
+    "width": 1440,
+    "height": 1200
+  },
+  "network": "loopback-only synthetic read transport; no mutation",
+  "results": [
+    {
+      "items": 200,
+      "slots": 600,
+      "projectionFourViewsP95Ms": 1.5459579999999846,
+      "pureDragAllDataP95Ms": 0.08037500000000364,
+      "frameCount": 138,
+      "frameP95Ms": 17.5,
+      "gestureFrameP95Ms": 17.59999999999991,
+      "pointerDownToFrameMs": 55.5,
+      "pointerUpToFrameMs": 73.5,
+      "pointerToFrameP95Ms": 17,
+      "pointerHandlerP95Ms": 0.10000000149011612,
+      "longFrames": [
+        {
+          "duration": 60.19999999925494,
+          "blockingDuration": 0,
+          "renderStart": 3884.5,
+          "styleAndLayoutStart": 3884.5,
+          "startTime": 3840,
+          "scripts": [
+            {
+              "duration": 29.299999997019768,
+              "invoker": "DOMWindow.onkeydown",
+              "sourceFunctionName": "f",
+              "forcedStyleAndLayoutDuration": 0
+            }
+          ]
+        }
+      ],
+      "reactCommitCount": 94,
+      "handlerEndToReactCommitP95Ms": 4.100000001490116,
+      "mutations": 0,
+      "providerCalls": 0,
+      "offscreen": {
+        "heightBefore": 35473,
+        "heightAfter": 35473,
+        "dragPreview": true,
+        "cancelClean": true
+      }
+    },
+    {
+      "items": 500,
+      "slots": 2000,
+      "projectionFourViewsP95Ms": 8.285499999999956,
+      "pureDragAllDataP95Ms": 0.21649999999954161,
+      "frameCount": 196,
+      "frameP95Ms": 33.59999999999991,
+      "gestureFrameP95Ms": 33.69999999999982,
+      "pointerDownToFrameMs": 84.89999999850988,
+      "pointerUpToFrameMs": 122.19999999925494,
+      "pointerToFrameP95Ms": 36.599999997764826,
+      "pointerHandlerP95Ms": 0.10000000149011612,
+      "longFrames": [
+        {
+          "duration": 64.09999999776483,
+          "blockingDuration": 13.7,
+          "renderStart": 1958.1000000014901,
+          "styleAndLayoutStart": 1958.199999999255,
+          "startTime": 1894.1000000014901,
+          "scripts": [
+            {
+              "duration": 62.5,
+              "invoker": "#document.onpointerdown",
+              "sourceFunctionName": "fT",
+              "forcedStyleAndLayoutDuration": 0.1
+            }
+          ]
+        },
+        {
+          "duration": 65.69999999925494,
+          "blockingDuration": 15.2,
+          "renderStart": 2106.900000002235,
+          "styleAndLayoutStart": 2106.900000002235,
+          "startTime": 2047.4000000022352,
+          "scripts": []
+        },
+        {
+          "duration": 52.29999999701977,
+          "blockingDuration": 0,
+          "renderStart": 2546.199999999255,
+          "styleAndLayoutStart": 2546.199999999255,
+          "startTime": 2528.900000002235,
+          "scripts": []
+        },
+        {
+          "duration": 65.10000000149012,
+          "blockingDuration": 0,
+          "renderStart": 3911.10000000149,
+          "styleAndLayoutStart": 3911.10000000149,
+          "startTime": 3846,
+          "scripts": []
+        },
+        {
+          "duration": 106.39999999850988,
+          "blockingDuration": 46.1,
+          "renderStart": 5818.60000000149,
+          "styleAndLayoutStart": 5818.60000000149,
+          "startTime": 5745.60000000149,
+          "scripts": [
+            {
+              "duration": 62.19999999925494,
+              "invoker": "DOMWindow.onkeydown",
+              "sourceFunctionName": "f",
+              "forcedStyleAndLayoutDuration": 0
+            }
+          ]
+        }
+      ],
+      "reactCommitCount": 94,
+      "handlerEndToReactCommitP95Ms": 6.100000001490116,
+      "mutations": 0,
+      "providerCalls": 0,
+      "offscreen": {
+        "heightBefore": 93133,
+        "heightAfter": 93133,
+        "dragPreview": true,
+        "cancelClean": true
+      }
+    }
+  ]
+}
