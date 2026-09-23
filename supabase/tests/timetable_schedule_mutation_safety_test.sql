@@ -108,11 +108,33 @@ set local role authenticated;
 select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='월'),'교사 미지정','authenticated timetable RPC preserves literal marker name under invoker ACL and RLS');
 select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='화'),'~41','authenticated timetable RPC preserves literal tilde room under invoker ACL and RLS');
 reset role;
+insert into public.teacher_catalogs(id,name,subjects,is_visible,sort_order) values
+('ac230000-0000-4000-8000-000000000105','김, 민',array['영어'],true,905);
+insert into public.classroom_catalogs(id,name,subjects,is_visible,sort_order,campus) values
+('ac230000-0000-4000-8000-000000000205','강의실 1, 별관',array['영어'],true,905,'본관');
+create temporary table schedule_comma_save as select public.save_class_schedule_defaults_v1(
+ 'ac230000-0000-4000-8000-000000000301',4,
+ '[{"id":"ac230000-0000-4000-8000-000000000401","weekday":1,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000105","classroomCatalogId":"ac230000-0000-4000-8000-000000000201","sortOrder":0},{"id":"ac230000-0000-4000-8000-000000000402","weekday":2,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":"ac230000-0000-4000-8000-000000000205","sortOrder":1},{"id":"ac230000-0000-4000-8000-000000000403","weekday":3,"startTime":"14:00","endTime":"15:30","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":2}]'::jsonb,
+ 'ac230000-0000-4000-8000-000000000511',null) as payload;
+select is((select schedule from public.classes where id='ac230000-0000-4000-8000-000000000301'),E'월 10:00-11:00 (김, 민, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 1, 별관)\n수 14:00-15:30 (, )','comma catalog names remain literal in the compatibility projection');
+select is((select jsonb_build_object('teacher',teacher_name,'room',classroom_name) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301' and weekday=1),'{"teacher": "김, 민", "room": "강의실 1"}'::jsonb,'normalized Monday slot retains comma teacher');
+select is((select jsonb_build_object('teacher',teacher_name,'room',classroom_name) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301' and weekday=2),'{"teacher": "교사 A", "room": "강의실 1, 별관"}'::jsonb,'normalized Tuesday slot retains comma room');
+set local role authenticated;
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='월'),'김, 민','authenticated normalized timetable uses full comma teacher from slot');
+select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='월'),'강의실 1','authenticated normalized timetable keeps Monday room');
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='화'),'교사 A','authenticated normalized timetable keeps Tuesday teacher');
+select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='화'),'강의실 1, 별관','authenticated normalized timetable uses full comma room from slot');
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='수'),'','authenticated normalized timetable keeps explicit empty teacher');
+select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='수'),'','authenticated normalized timetable keeps explicit empty room');
+reset role;
+update public.classes set schedule_storage_mode='legacy' where id='ac230000-0000-4000-8000-000000000302';
 update public.classes set schedule='화 11:00-12:00 (~41, ~42)', teacher='~41', room='~42' where id='ac230000-0000-4000-8000-000000000302';
 select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'~41','pre-existing raw tilde teacher detail is not decoded');
 select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'~42','pre-existing raw tilde room detail is not decoded');
 update public.classes set schedule='화 11:00-12:00 (교사 미지정)', teacher='교사 미지정', room='강의실 1' where id='ac230000-0000-4000-8000-000000000302';
 select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'교사 미지정','legacy single-detail literal marker teacher stays assigned');
+update public.classes set schedule_storage_mode='shadow' where id='ac230000-0000-4000-8000-000000000302';
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'교사 미지정','shadow mode keeps previous single-detail literal parsing');
 select dashboard_private.reconcile_continuous_schedule_shadow_slots_v1(
  'ac230000-0000-4000-8000-000000000302',
  '[{"weekday":2,"startTime":"11:00","endTime":"12:00","teacherName":"교사 B 보정","classroomName":"강의실 2","sortOrder":0}]'::jsonb);

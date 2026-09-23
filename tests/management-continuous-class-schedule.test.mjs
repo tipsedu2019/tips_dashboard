@@ -53,6 +53,24 @@ test("normalized defaults preserve slot and catalog IDs through the five-column 
   }]);
 });
 
+test("normalized defaults retain full comma-containing catalog names", () => {
+  const slots = fromContinuousClassScheduleDefaults([
+    { id: "20000000-0000-4000-8000-000000000011", weekday: 1, startTime: "10:00", endTime: "11:00", teacherCatalogId: TEACHER_ID, teacherName: "김, 민", classroomCatalogId: CLASSROOM_ID, classroomName: "강의실 1", sortOrder: 0 },
+    { id: "20000000-0000-4000-8000-000000000012", weekday: 2, startTime: "10:00", endTime: "11:00", teacherCatalogId: TEACHER_ID, teacherName: "교사 A", classroomCatalogId: CLASSROOM_ID, classroomName: "강의실 1, 별관", sortOrder: 1 },
+    { id: "20000000-0000-4000-8000-000000000013", weekday: 3, startTime: "14:00", endTime: "15:30", teacherCatalogId: null, teacherName: "", classroomCatalogId: null, classroomName: "", sortOrder: 2 },
+  ]);
+  assert.deepEqual(slots.map(({ teacher, classroom }) => ({ teacher, classroom })), [
+    { teacher: "김, 민", classroom: "강의실 1" },
+    { teacher: "교사 A", classroom: "강의실 1, 별관" },
+    { teacher: "", classroom: "" },
+  ]);
+  assert.deepEqual(toContinuousClassScheduleSlots(slots).map(({ teacherCatalogId, classroomCatalogId }) => ({ teacherCatalogId, classroomCatalogId })), [
+    { teacherCatalogId: TEACHER_ID, classroomCatalogId: CLASSROOM_ID },
+    { teacherCatalogId: TEACHER_ID, classroomCatalogId: CLASSROOM_ID },
+    { teacherCatalogId: null, classroomCatalogId: null },
+  ]);
+});
+
 test("legacy schedule consumer retains per-slot teacher and room after normalized save projection", () => {
   const slots = parseClassScheduleSlots(
     "월 09:00-10:00 (교사 A, 강의실 1)\n월 10:00-11:00 (교사 A, 강의실 1)\n수 14:00-15:30 (교사 B, 강의실 2)",
