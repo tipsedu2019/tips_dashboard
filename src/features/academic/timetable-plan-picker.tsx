@@ -23,7 +23,8 @@ function rejectedBeforeCommit(error: unknown) {
 }
 const labels = { create: '프리셋 만들기', rename: '이름·기준 기간 변경', clone: '프리셋 복제', archive: '프리셋 보관', restore: '프리셋 복원', share: '프리셋 공유' };
 
-export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, requestAction }: {
+export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, requestAction, reloadNonce = 0 }: {
+    reloadNonce?: number;
     planId: string | null;
     snapshot: PlanSnapshot | null;
     onChange: (id: string | null) => void;
@@ -64,7 +65,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
             if (valid()) { setList(result); setListError(''); }
         } catch (e) { if (valid()) setListError(planErrorLabel(e)); }
     }, [service, archived]);
-    useEffect(() => { setList(null); void reload(); }, [reload]);
+    useEffect(() => { setList(null); void reload(); }, [reload, reloadNonce]);
     useEffect(() => {
         mounted.current = true;
         operationEpoch.current++;

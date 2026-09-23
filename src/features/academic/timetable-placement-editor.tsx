@@ -11,7 +11,7 @@ import { Form, FormControl, FormField, FormItem, FormLabel, FormMessage } from '
 import type { DropTarget, PlanSnapshot, ResourceOption } from './timetable-plan-contract';
 import type { TimetableItemEdit } from './timetable-plan-model';
 import { suggestPlacements } from './timetable-conflicts';
-import { PLAN_DAYS, PLAN_DAY_ORDER, formatPlanTime, parsePlanTime, planErrorLabel, itemDraft, buildPlacementFormEdit, placementFormDefaults, placementScope, type PlacementEditorDraft, type PlacementFormValues } from './timetable-plan-interaction';
+import { PLAN_DAYS, PLAN_DAY_ORDER, formatPendingSlot, formatPlanTime, parsePlanTime, planErrorLabel, itemDraft, buildPlacementFormEdit, placementFormDefaults, placementScope, type PlacementEditorDraft, type PlacementFormValues } from './timetable-plan-interaction';
 export type { PlacementEditorDraft } from './timetable-plan-interaction';
 type Values = PlacementFormValues;
 export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onDirty, canEdit, failureKind, onRetry, onDiscard, onAcceptServer, serverSummary }: {
@@ -128,7 +128,7 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
                     </fieldset>
                     {draft.item.pendingSlots.length ? <div className="space-y-1 text-sm text-muted-foreground">
                         {draft.item.pendingSlots.map(p => <p key={p.id}>
-                            {p.sourceText} · {p.reason === 'conflict' ? '시간 충돌' : p.reason === 'missing_resource' ? '자원 미정' : '시각 확인 필요'}
+                            {formatPendingSlot(p, snapshot.catalogs)} · {p.reason === 'conflict' ? '시간 충돌' : p.reason === 'missing_resource' ? '자원 미정' : '시각 확인 필요'}
                         </p>)}
                     </div> : null}
                     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}

@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
   type CSSProperties,
+  type MutableRefObject,
 } from "react";
 import {
   CalendarDays,
@@ -18,6 +20,9 @@ import {
   type LucideIcon,
   RotateCcw,
 } from "lucide-react";
+import { invalidatePublicClassesCacheAfterMutation } from '@/lib/public-classes-cache-invalidation.js';
+import { clearRegistrationTrackServiceCaches } from '@/features/tasks/registration-track-service';
+import { supabase } from '@/lib/supabase';
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -209,21 +214,32 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 export function AcademicTimetableWorkspace() {
   const [view, setView] = useState<TimetableView>("teacher-weekly");
   const [planId, setPlanId] = useState<string | null>(null);
+  const operationalRefresh = useRef<(() => Promise<void>) | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
   const [formDirty, setFormDirty] = useState(false);
   const plan = useTimetablePlan(planId);
+  const handleTransferred = useCallback(async (_result: import('./timetable-plan-contract').TransferResult, request: import('./timetable-plan-contract').TransferRequest) => {
+    setReloadNonce(value => value + 1);
+    if (request.target.kind === 'operational') {
+      clearRegistrationTrackServiceCaches();
+      const publicCache = await invalidatePublicClassesCacheAfterMutation(supabase, 'class');
+      await operationalRefresh.current?.();
+      if (publicCache.status === 'pending') throw Error('public_classes_cache_refresh_pending');
+    }
+  }, []);
   const navigation = useDraftNavigation({ dirty: plan.dirty || formDirty });
   const changePlan = (id: string | null) => navigation.requestLocalAction(() => {
     setFormDirty(false); setPlanId(id);
   });
   return <div className="space-y-4">
-    <TimetablePlanPicker planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/>
-    <div hidden={Boolean(planId)}><OperationalTimetableWorkspace view={view} setView={setView}/></div>
-    {planId ? <TimetablePlanWorkspace key={planId} state={plan} view={view} onViewChange={setView} onFormDirty={setFormDirty} requestAction={navigation.requestLocalAction}/> : null}
+    <TimetablePlanPicker reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/>
+    <div hidden={Boolean(planId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
+    {planId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onFormDirty={setFormDirty} requestAction={navigation.requestLocalAction}/> : null}
     {navigation.confirmation}
   </div>;
 }
 
-function OperationalTimetableWorkspace({view, setView}: {view: TimetableView; setView: (view: TimetableView) => void}) {
+function OperationalTimetableWorkspace({view, setView, refreshRef}: {refreshRef: MutableRefObject<(() => Promise<void>) | null>; view: TimetableView; setView: (view: TimetableView) => void}) {
   const [status, setStatus] = useState("수강");
   const [subject, setSubject] = useState("");
   const [gridCount, setGridCount] = useState(2);
@@ -239,6 +255,7 @@ function OperationalTimetableWorkspace({view, setView}: {view: TimetableView; se
     loading,
     error,
     refresh,
+    refreshVerified,
     successfulRequest,
     displayRequest,
     dataMatchesCurrentScope,
@@ -252,6 +269,7 @@ function OperationalTimetableWorkspace({view, setView}: {view: TimetableView; se
       subject: subject || null,
     },
   });
+  useEffect(() => { refreshRef.current = refreshVerified; return () => { refreshRef.current = null; }; }, [refreshRef, refreshVerified]);
   const displayTimetableRequest = useMemo(
     () =>
       displayRequest.mode === "timetable"

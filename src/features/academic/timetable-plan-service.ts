@@ -101,9 +101,25 @@ function requireMutation(value: unknown): PlanMutationResult {
     || !(value.item === null || (planItem(value.item) && value.item.planId === value.planId))) throw invalid();
   return value as PlanMutationResult;
 }
-function requirePreview(value: unknown): TransferPreview {
+function requirePreview(value: unknown, request: TransferRequest): TransferPreview {
+  const issue = (entry: unknown) => record(entry) && string(entry.sourceId) && request.itemIds.includes(entry.sourceId)
+    && string(entry.code) && string(entry.label) && Array.isArray(entry.relatedIds) && entry.relatedIds.every(string);
   if (!record(value) || !string(value.fingerprint) || !string(value.shadowFingerprint)
-    || !record(value.request) || !Array.isArray(value.mappings) || !Array.isArray(value.blockers)) throw invalid();
+    || !record(value.request)
+    || !Array.isArray(value.mappings) || !value.mappings.every(entry => record(entry)
+      && string(entry.sourceId) && request.itemIds.includes(entry.sourceId)
+      && entry.action === (request.target.kind === 'operational' ? 'create_active_class' : 'create_plan_item'))
+    || value.mappings.length !== request.itemIds.length
+    || new Set(value.mappings.map(entry => (entry as { sourceId: string }).sourceId)).size !== request.itemIds.length
+    || !Array.isArray(value.blockers) || !value.blockers.every(issue)
+    || (value.warnings !== undefined && (!Array.isArray(value.warnings) || !value.warnings.every(issue)))) throw invalid();
+  const echoed = value.request as TransferRequest;
+  if (echoed.source?.kind !== 'plan' || echoed.source.planId !== request.source.planId
+    || echoed.target?.kind !== request.target.kind
+    || (request.target.kind === 'plan' && (echoed.target.kind !== 'plan' || echoed.target.planId !== request.target.planId))
+    || echoed.mode !== request.mode || echoed.onConflict !== request.onConflict
+    || !Array.isArray(echoed.itemIds) || echoed.itemIds.length !== request.itemIds.length
+    || echoed.itemIds.some((id, index) => id !== request.itemIds[index])) throw invalid();
   return value as TransferPreview;
 }
 /** Validate a full source snapshot or a complete delta before either service or controller accepts it. */
@@ -181,7 +197,7 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
       return result as { plan: PlanSnapshot['plan'] };
     },
     previewTransfer: async (request: TransferRequest, options?: RequestOptions) =>
-      requirePreview(await invoke('preview_timetable_plan_transfer_v1', { p_request: request }, options)),
+      requirePreview(await invoke('preview_timetable_plan_transfer_v1', { p_request: request }, options), request),
     commitTransfer: async (command: TransferCommitCommand, options?: RequestOptions) =>
       requireTimetableTransferResult(await invoke('commit_timetable_plan_transfer_v1', { p_command: command }, options), command.request.source.planId),
   };

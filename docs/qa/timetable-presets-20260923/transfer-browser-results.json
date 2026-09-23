@@ -1,0 +1,36 @@
+{
+  "teacher": "8d4cfa7e-8bdc-4ae9-9ad6-17d72687d65c",
+  "room": "f2f84915-db4f-422a-9325-e1ccbc8fc75c",
+  "plans": [
+    "ed451ffa-78e1-47b4-b02a-e51ce95fa861",
+    "9cf68d45-d897-46c5-ba56-f391c0bebbae",
+    "d1c14280-e3cc-4cc4-a27d-aa8e2f44b052",
+    "d4fde3c8-b0a9-4641-96d4-cccc1a73e557",
+    "1da943d3-906b-45bd-9fed-39a1786f044c",
+    "b54abf87-a684-456f-a5a4-a3b50f193fc7"
+  ],
+  "results": [
+    {
+      "width": 1440,
+      "errors": [],
+      "checks": [
+        "whole selection blocks zero-slot item",
+        "persisted loss + close/reopen retries exact body/key with three total classes",
+        "new active class visible in refreshed actual DB-backed operational reader",
+        "other preset sees labeled operating shadow"
+      ],
+      "passed": true
+    },
+    {
+      "width": 390,
+      "errors": [],
+      "checks": [
+        "whole selection blocks zero-slot item",
+        "persisted loss + close/reopen retries exact body/key with three total classes",
+        "new active class visible in refreshed actual DB-backed operational reader",
+        "other preset sees labeled operating shadow"
+      ],
+      "passed": true
+    }
+  ]
+}

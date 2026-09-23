@@ -75,10 +75,11 @@ async function api(req, res) {
   const path = url.pathname
   calls.push({ path, args })
   const rpcName=path.startsWith('/rest/v1/rpc/')?path.slice('/rest/v1/rpc/'.length):'';
-  if(isPlanFixtureRpc(rpcName)) {
+  if(isPlanFixtureRpc(rpcName) && (rpcName !== 'get_academic_timetable_range_v1' || req.headers['x-timetable-fixture-db'] === '1')) {
     try { const result=await planFixtureRpc(rpcName,args);return json(res,result.error||result.data,result.error?400:200); }
     catch { return json(res,{message:'fixture_database_unavailable'},503); }
   }
+  if (path === "/api/public-classes/cache/invalidate") return json(res,{ok:true,synthetic:true});
   if (path === "/__control") {
     mode = args.mode ?? url.searchParams.get("mode") ?? "normal"
     return json(res, { mode })

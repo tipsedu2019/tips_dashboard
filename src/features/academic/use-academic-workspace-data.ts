@@ -159,8 +159,9 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     try {
       const next = await service.load(stableRequest) as AcademicResult;
       if (serviceRef.current !== service || revision !== rangeRevision.current || fingerprintRef.current !== fingerprint) return;
-      if (isDensityError(next)) { setDensityError({ service, fingerprint, value: next }); return; }
+      if (isDensityError(next)) { setDensityError({ service, fingerprint, value: next }); return false; }
       setRange({ service, data: next, request: stableRequest }); setDensityError(null);
+      return true;
     } catch (error) {
       if (serviceRef.current === service && revision === rangeRevision.current && fingerprintRef.current === fingerprint)
         setRangeError(getErrorMessage(error, "학사 데이터를 불러오지 못했습니다."));
@@ -220,5 +221,6 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
     totalCount: snapshot?.totalCount ?? null,
     setPageSizePreference, goToPage, refresh,
     loadCurriculumDetail,
+    refreshVerified: async () => { if (!await loadRange()) throw Error("academic_refresh_failed"); },
   };
 }

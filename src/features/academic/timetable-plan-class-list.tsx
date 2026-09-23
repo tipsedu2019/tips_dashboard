@@ -7,7 +7,7 @@ import { Checkbox } from '@/components/ui/checkbox';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import type { PlanSnapshot } from './timetable-plan-contract';
 import type { PlacementEditorDraft } from './timetable-placement-editor';
-import { itemDraft, PLAN_DAYS, formatPlanTime } from './timetable-plan-interaction';
+import { blankPlanItem, formatPendingSlot, pendingPlacementDraft, itemDraft, PLAN_DAYS, formatPlanTime } from './timetable-plan-interaction';
 
 export function TimetablePlanClassList({ snapshot, search, setSearch, listFilter, setListFilter,
   selectedItemIds, setSelectedItemIds, activeItemId, canEdit, onActivate, onEdit, onDelete, onDrag, suppressClick,
@@ -70,12 +70,16 @@ export function TimetablePlanClassList({ snapshot, search, setSearch, listFilter
           {slots.map(slot => <Button key={slot.id} size="sm" variant="ghost" onClick={() => onEdit({ ...draft, scope: 'slot', slotId: slot.id })}>
             {PLAN_DAYS[slot.weekday]} {formatPlanTime(slot.startMinute)}
           </Button>)}
+          {item.state === 'applied' && canEdit ? <Button size="sm" variant="ghost" onClick={() => {
+            const saved = snapshot.appliedSnapshots.find(history => history.itemId === item.id)?.slots ?? [];
+            onEdit({ item: { ...itemDraft(item), id: blankPlanItem(snapshot.plan.id).id, pendingSlots: [...item.pendingSlots, ...saved.map(slot => ({ id: crypto.randomUUID(), sourceText: JSON.stringify(slot), reason: 'conflict' as const, weekday: slot.weekday, startMinute: slot.startMinute, endMinute: slot.endMinute, teacherId: slot.teacherId, classroomId: slot.classroomId }))] }, slots: [], scope: 'item' });
+          }}>새 초안으로 복제</Button> : null}
           {item.state === 'applied' ? snapshot.appliedSnapshots.find(history => history.itemId === item.id)?.slots.map(slot =>
             <span key={slot.id} className="text-xs text-muted-foreground">{PLAN_DAYS[slot.weekday]} {formatPlanTime(slot.startMinute)}–{formatPlanTime(slot.endMinute)}</span>) : null}
         </div>
-        {item.pendingSlots.map(pending => <p key={pending.id} className="pl-6 text-xs text-muted-foreground">
-          {pending.sourceText} · {pending.reason === 'conflict' ? '충돌' : pending.reason === 'missing_resource' ? '자원 미정' : '시각 확인 필요'}
-        </p>)}
+        {item.pendingSlots.map(pending => <div key={pending.id} className="pl-6 text-xs text-muted-foreground"><p>
+          {formatPendingSlot(pending, snapshot.catalogs)} · {pending.reason === 'conflict' ? '충돌' : pending.reason === 'missing_resource' ? '자원 미정' : '시각 확인 필요'}
+        </p>{canEdit && item.state === 'draft' ? <Button size="sm" variant="ghost" onClick={() => onEdit(pendingPlacementDraft(itemDraft(item), slots, pending.id))}>이 배치 편성</Button> : null}</div>)}
       </div>;
     })}
     {!rows.length ? <p className="py-4 text-sm text-muted-foreground">조건에 맞는 수업이 없습니다.</p> : null}

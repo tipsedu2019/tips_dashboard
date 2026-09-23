@@ -1,4 +1,4 @@
-import type { DropTarget, GridTarget, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
+import type { DropTarget, GridTarget, PendingSlot, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
 import { assertInterval, moveSlot, type TimetableItemEdit } from './timetable-plan-model.ts';
 import { findConflicts, findOperatingConflicts } from './timetable-conflicts.ts';
 import { projectTimetableSlot, resolveGridTarget, resolveMovedGridTarget } from './timetable-placement-adapter.ts';
@@ -9,6 +9,18 @@ export const PLAN_VIEWS: {
     label: string;
 }[] = [{ id: 'teacher-weekly', label: '선생님 주간' }, { id: 'classroom-weekly', label: '강의실 주간' }, { id: 'daily-teacher', label: '일별 선생님' }, { id: 'daily-classroom', label: '일별 강의실' }];
 export function formatPlanTime(minute: number) { return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`; }
+/** Stored originals may include canonical JSON; presentation never exposes IDs. */
+export function formatPendingSlot(pending: PendingSlot, catalogs: PlanSnapshot['catalogs']) {
+    let source: Record<string, unknown> | null = null;
+    try { const value: unknown = JSON.parse(pending.sourceText); if (value && typeof value === 'object' && !Array.isArray(value)) source = value as Record<string, unknown>; } catch { /* Human-entered original text. */ }
+    if (pending.weekday === null && pending.startMinute === null && pending.endMinute === null)
+        return source ? '원본 배치 확인 필요' : pending.sourceText;
+    const teacher = catalogs.teachers.find(row => row.id === pending.teacherId)?.name
+        ?? (typeof source?.teacherName === 'string' ? source.teacherName : '선생님 미정');
+    const room = catalogs.classrooms.find(row => row.id === pending.classroomId)?.name
+        ?? (typeof source?.classroomName === 'string' ? source.classroomName : '강의실 미정');
+    return `${pending.weekday === null ? '요일 미정' : PLAN_DAYS[pending.weekday]} ${pending.startMinute === null ? '시작 미정' : formatPlanTime(pending.startMinute)}–${pending.endMinute === null ? '종료 미정' : formatPlanTime(pending.endMinute)} · ${teacher} · ${room}`;
+}
 export function parsePlanTime(value: string, allowMidnight = false) {
     if (!/^\d{2}:\d{2}$/.test(value))
         throw Error('시각을 17:13 형식으로 입력해 주세요.');
@@ -175,8 +187,23 @@ function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string
 
 export type PlacementEditorDraft = {
     item: PlanItemDraft; slots: PlanSlot[]; scope?: 'item' | 'slot' | 'add';
-    slotId?: string; target?: DropTarget; endMinute?: number; revision?: number | null;
+    pendingResolutionId?: string;
+    slotId?: string; target?: DropTarget; startMinute?: number; endMinute?: number; revision?: number | null;
 };
+export function pendingPlacementDraft(item: PlanItemDraft, slots: PlanSlot[], pendingId: string): PlacementEditorDraft {
+    const pending = item.pendingSlots.find(row => row.id === pendingId);
+    if (!pending) throw Error('미배치 원안을 다시 확인해 주세요.');
+    const target = pending.weekday !== null && pending.startMinute !== null ? {
+        weekday: pending.weekday, startMinute: pending.startMinute,
+        ...(pending.teacherId ? { teacherId: pending.teacherId } : {}),
+        ...(pending.classroomId ? { classroomId: pending.classroomId } : {}),
+    } : undefined;
+    return { item: { ...itemDraft(item), defaultTeacherId: pending.teacherId ?? item.defaultTeacherId,
+        defaultClassroomId: pending.classroomId ?? item.defaultClassroomId,
+        durationMinutes: pending.startMinute !== null && pending.endMinute !== null && pending.endMinute > pending.startMinute
+            ? pending.endMinute - pending.startMinute : item.durationMinutes },
+        slots, scope: 'add', pendingResolutionId: pending.id, target, startMinute: pending.startMinute ?? undefined, endMinute: pending.endMinute ?? undefined };
+}
 export type PlacementFormValues = {
     name: string; subject: string; grade: string; teacher: string; room: string;
     duration: string; start: string; end: string; weekdays: number[]; capacity: string; tuition: string;
@@ -194,7 +221,7 @@ export function placementFormDefaults(draft: PlacementEditorDraft): PlacementFor
         name: draft.item.name, subject: draft.item.subject, grade: draft.item.grade,
         teacher: initial?.teacherId || (whole ? draft.item.defaultTeacherId : slot?.teacherId) || slot?.teacherId || draft.item.defaultTeacherId || '',
         room: initial?.classroomId || (whole ? draft.item.defaultClassroomId : slot?.classroomId) || slot?.classroomId || draft.item.defaultClassroomId || '',
-        duration: String(duration), start: formatPlanTime(initial?.startMinute ?? slot?.startMinute ?? 540),
+        duration: String(duration), start: formatPlanTime(initial?.startMinute ?? draft.startMinute ?? slot?.startMinute ?? 540),
         end: formatPlanTime(draft.endMinute ?? (initial ? Math.min(1440, initial.startMinute + duration) : slot?.endMinute ?? 600)),
         weekdays: initial ? [initial.weekday] : whole ? PLAN_DAY_ORDER.filter(day => draft.slots.some(s => s.weekday === day)) : slot ? [slot.weekday] : [],
         capacity: draft.item.capacity === null ? '' : String(draft.item.capacity), tuition: draft.item.tuition === null ? '' : String(draft.item.tuition),
@@ -202,6 +229,7 @@ export function placementFormDefaults(draft: PlacementEditorDraft): PlacementFor
     };
 }
 export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: PlacementFormValues, candidate?: DropTarget): TimetableItemEdit {
+    if (draft.pendingResolutionId && placementScope(draft) !== 'add') throw Error('미배치는 추가 배치로 편성해 주세요.');
     const duration = Number(values.duration);
     if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) throw Error('수업 길이는 1–1440분으로 입력해 주세요.');
     if (!values.name.trim() || !values.subject.trim()) throw Error('수업명과 과목을 입력해 주세요.');
@@ -233,6 +261,7 @@ export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: Plac
         slots = slots.map(s => ({ ...s, ...(values.applyTeacher ? { teacherId: values.teacher } : {}), ...(values.applyRoom ? { classroomId: values.room } : {}), ...interval }));
     } else {
         const weekdays = candidate ? [candidate.weekday] : values.weekdays;
+        if (draft.pendingResolutionId && (!weekdays.length || !item.pendingSlots.some(row => row.id === draft.pendingResolutionId))) throw Error('해결할 미배치와 배치 요일을 선택해 주세요.');
         if (weekdays.length) {
             if (!values.teacher || !values.room) throw Error('배치하려면 선생님과 강의실을 선택해 주세요.');
             const startMinute = candidate?.startMinute ?? parsePlanTime(values.start);
@@ -246,5 +275,6 @@ export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: Plac
             }))];
         }
     }
+    if (draft.pendingResolutionId) item.pendingSlots = item.pendingSlots.filter(row => row.id !== draft.pendingResolutionId);
     return { operation: 'save', item, slots };
 }

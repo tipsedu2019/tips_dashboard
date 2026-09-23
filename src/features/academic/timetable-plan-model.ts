@@ -465,10 +465,17 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     const base = state.snapshot;
     if (base) requireTimetableTransferResult(result, planId);
     if (!base) return;
+    // Retire reads started before this receipt. Plan-only copies do not advance
+    // the source sequence; equality cannot order two operating fingerprints.
+    readGeneration++;
+    const incomingPlan = result.snapshot?.plan ?? result.sourcePlan;
+    if (incomingPlan?.changeSequence === base.plan.changeSequence && result.shadowFingerprint !== base.shadowFingerprint) {
+      publish({ referenceStatus: 'unverifiable' }); rebuild('stale'); return;
+    }
     if (result.snapshot) {
       if (result.snapshot.plan.id !== planId || result.snapshot.plan.changeSequence < base.plan.changeSequence) return;
       authoritativeReadSequence = result.snapshot.plan.changeSequence; itemReceiptSequence.clear();
-      publish({ snapshot: result.snapshot, referenceStatus: 'verified', error: null }); rebuild(); return;
+      publish({ snapshot: result.snapshot, referenceStatus: 'unverifiable', error: null }); rebuild(); return;
     }
     if (!result.addedShadowClasses || !result.sourcePlan || !result.operatingReference
       || result.sourcePlan.id !== planId || result.sourcePlan.changeSequence < base.plan.changeSequence
@@ -497,7 +504,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     Object.assign(next, result.operatingReference);
     next.capacity.itemCount = next.items.length;
     next.capacity.slotCount = next.slots.length;
-    publish({ snapshot: next, referenceStatus: 'verified', error: null }); rebuild();
+    publish({ snapshot: next, referenceStatus: 'unverifiable', error: null }); rebuild();
   };
   return { snapshot: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
     load, refresh, checkRevision, dispatch, undo, retry, resolveStale, failureKind, replaceRejected, discardRejected, applyTransfer, clearSensitive,

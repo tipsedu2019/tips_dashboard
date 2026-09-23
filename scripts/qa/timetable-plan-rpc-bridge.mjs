@@ -3,6 +3,8 @@ import { spawn } from 'node:child_process';
 const actor='00000000-0000-4000-8000-000000000099';
 const quote=value=>"'"+String(value).replaceAll("'","''")+"'";
 const allowed={
+ preview_timetable_plan_transfer_v1:{p_request:'jsonb'},commit_timetable_plan_transfer_v1:{p_command:'jsonb'},
+ get_academic_timetable_range_v1:{p_date_from:'date',p_date_to:'date',p_class_group_id:'text',p_status:'text',p_subject:'text'},
  list_timetable_plans_v1:{p_search:'text',p_archived:'boolean',p_page:'integer',p_page_size:'integer'},
  get_timetable_plan_v1:{p_plan_id:'uuid'},get_timetable_plan_revision_v1:{p_plan_id:'uuid'},
  list_timetable_share_candidates_v1:{},mutate_timetable_plan_v1:{p_command:'jsonb'},mutate_timetable_plan_item_v1:{p_command:'jsonb'},

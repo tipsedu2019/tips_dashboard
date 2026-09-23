@@ -154,6 +154,7 @@ export type TimetableOperatingReference = {
 export type PlanAccess = {
   canManage: boolean;
   canEdit: boolean;
+  /** Operating promotion only; plan-to-plan requires editor access to both plans. */
   canTransfer: boolean;
 };
 export type PlanMember = { userId: string; name: string; access: "viewer" | "editor" };
@@ -226,6 +227,8 @@ export type TimetableInvalidationSignal = {
   updated_at: string;
 };
 export type TimetablePlanRpcContract = {
+  preview_timetable_plan_transfer_v1: { Args: { p_request: TransferRequest }; Returns: TransferPreview };
+  commit_timetable_plan_transfer_v1: { Args: { p_command: TransferCommitCommand }; Returns: TransferResult };
   get_timetable_operational_reference_v1: { Args: Record<string, never>; Returns: TimetableOperatingReference };
   list_timetable_plans_v1: { Args: { p_search?: string; p_archived?: boolean; p_page?: number; p_page_size?: number }; Returns: PlanList };
   get_timetable_plan_v1: { Args: { p_plan_id: string }; Returns: PlanSnapshot };
@@ -245,6 +248,7 @@ export type TransferPreview = {
   fingerprint: string; shadowFingerprint: string; request: TransferRequest;
   mappings: Array<{ sourceId: string; action: 'create_active_class' | 'create_plan_item' }>;
   blockers: Array<{ sourceId: string; code: string; label: string; relatedIds: string[] }>;
+  warnings?: Array<{ sourceId: string; code: string; label: string; relatedIds: string[] }>;
 };
 export type TransferCommitCommand = { request: TransferRequest; previewFingerprint: string; requestKey: string };
 export type TransferResult = {

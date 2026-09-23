@@ -11,11 +11,10 @@ import { useTimetablePlanSession } from './use-timetable-plan-session.ts';
 export function useTimetablePlan(planId: string | null) {
   const { user, role, loading } = useAuth();
   const actorScope = !loading && user?.id && role ? `${user.id}:${role}` : null;
-  const controller = useMemo(() => {
-    if (!supabase || !actorScope || !planId) return null;
-    const service = createTimetablePlanService({ client: supabase as unknown as TimetableRpcClient, actorScope });
-    return createTimetablePlanController({ service, actorScope, planId });
-  }, [actorScope, planId]);
+  const service = useMemo(() => supabase && actorScope
+    ? createTimetablePlanService({ client: supabase as unknown as TimetableRpcClient, actorScope }) : null, [actorScope]);
+  const controller = useMemo(() => service && actorScope && planId
+    ? createTimetablePlanController({ service, actorScope, planId }) : null, [service, actorScope, planId]);
   const state = useTimetablePlanSession({ controller, actorScope, planId,
     signalClient: supabase as unknown as TimetableSignalClient | null });
   const dispatch = useCallback((edit: TimetableItemEdit) => controller
@@ -33,5 +32,5 @@ export function useTimetablePlan(planId: string | null) {
   const discardRejected = useCallback((itemId: string) => controller
     ? controller.discardRejected(itemId) : Promise.reject(Error('timetable_plan_scope_missing')), [controller]);
   const failureKind = useCallback((itemId: string) => controller?.failureKind(itemId) ?? null, [controller]);
-  return { ...state, replaceRejected, discardRejected, failureKind, dispatch, retry, refresh, resolveStale, undo, controller };
+  return { ...state, service, replaceRejected, discardRejected, failureKind, dispatch, retry, refresh, resolveStale, undo, controller };
 }

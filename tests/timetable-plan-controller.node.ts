@@ -52,3 +52,14 @@ test('discard confirmed rejected head advances queued latest edit while preservi
  h.pending[1].resolve({planId:'plan',metaRevision:1,changeSequence:3,shadowFingerprint:'fingerprint',item:{...item,id:'other',revision:1},slots:[],removedItemIds:[]});await independent;
  assert.equal(c.snapshot().dirty,false);assert.equal(c.snapshot().snapshot?.items.length,2);assert.equal(c.snapshot().snapshot?.slots[0].startMinute,640);c.destroy();
 });
+
+test('plan-copy receipt at equal sequence never replaces a newer operating reference or verifies it',async()=>{
+ const h=makeService();const c=createTimetablePlanController({service:h.service,actorScope:'actor',planId:'plan',storage:memoryStorage()});await c.load();
+ const old=snapshot();
+ const newer={...snapshot(),shadowFingerprint:'new-operating',datedFingerprint:'new-dated',datedSessions:[{id:'session',classId:'class',sourceSlotId:null,date:'2026-09-24',state:'active' as const,startMinute:600,endMinute:660,teacherId:'teacher',classroomId:'room',revision:2}]};
+ h.setServer(newer);await c.refresh();
+ c.applyTransfer({transferId:'copy',shadowFingerprint:old.shadowFingerprint,mappings:[{sourceId:'item',targetId:'target-item',targetClassId:null}],appliedItems:[],removedItemIds:[],addedShadowSlots:[],createdItems:[],createdSlots:[],snapshot:old});
+ assert.equal(c.snapshot().snapshot?.shadowFingerprint,'new-operating');assert.equal(c.snapshot().snapshot?.datedFingerprint,'new-dated');
+ assert.notEqual(c.snapshot().referenceStatus,'verified');
+ await c.refresh();assert.equal(c.snapshot().referenceStatus,'verified');assert.equal(c.snapshot().snapshot?.datedSessions[0].revision,2);c.destroy();
+});
