@@ -106,7 +106,7 @@ begin
  -- Strict complete tokens only. Multi-resource legacy strings remain blocked
  -- unless each whole schedule line can resolve its exact catalog labels.
  for piece in select btrim(x) from regexp_split_to_table(coalesce(c.schedule,''), E'[\\n;]+|,[[:space:]]*(?=[월화수목금토일][월화수목금토일 /,]*[[:space:]]+[0-9])') x loop
- parts:=regexp_match(piece,'^([월화수목금토일][월화수목금토일 /,]*)[[:space:]]+([0-9]{1,2}:[0-9]{2})[[:space:]]*[-~][[:space:]]*([0-9]{1,2}:[0-9]{2})([[:space:]]*\\(([^,()]+),[[:space:]]*([^()]+)\\))?$');
+ parts:=regexp_match(piece,'^([월화수목금토일][월화수목금토일 /,]*)[[:space:]]+([0-9]{1,2}:[0-9]{2})[[:space:]]*[-~][[:space:]]*([0-9]{1,2}:[0-9]{2})([[:space:]]*[(]([^,()]+),[[:space:]]*([^()]+)[)])?$');
  if parts is null then invalid:=true; continue; end if;
  select min(id::text)::uuid into tid from public.teacher_catalogs where name=btrim(coalesce(parts[5],c.teacher)) having count(*)=1;
  select min(id::text)::uuid into rid from public.classroom_catalogs where name=btrim(coalesce(parts[6],c.room)) having count(*)=1;
@@ -204,7 +204,7 @@ declare v jsonb; other jsonb; old public.timetable_plan_slots; changed boolean; 
 begin
  if jsonb_typeof(p_slots) is distinct from 'array' then raise exception using errcode='22023',message='timetable_invalid';end if;
  if jsonb_array_length(p_slots)>2000 then raise exception using errcode='22023',message='timetable_capacity';end if;
- if (select count(*)<>count(distinct x->>'id') from jsonb_array_elements(p_slots) x) then raise exception using errcode='22023',message='timetable_invalid';end if;
+ if (select count(*)<>count(distinct (x->>'id')::uuid) from jsonb_array_elements(p_slots) x) then raise exception using errcode='22023',message='timetable_invalid';end if;
  for v in select value from jsonb_array_elements(p_slots) loop
  if jsonb_typeof(v)<>'object' or exists(select 1 from jsonb_object_keys(v) k where k not in('id','itemId','planId','weekday','startMinute','endMinute','teacherId','classroomId','sourceSlotId','teacherName','classroomName')) then raise exception using errcode='22023',message='timetable_invalid';end if;
  sid:=(v->>'id')::uuid;tid:=(v->>'teacherId')::uuid;rid:=(v->>'classroomId')::uuid;day:=(v->>'weekday')::int;a:=(v->>'startMinute')::int;b:=(v->>'endMinute')::int;

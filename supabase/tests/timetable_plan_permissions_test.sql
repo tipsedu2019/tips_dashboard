@@ -1,5 +1,9 @@
 begin;
-create extension if not exists pgtap with schema extensions;
+do $$begin
+ if not exists(select 1 from pg_catalog.pg_extension where extname='pgtap') then
+  create extension pgtap with schema extensions;
+ end if;
+end $$;
 select no_plan();
 create function pg_temp.tid(n int) returns uuid language sql immutable as $$select ('ac239000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 insert into auth.users(id,instance_id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
