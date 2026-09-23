@@ -24,6 +24,7 @@ async function harness() {
  let actor='A'; const pending=[], reads=[], calls=[], changes=[];
  const services = Object.fromEntries(['A','B'].map(id=>[id,{listPlans:async()=>({plans:[],total:0,canManage:true}),shareCandidates:()=>{const d=deferred();reads.push({actor:id,...d});return d.promise;},mutatePlan:command=>{const d=deferred();calls.push(structuredClone(command));pending.push({actor:id,...d});return d.promise;}}]));
  const box=({children})=>h('div',null,children);
+ const selectContext=React.createContext(null);
  const mocks={
  '@/providers/auth-provider':{useAuth:()=>({user:{id:actor},role:'admin',loading:false})},'@/lib/supabase':{supabase:{}},
  './timetable-plan-service':{createTimetablePlanService:({actorScope})=>services[actorScope.split(':')[0]]},
@@ -32,7 +33,11 @@ async function harness() {
  '@/components/ui/input':{Input:({onChange,...props})=>{delete props.autoFocus;return h('input',{...props,onInput:onChange});}},
  '@/components/ui/label':{Label:props=>h('label',props)},
  '@/components/ui/checkbox':{Checkbox:({checked,onCheckedChange})=>h('input',{type:'checkbox',checked,readOnly:true,onClick:()=>onCheckedChange(!checked)})},
- '@/components/ui/select':Object.fromEntries(['Select','SelectContent','SelectItem','SelectTrigger','SelectValue'].map(k=>[k,box])),
+ '@/components/ui/select':{
+  Select:({value,onValueChange,children})=>h(selectContext.Provider,{value:{onValueChange}},h('div',{'data-select':true,'data-value':value},children)),
+  SelectContent:box,SelectValue:box,SelectTrigger:({id,children})=>h('div',{id},children),
+  SelectItem:({value,children})=>{const context=React.useContext(selectContext);return h('button',{type:'button',onClick:()=>context.onValueChange(value)},children);},
+ },
  '@/components/ui/dialog':{Dialog:({open,children})=>open?h('section',{'data-dialog':true},children):null,...Object.fromEntries(['DialogContent','DialogHeader','DialogTitle','DialogDescription','DialogFooter'].map(k=>[k,box]))},
  '@/components/ui/dropdown-menu':{DropdownMenu:box,DropdownMenuContent:box,DropdownMenuTrigger:box,DropdownMenuItem:({children,onSelect})=>h('button',{onClick:onSelect},children)},
  };
@@ -44,7 +49,8 @@ async function harness() {
  const click=async text=>act(async()=>{const button=[...document.querySelectorAll('button')].find(b=>b.textContent===text);assert.ok(button,text);button.click();});
  const input=async value=>act(async()=>{const el=document.getElementById('plan-name');el.value=value;el.dispatchEvent(new dom.window.Event('input',{bubbles:true}));});
  const submit=()=>act(async()=>document.querySelector('form').dispatchEvent(new dom.window.Event('submit',{bubbles:true,cancelable:true})));
- return {pending,reads,calls,changes,click,input,submit,render,actor:async id=>{actor=id;await render();},resolve:async(index,result)=>act(async()=>pending[index].resolve(result)),reject:async(index,error=Error('response lost'))=>act(async()=>pending[index].reject(error)),close:async()=>{await act(async()=>root.unmount());Object.assign(globalThis,old);dom.window.close();}};
+ const chooseMember=(userId,label)=>act(async()=>{const control=document.getElementById(`member-${userId}`).closest('[data-select]');const option=[...control.querySelectorAll('button')].find(button=>button.textContent===label);assert.ok(option);option.click();});
+ return {pending,reads,calls,changes,click,input,submit,render,chooseMember,actor:async id=>{actor=id;await render();},resolve:async(index,result)=>act(async()=>pending[index].resolve(result)),reject:async(index,error=Error('response lost'))=>act(async()=>pending[index].reject(error)),close:async()=>{await act(async()=>root.unmount());Object.assign(globalThis,old);dom.window.close();}};
 }
 for(const mode of ['create','clone'])for(const reopen of [false,true])test(`${mode}: unknown receipt survives changed name${reopen?' and dialog reopen':''}`,async t=>{
  const f=await harness();const persistedIds=new Set();try {
@@ -80,4 +86,26 @@ test('conclusive picker validation rejection permits corrected intent; unrelated
    else assert.deepEqual(f.calls[1],original);
   }finally{await f.close();}
  }
+});
+
+for(const access of ['editor','none'])test(`share receipt preserves later ${access==='editor'?'viewer-to-editor change':'revocation'} for a separate confirmed-revision command`,async()=>{
+ const f=await harness();try{
+  await f.click('공유');
+  await act(async()=>f.reads[0].resolve([{userId:'teacher',name:'담당 선생님'},{userId:'other',name:'다른 선생님'}]));
+  await f.chooseMember('teacher','보기');await f.chooseMember('other','편집');await f.submit();
+  const original=structuredClone(f.calls[0]);assert.equal(original.operation,'share');
+  assert.deepEqual(original.members,[{userId:'teacher',access:'viewer'},{userId:'other',access:'editor'}]);
+  await f.reject(0);await f.chooseMember('teacher',access==='editor'?'편집':'공유 안 함');await f.submit();
+  assert.deepEqual(f.calls[1],original,'receipt retry must preserve exact original body/key');
+  await f.resolve(1,{plan:{id:'source',name:'원본',state:'draft',metaRevision:7,targetStartDate:null,targetEndDate:null}});
+  assert.ok(document.querySelector('[data-dialog]'),'later member input remains in the open dialog');
+  assert.equal(document.getElementById('member-teacher').closest('[data-select]').dataset.value,access);
+  assert.equal(f.calls.length,2,'later permission change requires a separate explicit save');
+  await f.submit();const follow=f.calls[2];
+  assert.equal(follow.operation,'share');assert.equal(follow.planId,original.planId);assert.equal(follow.expectedMetaRevision,7);
+  assert.notEqual(follow.requestKey,original.requestKey);
+  assert.deepEqual(follow.members,access==='editor'?[{userId:'teacher',access:'editor'},{userId:'other',access:'editor'}]:[{userId:'other',access:'editor'}]);
+  await f.resolve(2,{plan:{id:'source',name:'원본',state:'draft',metaRevision:8,targetStartDate:null,targetEndDate:null}});
+  assert.equal(document.querySelector('[data-dialog]'),null);assert.deepEqual(f.changes,[]);
+ }finally{await f.close();}
 });

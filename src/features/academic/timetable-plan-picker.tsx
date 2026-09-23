@@ -14,7 +14,8 @@ import type { PlanCommand, PlanList, PlanSnapshot, ShareCandidate } from './time
 import { planErrorLabel } from './timetable-plan-interaction';
 type Fields = { name: string; start: string; end: string; members: Record<string, 'viewer' | 'editor'> };
 type PendingCommand = { command: PlanCommand; fields: Fields };
-// These final RPC errors occur after receipt lookup and conclusively reject this body.
+// Exact validation/stale pairs in the final RPC; partial-date validation precedes receipt lookup.
+// Classify the code/message pair, never the SQLSTATE alone.
 function rejectedBeforeCommit(error: unknown) {
     if (!error || typeof error !== 'object' || !('code' in error) || !('message' in error)) return false;
     return (error.code === '22023' && error.message === 'timetable_invalid')
@@ -140,10 +141,16 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
             pending.current = null; retainedFields.current = null;
             setRecovering(false); setBusy(false);
             const created = intent.command.operation === 'create' || intent.command.operation === 'clone';
-            const changed = latest.name !== intent.fields.name || latest.start !== intent.fields.start || latest.end !== intent.fields.end;
-            if ((created || intent.command.operation === 'rename') && changed) {
-                setRecoveredPlan(result.plan); setMode('rename');
-                setError('원래 요청의 저장을 확인했습니다. 변경한 입력은 이 프리셋에 별도로 저장해 주세요.');
+            const metadataChanged = latest.name !== intent.fields.name || latest.start !== intent.fields.start || latest.end !== intent.fields.end;
+            const membersChanged = Object.keys(latest.members).length !== Object.keys(intent.fields.members).length
+                || Object.entries(latest.members).some(([id, access]) => intent.fields.members[id] !== access);
+            const continuation = (created || intent.command.operation === 'rename') && metadataChanged ? 'rename'
+                : intent.command.operation === 'share' && membersChanged ? 'share' : null;
+            if (continuation) {
+                setRecoveredPlan(result.plan); setMode(continuation);
+                setError(continuation === 'share'
+                    ? '원래 요청의 저장을 확인했습니다. 변경한 공유 권한은 별도로 저장해 주세요.'
+                    : '원래 요청의 저장을 확인했습니다. 변경한 입력은 이 프리셋에 별도로 저장해 주세요.');
             } else { setMode(null); operationEpoch.current++; }
             void reload();
             if (created) onChange(result.plan.id);
