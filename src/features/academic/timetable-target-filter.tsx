@@ -17,18 +17,20 @@ export function TimetableTargetFilter({
   options,
   selected,
   onChange,
+  optionLabels = {},
 }: {
   label: string;
   options: string[];
+  optionLabels?: Record<string, string>;
   selected: string[];
   onChange: (values: string[]) => void;
 }) {
   const id = useId();
   const [search, setSearch] = useState("");
   const filtered = options.filter((option) =>
-    option.toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
+    (optionLabels[option] || option).toLocaleLowerCase().includes(search.trim().toLocaleLowerCase()),
   );
-  const summary = selected.length ? selected.join(", ") : `전체 ${label}`;
+  const summary = selected.length ? selected.map(value => optionLabels[value] || value).join(", ") : `전체 ${label}`;
   return (
     <div className="min-w-0 space-y-2">
       <Label htmlFor={id}>{label}</Label>
@@ -89,7 +91,7 @@ export function TimetableTargetFilter({
                     )
                   }
                 />
-                <span className="min-w-0 break-words text-sm">{option}</span>
+                <span className="min-w-0 break-words text-sm">{optionLabels[option] || option}</span>
               </label>
             ))}
             {!filtered.length ? (

@@ -1,7 +1,7 @@
 import type {
   DeletePlanItemCommand, PlanCommand, PlanItem, PlanMutationResult, PlanRevision, PlanSnapshot,
   SavePlanItemCommand, TimetableOperatingReference, TimetablePlanRpcContract, TransferCommitCommand, TransferPreview,
-  TransferRequest, TransferResult,
+  TransferRequest, TransferResult, PlanList, ShareCandidate,
 } from './timetable-plan-contract.ts';
 
 type RpcName = keyof TimetablePlanRpcContract | 'preview_timetable_plan_transfer_v1' | 'commit_timetable_plan_transfer_v1';
@@ -160,6 +160,17 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
   }
   return {
     actorScope,
+    listPlans: async (archived = false, page = 1, options?: RequestOptions) => {
+      const result = await invoke('list_timetable_plans_v1', { p_archived: archived, p_page: page, p_page_size: 50 }, options);
+      if (!record(result) || !Array.isArray(result.plans) || !result.plans.every(planMetadata)
+        || !integer(result.total) || typeof result.canManage !== 'boolean') throw invalid();
+      return result as PlanList;
+    },
+    shareCandidates: async (options?: RequestOptions) => {
+      const result = await invoke('list_timetable_share_candidates_v1', {}, options);
+      if (!Array.isArray(result) || !result.every(row => record(row) && string(row.userId) && string(row.name) && row.role === 'teacher')) throw invalid();
+      return result as ShareCandidate[];
+    },
     readPlan: async (planId: string, options?: RequestOptions) => requireSnapshot(await invoke('get_timetable_plan_v1', { p_plan_id: planId }, options)),
     readRevision: async (planId: string, options?: RequestOptions) => requireRevision(await invoke('get_timetable_plan_revision_v1', { p_plan_id: planId }, options)),
     saveItem: async (command: SavePlanItemCommand | DeletePlanItemCommand, options?: RequestOptions) =>

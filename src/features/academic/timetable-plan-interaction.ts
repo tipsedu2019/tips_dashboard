@@ -1,0 +1,173 @@
+import type { GridTarget, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
+import { assertInterval, moveSlot, type TimetableItemEdit } from './timetable-plan-model.ts';
+import { findConflicts, findOperatingConflicts } from './timetable-conflicts.ts';
+import { projectTimetableSlot, resolveGridTarget, resolveMovedGridTarget } from './timetable-placement-adapter.ts';
+export const PLAN_DAYS = ['일', '월', '화', '수', '목', '금', '토'];
+export const PLAN_DAY_ORDER = [1, 2, 3, 4, 5, 6, 0];
+export const PLAN_VIEWS: {
+    id: TimetableView;
+    label: string;
+}[] = [{ id: 'teacher-weekly', label: '선생님 주간' }, { id: 'classroom-weekly', label: '강의실 주간' }, { id: 'daily-teacher', label: '일별 선생님' }, { id: 'daily-classroom', label: '일별 강의실' }];
+export function formatPlanTime(minute: number) { return `${String(Math.floor(minute / 60)).padStart(2, '0')}:${String(minute % 60).padStart(2, '0')}`; }
+export function parsePlanTime(value: string, allowMidnight = false) {
+    if (!/^\d{2}:\d{2}$/.test(value))
+        throw Error('시각을 17:13 형식으로 입력해 주세요.');
+    const [h, m] = value.split(':').map(Number);
+    const minute = h * 60 + m;
+    if (m > 59 || h > 24 || minute > (allowMidnight ? 1440 : 1439))
+        throw Error('시작은 00:00–23:59, 종료는 24:00까지 입력해 주세요.');
+    return minute;
+}
+export function itemDraft(item: PlanItemDraft): PlanItemDraft {
+    const { id, planId, name, subject, subjectAreaKey, grade, capacity, tuition, defaultTeacherId, defaultClassroomId, durationMinutes, pendingSlots } = item;
+    return { id, planId, name, subject, subjectAreaKey, grade, capacity, tuition, defaultTeacherId, defaultClassroomId, durationMinutes, pendingSlots };
+}
+export function blankPlanItem(planId: string, id = crypto.randomUUID()): PlanItemDraft { return { id, planId, name: '', subject: '영어', subjectAreaKey: null, grade: '', capacity: null, tuition: null, defaultTeacherId: null, defaultClassroomId: null, durationMinutes: 60, pendingSlots: [] }; }
+export type PlacementIntent = {
+    kind: 'move';
+    slotId: string;
+    origin: GridTarget;
+    target: GridTarget;
+} | {
+    kind: 'resize';
+    slotId: string;
+    endMinute: number;
+} | {
+    kind: 'unplace';
+    slotId: string;
+} | {
+    kind: 'drop';
+    itemId: string;
+    slotId: string;
+    target: GridTarget;
+};
+export function placementEdit(snapshot: PlanSnapshot, intent: PlacementIntent): TimetableItemEdit {
+    const slot = intent.kind === 'drop' ? undefined : snapshot.slots.find(s => s.id === intent.slotId);
+    if (intent.kind !== 'drop' && !slot)
+        throw Error('기존 수업은 편집할 수 없습니다.');
+    const item = snapshot.items.find(i => i.id === (intent.kind === 'drop' ? intent.itemId : slot!.itemId));
+    if (!item || item.state !== 'draft')
+        throw Error('편집할 수업을 선택해 주세요.');
+    let slots = snapshot.slots.filter(s => s.itemId === item.id);
+    if (intent.kind === 'unplace')
+        slots = slots.filter(s => s.id !== intent.slotId);
+    if (intent.kind === 'move')
+        slots = slots.map(s => s.id === slot!.id ? moveSlot(s, resolveMovedGridTarget(s, intent.origin, intent.target)) : s);
+    if (intent.kind === 'resize') {
+        assertInterval(slot!.startMinute, intent.endMinute);
+        slots = slots.map(s => s.id === slot!.id ? { ...s, endMinute: intent.endMinute } : s);
+    }
+    if (intent.kind === 'drop') {
+        const target = resolveGridTarget(intent.target);
+        const teacherId = target.teacherId || item.defaultTeacherId, classroomId = target.classroomId || item.defaultClassroomId;
+        if (!teacherId || !classroomId || !item.durationMinutes)
+            throw Error('선생님·강의실·수업 길이를 입력해 주세요.');
+        const endMinute = target.startMinute + item.durationMinutes;
+        assertInterval(target.startMinute, endMinute);
+        slots = [...slots, { id: intent.slotId, itemId: item.id, planId: item.planId, weekday: target.weekday, startMinute: target.startMinute, endMinute, teacherId, classroomId, sourceSlotId: null }];
+    }
+    return { operation: 'save', item: itemDraft(item), slots };
+}
+export type PlanGridBlock = {
+    id: string;
+    itemId: string;
+    shadow: boolean;
+    title: string;
+    subject: string;
+    teacher: string;
+    classroom: string;
+    columnKey: string;
+    startMinute: number;
+    endMinute: number;
+    slot: PlanSlot | ShadowSlot;
+};
+export function buildPlanPanels(snapshot: PlanSnapshot, view: TimetableView, subject = '', selectedTargets: string[] = []) {
+    const weekly = view.endsWith('weekly'), teacher = view.includes('teacher');
+    const resources = teacher ? snapshot.catalogs.teachers : snapshot.catalogs.classrooms;
+    if (!resources.length) return [];
+    const options = resources.map(r => ({ id: r.id, name: `${r.name}${!r.isVisible || r.isMissing ? ' (사용 불가)' : ''}` }));
+    const days = PLAN_DAY_ORDER.map(i => ({ id: String(i), name: PLAN_DAYS[i] }));
+    const panels = (weekly ? options : days).filter(p => !selectedTargets.length || selectedTargets.includes(p.id));
+    const columns = weekly ? days : options;
+    const all: PlanGridBlock[] = [...snapshot.slots, ...snapshot.shadowSlots].flatMap(slot => {
+        const shadow = 'classId' in slot;
+        const item = shadow ? snapshot.shadowClasses.find(i => i.id === slot.classId) : snapshot.items.find(i => i.id === slot.itemId);
+        if (!item || (subject && item.subject !== subject))
+            return [];
+        const projected = projectTimetableSlot(slot, view);
+        return [{ ...projected, itemId: shadow ? slot.classId : slot.itemId, shadow, title: item.name, subject: item.subject || '', teacher: resourceLabel(snapshot.catalogs.teachers, slot.teacherId), classroom: resourceLabel(snapshot.catalogs.classrooms, slot.classroomId), slot }];
+    });
+    return panels.map(panel => ({ ...panel, columns, blocks: all.filter(b => projectTimetableSlot(b.slot, view).panelKey === panel.id) }));
+}
+/** Connected interval groups share a lane count; adjacency is not overlap. */
+export function layoutOverlapLanes<T extends {
+    id: string;
+    startMinute: number;
+    endMinute: number;
+}>(blocks: T[]) {
+    const sorted = [...blocks].sort((a, b) => a.startMinute - b.startMinute || a.id.localeCompare(b.id));
+    const result: (T & {
+        lane: number;
+        laneCount: number;
+    })[] = [];
+    let group: typeof result = [];
+    let ends: number[] = [];
+    let groupEnd = -1;
+    const flush = () => { for (const b of group)
+        b.laneCount = ends.length; result.push(...group); group = []; ends = []; };
+    for (const b of sorted) {
+        if (b.startMinute >= groupEnd)
+            flush();
+        let lane = ends.findIndex(end => end <= b.startMinute);
+        if (lane < 0)
+            lane = ends.length;
+        ends[lane] = b.endMinute;
+        groupEnd = Math.max(group.length ? groupEnd : 0, b.endMinute);
+        group.push({ ...b, lane, laneCount: 1 });
+    }
+    flush();
+    return result;
+}
+export type PointerSession = {
+    slotId: string;
+    origin: GridTarget;
+    target: GridTarget;
+};
+export function createPointerSession(slotId: string, origin: GridTarget): PointerSession { return { slotId, origin, target: origin }; }
+export function finishPointerSession(session: PointerSession, reason: string): PlacementIntent | null {
+    if (reason !== 'pointerup')
+        return null;
+    const { origin, target } = session;
+    const moved = origin.view !== target.view || origin.panelKey !== target.panelKey || origin.columnKey !== target.columnKey || Math.round((target.visibleStartMinute + target.rowPosition * target.slotMinutes - origin.visibleStartMinute - origin.rowPosition * origin.slotMinutes) / 5) !== 0;
+    return moved ? { kind: 'move', ...session } : null;
+}
+export function planErrorLabel(error: unknown) {
+    const text = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : '';
+    if (text.includes('stale'))
+        return '다른 편집 내용이 있습니다. 최신 내용과 내 입력 중 하나를 선택해 주세요.';
+    if (text.includes('conflict'))
+        return '선생님 또는 강의실 시간이 겹칩니다. 다른 시간을 선택해 주세요.';
+    if (text.includes('invalid') || error instanceof RangeError)
+        return '요일·시각·과목에 맞는 선생님과 강의실을 확인해 주세요. 자정을 넘는 수업은 두 요일로 나누어 주세요.';
+    if (text.includes('permission') || text.includes('access'))
+        return '편집 권한을 확인할 수 없습니다. 다시 불러와 주세요.';
+    return /^[가-힣]/.test(text) ? text : '저장하지 못했습니다. 입력을 유지했으니 다시 시도해 주세요.';
+}
+/** Check only changed occupancy against the complete canonical scope. Metadata repair remains possible. */
+export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableItemEdit) {
+    if (edit.operation !== 'save')
+        return;
+    const same = (a: PlanSlot, b: PlanSlot) => a.weekday === b.weekday && a.startMinute === b.startMinute && a.endMinute === b.endMinute && a.teacherId === b.teacherId && a.classroomId === b.classroomId;
+    const changed = edit.slots.filter(slot => !snapshot.slots.some(old => old.id === slot.id && same(old, slot)));
+    const all = [...snapshot.slots.filter(s => s.itemId !== edit.item.id), ...edit.slots];
+    const conflicts = [...findConflicts(all, snapshot.shadowSlots), ...findOperatingConflicts(changed, snapshot, snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null)].filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
+    if (conflicts.length) {
+        const conflict = conflicts[0];
+        const otherId = conflict.otherSlotId;
+        const other = snapshot.shadowSlots.find(s => s.id === otherId);
+        const planSlot = all.find(s => s.id === otherId);
+        const name = other ? snapshot.shadowClasses.find(c => c.id === other.classId)?.name : snapshot.items.find(i => i.id === planSlot?.itemId)?.name;
+        throw Error(`${conflict.date ? conflict.date + ' · ' : ''}${name || '다른 수업'}과 ${conflict.kind === 'teacher' ? '선생님' : conflict.kind === 'classroom' ? '강의실' : '수업'} 시간이 겹칩니다.`);
+    }
+}
+function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string) { const row = options.find(r => r.id === id); return row ? `${row.name}${!row.isVisible || row.isMissing ? ' (사용 불가)' : ''}` : '사용 불가'; }

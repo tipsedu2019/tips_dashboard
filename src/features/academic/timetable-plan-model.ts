@@ -60,6 +60,7 @@ type Pending = {
   submitted: SavePlanItemCommand | DeletePlanItemCommand | null;
   status: 'queued' | 'sending' | 'error';
   expectedItemRevision?: number | null;
+  confirmedRejection?: boolean;
   resolve?: () => void;
   reject?: (error: unknown) => void;
 };
@@ -69,6 +70,11 @@ const isAccessError = (error: unknown) => {
   return value?.code === '42501' || value?.code === '28000' || value?.code === '28P01'
     || value?.code === 'PGRST301' || value?.status === 401 || value?.status === 403
     || value?.message === 'timetable_forbidden';
+};
+const isConfirmedRejection = (error: unknown) => {
+  const value = error as { code?: string; message?: string } | null;
+  return (value?.code === '23P01' && value.message === 'timetable_resource_conflict')
+    || (value?.code === '22023' && value.message === 'timetable_invalid');
 };
 const isStaleError = (error: unknown) => (error as { message?: string } | null)?.message === 'timetable_stale';
 const periodOf = (snapshot: PlanSnapshot) => snapshot.plan.targetStartDate && snapshot.plan.targetEndDate
@@ -327,7 +333,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
           } catch (error) {
             if (disposed || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) break;
             if (isAccessError(error)) { clearSensitive(); entry.reject?.(error); break; }
-            entry.status = 'error'; if (isStaleError(error)) staleItems.add(itemId);
+            entry.status = 'error'; entry.confirmedRejection = isConfirmedRejection(error); if (isStaleError(error)) staleItems.add(itemId);
             persist(); rebuild(isStaleError(error) ? 'stale' : 'error', error);
             entry.reject?.(error); break;
           }
@@ -342,6 +348,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     const itemId = edit.operation === 'save' ? edit.item.id : edit.itemId;
     if (!itemId || (edit.operation === 'save' && (edit.item.planId !== planId
       || edit.slots.some((slot) => slot.planId !== planId || slot.itemId !== itemId)))) return Promise.reject(Error('timetable_invalid'));
+    if (queues.get(itemId)?.[0]?.status === 'error') return Promise.reject(Error('timetable_failed_edit_pending'));
     let rejectSave!: (error: unknown) => void;
     const promise = new Promise<void>((resolve, reject) => {
       rejectSave = reject;
@@ -358,6 +365,34 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       rejectSave(Error(staleItems.has(itemId) ? 'timetable_stale' : 'timetable_reference_unverifiable'));
     } else { persist(); rebuild(); runQueue(itemId); }
     return promise;
+  };
+  const failureKind = (itemId: string): 'rejected' | 'uncertain' | 'stale' | null => {
+    const head = queues.get(itemId)?.[0];
+    if (staleItems.has(itemId)) return 'stale';
+    return head?.status === 'error' ? head.confirmedRejection ? 'rejected' : 'uncertain' : null;
+  };
+  // Replace only a conclusively rejected head. Newer queued intents and other items stay intact.
+  const replaceRejected = (edit: TimetableItemEdit): Promise<void> => {
+    if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
+    const itemId = edit.operation === 'save' ? edit.item.id : edit.itemId;
+    if (failureKind(itemId) !== 'rejected') return Promise.reject(Error('timetable_rejection_required'));
+    if (!state.snapshot?.permissions.canEdit || state.snapshot.plan.state !== 'draft') return Promise.reject(Error('timetable_forbidden'));
+    if (edit.operation === 'save' && (edit.item.planId !== planId || edit.slots.some(slot => slot.planId !== planId || slot.itemId !== itemId))) return Promise.reject(Error('timetable_invalid'));
+    if (state.referenceStatus !== 'verified' || !operatingReferenceComplete(state.snapshot, periodOf(state.snapshot))) return Promise.reject(Error('timetable_reference_unverifiable'));
+    const queue = queues.get(itemId)!;
+    queue.shift();
+    const promise = new Promise<void>((resolve, reject) => {
+      queue.unshift({ edit: structuredClone(edit), submitted: null, status: 'queued', resolve, reject });
+    });
+    persist(); rebuild(); runQueue(itemId);
+    return promise;
+  };
+  const discardRejected = async (itemId: string): Promise<void> => {
+    if (paused || disposed) throw Error('timetable_plan_inactive');
+    if (failureKind(itemId) !== 'rejected') throw Error('timetable_rejection_required');
+    const queue = queues.get(itemId)!;
+    queue.shift(); if (!queue.length) queues.delete(itemId);
+    persist(); rebuild(undefined, null); runQueue(itemId);
   };
   const undo = (): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
@@ -465,7 +500,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     publish({ snapshot: next, referenceStatus: 'verified', error: null }); rebuild();
   };
   return { snapshot: () => state, subscribe: (listener: () => void) => { listeners.add(listener); return () => { listeners.delete(listener); }; },
-    load, refresh, checkRevision, dispatch, undo, retry, resolveStale, applyTransfer, clearSensitive,
+    load, refresh, checkRevision, dispatch, undo, retry, resolveStale, failureKind, replaceRejected, discardRejected, applyTransfer, clearSensitive,
     pause: () => {
       if (disposed || paused) return;
       paused = true; epoch += 1;

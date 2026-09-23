@@ -48,6 +48,10 @@ import {
 } from "./records.js";
 import { getTimetablePanelLayout } from "./timetable-layout";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
+import { useDraftNavigation } from '@/hooks/use-draft-navigation';
+import { useTimetablePlan } from './use-timetable-plan';
+import { TimetablePlanPicker } from './timetable-plan-picker';
+import { TimetablePlanWorkspace } from './timetable-plan-workspace';
 import styles from "./timetable-grid-skin.module.css";
 import TimetableGrid from "./components/legacy-timetable-grid.jsx";
 
@@ -204,6 +208,22 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 
 export function AcademicTimetableWorkspace() {
   const [view, setView] = useState<TimetableView>("teacher-weekly");
+  const [planId, setPlanId] = useState<string | null>(null);
+  const [formDirty, setFormDirty] = useState(false);
+  const plan = useTimetablePlan(planId);
+  const navigation = useDraftNavigation({ dirty: plan.dirty || formDirty });
+  const changePlan = (id: string | null) => navigation.requestLocalAction(() => {
+    setFormDirty(false); setPlanId(id);
+  });
+  return <div className="space-y-4">
+    <TimetablePlanPicker planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/>
+    <div hidden={Boolean(planId)}><OperationalTimetableWorkspace view={view} setView={setView}/></div>
+    {planId ? <TimetablePlanWorkspace key={planId} state={plan} view={view} onViewChange={setView} onFormDirty={setFormDirty} requestAction={navigation.requestLocalAction}/> : null}
+    {navigation.confirmation}
+  </div>;
+}
+
+function OperationalTimetableWorkspace({view, setView}: {view: TimetableView; setView: (view: TimetableView) => void}) {
   const [status, setStatus] = useState("수강");
   const [subject, setSubject] = useState("");
   const [gridCount, setGridCount] = useState(2);

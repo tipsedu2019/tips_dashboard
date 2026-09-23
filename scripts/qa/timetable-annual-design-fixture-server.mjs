@@ -1,9 +1,9 @@
 // Isolated synthetic transport for the real dashboard. Never forwards data calls.
 import http from "node:http"
+import { isPlanFixtureRpc, planFixtureRpc } from "./timetable-plan-rpc-bridge.mjs"
 import { buildTimetableWorkspaceModel } from "../../src/features/academic/records.js"
 import { buildAcademicAnnualBoardModel } from "../../src/features/operations/academic-calendar-models.js"
-const now = new Date().toISOString(),
-  ago = (days) => new Date(Date.now() - days * 86400000).toISOString()
+const now = new Date().toISOString()
 const user = {
   id: "00000000-0000-4000-8000-000000000099",
   email: "fixture@example.invalid",
@@ -65,6 +65,8 @@ function json(res, data, status = 200) {
   res.end(JSON.stringify(data))
 }
 async function api(req, res) {
+  const origin=req.headers.origin;
+  if (origin && !['http://127.0.0.1:3260','http://127.0.0.1:3261'].includes(origin)) return json(res,{message:'fixture_origin_denied'},403);
   if (req.method === "OPTIONS") return json(res, {})
   const url = new URL(req.url, "http://127.0.0.1")
   let body = ""
@@ -72,6 +74,11 @@ async function api(req, res) {
   const args = body ? JSON.parse(body) : {}
   const path = url.pathname
   calls.push({ path, args })
+  const rpcName=path.startsWith('/rest/v1/rpc/')?path.slice('/rest/v1/rpc/'.length):'';
+  if(isPlanFixtureRpc(rpcName)) {
+    try { const result=await planFixtureRpc(rpcName,args);return json(res,result.error||result.data,result.error?400:200); }
+    catch { return json(res,{message:'fixture_database_unavailable'},503); }
+  }
   if (path === "/__control") {
     mode = args.mode ?? url.searchParams.get("mode") ?? "normal"
     return json(res, { mode })

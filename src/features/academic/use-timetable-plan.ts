@@ -28,5 +28,10 @@ export function useTimetablePlan(planId: string | null) {
     ? controller.resolveStale(itemId, choice) : Promise.reject(Error('timetable_plan_scope_missing')), [controller]);
   const undo = useCallback(() => controller
     ? controller.undo() : Promise.reject(Error('timetable_plan_scope_missing')), [controller]);
-  return { ...state, dispatch, retry, refresh, resolveStale, undo, controller };
+  const replaceRejected = useCallback((edit: TimetableItemEdit) => controller
+    ? controller.replaceRejected(edit) : Promise.reject(Error('timetable_plan_scope_missing')), [controller]);
+  const discardRejected = useCallback((itemId: string) => controller
+    ? controller.discardRejected(itemId) : Promise.reject(Error('timetable_plan_scope_missing')), [controller]);
+  const failureKind = useCallback((itemId: string) => controller?.failureKind(itemId) ?? null, [controller]);
+  return { ...state, replaceRejected, discardRejected, failureKind, dispatch, retry, refresh, resolveStale, undo, controller };
 }
