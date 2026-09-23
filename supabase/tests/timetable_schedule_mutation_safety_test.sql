@@ -66,7 +66,7 @@ create temporary table schedule_partial_save as select public.save_class_schedul
  'ac230000-0000-4000-8000-000000000301',2,
  '[{"id":"ac230000-0000-4000-8000-000000000401","weekday":1,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":"ac230000-0000-4000-8000-000000000201","sortOrder":0},{"id":"ac230000-0000-4000-8000-000000000402","weekday":2,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":null,"sortOrder":1},{"id":"ac230000-0000-4000-8000-000000000403","weekday":3,"startTime":"14:00","endTime":"15:30","teacherCatalogId":null,"classroomCatalogId":"ac230000-0000-4000-8000-000000000202","sortOrder":2},{"id":null,"weekday":5,"startTime":"16:00","endTime":"17:00","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":3}]'::jsonb,
  'ac230000-0000-4000-8000-000000000509',null) as payload;
-select is((select schedule from public.classes where id='ac230000-0000-4000-8000-000000000301'),E'월 10:00-11:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 미지정)\n수 14:00-15:30 (교사 미지정, 강의실 2)\n금 16:00-17:00 (교사 미지정, 강의실 미지정)','mixed slots project explicit unassigned resources');
+select is((select schedule from public.classes where id='ac230000-0000-4000-8000-000000000301'),E'월 10:00-11:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, )\n수 14:00-15:30 (, 강의실 2)\n금 16:00-17:00 (, )','mixed slots project explicit unassigned resources');
 select is((select teacher from public.classes where id='ac230000-0000-4000-8000-000000000301'),'교사 A','teacher summary only names assigned teachers');
 select is((select room from public.classes where id='ac230000-0000-4000-8000-000000000301'),'강의실 1(월), 강의실 2(수)','room summary only names assigned rooms');
 select is((select jsonb_build_object('teacher',teacher_name,'room',classroom_name) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301' and weekday=5),'{"teacher": "", "room": ""}'::jsonb,'both-unassigned normalized slot stays empty');
@@ -82,6 +82,37 @@ select is((select payload->>'teacher' from schedule_partial_timetable where payl
 select is((select payload->>'classroom' from schedule_partial_timetable where payload->>'day'='수'),'강의실 2','legacy timetable keeps room-only classroom');
 select is((select payload->>'teacher' from schedule_partial_timetable where payload->>'day'='금'),'','legacy timetable does not borrow a teacher for unassigned slot');
 select is((select payload->>'classroom' from schedule_partial_timetable where payload->>'day'='금'),'','legacy timetable does not borrow a room for unassigned slot');
+insert into public.teacher_catalogs(id,name,subjects,is_visible,sort_order) values
+('ac230000-0000-4000-8000-000000000103','교사 미지정',array['영어'],true,903),
+('ac230000-0000-4000-8000-000000000104','~v1:41~',array['영어'],true,904);
+insert into public.classroom_catalogs(id,name,subjects,is_visible,sort_order,campus) values
+('ac230000-0000-4000-8000-000000000203','강의실 미지정',array['영어'],true,903,'본관'),
+('ac230000-0000-4000-8000-000000000204','~41',array['영어'],true,904,'본관');
+create temporary table schedule_literal_save as select public.save_class_schedule_defaults_v1(
+ 'ac230000-0000-4000-8000-000000000301',3,
+ '[{"id":"ac230000-0000-4000-8000-000000000401","weekday":1,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000103","classroomCatalogId":"ac230000-0000-4000-8000-000000000203","sortOrder":0},{"id":"ac230000-0000-4000-8000-000000000402","weekday":2,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000104","classroomCatalogId":"ac230000-0000-4000-8000-000000000204","sortOrder":1},{"id":"ac230000-0000-4000-8000-000000000403","weekday":3,"startTime":"14:00","endTime":"15:30","teacherCatalogId":null,"classroomCatalogId":null,"sortOrder":2}]'::jsonb,
+ 'ac230000-0000-4000-8000-000000000510',null) as payload;
+select is((select schedule from public.classes where id='ac230000-0000-4000-8000-000000000301'),
+ E'월 10:00-11:00 (교사 미지정, 강의실 미지정)\n화 10:00-11:00 (~v1:41~, ~41)\n수 14:00-15:30 (, )',
+ 'literal placeholder names and escape-prefix names have unambiguous projected details');
+create temporary table schedule_literal_timetable as
+select row.value as payload from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value)
+where row.value->>'classId'='ac230000-0000-4000-8000-000000000301';
+select is((select payload->>'teacher' from schedule_literal_timetable where payload->>'day'='월'),'교사 미지정','timetable preserves assigned teacher whose name matches absence marker');
+select is((select payload->>'classroom' from schedule_literal_timetable where payload->>'day'='월'),'강의실 미지정','timetable preserves assigned room whose name matches absence marker');
+select is((select payload->>'teacher' from schedule_literal_timetable where payload->>'day'='화'),'~v1:41~','timetable preserves literal former encoding token teacher');
+select is((select payload->>'classroom' from schedule_literal_timetable where payload->>'day'='화'),'~41','timetable preserves literal tilde room');
+select is((select payload->>'teacher' from schedule_literal_timetable where payload->>'day'='수'),'','timetable keeps a truly unassigned teacher empty');
+select is((select payload->>'classroom' from schedule_literal_timetable where payload->>'day'='수'),'','timetable keeps a truly unassigned room empty');
+set local role authenticated;
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='월'),'교사 미지정','authenticated timetable RPC preserves literal marker name under invoker ACL and RLS');
+select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000301' and row.value->>'day'='화'),'~41','authenticated timetable RPC preserves literal tilde room under invoker ACL and RLS');
+reset role;
+update public.classes set schedule='화 11:00-12:00 (~41, ~42)', teacher='~41', room='~42' where id='ac230000-0000-4000-8000-000000000302';
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'~41','pre-existing raw tilde teacher detail is not decoded');
+select is((select row.value->>'classroom' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'~42','pre-existing raw tilde room detail is not decoded');
+update public.classes set schedule='화 11:00-12:00 (교사 미지정)', teacher='교사 미지정', room='강의실 1' where id='ac230000-0000-4000-8000-000000000302';
+select is((select row.value->>'teacher' from jsonb_array_elements(public.get_academic_timetable_range_v1(current_date,current_date+6,null,null,'영어')->'rows') row(value) where row.value->>'classId'='ac230000-0000-4000-8000-000000000302'),'교사 미지정','legacy single-detail literal marker teacher stays assigned');
 select dashboard_private.reconcile_continuous_schedule_shadow_slots_v1(
  'ac230000-0000-4000-8000-000000000302',
  '[{"weekday":2,"startTime":"11:00","endTime":"12:00","teacherName":"교사 B 보정","classroomName":"강의실 2","sortOrder":0}]'::jsonb);

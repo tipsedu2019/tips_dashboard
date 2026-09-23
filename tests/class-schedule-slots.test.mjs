@@ -58,6 +58,32 @@ test("class list display combines weekdays that share the same time and details"
   );
 });
 
+test("empty resource positions and literal marker names display without decoding", () => {
+  const slots = parseClassScheduleSlots(
+    "월 10:00-11:00 (교사 미지정, 강의실 미지정)\n화 10:00-11:00 (~v1:41~, ~41)\n수 14:00-15:30 (, )",
+    "교사 미지정, ~v1:41~",
+    "강의실 미지정(월), ~41(화)",
+  );
+  assert.deepEqual(slots.map(({ teacher, classroom }) => ({ teacher, classroom })), [
+    { teacher: "교사 미지정", classroom: "강의실 미지정" },
+    { teacher: "~v1:41~", classroom: "~41" },
+    { teacher: "", classroom: "" },
+  ]);
+  assert.deepEqual(formatClassScheduleDisplayLines(formatClassScheduleSlots(slots).schedule), [
+    "월 10:00-11:00 (교사 미지정, 강의실 미지정)",
+    "화 10:00-11:00 (~v1:41~, ~41)",
+    "수 14:00-15:30 (, )",
+  ]);
+});
+
+test("legacy raw tilde details stay literal", () => {
+  const slots = parseClassScheduleSlots("월 10:00-11:00 (~41, 강의실 1)", "~41", "강의실 1");
+  assert.equal(slots[0].teacher, "~41");
+  assert.deepEqual(formatClassScheduleDisplayLines("월 10:00-11:00 (~41, 강의실 1)"), ["월 10:00-11:00 (~41, 강의실 1)"]);
+  assert.deepEqual(formatClassScheduleDisplayLines("월 10:00-11:00 (A/B)"), ["월 10:00-11:00 (A/B)"]);
+  assert.equal(parseClassScheduleSlots("화 11:00-12:00 (교사 미지정)", "교사 미지정", "강의실 1")[0].teacher, "교사 미지정");
+});
+
 test("class resource display splits multiple teachers and classrooms into rows", () => {
   assert.deepEqual(splitClassResourceDisplayValues("양소윤, 김성은"), ["양소윤", "김성은"]);
   assert.deepEqual(

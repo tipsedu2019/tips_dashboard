@@ -70,7 +70,7 @@ test("legacy schedule consumer retains per-slot teacher and room after normalize
 
 test("projected mixed resource slots keep assigned and unassigned states in the legacy parser", () => {
   const slots = parseClassScheduleSlots(
-    "월 09:00-10:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 미지정)\n수 14:00-15:30 (교사 미지정, 강의실 2)\n금 16:00-17:00 (교사 미지정, 강의실 미지정)",
+    "월 09:00-10:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, )\n수 14:00-15:30 (, 강의실 2)\n금 16:00-17:00 (, )",
     "교사 A",
     "강의실 1(월), 강의실 2(수)",
   );
@@ -81,10 +81,26 @@ test("projected mixed resource slots keep assigned and unassigned states in the 
     { day: "금", teacher: "", classroom: "" },
   ]);
   assert.deepEqual(formatClassScheduleSlots(slots), {
-    schedule: "월 09:00-10:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, 강의실 미지정)\n수 14:00-15:30 (교사 미지정, 강의실 2)\n금 16:00-17:00 (교사 미지정, 강의실 미지정)",
+    schedule: "월 09:00-10:00 (교사 A, 강의실 1)\n화 10:00-11:00 (교사 A, )\n수 14:00-15:30 (, 강의실 2)\n금 16:00-17:00 (, )",
     teacher: "교사 A",
     classroom: "강의실 1(월), 강의실 2(수)",
   });
+});
+
+test("literal absence labels and former escape tokens remain assigned names", () => {
+  const source = [
+    { id: null, day: "월", startTime: "10:00", endTime: "11:00", teacher: "교사 미지정", teacherCatalogId: null, classroom: "강의실 미지정", classroomCatalogId: null, sortOrder: 0 },
+    { id: null, day: "화", startTime: "10:00", endTime: "11:00", teacher: "~v1:41~", teacherCatalogId: null, classroom: "~41", classroomCatalogId: null, sortOrder: 1 },
+    { id: null, day: "수", startTime: "14:00", endTime: "15:30", teacher: "", teacherCatalogId: null, classroom: "", classroomCatalogId: null, sortOrder: 2 },
+  ];
+  const projection = formatClassScheduleSlots(source);
+  assert.equal(projection.schedule, [
+    "월 10:00-11:00 (교사 미지정, 강의실 미지정)",
+    "화 10:00-11:00 (~v1:41~, ~41)",
+    "수 14:00-15:30 (, )",
+  ].join("\n"));
+  const slots = parseClassScheduleSlots(projection.schedule, projection.teacher, projection.classroom);
+  assert.deepEqual(slots.map(({ day, teacher, classroom }) => ({ day, teacher, classroom })), source.map(({ day, teacher, classroom }) => ({ day, teacher, classroom })));
 });
 
 test("normalized metadata writes omit schedule-owned legacy columns", () => {
