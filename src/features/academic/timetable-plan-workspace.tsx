@@ -104,7 +104,8 @@ export function TimetablePlanWorkspace({ state, view, onViewChange, onFormDirty,
     const panels = useMemo(() => snapshot ? buildPlanPanels(snapshot, view, subject, targets[view] || []) : [], [snapshot, view, subject, targets]);
     const layout = getTimetablePanelLayout({ view, gridCount });
     useEffect(() => () => { cleanupPointer.current?.(); cleanupReleaseSuppression.current?.(); }, []);
-    useEffect(() => { cleanupPointer.current?.(); cleanupReleaseSuppression.current?.(); suppressClick.current = false; }, [snapshot, view, subject, targets, gridCount, canEdit]);
+    // Snapshot/filter changes cancel the gesture, but Escape still owns its later physical release.
+    useEffect(() => { cleanupPointer.current?.(); }, [snapshot, view, subject, targets, gridCount, canEdit]);
     useEffect(() => { if (snapshot)
         setSelectedItemIds(ids => ids.filter(id => snapshot.items.some(item => item.id === id && item.state === 'draft'))); }, [snapshot]);
     const openEditor = useCallback((draft: PlacementEditorDraft) => requestAction(() => { setEditor({ ...draft, revision: state.controller?.snapshot().snapshot?.items.find(i => i.id === draft.item.id)?.revision ?? null }); setDetail(null); }), [requestAction, state.controller]);

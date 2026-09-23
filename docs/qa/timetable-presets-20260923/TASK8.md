@@ -43,3 +43,11 @@ The historical notification adapter/single-writer suites are **not passed** in t
 Release browser evidence uses a synthetic read fixture for performance/export and actual isolated DB RPC for pointer saves. It does not prove production latency, actual provider behavior, live Realtime or Task9's two-actor app/import/full-regression gates.
 
 Final focused ESLint and TypeScript (`tsc --noEmit --incremental false`) passed. Export proves complete axis/rows/forced rendering, with partially clipped second title lines in some two-lane 30-minute blocks; full title readability remains a final UI review observation.
+
+## Review fix round 1
+
+Escape cancellation now retains its matching physical-release suppression across snapshot, view and filter changes; those changes still cancel active gesture/preview. `task8-cancel-lifecycle.json` records actual release RED (refresh/filter: dialogs0→1) and GREEN (0→0), Escape-only, view, unmount, unrelated-pointer release, and new-gesture listener cleanup. All seven cases preserve the next real drag and standard Enter editor activation; mutation/external requests0. The synthetic second-pointer cleanup case releases the original mouse outside the handle and does not claim simultaneous multi-pointer click cancellation.
+
+**Measurement correction:** all historical `pointerHandlerP95Ms` and `handlerEndToReactCommitP95Ms` interpretations are invalid, including any baseline sample using that instrumentation: the endpoint listener preceded the product handler. Both unsupported fields are removed from the runner and current performance artifacts, not replaced by new measurements. Independent frame/whole-gesture/input-to-frame/pure-model/LoAF observations are unchanged. Raw historical scratch remains chronology, not support for the withdrawn handler/commit claims.
+
+Focused validation: seven release-browser lifecycle cases,39 interaction/export Node tests, scoped ESLint, TypeScript noEmit and safeenv webpack release build passed. No SQL changes or reruns; no repeated performance benchmark. Reproduce the new browser check with `node scripts/qa/timetable-cancel-lifecycle-browser.mjs`.

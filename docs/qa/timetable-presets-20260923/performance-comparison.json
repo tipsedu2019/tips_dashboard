@@ -167,7 +167,6 @@
         "pointerDownToFrameMs": 55.5,
         "pointerUpToFrameMs": 73.5,
         "pointerToFrameP95Ms": 17,
-        "pointerHandlerP95Ms": 0.10000000149011612,
         "longFrames": [
           {
             "duration": 60.19999999925494,
@@ -186,7 +185,6 @@
           }
         ],
         "reactCommitCount": 94,
-        "handlerEndToReactCommitP95Ms": 4.100000001490116,
         "mutations": 0,
         "providerCalls": 0,
         "offscreen": {
@@ -207,7 +205,6 @@
         "pointerDownToFrameMs": 84.89999999850988,
         "pointerUpToFrameMs": 122.19999999925494,
         "pointerToFrameP95Ms": 36.599999997764826,
-        "pointerHandlerP95Ms": 0.10000000149011612,
         "longFrames": [
           {
             "duration": 64.09999999776483,
@@ -265,7 +262,6 @@
           }
         ],
         "reactCommitCount": 94,
-        "handlerEndToReactCommitP95Ms": 6.100000001490116,
         "mutations": 0,
         "providerCalls": 0,
         "offscreen": {
@@ -361,5 +357,6 @@
       "payloadBytes": 2594645
     },
     "passed": true
-  }
+  },
+  "measurementCorrection": "Removed pointerHandlerP95Ms and handlerEndToReactCommitP95Ms: timing endpoint was registered before the product pointermove handler. Neither field measured the claimed interval. Independent frame, whole-gesture, input-to-frame, pure projection and LoAF evidence remains unchanged; no performance rerun or new performance claim."
 }

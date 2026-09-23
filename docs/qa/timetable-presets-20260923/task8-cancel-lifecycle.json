@@ -1,0 +1,115 @@
+{
+  "mode": "local Next production webpack",
+  "transport": "synthetic reads; all mutations/external requests blocked",
+  "results": [
+    {
+      "change": "none",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 1,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": false,
+      "reads": 1,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "refresh",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 1,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": false,
+      "reads": 2,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "view",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 1,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": false,
+      "reads": 1,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "filter",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 1,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": false,
+      "reads": 1,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "unmount",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 0,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": false,
+      "reads": 2,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "unrelated-release",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 1,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": false,
+      "reads": 1,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "new-gesture",
+      "passed": true,
+      "beforeDialogs": 0,
+      "afterDialogs": 0,
+      "pendingBeforeRelease": 0,
+      "nextGesture": true,
+      "nextKeyboardOpen": true,
+      "secondPointerSynthetic": true,
+      "reads": 1,
+      "mutations": 0,
+      "external": 0
+    }
+  ],
+  "redObservations": [
+    {
+      "change": "refresh",
+      "beforeDialogs": 0,
+      "afterDialogs": 1,
+      "mutations": 0,
+      "external": 0
+    },
+    {
+      "change": "filter",
+      "beforeDialogs": 0,
+      "afterDialogs": 1,
+      "mutations": 0,
+      "external": 0
+    }
+  ],
+  "redBuild": "fffe462c release; raw initial harness results retained in ignored task-8-fix1-cancel-red.json",
+  "secondPointerBoundary": "new-gesture uses synthetic second pointer only to verify previous release listener removal; original mouse releases outside the handle. It does not prove simultaneous multi-pointer click cancellation."
+}

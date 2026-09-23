@@ -80,5 +80,27 @@
       "passed": 1,
       "failed": 0
     }
+  },
+  "reviewFix1": {
+    "browserLifecycle": {
+      "passed": 7,
+      "failed": 0,
+      "mutations": 0,
+      "external": 0,
+      "evidence": "task8-cancel-lifecycle.json"
+    },
+    "nodeInteractionExport": {
+      "passed": 39,
+      "failed": 0
+    },
+    "scopedESLint": true,
+    "typescriptNoEmit": true,
+    "safeenvReleaseBuild": true,
+    "sqlChangedOrRerun": false,
+    "performanceRerun": false,
+    "withdrawnMeasurements": [
+      "pointerHandlerP95Ms",
+      "handlerEndToReactCommitP95Ms"
+    ]
   }
 }
