@@ -1,0 +1,357 @@
+✔ schedule-only page exposes one save and return action even for a legacy progress URL (348.085ms)
+✔ schedule-only return keeps an edited draft when the operator continues editing (225.849958ms)
+✔ calendar: holiday cancellation and linked makeup on the same day are both named (207.938292ms)
+✔ plan: same-class refreshed source preserves an authored draft (234.576167ms)
+✖ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (160.579292ms)
+✔ normalized session: real save reaches the service once and preserves edits made while pending (171.211792ms)
+✔ class-schedule: clean read, revert, protected close and confirmed destination (249.675125ms)
+✔ curriculum: clean read, revert, protected close and confirmed destination (260.054208ms)
+✔ curriculum/lesson-design: clean read, revert, protected close and confirmed destination (289.749458ms)
+✖ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (174.948209ms)
+✔ normalized session: unchanged/reverted draft is clean and accepted revision is reused (179.528375ms)
+✔ normalized read: a loading read must never fall through to a legacy classes update (156.699375ms)
+✖ plan: failed write retains its draft and a retry submits the current values (202.629916ms)
+✖ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (172.536958ms)
+✔ normalized session: accepted trimmed input becomes clean and later authoritative data replaces clean overrides (167.81275ms)
+✔ normalized schedule: calendar opens authoritative session editing without creating a legacy draft (167.131959ms)
+✔ normalized generation: a late preview from another month cannot authorize current-month creation (180.766709ms)
+✔ normalized generation: preview and creation each reject same-turn duplicate clicks (154.411167ms)
+✔ normalized generation previews dates without mutating saved sessions and disables an all-existing confirmation (238.736459ms)
+✔ compact weekday groups expand without losing days (0.8555ms)
+✔ three-day groups preserve weekday order (0.091417ms)
+✔ mixed compact and single-day schedules preserve every slot (0.143ms)
+✔ class list display combines weekdays that share the same time and details (0.142ms)
+✔ empty resource positions and literal marker names display without decoding (0.522417ms)
+✔ legacy raw tilde details stay literal (0.141459ms)
+✔ class resource display splits multiple teachers and classrooms into rows (0.071542ms)
+✔ parenthesized slot details are copied to every day in a group (0.06475ms)
+✔ shared candidate details are removed but different details stay (0.357916ms)
+✖ legacy management editor parsed resources: 홍길동 (0.709167ms)
+✔ legacy management editor parsed resources: 2강의실 (0.05975ms)
+✔ legacy management editor parsed resources: 홍길동, 2강의실 (0.036542ms)
+✔ legacy management editor parsed resources: , 2강의실 (0.032375ms)
+✔ legacy management editor parsed resources: 홍길동,  (0.022791ms)
+✔ legacy management editor parsed resources: 홍길동/2강의실 (0.02025ms)
+✖ teacher-only detail retains day-specific classroom for legacy editor (0.46425ms)
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (3.08825ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.720291ms)
+✔ refresh preserves local draft and stale shows latest server (0.289708ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (0.31775ms)
+✔ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.204542ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.166041ms)
+✔ transient reference failure preserves prior display but blocks another save (0.133792ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.188208ms)
+✔ undo is a new revision-checked inverse command (0.259375ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.527375ms)
+✔ item A stale does not stop independent item B save (0.273708ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (0.25825ms)
+✔ accept-server drops only the conflicted item draft (0.126875ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.130834ms)
+✔ transfer delta applies source state and class labels atomically (0.365ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.2295ms)
+✔ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.233084ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.0705ms)
+✔ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.111625ms)
+✔ own-save signal before receipt still drains queued second edit (0.1965ms)
+✔ paused retired controller rejects old action references and terminal destroy cannot resume (0.145ms)
+✔ independent creates merge when later sequence receipt arrives first without a full refresh (0.195875ms)
+✔ malformed applied transfer item cannot strip source slots or mark the view verified (0.074875ms)
+✔ independent delete receipt still applies after a later unrelated create receipt (0.414541ms)
+✔ complete but unknown applied source item is rejected before a transfer delta merge (0.111875ms)
+✔ confirmed 23P01 rejection can be explicitly corrected with a new request identity (0.209458ms)
+✔ confirmed 22023 rejection can be explicitly corrected with a new request identity (0.140958ms)
+✔ uncertain response cannot be replaced or discarded and retries original immutable body/key (0.657917ms)
+✔ corrected rejected head preserves queued newer edit and independent item draft (0.354709ms)
+✔ discard confirmed rejected head advances queued latest edit while preserving independent pending item (0.248958ms)
+✔ plan-copy receipt at equal sequence never replaces a newer operating reference or verifies it (0.168458ms)
+✖ explicit editor revision receipt replay: existing=true, reload=false (0.532583ms)
+✖ explicit editor revision receipt replay: existing=true, reload=true (0.188542ms)
+✖ explicit editor revision receipt replay: existing=false, reload=false (0.135917ms)
+✖ explicit editor revision receipt replay: existing=false, reload=true (0.157167ms)
+✖ 501st item exact capacity rejection permits correction and discard (0.116542ms)
+✖ 2001st slot exact capacity rejection permits correction and discard (0.093541ms)
+✖ removed delete retains recovery descriptor timetable_stale (0.417333ms)
+✖ removed delete retains recovery descriptor timetable_invalid (0.126708ms)
+ℹ tests 74
+ℹ suites 0
+ℹ pass 60
+ℹ fail 14
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4262.389584
+
+✖ failing tests:
+
+test at tests/class-schedule-draft-navigation.test.mjs:223:1
+✖ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (160.579292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:226:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-draft-navigation.test.mjs:268:1
+✖ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (174.948209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:272:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-draft-navigation.test.mjs:297:1
+✖ plan: failed write retains its draft and a retry submits the current values (202.629916ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:300:46
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:300:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/class-schedule-draft-navigation.test.mjs:308:1
+✖ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (172.536958ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:313:33
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:313:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/class-schedule-slots.test.mjs:127:180
+✖ legacy management editor parsed resources: 홍길동 (0.709167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   classroom: '홍길동',
+  -   classroom: '1강의실',
+      end: '18:43',
+      start: '17:13',
+      teacher: '홍길동'
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-slots.test.mjs:129:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { teacher: '홍길동', classroom: '홍길동', start: '17:13', end: '18:43' },
+    expected: { teacher: '홍길동', classroom: '1강의실', start: '17:13', end: '18:43' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-slots.test.mjs:131:1
+✖ teacher-only detail retains day-specific classroom for legacy editor (0.46425ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+  +   '홍길동',
+  +   '홍길동'
+  -   '1강의실',
+  -   '2강의실'
+    ]
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-slots.test.mjs:133:9)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ '홍길동', '홍길동' ],
+    expected: [ '1강의실', '2강의실' ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:67:75
+✖ explicit editor revision receipt replay: existing=true, reload=false (0.532583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'stale'
+  - 'uncertain'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:76:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'stale',
+    expected: 'uncertain',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:67:75
+✖ explicit editor revision receipt replay: existing=true, reload=true (0.188542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'stale'
+  - 'uncertain'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:76:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'stale',
+    expected: 'uncertain',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:67:75
+✖ explicit editor revision receipt replay: existing=false, reload=false (0.135917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'stale'
+  - 'uncertain'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:76:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'stale',
+    expected: 'uncertain',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:67:75
+✖ explicit editor revision receipt replay: existing=false, reload=true (0.157167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'stale'
+  - 'uncertain'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:76:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'stale',
+    expected: 'uncertain',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:84:50
+✖ 501st item exact capacity rejection permits correction and discard (0.116542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'uncertain'
+  - 'rejected'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:86:136)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'uncertain',
+    expected: 'rejected',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:84:50
+✖ 2001st slot exact capacity rejection permits correction and discard (0.093541ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'uncertain'
+  - 'rejected'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:86:136)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'uncertain',
+    expected: 'rejected',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:89:109
+✖ removed delete retains recovery descriptor timetable_stale (0.417333ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - [
+  -   {
+  -     failure: 'stale',
+  -     itemId: 'item',
+  -     name: 'Math',
+  -     operation: 'delete'
+  -   }
+  - ]
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:91:58)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [ { itemId: 'item', operation: 'delete', name: 'Math', failure: 'stale' } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:89:109
+✖ removed delete retains recovery descriptor timetable_invalid (0.126708ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - [
+  -   {
+  -     failure: 'rejected',
+  -     itemId: 'item',
+  -     name: 'Math',
+  -     operation: 'delete'
+  -   }
+  - ]
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:91:58)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: [ { itemId: 'item', operation: 'delete', name: 'Math', failure: 'rejected' } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

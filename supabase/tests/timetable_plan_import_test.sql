@@ -18,6 +18,10 @@ jsonb_build_object('entries',jsonb_build_object('private-old-key',jsonb_build_ob
 jsonb_build_object('day','금','start','23:30','end','24:00','teacher','Task9 SQL 교사','classroom','Task9 SQL 강의실','studentIds','PRIVATE-LINE'),
 jsonb_build_object('day','수','start','17:13','end','18:43','teacher','없는 교사','classroom','Task9 SQL 강의실','raw',jsonb_build_object('private','PRIVATE-RAW')),
 jsonb_build_object('day','unknown','start',jsonb_build_object('student','PRIVATE-TIME'),'teacher',jsonb_build_object('private','PRIVATE-TEACHER'),'status','PRIVATE-NESTED-STATUS'))))) from unnest(array['teacher-weekly','classroom-weekly','daily-teacher','daily-classroom']) surface;
+insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room) values
+(pg_temp.i(303),'Final en dash','영어','개강 준비','legacy','월 17:13–18:43','Task9 SQL 교사','Task9 SQL 강의실'),
+(pg_temp.i(304),'Final malformed','영어','개강 준비','legacy','수 17:xx–18:43 (기존 교사)','Task9 SQL 교사','Task9 SQL 강의실'),
+(pg_temp.i(305),'Final unknown day','영어','개강 준비','legacy','시간 확인 필요 (수영쌤)','Task9 SQL 교사','Task9 SQL 강의실');
 create temp table original_classes as select md5(jsonb_agg(to_jsonb(c) order by id)::text) hash from public.classes c;
 create temp table original_preferences as select md5(jsonb_agg(to_jsonb(p) order by key)::text) hash from public.app_preferences p;
 create temp table originals as select (select count(*) from public.class_lesson_sessions) sessions,(select count(*) from dashboard_private.notification_deliveries) deliveries;
@@ -62,6 +66,19 @@ update public.app_preferences set value=jsonb_set(value,'{entries,private-old-ke
 select set_config('request.jwt.claim.sub',pg_temp.i(901)::text,true);
 set local role authenticated;
 select throws_ok($$select public.preview_timetable_plan_import_v1('{"kind":"legacy","key":"planner:term:task9sql:영어:daily-teacher"}')$$,'22023','timetable_import_metadata_missing','missing subject cannot become invented promotable English');
+select is(public.preview_timetable_plan_import_v1(jsonb_build_object('kind','preparation','classIds',jsonb_build_array(pg_temp.i(305))))#>>'{entries,0,scheduleLines,0,day}','','malformed text never infers a weekday from a teacher name');
+create temp table repair_preview as select public.preview_timetable_plan_import_v1(jsonb_build_object('kind','preparation','classIds',jsonb_build_array(pg_temp.i(303),pg_temp.i(304)))) value;
+select is((select value#>>'{entries,0,scheduleLines,0,day}' from repair_preview),'월','en dash preview preserves weekday');
+select is((select value#>>'{entries,0,scheduleLines,0,start}' from repair_preview),'17:13','en dash preview preserves exact minutes');
+select is((select value#>>'{entries,1,scheduleLines,0,originalSchedule}' from repair_preview),'수 17:xx–18:43 (기존 교사)','malformed preview preserves only supported original schedule string');
+select is((select value#>>'{entries,1,scheduleLines,0,day}' from repair_preview),'수','malformed preview keeps available weekday');
+create temp table repair_result as select public.commit_timetable_plan_import_v1(jsonb_build_object('source',value->'source','sourceFingerprint',value->>'sourceFingerprint','name','Final repair','requestKey','final-repair')) value from repair_preview;
+create temp table repair_snapshot as select public.get_timetable_plan_v1((value#>>'{plan,id}')::uuid) value from repair_result;
+select is((select value#>>'{slots,0,startMinute}' from repair_snapshot),'1033','en dash commit retains 17:13 integer minutes');
+select is((select value#>>'{slots,0,endMinute}' from repair_snapshot),'1123','en dash commit retains 18:43 integer minutes');
+select is((select (x#>>'{pendingSlots,0,sourceText}')::jsonb->>'originalSchedule' from repair_snapshot,jsonb_array_elements(value->'items') x where x->>'name'='Final malformed'),'수 17:xx–18:43 (기존 교사)','pending commit retains original for correction');
+select is((select x#>>'{pendingSlots,0,weekday}' from repair_snapshot,jsonb_array_elements(value->'items') x where x->>'name'='Final malformed'),'3','pending commit retains original weekday');
+select is((select x#>>'{pendingSlots,0,reason}' from repair_snapshot,jsonb_array_elements(value->'items') x where x->>'name'='Final malformed'),'invalid_time','pending diagnostic explains malformed time');
 reset role;
 select * from finish();
 rollback;

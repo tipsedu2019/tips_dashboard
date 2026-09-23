@@ -7,5 +7,5 @@ const manifest=result.manifest;
 const catalog=JSON.parse(await readFile('supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json','utf8'));
 await validateManifestMigrations({root,manifest,baselineVersions:catalog.migrationLedger.map(row=>row.version)});
 const evidence={status:result.status,nonExecuting:true,verified:manifest.orderedNewMigrations.length,baselineSha256:manifest.baselineSha256,catalogSha256:manifest.catalogSha256,featureMigrations:manifest.orderedNewMigrations.filter(row=>row.fileName.startsWith('20260923'))};
-await writeFile('docs/qa/timetable-presets-20260923/evidence/task9-manifest-validation.json',JSON.stringify(evidence,null,2));
+await writeFile(process.argv.includes('--output') ? process.argv[process.argv.indexOf('--output')+1] : 'docs/qa/timetable-presets-20260923/evidence/task9-manifest-validation.json',JSON.stringify(evidence,null,2));
 console.log(JSON.stringify(evidence));

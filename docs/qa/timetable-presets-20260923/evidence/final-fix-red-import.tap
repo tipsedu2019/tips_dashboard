@@ -1,0 +1,69 @@
+ok 1 - manager source picker exists
+ok 2 - safe preview exists
+ok 3 - atomic import exists
+release2-rpc
+af249100-0000-4000-8000-000000000901
+ok 4 - four independent historical surfaces remain separate candidates
+ok 5 - only planner prefix permitted
+ok 6 - safe preview excludes raw keys, students, status and nested unknown personal data
+ok 7 - same immutable import receipt creates one preset
+ok 8 - same import key with changed body is rejected
+ok 9 - both selected preparing classes copied
+ok 10 - first valid placement confirmed
+ok 11 - conflicting placement retained pending
+ok 12 - normalized minute precision preserved
+ok 13 - server-derived normalized source provenance retained
+ok 14 - new item UUIDs independent of source classes
+ok 15 - nested pending sourceText is also whitelisted
+ok 16 - historical midnight preserved
+ok 17 - missing resource and invalid time remain pending
+af249100-0000-4000-8000-000000000902
+ok 18 - eligible teacher cannot list global legacy preferences
+ok 19 - teacher cannot preview recovery
+ok 20 - teacher cannot replay manager import receipt
+ok 21 - every source class and status unchanged
+ok 22 - raw historical preference rows unchanged
+ok 23 - no lesson history created or changed
+ok 24 - no notification delivery created
+af249100-0000-4000-8000-000000000901
+ok 25 - changed historical source after preview fails exact non-concurrency SQLSTATE
+ok 26 - completed receipt remains same after source changes
+ok 27 - anonymous preview denied
+ok 28 - private raw-source helper inaccessible
+af249100-0000-4000-8000-000000000901
+ok 29 - missing subject cannot become invented promotable English
+not ok 30 - en dash preview preserves weekday
+# Failed test 30: "en dash preview preserves weekday"
+#         have: 
+#         want: 월
+not ok 31 - en dash preview preserves exact minutes
+# Failed test 31: "en dash preview preserves exact minutes"
+#         have: 
+#         want: 17:13
+not ok 32 - malformed preview preserves only supported original schedule string
+# Failed test 32: "malformed preview preserves only supported original schedule string"
+#         have: NULL
+#         want: 수 17:xx–18:43 (기존 교사)
+not ok 33 - malformed preview keeps available weekday
+# Failed test 33: "malformed preview keeps available weekday"
+#         have: 
+#         want: 수
+not ok 34 - en dash commit retains 17:13 integer minutes
+# Failed test 34: "en dash commit retains 17:13 integer minutes"
+#         have: NULL
+#         want: 1033
+not ok 35 - en dash commit retains 18:43 integer minutes
+# Failed test 35: "en dash commit retains 18:43 integer minutes"
+#         have: NULL
+#         want: 1123
+not ok 36 - pending commit retains original for correction
+# Failed test 36: "pending commit retains original for correction"
+#         have: NULL
+#         want: 수 17:xx–18:43 (기존 교사)
+not ok 37 - pending commit retains original weekday
+# Failed test 37: "pending commit retains original weekday"
+#         have: NULL
+#         want: 3
+ok 38 - pending diagnostic explains malformed time
+1..38
+# Looks like you failed 8 tests of 38

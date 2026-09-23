@@ -5,7 +5,7 @@ import {PsqlConnection,validateLocalArguments} from '../verify-timetable-concurr
 validateLocalArguments(process.argv.slice(2));
 const db=new PsqlConnection(),results=[];
 try{
- for(const migration of ['20260923131454_timetable_makeup_domain_sqlstates.sql','20260923134651_timetable_reference_aggregation.sql']){
+ for(const migration of ['20260923131454_timetable_makeup_domain_sqlstates.sql','20260923134651_timetable_reference_aggregation.sql','20260923164328_timetable_import_original_placement.sql']){
   const source=await readFile('supabase/migrations/'+migration,'utf8');
   for(const match of source.matchAll(/create or replace function (dashboard_private\.\w+)\(/gi)){
    const rest=source.slice(match.index),tag=rest.match(/\$\w*\$/)[0],start=rest.indexOf(tag)+tag.length,body=rest.slice(start,rest.indexOf(tag,start));
@@ -14,5 +14,5 @@ try{
    const hash=createHash('sha256').update(body).digest('hex');delete row.body;results.push({migration,...row,exactSourceMatch:true,bodySha256:hash,manual40001:false});
   }
  }
- assert.equal(results.length,8);await writeFile('docs/qa/timetable-presets-20260923/final-sql-provenance.json',JSON.stringify({container:'tips_timetable_20260923',results},null,2));console.log(JSON.stringify({verifiedFunctions:results.length,exactSourceMatch:true,aclPreserved:true}));
+ assert.equal(results.length,9);await writeFile(process.argv.includes('--output') ? process.argv[process.argv.indexOf('--output')+1] : 'docs/qa/timetable-presets-20260923/final-sql-provenance.json',JSON.stringify({container:'tips_timetable_20260923',results},null,2));console.log(JSON.stringify({verifiedFunctions:results.length,exactSourceMatch:true,aclPreserved:true}));
 }finally{db.close();}

@@ -123,3 +123,12 @@ test("shared candidate details are removed but different details stay", () => {
     "금 21:30-23:00 (양소윤, 별7)\n토 15:30-17:00 (김성은, 본2)",
   );
 });
+
+for(const [detail,teacher,classroom] of [['홍길동','홍길동','1강의실'],['2강의실','김선생','2강의실'],['홍길동, 2강의실','홍길동','2강의실'],[', 2강의실','','2강의실'],['홍길동, ','홍길동',''],['홍길동/2강의실','홍길동','2강의실']]) test(`legacy management editor parsed resources: ${detail}`,()=>{
+ const [slot]=parseClassScheduleSlots(`월 17:13–18:43 (${detail})`,'김선생','1강의실');
+ assert.deepEqual({teacher:slot.teacher,classroom:slot.classroom,start:slot.startTime,end:slot.endTime},{teacher,classroom,start:'17:13',end:'18:43'});
+});
+test('teacher-only detail retains day-specific classroom for legacy editor',()=>{
+ const slots=parseClassScheduleSlots('월수 17:13-18:43 (홍길동)','김선생','1강의실(월), 2강의실(수)');
+ assert.deepEqual(slots.map(s=>s.classroom),['1강의실','2강의실']);
+});

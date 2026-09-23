@@ -589,6 +589,11 @@
       "fileName": "20260923150523_timetable_plan_import_recovery.sql",
       "status": "final",
       "sha256": "cb6afcb477409fdb3e5c756dbe0172d9720e255d3f3b8b145c47f8650691f5bd"
+    },
+    {
+      "fileName": "20260923164328_timetable_import_original_placement.sql",
+      "status": "final",
+      "sha256": "1f513b80ab0cfd02b393babc11faa64492aa2afd21768ae1467c33af8f7d25c5"
     }
   ]
 }

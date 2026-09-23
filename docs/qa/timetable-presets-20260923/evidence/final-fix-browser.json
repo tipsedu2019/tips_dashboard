@@ -1,0 +1,49 @@
+{
+  "boundary": "actual isolated DB commit/receipt through release editor; synthetic response loss and safe candidate enumeration; no provider Realtime",
+  "checks": [
+    {
+      "name": "actual editor existing commit loss → reload → immutable receipt",
+      "passed": true,
+      "itemId": "beed7321-98e8-46bf-a43a-3a36af1925af",
+      "requestKey": "d61e0a91-05c1-478d-a537-16293796b7cd"
+    },
+    {
+      "name": "actual editor new commit loss → reload → immutable receipt",
+      "passed": true,
+      "itemId": "a81fe141-0e31-4ca8-a760-2b3749f33664",
+      "requestKey": "3ea4a4b4-f901-41a5-a3e3-9492974ab2b1"
+    },
+    {
+      "name": "stale delete usable 최신 내용 사용 despite absent optimistic item",
+      "passed": true
+    },
+    {
+      "name": "stale delete usable 삭제 다시 적용 despite absent optimistic item",
+      "passed": true
+    },
+    {
+      "name": "definite rejected delete exposes discard and restores canonical item",
+      "passed": true,
+      "transport": "synthetic exact 22023/timetable_invalid; no write sent"
+    },
+    {
+      "name": "lost delete absent canonical row → reload → original receipt only",
+      "passed": true
+    },
+    {
+      "name": "390px dark long import candidate date stays unbroken",
+      "passed": true,
+      "bounds": {
+        "x": 217.078125,
+        "y": 469,
+        "width": 78.8125,
+        "height": 16
+      }
+    }
+  ],
+  "planId": "a799d622-b715-4cf7-be50-be6551ad6094",
+  "archivedQaPlans": [
+    "85accd07-98bd-4fbc-8ed6-6c76cf2612a4",
+    "82d6dbf2-557b-41d7-a41b-eed7c4445cb6"
+  ]
+}

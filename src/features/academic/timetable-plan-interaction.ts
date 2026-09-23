@@ -13,6 +13,8 @@ export function formatPlanTime(minute: number) { return `${String(Math.floor(min
 export function formatPendingSlot(pending: PendingSlot, catalogs: PlanSnapshot['catalogs']) {
     let source: Record<string, unknown> | null = null;
     try { const value: unknown = JSON.parse(pending.sourceText); if (value && typeof value === 'object' && !Array.isArray(value)) source = value as Record<string, unknown>; } catch { /* Human-entered original text. */ }
+    if (pending.reason === 'invalid_time' && typeof source?.originalSchedule === 'string' && source.originalSchedule)
+        return source.originalSchedule;
     if (pending.weekday === null && pending.startMinute === null && pending.endMinute === null)
         return source ? '원본 배치 확인 필요' : pending.sourceText;
     const teacher = catalogs.teachers.find(row => row.id === pending.teacherId)?.name
@@ -157,6 +159,7 @@ export function planErrorLabel(error: unknown) {
     if (error && typeof error === 'object' && 'code' in error && error.code === 'PGRST202') return '프리셋 기능을 사용할 수 없습니다. 운영 시간표는 계속 확인할 수 있습니다.';
     if (error && typeof error === 'object' && 'message' in error && error.message === 'timetable_import_metadata_missing') return '원본 초안의 과목 정보가 없어 가져올 수 없습니다. 원본을 확인해 주세요.';
     const text = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : '';
+    if (text === 'timetable_capacity') return '프리셋당 수업은 500개, 배치는 2,000개까지 저장할 수 있습니다. 수업이나 배치를 줄이거나 다른 프리셋을 사용해 주세요.';
     if (text.includes('stale'))
         return '다른 편집 내용이 있습니다. 최신 내용과 내 입력 중 하나를 선택해 주세요.';
     if (text.includes('conflict'))

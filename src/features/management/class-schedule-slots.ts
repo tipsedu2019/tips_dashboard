@@ -150,7 +150,7 @@ export function parseClassScheduleSlots(
         teacherCatalogId: null,
         classroom: hasResourcePair
           ? detailParts.slice(1).join(", ")
-          : detailParts[detailParts.length - 1] || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex),
+          : (detailParts.length > 1 || !firstDetailIsTeacher ? detailParts[detailParts.length - 1] : "") || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex),
         classroomCatalogId: null,
         sortOrder: slotIndex,
       });

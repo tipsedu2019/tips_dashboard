@@ -1,0 +1,7 @@
+actual editor existing commit loss → reload → immutable receipt
+actual editor new commit loss → reload → immutable receipt
+stale delete usable 최신 내용 사용 despite absent optimistic item
+stale delete usable 삭제 다시 적용 despite absent optimistic item
+definite rejected delete exposes discard and restores canonical item
+lost delete absent canonical row → reload → original receipt only
+390px dark long import candidate date stays unbroken

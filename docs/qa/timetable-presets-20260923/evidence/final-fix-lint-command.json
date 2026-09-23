@@ -1,0 +1,24 @@
+{
+  "argv": [
+    "/Users/hyunjun/.cache/codex-runtimes/codex-primary-runtime/dependencies/node/bin/node",
+    "node_modules/eslint/bin/eslint.js",
+    "src/features/academic/timetable-plan-model.ts",
+    "src/features/academic/timetable-plan-workspace.tsx",
+    "src/features/academic/timetable-plan-recovery-actions.tsx",
+    "src/features/academic/timetable-plan-import-dialog.tsx",
+    "src/features/academic/timetable-plan-interaction.ts",
+    "src/features/academic/use-timetable-plan-session.ts",
+    "src/features/management/class-schedule-slots.ts",
+    "tests/timetable-plan-controller.node.ts",
+    "tests/class-schedule-slots.test.mjs",
+    "tests/class-schedule-draft-navigation.test.mjs",
+    "tests/timetable-plan-delete-recovery.test.mjs",
+    "tests/timetable-plan-interaction.test.mjs",
+    "scripts/qa/timetable-final-fix-browser.mjs",
+    "scripts/qa/timetable-manifest-check.mjs",
+    "scripts/qa/verify-timetable-final-sql.mjs"
+  ],
+  "exit": 0,
+  "warnings": 0,
+  "errors": 0
+}

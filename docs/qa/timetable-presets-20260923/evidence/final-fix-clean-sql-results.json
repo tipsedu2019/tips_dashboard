@@ -1,0 +1,103 @@
+[
+  {
+    "file": "timetable_continuous_class_scope_test.sql",
+    "exit": 0,
+    "plans": [
+      "12"
+    ],
+    "pass": 12,
+    "failed": []
+  },
+  {
+    "file": "timetable_guard_aggregation_test.sql",
+    "exit": 0,
+    "plans": [
+      "12"
+    ],
+    "pass": 12,
+    "failed": []
+  },
+  {
+    "file": "timetable_makeup_domain_sqlstate_test.sql",
+    "exit": 0,
+    "plans": [
+      "25"
+    ],
+    "pass": 25,
+    "failed": []
+  },
+  {
+    "file": "timetable_normalized_time_matching_test.sql",
+    "exit": 0,
+    "plans": [
+      "22"
+    ],
+    "pass": 22,
+    "failed": []
+  },
+  {
+    "file": "timetable_operational_conflicts_test.sql",
+    "exit": 0,
+    "plans": [
+      "5",
+      "5",
+      "125"
+    ],
+    "pass": 135,
+    "failed": []
+  },
+  {
+    "file": "timetable_plan_import_test.sql",
+    "exit": 0,
+    "plans": [
+      "39"
+    ],
+    "pass": 39,
+    "failed": []
+  },
+  {
+    "file": "timetable_plan_no_send_test.sql",
+    "exit": 0,
+    "plans": [
+      "132"
+    ],
+    "pass": 132,
+    "failed": []
+  },
+  {
+    "file": "timetable_plan_permissions_test.sql",
+    "exit": 0,
+    "plans": [
+      "24"
+    ],
+    "pass": 24,
+    "failed": []
+  },
+  {
+    "file": "timetable_plan_storage_test.sql",
+    "exit": 0,
+    "plans": [
+      "74"
+    ],
+    "pass": 74,
+    "failed": []
+  },
+  {
+    "file": "timetable_plan_transfers_test.sql",
+    "exit": 0,
+    "plans": [
+      "133"
+    ],
+    "pass": 133,
+    "failed": []
+  },
+  {
+    "file": "timetable_schedule_mutation_safety_test.sql",
+    "exit": 0,
+    "plans": [
+      "60"
+    ],
+    "pass": 60,
+    "failed": []
+  }
+]

@@ -104,6 +104,7 @@ update public.classes set status='종강' where id=pg_temp.tid(302);
 insert into public.timetable_plan_items(id,plan_id,name,subject) select pg_temp.tid(1000+n),pg_temp.tid(2),'capacity '||n,'영어' from generate_series(1,500) n;
 set local role authenticated;
 select is((public.get_timetable_plan_v1(pg_temp.tid(2))#>>'{capacity,itemCount}')::int,500,'500 items returned without truncation');
+select throws_ok($$select public.mutate_timetable_plan_item_v1(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'over-slot-capacity'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2)))||jsonb_build_object('slots',(select jsonb_agg((pg_temp.cmd(21)->'slots'->0)||jsonb_build_object('id',pg_temp.tid(10000+n),'planId',pg_temp.tid(2))) from generate_series(1,2001) n)))$$,'22023','timetable_capacity','2001-slot request rejected with exact producer pair before item insertion');
 select throws_ok($$select public.mutate_timetable_plan_item_v1(jsonb_set(jsonb_set(pg_temp.cmd(21,null,660,720,'over-capacity'),'{planId}',to_jsonb(pg_temp.tid(2))),'{item,planId}',to_jsonb(pg_temp.tid(2)))||'{"slots":[]}'::jsonb)$$,'22023','timetable_capacity','501st item explicitly rejected');
 reset role;
 insert into public.timetable_plan_items(id,plan_id,name,subject) values(pg_temp.tid(1600),pg_temp.tid(2),'capacity exceeded','영어');

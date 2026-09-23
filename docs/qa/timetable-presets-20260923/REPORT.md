@@ -4,6 +4,22 @@
 
 작업 위치는 `/Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard`, branch `codex/timetable-presets-20260923`; Task9 base `ed3e7a3199e1c222b274836cd5a7d3b8650a48af`, 전체 기능 기준 `eb23d7d8`다. 원래 `/Users/hyunjun/Documents/Codex/tips_dashboard` checkout은 수정하지 않았다. 사용자 `진행`은 로컬 구현 승인이고, 출시 순서는 [runbook](../../operations/timetable-presets-runbook.md)에 분리했다.
 
+
+## Final review consolidated fix — 2026-09-24
+
+전체 검토 [final-review-1](evidence/history/final-review-1.md)의 I1–I6와 M2를 base `75585a5f` 이후 한 번의 통합 wave에서 수정했다. 독립 scoped re-review는 root 인계 뒤 별도다. 상세 변경·명령·경계는 [final-fix-report](evidence/history/final-fix-report.md)에 있다. 이전 기록은 당시의 증거이며 아래가 최신 수정 gate다.
+
+- 명시적 editor revision이 달라져도 제출한 immutable request는 서버 receipt까지 재시도한다. unknown 결과는 snapshot 변화만으로 버릴 수 없다. 삭제 요청은 optimistic row와 별개로 복구 버튼을 유지한다. 정확한 capacity SQLSTATE는 수정·폐기 가능한 확정 거절이다.
+- 교사 이름만 있는 legacy detail은 원래 강의실 fallback을 사용하며 명시적 comma 빈 쪽은 보존한다. 관리 화면이 이 parser 반환값을 그대로 `setClassScheduleSlots`로 넘기는 실제 경계를 확인했다.
+- 추가 migration `20260923164328`이 en dash와 허용된 원문 placement를 보존한다. malformed 문자열의 교사 이름에서 요일을 추정하지 않는다. preview·commit·pending 표시 및 unknown/student/status 필드 제외를 검증했다. 최종 import helper 정의의 출처는 이 migration이고, commit/import 권한·receipt/locks는 기존 `150523` 정의가 계속 담당한다.
+- 기존 수업계획 lifecycle **19개 전부**를 유지하고 `update_class_operational_v1`/`p_patch`에 harness만 맞췄다. 4개 branch regression을 preexisting으로 분류하지 않는다.
+- 최신 Node gate **202/202** (위 19개 포함), 실제 release browser **7/7**, full tsc/changed lint exit0 (경고0), safe release build exit0. SQL 최종 clean replay **118 ordered migrations / 13 feature hashes / 11 files / 668 assertions**. [최종 SQL 결과](evidence/final-fix-verified-clean-sql-results.json), [노드](evidence/final-fix-regression-node.log), [브라우저](evidence/final-fix-browser.json), [실제 최종 정의/ACL](evidence/final-fix-verified-final-definitions-acl.json), [9함수 exact source](evidence/final-fix-sql-provenance.json).
+- RED 증거: Node14실패(기존 lifecycle4 포함), import 원문8실패, pending 표시1실패, ambiguity/요일추정 추가실패. 결과를 고친 뒤 GREEN을 확인했다. 브라우저 초기 두 번은 QA locator/fixture 선택 초기화의 harness 실패이며 [attempt1](evidence/final-fix-browser-harness-attempt1.log)/[attempt2](evidence/final-fix-browser-harness-attempt2.log)에 남겼다.
+- M2는 실제 **390×844 dark**, 긴 과목 후보명에서 `2026-09-23`이 한 덩어리로 보이는 [최종 PNG](final-fix-import-mobile-dark.png)를 확인했다. [삭제 최신 수용](final-fix-delete-accept.png), [삭제 재적용](final-fix-delete-reapply.png)도 실제 release UI다.
+- 원래 DB 두 개와 수동3fixture는 그대로다. 신규 isolated replay DB 두 개를 별도로 사용했고 마지막 `tips_timetable_finalfix_verified_20260924`가 최종 소스 전체 재생 증거다. 새 QA 프리셋만 만들고 보관했으며 운영 수업/발송은 실행하지 않았다.
+
+**M1**: 최신 성공 build에도 synthetic public-read403 네 블록이 남아 있다. 실제 public API PASS가 아니다. **M3**: 최대 용량 valid frame33.6–33.7ms는32ms 목표 미달이며 root deferral 그대로다. 이 wave는 성능/10개 race/provider gates를 다시 실행하지 않았다. 실제 운영 migration, main CI, 배포, 실제 legacy 존재 여부, provider Realtime/cache/sends, 실수강 반영과 과거 notification 전체 suite는 이전 제한을 유지한다.
+
 ## 구현과 결과
 
 - `list_timetable_import_sources_v1` / `preview_timetable_plan_import_v1` / `commit_timetable_plan_import_v1`를 migration·type·service·관리팀 UI로 연결했다. 준비 수업은 선택한 기본정보와 정확한 normalized slots를 새 UUID로 복사한다. 기존 class 상태/학생/이력과 옛 preference row는 그대로다. 충돌/미해결 배치는 기존 pending 편집기로 수리한다.

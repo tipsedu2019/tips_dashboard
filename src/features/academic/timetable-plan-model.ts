@@ -53,6 +53,7 @@ export type TimetableControllerState = {
   referenceStatus: 'unknown' | 'verified' | 'unverifiable';
   recoveryAvailable: boolean;
   dirty: boolean;
+  pendingOperations: { itemId: string; operation: 'save' | 'delete'; name: string; failure: 'rejected' | 'uncertain' | 'stale' | null }[];
 };
 type StorageLike = TimetableDraftStorage;
 type Pending = {
@@ -61,6 +62,8 @@ type Pending = {
   status: 'queued' | 'sending' | 'error';
   expectedItemRevision?: number | null;
   confirmedRejection?: boolean;
+  confirmedStale?: boolean;
+  itemName?: string;
   resolve?: () => void;
   reject?: (error: unknown) => void;
 };
@@ -74,9 +77,12 @@ const isAccessError = (error: unknown) => {
 const isConfirmedRejection = (error: unknown) => {
   const value = error as { code?: string; message?: string } | null;
   return (value?.code === '23P01' && value.message === 'timetable_resource_conflict')
-    || (value?.code === '22023' && value.message === 'timetable_invalid');
+    || (value?.code === '22023' && ['timetable_invalid', 'timetable_capacity'].includes(value.message || ''));
 };
-const isStaleError = (error: unknown) => (error as { message?: string } | null)?.message === 'timetable_stale';
+const isStaleError = (error: unknown) => {
+  const value = error as { code?: string; message?: string } | null;
+  return value?.code === 'P0001' && value.message === 'timetable_stale';
+};
 const periodOf = (snapshot: PlanSnapshot) => snapshot.plan.targetStartDate && snapshot.plan.targetEndDate
   ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null;
 const toItemDraft = (item: PlanItemDraft): PlanItemDraft => ({
@@ -168,7 +174,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   let paused = false;
   let lastUndo: { edit: TimetableItemEdit; expectedItemRevision: number | null } | null = null;
   let state: TimetableControllerState = { snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
-    referenceStatus: 'unknown', recoveryAvailable: true, dirty: false };
+    referenceStatus: 'unknown', recoveryAvailable: true, dirty: false, pendingOperations: [] };
   const publish = (patch: Partial<TimetableControllerState> = {}) => {
     state = { ...state, ...patch };
     for (const listener of listeners) listener();
@@ -177,7 +183,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   const persist = () => {
     if (!storage) { publish({ recoveryAvailable: false }); return; }
     try {
-      const entries = pending().map(({ edit, submitted, status, expectedItemRevision }) => ({ edit, submitted, status, expectedItemRevision }));
+      const entries = pending().map(({ edit, submitted, status, expectedItemRevision, itemName }) => ({ edit, submitted, status, expectedItemRevision, itemName }));
       if (entries.length) storage.setItem(key, JSON.stringify({ version: 1, entries }));
       else storage.removeItem(key);
     } catch { publish({ recoveryAvailable: false }); }
@@ -193,6 +199,8 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     } catch { /* Malformed local input remains editable and server validation fails closed. */ }
     const complete = operatingReferenceComplete(state.snapshot, period);
     publish({ draft, conflicts, dirty: pending().length > 0,
+      pendingOperations: [...queues].map(([itemId, queue]) => ({ itemId, operation: queue[0].edit.operation,
+        name: queue[0].itemName || state.snapshot?.items.find(item => item.id === itemId)?.name || '삭제한 수업', failure: failureKind(itemId) })),
       saveState: saveState ?? (!complete || state.referenceStatus !== 'verified' || staleItems.size > 0 ? 'stale'
         : pending().some((entry) => entry.status === 'error') ? 'error'
           : pending().length ? 'saving' : state.saveState === 'idle' ? 'idle' : 'saved'),
@@ -205,7 +213,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     itemReceiptSequence.clear(); authoritativeReadSequence = -1; lastUndo = null;
     try { storage?.removeItem(key); } catch { /* Storage access can fail after logout. */ }
     publish({ snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
-      referenceStatus: 'unknown', dirty: false });
+      referenceStatus: 'unknown', dirty: false, pendingOperations: [] });
   };
   const restore = () => {
     if (!storage) return;
@@ -222,7 +230,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
         const queue = queues.get(itemId) ?? [];
         const submitted = isObject(entry.submitted) && entry.submitted.planId === planId && typeof entry.submitted.requestKey === 'string'
           ? entry.submitted as SavePlanItemCommand | DeletePlanItemCommand : null;
-        queue.push({ edit, submitted, status: submitted ? 'error' : 'queued',
+        queue.push({ edit, submitted, status: submitted ? 'error' : 'queued', itemName: typeof entry.itemName === 'string' ? entry.itemName : undefined,
           expectedItemRevision: typeof entry.expectedItemRevision === 'number' || entry.expectedItemRevision === null
             ? entry.expectedItemRevision : undefined });
         queues.set(itemId, queue);
@@ -287,9 +295,9 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
           if (!base || state.referenceStatus !== 'verified') break;
           if (!operatingReferenceComplete(base, periodOf(base))) { rebuild('stale'); break; }
           const revision = base.items.find((item) => item.id === itemId)?.revision ?? null;
-          if (entry.expectedItemRevision !== undefined && entry.expectedItemRevision !== revision) {
+          if (!entry.submitted && entry.expectedItemRevision !== undefined && entry.expectedItemRevision !== revision) {
             const error = Error('timetable_stale');
-            entry.status = 'error'; staleItems.add(itemId); persist(); rebuild('stale', error); entry.reject?.(error); break;
+            entry.status = 'error'; entry.confirmedStale = true; staleItems.add(itemId); persist(); rebuild('stale', error); entry.reject?.(error); break;
           }
           const priorItem = base.items.find((item) => item.id === itemId);
           const priorSlots = base.slots.filter((slot) => slot.itemId === itemId);
@@ -310,7 +318,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
             if (!state.snapshot) break;
             if (receiptSuperseded(state.snapshot, response, authoritativeReadSequence, itemReceiptSequence)) {
               const error = Error('timetable_stale');
-              entry.status = 'error'; staleItems.add(itemId); persist(); rebuild('stale', error);
+              entry.status = 'error'; entry.confirmedStale = true; staleItems.add(itemId); persist(); rebuild('stale', error);
               entry.reject?.(error); break;
             }
             const shadowChanged = response.shadowFingerprint !== state.snapshot.shadowFingerprint;
@@ -333,7 +341,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
           } catch (error) {
             if (disposed || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) break;
             if (isAccessError(error)) { clearSensitive(); publish({ error, referenceStatus: 'unverifiable' }); entry.reject?.(error); break; }
-            entry.status = 'error'; entry.confirmedRejection = isConfirmedRejection(error); if (isStaleError(error)) staleItems.add(itemId);
+            entry.status = 'error'; entry.confirmedRejection = isConfirmedRejection(error); entry.confirmedStale = isStaleError(error); if (isStaleError(error)) staleItems.add(itemId);
             persist(); rebuild(isStaleError(error) ? 'stale' : 'error', error);
             entry.reject?.(error); break;
           }
@@ -353,7 +361,8 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     const promise = new Promise<void>((resolve, reject) => {
       rejectSave = reject;
       const queue = queues.get(itemId) ?? [];
-      queue.push({ edit: structuredClone(edit), submitted: null, status: 'queued', expectedItemRevision, resolve, reject });
+      queue.push({ edit: structuredClone(edit), submitted: null, status: 'queued', expectedItemRevision, resolve, reject,
+        itemName: edit.operation === 'save' ? edit.item.name : state.snapshot?.items.find(item => item.id === itemId)?.name });
       queues.set(itemId, queue);
     });
     const blocked = state.referenceStatus !== 'verified'
@@ -366,11 +375,15 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
     } else { persist(); rebuild(); runQueue(itemId); }
     return promise;
   };
-  const failureKind = (itemId: string): 'rejected' | 'uncertain' | 'stale' | null => {
+  function failureKind(itemId: string): 'rejected' | 'uncertain' | 'stale' | null {
     const head = queues.get(itemId)?.[0];
-    if (staleItems.has(itemId)) return 'stale';
+    // A newer snapshot cannot tell whether our submitted command committed.
+    // Only its server response (or a superseded receipt) authorizes abandonment.
+    if (head?.submitted && !head.confirmedStale && !head.confirmedRejection)
+      return head.status === 'error' || staleItems.has(itemId) ? 'uncertain' : null;
+    if (head?.confirmedStale || staleItems.has(itemId)) return 'stale';
     return head?.status === 'error' ? head.confirmedRejection ? 'rejected' : 'uncertain' : null;
-  };
+  }
   // Replace only a conclusively rejected head. Newer queued intents and other items stay intact.
   const replaceRejected = (edit: TimetableItemEdit): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
@@ -422,7 +435,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
   };
   const resolveStale = (itemId: string, choice: 'accept_server' | 'reapply_draft'): Promise<void> => {
     if (paused || disposed) return Promise.reject(Error('timetable_plan_inactive'));
-    if (!staleItems.has(itemId) || !state.snapshot || !state.draft) return Promise.reject(Error('timetable_stale_resolution_unavailable'));
+    if (failureKind(itemId) !== 'stale' || !state.snapshot || !state.draft) return Promise.reject(Error('timetable_stale_resolution_unavailable'));
     const oldQueue = queues.get(itemId);
     const desired = oldQueue?.[oldQueue.length - 1]?.edit;
     const desiredDraft = state.draft;

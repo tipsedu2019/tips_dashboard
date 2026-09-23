@@ -1,6 +1,6 @@
 # Chronological controller rulings
 
-Verbatim Ruling lines from the controller progress ledger, in order. Later rulings supersede provisional assumptions. Current result is REPORT.md; Task9 controller notes are also retained in full.
+Verbatim Ruling lines from the latest controller progress ledger; later rulings supersede provisional assumptions. Current completion and evidence boundaries are in REPORT.md and final-fix-report.md.
 
 `progress.md:29`
 Ruling: The plan text saying this work ends at planning is superseded by the user instruction 진행 — implement the approved spec; production release remains separate.
@@ -112,3 +112,13 @@ Ruling: Task9 preset-creating import commands must receive the same actor-scoped
 
 `progress.md:302`
 Ruling: Legacy recovery must not silently substitute English for a missing subject. Reject malformed missing-subject candidates with an explicit, user-readable metadata error, preserving the source preference; valid historical entries remain importable and unresolved time/resources still use pending. This avoids creating a silently promotable class with invented business metadata. Cost if wrong: a malformed old candidate requires manual reconstruction or a later explicit metadata-repair flow instead of one-click bulk recovery.
+
+`progress.md:328`
+Ruling: Keep the four synthetic public-read403 build fallback blocks as a documented successful-build evidence limitation rather than expanding this timetable fix into public API or credential configuration. No clean public-read claim is made. Cost if wrong: actual public reads still need the separately authorized production smoke check and a future deterministic local build fixture may be useful.
+
+`progress.md:329`
+Ruling: Defer automatic same-revision recovery after a transient reference-read failure; explicit refresh/focus remains available and writes remain safely blocked until verified. This avoids adding a new background lifecycle in the final fix wave without a demonstrated unsafe write. Cost if wrong: a user may need an extra manual refresh after a transient error.
+
+`progress.md:330`
+Ruling: Keep the current applied-snapshot summary without adding a new expanded read-only details view in this release; stored historical fields remain intact and no required workflow/data loss was demonstrated. Cost if wrong: richer historical inspection would require an additional focused UI change.
+

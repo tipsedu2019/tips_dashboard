@@ -78,3 +78,8 @@ test('single-slot form edit and add-placement preserve the complete differing We
  const placed = interaction.buildPlacementFormEdit(add,{...interaction.placementFormDefaults(add),end:'24:00'});
  assert.equal(placed.slots.length,3);assert.deepEqual(placed.slots.slice(0,2),wholeDraft.slots);assert.equal(placed.slots[2].endMinute,1440);
 });
+
+test('safe imported malformed placement is visible for repair without exposing unknown properties',()=>{
+ const pending={id:'pending',sourceText:JSON.stringify({originalSchedule:'수 17:xx–18:43 (기존 교사)',studentIds:['PRIVATE'],unknown:'PRIVATE'}),reason:'invalid_time',weekday:3,startMinute:null,endMinute:null,teacherId:null,classroomId:null};
+ const label=interaction.formatPendingSlot(pending,snapshot.catalogs);assert.ok(label.includes('수 17:xx–18:43 (기존 교사)'));assert.equal(label.includes('PRIVATE'),false);
+});

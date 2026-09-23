@@ -4,7 +4,7 @@ import { watchTimetablePlan, type TimetableSignalClient } from './timetable-plan
 import type { createTimetablePlanController, TimetableControllerState } from './timetable-plan-model.ts';
 
 const EMPTY: TimetableControllerState = { snapshot: null, draft: null, saveState: 'idle', conflicts: [], error: null,
-  referenceStatus: 'unknown', recoveryAvailable: true, dirty: false };
+  referenceStatus: 'unknown', recoveryAvailable: true, dirty: false, pendingOperations: [] };
 const noSubscribe = () => () => {};
 const emptySnapshot = () => EMPTY;
 type Controller = ReturnType<typeof createTimetablePlanController>;
