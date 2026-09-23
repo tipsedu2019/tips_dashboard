@@ -1,0 +1,42 @@
+1..85
+ok 1 - canonical content를 legacy 호환 행으로 내리는 단방향 mirror가 있다
+ok 2 - 보관 휴보강 이력을 한 번만 가져오는 함수가 있다
+ok 3 - 레거시 delivery별 import 영수증이 있다
+ok 4 - 보관 이력 관측값을 덮어쓰지 않는 append-only 감사표가 있다
+ok 5 - 레거시 원본과 import 영수증의 개수·checksum parity를 검증한다
+ok 6 - Task 8 직후 상태와 Task 17 조정 결과를 같은 규칙 단위로 보존한다
+ok 7 - 원자적 휴보강 생성 RPC가 있다
+ok 8 - 원자적 휴보강 전이 RPC가 있다
+ok 9 - 동일 강의실 승인 점유를 트랜잭션 안에서 다시 검사한다
+ok 10 - 원자적 휴보강 삭제 RPC가 있다
+ok 11 - 구글챗 레거시 브리지도 canonical delivery를 만든다
+ok 12 - 구글챗 결과를 소유권과 canonical delivery에 함께 확정한다
+ok 13 - legacy 설정을 canonical로 올리던 trigger는 제거된다
+ok 14 - 휴보강 설정과 content는 공통 v2 command로만 저장한다
+ok 15 - authenticated direct legacy setting writers remain closed
+ok 16 - obsolete legacy-to-canonical trigger function is closed to every API role
+ok 17 - current canonical makeup graph resolves every registry rule, active template, and content contract
+ok 18 - canonical active content remains mirrored to mapped legacy renderer rows
+ok 19 - single-writer mirror keeps legacy compatibility checksums current
+ok 20 - authenticated direct legacy UPDATE fails at the table privilege boundary
+ok 21 - authenticated direct legacy INSERT fails at the table privilege boundary
+ok 22 - 아직 승인되지 않은 요청끼리는 첫 승인 후보를 선택할 수 있다
+ok 23 - 먼저 승인된 일정과 겹치는 두 번째 승인을 거절한다
+not ok 24 - 보관 delivery/history/occurrence를 가져온다
+# Failed test 24: "보관 delivery/history/occurrence를 가져온다"
+#     died: 55000: notification_makeup_legacy_rule_missing
+#         DETAIL:     91000000-0000-4000-8000-000000000301
+#         CONTEXT:
+#             PL/pgSQL function dashboard_private.notification_import_makeup_retained_state_v1() line 137 at RAISE
+#             SQL statement "select dashboard_private.notification_import_makeup_retained_state_v1()"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+not ok 25 - delivery 시각 +5초 안의 허용 원본 중 가장 최신 재제출 이벤트를 occurrence로 사용한다
+# Failed test 25: "delivery 시각 +5초 안의 허용 원본 중 가장 최신 재제출 이벤트를 occurrence로 사용한다"
+not ok 26 - 영수증은 안전한 legacy ID·dedupe·렌더링·대상·상태·시각 스냅샷과 그 checksum을 보존한다
+# Failed test 26: "영수증은 안전한 legacy ID·dedupe·렌더링·대상·상태·시각 스냅샷과 그 checksum을 보존한다"
+not ok 27 - canonical delivery와 legacy 소유권도 실제 원본 이벤트 occurrence를 공유한다
+# Failed test 27: "canonical delivery와 legacy 소유권도 실제 원본 이벤트 occurrence를 공유한다"
+not ok 28 - 보관 history event는 원본 occurrence당 하나이며 재전송 fanout job을 만들지 않는다
+# Failed test 28: "보관 history event는 원본 occurrence당 하나이며 재전송 fanout job을 만들지 않는다"
+ERROR:  notification_makeup_legacy_import_incomplete
+CONTEXT:  PL/pgSQL function dashboard_private.notification_assert_makeup_retained_import_complete_v1() line 15 at RAISE

@@ -1,0 +1,357 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 3
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 2
+SET CONSTRAINTS
+SET CONSTRAINTS
+              set_config              
+--------------------------------------
+ ad240000-0000-4000-8000-000000000901
+(1 row)
+
+CREATE FUNCTION
+                                 throws_ok                                 
+---------------------------------------------------------------------------
+ ok 1 - legacy status activation rejects teacher collision across subjects
+(1 row)
+
+                            throws_ok                             
+------------------------------------------------------------------
+ ok 2 - defaults RPC rejects room-only collision before returning
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 3 - direct dated makeup write rejects effective weekly teacher conflict
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 4 - initialize stale uses domain SQLSTATE
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 5 - preview stale uses domain SQLSTATE
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 6 - generation stale uses domain SQLSTATE
+(1 row)
+
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                 throws_ok                 
+-------------------------------------------
+ ok 7 - session stale uses domain SQLSTATE
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 8 - content stale uses domain SQLSTATE
+(1 row)
+
+                 throws_ok                  
+--------------------------------------------
+ ok 9 - backfill stale uses domain SQLSTATE
+(1 row)
+
+UPDATE 1
+                 throws_ok                 
+-------------------------------------------
+ ok 10 - verify stale uses domain SQLSTATE
+(1 row)
+
+                  throws_ok                  
+---------------------------------------------
+ ok 11 - activate stale uses domain SQLSTATE
+(1 row)
+
+                                      is                                      
+------------------------------------------------------------------------------
+ ok 12 - skipped source-slot/date replaces weekly default with no reservation
+(1 row)
+
+                                    lives_ok                                    
+--------------------------------------------------------------------------------
+ ok 13 - actual makeup can use a date released by skipped authoritative session
+(1 row)
+
+                               throws_ok                               
+-----------------------------------------------------------------------
+ ok 14 - removing skipped override cannot expose a conflicting default
+(1 row)
+
+                                    throws_ok                                    
+---------------------------------------------------------------------------------
+ ok 15 - session RPC restoration rejects actual dated occupancy before returning
+(1 row)
+
+                           lives_ok                           
+--------------------------------------------------------------
+ ok 16 - exception session uses exact half-open safe interval
+(1 row)
+
+                                is                                
+------------------------------------------------------------------
+ ok 17 - actual exception replaces weekly source reservation once
+(1 row)
+
+SET CONSTRAINTS
+SET CONSTRAINTS
+                           lives_ok                            
+---------------------------------------------------------------
+ ok 18 - gateway updates legacy defaults and status atomically
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 19 - legacy schedule_plan gateway checks dated teacher collision
+(1 row)
+
+                    throws_ok                     
+--------------------------------------------------
+ ok 20 - legacy gateway detects stale source JSON
+(1 row)
+
+                          throws_ok                          
+-------------------------------------------------------------
+ ok 21 - new unresolved active legacy occupancy fails closed
+(1 row)
+
+                                throws_ok                                 
+--------------------------------------------------------------------------
+ ok 22 - active normalized defaults cannot introduce unresolved resources
+(1 row)
+
+SET CONSTRAINTS
+SET CONSTRAINTS
+UPDATE 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                       lives_ok                       
+------------------------------------------------------
+ ok 23 - existing conflict permits metadata-only edit
+(1 row)
+
+                                  throws_ok                                  
+-----------------------------------------------------------------------------
+ ok 24 - same conflict pair with changed overlapping coordinates is rejected
+(1 row)
+
+                             lives_ok                              
+-------------------------------------------------------------------
+ ok 25 - unrelated safe occupancy edit preserves existing conflict
+(1 row)
+
+                            lives_ok                            
+----------------------------------------------------------------
+ ok 26 - existing overlap can be repaired to adjacent safe time
+(1 row)
+
+                             is                             
+------------------------------------------------------------
+ ok 27 - deferred flush cleans baseline after multiple RPCs
+(1 row)
+
+                    lives_ok                    
+------------------------------------------------
+ ok 28 - zero-row guarded statement is harmless
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 29 - zero-row statement baseline is cleaned
+(1 row)
+
+SET CONSTRAINTS
+                            lives_ok                             
+-----------------------------------------------------------------
+ ok 30 - immediate constraints support safe subsequent statement
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 31 - immediate constraints still guard subsequent conflicting statement
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 32 - rejected statement rollback leaves no baseline
+(1 row)
+
+SET CONSTRAINTS
+SET
+                                     is                                      
+-----------------------------------------------------------------------------
+ ok 33 - authenticated authorized reference includes complete dated contract
+(1 row)
+
+                           ok                           
+--------------------------------------------------------
+ ok 34 - shadow identity is class and source slot based
+(1 row)
+
+                         throws_ok                         
+-----------------------------------------------------------
+ ok 35 - authenticated cannot read or forge guard baseline
+(1 row)
+
+                      lives_ok                      
+----------------------------------------------------
+ ok 36 - gateway works as actual authenticated role
+(1 row)
+
+RESET
+SET
+                  throws_ok                   
+----------------------------------------------
+ ok 37 - anon cannot read operating reference
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 38 - anon cannot mutate operating gateway
+(1 row)
+
+RESET
+INSERT 0 1
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                               throws_ok                                
+------------------------------------------------------------------------
+ ok 39 - generation under preparing class checks actual dated occupancy
+(1 row)
+
+UPDATE 1
+                                 lives_ok                                 
+--------------------------------------------------------------------------
+ ok 40 - safe generation retains existing projection and receipt behavior
+(1 row)
+
+                             is                              
+-------------------------------------------------------------
+ ok 41 - failed generation rolled back all inserted sessions
+(1 row)
+
+ set_config 
+------------
+ v1
+(1 row)
+
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                             is                             
+------------------------------------------------------------
+ ok 42 - closed class retains valid actual makeup occupancy
+(1 row)
+
+                                                                                        mutate_timetable_plan_v1                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"plan": {"id": "ad240000-0000-4000-8000-000000000701", "name": "기간 계획", "state": "draft", "metaRevision": 0, "targetEndDate": "2026-10-05", "changeSequence": 0, "targetStartDate": "2026-10-05"}}
+(1 row)
+
+CREATE FUNCTION
+SET
+                                    lives_ok                                     
+---------------------------------------------------------------------------------
+ ok 43 - bounded plan uses freed default time after actual session moved earlier
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 44 - bounded plan detects dated exception outside weekly default
+(1 row)
+
+                           throws_ok                           
+---------------------------------------------------------------
+ ok 45 - bounded plan detects actual makeup under closed class
+(1 row)
+
+RESET
+                             lives_ok                              
+-------------------------------------------------------------------
+ ok 46 - safe operating update ignores future plan draft occupancy
+(1 row)
+
+INSERT 0 1
+CREATE FUNCTION
+                                  throws_ok                                  
+-----------------------------------------------------------------------------
+ not ok 47 - normalized makeup adapter conflicts at correct KST time        +
+ # Failed test 47: "normalized makeup adapter conflicts at correct KST time"+
+ #       caught: no exception                                               +
+ #       wanted: 23P01
+(1 row)
+
+UPDATE 1
+                                         throws_ok                                         
+-------------------------------------------------------------------------------------------
+ not ok 48 - normalized makeup adapter rejects unresolved room instead of guessing        +
+ # Failed test 48: "normalized makeup adapter rejects unresolved room instead of guessing"+
+ #       caught: 40001: makeup_lesson_session_stale                                       +
+ #       wanted: 23P01: timetable_resource_conflict
+(1 row)
+
+UPDATE 1
+                                                                                   lives_ok                                                                                   
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ not ok 49 - normalized makeup adapter accepts unique exact room                                                                                                             +
+ # Failed test 49: "normalized makeup adapter accepts unique exact room"                                                                                                     +
+ #     died: 40001: makeup_lesson_session_stale                                                                                                                              +
+ #         CONTEXT:                                                                                                                                                          +
+ #             PL/pgSQL function dashboard_private.apply_normalized_makeup_effect_v1(uuid,uuid,jsonb) line 14 at RAISE                                                       +
+ #             SQL statement "SELECT dashboard_private.apply_normalized_makeup_effect_v1('ad240000-0000-4000-8000-000000000801','ad240000-0000-4000-8000-000000000304','[]')"+
+ #             PL/pgSQL function pg_temp_80.apply_makeup() line 1 at PERFORM                                                                                                 +
+ #             SQL statement "select pg_temp.apply_makeup()"                                                                                                                 +
+ #             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+(1 row)
+
+                     is                     
+--------------------------------------------
+ ok 50 - makeup stores exact stable room ID
+(1 row)
+
+                                     is                                      
+-----------------------------------------------------------------------------
+ not ok 51 - makeup KST start preserved independently of DB timezone        +
+ # Failed test 51: "makeup KST start preserved independently of DB timezone"+
+ #         have: 00:30:00                                                   +
+ #         want: 14:00:00
+(1 row)
+
+                                    lives_ok                                    
+--------------------------------------------------------------------------------
+ ok 52 - normalized revert remains guarded and restores original active session
+(1 row)
+
+                                is                                 
+-------------------------------------------------------------------
+ ok 53 - makeup revert preserves original session history identity
+(1 row)
+
+                finish                 
+---------------------------------------
+ 1..53
+ # Looks like you failed 4 tests of 53
+(2 rows)
+
+ROLLBACK

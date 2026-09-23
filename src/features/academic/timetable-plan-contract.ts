@@ -227,7 +227,17 @@ export type TimetableInvalidationSignal = {
   updated_at: string;
 };
 export type ScienceSubjectArea = { key: string; label: string };
+export type TimetableImportSource = { kind: 'preparation'; classIds: string[] } | { kind: 'legacy'; key: string };
+export type TimetableImportSources = {
+  preparationClasses: Array<{ id: string; name: string; subject: string | null }>;
+  legacyCandidates: Array<{ key: string; updatedAt: string; version: string | null; entryCount: number; parseStatus: 'ready' | 'invalid' }>;
+};
+export type TimetableImportPreview = { source: TimetableImportSource; sourceFingerprint: string; entries: Array<{ name: string; subject: string; scheduleLines: Array<Record<string, string | null>> }> };
+export type TimetableImportCommand = { source: TimetableImportSource; sourceFingerprint: string; name: string; requestKey: string };
 export type TimetablePlanRpcContract = {
+  list_timetable_import_sources_v1: { Args: Record<string, never>; Returns: TimetableImportSources };
+  preview_timetable_plan_import_v1: { Args: { p_source: TimetableImportSource }; Returns: TimetableImportPreview };
+  commit_timetable_plan_import_v1: { Args: { p_command: TimetableImportCommand }; Returns: { plan: PlanMetadata } };
   list_active_science_subject_areas_v1: { Args: Record<string, never>; Returns: Array<{ subject: string; area_key: string; label: string; sort_order: number; is_active: boolean }> };
   preview_timetable_plan_transfer_v1: { Args: { p_request: TransferRequest }; Returns: TransferPreview };
   commit_timetable_plan_transfer_v1: { Args: { p_command: TransferCommitCommand }; Returns: TransferResult };

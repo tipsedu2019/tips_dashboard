@@ -16,9 +16,9 @@ export function formatPendingSlot(pending: PendingSlot, catalogs: PlanSnapshot['
     if (pending.weekday === null && pending.startMinute === null && pending.endMinute === null)
         return source ? '원본 배치 확인 필요' : pending.sourceText;
     const teacher = catalogs.teachers.find(row => row.id === pending.teacherId)?.name
-        ?? (typeof source?.teacherName === 'string' ? source.teacherName : '선생님 미정');
+        ?? (typeof source?.teacherName === 'string' ? source.teacherName : typeof source?.teacher === 'string' && source.teacher ? source.teacher : '선생님 미정');
     const room = catalogs.classrooms.find(row => row.id === pending.classroomId)?.name
-        ?? (typeof source?.classroomName === 'string' ? source.classroomName : '강의실 미정');
+        ?? (typeof source?.classroomName === 'string' ? source.classroomName : typeof source?.classroom === 'string' && source.classroom ? source.classroom : '강의실 미정');
     return `${pending.weekday === null ? '요일 미정' : PLAN_DAYS[pending.weekday]} ${pending.startMinute === null ? '시작 미정' : formatPlanTime(pending.startMinute)}–${pending.endMinute === null ? '종료 미정' : formatPlanTime(pending.endMinute)} · ${teacher} · ${room}`;
 }
 export function parsePlanTime(value: string, allowMidnight = false) {
@@ -154,6 +154,8 @@ export function finishPointerSession(session: PointerSession, reason: string): P
     return moved ? { kind: 'move', ...session } : null;
 }
 export function planErrorLabel(error: unknown) {
+    if (error && typeof error === 'object' && 'code' in error && error.code === 'PGRST202') return '프리셋 기능을 사용할 수 없습니다. 운영 시간표는 계속 확인할 수 있습니다.';
+    if (error && typeof error === 'object' && 'message' in error && error.message === 'timetable_import_metadata_missing') return '원본 초안의 과목 정보가 없어 가져올 수 없습니다. 원본을 확인해 주세요.';
     const text = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : '';
     if (text.includes('stale'))
         return '다른 편집 내용이 있습니다. 최신 내용과 내 입력 중 하나를 선택해 주세요.';
@@ -277,4 +279,14 @@ export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: Plac
     }
     if (draft.pendingResolutionId) item.pendingSlots = item.pendingSlots.filter(row => row.id !== draft.pendingResolutionId);
     return { operation: 'save', item, slots };
+}
+
+/** Historical keys remain identity only; arbitrary term IDs are not semester names. */
+export function formatLegacyImportLabel(key: string, index: number): string {
+    const parts = key.split(':');
+    const surface = parts.pop() || '', subject = parts.pop() || '';
+    const views: Record<string, string> = { 'teacher-weekly': '선생님 주간', 'classroom-weekly': '강의실 주간', 'daily-teacher': '일별 선생님', 'daily-classroom': '일별 강의실' };
+    const term = parts.slice(2).join(':');
+    const period = /^20[0-9]{2}[-/][12]$/.test(term) ? term : `이전 초안 ${index + 1}`;
+    return `${period} · ${subject === 'all' || !subject ? '전체 과목' : subject} · ${views[surface] || '이전 보기'}`;
 }

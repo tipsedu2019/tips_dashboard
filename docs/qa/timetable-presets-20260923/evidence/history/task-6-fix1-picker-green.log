@@ -1,0 +1,127 @@
+TypeError: activeElement$1.attachEvent is not a function
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3573:27)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLInputElementImpl._dispatch (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+✔ create: unknown receipt survives changed name (64.457709ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✔ create: unknown receipt survives changed name and dialog reopen (16.497625ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✔ clone: unknown receipt survives changed name (12.17975ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✔ clone: unknown receipt survives changed name and dialog reopen (13.089625ms)
+✔ late share success cannot populate another actor/dialog (10.765084ms)
+✔ late share failure cannot populate another actor/dialog (9.252292ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✔ late create success cannot change another actor's selection/dialog (12.464709ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✔ late create failure cannot change another actor's selection/dialog (12.941875ms)
+✔ late share response cannot fill a newer dialog in the same actor scope (8.717625ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 666.386

@@ -1,0 +1,43 @@
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (0.713875ms)
+✔ normalized defaults retain full comma-containing catalog names (0.115083ms)
+✔ legacy schedule consumer retains per-slot teacher and room after normalized save projection (0.348583ms)
+✔ projected mixed resource slots keep assigned and unassigned states in the legacy parser (0.152416ms)
+✔ literal absence labels and former escape tokens remain assigned names (0.148833ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.162083ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (8.739083ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.069667ms)
+✖ actual bulk merged-row save resolves each class mode before status update (0.228042ms)
+✖ actual bulk merged-row save resolves each class mode before name update (0.095916ms)
+✖ bulk save fails closed if authoritative storage mode cannot be read (0.334583ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 8
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 84.86025
+
+✖ failing tests:
+
+test at tests/management-continuous-class-schedule.test.mjs:219:3
+✖ actual bulk merged-row save resolves each class mode before status update (0.228042ms)
+  { code: '22023', message: 'class_schedule_validation' }
+
+test at tests/management-continuous-class-schedule.test.mjs:219:3
+✖ actual bulk merged-row save resolves each class mode before name update (0.095916ms)
+  { code: '22023', message: 'class_schedule_validation' }
+
+test at tests/management-continuous-class-schedule.test.mjs:249:1
+✖ bulk save fails closed if authoritative storage mode cannot be read (0.334583ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/management-continuous-class-schedule.test.mjs:255:3)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /수업 일정 저장 방식을 확인/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

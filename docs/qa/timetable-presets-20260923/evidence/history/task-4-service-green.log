@@ -1,0 +1,23 @@
+✔ a retry reuses the action request key and its canonical defaults payload (0.96825ms)
+✔ RPC errors are mapped to safe schedule action states (0.113833ms)
+✔ generation preview sends only the bounded range and revision (0.094708ms)
+✔ bounded reader deduplicates one range, aborts a prior class, and trusts the RPC authority result (0.33925ms)
+✔ runtime-not-ready reloads legacy while other normalized read failures stay explicit (0.166583ms)
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (2.218833ms)
+✔ normalized defaults retain full comma-containing catalog names (0.214625ms)
+✔ legacy schedule consumer retains per-slot teacher and room after normalized save projection (0.394083ms)
+✔ projected mixed resource slots keep assigned and unassigned states in the legacy parser (0.172125ms)
+✔ literal absence labels and former escape tokens remain assigned names (0.16075ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.197375ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (13.8655ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.091167ms)
+✔ operating retry retains request key and payload; refresh failure is committed (0.928834ms)
+✔ operating conflict preserves inputs and separates true serialization failure (0.697083ms)
+ℹ tests 15
+ℹ suites 0
+ℹ pass 15
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 103.349792

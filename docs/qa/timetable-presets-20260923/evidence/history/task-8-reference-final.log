@@ -1,0 +1,4 @@
+{"name":"operatingReference","samples":[{"durationMs":156.08808299999873,"payloadBytes":2594645},{"durationMs":156.01237500000025,"payloadBytes":2594645},{"durationMs":155.90295800000058,"payloadBytes":2594645},{"durationMs":146.3561669999999,"payloadBytes":2594645},{"durationMs":151.45887499999844,"payloadBytes":2594645}]}
+{"name":"revisionPoll","samples":[{"durationMs":120.69029200000114,"payloadBytes":165},{"durationMs":117.6002499999995,"payloadBytes":165},{"durationMs":117.74104199999965,"payloadBytes":165},{"durationMs":147.0482090000005,"payloadBytes":165},{"durationMs":144.20216699999946,"payloadBytes":165}]}
+{"name":"guardedOperatingWrite","samples":[{"durationMs":11822.197208,"payloadBytes":694},{"durationMs":11351.509917,"payloadBytes":694},{"durationMs":11406.046750000001,"payloadBytes":694}]}
+{"original":{"durationMs":18562.223584,"code":"00000"},"equality":{"datedRows":7800,"jsonbExact":true,"payloadBytes":2594645}}

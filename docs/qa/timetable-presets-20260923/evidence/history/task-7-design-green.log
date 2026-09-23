@@ -1,0 +1,68 @@
+✔ shared checkbox keeps a comfortable click target (2.054333ms)
+✔ settings row text inputs announce the edited row (1.033833ms)
+✔ select menus can show long option lists inside modals (0.299083ms)
+✔ ported option panels stay above high-layer management dialogs (0.564333ms)
+✔ shared dialog can expose explicit top close copy for unsaved forms (0.287ms)
+✔ light: body, supporting text, selection, primary and destructive states meet 4.5:1 (1.187125ms)
+ℹ --foreground/--background: 12.63:1
+ℹ --card-foreground/--card: 12.63:1
+ℹ --popover-foreground/--popover: 12.63:1
+ℹ --secondary-foreground/--secondary: 6.87:1
+ℹ --accent-foreground/--accent: 9.03:1
+ℹ --sidebar-foreground/--sidebar: 11.48:1
+ℹ --sidebar-accent-foreground/--sidebar-accent: 10.47:1
+ℹ --foreground/--workspace-background: 11.93:1
+ℹ --muted-foreground/--workspace-background: 5.09:1
+ℹ --muted-foreground/--sidebar: 4.90:1
+ℹ --primary/--sidebar-accent: 4.53:1
+ℹ --muted-foreground/--background: 5.40:1
+ℹ --muted-foreground/--card: 5.40:1
+ℹ --muted-foreground/--muted: 5.16:1
+ℹ --muted-foreground/--accent: 4.70:1
+ℹ --primary/--background: 5.46:1
+ℹ --primary/--card: 5.46:1
+ℹ --primary-foreground/--primary: 5.46:1
+ℹ --destructive/--background: 5.52:1
+ℹ --destructive/--card: 5.52:1
+ℹ --destructive-foreground/--destructive: 5.52:1
+ℹ --primary hover on --background: 4.54:1
+ℹ --primary hover on --card: 4.54:1
+ℹ --destructive hover on --background: 4.90:1
+ℹ --destructive hover on --card: 4.90:1
+✔ dark: body, supporting text, selection, primary and destructive states meet 4.5:1 (0.15325ms)
+ℹ --foreground/--background: 14.23:1
+ℹ --card-foreground/--card: 12.01:1
+ℹ --popover-foreground/--popover: 12.01:1
+ℹ --secondary-foreground/--secondary: 12.01:1
+ℹ --accent-foreground/--accent: 7.29:1
+ℹ --sidebar-foreground/--sidebar: 13.74:1
+ℹ --sidebar-accent-foreground/--sidebar-accent: 10.45:1
+ℹ --foreground/--workspace-background: 14.93:1
+ℹ --muted-foreground/--workspace-background: 8.30:1
+ℹ --muted-foreground/--sidebar: 7.64:1
+ℹ --primary/--sidebar-accent: 5.17:1
+ℹ --muted-foreground/--background: 7.91:1
+ℹ --muted-foreground/--card: 6.68:1
+ℹ --muted-foreground/--muted: 7.28:1
+ℹ --muted-foreground/--accent: 4.57:1
+ℹ --primary/--background: 7.04:1
+ℹ --primary/--card: 5.94:1
+ℹ --primary-foreground/--primary: 7.04:1
+ℹ --destructive/--background: 6.22:1
+ℹ --destructive/--card: 5.25:1
+ℹ --destructive-foreground/--destructive: 6.22:1
+ℹ --primary hover on --background: 5.92:1
+ℹ --primary hover on --card: 6.03:1
+ℹ --destructive hover on --background: 5.25:1
+ℹ --destructive hover on --card: 5.34:1
+✔ manual tabs move focus with arrows, Home and End without selecting, and skip disabled tabs (141.015375ms)
+✔ all triggers control one stable labelled panel, preserving child DOM and draft across accepted views (20.865417ms)
+✔ accepted deep-link selection reveals the clipped tab without moving focus or resetting the draft (16.150709ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 10
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 486.663375

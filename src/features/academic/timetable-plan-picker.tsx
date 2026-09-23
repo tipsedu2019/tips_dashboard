@@ -11,6 +11,8 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu';
 import { createTimetablePlanService, type TimetableRpcClient } from './timetable-plan-service';
 import type { PlanCommand, PlanList, PlanSnapshot, ShareCandidate } from './timetable-plan-contract';
+import { availableTimetableSessionStorage, timetableDraftStorageKey, observeTimetableActorRetirement, observeTimetablePlanRevocation, clearTimetableActorRecovery } from './timetable-plan-recovery.ts';
+import { TimetablePlanImportDialog } from './timetable-plan-import-dialog';
 import { planErrorLabel } from './timetable-plan-interaction';
 type Fields = { name: string; start: string; end: string; members: Record<string, 'viewer' | 'editor'> };
 type PendingCommand = { command: PlanCommand; fields: Fields };
@@ -23,7 +25,10 @@ function rejectedBeforeCommit(error: unknown) {
 }
 const labels = { create: '프리셋 만들기', rename: '이름·기준 기간 변경', clone: '프리셋 복제', archive: '프리셋 보관', restore: '프리셋 복원', share: '프리셋 공유' };
 
-export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, requestAction, reloadNonce = 0 }: {
+export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, requestAction, reloadNonce = 0, onFormDirty, onCommitted, disabled = false }: {
+    disabled?: boolean;
+    onCommitted?: (id: string) => void;
+    onFormDirty?: (dirty: boolean) => void;
     reloadNonce?: number;
     planId: string | null;
     snapshot: PlanSnapshot | null;
@@ -39,6 +44,11 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
     const [mode, setMode] = useState<PlanCommand['operation'] | null>(null);
     const [fields, setFields] = useState<Fields>({ name: '', start: '', end: '', members: {} });
     const [error, setError] = useState(''), [listError, setListError] = useState('');
+    const [importDirty, setImportDirty] = useState(false);
+    const [storageError, setStorageError] = useState(false);
+    const recoveryKey = actorScope ? timetableDraftStorageKey(actorScope, '$metadata') : null;
+    const previousActor = useRef(actorScope);
+    const displayedPlan = useRef(planId); displayedPlan.current = planId;
     const [busy, setBusy] = useState(false), [recovering, setRecovering] = useState(false);
     const [candidates, setCandidates] = useState<ShareCandidate[]>([]);
     const [recoveredPlan, setRecoveredPlan] = useState<PlanSnapshot['plan'] | null>(null);
@@ -75,6 +85,54 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
         setError(''); setBusy(false); setRecovering(false); setRecoveredPlan(null);
         return () => { mounted.current = false; shareRead.current?.abort(); };
     }, [service]);
+    const persist = useCallback(() => {
+        if (!recoveryKey) return;
+        try {
+            const storage = availableTimetableSessionStorage();
+            if (!storage) throw Error('storage unavailable');
+            if (pending.current) storage.setItem(recoveryKey, JSON.stringify({ version: 1, pending: pending.current, followup: currentFields.current }));
+            else storage.removeItem(recoveryKey);
+            setStorageError(false);
+        } catch { setStorageError(true); }
+    }, [recoveryKey]);
+    useEffect(() => {
+        if (previousActor.current && previousActor.current !== actorScope) clearTimetableActorRecovery(previousActor.current);
+        previousActor.current = actorScope;
+        if (!actorScope || !recoveryKey) return;
+        const retire = () => {
+            operationEpoch.current++; listEpoch.current++; shareRead.current?.abort();
+            pending.current = null; retainedFields.current = null;
+            setMode(null); setCandidates([]); setList(null); setRecoveredPlan(null); setRecovering(false); setBusy(false);
+            setFields({ name: '', start: '', end: '', members: {} }); setError('');
+        };
+        const stop = observeTimetableActorRetirement(actorScope, retire);
+        const stopRevocation = observeTimetablePlanRevocation(actorScope, id => {
+            listEpoch.current++;
+            setList(value => value ? { ...value, plans: value.plans.filter(plan => plan.id !== id) } : value);
+            const command = pending.current?.command;
+            if (command ? command.planId === id || ('sourcePlanId' in command && command.sourcePlanId === id) : displayedPlan.current === id) {
+                operationEpoch.current++; shareRead.current?.abort();
+                pending.current = null; retainedFields.current = null;
+                setMode(null); setCandidates([]); setRecoveredPlan(null); setRecovering(false); setBusy(false);
+                setFields({ name: '', start: '', end: '', members: {} }); setError('');
+            }
+        });
+        try {
+            const storage = availableTimetableSessionStorage();
+            if (!storage) throw Error('storage unavailable');
+            const raw = storage.getItem(recoveryKey);
+            if (raw) {
+                const saved = JSON.parse(raw);
+                if (saved.version !== 1 || !saved.pending?.command?.requestKey || !labels[saved.pending.command.operation as keyof typeof labels]
+                    || typeof saved.pending.fields?.name !== 'string' || typeof saved.followup?.name !== 'string') throw Error('invalid recovery');
+                pending.current = saved.pending; retainedFields.current = saved.followup; currentFields.current = saved.followup;
+                setFields(saved.followup); setRecovering(true);
+            }
+        } catch { setStorageError(true); }
+        return () => { stop(); stopRevocation(); };
+    }, [actorScope, recoveryKey]);
+    useEffect(() => { if (pending.current) persist(); }, [fields, persist]); // Only submitted intents are recoverable.
+    useEffect(() => { onFormDirty?.(!!mode || recovering || importDirty); return () => onFormDirty?.(false); }, [mode, recovering, importDirty, onFormDirty]);
     const close = () => {
         if (busy) return;
         operationEpoch.current++; shareRead.current?.abort();
@@ -83,7 +141,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
     };
     const open = (requested: PlanCommand['operation']) => {
         const owner = service;
-        requestAction(() => {
+        const action = () => {
             if (currentService.current !== owner || !mounted.current) return;
             const epoch = ++operationEpoch.current;
             shareRead.current?.abort(); setCandidates([]); setError('');
@@ -103,7 +161,8 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                     if (isCurrent(owner, epoch)) setCandidates(result);
                 }).catch(e => { if (isCurrent(owner, epoch) && !controller.signal.aborted) setError(planErrorLabel(e)); });
             }
-        });
+        };
+        if (pending.current) action(); else requestAction(action);
     };
     const createCommand = (): PlanCommand | null => {
         if (!mode) return null;
@@ -122,7 +181,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
         return { operation: mode, ...base };
     };
     const submit = async () => {
-        if (!service || !mode || busy) return;
+        if (!service || !mode || busy || (disabled && !pending.current)) return;
         const owner = service, epoch = operationEpoch.current;
         setError('');
         let intent = pending.current;
@@ -132,6 +191,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                 if (!command) return;
                 intent = { command, fields: structuredClone(fields) };
                 pending.current = intent;
+                persist();
             } catch (e) { setError(planErrorLabel(e)); return; }
         }
         setBusy(true);
@@ -139,7 +199,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
             const result = await owner.mutatePlan(intent.command);
             if (!isCurrent(owner, epoch)) return;
             const latest = currentFields.current;
-            pending.current = null; retainedFields.current = null;
+            pending.current = null; retainedFields.current = null; persist();
             setRecovering(false); setBusy(false);
             const created = intent.command.operation === 'create' || intent.command.operation === 'clone';
             const metadataChanged = latest.name !== intent.fields.name || latest.start !== intent.fields.start || latest.end !== intent.fields.end;
@@ -154,12 +214,12 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                     : '원래 요청의 저장을 확인했습니다. 변경한 입력은 이 프리셋에 별도로 저장해 주세요.');
             } else { setMode(null); operationEpoch.current++; }
             void reload();
-            if (created) onChange(result.plan.id);
+            if (created) (onCommitted ?? onChange)(result.plan.id);
             else await onRefresh();
         } catch (e) {
             if (isCurrent(owner, epoch)) {
                 if (rejectedBeforeCommit(e)) {
-                    pending.current = null; retainedFields.current = null; setRecoveredPlan(null);
+                    pending.current = null; retainedFields.current = null; persist(); setRecoveredPlan(null);
                     // Refresh the current metadata revision before a separately submitted correction.
                     void onRefresh().catch(refreshError => { if (isCurrent(owner, epoch)) setError(planErrorLabel(refreshError)); }); void reload();
                 }
@@ -180,10 +240,11 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                 </SelectContent>
             </Select>
             <label className="flex items-center gap-2 text-sm"><Checkbox checked={archived} onCheckedChange={v => setArchived(Boolean(v))} />보관함</label>
-            {list?.canManage ? <Button variant="outline" onClick={() => open('create')}>프리셋 만들기</Button> : null}
+            {list?.canManage ? <Button variant="outline" disabled={disabled || !!listError || importDirty} onClick={() => open('create')}>프리셋 만들기</Button> : null}
+            {list?.canManage && service ? <TimetablePlanImportDialog key={actorScope} service={service} disabled={disabled || !!listError || !!pending.current} requestAction={requestAction} onDirty={setImportDirty} onCommitted={id => { void reload(); (onCommitted ?? onChange)(id); }} /> : null}
             {recovering && !mode ? <Button variant="outline" onClick={() => open(pending.current!.command.operation)}>원래 요청 확인</Button> : null}
             {snapshot ? <DropdownMenu>
-                <DropdownMenuTrigger asChild><Button variant="outline">더보기</Button></DropdownMenuTrigger>
+                <DropdownMenuTrigger asChild><Button variant="outline" disabled={disabled || importDirty}>더보기</Button></DropdownMenuTrigger>
                 <DropdownMenuContent>{snapshot.permissions.canManage ? <>
                     <DropdownMenuItem onSelect={() => open('rename')}>이름·기준 기간 변경</DropdownMenuItem>
                     <DropdownMenuItem onSelect={() => open('clone')}>복제</DropdownMenuItem>
@@ -192,6 +253,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                 </> : <DropdownMenuItem disabled>읽기 전용</DropdownMenuItem>}</DropdownMenuContent>
             </DropdownMenu> : null}
         </div>
+        {storageError ? <p role="alert" className="text-sm text-destructive">이 탭에서 복구 정보를 저장할 수 없습니다. 결과를 확인하기 전에는 새로고침하지 마세요.</p> : null}
         {listError ? <p role="alert" className="text-sm text-destructive">{listError} <Button variant="ghost" onClick={() => void reload()}>다시 불러오기</Button></p> : null}
         <Dialog open={!!mode} onOpenChange={opened => { if (!opened) close(); }}>
             <DialogContent restoreFocusToOpener>
@@ -201,7 +263,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                 </DialogHeader>
                 <form onSubmit={e => { e.preventDefault(); void submit(); }} className="space-y-4">
                     {mode && ['create', 'rename', 'clone'].includes(mode) ? <div className="space-y-2">
-                        <Label htmlFor="plan-name">프리셋 이름</Label><Input id="plan-name" value={fields.name} maxLength={120} onChange={e => setField('name', e.target.value)} autoFocus required={!recovering} />
+                        <Label htmlFor="plan-name">프리셋 이름</Label><Input id="plan-name" value={fields.name} maxLength={120} onChange={e => setField('name', e.target.value)} required={!recovering} />
                     </div> : null}
                     {mode && ['create', 'rename'].includes(mode) ? <div className="grid gap-3 sm:grid-cols-2">
                         <div className="space-y-2"><Label htmlFor="plan-start">기준 시작일</Label><Input id="plan-start" type="date" value={fields.start} onChange={e => setField('start', e.target.value)} /></div>
@@ -223,7 +285,7 @@ export function TimetablePlanPicker({ planId, snapshot, onChange, onRefresh, req
                     </div> : null}
                     {recovering ? <p role="status" className="text-sm">저장 결과를 확인하지 못했습니다. 입력을 바꾸어도 먼저 원래 요청을 확인합니다.</p> : null}
                     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
-                    <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={close}>취소</Button><Button disabled={busy}>{busy ? '저장 중…' : recovering ? '원래 요청 재시도' : '저장'}</Button></DialogFooter>
+                    <DialogFooter><Button type="button" variant="outline" disabled={busy} onClick={close}>취소</Button><Button disabled={busy || (disabled && !recovering)}>{busy ? '저장 중…' : recovering ? '원래 요청 재시도' : '저장'}</Button></DialogFooter>
                 </form>
             </DialogContent>
         </Dialog>

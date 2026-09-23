@@ -1,0 +1,31 @@
+✔ a retry reuses the action request key and its canonical defaults payload (1.072042ms)
+✔ RPC errors are mapped to safe schedule action states (0.100708ms)
+✔ generation preview sends only the bounded range and revision (0.085333ms)
+✔ bounded reader deduplicates one range, aborts a prior class, and trusts the RPC authority result (0.306166ms)
+✔ runtime-not-ready reloads legacy while other normalized read failures stay explicit (0.15325ms)
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (0.582625ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.205792ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (11.929709ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.091625ms)
+✔ timetable panels expose per-panel high resolution image export (2.171917ms)
+✔ timetable blocks expose structured hover details (1.1255ms)
+✔ timetable panel headers show lesson count and weekly hours (1.00675ms)
+✔ compact timetable blocks keep class names readable (1.657916ms)
+✔ timetable reuses shared tabs and responsive filters without semester controls (0.595292ms)
+✔ selected teacher panels remain visible beyond the grid column count (0.840958ms)
+✔ default panels include every available target when nothing is selected (0.070875ms)
+✔ teacher timetable filters only academic teams for the selected subject (8.518583ms)
+✔ precomputed timetable rows preserve the legacy workspace and grid model (0.377542ms)
+✔ timetable workspace requests only its active mode and keeps dense recovery explicit (2.098417ms)
+✔ weekly timetable panels fit all weekdays without horizontal scrolling (0.181667ms)
+✔ daily timetable panels keep horizontal scrolling for wider axis sets (0.079375ms)
+✔ timetable ignores retired period scopes and keeps exactly three status choices (0.478166ms)
+✔ comparison panels share a cropped axis without losing morning or late lessons (0.387459ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 109.365041

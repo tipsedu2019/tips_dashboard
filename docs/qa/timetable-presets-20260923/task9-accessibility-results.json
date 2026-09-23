@@ -1,0 +1,17 @@
+{
+  "mode": "local Next production webpack",
+  "results": [
+    {
+      "name": "390px dark touch entry, readable legacy candidates, no page overflow, Escape restores opener",
+      "passed": true
+    },
+    {
+      "name": "standard keyboard form Tab and Escape focus restoration",
+      "passed": true
+    },
+    {
+      "name": "actual auth-provider logout retires actor and removes submitted metadata recovery",
+      "passed": true
+    }
+  ]
+}

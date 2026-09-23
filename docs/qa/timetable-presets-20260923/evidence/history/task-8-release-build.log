@@ -1,0 +1,167 @@
+▲ Next.js 16.1.1 (webpack)
+- Experiments (use with caution):
+  ✓ externalDir
+  · optimizePackageImports
+
+  Creating an optimized production build ...
+✓ Compiled successfully in 9.4s
+  Running TypeScript ...
+  Collecting page data using 9 workers ...
+  Generating static pages using 9 workers (0/80) ...
+  Generating static pages using 9 workers (20/80) 
+public_classes_read_failed {
+  event: 'public_classes_read_failed',
+  phase: 'query',
+  table: 'classes',
+  status: 501,
+  code: null,
+  kind: 'upstream',
+  durationMs: 9
+}
+public_classes_read_failed {
+  event: 'public_classes_read_failed',
+  phase: 'query',
+  table: 'textbooks',
+  status: 501,
+  code: null,
+  kind: 'upstream',
+  durationMs: 10
+}
+public_classes_read_failed {
+  event: 'public_classes_read_failed',
+  phase: 'query',
+  table: 'progress_logs',
+  status: 501,
+  code: null,
+  kind: 'upstream',
+  durationMs: 10
+}
+public_classes_read_failed {
+  event: 'public_classes_read_failed',
+  phase: 'query',
+  table: 'classes',
+  status: 501,
+  code: null,
+  kind: 'upstream',
+  durationMs: 7
+}
+  Generating static pages using 9 workers (40/80) 
+  Generating static pages using 9 workers (60/80) 
+✓ Generating static pages using 9 workers (80/80) in 202.6ms
+  Finalizing page optimization ...
+  Collecting build traces ...
+
+Route (app)
+┌ ○ /
+├ ○ /_not-found
+├ ○ /admin
+├ ○ /admin/academic-calendar
+├ ○ /admin/academic-calendar/annual-board
+├ ○ /admin/calendar
+├ ○ /admin/chat
+├ ƒ /admin/class-schedule
+├ ƒ /admin/class-schedule/lesson-design
+├ ○ /admin/classes
+├ ○ /admin/classrooms
+├ ƒ /admin/curriculum
+├ ○ /admin/curriculum/lesson-design
+├ ○ /admin/dashboard
+├ ○ /admin/dashboard-2
+├ ○ /admin/faqs
+├ ○ /admin/mail
+├ ○ /admin/makeup-requests
+├ ○ /admin/manual
+├ ○ /admin/pricing
+├ ○ /admin/public-content
+├ ○ /admin/recruiting
+├ ○ /admin/registration
+├ ○ /admin/schools
+├ ○ /admin/settings
+├ ○ /admin/settings/account
+├ ○ /admin/settings/appearance
+├ ○ /admin/settings/billing
+├ ○ /admin/settings/classrooms
+├ ○ /admin/settings/connections
+├ ƒ /admin/settings/notifications
+├ ○ /admin/settings/schools
+├ ○ /admin/settings/subjects
+├ ○ /admin/settings/teachers
+├ ○ /admin/settings/textbook-suppliers
+├ ○ /admin/settings/user
+├ ○ /admin/statistics
+├ ○ /admin/students
+├ ○ /admin/tasks
+├ ○ /admin/teachers
+├ ○ /admin/textbooks
+├ ○ /admin/timetable
+├ ○ /admin/transfer
+├ ○ /admin/users
+├ ○ /admin/withdrawal
+├ ○ /admin/word-retests
+├ ƒ /api/admin/google-chat-identities
+├ ƒ /api/admin/public-content
+├ ƒ /api/admin/public-content/uploads
+├ ƒ /api/admin/recruiting/applications
+├ ƒ /api/admin/recruiting/applications/[applicationId]
+├ ƒ /api/dashboard/statistics
+├ ƒ /api/dashboard/statistics/drilldown
+├ ƒ /api/google-chat
+├ ƒ /api/makeup-requests/approve
+├ ƒ /api/notifications/connections
+├ ƒ /api/notifications/contract-version
+├ ƒ /api/notifications/control-plane
+├ ƒ /api/notifications/events/[eventId]
+├ ƒ /api/notifications/events/[eventId]/retry
+├ ƒ /api/notifications/legacy/makeup
+├ ƒ /api/notifications/legacy/ops-task
+├ ƒ /api/notifications/mention-settings
+├ ƒ /api/notifications/operations
+├ ƒ /api/notifications/push-readiness
+├ ƒ /api/notifications/worker
+├ ƒ /api/public-classes
+├ ƒ /api/public-classes/[classId]
+├ ƒ /api/public-classes/cache/invalidate
+├ ƒ /api/public-classes/summary
+├ ƒ /api/public-content
+├ ƒ /api/public-content/assets/[...path]
+├ ƒ /api/push-subscriptions
+├ ƒ /api/recruiting/applications
+├ ƒ /api/registration/consultation-cancellation-notification
+├ ƒ /api/registration/consultation-notification
+├ ƒ /api/registration/observation-chat
+├ ƒ /api/solapi/registration
+├ ƒ /api/solapi/registration/admin
+├ ƒ /api/solapi/registration/bundles/preview
+├ ƒ /api/solapi/registration/case-history
+├ ƒ /api/solapi/registration/check
+├ ƒ /api/solapi/registration/delivery
+├ ƒ /api/solapi/registration/messages
+├ ƒ /api/solapi/registration/preview
+├ ƒ /api/solapi/registration/reminders/settings
+├ ƒ /api/solapi/registration/reminders/worker
+├ ƒ /api/solapi/registration/send
+├ ƒ /api/solapi/registration/settings
+├ ƒ /api/web-push
+├ ○ /errors/forbidden
+├ ○ /errors/internal-server-error
+├ ○ /errors/not-found
+├ ○ /errors/unauthorized
+├ ○ /errors/under-maintenance
+├ ○ /forgot-password
+├ ○ /forgot-password-2
+├ ○ /forgot-password-3
+├ ○ /inquiry
+├ ○ /reset-password
+├ ○ /sign-in
+├ ○ /sign-in-2
+├ ○ /sign-in-3
+├ ○ /sign-up
+├ ○ /sign-up-2
+└ ○ /sign-up-3
+
+
+ƒ Proxy (Middleware)
+
+○  (Static)   prerendered as static content
+ƒ  (Dynamic)  server-rendered on demand
+

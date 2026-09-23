@@ -1,0 +1,134 @@
+✖ create: unknown receipt survives changed name (556.088209ms)
+ℹ {"mode":"create","reopen":false,"persistedIds":["e4193ce1-e44d-43c9-afc7-a2162551cade","a156fb05-988e-4cf2-89c9-cfaabb32198c"],"persistedCount":2}
+✖ create: unknown receipt survives changed name and dialog reopen (429.672917ms)
+ℹ {"mode":"create","reopen":true,"persistedIds":["c015ab0e-bd32-4355-9caa-581168d9a330","4b5d3d46-bad5-41ef-9320-61841eecd8e8"],"persistedCount":2}
+✖ clone: unknown receipt survives changed name (503.881542ms)
+ℹ {"mode":"clone","reopen":false,"persistedIds":["7fda4c29-5be9-42de-a135-7b5962546fce","59a94610-d56b-4c45-aa4f-b41ce8333089"],"persistedCount":2}
+✖ clone: unknown receipt survives changed name and dialog reopen (486.04ms)
+ℹ {"mode":"clone","reopen":true,"persistedIds":["083882ee-a13b-40e6-8fbc-ec902a3ed031","0f63dcd9-25c6-48bc-825d-548c8295766a"],"persistedCount":2}
+ℹ tests 4
+ℹ suites 0
+ℹ pass 0
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 2444.342542
+
+✖ failing tests:
+
+test at tests/timetable-plan-picker.test.mjs:49:71
+✖ create: unknown receipt survives changed name (556.088209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   name: '후속 입력',
+  -   name: '원래 요청',
+      operation: 'create',
+  +   planId: 'a156fb05-988e-4cf2-89c9-cfaabb32198c',
+  +   requestKey: '314e034e-ee38-458e-ab31-21f5cea85c69',
+  -   planId: 'e4193ce1-e44d-43c9-afc7-a2162551cade',
+  -   requestKey: 'd091b565-81a0-4690-882f-6c897aeedef1',
+      targetEndDate: null,
+      targetStartDate: null
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:60:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'create', planId: 'a156fb05-988e-4cf2-89c9-cfaabb32198c', name: '후속 입력', requestKey: '314e034e-ee38-458e-ab31-21f5cea85c69', targetStartDate: null, targetEndDate: null },
+    expected: { operation: 'create', planId: 'e4193ce1-e44d-43c9-afc7-a2162551cade', name: '원래 요청', requestKey: 'd091b565-81a0-4690-882f-6c897aeedef1', targetStartDate: null, targetEndDate: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:49:71
+✖ create: unknown receipt survives changed name and dialog reopen (429.672917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   name: '후속 입력',
+  -   name: '원래 요청',
+      operation: 'create',
+  +   planId: '4b5d3d46-bad5-41ef-9320-61841eecd8e8',
+  +   requestKey: 'f500fdb9-94d3-411f-8eef-0845ab96c94d',
+  -   planId: 'c015ab0e-bd32-4355-9caa-581168d9a330',
+  -   requestKey: '199e8770-bb7d-4ff2-8946-ce81b711280c',
+      targetEndDate: null,
+      targetStartDate: null
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:60:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'create', planId: '4b5d3d46-bad5-41ef-9320-61841eecd8e8', name: '후속 입력', requestKey: 'f500fdb9-94d3-411f-8eef-0845ab96c94d', targetStartDate: null, targetEndDate: null },
+    expected: { operation: 'create', planId: 'c015ab0e-bd32-4355-9caa-581168d9a330', name: '원래 요청', requestKey: '199e8770-bb7d-4ff2-8946-ce81b711280c', targetStartDate: null, targetEndDate: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:49:71
+✖ clone: unknown receipt survives changed name (503.881542ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      expectedMetaRevision: 0,
+  +   name: '후속 입력',
+  -   name: '원래 요청',
+      operation: 'clone',
+  +   planId: '59a94610-d56b-4c45-aa4f-b41ce8333089',
+  +   requestKey: '43a69b25-cc45-4761-929c-55c2c084365b',
+  -   planId: '7fda4c29-5be9-42de-a135-7b5962546fce',
+  -   requestKey: 'd951f444-06ef-4129-9a3b-69902374bedd',
+      sourcePlanId: 'ae260000-0000-4000-8000-000000000001'
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:60:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'clone', planId: '59a94610-d56b-4c45-aa4f-b41ce8333089', sourcePlanId: 'ae260000-0000-4000-8000-000000000001', expectedMetaRevision: 0, name: '후속 입력', requestKey: '43a69b25-cc45-4761-929c-55c2c084365b' },
+    expected: { operation: 'clone', planId: '7fda4c29-5be9-42de-a135-7b5962546fce', sourcePlanId: 'ae260000-0000-4000-8000-000000000001', expectedMetaRevision: 0, name: '원래 요청', requestKey: 'd951f444-06ef-4129-9a3b-69902374bedd' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:49:71
+✖ clone: unknown receipt survives changed name and dialog reopen (486.04ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      expectedMetaRevision: 0,
+  +   name: '후속 입력',
+  -   name: '원래 요청',
+      operation: 'clone',
+  +   planId: '0f63dcd9-25c6-48bc-825d-548c8295766a',
+  +   requestKey: 'c0616504-69bd-408d-ab66-d762a7618e20',
+  -   planId: '083882ee-a13b-40e6-8fbc-ec902a3ed031',
+  -   requestKey: 'beb1b7ba-e539-49c7-9ff9-3246b105fe68',
+      sourcePlanId: 'ae260000-0000-4000-8000-000000000001'
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:60:9)
+      at process.processTicksAndRejections (node:internal/process/task_queues:104:5)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'clone', planId: '0f63dcd9-25c6-48bc-825d-548c8295766a', sourcePlanId: 'ae260000-0000-4000-8000-000000000001', expectedMetaRevision: 0, name: '후속 입력', requestKey: 'c0616504-69bd-408d-ab66-d762a7618e20' },
+    expected: { operation: 'clone', planId: '083882ee-a13b-40e6-8fbc-ec902a3ed031', sourcePlanId: 'ae260000-0000-4000-8000-000000000001', expectedMetaRevision: 0, name: '원래 요청', requestKey: 'beb1b7ba-e539-49c7-9ff9-3246b105fe68' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,174 @@
+BEGIN
+INSERT 0 1
+BEGIN
+CREATE EXTENSION
+ plan  
+-------
+ 1..32
+(1 row)
+
+                 has_column                  
+---------------------------------------------
+ ok 1 - dashboard_audit_logs.class_id exists
+(1 row)
+
+                   has_column                   
+------------------------------------------------
+ ok 2 - dashboard_audit_logs.request_key exists
+(1 row)
+
+                      has_column                      
+------------------------------------------------------
+ ok 3 - dashboard_audit_logs.request_operation exists
+(1 row)
+
+                    has_column                    
+--------------------------------------------------
+ ok 4 - dashboard_audit_logs.change_reason exists
+(1 row)
+
+                                 ok                                 
+--------------------------------------------------------------------
+ ok 5 - dashboard_audit_logs_authenticated_insert policy is removed
+(1 row)
+
+                           ok                           
+--------------------------------------------------------
+ ok 6 - authenticated cannot directly insert audit rows
+(1 row)
+
+                        has_table                        
+---------------------------------------------------------
+ ok 7 - private continuous_class_schedule_runtime exists
+(1 row)
+
+                   has_table                   
+-----------------------------------------------
+ ok 8 - private class_schedule_cutovers exists
+(1 row)
+
+                                   is                                    
+-------------------------------------------------------------------------
+ ok 9 - runtime remains inactive until the separate activation migration
+(1 row)
+
+                            ok                             
+-----------------------------------------------------------
+ ok 10 - authenticated cannot read the private runtime row
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 11 - authenticated cannot read cutover receipts
+(1 row)
+
+                       ok                       
+------------------------------------------------
+ ok 12 - slot direct-write guard trigger exists
+(1 row)
+
+                        ok                         
+---------------------------------------------------
+ ok 13 - session direct-write guard trigger exists
+(1 row)
+
+                                    has_function                                     
+-------------------------------------------------------------------------------------
+ ok 14 - Function public.continuous_class_schedule_direct_write_guard() should exist
+(1 row)
+
+                               throws_ok                                
+------------------------------------------------------------------------
+ ok 15 - direct writes to normalized class schedule tables are rejected
+(1 row)
+
+                                   ok                                   
+------------------------------------------------------------------------
+ ok 16 - authenticated can read the runtime marker through its function
+(1 row)
+
+                        ok                         
+---------------------------------------------------
+ ok 17 - existing mutation receipts remain private
+(1 row)
+
+                       ok                        
+-------------------------------------------------
+ ok 18 - class-scoped audit history index exists
+(1 row)
+
+                   ok                   
+----------------------------------------
+ ok 19 - runtime version is constrained
+(1 row)
+
+                      ok                       
+-----------------------------------------------
+ ok 20 - runtime table keeps one singleton row
+(1 row)
+
+                               has_function                                
+---------------------------------------------------------------------------
+ ok 21 - Function public.get_class_schedule_defaults_v1(uuid) should exist
+(1 row)
+
+                                 has_function                                 
+------------------------------------------------------------------------------
+ ok 22 - Function public.get_class_schedule_v1(uuid, date, date) should exist
+(1 row)
+
+                                              has_function                                              
+--------------------------------------------------------------------------------------------------------
+ ok 23 - Function public.initialize_new_class_schedule_v1(uuid, bigint, text, jsonb, uuid) should exist
+(1 row)
+
+                                             has_function                                              
+-------------------------------------------------------------------------------------------------------
+ ok 24 - Function public.save_class_schedule_defaults_v1(uuid, bigint, jsonb, uuid, text) should exist
+(1 row)
+
+                                               has_function                                                
+-----------------------------------------------------------------------------------------------------------
+ ok 25 - Function public.preview_class_lesson_session_generation_v1(uuid, bigint, date, date) should exist
+(1 row)
+
+                                                 has_function                                                 
+--------------------------------------------------------------------------------------------------------------
+ ok 26 - Function public.generate_class_lesson_sessions_v1(uuid, bigint, date, date, uuid, text) should exist
+(1 row)
+
+                                                                   has_function                                                                    
+---------------------------------------------------------------------------------------------------------------------------------------------------
+ ok 27 - Function public.save_class_lesson_session_v1(uuid, bigint, text, date, time, time, uuid, uuid, text, text, text, uuid, text) should exist
+(1 row)
+
+                                        has_function                                        
+--------------------------------------------------------------------------------------------
+ ok 28 - Function public.save_class_lesson_content_v1(uuid, text, jsonb, uuid) should exist
+(1 row)
+
+                                              has_function                                              
+--------------------------------------------------------------------------------------------------------
+ ok 29 - Function public.backfill_class_schedule_shadow_v1(uuid, text, jsonb, jsonb, uuid) should exist
+(1 row)
+
+                                   has_function                                   
+----------------------------------------------------------------------------------
+ ok 30 - Function public.verify_class_schedule_shadow_v1(uuid, text) should exist
+(1 row)
+
+                                           has_function                                            
+---------------------------------------------------------------------------------------------------
+ ok 31 - Function public.activate_class_schedule_storage_v1(uuid, bigint, text, uuid) should exist
+(1 row)
+
+                                        has_function                                         
+---------------------------------------------------------------------------------------------
+ ok 32 - Function public.deactivate_class_schedule_storage_v1(uuid, uuid, text) should exist
+(1 row)
+
+ finish 
+--------
+(0 rows)
+
+ROLLBACK

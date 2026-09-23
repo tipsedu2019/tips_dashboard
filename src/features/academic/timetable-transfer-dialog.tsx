@@ -6,7 +6,7 @@ import { Label } from '@/components/ui/label';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { createTimetableTransferSession, transferEffect } from './timetable-transfer-session';
-import { observeTimetableActorRetirement } from './timetable-plan-recovery';
+import { observeTimetableActorRetirement, observeTimetablePlanRevocation } from './timetable-plan-recovery';
 import { planErrorLabel, PLAN_DAYS, formatPlanTime } from './timetable-plan-interaction';
 import type { PlanMetadata, TransferRequest, TransferResult } from './timetable-plan-contract';
 import type { useTimetablePlan } from './use-timetable-plan';
@@ -31,8 +31,13 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
     if (!session || !service) return;
     session.resume();
     const stop = observeTimetableActorRetirement(service.actorScope, () => session.retire());
-    return () => { stop(); session.pause(); };
-  }, [session, service]);
+    const stopRevocation = observeTimetablePlanRevocation(service.actorScope, id => {
+      setPlans(value => value.filter(plan => plan.id !== id));
+      const request = session.snapshot().command?.request;
+      if (id === planId || request?.target.kind === 'plan' && request.target.planId === id) session.retire();
+    });
+    return () => { stop(); stopRevocation(); session.pause(); };
+  }, [session, service, planId]);
   useEffect(() => { onPending(!!transfer?.command); }, [transfer?.command, onPending]);
   useEffect(() => {
     if (!open || !service) return;

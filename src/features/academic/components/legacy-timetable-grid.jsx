@@ -33,10 +33,12 @@ function TimetableBlock({
     ? [tooltipDetails.teacher, tooltipDetails.classroom].filter(Boolean)
     : [];
 
+  const blockHeight = (block.endSlot - block.startSlot) * slotHeight;
   const classNames = [
     'timetable-block',
     'is-' + density,
-    (block.endSlot - block.startSlot) * slotHeight < 76 ? 'is-short' : '',
+    blockHeight < 76 ? 'is-short' : '',
+    blockHeight < 46 ? 'is-single-line' : '',
     block.clickable && !isGhost ? 'clickable' : '',
     block.editable ? 'editable' : '',
     isGhost ? 'ghost' : '',

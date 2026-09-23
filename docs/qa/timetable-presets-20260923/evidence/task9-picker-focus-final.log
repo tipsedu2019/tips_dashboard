@@ -1,0 +1,28 @@
+✔ create: unknown receipt survives changed name (65.478ms)
+✔ create: unknown receipt survives changed name and dialog reopen (19.645209ms)
+✔ clone: unknown receipt survives changed name (13.497166ms)
+✔ clone: unknown receipt survives changed name and dialog reopen (15.110625ms)
+✔ late share success cannot populate another actor/dialog (11.780917ms)
+✔ late share failure cannot populate another actor/dialog (10.560417ms)
+✔ late create success cannot change another actor's selection/dialog (13.2315ms)
+✔ late create failure cannot change another actor's selection/dialog (12.660333ms)
+✔ late share response cannot fill a newer dialog in the same actor scope (9.086167ms)
+✔ conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable (24.501708ms)
+✔ share receipt preserves later viewer-to-editor change for a separate confirmed-revision command (16.544625ms)
+✔ share receipt preserves later revocation for a separate confirmed-revision command (16.463208ms)
+✔ create: submitted immutable receipt survives full remount (9.880959ms)
+✔ clone: submitted immutable receipt survives full remount (6.574125ms)
+✔ rename: submitted immutable receipt survives full remount (7.510042ms)
+✔ share: submitted immutable receipt survives full remount (9.795416ms)
+✔ archive: submitted immutable receipt survives full remount (5.691208ms)
+✔ restore: submitted immutable receipt survives full remount (4.5085ms)
+✔ actor retirement purges pending metadata, picker list and recovery UI (4.499125ms)
+✔ Storage SecurityError keeps the submitted immutable request in memory and warns before reload (4.870584ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 773.01

@@ -1,0 +1,9 @@
+page.waitForURL: Timeout 30000ms exceeded.
+=========================== logs ===========================
+waiting for navigation until "load"
+  navigated to "http://127.0.0.1:3260/sign-in?next=%2Fadmin%2Ftimetable"
+============================================================
+    at /Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/scripts/qa/timetable-rollout-accessibility-browser.mjs:11:98 {
+  log: [],
+  name: 'TimeoutError'
+}

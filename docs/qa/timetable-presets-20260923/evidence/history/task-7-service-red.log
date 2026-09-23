@@ -1,0 +1,56 @@
+✔ preview sends exact canonical request with selected item IDs (0.558917ms)
+✖ malformed or mismatched preview is never commit-ready (0.272458ms)
+✖ malformed or mismatched preview is never commit-ready (0.055917ms)
+✖ malformed or mismatched preview is never commit-ready (0.094ms)
+ℹ tests 4
+ℹ suites 0
+ℹ pass 1
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.726708
+
+✖ failing tests:
+
+test at tests/timetable-transfer-service.test.mjs:7:193
+✖ malformed or mismatched preview is never commit-ready (0.272458ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-transfer-service.test.mjs:7:389)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /response_invalid/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/timetable-transfer-service.test.mjs:7:193
+✖ malformed or mismatched preview is never commit-ready (0.055917ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-transfer-service.test.mjs:7:389)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /response_invalid/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/timetable-transfer-service.test.mjs:7:193
+✖ malformed or mismatched preview is never commit-ready (0.094ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-transfer-service.test.mjs:7:389)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /response_invalid/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

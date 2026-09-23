@@ -55,6 +55,7 @@ import { getTimetablePanelLayout } from "./timetable-layout";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 import { useDraftNavigation } from '@/hooks/use-draft-navigation';
 import { useTimetablePlan } from './use-timetable-plan';
+import { clearTimetablePlanRecovery } from './timetable-plan-recovery';
 import { TimetablePlanPicker } from './timetable-plan-picker';
 import { TimetablePlanWorkspace } from './timetable-plan-workspace';
 import styles from "./timetable-grid-skin.module.css";
@@ -212,6 +213,7 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 }
 
 export function AcademicTimetableWorkspace() {
+  const presetsEnabled = process.env.NEXT_PUBLIC_TIMETABLE_PRESETS_ENABLED !== "false";
   const [view, setView] = useState<TimetableView>("teacher-weekly");
   const [planId, setPlanId] = useState<string | null>(null);
   const operationalRefresh = useRef<(() => Promise<void>) | null>(null);
@@ -227,12 +229,23 @@ export function AcademicTimetableWorkspace() {
       if (publicCache.status === 'pending') throw Error('public_classes_cache_refresh_pending');
     }
   }, []);
+  useEffect(() => {
+    const error = plan.error as { code?: string; message?: string } | null;
+    if (error?.code === '42501' || error?.message === 'timetable_forbidden') {
+      let current = true;
+      queueMicrotask(() => { if (current) {
+        if (plan.service && planId) clearTimetablePlanRecovery(plan.service.actorScope, planId);
+        setFormDirty(false); setPlanId(null); setReloadNonce(value => value + 1);
+      } });
+      return () => { current = false; };
+    }
+  }, [plan.error, plan.service, planId]);
   const navigation = useDraftNavigation({ dirty: plan.dirty || formDirty });
   const changePlan = (id: string | null) => navigation.requestLocalAction(() => {
     setFormDirty(false); setPlanId(id);
   });
   return <div className="space-y-4">
-    <TimetablePlanPicker reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/>
+    {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && plan.referenceStatus !== 'verified'} onCommitted={id => { setFormDirty(false); setPlanId(id); }} onFormDirty={setFormDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
     <div hidden={Boolean(planId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
     {planId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onFormDirty={setFormDirty} requestAction={navigation.requestLocalAction}/> : null}
     {navigation.confirmation}

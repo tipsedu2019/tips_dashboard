@@ -1,0 +1,31 @@
+      nspname      |               relname               |  owner   | relrowsecurity | auth_select | auth_write | anon_any 
+-------------------+-------------------------------------+----------+----------------+-------------+------------+----------
+ public            | timetable_invalidation_signals      | postgres | t              | t           | f          | f
+ dashboard_private | timetable_operating_write_baselines | postgres | t              | f           | f          | f
+(2 rows)
+
+ remaining_baselines 
+---------------------
+                   0
+(1 row)
+
+                        tgrelid                        |            tgname            |                                                                                                                                                               pg_get_triggerdef                                                                                                                                                                
+-------------------------------------------------------+------------------------------+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ classes                                               | timetable_operating_after    | CREATE TRIGGER timetable_operating_after AFTER INSERT OR DELETE OR UPDATE OF schedule, teacher, room, status, start_date, end_date, schedule_storage_mode, schedule_plan ON public.classes FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_after_statement_v1()
+ classes                                               | timetable_operating_before   | CREATE TRIGGER timetable_operating_before BEFORE INSERT OR DELETE OR UPDATE OF schedule, teacher, room, status, start_date, end_date, schedule_storage_mode, schedule_plan ON public.classes FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_before_statement_v1()
+ teacher_catalogs                                      | timetable_operating_after    | CREATE TRIGGER timetable_operating_after AFTER INSERT OR DELETE OR UPDATE OF name, is_visible, subjects ON public.teacher_catalogs FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_after_statement_v1()
+ teacher_catalogs                                      | timetable_operating_before   | CREATE TRIGGER timetable_operating_before BEFORE INSERT OR DELETE OR UPDATE OF name, is_visible, subjects ON public.teacher_catalogs FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_before_statement_v1()
+ classroom_catalogs                                    | timetable_operating_after    | CREATE TRIGGER timetable_operating_after AFTER INSERT OR DELETE OR UPDATE OF name, is_visible, subjects ON public.classroom_catalogs FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_after_statement_v1()
+ classroom_catalogs                                    | timetable_operating_before   | CREATE TRIGGER timetable_operating_before BEFORE INSERT OR DELETE OR UPDATE OF name, is_visible, subjects ON public.classroom_catalogs FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_before_statement_v1()
+ class_schedule_slots                                  | timetable_operating_after    | CREATE TRIGGER timetable_operating_after AFTER INSERT OR DELETE OR UPDATE OF weekday, start_time, end_time, teacher_catalog_id, classroom_catalog_id, class_id ON public.class_schedule_slots FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_after_statement_v1()
+ class_schedule_slots                                  | timetable_operating_before   | CREATE TRIGGER timetable_operating_before BEFORE INSERT OR DELETE OR UPDATE OF weekday, start_time, end_time, teacher_catalog_id, classroom_catalog_id, class_id ON public.class_schedule_slots FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_before_statement_v1()
+ class_lesson_sessions                                 | timetable_operating_after    | CREATE TRIGGER timetable_operating_after AFTER INSERT OR DELETE OR UPDATE OF session_date, schedule_state, start_time, end_time, teacher_catalog_id, classroom_catalog_id, class_id, source_schedule_slot_id ON public.class_lesson_sessions FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_after_statement_v1()
+ class_lesson_sessions                                 | timetable_operating_before   | CREATE TRIGGER timetable_operating_before BEFORE INSERT OR DELETE OR UPDATE OF session_date, schedule_state, start_time, end_time, teacher_catalog_id, classroom_catalog_id, class_id, source_schedule_slot_id ON public.class_lesson_sessions FOR EACH STATEMENT EXECUTE FUNCTION dashboard_private.timetable_operating_before_statement_v1()
+ dashboard_private.timetable_operating_write_baselines | timetable_operating_finalize | CREATE CONSTRAINT TRIGGER timetable_operating_finalize AFTER UPDATE ON dashboard_private.timetable_operating_write_baselines DEFERRABLE INITIALLY DEFERRED FOR EACH ROW EXECUTE FUNCTION dashboard_private.timetable_operating_finalize_v1()
+(11 rows)
+
+      pubname      | schemaname |           tablename            
+-------------------+------------+--------------------------------
+ supabase_realtime | public     | timetable_invalidation_signals
+(1 row)
+

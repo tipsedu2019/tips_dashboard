@@ -262,6 +262,7 @@
 .scope :global(.timetable-block.is-compact .block-name) { font-size: 12px; }
 .scope :global(.timetable-block.is-short) { padding-block: 4px; gap: 2px; }
 .scope :global(.timetable-block.is-short .block-name) { -webkit-line-clamp: 2; }
+.scope :global(.timetable-block.is-single-line .block-name) { -webkit-line-clamp: 1; }
 .scope :global(.timetable-block.is-short .block-details) { display: none; }
 
 @media (prefers-reduced-motion: reduce) {

@@ -1,6 +1,6 @@
 // Isolated synthetic transport for the real dashboard. Never forwards data calls.
 import http from "node:http"
-import { isPlanFixtureRpc, planFixtureRpc } from "./timetable-plan-rpc-bridge.mjs"
+import { isPlanFixtureRpc, planFixtureRpc, fixtureActors } from "./timetable-plan-rpc-bridge.mjs"
 import { buildTimetableWorkspaceModel } from "../../src/features/academic/records.js"
 import { buildAcademicAnnualBoardModel } from "../../src/features/operations/academic-calendar-models.js"
 const now = new Date().toISOString()
@@ -26,6 +26,11 @@ const session = {
   expires_in: 3600,
   expires_at: 2000000000,
   user,
+}
+function fixtureSession(actor) {
+ if (!fixtureActors.includes(actor)) throw Error('Unknown fixture actor');
+ const actorUser={...user,id:actor,email:actor===user.id?user.email:'task9-teacher@test.invalid'};
+ return {...session,user:actorUser,access_token:token.split('.')[0]+'.'+Buffer.from(JSON.stringify({sub:actor,exp:2000000000,role:'authenticated'})).toString('base64url')+'.fixture'};
 }
 const classes = [
   {id:"a",name:"고2 심화수학",subject:"수학",teacher:"김선생",classroom:"본관 1강",schedule:"월수금 15:00-17:00",status:"수강"},
@@ -73,10 +78,17 @@ async function api(req, res) {
   for await (const chunk of req) body += chunk
   const args = body ? JSON.parse(body) : {}
   const path = url.pathname
+  let actor = user.id;
+  if(req.headers.authorization) {
+    try { actor=JSON.parse(Buffer.from(req.headers.authorization.replace(/^Bearer /,'').split('.')[1],'base64url').toString()).sub; }
+    catch { return json(res,{message:'fixture_actor_denied'},403); }
+    if(!fixtureActors.includes(actor)) return json(res,{message:'fixture_actor_denied'},403);
+  }
+  const activeUser=fixtureSession(actor).user;
   calls.push({ path, args })
   const rpcName=path.startsWith('/rest/v1/rpc/')?path.slice('/rest/v1/rpc/'.length):'';
   if(isPlanFixtureRpc(rpcName) && (rpcName !== 'get_academic_timetable_range_v1' || req.headers['x-timetable-fixture-db'] === '1')) {
-    try { const result=await planFixtureRpc(rpcName,args);return json(res,result.error||result.data,result.error?400:200); }
+    try { const result=await planFixtureRpc(rpcName,args,actor);return json(res,result.error||result.data,result.error?400:200); }
     catch { return json(res,{message:'fixture_database_unavailable'},503); }
   }
   if (path === "/api/public-classes/cache/invalidate") return json(res,{ok:true,synthetic:true});
@@ -85,8 +97,9 @@ async function api(req, res) {
     return json(res, { mode })
   }
   if (path === "/__evidence") return json(res, {mode,calls});
-  if (path.endsWith("/user")) return json(res, user);
-  if (path.endsWith("/profiles")) return json(res, {...user,role:"admin",name:"합성 관리자"});
+  if (path.endsWith("/logout")) return json(res, {});
+  if (path.endsWith("/user")) return json(res, activeUser);
+  if (path.endsWith("/profiles")) return json(res, {...activeUser,role:actor===user.id?"admin":"teacher",name:actor===user.id?"합성 관리자":"Task9 교사",teacher_catalog_id:actor===user.id?null:"af249000-0000-4000-8000-000000000101"});
   if (path.endsWith("/get_academic_timetable_range_v1")) {
     if (mode === "error") return json(res,{message:"합성 조회 오류"},503);
     if (mode === "loading") await new Promise(resolve=>setTimeout(resolve,3000));
@@ -123,7 +136,7 @@ http
     if (url.pathname === "/__fixture") {
       res.writeHead(200, { "Content-Type": "text/html" })
       return res.end(
-        `<script>localStorage.setItem('sb-127-auth-token',${JSON.stringify(JSON.stringify(session))});localStorage.setItem('tips-dashboard-v2-theme',${JSON.stringify(url.searchParams.get("theme") === "dark" ? "dark" : "light")});location.replace(${JSON.stringify(url.searchParams.get('view') === 'annual' ? '/admin/academic-calendar/annual-board' : '/admin/timetable')})</script>`,
+        `<script>localStorage.setItem('sb-127-auth-token',${JSON.stringify(JSON.stringify(fixtureSession(url.searchParams.get('actor')==='teacher'?fixtureActors[1]:fixtureActors[0])))});localStorage.setItem('tips-dashboard-v2-theme',${JSON.stringify(url.searchParams.get("theme") === "dark" ? "dark" : "light")});location.replace(${JSON.stringify(url.searchParams.get('view') === 'annual' ? '/admin/academic-calendar/annual-board' : '/admin/timetable')})</script>`,
       )
     }
     if (url.pathname.startsWith("/api/") || url.pathname.startsWith("/__"))

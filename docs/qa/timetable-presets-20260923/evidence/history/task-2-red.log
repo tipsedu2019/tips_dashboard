@@ -1,0 +1,213 @@
+✖ touching intervals are free but one minute of overlap conflicts (0.291958ms)
+✖ same item overlaps even with different resources and includes both resource reasons when shared (0.045584ms)
+✖ each plan is independent, while every plan checks the same active shadow (0.037958ms)
+✖ a source class is not exempt from its own live shadow (0.03475ms)
+✖ suggestions preserve resource IDs, selected weekday order and five minute sequence (0.074667ms)
+✖ suggestions avoid shadows even for matching source class and return empty when none fit (0.029166ms)
+✖ an unrelated preexisting conflict does not hide a safe new suggestion (0.02975ms)
+✖ four views project the same stable Monday and Wednesday slot IDs (0.302459ms)
+✖ resolveGridTarget uses cropped absolute minutes and only the view-owned resource (0.049375ms)
+✖ resolveMovedGridTarget snaps the movement delta, preserving a 17:13 origin (0.040959ms)
+✖ grid adapter rejects malformed weekday, coordinate, and time (0.269542ms)
+✖ moveSlot changes one slot without mutating the original or its duration (0.27875ms)
+✖ moveSlot rejects noninteger, invalid weekday, and crossing-midnight targets (0.303541ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 0
+ℹ fail 13
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 52.980417
+
+✖ failing tests:
+
+test at tests/timetable-conflicts.node.ts:18:1
+✖ touching intervals are free but one minute of overlap conflicts (0.291958ms)
+  Error: findConflicts is not implemented
+      at findConflicts (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:4:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:19:16)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+
+test at tests/timetable-conflicts.node.ts:26:1
+✖ same item overlaps even with different resources and includes both resource reasons when shared (0.045584ms)
+  Error: findConflicts is not implemented
+      at findConflicts (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:4:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:27:20)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/timetable-conflicts.node.ts:34:1
+✖ each plan is independent, while every plan checks the same active shadow (0.037958ms)
+  Error: findConflicts is not implemented
+      at findConflicts (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:4:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:36:20)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-conflicts.node.ts:43:1
+✖ a source class is not exempt from its own live shadow (0.03475ms)
+  Error: findConflicts is not implemented
+      at findConflicts (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:4:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:45:20)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-conflicts.node.ts:49:1
+✖ suggestions preserve resource IDs, selected weekday order and five minute sequence (0.074667ms)
+  Error: suggestPlacements is not implemented
+      at suggestPlacements (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:19:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:52:23)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-conflicts.node.ts:65:1
+✖ suggestions avoid shadows even for matching source class and return empty when none fit (0.029166ms)
+  Error: suggestPlacements is not implemented
+      at suggestPlacements (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:19:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:66:19)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-conflicts.node.ts:72:1
+✖ an unrelated preexisting conflict does not hide a safe new suggestion (0.02975ms)
+  Error: suggestPlacements is not implemented
+      at suggestPlacements (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-conflicts.ts:19:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-conflicts.node.ts:74:19)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-placement-adapter.node.ts:21:1
+✖ four views project the same stable Monday and Wednesday slot IDs (0.302459ms)
+  Error: projectTimetableSlot is not implemented
+      at projectTimetableSlot (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-placement-adapter.ts:12:9)
+      at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:26:59
+      at Array.map (<anonymous>)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:26:45)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+
+test at tests/timetable-placement-adapter.node.ts:42:1
+✖ resolveGridTarget uses cropped absolute minutes and only the view-owned resource (0.049375ms)
+  Error: resolveGridTarget is not implemented
+      at resolveGridTarget (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-placement-adapter.ts:16:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:43:20)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/timetable-placement-adapter.node.ts:54:1
+✖ resolveMovedGridTarget snaps the movement delta, preserving a 17:13 origin (0.040959ms)
+  Error: resolveMovedGridTarget is not implemented
+      at resolveMovedGridTarget (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-placement-adapter.ts:20:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:55:20)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-placement-adapter.node.ts:75:1
+✖ grid adapter rejects malformed weekday, coordinate, and time (0.269542ms)
+  AssertionError [ERR_ASSERTION]: The error is expected to be an instance of "RangeError". Received "Error"
+  
+  Error message:
+  
+  resolveGridTarget is not implemented
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:76:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: resolveGridTarget is not implemented
+        at resolveGridTarget (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-placement-adapter.ts:16:9)
+        at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:76:23
+        at getActual (node:assert:611:5)
+        at strict.throws (node:assert:759:24)
+        at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-placement-adapter.node.ts:76:10)
+        at Test.runInAsyncScope (node:async_hooks:227:14)
+        at Test.run (node:internal/test_runner/test:1382:25)
+        at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+        at Test.postRun (node:internal/test_runner/test:1522:19)
+        at Test.run (node:internal/test_runner/test:1447:12),
+    operator: 'throws',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-model.node.ts:13:1
+✖ moveSlot changes one slot without mutating the original or its duration (0.27875ms)
+  Error: moveSlot is not implemented
+      at moveSlot (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-plan-model.ts:4:9)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-model.node.ts:14:17)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+
+test at tests/timetable-plan-model.node.ts:23:1
+✖ moveSlot rejects noninteger, invalid weekday, and crossing-midnight targets (0.303541ms)
+  AssertionError [ERR_ASSERTION]: The error is expected to be an instance of "RangeError". Received "Error"
+  
+  Error message:
+  
+  moveSlot is not implemented
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-model.node.ts:32:12)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: Error: moveSlot is not implemented
+        at moveSlot (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-plan-model.ts:4:9)
+        at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-model.node.ts:32:25
+        at getActual (node:assert:611:5)
+        at strict.throws (node:assert:759:24)
+        at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-model.node.ts:32:12)
+        at Test.runInAsyncScope (node:async_hooks:227:14)
+        at Test.run (node:internal/test_runner/test:1382:25)
+        at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+        at Test.postRun (node:internal/test_runner/test:1522:19)
+        at Test.run (node:internal/test_runner/test:1447:12),
+    operator: 'throws',
+    diff: 'simple'
+  }

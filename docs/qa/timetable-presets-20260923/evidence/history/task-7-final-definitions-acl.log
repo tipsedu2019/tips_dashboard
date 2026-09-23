@@ -1,0 +1,18 @@
+                           oid                           | pg_get_userbyid | prosecdef |                                 proacl                                 
+---------------------------------------------------------+-----------------+-----------+------------------------------------------------------------------------
+ dashboard_private.evaluate_timetable_transfer_v1(jsonb) | postgres        | t         | {postgres=X/postgres}
+ preview_timetable_plan_transfer_v1(jsonb)               | postgres        | t         | {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+ commit_timetable_plan_transfer_v1(jsonb)                | postgres        | t         | {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres}
+ dashboard_private.prepare_timetable_transfer_v1(jsonb)  | postgres        | t         | {postgres=X/postgres}
+(4 rows)
+
+ tgenabled 
+-----------
+ O
+(1 row)
+
+ revision 
+----------
+        8
+(1 row)
+

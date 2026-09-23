@@ -1,0 +1,8 @@
+not ok 1 - manager source picker exists
+# Failed test 1: "manager source picker exists"
+not ok 2 - safe preview exists
+# Failed test 2: "safe preview exists"
+not ok 3 - atomic import exists
+# Failed test 3: "atomic import exists"
+1..3
+# Looks like you failed 3 tests of 3

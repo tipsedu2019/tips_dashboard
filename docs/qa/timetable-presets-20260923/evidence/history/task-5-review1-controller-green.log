@@ -1,0 +1,28 @@
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (2.276208ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.621334ms)
+✔ refresh preserves local draft and stale shows latest server (0.273333ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (0.285541ms)
+✔ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.271666ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.198417ms)
+✔ transient reference failure preserves prior display but blocks another save (0.155708ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.198583ms)
+✔ undo is a new revision-checked inverse command (0.283458ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.204625ms)
+✔ item A stale does not stop independent item B save (0.232167ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (0.545958ms)
+✔ accept-server drops only the conflicted item draft (0.16075ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.126667ms)
+✔ transfer delta applies source state and class labels atomically (0.286208ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.206791ms)
+✔ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.18775ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.092417ms)
+✔ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.113917ms)
+✔ own-save signal before receipt still drains queued second edit (0.164584ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 20
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63.651583

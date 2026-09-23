@@ -1,8 +1,10 @@
 // LOCAL SYNTHETIC ONLY. Explicit allowlist, fixed actor/container, no network DB URL.
 import { spawn } from 'node:child_process';
-const actor='00000000-0000-4000-8000-000000000099';
+export const fixtureActors = ['00000000-0000-4000-8000-000000000099','af249000-0000-4000-8000-000000000902'];
+const defaultActor=fixtureActors[0];
 const quote=value=>"'"+String(value).replaceAll("'","''")+"'";
 const allowed={
+ list_timetable_import_sources_v1:{},preview_timetable_plan_import_v1:{p_source:'jsonb'},commit_timetable_plan_import_v1:{p_command:'jsonb'},
  list_active_science_subject_areas_v1:{},
  preview_timetable_plan_transfer_v1:{p_request:'jsonb'},commit_timetable_plan_transfer_v1:{p_command:'jsonb'},
  get_academic_timetable_range_v1:{p_date_from:'date',p_date_to:'date',p_class_group_id:'text',p_status:'text',p_subject:'text'},
@@ -11,7 +13,8 @@ const allowed={
  list_timetable_share_candidates_v1:{},mutate_timetable_plan_v1:{p_command:'jsonb'},mutate_timetable_plan_item_v1:{p_command:'jsonb'},
 };
 export function isPlanFixtureRpc(name){return Object.hasOwn(allowed,name);}
-export async function planFixtureRpc(name,args){
+export async function planFixtureRpc(name,args,actor=defaultActor){
+ if(!fixtureActors.includes(actor))throw Error('Unknown fixture actor');
  if(!isPlanFixtureRpc(name)||!args||typeof args!=='object'||Array.isArray(args)||Object.keys(args).some(k=>!Object.hasOwn(allowed[name],k)))throw Error('Unknown fixture RPC or argument');
  const parameters=Object.entries(args).map(([key,value])=>`${key} => ${value===null?'null':quote(allowed[name][key]==='jsonb'?JSON.stringify(value):value)}::${allowed[name][key]}`).join(',');
  const query=name==='list_active_science_subject_areas_v1'?`select coalesce(jsonb_agg(to_jsonb(area)),'[]'::jsonb)::text from public.${name}(${parameters}) area`:`select public.${name}(${parameters})::text`;

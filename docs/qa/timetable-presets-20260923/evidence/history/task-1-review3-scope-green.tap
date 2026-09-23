@@ -1,0 +1,101 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+SET
+CREATE FUNCTION
+INSERT 0 1
+INSERT 0 1
+              set_config              
+--------------------------------------
+ ac220000-0000-4000-8000-000000000900
+(1 row)
+
+UPDATE 1
+INSERT 0 1
+ set_config 
+------------
+ v1
+(1 row)
+
+INSERT 0 4
+INSERT 0 1
+ set_config 
+------------
+ 
+(1 row)
+
+SET
+                               is                                
+-----------------------------------------------------------------
+ ok 1 - null group includes grouped and ungrouped active classes
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 2 - stale explicit group is ignored
+(1 row)
+
+                        is                         
+---------------------------------------------------
+ ok 3 - future class appears in preparation status
+(1 row)
+
+                       is                        
+-------------------------------------------------
+ ok 4 - historical class appears in ended status
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 5 - exactly three status choices
+(1 row)
+
+                     is                     
+--------------------------------------------
+ ok 6 - retired group catalog is not loaded
+(1 row)
+
+                 is                 
+------------------------------------
+ ok 7 - subject scope still applies
+(1 row)
+
+                throws_ok                
+-----------------------------------------
+ ok 8 - range guard keeps exact SQLSTATE
+(1 row)
+
+ set_config 
+------------
+ 
+(1 row)
+
+           throws_ok           
+-------------------------------
+ ok 9 - missing actor rejected
+(1 row)
+
+RESET
+                      ok                      
+----------------------------------------------
+ ok 10 - final function preserves invoker RLS
+(1 row)
+
+                     ok                     
+--------------------------------------------
+ ok 11 - anonymous execution remains denied
+(1 row)
+
+                                ok                                
+------------------------------------------------------------------
+ ok 12 - final definition never queries retired membership tables
+(1 row)
+
+ finish 
+--------
+ 1..12
+(1 row)
+
+ROLLBACK

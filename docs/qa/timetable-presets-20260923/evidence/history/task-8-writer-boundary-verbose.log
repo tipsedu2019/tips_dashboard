@@ -1,0 +1,29 @@
+1..20
+ok 1 - canonical template을 legacy 호환 행에 mirror하는 private 함수가 있다
+ok 2 - 공통 v2 저장 command가 유지된다
+ok 3 - 휴보강 source payload snapshot 함수가 유지된다
+ok 4 - legacy sender 읽기는 유지하고 authenticated direct writer 권한은 닫는다
+ok 5 - legacy 변경을 canonical로 올리는 trigger는 제거된다
+
+ok 6 - authenticated direct UPDATE는 권한 경계에서 실패한다
+ok 7 - authenticated direct INSERT도 권한 경계에서 실패한다
+not ok 8 - content 변경은 canonical template version을 정확히 하나 추가한다
+# Failed test 8: "content 변경은 canonical template version을 정확히 하나 추가한다"
+#         have: 0
+#         want: NULL
+not ok 9 - canonical active pointer와 revision이 함께 이동한다
+# Failed test 9: "canonical active pointer와 revision이 함께 이동한다"
+#     (test result was NULL)
+ok 10 - 새 active template은 해당 rule에 매핑된 모든 legacy 행에 mirror된다
+ok 11 - content-only 저장은 canonical과 legacy enabled 값을 바꾸지 않는다
+ok 12 - legacy mirror 뒤 metadata checksum도 같은 transaction에서 갱신된다
+not ok 13 - canonical v2 audit가 같은 request ID로 남는다
+# Failed test 13: "canonical v2 audit가 같은 request ID로 남는다"
+ok 14 - 기존 template version은 byte-for-byte 불변이다
+not ok 15 - content 저장은 dispatch ownership을 바꾸지 않는다
+# Failed test 15: "content 저장은 dispatch ownership을 바꾸지 않는다"
+#         have: 0
+#         want: NULL
+
+ERROR:  42501: permission denied for table notification_rules
+LOCATION:  aclcheck_error, aclchk.c:2843

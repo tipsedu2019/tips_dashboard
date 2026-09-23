@@ -1,0 +1,61 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 3
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 2
+SET CONSTRAINTS
+SET CONSTRAINTS
+              set_config              
+--------------------------------------
+ ad240000-0000-4000-8000-000000000901
+(1 row)
+
+CREATE FUNCTION
+                                 throws_ok                                 
+---------------------------------------------------------------------------
+ ok 1 - legacy status activation rejects teacher collision across subjects
+(1 row)
+
+                            throws_ok                             
+------------------------------------------------------------------
+ ok 2 - defaults RPC rejects room-only collision before returning
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 3 - direct dated makeup write rejects effective weekly teacher conflict
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 4 - initialize stale uses domain SQLSTATE
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 5 - preview stale uses domain SQLSTATE
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 6 - generation stale uses domain SQLSTATE
+(1 row)
+
+ finish 
+--------
+ 1..6
+(1 row)
+
+ROLLBACK

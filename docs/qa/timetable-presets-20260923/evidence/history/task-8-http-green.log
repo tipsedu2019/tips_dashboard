@@ -1,0 +1,17 @@
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_stale_status (0.335708ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_source_changed (0.037292ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_schedule_plan_stale (0.030708ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_lesson_session_stale (0.027917ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_room_collision (0.033375ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_calendar_event_conflict (0.027667ms)
+✔ unknown P0001 is not silently conclusive; real40001 remains a database retry (0.038584ms)
+✔ concurrency runner requires explicit isolated local transport (0.448958ms)
+✔ real approval POST maps final producer errors through actual replay and response (105.619792ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 161.2225

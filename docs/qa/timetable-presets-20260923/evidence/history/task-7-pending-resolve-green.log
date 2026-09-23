@@ -1,0 +1,39 @@
+✔ teacher-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.873042ms)
+✔ teacher-weekly: unplaced item drop creates one stable slot with target resource (0.069041ms)
+✔ classroom-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.084583ms)
+✔ classroom-weekly: unplaced item drop creates one stable slot with target resource (0.037125ms)
+✔ daily-teacher: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.070666ms)
+✔ daily-teacher: unplaced item drop creates one stable slot with target resource (0.040625ms)
+✔ daily-classroom: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.054333ms)
+✔ daily-classroom: unplaced item drop creates one stable slot with target resource (0.040708ms)
+✔ shadow never produces move, resize or unplace commands (0.171708ms)
+✔ exact typed minutes and midnight preserved, invalid overflow rejected (0.132042ms)
+✔ empty presets build panels from IDs, duplicate names do not merge; overlap lanes retain every slot (4.339292ms)
+✔ pointer cancel, Escape and capture-loss cannot commit; source/target panel identity counts as a move (0.075333ms)
+✔ teacher-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (61.377458ms)
+✔ classroom-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (12.319375ms)
+✔ daily-teacher: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (7.251833ms)
+✔ daily-classroom: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.315541ms)
+✔ hidden operating subjects still block changed placements, while name-only edits preserve existing conflicts (0.308875ms)
+✔ empty resource catalogs produce no misleading day grids in any view (0.037709ms)
+✔ rendered class-list selection uses item IDs, preserves hidden selections and excludes applied/shadows (18.363667ms)
+✔ whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft (0.276ms)
+✔ whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs (0.065584ms)
+✔ single-slot form edit and add-placement preserve the complete differing Wednesday sibling (0.308708ms)
+✔ selected item IDs and final copy/move effects are explicit (0.382041ms)
+✔ unknown response retains byte-equivalent immutable command through new preview attempts and remount (2.003375ms)
+✔ committed refresh failure retries only reads and never repeats promotion (0.127583ms)
+✔ exact stale rejection permits explicit new selection preview and new key (0.131125ms)
+✔ preview blockers prevent commit and exact rejection pairs exclude unrelated SQL failures (0.068416ms)
+✔ late commit response from retired actor neither merges data nor invokes caches (0.093583ms)
+✔ permission revocation immediately clears caller canonical data on preview and commit (0.117667ms)
+✔ pending original JSON stays intact while labels show day time and resource names (7.932667ms)
+✔ resolving one pending placement atomically adds a new slot and preserves siblings and remaining originals (0.840667ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 696.250625

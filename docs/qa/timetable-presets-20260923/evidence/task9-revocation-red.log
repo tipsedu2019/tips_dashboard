@@ -1,0 +1,62 @@
+✖ one plan revocation preserves other plan submitted recovery and actor lifetime (0.357041ms)
+✖ unrelated metadata remains while transfers targeting revoked plan are removed (0.080292ms)
+✖ plan revocation tolerates unavailable storage (0.211959ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 0
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.951459
+
+✖ failing tests:
+
+test at tests/timetable-plan-recovery.node.ts:5:1
+✖ one plan revocation preserves other plan submitted recovery and actor lifetime (0.357041ms)
+  TypeError: recovery.clearTimetablePlanRecovery is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-recovery.node.ts:10:11)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.start (node:internal/test_runner/test:1242:17)
+      at startSubtestAfterBootstrap (node:internal/test_runner/harness:387:17)
+
+test at tests/timetable-plan-recovery.node.ts:15:1
+✖ unrelated metadata remains while transfers targeting revoked plan are removed (0.080292ms)
+  TypeError: recovery.observeTimetablePlanRevocation is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-recovery.node.ts:17:34)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3)
+
+test at tests/timetable-plan-recovery.node.ts:19:1
+✖ plan revocation tolerates unavailable storage (0.211959ms)
+  AssertionError [ERR_ASSERTION]: Got unwanted exception.
+  Actual message: "recovery.clearTimetablePlanRecovery is not a function"
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-recovery.node.ts:19:66)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: TypeError: recovery.clearTimetablePlanRecovery is not a function
+        at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-recovery.node.ts:19:92
+        at getActual (node:assert:611:5)
+        at strict.doesNotThrow (node:assert:779:32)
+        at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-recovery.node.ts:19:66)
+        at Test.runInAsyncScope (node:async_hooks:227:14)
+        at Test.run (node:internal/test_runner/test:1382:25)
+        at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+        at Test.postRun (node:internal/test_runner/test:1522:19)
+        at Test.run (node:internal/test_runner/test:1447:12)
+        at async Test.processPendingSubtests (node:internal/test_runner/test:960:7),
+    expected: undefined,
+    operator: 'doesNotThrow',
+    diff: 'simple'
+  }

@@ -1,0 +1,25 @@
+✔ teacher-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.844875ms)
+✔ teacher-weekly: unplaced item drop creates one stable slot with target resource (0.067041ms)
+✔ classroom-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.079125ms)
+✔ classroom-weekly: unplaced item drop creates one stable slot with target resource (0.038333ms)
+✔ daily-teacher: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.070083ms)
+✔ daily-teacher: unplaced item drop creates one stable slot with target resource (0.041542ms)
+✔ daily-classroom: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.054416ms)
+✔ daily-classroom: unplaced item drop creates one stable slot with target resource (0.040416ms)
+✔ shadow never produces move, resize or unplace commands (0.172458ms)
+✔ exact typed minutes and midnight preserved, invalid overflow rejected (0.1345ms)
+✔ empty presets build panels from IDs, duplicate names do not merge; overlap lanes retain every slot (4.453208ms)
+✔ pointer cancel, Escape and capture-loss cannot commit; source/target panel identity counts as a move (0.090917ms)
+✔ teacher-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (55.725292ms)
+✔ classroom-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (16.7515ms)
+✔ daily-teacher: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (7.114791ms)
+✔ daily-classroom: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.872209ms)
+✔ hidden operating subjects still block changed placements, while name-only edits preserve existing conflicts (0.366959ms)
+ℹ tests 17
+ℹ suites 0
+ℹ pass 17
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 656.813208

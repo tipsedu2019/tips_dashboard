@@ -1,0 +1,544 @@
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_stale_status (0.347917ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_source_changed (0.036958ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_schedule_plan_stale (0.035375ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_lesson_session_stale (0.030584ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_room_collision (0.035541ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_calendar_event_conflict (0.026ms)
+✔ unknown P0001 is not silently conclusive; real40001 remains a database retry (0.037ms)
+✔ concurrency runner requires explicit isolated local transport (0.457125ms)
+✔ real approval POST maps final producer errors through actual replay and response (100.065125ms)
+✖ changed occupancy preserves exact ordered full-scope conflict results, including siblings and shadows (8.872917ms)
+ℹ tests 10
+ℹ suites 0
+ℹ pass 9
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 170.236375
+
+✖ failing tests:
+
+test at tests/timetable-release-contract.test.mjs:44:1
+✖ changed occupancy preserves exact ordered full-scope conflict results, including siblings and shadows (8.872917ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + [
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010000',
+  +     slotId: 'a8250000-0000-4000-8000-000000010000'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010000',
+  +     slotId: 'a8250000-0000-4000-8000-000000010000'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010001',
+  +     slotId: 'a8250000-0000-4000-8000-000000010001'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010001',
+  +     slotId: 'a8250000-0000-4000-8000-000000010001'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010002',
+  +     slotId: 'a8250000-0000-4000-8000-000000010002'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010002',
+  +     slotId: 'a8250000-0000-4000-8000-000000010002'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010003',
+  +     slotId: 'a8250000-0000-4000-8000-000000010003'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010003',
+  +     slotId: 'a8250000-0000-4000-8000-000000010003'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010004',
+  +     slotId: 'a8250000-0000-4000-8000-000000010004'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010004',
+  +     slotId: 'a8250000-0000-4000-8000-000000010004'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010005',
+  +     slotId: 'a8250000-0000-4000-8000-000000010005'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010005',
+  +     slotId: 'a8250000-0000-4000-8000-000000010005'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010006',
+  +     slotId: 'a8250000-0000-4000-8000-000000010006'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010006',
+  +     slotId: 'a8250000-0000-4000-8000-000000010006'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010007',
+  +     slotId: 'a8250000-0000-4000-8000-000000010007'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010007',
+  +     slotId: 'a8250000-0000-4000-8000-000000010007'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010008',
+  +     slotId: 'a8250000-0000-4000-8000-000000010008'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010008',
+  +     slotId: 'a8250000-0000-4000-8000-000000010008'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010009',
+  +     slotId: 'a8250000-0000-4000-8000-000000010009'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010009',
+  +     slotId: 'a8250000-0000-4000-8000-000000010009'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010010',
+  +     slotId: 'a8250000-0000-4000-8000-000000010010'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010010',
+  +     slotId: 'a8250000-0000-4000-8000-000000010010'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010011',
+  +     slotId: 'a8250000-0000-4000-8000-000000010011'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010011',
+  +     slotId: 'a8250000-0000-4000-8000-000000010011'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010012',
+  +     slotId: 'a8250000-0000-4000-8000-000000010012'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010012',
+  +     slotId: 'a8250000-0000-4000-8000-000000010012'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010013',
+  +     slotId: 'a8250000-0000-4000-8000-000000010013'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010013',
+  +     slotId: 'a8250000-0000-4000-8000-000000010013'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010014',
+  +     slotId: 'a8250000-0000-4000-8000-000000010014'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010014',
+  +     slotId: 'a8250000-0000-4000-8000-000000010014'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010015',
+  +     slotId: 'a8250000-0000-4000-8000-000000010015'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010015',
+  +     slotId: 'a8250000-0000-4000-8000-000000010015'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010016',
+  +     slotId: 'a8250000-0000-4000-8000-000000010016'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010016',
+  +     slotId: 'a8250000-0000-4000-8000-000000010016'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010017',
+  +     slotId: 'a8250000-0000-4000-8000-000000010017'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010017',
+  +     slotId: 'a8250000-0000-4000-8000-000000010017'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010018',
+  +     slotId: 'a8250000-0000-4000-8000-000000010018'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010018',
+  +     slotId: 'a8250000-0000-4000-8000-000000010018'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010019',
+  +     slotId: 'a8250000-0000-4000-8000-000000010019'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010019',
+  +     slotId: 'a8250000-0000-4000-8000-000000010019'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010020',
+  +     slotId: 'a8250000-0000-4000-8000-000000010020'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010020',
+  +     slotId: 'a8250000-0000-4000-8000-000000010020'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010021',
+  +     slotId: 'a8250000-0000-4000-8000-000000010021'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010021',
+  +     slotId: 'a8250000-0000-4000-8000-000000010021'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010022',
+  +     slotId: 'a8250000-0000-4000-8000-000000010022'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010022',
+  +     slotId: 'a8250000-0000-4000-8000-000000010022'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010023',
+  +     slotId: 'a8250000-0000-4000-8000-000000010023'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010023',
+  +     slotId: 'a8250000-0000-4000-8000-000000010023'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010024',
+  +     slotId: 'a8250000-0000-4000-8000-000000010024'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010024',
+  +     slotId: 'a8250000-0000-4000-8000-000000010024'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010025',
+  +     slotId: 'a8250000-0000-4000-8000-000000010025'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010025',
+  +     slotId: 'a8250000-0000-4000-8000-000000010025'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010026',
+  +     slotId: 'a8250000-0000-4000-8000-000000010026'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010026',
+  +     slotId: 'a8250000-0000-4000-8000-000000010026'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010027',
+  +     slotId: 'a8250000-0000-4000-8000-000000010027'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010027',
+  +     slotId: 'a8250000-0000-4000-8000-000000010027'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010028',
+  +     slotId: 'a8250000-0000-4000-8000-000000010028'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010028',
+  +     slotId: 'a8250000-0000-4000-8000-000000010028'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010029',
+  +     slotId: 'a8250000-0000-4000-8000-000000010029'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010029',
+  +     slotId: 'a8250000-0000-4000-8000-000000010029'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010030',
+  +     slotId: 'a8250000-0000-4000-8000-000000010030'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010030',
+  +     slotId: 'a8250000-0000-4000-8000-000000010030'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010031',
+  +     slotId: 'a8250000-0000-4000-8000-000000010031'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010031',
+  +     slotId: 'a8250000-0000-4000-8000-000000010031'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010032',
+  +     slotId: 'a8250000-0000-4000-8000-000000010032'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010032',
+  +     slotId: 'a8250000-0000-4000-8000-000000010032'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010033',
+  +     slotId: 'a8250000-0000-4000-8000-000000010033'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010033',
+  +     slotId: 'a8250000-0000-4000-8000-000000010033'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010034',
+  +     slotId: 'a8250000-0000-4000-8000-000000010034'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010034',
+  +     slotId: 'a8250000-0000-4000-8000-000000010034'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010035',
+  +     slotId: 'a8250000-0000-4000-8000-000000010035'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010035',
+  +     slotId: 'a8250000-0000-4000-8000-000000010035'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010036',
+  +     slotId: 'a8250000-0000-4000-8000-000000010036'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010036',
+  +     slotId: 'a8250000-0000-4000-8000-000000010036'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010037',
+  +     slotId: 'a8250000-0000-4000-8000-000000010037'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010037',
+  +     slotId: 'a8250000-0000-4000-8000-000000010037'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010038',
+  +     slotId: 'a8250000-0000-4000-8000-000000010038'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010038',
+  +     slotId: 'a8250000-0000-4000-8000-000000010038'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010039',
+  +     slotId: 'a8250000-0000-4000-8000-000000010039'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010039',
+  +     slotId: 'a8250000-0000-4000-8000-000000010039'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010040',
+  +     slotId: 'a8250000-0000-4000-8000-000000010040'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010040',
+  +     slotId: 'a8250000-0000-4000-8000-000000010040'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010041',
+  +     slotId: 'a8250000-0000-4000-8000-000000010041'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010041',
+  +     slotId: 'a8250000-0000-4000-8000-000000010041'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010042',
+  +     slotId: 'a8250000-0000-4000-8000-000000010042'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010042',
+  +     slotId: 'a8250000-0000-4000-8000-000000010042'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010043',
+  +     slotId: 'a8250000-0000-4000-8000-000000010043'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010043',
+  +     slotId: 'a8250000-0000-4000-8000-000000010043'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010044',
+  +     slotId: 'a8250000-0000-4000-8000-000000010044'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010044',
+  +     slotId: 'a8250000-0000-4000-8000-000000010044'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010045',
+  +     slotId: 'a8250000-0000-4000-8000-000000010045'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010045',
+  +     slotId: 'a8250000-0000-4000-8000-000000010045'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010046',
+  +     slotId: 'a8250000-0000-4000-8000-000000010046'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010046',
+  +     slotId: 'a8250000-0000-4000-8000-000000010046'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010047',
+  +     slotId: 'a8250000-0000-4000-8000-000000010047'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010047',
+  +     slotId: 'a8250000-0000-4000-8000-000000010047'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010048',
+  +     slotId: 'a8250000-0000-4000-8000-000000010048'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010048',
+  +     slotId: 'a8250000-0000-4000-8000-000000010048'
+  +   },
+  +   {
+  +     kind: 'teacher',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010049',
+  +     slotId: 'a8250000-0000-4000-8000-000000010049'
+  +   },
+  +   {
+  +     kind: 'classroom',
+  +     otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010049',
+  +     slotId: 'a8250000-0000-4000-8000-000000010049'
+  +   }
+  + ]
+  - []
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-release-contract.test.mjs:50:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010000', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010000' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010000', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010000' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010001', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010001' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010001', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010001' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010002', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010002' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010002', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010002' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010003', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010003' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010003', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010003' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010004', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010004' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010004', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010004' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010005', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010005' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010005', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010005' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010006', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010006' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010006', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010006' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010007', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010007' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010007', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010007' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010008', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010008' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010008', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010008' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010009', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010009' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010009', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010009' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010010', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010010' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010010', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010010' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010011', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010011' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010011', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010011' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010012', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010012' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010012', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010012' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010013', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010013' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010013', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010013' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010014', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010014' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010014', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010014' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010015', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010015' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010015', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010015' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010016', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010016' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010016', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010016' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010017', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010017' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010017', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010017' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010018', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010018' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010018', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010018' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010019', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010019' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010019', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010019' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010020', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010020' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010020', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010020' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010021', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010021' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010021', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010021' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010022', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010022' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010022', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010022' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010023', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010023' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010023', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010023' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010024', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010024' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010024', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010024' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010025', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010025' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010025', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010025' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010026', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010026' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010026', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010026' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010027', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010027' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010027', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010027' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010028', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010028' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010028', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010028' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010029', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010029' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010029', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010029' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010030', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010030' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010030', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010030' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010031', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010031' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010031', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010031' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010032', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010032' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010032', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010032' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010033', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010033' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010033', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010033' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010034', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010034' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010034', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010034' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010035', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010035' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010035', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010035' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010036', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010036' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010036', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010036' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010037', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010037' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010037', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010037' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010038', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010038' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010038', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010038' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010039', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010039' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010039', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010039' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010040', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010040' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010040', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010040' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010041', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010041' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010041', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010041' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010042', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010042' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010042', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010042' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010043', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010043' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010043', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010043' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010044', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010044' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010044', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010044' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010045', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010045' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010045', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010045' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010046', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010046' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010046', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010046' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010047', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010047' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010047', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010047' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010048', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010048' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010048', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010048' }, { kind: 'teacher', slotId: 'a8250000-0000-4000-8000-000000010049', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010049' }, { kind: 'classroom', slotId: 'a8250000-0000-4000-8000-000000010049', otherSlotId: 'shadow-a8250000-0000-4000-8000-000000010049' } ],
+    expected: [],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

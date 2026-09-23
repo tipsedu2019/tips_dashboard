@@ -1,0 +1,28 @@
+✖ real approval POST maps final producer errors through actual replay and response (101.996708ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 163.294458
+
+✖ failing tests:
+
+test at tests/timetable-release-contract.test.mjs:28:1
+✖ real approval POST maps final producer errors through actual replay and response (101.996708ms)
+  AssertionError [ERR_ASSERTION]: 23P01/timetable_resource_conflict
+  
+  503 !== 409
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-release-contract.test.mjs:38:327)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: 503,
+    expected: 409,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

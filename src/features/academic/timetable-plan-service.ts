@@ -1,7 +1,7 @@
 import type {
   DeletePlanItemCommand, PlanCommand, PlanItem, PlanMutationResult, PlanRevision, PlanSnapshot,
   SavePlanItemCommand, TimetableOperatingReference, TimetablePlanRpcContract, TransferCommitCommand, TransferPreview,
-  TransferRequest, TransferResult, PlanList, ShareCandidate, ScienceSubjectArea,
+  TransferRequest, TransferResult, PlanList, ShareCandidate, ScienceSubjectArea, TimetableImportSource, TimetableImportSources, TimetableImportPreview, TimetableImportCommand,
 } from './timetable-plan-contract.ts';
 
 type RpcName = keyof TimetablePlanRpcContract | 'preview_timetable_plan_transfer_v1' | 'commit_timetable_plan_transfer_v1';
@@ -176,6 +176,26 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
   }
   return {
     actorScope,
+    importSources: async (options?: RequestOptions) => {
+      const result = await invoke('list_timetable_import_sources_v1', {}, options);
+      if (!record(result) || !Array.isArray(result.preparationClasses) || !Array.isArray(result.legacyCandidates)
+        || !result.preparationClasses.every(x => record(x) && string(x.id) && string(x.name))
+        || !result.legacyCandidates.every(x => record(x) && string(x.key) && integer(x.entryCount) && ['ready', 'invalid'].includes(String(x.parseStatus)))) throw invalid();
+      return result as TimetableImportSources;
+    },
+    previewImport: async (source: TimetableImportSource, options?: RequestOptions) => {
+      const result = await invoke('preview_timetable_plan_import_v1', { p_source: source }, options);
+      if (!record(result) || !record(result.source) || result.source.kind !== source.kind
+        || (source.kind === 'legacy' ? result.source.key !== source.key : JSON.stringify(result.source.classIds) !== JSON.stringify(source.classIds))
+        || !string(result.sourceFingerprint) || !result.sourceFingerprint || !Array.isArray(result.entries)
+        || !result.entries.every(x => record(x) && string(x.name) && string(x.subject) && Array.isArray(x.scheduleLines))) throw invalid();
+      return result as TimetableImportPreview;
+    },
+    commitImport: async (command: TimetableImportCommand, options?: RequestOptions) => {
+      const result = await invoke('commit_timetable_plan_import_v1', { p_command: command }, options);
+      if (!record(result) || !planMetadata(result.plan)) throw invalid();
+      return result as { plan: PlanSnapshot['plan'] };
+    },
     listPlans: async (archived = false, page = 1, options?: RequestOptions) => {
       const result = await invoke('list_timetable_plans_v1', { p_archived: archived, p_page: page, p_page_size: 50 }, options);
       if (!record(result) || !Array.isArray(result.plans) || !result.plans.every(planMetadata)

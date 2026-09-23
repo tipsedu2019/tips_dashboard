@@ -1,0 +1,37 @@
+BEGIN
+UPDATE 3
+COMMIT
+BEGIN
+              set_config              
+--------------------------------------
+ 00000000-0000-4000-8000-000000000099
+(1 row)
+
+DO
+ROLLBACK
+NOTICE:  audit delete SQLSTATE=23503 MESSAGE=insert or update on table "dashboard_audit_logs" violates foreign key constraint "dashboard_audit_logs_class_id_fkey"
+                                                                            pg_get_triggerdef                                                                             | tgenabled 
+--------------------------------------------------------------------------------------------------------------------------------------------------------------------------+-----------
+ CREATE TRIGGER dashboard_audit_classes AFTER INSERT OR DELETE OR UPDATE ON public.classes FOR EACH ROW EXECUTE FUNCTION dashboard_private.log_dashboard_audit_event_v2() | O
+(1 row)
+
+                  conname                   |                           pg_get_constraintdef                           
+--------------------------------------------+--------------------------------------------------------------------------
+ dashboard_audit_logs_class_id_fkey         | FOREIGN KEY (class_id) REFERENCES classes(id) ON DELETE SET NULL
+ timetable_plan_items_applied_class_id_fkey | FOREIGN KEY (applied_class_id) REFERENCES classes(id) ON DELETE SET NULL
+ timetable_plan_items_source_class_id_fkey  | FOREIGN KEY (source_class_id) REFERENCES classes(id) ON DELETE SET NULL
+(3 rows)
+
+                           oid                           | pg_get_userbyid | prosecdef |                                 proacl                                 |          definition_md5          
+---------------------------------------------------------+-----------------+-----------+------------------------------------------------------------------------+----------------------------------
+ dashboard_private.evaluate_timetable_transfer_v1(jsonb) | postgres        | t         | {postgres=X/postgres}                                                  | 78d73536afb27be6c4a378c33ca0bb19
+ preview_timetable_plan_transfer_v1(jsonb)               | postgres        | t         | {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} | fc6a16c4c7ca696db18feb7b73f025c1
+ commit_timetable_plan_transfer_v1(jsonb)                | postgres        | t         | {postgres=X/postgres,authenticated=X/postgres,service_role=X/postgres} | 59fd98ecc078b92f20614ab083886507
+ dashboard_private.prepare_timetable_transfer_v1(jsonb)  | postgres        | t         | {postgres=X/postgres}                                                  | d7eed54f3fa674b5d1c861a8e8d130a8
+(4 rows)
+
+ revision 
+----------
+        8
+(1 row)
+

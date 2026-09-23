@@ -1,0 +1,67 @@
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (2.690166ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.707708ms)
+✔ refresh preserves local draft and stale shows latest server (0.264875ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (0.340333ms)
+✔ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.197667ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.165166ms)
+✔ transient reference failure preserves prior display but blocks another save (0.143292ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.179667ms)
+✔ undo is a new revision-checked inverse command (0.243584ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.217083ms)
+✔ item A stale does not stop independent item B save (0.418375ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (0.224292ms)
+✔ accept-server drops only the conflicted item draft (0.117083ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.115625ms)
+✔ transfer delta applies source state and class labels atomically (0.335834ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.185875ms)
+✔ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.216125ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.072459ms)
+✔ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.102625ms)
+✔ own-save signal before receipt still drains queued second edit (0.17175ms)
+✔ paused retired controller rejects old action references and terminal destroy cannot resume (0.13175ms)
+✔ independent creates merge when later sequence receipt arrives first without a full refresh (0.205583ms)
+✔ malformed applied transfer item cannot strip source slots or mark the view verified (0.092375ms)
+✔ independent delete receipt still applies after a later unrelated create receipt (0.180042ms)
+✔ complete but unknown applied source item is rejected before a transfer delta merge (0.085375ms)
+✖ confirmed 23P01 rejection can be explicitly corrected with a new request identity (0.146334ms)
+✖ confirmed 22023 rejection can be explicitly corrected with a new request identity (0.3315ms)
+✖ uncertain response cannot be replaced or discarded and retries original immutable body/key (0.220334ms)
+✖ corrected rejected head preserves queued newer edit and independent item draft (0.201958ms)
+ℹ tests 29
+ℹ suites 0
+ℹ pass 25
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 68.677292
+
+✖ failing tests:
+
+test at tests/timetable-plan-controller.node.ts:41:122
+✖ confirmed 23P01 rejection can be explicitly corrected with a new request identity (0.146334ms)
+  TypeError: c.failureKind is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:41:490)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-plan-controller.node.ts:41:122
+✖ confirmed 22023 rejection can be explicitly corrected with a new request identity (0.3315ms)
+  TypeError: c.failureKind is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:41:490)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-plan-controller.node.ts:42:1
+✖ uncertain response cannot be replaced or discarded and retries original immutable body/key (0.220334ms)
+  TypeError: c.failureKind is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:42:487)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-plan-controller.node.ts:43:1
+✖ corrected rejected head preserves queued newer edit and independent item draft (0.201958ms)
+  TypeError: c.replaceRejected is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:43:523)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

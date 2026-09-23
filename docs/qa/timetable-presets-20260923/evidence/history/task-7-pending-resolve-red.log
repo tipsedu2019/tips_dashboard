@@ -1,0 +1,47 @@
+✖ resolving one pending placement atomically adds a new slot and preserves siblings and remaining originals (9.268709ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 65.823042
+
+✖ failing tests:
+
+test at tests/timetable-transfer-interaction.test.mjs:33:1
+✖ resolving one pending placement atomically adds a new slot and preserves siblings and remaining originals (9.268709ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    [
+      {
+        classroomId: 'r',
+        endMinute: 1093,
+  +     id: 'pending1',
+  +     reason: 'conflict',
+  +     sourceText: '월 17:13–18:13',
+  +     startMinute: 1033,
+  +     teacherId: 't',
+  +     weekday: 1
+  +   },
+  +   {
+  +     classroomId: 'r',
+  +     endMinute: 1093,
+        id: 'pending2',
+        reason: 'conflict',
+        sourceText: '월 17:13–18:13',
+        startMinute: 1033,
+        teacherId: 't',
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-transfer-interaction.test.mjs:40:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: [ { id: 'pending1', sourceText: '월 17:13–18:13', reason: 'conflict', weekday: 1, startMinute: 1033, endMinute: 1093, teacherId: 't', classroomId: 'r' }, { id: 'pending2', sourceText: '월 17:13–18:13', reason: 'conflict', weekday: 3, startMinute: 1033, endMinute: 1093, teacherId: 't', classroomId: 'r' } ],
+    expected: [ { id: 'pending2', sourceText: '월 17:13–18:13', reason: 'conflict', weekday: 3, startMinute: 1033, endMinute: 1093, teacherId: 't', classroomId: 'r' } ],
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,24 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+                has_function                
+--------------------------------------------
+ not ok 1 - transfer preview exists        +
+ # Failed test 1: "transfer preview exists"
+(1 row)
+
+               has_function                
+-------------------------------------------
+ not ok 2 - atomic transfer exists        +
+ # Failed test 2: "atomic transfer exists"
+(1 row)
+
+                finish                
+--------------------------------------
+ 1..2
+ # Looks like you failed 2 tests of 2
+(2 rows)
+
+ROLLBACK

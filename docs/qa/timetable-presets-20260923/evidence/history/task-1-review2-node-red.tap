@@ -1,0 +1,40 @@
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (1.12475ms)
+✔ legacy schedule consumer retains per-slot teacher and room after normalized save projection (0.36425ms)
+✔ projected mixed resource slots keep assigned and unassigned states in the legacy parser (0.170792ms)
+✖ literal absence labels, escape prefixes, and delimiters round-trip through projected details (0.371875ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.326334ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (15.451042ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.080334ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 6
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 117.582375
+
+✖ failing tests:
+
+test at tests/management-continuous-class-schedule.test.mjs:90:1
+✖ literal absence labels, escape prefixes, and delimiters round-trip through projected details (0.371875ms)
+  AssertionError [ERR_ASSERTION]: The input did not match the regular expression /^월 10:00-11:00 \(~[0-9a-f]+, ~[0-9a-f]+\)/. Input:
+  
+  '월 10:00-11:00 (교사 미지정, 강의실 미지정)\n' +
+    '화 10:00-11:00 (~교사, 미지정, ~강의실/미지정)\n' +
+    '수 14:00-15:30 (교사 미지정, 강의실 미지정)'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/management-continuous-class-schedule.test.mjs:97:10)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '월 10:00-11:00 (교사 미지정, 강의실 미지정)\n화 10:00-11:00 (~교사, 미지정, ~강의실/미지정)\n수 14:00-15:30 (교사 미지정, 강의실 미지정)',
+    expected: /^월 10:00-11:00 \(~[0-9a-f]+, ~[0-9a-f]+\)/,
+    operator: 'match',
+    diff: 'simple'
+  }

@@ -1,0 +1,51 @@
+✔ 응답이 유실된 동일 휴보강 생성 재시도는 같은 request ID를 재사용한다 (2.089917ms)
+✔ 사용자나 payload가 달라지면 휴보강 생성 request ID도 분리한다 (0.399083ms)
+✔ 명확한 DB 검증 실패는 보존 ID를 제거해 수정 후 새 시도로 시작한다 (0.535458ms)
+✖ exact makeup outcome P0001/makeup_request_stale_status (0.529166ms)
+✖ exact makeup outcome P0001/makeup_lesson_session_stale (0.500583ms)
+✔ exact makeup outcome P0001/unknown_server_error (0.295834ms)
+✔ exact makeup outcome 40001/could not serialize access due to concurrent update (0.186292ms)
+ℹ tests 7
+ℹ suites 0
+ℹ pass 5
+ℹ fail 2
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 35.376625
+
+✖ failing tests:
+
+test at tests/makeup-create-attempt.test.mjs:114:4
+✖ exact makeup outcome P0001/makeup_request_stale_status (0.529166ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/makeup-create-attempt.test.mjs:118:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/makeup-create-attempt.test.mjs:114:4
+✖ exact makeup outcome P0001/makeup_lesson_session_stale (0.500583ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/makeup-create-attempt.test.mjs:118:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

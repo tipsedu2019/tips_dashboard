@@ -1,0 +1,615 @@
+{
+  "mode": "local Next production webpack, final Task9",
+  "titleMetrics": [
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 40 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 20 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 140 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 180 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 120 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 160 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 280 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 320 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 260 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 300 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 420 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 460 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 400 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 440 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 60 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 40 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 20 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 200 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 140 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 180 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 160 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 340 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 280 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 320 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 300 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 480 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 420 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 460 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 440 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 80 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 60 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 40 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 220 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 20 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 200 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 180 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 360 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 160 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 340 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 320 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 500 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 300 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 480 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 460 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 440 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 100 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 80 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 60 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 240 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 40 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 220 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 200 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 380 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 180 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 360 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 340 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 320 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 500 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 480 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 460 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 120 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 100 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 80 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 260 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 60 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 240 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 220 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 400 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 200 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 380 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 360 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 340 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 500 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 480 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 140 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 120 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 100 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 280 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 80 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 260 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 240 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 420 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 220 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 400 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 380 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 360 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 500 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 20 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 140 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 120 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 160 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 100 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 280 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 260 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 300 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 240 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 420 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 400 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 440 긴 수업명 둘째 줄 잘림 확인"
+    },
+    {
+      "lineClamp": "1",
+      "lineHeight": 16.8,
+      "height": 16.796875,
+      "text": "성능 수업 380 긴 수업명 둘째 줄 잘림 확인"
+    }
+  ],
+  "items": 500,
+  "slots": 2000,
+  "lastPanelSlots": 100,
+  "midnightVisible": true,
+  "forcedFullRendering": true,
+  "width": 3369,
+  "height": 3369,
+  "bytes": 786976,
+  "mutations": 0,
+  "providerCalls": 0
+}

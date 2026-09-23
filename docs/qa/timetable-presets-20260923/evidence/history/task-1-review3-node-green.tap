@@ -1,0 +1,16 @@
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (0.801167ms)
+✔ normalized defaults retain full comma-containing catalog names (0.114958ms)
+✔ legacy schedule consumer retains per-slot teacher and room after normalized save projection (0.336125ms)
+✔ projected mixed resource slots keep assigned and unassigned states in the legacy parser (0.153083ms)
+✔ literal absence labels and former escape tokens remain assigned names (0.145041ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.178417ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (9.014333ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.098625ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 8
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 81.893708

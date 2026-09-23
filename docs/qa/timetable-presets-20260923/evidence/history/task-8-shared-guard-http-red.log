@@ -1,0 +1,42 @@
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_stale_status (0.37025ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_source_changed (0.038708ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_schedule_plan_stale (0.038208ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_lesson_session_stale (0.028708ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_room_collision (0.034417ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_calendar_event_conflict (0.027708ms)
+✖ actual makeup producer pair maps HTTP409 and actionable message: timetable_resource_conflict (0.31075ms)
+✔ unknown P0001 is not silently conclusive; real40001 remains a database retry (0.041833ms)
+✔ concurrency runner requires explicit isolated local transport (0.291333ms)
+✔ real approval POST maps final producer errors through actual replay and response (103.970375ms)
+✔ changed occupancy preserves exact ordered full-scope conflict results, including siblings and shadows (27.549333ms)
+ℹ tests 11
+ℹ suites 0
+ℹ pass 10
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 193.061833
+
+✖ failing tests:
+
+test at tests/timetable-release-contract.test.mjs:8:309
+✖ actual makeup producer pair maps HTTP409 and actionable message: timetable_resource_conflict (0.31075ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  false !== true
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-release-contract.test.mjs:8:427)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: false,
+    expected: true,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

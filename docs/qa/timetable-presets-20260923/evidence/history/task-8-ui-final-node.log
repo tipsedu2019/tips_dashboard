@@ -1,0 +1,45 @@
+✔ timetable panels expose per-panel high resolution image export (2.2225ms)
+✔ timetable blocks expose structured hover details (1.274958ms)
+✔ timetable panel headers show lesson count and weekly hours (0.868ms)
+✔ compact timetable blocks keep class names readable (1.01775ms)
+✔ timetable reuses shared tabs and responsive filters without semester controls (0.282417ms)
+✔ teacher-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.847916ms)
+✔ teacher-weekly: unplaced item drop creates one stable slot with target resource (0.067542ms)
+✔ classroom-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.080583ms)
+✔ classroom-weekly: unplaced item drop creates one stable slot with target resource (0.037667ms)
+✔ daily-teacher: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.069916ms)
+✔ daily-teacher: unplaced item drop creates one stable slot with target resource (0.0395ms)
+✔ daily-classroom: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.055834ms)
+✔ daily-classroom: unplaced item drop creates one stable slot with target resource (0.03675ms)
+✔ shadow never produces move, resize or unplace commands (0.170792ms)
+✔ exact typed minutes and midnight preserved, invalid overflow rejected (0.161875ms)
+✔ empty presets build panels from IDs, duplicate names do not merge; overlap lanes retain every slot (4.528791ms)
+✔ pointer cancel, Escape and capture-loss cannot commit; source/target panel identity counts as a move (0.08ms)
+✔ teacher-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (59.713416ms)
+✔ classroom-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (12.492708ms)
+✔ daily-teacher: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (7.053875ms)
+✔ daily-classroom: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.376208ms)
+✔ hidden operating subjects still block changed placements, while name-only edits preserve existing conflicts (0.338458ms)
+✔ empty resource catalogs produce no misleading day grids in any view (0.105333ms)
+✔ rendered class-list selection uses item IDs, preserves hidden selections and excludes applied/shadows (21.41275ms)
+✔ whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft (0.291125ms)
+✔ whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs (0.070916ms)
+✔ single-slot form edit and add-placement preserve the complete differing Wednesday sibling (0.530208ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_stale_status (0.374541ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_request_source_changed (0.04125ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_schedule_plan_stale (0.032833ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_lesson_session_stale (0.031041ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_room_collision (0.034625ms)
+✔ actual makeup producer pair maps HTTP409 and actionable message: makeup_calendar_event_conflict (0.026708ms)
+✔ unknown P0001 is not silently conclusive; real40001 remains a database retry (0.038833ms)
+✔ concurrency runner requires explicit isolated local transport (0.549708ms)
+✔ real approval POST maps final producer errors through actual replay and response (111.06975ms)
+✔ changed occupancy preserves exact ordered full-scope conflict results, including siblings and shadows (25.825ms)
+ℹ tests 37
+ℹ suites 0
+ℹ pass 37
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 651.964084

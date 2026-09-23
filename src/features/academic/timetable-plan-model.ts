@@ -261,7 +261,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
       rebuild(externallyChanged ? 'stale' : undefined);
     } catch (error) {
       if (disposed || token !== epoch || generation !== readGeneration) return;
-      if (isAccessError(error)) clearSensitive();
+      if (isAccessError(error)) { clearSensitive(); publish({ error, referenceStatus: 'unverifiable' }); }
       else { publish({ referenceStatus: 'unverifiable', error }); rebuild('stale', error); }
     }
   };
@@ -332,7 +332,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
             }
           } catch (error) {
             if (disposed || token !== epoch || generation !== (itemEpoch.get(itemId) ?? 0)) break;
-            if (isAccessError(error)) { clearSensitive(); entry.reject?.(error); break; }
+            if (isAccessError(error)) { clearSensitive(); publish({ error, referenceStatus: 'unverifiable' }); entry.reject?.(error); break; }
             entry.status = 'error'; entry.confirmedRejection = isConfirmedRejection(error); if (isStaleError(error)) staleItems.add(itemId);
             persist(); rebuild(isStaleError(error) ? 'stale' : 'error', error);
             entry.reject?.(error); break;
@@ -456,7 +456,7 @@ export function createTimetablePlanController({ service, actorScope, planId, sto
         || revision.complete !== state.snapshot.complete) await refresh();
     } catch (error) {
       if (disposed || token !== epoch) return;
-      if (isAccessError(error)) clearSensitive();
+      if (isAccessError(error)) { clearSensitive(); publish({ error, referenceStatus: 'unverifiable' }); }
       else { publish({ referenceStatus: 'unverifiable', error }); rebuild('stale', error); }
     }
   };

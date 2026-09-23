@@ -1,5 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useSyncExternalStore } from 'react';
-import { clearTimetableActorRecovery, observeTimetableActorRetirement } from './timetable-plan-recovery.ts';
+import { clearTimetableActorRecovery, observeTimetableActorRetirement, observeTimetablePlanRevocation } from './timetable-plan-recovery.ts';
 import { watchTimetablePlan, type TimetableSignalClient } from './timetable-plan-service.ts';
 import type { createTimetablePlanController, TimetableControllerState } from './timetable-plan-model.ts';
 
@@ -22,6 +22,9 @@ export function useTimetablePlanSession({ controller, actorScope, planId, signal
     const stopRetirement = observeTimetableActorRetirement(actorScope, () => {
       controller.clearSensitive(); controller.destroy();
     });
+    const stopRevocation = observeTimetablePlanRevocation(actorScope, id => {
+      if (id === planId) { controller.clearSensitive(); controller.destroy(); }
+    });
     void controller.load();
     const stop = signalClient ? watchTimetablePlan({
       client: signalClient, actorScope, planId,
@@ -31,7 +34,7 @@ export function useTimetablePlanSession({ controller, actorScope, planId, signal
     }) : () => {};
     return () => {
       stop();
-      stopRetirement();
+      stopRetirement(); stopRevocation();
       if (latestActor.current !== actorScope) {
         controller.clearSensitive();
         clearTimetableActorRecovery(actorScope);

@@ -1,0 +1,110 @@
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (3.912791ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.969083ms)
+✔ refresh preserves local draft and stale shows latest server (0.26025ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (0.3215ms)
+✔ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.192333ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.167791ms)
+✔ transient reference failure preserves prior display but blocks another save (0.218959ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.213209ms)
+✔ undo is a new revision-checked inverse command (0.245041ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.23625ms)
+✔ item A stale does not stop independent item B save (0.226ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (0.243125ms)
+✔ accept-server drops only the conflicted item draft (0.315292ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.125167ms)
+✔ transfer delta applies source state and class labels atomically (0.156667ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.175375ms)
+✔ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.188459ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.066459ms)
+✖ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.406417ms)
+✖ own-save signal before receipt still drains queued second edit (0.187209ms)
+node:internal/modules/esm/resolve:271
+    throw new ERR_MODULE_NOT_FOUND(
+          ^
+
+Error [ERR_MODULE_NOT_FOUND]: Cannot find module '/Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/use-timetable-plan-session.ts' imported from /Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-hook.node.ts
+    at finalizeResolution (node:internal/modules/esm/resolve:271:11)
+    at moduleResolve (node:internal/modules/esm/resolve:865:10)
+    at defaultResolve (node:internal/modules/esm/resolve:992:11)
+    at #cachedDefaultResolve (node:internal/modules/esm/loader:701:20)
+    at #resolveAndMaybeBlockOnLoaderThread (node:internal/modules/esm/loader:721:38)
+    at ModuleLoader.resolveSync (node:internal/modules/esm/loader:759:56)
+    at #resolve (node:internal/modules/esm/loader:683:17)
+    at ModuleLoader.getOrCreateModuleJob (node:internal/modules/esm/loader:603:35)
+    at ModuleJob.syncLink (node:internal/modules/esm/module_job:163:33)
+    at ModuleJob.link (node:internal/modules/esm/module_job:253:17) {
+  code: 'ERR_MODULE_NOT_FOUND',
+  url: 'file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/use-timetable-plan-session.ts'
+}
+
+Node.js v24.19.0
+✖ tests/timetable-plan-hook.node.ts (59.9595ms)
+✔ uses canonical RPC arguments and forwards AbortSignal (0.6825ms)
+✔ rejects malformed snapshot and never reports synthetic empty success (0.187292ms)
+✔ calls real transfer RPC names and requires atomic label metadata (0.09925ms)
+✔ transfer result without labels or complete snapshot fails closed (0.104958ms)
+✔ minimal signals refresh selected plan or operating shadow; visible poll and focus recover missed events (0.213ms)
+✔ plan metadata mutation uses canonical command envelope (0.083125ms)
+✖ transfer delta lacking full source metadata and dated reference is invalid (0.25875ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 24
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.420542
+
+✖ failing tests:
+
+test at tests/timetable-plan-controller.node.ts:33:1
+✖ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.406417ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 0
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:33:420)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 0,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:34:1
+✖ own-save signal before receipt still drains queued second edit (0.187209ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 2
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:34:485)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 2,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-hook.node.ts:1:1
+✖ tests/timetable-plan-hook.node.ts (59.9595ms)
+  'test failed'
+
+test at tests/timetable-plan-service.test.mjs:12:1
+✖ transfer delta lacking full source metadata and dated reference is invalid (0.25875ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-service.test.mjs:12:547)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /invalid/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

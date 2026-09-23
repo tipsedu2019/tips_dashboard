@@ -1,0 +1,225 @@
+BEGIN
+CREATE EXTENSION
+ no_plan 
+---------
+(0 rows)
+
+SET
+INSERT 0 1
+INSERT 0 3
+INSERT 0 3
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 4
+INSERT 0 1
+SELECT 1
+                                ok                                 
+-------------------------------------------------------------------
+ ok 1 - slot time uniqueness is deferrable for ID-preserving swaps
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000901
+(1 row)
+
+SELECT 1
+                             is                             
+------------------------------------------------------------
+ ok 2 - saving A preserves B schedule metadata and revision
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 3 - only A revision increments
+(1 row)
+
+                               is                               
+----------------------------------------------------------------
+ ok 4 - legacy schedule keeps per-slot teacher and room details
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 5 - legacy teacher projection keeps both resources
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 6 - legacy room projection keeps weekday assignments
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 7 - past session snapshot and slot FK remain unchanged
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 8 - same request key replays exact receipt
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 9 - stale revision has domain SQLSTATE
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 10 - B slot cannot be transferred through A save
+(1 row)
+
+                          throws_ok                           
+--------------------------------------------------------------
+ ok 11 - duplicate final time tuple is rejected before commit
+(1 row)
+
+                         lives_ok                          
+-----------------------------------------------------------
+ ok 12 - valid final time swap preserves existing slot IDs
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 13 - first slot ID keeps its row after swap
+(1 row)
+
+                       is                        
+-------------------------------------------------
+ ok 14 - second slot ID keeps its row after swap
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 15 - past session FK still targets original slot ID
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000903
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 16 - teacher role cannot save defaults
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000902
+(1 row)
+
+                        lives_ok                        
+--------------------------------------------------------
+ ok 17 - staff can idempotently save unchanged defaults
+(1 row)
+
+SELECT 1
+                            is                             
+-----------------------------------------------------------
+ ok 18 - mixed slots project explicit unassigned resources
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 19 - teacher summary only names assigned teachers
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 20 - room summary only names assigned rooms
+(1 row)
+
+                         is                          
+-----------------------------------------------------
+ ok 21 - both-unassigned normalized slot stays empty
+(1 row)
+
+SELECT 4
+                          is                           
+-------------------------------------------------------
+ ok 22 - legacy timetable returns all four mixed slots
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 23 - legacy timetable keeps fully assigned teacher
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 24 - legacy timetable keeps fully assigned classroom
+(1 row)
+
+                         is                          
+-----------------------------------------------------
+ ok 25 - legacy timetable keeps teacher-only teacher
+(1 row)
+
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 26 - legacy timetable does not borrow a room for teacher-only slot
+(1 row)
+
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 27 - legacy timetable does not borrow a teacher for room-only slot
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 28 - legacy timetable keeps room-only classroom
+(1 row)
+
+                                   is                                   
+------------------------------------------------------------------------
+ ok 29 - legacy timetable does not borrow a teacher for unassigned slot
+(1 row)
+
+                                 is                                  
+---------------------------------------------------------------------
+ ok 30 - legacy timetable does not borrow a room for unassigned slot
+(1 row)
+
+ reconcile_continuous_schedule_shadow_slots_v1 
+-----------------------------------------------
+ 
+(1 row)
+
+                                        is                                        
+----------------------------------------------------------------------------------
+ ok 31 - shadow reconciliation updates an existing tuple without changing slot ID
+(1 row)
+
+                               is                                
+-----------------------------------------------------------------
+ ok 32 - shadow reconciliation does not insert a duplicate tuple
+(1 row)
+
+ set_config 
+------------
+ 
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 33 - unauthenticated caller cannot save defaults
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 34 - anon retains no public save grant
+(1 row)
+
+ finish 
+--------
+ 1..34
+(1 row)
+
+ROLLBACK

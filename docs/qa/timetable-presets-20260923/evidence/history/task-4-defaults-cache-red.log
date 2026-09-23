@@ -1,0 +1,27 @@
+✔ operating retry retains request key and payload; refresh failure is committed (1.016375ms)
+✔ operating conflict preserves inputs and separates true serialization failure (0.131666ms)
+✔ date authority frees actual date but recurring plan still reserves weekly shadow (0.163667ms)
+✔ dated exception and source-less legacy occupancy are additive and identify exact date (0.085125ms)
+✔ period suggestions include dated reservations and never offer incomplete range (0.197042ms)
+✔ actual management consumer uses atomic gateway and keeps retry key after lost response (0.380958ms)
+✔ metadata-only UPDATE does not claim success for zero affected rows (0.178583ms)
+✖ committed defaults and initialization retain a pending cache refresh receipt (0.117334ms)
+ℹ tests 8
+ℹ suites 0
+ℹ pass 7
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 69.159125
+
+✖ failing tests:
+
+test at tests/timetable-operational-service.test.mjs:71:1
+✖ committed defaults and initialization retain a pending cache refresh receipt (0.117334ms)
+  Error: cache
+      at refreshPublicClassesCache (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-operational-service.test.mjs:72:208)
+      at Object.saveClassScheduleDefaults (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/management/management-service.js:1762:13)
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-operational-service.test.mjs:74:16)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

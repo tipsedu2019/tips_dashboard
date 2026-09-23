@@ -1,0 +1,849 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+CREATE FUNCTION
+INSERT 0 3
+INSERT 0 3
+DELETE 1
+INSERT 0 1
+UPDATE 1
+INSERT 0 1
+              set_config              
+--------------------------------------
+ a7230000-0000-4000-8000-000000000901
+(1 row)
+
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE TABLE
+GRANT
+          has_function          
+--------------------------------
+ ok 1 - transfer preview exists
+(1 row)
+
+         has_function          
+-------------------------------
+ ok 2 - atomic transfer exists
+(1 row)
+
+         ok         
+--------------------
+ ok 3 - anon denied
+(1 row)
+
+               ok                
+---------------------------------
+ ok 4 - private evaluator denied
+(1 row)
+
+                 seed                 
+--------------------------------------
+ a7230000-0000-4000-8000-000000000001
+(1 row)
+
+                 seed                 
+--------------------------------------
+ a7230000-0000-4000-8000-000000000002
+(1 row)
+
+SET
+        throws_ok        
+-------------------------
+ ok 5 - same plan denied
+(1 row)
+
+             throws_ok             
+-----------------------------------
+ ok 6 - duplicate selection denied
+(1 row)
+
+              throws_ok               
+--------------------------------------
+ ok 7 - operating keep_pending denied
+(1 row)
+
+            throws_ok            
+---------------------------------
+ ok 8 - move keep_pending denied
+(1 row)
+
+              throws_ok               
+--------------------------------------
+ ok 9 - client conflict bypass denied
+(1 row)
+
+RESET
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 10 - 0-copy-1 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 11 - 0-copy-1 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 12 - 0-copy-1 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 13 - 0-copy-1 canonical source excludes applied
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 14 - 0-copy-1 new active classes
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 15 - 0-copy-1 no roster textbook history copied
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 16 - 0-copy-1 no sessions generated
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 17 - 0-copy-3 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 18 - 0-copy-3 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 19 - 0-copy-3 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 20 - 0-copy-3 canonical source excludes applied
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 21 - 0-copy-3 new active classes
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 22 - 0-copy-3 no roster textbook history copied
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 23 - 0-copy-3 no sessions generated
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 24 - 0-copy-4 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 25 - 0-copy-4 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 26 - 0-copy-4 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 27 - 0-copy-4 canonical source excludes applied
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 28 - 0-copy-4 new active classes
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 29 - 0-copy-4 no roster textbook history copied
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 30 - 0-copy-4 no sessions generated
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 31 - 0-move-1 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 32 - 0-move-1 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 33 - 0-move-1 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 34 - 0-move-1 canonical source excludes applied
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 35 - 0-move-1 new active classes
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 36 - 0-move-1 no roster textbook history copied
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 37 - 0-move-1 no sessions generated
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 38 - 0-move-3 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 39 - 0-move-3 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 40 - 0-move-3 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 41 - 0-move-3 canonical source excludes applied
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 42 - 0-move-3 new active classes
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 43 - 0-move-3 no roster textbook history copied
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 44 - 0-move-3 no sessions generated
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 45 - 0-move-4 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 46 - 0-move-4 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 47 - 0-move-4 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 48 - 0-move-4 canonical source excludes applied
+(1 row)
+
+                 is                  
+-------------------------------------
+ ok 49 - 0-move-4 new active classes
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 50 - 0-move-4 no roster textbook history copied
+(1 row)
+
+                   is                   
+----------------------------------------
+ ok 51 - 0-move-4 no sessions generated
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 52 - 2-copy-1 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 53 - 2-copy-1 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 54 - 2-copy-1 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 55 - 2-copy-1 canonical source excludes applied
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 56 - 2-copy-1 destination stays draft
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 57 - 2-copy-1 independent new slot IDs
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 58 - 2-copy-3 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 59 - 2-copy-3 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 60 - 2-copy-3 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 61 - 2-copy-3 canonical source excludes applied
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 62 - 2-copy-3 destination stays draft
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 63 - 2-copy-3 independent new slot IDs
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 64 - 2-copy-4 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 65 - 2-copy-4 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 66 - 2-copy-4 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 67 - 2-copy-4 canonical source excludes applied
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 68 - 2-copy-4 destination stays draft
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 69 - 2-copy-4 independent new slot IDs
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 70 - 2-move-1 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 71 - 2-move-1 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 72 - 2-move-1 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 73 - 2-move-1 canonical source excludes applied
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 74 - 2-move-1 destination stays draft
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 75 - 2-move-1 independent new slot IDs
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 76 - 2-move-3 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 77 - 2-move-3 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 78 - 2-move-3 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 79 - 2-move-3 canonical source excludes applied
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 80 - 2-move-3 destination stays draft
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 81 - 2-move-3 independent new slot IDs
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+SET
+INSERT 0 1
+UPDATE 1
+                   is                   
+----------------------------------------
+ ok 82 - 2-move-4 all selected mappings
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 83 - 2-move-4 immutable replay
+(1 row)
+
+              is               
+-------------------------------
+ ok 84 - 2-move-4 source count
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 85 - 2-move-4 canonical source excludes applied
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 86 - 2-move-4 destination stays draft
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 87 - 2-move-4 independent new slot IDs
+(1 row)
+
+RESET
+ROLLBACK
+SAVEPOINT
+UPDATE 1
+UPDATE 1
+INSERT 0 1
+UPDATE 1
+                    is                    
+------------------------------------------
+ ok 88 - transfer preserves 17:13 exactly
+(1 row)
+
+                        is                         
+---------------------------------------------------
+ ok 89 - transfer preserves endMinute1440 as 24:00
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 90 - canonical promoted shadow retains endMinute1440
+(1 row)
+
+ROLLBACK
+UPDATE 1
+DELETE 1
+                      is                       
+-----------------------------------------------
+ ok 91 - unselected pending/zero slots ignored
+(1 row)
+
+                             is                             
+------------------------------------------------------------
+ ok 92 - pending and zero slot rejected for whole promotion
+(1 row)
+
+                       is                        
+-------------------------------------------------
+ ok 93 - all moves reject pending and zero slots
+(1 row)
+
+INSERT 0 1
+UPDATE 1
+                             is                              
+-------------------------------------------------------------
+ ok 94 - keep_pending preserves complete unresolved original
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 95 - keep_pending copies zero slot item too
+(1 row)
+
+                      is                      
+----------------------------------------------
+ ok 96 - destination existing draft conflicts
+(1 row)
+
+INSERT 0 1
+UPDATE 1
+                         is                         
+----------------------------------------------------
+ ok 97 - conflicting confirmed slot becomes pending
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 98 - pending retains original exact minutes
+(1 row)
+
+                             is                              
+-------------------------------------------------------------
+ ok 99 - conflict copy never inserts occupied confirmed slot
+(1 row)
+
+SAVEPOINT
+UPDATE 1
+                            throws_ok                            
+-----------------------------------------------------------------
+ ok 100 - conflict conversion respects per-item pending capacity
+(1 row)
+
+ROLLBACK
+INSERT 0 1
+UPDATE 1
+                  throws_ok                  
+---------------------------------------------
+ ok 101 - catalog hiding invalidates preview
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 102 - hidden catalog explicit blocker
+(1 row)
+
+UPDATE 1
+INSERT 0 2
+              set_config              
+--------------------------------------
+ a7230000-0000-4000-8000-000000000902
+(1 row)
+
+           throws_ok            
+--------------------------------
+ ok 103 - editor cannot promote
+(1 row)
+
+INSERT 0 1
+SAVEPOINT
+UPDATE 1
+                             is                              
+-------------------------------------------------------------
+ ok 104 - eligible editor copies into authorized destination
+(1 row)
+
+DELETE 1
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 105 - permission revocation also denies immutable receipt replay
+(1 row)
+
+ROLLBACK
+DELETE 1
+                    throws_ok                     
+--------------------------------------------------
+ ok 106 - destination share revoked before commit
+(1 row)
+
+              set_config              
+--------------------------------------
+ a7230000-0000-4000-8000-000000000901
+(1 row)
+
+CREATE FUNCTION
+CREATE TRIGGER
+INSERT 0 1
+            throws_ok             
+----------------------------------
+ ok 107 - last insert fails batch
+(1 row)
+
+                   is                    
+-----------------------------------------
+ ok 108 - rollback leaves no new classes
+(1 row)
+
+                      is                      
+----------------------------------------------
+ ok 109 - rollback preserves all source items
+(1 row)
+
+                   is                    
+-----------------------------------------
+ ok 110 - rollback removes audit receipt
+(1 row)
+
+                     is                     
+--------------------------------------------
+ ok 111 - rollback removes mutation receipt
+(1 row)
+
+INSERT 0 1
+                  throws_ok                  
+---------------------------------------------
+ ok 112 - copy last insert fails whole batch
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 113 - failed copy rolls back earlier applied update
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 114 - failed copy leaves no created classes
+(1 row)
+
+                     is                     
+--------------------------------------------
+ ok 115 - failed copy removes audit receipt
+(1 row)
+
+DROP TRIGGER
+INSERT 0 1
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 1
+                            is                             
+-----------------------------------------------------------
+ ok 116 - future actual session blocks operating promotion
+(1 row)
+
+UPDATE 1
+                        is                        
+--------------------------------------------------
+ ok 117 - skipped actual session has no occupancy
+(1 row)
+
+INSERT 0 1
+UPDATE 1
+                    throws_ok                     
+--------------------------------------------------
+ ok 118 - dated session change invalidates commit
+(1 row)
+
+UPDATE 1
+INSERT 0 1
+UPDATE 1
+                  throws_ok                   
+----------------------------------------------
+ ok 119 - target revision invalidates preview
+(1 row)
+
+INSERT 0 1
+UPDATE 1
+INSERT 0 1
+SELECT 1
+INSERT 0 1
+UPDATE 1
+                            is                            
+----------------------------------------------------------
+ ok 120 - all pre-existing classes remain byte equivalent
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 121 - student states remain unchanged
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 122 - enrollment histories remain unchanged
+(1 row)
+
+                         is                          
+-----------------------------------------------------
+ ok 123 - all pre-existing sessions remain unchanged
+(1 row)
+
+                     throws_ok                     
+---------------------------------------------------
+ ok 124 - applied item cannot promote with new key
+(1 row)
+
+                    is                    
+------------------------------------------
+ ok 125 - source copy retained as applied
+(1 row)
+
+                     ok                      
+---------------------------------------------
+ ok 126 - other plans see new labeled shadow
+(1 row)
+
+SELECT 1
+UPDATE 1
+UPDATE 1
+                            is                            
+----------------------------------------------------------
+ ok 127 - source_class_id never excludes operating shadow
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 128 - existing operating class remains byte equivalent
+(1 row)
+
+ set_config 
+------------
+ v1
+(1 row)
+
+UPDATE 1
+                               is                                
+-----------------------------------------------------------------
+ ok 129 - replay after closing returns original immutable result
+(1 row)
+
+DELETE 1
+ALTER TABLE
+DELETE 1
+ALTER TABLE
+                              is                              
+--------------------------------------------------------------
+ ok 130 - audit trigger restored inside rollback-only fixture
+(1 row)
+
+                      is                      
+----------------------------------------------
+ ok 131 - FK null never revives applied draft
+(1 row)
+
+                  is                   
+---------------------------------------
+ ok 132 - deleted class clears only FK
+(1 row)
+
+                throws_ok                 
+------------------------------------------
+ ok 133 - same key body mutation rejected
+(1 row)
+
+ finish 
+--------
+ 1..133
+(1 row)
+
+ROLLBACK

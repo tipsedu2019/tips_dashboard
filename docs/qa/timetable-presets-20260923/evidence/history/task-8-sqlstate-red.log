@@ -1,0 +1,106 @@
+release2-rpc
+
+a8230000-0000-4000-8000-000000000001
+service_role
+not ok 1 - public final transition stale status
+# Failed test 1: "public final transition stale status"
+#       caught: 40001: makeup_request_stale_status
+#       wanted: P0001: makeup_request_stale_status
+not ok 2 - missing source branch
+# Failed test 2: "missing source branch"
+#       caught: 40001: makeup_request_source_changed
+#       wanted: P0001: makeup_request_source_changed
+not ok 3 - changed source branch
+# Failed test 3: "changed source branch"
+#       caught: 40001: makeup_request_source_changed
+#       wanted: P0001: makeup_request_source_changed
+not ok 4 - legacy revert stale
+# Failed test 4: "legacy revert stale"
+#       caught: 40001: makeup_schedule_plan_stale
+#       wanted: P0001: makeup_schedule_plan_stale
+not ok 5 - legacy apply stale
+# Failed test 5: "legacy apply stale"
+#       caught: 40001: makeup_schedule_plan_stale
+#       wanted: P0001: makeup_schedule_plan_stale
+not ok 6 - legacy event ownership collision
+# Failed test 6: "legacy event ownership collision"
+#       caught: 40001: makeup_calendar_event_conflict
+#       wanted: 23P01: makeup_calendar_event_conflict
+not ok 7 - normalized apply missing session
+# Failed test 7: "normalized apply missing session"
+#       caught: 40001: makeup_lesson_session_stale
+#       wanted: P0001: makeup_lesson_session_stale
+not ok 8 - normalized revert missing session
+# Failed test 8: "normalized revert missing session"
+#       caught: 40001: makeup_lesson_session_stale
+#       wanted: P0001: makeup_lesson_session_stale
+not ok 9 - normalized apply revision branch
+# Failed test 9: "normalized apply revision branch"
+#       caught: 40001: makeup_lesson_session_stale
+#       wanted: P0001: makeup_lesson_session_stale
+release2-rpc
+
+not ok 10 - normalized revert changed created session branch
+# Failed test 10: "normalized revert changed created session branch"
+#       caught: 40001: makeup_lesson_session_stale
+#       wanted: P0001: makeup_lesson_session_stale
+not ok 11 - final room assertion collision
+# Failed test 11: "final room assertion collision"
+#       caught: 40001: makeup_room_collision
+#       wanted: 23P01: makeup_room_collision
+not ok 12 - public normalized approval without fixture GUC
+# Failed test 12: "public normalized approval without fixture GUC"
+#     died: 42501: continuous class schedule direct write is not allowed
+#         CONTEXT:
+#             PL/pgSQL function public.continuous_class_schedule_direct_write_guard() line 6 at RAISE
+#             SQL statement "update public.class_lesson_sessions set schedule_state = 'exception', revision = revision + 1
+#                 where id = v_session.id"
+#             PL/pgSQL function dashboard_private.apply_normalized_makeup_effect_v1(uuid,uuid,jsonb) line 19 at SQL statement
+#             SQL statement "SELECT dashboard_private.apply_normalized_makeup_effect_v1(p_request_id, p_class_id, p_calendar_events)"
+#             PL/pgSQL function dashboard_private.notification_apply_makeup_calendar_effects_v1(uuid,uuid,jsonb,jsonb,uuid,uuid,jsonb,jsonb) line 11 at PERFORM
+#             SQL statement "SELECT dashboard_private.notification_apply_makeup_calendar_effects_v1(
+#                     before_row.id,
+#                     before_row.class_id,
+#                     p_patch -> 'schedule_plan_before',
+#                     p_patch -> 'schedule_plan_after',
+#                     nullif(p_patch ->> 'cancel_academic_event_id', '')::uuid,
+#                     nullif(p_patch ->> 'makeup_academic_event_id', '')::uuid,
+#                     p_patch -> 'makeup_academic_event_ids',
+#                     p_patch -> 'calendar_events'
+#                   )"
+#             PL/pgSQL function dashboard_private.transition_makeup_request_v2_unguarded(uuid,text,jsonb,text,uuid) line 161 at PERFORM
+#             PL/pgSQL assignment "timetable_result := dashboard_private.transition_makeup_request_v2_unguarded(
+#                 p_makeup_request_id,
+#                 p_command,
+#                 p_patch,
+#                 p_expected_status,
+#                 p_request_id
+#               )"
+#             PL/pgSQL function public.transition_makeup_request_v2(uuid,text,jsonb,text,uuid) line 5 at assignment
+#             SQL statement "select public.transition_makeup_request_v2(pg_temp.t8(7),'approve',pg_temp.patch(),'approval_pending',pg_temp.t8(83))"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ok 13 - approval restores caller direct-write context
+not ok 14 - actual public approval committed effect
+# Failed test 14: "actual public approval committed effect"
+#         have: approval_pending
+#         want: completed
+ok 15 - no direct-write permission leak after public effect
+not ok 16 - public normalized cancellation establishes and restores context
+# Failed test 16: "public normalized cancellation establishes and restores context"
+#     died: 40001: makeup_request_stale_status
+#         CONTEXT:
+#             PL/pgSQL function dashboard_private.transition_makeup_request_v2_unguarded(uuid,text,jsonb,text,uuid) line 99 at RAISE
+#             PL/pgSQL assignment "timetable_result := dashboard_private.transition_makeup_request_v2_unguarded(
+#                 p_makeup_request_id,
+#                 p_command,
+#                 p_patch,
+#                 p_expected_status,
+#                 p_request_id
+#               )"
+#             PL/pgSQL function public.transition_makeup_request_v2(uuid,text,jsonb,text,uuid) line 5 at assignment
+#             SQL statement "select public.transition_makeup_request_v2(pg_temp.t8(7),'approval_canceled','{}','completed',pg_temp.t8(84))"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ok 17 - revert restores caller context
+ok 18 - revert preserves original session identity
+1..18
+# Looks like you failed 13 tests of 18
