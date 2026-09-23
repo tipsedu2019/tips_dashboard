@@ -3,6 +3,11 @@
   "baseline.log",
   "db-baseline.log",
   "db-bootstrap.log",
+  "final-fix-brief.md",
+  "final-fix-report.md",
+  "final-rereview-1.md",
+  "final-review-1.md",
+  "final-ruling-disclosure-draft.md",
   "progress.md",
   "review-global-constraints.md",
   "root-acceptance-map.md",
@@ -217,6 +222,7 @@
   "task-9-picker-green.log",
   "task-9-picker-red.log",
   "task-9-report.md",
+  "task-9-rereview-1.md",
   "task-9-review-1.md",
   "task-9-root-browser.md"
 ]

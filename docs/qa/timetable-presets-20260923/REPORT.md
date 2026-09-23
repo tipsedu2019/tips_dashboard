@@ -115,3 +115,11 @@ At packaging: owned proxy/API session 41498 PID 48390 listens only 127.0.0.1:326
 - 기존 audit DELETE FK defect 때문에 synthetic tombstone test는 실제 제품 delete API 성공의 증거가 아니다. 초기 Task1 RED 원문은 없고 이후 retained RED/GREEN을 사용한다. bounded synthetic pointer replacement는 임의 동시 하드웨어 pointer의 포괄 검증이 아니다.
 - 원래 legacy preference table ACL 전면 개편, malformed missing-subject old draft의 one-click 자동수리, 새 browser session 복구는 이 구현 범위 밖이다. 네 old view는 자동 합치지 않는다.
 - main CI, 운영 migration/실제 legacy 조사·복구, 배포, 실제 수강 반영, 실제 공개 cache/Realtime provider 수신 및 provider 발송은 **미실행**. 로컬 SQL/browser/release build 통과와 구분한다. Rollback은 UI capability off 재빌드·운영 읽기이며 이력/프리셋 삭제가 아니다.
+
+## 최종 독립 검토 완료
+
+2026-09-24, 제품 코드 `5a2fe56fe1b0ac1ce8195bc4b471b2db79ea1fb4` 기준으로 전체 검토와 한 번의 통합 수정·독립 재검토를 완료했다. Important I1–I6 및 M2가 모두 해결됐고, 수정 범위에서 새 Critical/Important 문제가 확인되지 않았다. [최종 재검토 원문](evidence/history/final-rereview-1.md)을 보존한다.
+
+최종 로컬 결과는 Node 202/202, SQL 668/668, 브라우저 7/7, TypeScript·변경 파일 lint·release build 통과다. 테스트 환경의 공개 조회 403 로그(M1), 최대 배치 성능 목표 미달(M3), 명시된 운영 환경 검증 한계는 그대로 남는다. 운영 DB 적용·main CI·푸시·배포·실제 수강 반영·provider 확인은 완료한 것으로 표시하지 않는다.
+
+브랜치 `codex/timetable-presets-20260923`와 격리 worktree를 보존한다. 아래 별도 문서 커밋은 검토 결과 보존과 임시 작업 기록 정리만 포함하며 제품 코드를 바꾸지 않는다.
