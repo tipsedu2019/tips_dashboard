@@ -43,7 +43,7 @@ export function TimetablePlanClassList({ snapshot, search, setSearch, listFilter
     </label>
     {rows.map(item => {
       const slots = snapshot.slots.filter(slot => slot.itemId === item.id);
-      const draft = { item: itemDraft(item), slots };
+      const draft: PlacementEditorDraft = { item: itemDraft(item), slots, scope: 'item' };
       return <div key={item.id} className="border-b py-2">
         <div className="flex items-start gap-2">
           {item.state === 'draft' ? <Checkbox className="mt-3" aria-label={`${item.name} 선택`}
@@ -64,10 +64,10 @@ export function TimetablePlanClassList({ snapshot, search, setSearch, listFilter
         </p>
         <div className="flex flex-wrap gap-1 pl-6">
           {item.state === 'draft' ? <>
-            <Button size="sm" variant="ghost" onClick={() => onEdit(draft)}>편집·배치</Button>
+            <Button size="sm" variant="ghost" onClick={() => onEdit(draft)}>수업 전체 편집</Button>
             {canEdit ? <Button size="sm" variant="ghost" onClick={() => onDelete(item.id)}>수업 삭제</Button> : null}
           </> : null}
-          {slots.map(slot => <Button key={slot.id} size="sm" variant="ghost" onClick={() => onEdit({ ...draft, slotId: slot.id })}>
+          {slots.map(slot => <Button key={slot.id} size="sm" variant="ghost" onClick={() => onEdit({ ...draft, scope: 'slot', slotId: slot.id })}>
             {PLAN_DAYS[slot.weekday]} {formatPlanTime(slot.startMinute)}
           </Button>)}
           {item.state === 'applied' ? snapshot.appliedSnapshots.find(history => history.itemId === item.id)?.slots.map(slot =>

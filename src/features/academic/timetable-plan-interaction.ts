@@ -1,4 +1,4 @@
-import type { GridTarget, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
+import type { DropTarget, GridTarget, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
 import { assertInterval, moveSlot, type TimetableItemEdit } from './timetable-plan-model.ts';
 import { findConflicts, findOperatingConflicts } from './timetable-conflicts.ts';
 import { projectTimetableSlot, resolveGridTarget, resolveMovedGridTarget } from './timetable-placement-adapter.ts';
@@ -171,3 +171,80 @@ export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableIte
     }
 }
 function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string) { const row = options.find(r => r.id === id); return row ? `${row.name}${!row.isVisible || row.isMissing ? ' (사용 불가)' : ''}` : '사용 불가'; }
+
+
+export type PlacementEditorDraft = {
+    item: PlanItemDraft; slots: PlanSlot[]; scope?: 'item' | 'slot' | 'add';
+    slotId?: string; target?: DropTarget; endMinute?: number; revision?: number | null;
+};
+export type PlacementFormValues = {
+    name: string; subject: string; grade: string; teacher: string; room: string;
+    duration: string; start: string; end: string; weekdays: number[]; capacity: string; tuition: string;
+    applyTeacher: boolean; applyRoom: boolean; applyTime: boolean; applyWeekdays: boolean;
+};
+export function placementScope(draft: PlacementEditorDraft) {
+    return draft.scope ?? (draft.slotId ? 'slot' : draft.target ? 'add' : 'item');
+}
+export function placementFormDefaults(draft: PlacementEditorDraft): PlacementFormValues {
+    const whole = placementScope(draft) === 'item';
+    const slot = draft.slots.find(s => s.id === draft.slotId) ?? (whole ? draft.slots[0] : undefined);
+    const initial = draft.target;
+    const duration = draft.item.durationMinutes || 60;
+    return {
+        name: draft.item.name, subject: draft.item.subject, grade: draft.item.grade,
+        teacher: initial?.teacherId || (whole ? draft.item.defaultTeacherId : slot?.teacherId) || slot?.teacherId || draft.item.defaultTeacherId || '',
+        room: initial?.classroomId || (whole ? draft.item.defaultClassroomId : slot?.classroomId) || slot?.classroomId || draft.item.defaultClassroomId || '',
+        duration: String(duration), start: formatPlanTime(initial?.startMinute ?? slot?.startMinute ?? 540),
+        end: formatPlanTime(draft.endMinute ?? (initial ? Math.min(1440, initial.startMinute + duration) : slot?.endMinute ?? 600)),
+        weekdays: initial ? [initial.weekday] : whole ? PLAN_DAY_ORDER.filter(day => draft.slots.some(s => s.weekday === day)) : slot ? [slot.weekday] : [],
+        capacity: draft.item.capacity === null ? '' : String(draft.item.capacity), tuition: draft.item.tuition === null ? '' : String(draft.item.tuition),
+        applyTeacher: false, applyRoom: false, applyTime: false, applyWeekdays: false,
+    };
+}
+export function buildPlacementFormEdit(draft: PlacementEditorDraft, values: PlacementFormValues, candidate?: DropTarget): TimetableItemEdit {
+    const duration = Number(values.duration);
+    if (!Number.isInteger(duration) || duration <= 0 || duration > 1440) throw Error('수업 길이는 1–1440분으로 입력해 주세요.');
+    if (!values.name.trim() || !values.subject.trim()) throw Error('수업명과 과목을 입력해 주세요.');
+    for (const value of [values.capacity, values.tuition]) if (value && (!Number.isFinite(Number(value)) || Number(value) < 0)) throw Error('정원과 수업료는 0 이상의 수로 입력해 주세요.');
+    const whole = placementScope(draft) === 'item' && draft.slots.length > 0;
+    const item = { ...itemDraft(draft.item), name: values.name.trim(), subject: values.subject.trim(), grade: values.grade,
+        defaultTeacherId: whole && !values.applyTeacher ? draft.item.defaultTeacherId : values.teacher || null,
+        defaultClassroomId: whole && !values.applyRoom ? draft.item.defaultClassroomId : values.room || null,
+        durationMinutes: duration, capacity: values.capacity ? Number(values.capacity) : null, tuition: values.tuition ? Number(values.tuition) : null };
+    let slots = draft.slots.map(s => ({ ...s }));
+    if (whole) {
+        if (values.applyWeekdays) {
+            const desired = PLAN_DAY_ORDER.filter(day => values.weekdays.includes(day));
+            const oldDays = PLAN_DAY_ORDER.filter(day => slots.some(s => s.weekday === day));
+            const removed = oldDays.filter(day => !desired.includes(day));
+            const added = desired.filter(day => !oldDays.includes(day));
+            // Remap whole weekday groups, retaining each slot's own time/resources and stable identity.
+            const remapped = new Map(removed.map((day, index) => [day, added[index]]));
+            slots = slots.flatMap(s => desired.includes(s.weekday) ? [s] : remapped.get(s.weekday) !== undefined ? [{ ...s, weekday: remapped.get(s.weekday)! }] : []);
+            for (const day of added.slice(removed.length)) {
+                const template = draft.slots.filter(s => s.weekday === oldDays[0]);
+                slots.push(...template.map(s => ({ ...s, id: crypto.randomUUID(), sourceSlotId: null, weekday: day })));
+            }
+        }
+        if (values.applyTeacher && slots.length && !values.teacher) throw Error('전체 배치의 선생님을 선택해 주세요.');
+        if (values.applyRoom && slots.length && !values.room) throw Error('전체 배치의 강의실을 선택해 주세요.');
+        const interval = values.applyTime ? { startMinute: parsePlanTime(values.start), endMinute: parsePlanTime(values.end, true) } : null;
+        if (interval) assertInterval(interval.startMinute, interval.endMinute);
+        slots = slots.map(s => ({ ...s, ...(values.applyTeacher ? { teacherId: values.teacher } : {}), ...(values.applyRoom ? { classroomId: values.room } : {}), ...interval }));
+    } else {
+        const weekdays = candidate ? [candidate.weekday] : values.weekdays;
+        if (weekdays.length) {
+            if (!values.teacher || !values.room) throw Error('배치하려면 선생님과 강의실을 선택해 주세요.');
+            const startMinute = candidate?.startMinute ?? parsePlanTime(values.start);
+            const endMinute = candidate ? startMinute + duration : parsePlanTime(values.end, true);
+            assertInterval(startMinute, endMinute);
+            const selected = draft.slots.find(s => s.id === draft.slotId);
+            slots = [...slots.filter(s => s.id !== draft.slotId), ...weekdays.map((weekday, index) => ({
+                id: index === 0 && selected ? selected.id : crypto.randomUUID(), itemId: item.id, planId: item.planId,
+                weekday, startMinute, endMinute, teacherId: values.teacher, classroomId: values.room,
+                sourceSlotId: index === 0 && selected ? selected.sourceSlotId : null,
+            }))];
+        }
+    }
+    return { operation: 'save', item, slots };
+}

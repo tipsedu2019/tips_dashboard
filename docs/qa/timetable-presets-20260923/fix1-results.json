@@ -1,0 +1,100 @@
+{
+  "red": [
+    {
+      "mode": "create",
+      "reopen": false,
+      "persistedIds": [
+        "e4193ce1-e44d-43c9-afc7-a2162551cade",
+        "a156fb05-988e-4cf2-89c9-cfaabb32198c"
+      ],
+      "persistedCount": 2
+    },
+    {
+      "mode": "create",
+      "reopen": true,
+      "persistedIds": [
+        "c015ab0e-bd32-4355-9caa-581168d9a330",
+        "4b5d3d46-bad5-41ef-9320-61841eecd8e8"
+      ],
+      "persistedCount": 2
+    },
+    {
+      "mode": "clone",
+      "reopen": false,
+      "persistedIds": [
+        "7fda4c29-5be9-42de-a135-7b5962546fce",
+        "59a94610-d56b-4c45-aa4f-b41ce8333089"
+      ],
+      "persistedCount": 2
+    },
+    {
+      "mode": "clone",
+      "reopen": true,
+      "persistedIds": [
+        "083882ee-a13b-40e6-8fbc-ec902a3ed031",
+        "0f63dcd9-25c6-48bc-825d-548c8295766a"
+      ],
+      "persistedCount": 2
+    }
+  ],
+  "green": [
+    {
+      "mode": "create",
+      "reopen": false,
+      "persistedIds": [
+        "de6c281d-5970-43ba-bb5f-9544996d98d6"
+      ],
+      "persistedCount": 1
+    },
+    {
+      "mode": "create",
+      "reopen": true,
+      "persistedIds": [
+        "6f236351-f694-49d1-bd79-c65d552c1227"
+      ],
+      "persistedCount": 1
+    },
+    {
+      "mode": "clone",
+      "reopen": false,
+      "persistedIds": [
+        "11103b41-bcc1-4b12-b352-de24561e2edf"
+      ],
+      "persistedCount": 1
+    },
+    {
+      "mode": "clone",
+      "reopen": true,
+      "persistedIds": [
+        "4ac9b4c1-6b68-4e9a-b218-09b57fac1996"
+      ],
+      "persistedCount": 1
+    }
+  ],
+  "scope": "Synthetic loopback fixture; real PostgreSQL receipt writes, response withheld from isolated rendered React component; only created test plans archived afterwards.",
+  "focused": {
+    "tests": 62,
+    "pass": 62,
+    "fail": 0,
+    "tsc": "exit0",
+    "changedLint": "exit0"
+  },
+  "manual": {
+    "itemId": "e446fbd2-fa5b-4b4d-b244-96a997d896cd",
+    "slotIds": [
+      "c49499af-12b5-4958-9f1c-75eb9fc503b0",
+      "5ab32d96-5d55-407e-8ede-c6a35217bda4"
+    ],
+    "teacherChangeRevision": 2,
+    "weekdayChangeRevision": 3,
+    "startMinute": 553,
+    "endMinute": 613,
+    "finalWeekdays": [
+      2,
+      4
+    ],
+    "teacherId": "ae260000-0000-4000-8000-000000000102",
+    "classroomId": "ae260000-0000-4000-8000-000000000201",
+    "allFourWholeChangeAccessibleNamesVerified": true
+  }
+}

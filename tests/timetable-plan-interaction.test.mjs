@@ -51,3 +51,30 @@ test('rendered class-list selection uses item IDs, preserves hidden selections a
  let selected=['hidden'];const base={...snapshot,items:[item,{...item,id:'hidden',name:'숨긴 수학'},{...item,id:'applied',name:'반영 이력',state:'applied'}],appliedSnapshots:[]};const root=createRoot(document.getElementById('root'));const render=async(filter='all')=>act(async()=>root.render(createElement(listModule.exports.TimetablePlanClassList,{snapshot:base,search:filter==='all'?'새':'',setSearch(){},listFilter:filter,setListFilter(){},selectedItemIds:selected,setSelectedItemIds:update=>{selected=update(selected);},activeItemId:null,canEdit:true,onActivate(){},onEdit(){},onDelete(){},onDrag(){},suppressClick:()=>false})));
  try{await render();const checks=document.querySelectorAll('input[type=checkbox]');assert.equal(checks.length,2,'one class item with two slots has one selectable identity plus scope control');await act(async()=>checks[0].click());assert.deepEqual(selected,['hidden','i']);await render();await act(async()=>document.querySelector('input[type=checkbox]').click());assert.deepEqual(selected,['hidden']);await render('applied');assert.equal(document.querySelectorAll('input[type=checkbox]').length,1,'applied rows and shadows have no item-selection control');}finally{await act(async()=>root.unmount());Object.assign(globalThis,previous);dom.window.close();}
 });
+
+const variedWed = { ...wed, teacherId: 't2', classroomId: 'r2', startMinute: 1103, endMinute: 1193 };
+const wholeDraft = { item, slots: [mon, variedWed], scope: 'item' };
+test('whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft', () => {
+ const draft = { ...wholeDraft, item: { ...item, pendingSlots: [{id:'pending',sourceText:'기존 초안',reason:'invalid_time'}] } };
+ const values = interaction.placementFormDefaults(draft);
+ assert.deepEqual(values.weekdays, [1,3]);
+ const edit = interaction.buildPlacementFormEdit(draft, {...values, weekdays:[2,4], applyWeekdays:true});
+ assert.equal(edit.operation,'save');assert.equal(edit.slots.length,2);
+ assert.deepEqual(edit.slots,[{...mon,weekday:2},{...variedWed,weekday:4}]);
+ assert.deepEqual(edit.item.pendingSlots,draft.item.pendingSlots);
+});
+test('whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs', () => {
+ const values = interaction.placementFormDefaults(wholeDraft);
+ assert.deepEqual(interaction.buildPlacementFormEdit(wholeDraft,{...values,name:'이름만'}).slots,wholeDraft.slots);
+ const edit = interaction.buildPlacementFormEdit(wholeDraft,{...values,teacher:'t',applyTeacher:true});
+ assert.deepEqual(edit.slots,[mon,{...variedWed,teacherId:'t'}]);assert.equal(edit.item.defaultTeacherId,'t');
+ const removed = interaction.buildPlacementFormEdit(wholeDraft,{...values,weekdays:[],applyWeekdays:true});assert.deepEqual(removed.slots,[]);
+});
+test('single-slot form edit and add-placement preserve the complete differing Wednesday sibling', () => {
+ const single = {...wholeDraft,scope:'slot',slotId:'mon'};
+ const edit = interaction.buildPlacementFormEdit(single,{...interaction.placementFormDefaults(single),teacher:'t2',start:'09:10',end:'10:10'});
+ assert.deepEqual(edit.slots.find(s=>s.id==='wed'),variedWed);assert.equal(edit.slots.find(s=>s.id==='mon').startMinute,550);
+ const add = {...wholeDraft,scope:'add',target:{weekday:5,startMinute:1410,teacherId:'t',classroomId:'r'}};
+ const placed = interaction.buildPlacementFormEdit(add,{...interaction.placementFormDefaults(add),end:'24:00'});
+ assert.equal(placed.slots.length,3);assert.deepEqual(placed.slots.slice(0,2),wholeDraft.slots);assert.equal(placed.slots[2].endMinute,1440);
+});
