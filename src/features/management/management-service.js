@@ -1707,7 +1707,18 @@ export function createManagementService(options = {}) {
         generateId,
         candidateMembershipContext: options.candidateMembershipContext,
       };
-      const payload = options.scheduleOwnership === "normalized"
+      let scheduleOwnership = options.scheduleOwnership;
+      if (options.resolveScheduleOwnership) {
+        const { data: defaults, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.getDefaults, {
+          p_class_id: trimText(record.id),
+        });
+        if (error) throw error;
+        if (!["legacy", "shadow", "normalized"].includes(defaults?.storageMode)) {
+          throw new Error("수업 일정 저장 방식을 확인한 뒤 다시 시도해 주세요.");
+        }
+        scheduleOwnership = defaults.storageMode === "normalized" ? "normalized" : undefined;
+      }
+      const payload = scheduleOwnership === "normalized"
         ? buildClassMetadataPayload(record, payloadOptions)
         : buildClassPayload(record, payloadOptions);
       const operationalFields = ["status", "teacher", "teacherName", "teacher_name", "schedule", "room", "classroom"];

@@ -55,7 +55,7 @@ end $function$
 -- Source-slot authority is explicit. Legacy sessions never infer a source slot.
 create or replace function dashboard_private.read_timetable_operating_reference_v1()
 returns jsonb language plpgsql stable security definer set search_path='' as $f$
-declare r jsonb; dated jsonb:='[]'; blockers jsonb:='[]'; c record; s record; v jsonb; tid uuid; rid uuid; dt date; a int; b int; state text; ident text; raw jsonb:='[]';
+declare r jsonb; dated jsonb:='[]'; blockers jsonb:='[]'; c record; s record; v jsonb; tid uuid; rid uuid; dt date; a int; b int; state text; ident text; occupancy jsonb; raw jsonb:='[]';
 begin
  r:=dashboard_private.read_timetable_weekly_reference_v1();
  for s in select lesson.*,class_row.name from public.class_lesson_sessions lesson join public.classes class_row on class_row.id=lesson.class_id where class_row.schedule_storage_mode='normalized' order by lesson.id loop
@@ -69,12 +69,23 @@ begin
  if c.schedule_plan ? 'sessions' and jsonb_typeof(c.schedule_plan->'sessions')<>'array' then
  blockers:=blockers||jsonb_build_array(jsonb_build_object('classId',c.id,'label',c.name,'scope','all','resourceId',null,'reason','incomplete_read','date',null));continue;end if;
  for v in select value from jsonb_array_elements(coalesce(c.schedule_plan->'sessions','[]')) loop
- -- Content-only fields are deliberately absent from the fingerprint.
+ -- Scalar legacy entries are diagnostic data, never JSON-object operations.
+ -- Content-only fields remain absent from an object's occupancy fingerprint.
+ occupancy:=case when jsonb_typeof(v)='object' then v-array['memo','publicNote','teacherNote','textbook','textbooks','homework','content','lessonContent','learningContent'] else v end;
  state:=coalesce(nullif(v->>'scheduleState',''),'active');
  if state in('skipped','tbd') then continue;end if;
- raw:=raw||jsonb_build_array(jsonb_build_object('classId',c.id,'session',v-array['memo','publicNote','teacherNote','textbook','textbooks','homework','content','lessonContent','learningContent']));
+ raw:=raw||jsonb_build_array(jsonb_build_object('classId',c.id,'session',occupancy));
+ -- Date knowledge is independent of time/resource validity and must survive it.
+ dt:=null;
+ begin dt:=(v->>'date')::date;
+ exception when invalid_datetime_format or datetime_field_overflow then dt:=null;
+ end;
  begin
- dt:=(v->>'date')::date;
+ if jsonb_typeof(v)<>'object' then raise exception 'unresolved';end if;
+ -- Validate the original text before casting: even sub-microsecond fractions
+ -- must not be rounded into an apparently whole-minute reservation.
+ if (v->>'startTime') !~ '^[0-9]{1,2}:[0-9]{2}(:00([.]0+)?)?$'
+   or (v->>'endTime') !~ '^[0-9]{1,2}:[0-9]{2}(:00([.]0+)?)?$' then raise exception 'unresolved';end if;
  a:=extract(epoch from (v->>'startTime')::time)::int/60;b:=extract(epoch from (v->>'endTime')::time)::int/60;
  tid:=nullif(v->>'teacherCatalogId','')::uuid;rid:=nullif(v->>'classroomCatalogId','')::uuid;
  if tid is null then select min(id::text)::uuid into tid from public.teacher_catalogs where name=v->>'teacherName' having count(*)=1;end if;
@@ -84,7 +95,7 @@ begin
  if ident is null or (select count(*) from jsonb_array_elements(c.schedule_plan->'sessions') x where coalesce(x->>'id',x->>'sessionKey')=ident)>1 then raise exception 'unresolved';end if;
  dated:=dated||jsonb_build_array(jsonb_build_object('id','legacy-session:'||c.id::text||':'||ident,'classId',c.id,'sourceSlotId',null,'date',dt,'state',state,'startMinute',a,'endMinute',b,'teacherId',tid,'classroomId',rid,'revision',0));
  exception when others then
- blockers:=blockers||jsonb_build_array(jsonb_build_object('classId',c.id,'label',c.name,'scope','all','resourceId',null,'reason','incomplete_read','date',null,'occupancyFingerprint',md5((v-array['memo','publicNote','teacherNote','textbook','textbooks','homework','content','lessonContent','learningContent'])::text)));
+ blockers:=blockers||jsonb_build_array(jsonb_build_object('classId',c.id,'label',c.name,'scope','all','resourceId',null,'reason','incomplete_read','date',dt,'occupancyFingerprint',md5(occupancy::text)));
  end;
  end loop;
  end loop;

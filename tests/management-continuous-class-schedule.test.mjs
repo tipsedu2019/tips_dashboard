@@ -214,3 +214,44 @@ test("a missing defaults RPC keeps legacy class creation available", async () =>
 
   assert.equal(await service.getClassScheduleDefaults(CLASS_ID), null);
 });
+
+for (const change of [{ status: "개강 준비" }, { name: "일괄 이름 변경" }]) {
+  test(`actual bulk merged-row save resolves each class mode before ${Object.keys(change)[0]} update`, async () => {
+    const writes = []; const reads = [];
+    const service = createManagementService({
+      supabase: { async rpc(name, args) {
+        if (name === "get_class_schedule_defaults_v1") {
+          reads.push(args.p_class_id);
+          return { data: { storageMode: args.p_class_id === CLASS_ID ? "normalized" : "legacy", authoritativeSource: "legacy" }, error: null };
+        }
+        assert.equal(name, "update_class_operational_v1");
+        if (args.p_class_id === CLASS_ID && ["schedule", "teacher", "room"].some(key => key in args.p_patch)) {
+          return { data: null, error: { code: "22023", message: "class_schedule_validation" } };
+        }
+        writes.push(args); return { data: { classRow: { id: args.p_class_id } }, error: null };
+      } },
+      probeRegistrationRuntime: async () => ({ mode: "ready" }),
+      refreshPublicClassesCache: async () => ({ status: "complete" }),
+    });
+    // Same merged row payload supplied by management-page's bulk compact path.
+    const row = { id: CLASS_ID, name: "고1 수학", subject: "수학", status: "수강", schedule: "화 18:00-20:00", teacher: "한지현", room: "별관 5강" };
+    for (const id of [CLASS_ID, "10000000-0000-4000-8000-000000000002"]) {
+      await service.updateClass({ ...row, id, ...change }, { resolveScheduleOwnership: true });
+    }
+    assert.equal(reads.length, 2);
+    for (const key of ["schedule", "teacher", "room"]) assert.equal(key in writes[0].p_patch, false);
+    assert.equal(writes[0].p_patch.status, change.status ?? "수강");
+    assert.equal(writes[0].p_patch.name, change.name ?? row.name);
+    assert.equal(writes[1].p_patch.schedule, row.schedule);
+  });
+}
+
+test("bulk save fails closed if authoritative storage mode cannot be read", async () => {
+  let writes = 0;
+  const service = createManagementService({ supabase: { async rpc(name) {
+    if (name === "get_class_schedule_defaults_v1") return { data: null, error: null };
+    writes++; return { data: {}, error: null };
+  } }, probeRegistrationRuntime: async () => ({ mode: "ready" }), refreshPublicClassesCache: async () => ({ status: "complete" }) });
+  await assert.rejects(service.updateClass({ id: CLASS_ID, status: "수강" }, { resolveScheduleOwnership: true }), /수업 일정 저장 방식을 확인/);
+  assert.equal(writes, 0);
+});

@@ -97,7 +97,7 @@ type ManagementServiceClient = {
   updateStudent: (record: Record<string, unknown>) => Promise<unknown>;
   deleteStudent: (id: string) => Promise<unknown>;
   createClass: (record: Record<string, unknown>, options: { candidateMembershipContext?: ClassFormReferences; groupIds?: string[] }) => Promise<unknown>;
-  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized" }) => Promise<unknown>;
+  updateClass: (record: Record<string, unknown>, options?: { candidateMembershipContext?: ClassFormReferences; scheduleOwnership?: "normalized"; resolveScheduleOwnership?: boolean }) => Promise<unknown>;
   deleteClass: (id: string) => Promise<unknown>;
   createTextbook: (record: Record<string, unknown>) => Promise<unknown>;
   updateTextbook: (record: Record<string, unknown>) => Promise<unknown>;
@@ -2787,7 +2787,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const outcomes = await Promise.allSettled(rows.map(async (row) => {
         const payload = compact({ [change.field]: value }, kind, row);
         if (kind === "students") return service.updateStudent(payload);
-        if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences });
+        if (kind === "classes") return service.updateClass(payload, { candidateMembershipContext: classFormReferences, resolveScheduleOwnership: true });
         return service.updateTextbook(payload);
       }));
       if (!isCurrent()) return false;

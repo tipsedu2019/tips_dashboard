@@ -1,5 +1,7 @@
 begin;
-create extension if not exists pgtap with schema extensions;
+do $pgtap$ begin
+ if not exists(select 1 from pg_extension where extname='pgtap') then create extension pgtap with schema extensions; end if;
+end $pgtap$;
 select no_plan();
 set local statement_timeout = '60s';
 insert into dashboard_private.continuous_class_schedule_runtime(singleton,version) values(true,1)
