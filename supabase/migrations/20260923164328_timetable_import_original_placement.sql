@@ -1,6 +1,8 @@
 -- Preserve supported legacy punctuation and safe original placement for repair.
 -- No data rewrite; current authorization, receipt, locks and whitelist remain unchanged.
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 create or replace function dashboard_private.timetable_import_source_v1(src jsonb) returns jsonb
 language plpgsql stable security definer set search_path='' as $$
 declare c public.classes; pref public.app_preferences; entry jsonb; line jsonb; lines jsonb; entries jsonb:='[]'; raw jsonb:='[]'; safe jsonb; sid uuid; piece text; parts text[]; day text; selected uuid[]; detail text; resources text[]; teacher_text text; room_text text;

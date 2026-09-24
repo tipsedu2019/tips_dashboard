@@ -1,6 +1,8 @@
 -- Measured 7800-session reference timed out at35s; preserve every row and fingerprint.
 -- Original final definition:20260923085008. CREATE OR REPLACE retains owner/ACL.
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 create or replace function dashboard_private.read_timetable_operating_reference_v1()
 returns jsonb language plpgsql stable security definer set search_path='' as $f$
 declare r jsonb; dated jsonb:='[]'; blockers jsonb:='[]'; c record; v jsonb; tid uuid; rid uuid; dt date; a int; b int; state text; ident text; occupancy jsonb; raw jsonb:='[]';

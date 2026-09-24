@@ -1,6 +1,8 @@
 -- Management-only copies from untouched preparing classes or global historical
 -- planner preferences. Every public projection is a whitelist, including pending.
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 create or replace function dashboard_private.timetable_import_text_v1(v jsonb) returns text
 language sql immutable set search_path='' as $$ select case when jsonb_typeof(v)='string' then v#>>'{}' else '' end $$;
 

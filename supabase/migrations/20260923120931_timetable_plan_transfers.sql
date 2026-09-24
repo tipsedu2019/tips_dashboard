@@ -1,3 +1,7 @@
+begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+
 -- Selected transfers are independent of whole-plan cloning. All writers share
 -- the operating key, then lock plans and related classes in UUID order.
 create or replace function dashboard_private.prepare_timetable_transfer_v1(r jsonb)
@@ -199,3 +203,5 @@ alter function public.preview_timetable_plan_transfer_v1(jsonb) owner to postgre
 alter function public.commit_timetable_plan_transfer_v1(jsonb) owner to postgres;
 revoke all on function public.preview_timetable_plan_transfer_v1(jsonb),public.commit_timetable_plan_transfer_v1(jsonb) from public,anon;
 grant execute on function public.preview_timetable_plan_transfer_v1(jsonb),public.commit_timetable_plan_transfer_v1(jsonb) to authenticated;
+
+commit;

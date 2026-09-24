@@ -3,6 +3,8 @@
 -- CREATE OR REPLACE retains ACL/owner; errors roll back the whole statement.
 -- Genuine PostgreSQL serialization failures remain 40001.
 begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
 
 -- Source: 20260923085008_timetable_operational_conflict_guards.sql
 CREATE OR REPLACE FUNCTION dashboard_private.transition_makeup_request_v2_unguarded(p_makeup_request_id uuid, p_command text, p_patch jsonb, p_expected_status text, p_request_id uuid)

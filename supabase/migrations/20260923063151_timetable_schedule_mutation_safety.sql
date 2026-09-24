@@ -123,7 +123,11 @@ $patch$;
 -- The helper restores immediate checking before returning.
 alter table public.class_schedule_slots
   drop constraint class_schedule_slots_class_time_key;
+-- Replace the existing unique index atomically to support deferred slot swaps.
+-- Production preflight counted 5 rows; 5s lock timeout bounds contention.
+-- UNIQUE cannot be NOT VALID. No concurrent index may run inside this transaction.
 alter table public.class_schedule_slots
+  -- squawk-ignore constraint-missing-not-valid, disallowed-unique-constraint
   add constraint class_schedule_slots_class_time_key
   unique (class_id, weekday, start_time, end_time)
   deferrable initially immediate;

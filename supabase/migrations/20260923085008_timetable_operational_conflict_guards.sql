@@ -1,3 +1,7 @@
+begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+
 -- Operational timetable writes share a single transaction advisory lock.
 -- Baselines are private and removed by their deferred final-state check.
 
@@ -2767,6 +2771,9 @@ begin
 exception when invalid_text_representation or invalid_datetime_format or datetime_field_overflow or numeric_value_out_of_range or check_violation or not_null_violation then raise exception using errcode='22023',message='timetable_invalid';
 end $function$
 ;
+-- This independent table is created earlier in the same unreleased feature chain.
+-- No data backfill is performed; lock/statement timeouts bound validation.
+-- squawk-ignore constraint-missing-not-valid
 alter table public.timetable_plans add constraint timetable_plan_target_date_pair check ((target_start_date is null)=(target_end_date is null));
 -- A lock cannot refresh a snapshot already pinned by RR/Serializable.
 -- Fail closed rather than turning a domain condition into SQLSTATE 40001.
@@ -2777,3 +2784,5 @@ begin
  raise exception using errcode='25001',message='timetable_isolation_not_supported';end if;
  perform pg_catalog.pg_advisory_xact_lock(pg_catalog.hashtextextended('tips:timetable:operational',0));
 end $f$;
+
+commit;

@@ -1,3 +1,7 @@
+begin;
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+
 -- Independent shared plans. Resource UUIDs intentionally have no catalog FK:
 -- deleting a catalog entry must retain identity and the last display snapshot.
 create table public.timetable_plans (
@@ -15,10 +19,13 @@ create table public.timetable_plan_members (
  access text not null check(access in('viewer','editor')), primary key(plan_id,user_id)
 );
 create index timetable_plan_members_user_idx on public.timetable_plan_members(user_id,plan_id);
+-- Capacity/tuition retain the existing class integer contract; durations are <=1440 minutes.
 create table public.timetable_plan_items (
  id uuid primary key default gen_random_uuid(), plan_id uuid not null references public.timetable_plans(id) on delete cascade,
  name text not null check(length(btrim(name)) between 1 and 200), subject text not null check(length(btrim(subject)) between 1 and 80), subject_area_key text, grade text not null default '',
+ -- squawk-ignore prefer-bigint-over-int
  capacity integer check(capacity>=0), tuition integer check(tuition>=0), default_teacher_id uuid, default_classroom_id uuid,
+ -- squawk-ignore prefer-bigint-over-int
  duration_minutes integer check(duration_minutes between 1 and 1440),
  source_class_id uuid references public.classes(id) on delete set null,
  state text not null default 'draft' check(state in('draft','applied')),
@@ -26,8 +33,10 @@ create table public.timetable_plan_items (
  revision bigint not null default 1 check(revision>0), pending_slots jsonb not null default '[]' check(jsonb_typeof(pending_slots)='array'),
  unique(plan_id,id), check((state='draft' and applied_class_id is null and applied_transfer_id is null and applied_at is null) or (state='applied' and applied_transfer_id is not null and applied_at is not null))
 );
+-- Weekdays and minute offsets are bounded by the adjacent CHECK constraints.
 create table public.timetable_plan_slots (
  id uuid primary key default gen_random_uuid(), plan_id uuid not null, item_id uuid not null,
+ -- squawk-ignore prefer-bigint-over-int, prefer-bigint-over-smallint
  weekday smallint not null check(weekday between 0 and 6), start_minute integer not null check(start_minute>=0), end_minute integer not null check(end_minute<=1440 and end_minute>start_minute),
  teacher_catalog_id uuid not null, classroom_catalog_id uuid not null, teacher_name text not null, classroom_name text not null, source_slot_id uuid,
  foreign key(plan_id,item_id) references public.timetable_plan_items(plan_id,id) on delete cascade
@@ -352,3 +361,5 @@ revoke all on function public.can_read_timetable_operating_signal_v1() from publ
 grant execute on function public.can_read_timetable_operating_signal_v1() to authenticated;
 create policy timetable_signals_read on public.timetable_invalidation_signals for select to authenticated using(case when plan_id is null then public.can_read_timetable_operating_signal_v1() else public.can_read_timetable_plan_v1(plan_id) end);
 do $$begin if exists(select 1 from pg_publication where pubname='supabase_realtime' and not puballtables) then alter publication supabase_realtime add table public.timetable_invalidation_signals;end if;end $$;
+
+commit;
