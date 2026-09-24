@@ -33,8 +33,20 @@ vm.runInThisContext(`(function(require,module,exports){${compiled}\n})`)(key=>ke
 for(const view of views)test(`${view}: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles`,async()=>{
  const dom=new JSDOM('<div id="root"></div>',{pretendToBeVisual:true});const previous={window:globalThis.window,document:globalThis.document,IS_REACT_ACT_ENVIRONMENT:globalThis.IS_REACT_ACT_ENVIRONMENT};Object.assign(globalThis,{window:dom.window,document:dom.window.document,IS_REACT_ACT_ENVIRONMENT:true});
  const container=document.getElementById('root'),root=createRoot(container);const panel=buildPlanPanels(snapshot,view).find(p=>p.blocks.some(b=>b.id==='mon'));const actions=[];
- try{await act(async()=>root.render(createElement(runtime.exports.TimetablePlanGrid,{panel,view,visibleStartMinute:540,visibleEndMinute:1440,layout:{slotHeight:32,timeColumnWidth:76,minColumnWidth:0,fitColumns:true,density:'compact'},editable:true,onCell:t=>actions.push(t),onOpen:()=>{},onPointerStart:(e,s)=>actions.push(s),BlockComponent:({block})=>createElement('button',{'data-title':block.title},block.title)})));
+ const original=panel.blocks.find(b=>b.id==='mon');
+ const boundedPanel={...panel,blocks:[...panel.blocks,
+  {...original,id:'before-nine',startMinute:480,endMinute:540},
+  {...original,id:'across-nine',startMinute:510,endMinute:570},
+  {...original,id:'until-midnight',startMinute:1410,endMinute:1440},
+ ]};
+ try{await act(async()=>root.render(createElement(runtime.exports.TimetablePlanGrid,{panel:boundedPanel,view,visibleStartMinute:540,visibleEndMinute:1440,layout:{slotHeight:32,timeColumnWidth:76,minColumnWidth:0,fitColumns:true,density:'compact'},editable:true,onCell:t=>actions.push(t),onOpen:()=>{},onPointerStart:(e,s)=>actions.push(s),BlockComponent:({block})=>createElement('button',{'data-title':block.title},block.title)})));
  const cell=container.querySelector('.timetable-cell');await act(async()=>cell.click());assert.equal(actions[0].view,view);assert.equal(actions[0].panelKey,panel.id);assert.equal(actions[0].visibleStartMinute,540);assert.equal(actions[0].slotMinutes,30);
+ const times=[...container.querySelectorAll('.timetable-time-cell')].map(n=>n.textContent);
+ assert.equal(times.length,30);assert.equal(times[0],'09:00–09:30');assert.equal(times.at(-1),'23:30–24:00');
+ assert.equal(container.querySelector('[data-plan-slot="before-nine"]'),null,'off-axis classes cannot cover the header');
+ assert.equal(container.querySelector('[data-plan-slot="across-nine"]').style.top,'0px','straddling class starts at visible boundary');
+ assert.equal(parseFloat(container.querySelector('[data-plan-slot="until-midnight"]').style.top),29*32);
+ assert.equal(boundedPanel.blocks.find(b=>b.id==='across-nine').startMinute,510,'display clipping preserves the original schedule');
  const mon=container.querySelector('[data-plan-slot="mon"]');assert.ok(mon);assert.equal(parseFloat(mon.style.top),(1033-540)/30*32);
  const move=mon.querySelector('[data-plan-handle]');assert.ok(move);await act(async()=>move.dispatchEvent(new dom.window.MouseEvent('pointerdown',{bubbles:true,button:0})));assert.equal(actions.at(-1).slotId,'mon');assert.equal(actions.at(-1).kind,'move');
  for(const shadow of container.querySelectorAll('[data-shadow]'))assert.equal(shadow.querySelectorAll('[data-plan-handle]').length,0);

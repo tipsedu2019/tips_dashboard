@@ -322,7 +322,7 @@ begin
     raise exception 'makeup_request_not_found' using errcode = 'P0002';
   end if;
   if before_row.status <> p_expected_status then
-    raise exception 'makeup_request_stale_status' using errcode = '40001';
+    raise exception 'makeup_request_stale_status' using errcode = 'P0001';
   end if;
 
   if p_command = 'approve' then
@@ -363,7 +363,7 @@ begin
       where class_row.id = before_row.class_id
       for update of class_row;
       if not found then
-        raise exception 'makeup_request_source_changed' using errcode = '40001';
+        raise exception 'makeup_request_source_changed' using errcode = 'P0001';
       end if;
       if not exists (
         select 1
@@ -379,7 +379,7 @@ begin
           and teacher.profile_id is not distinct from before_row.teacher_profile_id
           and approver.profile_id is not distinct from before_row.approver_profile_id
       ) then
-        raise exception 'makeup_request_source_changed' using errcode = '40001';
+        raise exception 'makeup_request_source_changed' using errcode = 'P0001';
       end if;
       perform dashboard_private.notification_assert_makeup_room_available_v1(
         before_row.id
@@ -604,7 +604,7 @@ begin
       p_schedule_plan_after
     );
   if not found then
-    raise exception 'makeup_schedule_plan_stale' using errcode = '40001';
+    raise exception 'makeup_schedule_plan_stale' using errcode = 'P0001';
   end if;
 
   delete from public.academic_events event_row
@@ -1307,7 +1307,7 @@ begin
   where class_row.id = p_class_id
     and coalesce(class_row.schedule_plan, '{}'::jsonb) = p_schedule_plan_before;
   if not found then
-    raise exception 'makeup_schedule_plan_stale' using errcode = '40001';
+    raise exception 'makeup_schedule_plan_stale' using errcode = 'P0001';
   end if;
 
   for calendar_event in
@@ -1337,7 +1337,7 @@ begin
         coalesce(public.academic_events.note, ''), p_request_id::text
       ) > 0;
     if not found then
-      raise exception 'makeup_calendar_event_conflict' using errcode = '40001';
+      raise exception 'makeup_calendar_event_conflict' using errcode = '23P01';
     end if;
   end loop;
 end;
@@ -1357,11 +1357,11 @@ begin
   select * into v_session from public.class_lesson_sessions
     where id = v_request.original_lesson_session_id and class_id = p_class_id for update;
   if not found or v_session.revision is distinct from v_request.makeup_effect_revision then
-    raise exception 'makeup_lesson_session_stale' using errcode = '40001';
+    raise exception 'makeup_lesson_session_stale' using errcode = 'P0001';
   end if;
   if exists (select 1 from jsonb_array_elements_text(v_request.makeup_lesson_session_ids) item
     join public.class_lesson_sessions session on session.id = item.value::uuid
-    where session.revision <> 0) then raise exception 'makeup_lesson_session_stale' using errcode = '40001'; end if;
+    where session.revision <> 0) then raise exception 'makeup_lesson_session_stale' using errcode = 'P0001'; end if;
   update public.class_lesson_sessions set schedule_state = 'active', revision = revision + 1 where id = v_session.id;
   delete from public.class_lesson_sessions where id in (select value::uuid from jsonb_array_elements_text(v_request.makeup_lesson_session_ids));
 end;
@@ -1432,10 +1432,10 @@ begin
   select * into v_session from public.class_lesson_sessions
     where id = v_request.original_lesson_session_id and class_id = p_class_id for update;
   if not found or v_session.schedule_state not in ('active', 'makeup') then
-    raise exception 'makeup_lesson_session_stale' using errcode = '40001';
+    raise exception 'makeup_lesson_session_stale' using errcode = 'P0001';
   end if;
   if v_request.original_lesson_session_revision is distinct from v_session.revision then
-    raise exception 'makeup_lesson_session_stale' using errcode = '40001';
+    raise exception 'makeup_lesson_session_stale' using errcode = 'P0001';
   end if;
   update public.class_lesson_sessions set schedule_state = 'exception', revision = revision + 1
     where id = v_session.id;
