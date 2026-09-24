@@ -2262,7 +2262,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     } catch (error) {
       if (!request.isCurrent()) return;
       const message = getSaveErrorMessage(error);
-      setOperationError(message.includes("class_schedule_stale") ? "다른 변경이 있습니다. 최신값을 불러온 뒤 다시 저장하세요." : message);
+      setOperationError((error as { message?: unknown } | null)?.message === "class_schedule_stale" ? "다른 변경이 있습니다. 최신값을 불러온 뒤 다시 저장하세요." : message);
     } finally {
       scheduleDefaultsPendingRef.current.delete(classId);
       scheduleDefaultsDraftsRef.current.delete(classId);

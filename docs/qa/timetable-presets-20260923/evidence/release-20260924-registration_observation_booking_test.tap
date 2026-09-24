@@ -1,0 +1,51 @@
+1..47
+ok 1 - Function public.enter_registration_observation_v1(uuid, integer, text) should return jsonb
+ok 2 - Function public.save_registration_observation_booking_v1(uuid, uuid, uuid, text, uuid, text, integer, integer, bigint, text) should return jsonb
+ok 3 - Function public.cancel_registration_observation_v1(uuid, integer, bigint, text) should return jsonb
+ok 4 - Function public.withdraw_registration_observation_v1(uuid, text, text, uuid, integer, bigint, bigint, text, text) should return jsonb
+ok 5 - authenticated can execute the public and delegated booking surface but not retired withdrawal
+ok 6 - anon service and direct-write surfaces remain closed
+
+ok 7 - a teacher cannot enter an observation track because registration writes are manager-only
+
+ok 8 - new booking rejects notification revision input
+ok 9 - reschedule rejects workflow revision input
+ok 10 - new booking accepts a missing workflow revision and the probe rolls back its successful write
+ok 11 - new booking rejects forbidden observation revision input
+ok 12 - reschedule rejects a missing required notification revision
+ok 13 - reschedule rejects a missing required observation revision
+ok 14 - invalid save revision combinations leave booking track rows audit and receipts unchanged
+ok 15 - enter is a no-op even when its compatibility workflow revision is stale
+ok 16 - same fingerprint replays byte-identical JSON before runtime guard
+ok 17 - same key with another fingerprint conflicts before runtime guard
+ok 18 - enter also accepts a null compatibility workflow revision
+ok 19 - enter leaves manual status and audit unchanged while storing its no-op receipt
+ok 20 - new booking atomically creates exact revision-one rows event and one counter increment
+ok 21 - normalized booking mutation returns canonical attempt and exact appointment payloads
+ok 22 - booking response has the exact common key envelope
+ok 23 - new booking emits exactly one scheduled event
+ok 24 - core booking emits no due-kind rows
+ok 25 - legacy booking mutation returns canonical attempt with exact legacy session and appointment payloads
+ok 26 - same-key replay preserves JSON event count and attempt counter
+ok 27 - same actor key cannot cross from book to cancel operation
+ok 28 - same booking hash stores only its receipt and preserves customer revisions
+ok 29 - changed booking hash increments only observation and notification revisions
+ok 30 - stale reschedule revisions are non-retryable domain conflicts
+ok 31 - observation-only stale reschedule uses the exact non-retryable domain SQLSTATE
+ok 32 - notification-only stale reschedule uses the exact non-retryable domain SQLSTATE
+ok 33 - independent stale reschedules leave revisions events and receipts unchanged
+ok 34 - cancel updates both lifecycle rows and leaves track and counter unchanged
+ok 35 - cancel replay returns the original revisions and JSON
+ok 36 - a canceled attempt is never revived and the next attempt increments once
+{"changed": true, "trackId": "99100000-0000-4000-8000-000000000116", "operation": "cancel", "requestKey": "cancel-second", "appointment": {"place": "본관", "status": "canceled", "scheduledAt": "2026-10-01T18:00:00+09:00", "appointmentId": "a7b4570c-b7f0-4bd6-8b21-c9e3dc6a01e3", "notificationRevision": 2}, "observation": {"campus": "본관", "endsAt": "2026-10-01T20:00:00+09:00", "status": "canceled", "taskId": "99100000-0000-4000-8000-000000000115", "classId": "99100000-0000-4000-8000-000000000103", "subject": "영어", "trackId": "99100000-0000-4000-8000-000000000116", "progress": "진도: 미입력", "revision": 2, "startsAt": "2026-10-01T18:00:00+09:00", "className": "청강 예약 영어반", "createdAt": "2026-09-24T09:43:50.319846+09:00", "textbooks": [], "updatedAt": "2026-09-24T09:43:50.319846+09:00", "attendance": null, "sessionKey": "booking-session-a", "sessionDate": "2026-10-01", "teacherName": "청강 예약 원장", "decisionKind": null, "appointmentId": "a7b4570c-b7f0-4bd6-8b21-c9e3dc6a01e3", "classroomName": "청강 예약 101호", "observationId": "685c6a29-380a-4a11-a6ad-da16abf45346", "scheduleState": "active", "sourceRevision": {"revision": 7, "authority": "normalized", "sessionId": "99100000-0000-4000-8000-000000000104"}, "bookingFactHash": "ec139543ce830a4c7c91ac1b554bfa9f2a1ada0e78658df770932b827eb14fd3", "feedbackRevision": 0, "legacySessionKey": null, "sessionAuthority": "normalized", "teacherCatalogId": "99100000-0000-4000-8000-000000000101", "teacherProfileId": "99100000-0000-4000-8000-000000000003", "appointmentStatus": "canceled", "suitabilityResult": null, "classroomCatalogId": "99100000-0000-4000-8000-000000000102", "classLessonSessionId": "99100000-0000-4000-8000-000000000104", "sessionSourceRevision": 7, "legacySessionSourceHash": null, "appointmentNotificationRevision": 2}, "workflowStatus": "observation_requested", "workflowRevision": 2}
+ok 37 - the retired public wrapper delegates to an owner-only implementation with no authenticated grant
+ok 38 - the owner-only compatibility implementation fails closed with the exact retired contract
+ok 39 - manual registration status remains editable despite an active observation
+ok 40 - manual status editing leaves observation, notification, admission, and enrollment facts unchanged
+ok 41 - final observation mutations retain advisory and row locks without a synthetic retryable 40001
+ok 42 - idempotent replay and key conflicts resolve before runtime readiness and manager access checks
+ok 43 - domain event failure aborts the booking statement
+ok 44 - counter appointment observation event audit and receipt roll back together
+ok 45 - class session save accepts a team-suffixed teacher subject for the same academic subject
+ok 46 - team-subject class session save commits the new revision
+ok 47 - booking ceiling persists only scheduled rescheduled and canceled domain events

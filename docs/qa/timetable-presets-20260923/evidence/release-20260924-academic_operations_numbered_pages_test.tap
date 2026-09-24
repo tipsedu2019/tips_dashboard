@@ -1,0 +1,141 @@
+ok 1 - numbered academic API exists
+ok 2 - numbered planning API exists
+ab000000-0000-4000-8000-000000000900
+{"sub": "ab000000-0000-4000-8000-000000000900", "role": "authenticated"}
+release2-rpc
+
+ok 3 - public.get_academic_curriculum_numbered_page_v1(jsonb,integer,integer,boolean) preserves invoker fixed path and exact ACL
+ok 4 - public.get_operations_class_schedule_numbered_page_v1(jsonb,integer,integer) preserves invoker fixed path and exact ACL
+ok 5 - final classes authenticated visibility is not invented owner-only
+ok 6 - academic all-filter count is 111, not page length
+ok 7 - planning all-filter count is 111
+ok 8 - academic direct page11 starts at literal numeric class101
+ok 9 - planning direct page11 starts at literal numeric class101
+ok 10 - academic numeric 2 precedes10
+ok 11 - planning numeric 2 precedes10
+ok 12 - academic tie first ID ends page1
+ok 13 - planning tie first ID ends page1
+ok 14 - academic equal name/different term tie continues with id11
+ok 15 - planning equal name/different term tie continues with id11
+ok 16 - academic partial final page
+ok 17 - planning partial final page
+ok 18 - academic out-of-range empty
+ok 19 - planning out-of-range keeps count
+ok 20 - academic empty search count
+ok 21 - planning empty search count
+ok 22 - academic size 10
+ok 23 - academic size 15
+ok 24 - academic size 20
+ok 25 - planning size 10
+ok 26 - planning size 15
+ok 27 - planning size 20
+ok 28 - academic row is flat without histories
+ok 29 - academic row is flat without histories
+ok 30 - academic row is flat without histories
+ok 31 - academic row is flat without histories
+ok 32 - academic row is flat without histories
+ok 33 - academic row is flat without histories
+ok 34 - academic row is flat without histories
+ok 35 - academic row is flat without histories
+ok 36 - academic row is flat without histories
+ok 37 - academic row is flat without histories
+ok 38 - planning row is flat without histories
+ok 39 - planning row is flat without histories
+ok 40 - planning row is flat without histories
+ok 41 - planning row is flat without histories
+ok 42 - planning row is flat without histories
+ok 43 - planning row is flat without histories
+ok 44 - planning row is flat without histories
+ok 45 - planning row is flat without histories
+ok 46 - planning row is flat without histories
+ok 47 - planning row is flat without histories
+ok 48 - planning nullable created_at remains null
+ok 49 - group facet preserves catalog order B first
+ok 50 - B credits class111 only without selected group
+ok 51 - representative may be outside current page
+ok 52 - A credits110 classes, not all memberships
+ok 53 - A representative is first in full SQL order
+ok 54 - facets unchanged between pages1 and11
+ok 55 - selected B prefers B for both classes
+ok 56 - all six planning filters intersect
+ok 57 - group counts keep search/teacher/selected group filters
+ok 58 - planning term filter selects one equal-name class
+ok 59 - planning exact split-token teacher includes newline but excludes suffix
+ok 60 - academic substring teacher includes suffix
+ok 61 - academic classroom aliases include 본3 but exclude 별4
+ok 62 - academic status normalization
+ok 63 - all eight academic filters intersect
+ok 64 - planning negative subject
+ok 65 - planning negative grade
+ok 66 - academic negative subject
+ok 67 - academic negative grade
+ok 68 - planning search includes term label
+ok 69 - academic search does not add term label
+ok 70 - planning raw active status count
+ok 71 - planning raw draft status count
+ok 72 - academic preserves full bracket-prefix order, not display-title order
+ok 73 - planning preserves full bracket-prefix order
+ok 74 - all four classified candidates counted
+ok 75 - skipped-only class is unscheduled before unlinked
+ok 76 - scheduled class without books is unlinked
+ok 77 - partial planned vs2 sessions needs update
+ok 78 - distinct completed class is done
+ok 79 - selected-page next session skips session-key match
+ok 80 - next session key is retained
+ok 81 - nullable session times produce empty period label
+ok 82 - pending logs excluded from planned count
+ok 83 - same session_id dedupes and null key falls back to log ID
+ok 84 - legacy planned aggregate may exceed100 percent
+ok 85 - UUID-text session match leaves no next session
+ok 86 - selected view total is filtered
+ok 87 - selected-view stats use filtered candidates
+ok 88 - view counts remain pre-view
+ok 89 - options use base before view selection
+ok 90 - explicit period name alias remains selector
+ok 91 - absent period remains unscoped
+ok 92 - metadata false stats explicit null
+ok 93 - metadata false options explicit null
+ok 94 - metadata false count still fresh
+ok 95 - pinned period unchanged after default mutation
+ok 96 - absent period remains unscoped after default mutation
+ok 97 - academic rejects invalid JSON/filter shape
+ok 98 - academic rejects invalid JSON/filter shape
+ok 99 - academic rejects invalid JSON/filter shape
+ok 100 - academic rejects invalid JSON/filter shape
+ok 101 - academic rejects invalid JSON/filter shape
+ok 102 - planning rejects invalid JSON/filter shape
+ok 103 - planning rejects invalid JSON/filter shape
+ok 104 - planning rejects invalid JSON/filter shape
+ok 105 - planning rejects invalid JSON/filter shape
+ok 106 - planning rejects invalid JSON/filter shape
+ok 107 - academic SQL-null filters
+ok 108 - planning SQL-null filters
+ok 109 - academic invalid page
+ok 110 - academic invalid page
+ok 111 - academic invalid page
+ok 112 - planning invalid page
+ok 113 - planning invalid page
+ok 114 - planning invalid page
+ok 115 - academic invalid page size
+ok 116 - academic invalid page size
+ok 117 - academic invalid page size
+ok 118 - planning invalid page size
+ok 119 - planning invalid page size
+ok 120 - planning invalid page size
+ok 121 - metadata flag cannot be null
+ok 122 - invalid view enum
+ok 123 - invalid status enum
+ok 124 - academic unknown filters rejected
+ok 125 - planning unknown filters rejected
+ok 126 - planning invalid term selector
+ok 127 - bigint offset avoids integer overflow for maximum input
+ok 128 - planning bigint offset avoids overflow
+ok 129 - teacher sees classes under final authenticated SELECT policy
+ok 130 - planning teacher RLS parity
+
+{}
+ok 131 - anonymous academic execute denied
+ok 132 - anonymous planning execute denied
+ok 133 - no notification deliveries from seeds or reads
+ok 134 - no operational tasks from seeds or reads
+1..134

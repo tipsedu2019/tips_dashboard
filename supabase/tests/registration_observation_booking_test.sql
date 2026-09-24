@@ -584,6 +584,11 @@ and not exists (
   where template.id = seed.template_id
 );
 
+-- These pre-existing legacy fixtures intentionally include overlapping or incomplete
+-- schedules. Seal only the fixture baseline; all guards remain active for assertions.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
 set constraints all immediate;
 
 select function_returns('public', 'enter_registration_observation_v1', array['uuid','integer','text'], 'jsonb');
@@ -1346,6 +1351,8 @@ select is(
 );
 reset role;
 
+-- Add the historical team-alias session as fixture data, before its save assertions.
+set constraints all deferred;
 update public.teacher_catalogs
 set subjects = array['영어팀']::text[]
 where id = '99100000-0000-4000-8000-000000000101';
@@ -1372,6 +1379,11 @@ values (
   '99100000-0000-4000-8000-000000000102', '청강 예약 101호',
   'manual', 1
 );
+
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
+set constraints all immediate;
 
 set local role authenticated;
 select lives_ok(

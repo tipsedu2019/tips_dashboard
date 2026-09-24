@@ -731,6 +731,8 @@ values (
   array['영어']::text[], true, 9872, '본관'
 );
 
+-- Seed historical session-only class before enforcing its unchanged baseline.
+set constraints all deferred;
 insert into public.classes(
   id, name, subject, status, schedule_storage_mode, schedule_plan
 )
@@ -764,6 +766,12 @@ values (
   '98710000-0000-4000-8000-000000000602', '발송차단 101호',
   'manual', 7
 );
+
+-- Seal only the historical fixture baseline; guards remain active for assertions.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
+set constraints all immediate;
 
 insert into public.ops_registration_appointments(
   id, task_id, kind, scheduled_at, place, status,

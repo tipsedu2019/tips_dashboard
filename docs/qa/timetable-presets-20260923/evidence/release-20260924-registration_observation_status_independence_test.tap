@@ -1,0 +1,29 @@
+1..27
+ok 1 - Function public.enter_registration_observation_v1(uuid, integer, text) should return jsonb
+ok 2 - Function public.save_registration_observation_booking_v1(uuid, uuid, uuid, text, uuid, text, integer, integer, bigint, text) should return jsonb
+ok 3 - Function public.cancel_registration_observation_v1(uuid, integer, bigint, text) should return jsonb
+ok 4 - public observation mutation wrappers remain postgres-owned fixed-path security invokers
+ok 5 - private observation mutation implementations remain postgres-owned fixed-path security definers
+ok 6 - public observation mutation ACL stays authenticated-only
+ok 7 - private observation implementation ACL preserves the reviewed authenticated boundary
+ok 8 - legacy combined withdraw RPC is fixed-path owner-only and has no caller grant
+ok 9 - owner-only withdraw compatibility implementation rejects the coupled mutation
+
+ok 10 - enter is a compatibility no-op even with a stale workflow revision
+ok 11 - enter replays its byte-identical no-op receipt
+ok 12 - enter accepts no workflow revision because workflow status is not its domain
+ok 13 - booking saves facts and receipts without reading or changing manual workflow status
+ok 14 - booking replays its byte-identical receipt
+ok 15 - a second active observation remains rejected independently of workflow status
+ok 16 - active duplicate rejection leaves booking facts and receipts unchanged
+ok 17 - stale observation revisions are non-retryable domain conflicts
+ok 18 - stale appointment revisions are non-retryable domain conflicts
+ok 19 - stale reschedules leave facts events and receipts unchanged
+ok 20 - rescheduling changes only booking-domain revisions and facts
+ok 21 - stale cancel revisions are non-retryable domain conflicts
+ok 22 - cancel is allowed without a workflow-state gate and leaves manual status unchanged
+ok 23 - terminal observations remain protected from rescheduling
+ok 24 - terminal reschedule rejection leaves domain state and receipts unchanged
+ok 25 - final observation definitions neither gate on nor mutate manual workflow status revisions
+ok 26 - observation domain conflicts are never manually mislabeled as serialization failures
+ok 27 - public wrappers retain exact delegation to the reviewed private implementations

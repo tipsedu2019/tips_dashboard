@@ -378,6 +378,11 @@ select ok(
   'aggregate does not execute class drilldown RPCs'
 );
 
+-- These pre-existing legacy fixtures intentionally include overlapping or incomplete
+-- schedules. Seal only the fixture baseline; all guards remain active for assertions.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
 set constraints all immediate;
 
 do $fixture_policy$

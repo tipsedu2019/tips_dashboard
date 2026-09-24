@@ -61,7 +61,7 @@ values
  (pg_temp.fid(302),'[나] 수업 2','정규','__order__','고1','정렬 교사','','본3',12,320000,'수강','[]','[]','[]','[]','{}');
 insert into public.class_schedule_sync_group_members(group_id,class_id,sort_order) values
  (pg_temp.fid(901),pg_temp.fid(301),0),(pg_temp.fid(901),pg_temp.fid(302),0);
-set constraints all immediate;
+
 
 select set_config('app.class_schedule_mutation','release2-rpc',true);
 insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,start_time,end_time,teacher_name_snapshot,classroom_name_snapshot,origin,revision) values
@@ -77,6 +77,13 @@ insert into public.progress_logs(id,class_id,textbook_id,session_id,progress_key
  (pg_temp.fid(503),pg_temp.fid(204),pg_temp.fid(920),pg_temp.fid(405)::text,'numbered-done-a','done','','2199-01-05',now()),
  (pg_temp.fid(504),pg_temp.fid(204),pg_temp.fid(920),pg_temp.fid(405)::text,'numbered-done-b','partial','','2199-01-05',now()),
  (pg_temp.fid(505),pg_temp.fid(204),pg_temp.fid(920),null,null,'done','','2199-01-05',now());
+
+-- These pre-existing legacy fixtures intentionally include overlapping or incomplete
+-- schedules. Seal only the fixture baseline; all guards remain active for assertions.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
+set constraints all immediate;
 
 with signatures(signature) as (values
  ('public.get_academic_curriculum_numbered_page_v1(jsonb,integer,integer,boolean)'),

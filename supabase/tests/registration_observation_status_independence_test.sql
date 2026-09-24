@@ -301,6 +301,11 @@ and not exists (
   where template.id = seed.template_id
 );
 
+-- These pre-existing legacy fixtures intentionally include overlapping or incomplete
+-- schedules. Seal only the fixture baseline; all guards remain active for assertions.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
 set constraints all immediate;
 
 select function_returns(

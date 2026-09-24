@@ -1,0 +1,58 @@
+ok 1 - statistics aggregate RPC exists
+ok 2 - statistics aggregate RPC is stable
+ok 3 - statistics aggregate RPC is security invoker
+ok 4 - statistics aggregate RPC has an empty search_path
+ok 5 - public.get_dashboard_statistics_sources_v1(text,text,text,date,date) is authenticated-only
+ok 6 - public.list_dashboard_statistics_student_roster_v1(text,text,text,text,text,text,uuid,integer) is authenticated-only
+ok 7 - public.list_dashboard_statistics_class_group_v1(text,text,text,text,text,uuid,integer) is authenticated-only
+ok 8 - public.list_dashboard_statistics_class_roster_v1(uuid,text,uuid,integer) is authenticated-only
+ok 9 - Korean numeric collation is deterministic and exact
+ok 10 - empty tab is rejected
+ok 11 - unknown tab is rejected
+ok 12 - academy-wide conflicts reject subject filters
+ok 13 - snapshot tabs reject date filters
+ok 14 - textbook range outside the exact preset is rejected
+ok 15 - weekly minutes expands one time range across multiple schedule days
+ok 16 - weekly minutes preserves the legacy dayless range fallback
+ok 17 - student and waitlist JSON ids are deduplicated before counts
+ok 18 - legacy 사용중 is active
+ok 19 - legacy 미사용 is inactive
+ok 20 - direct grade wins over class-name and student grades
+ok 21 - name and enrolled grades are combined when direct grade is absent
+ok 22 - student grade is the final inference source
+ok 23 - aggregate does not execute drilldown RPCs
+ok 24 - aggregate does not execute class drilldown RPCs
+ok 25 - 31 rows read and 30 returned
+ok 26 - 31-row fixture reports hasMore
+ok 27 - normalized-name cursor parity ends the first page at student 30
+ok 28 - cursor reads the remaining 31st row exactly once
+ok 29 - RLS-hidden statistics rows are excluded by the security-invoker class drilldown
+ok 30 - registered duplicate id is present in class 301 source
+ok 31 - registered aggregate count deduplicates class 301 source
+ok 32 - class group count matches deduplicated class 301 source
+ok 33 - class roster drilldown deduplicates class 301 source
+ok 34 - inferred grade aggregate and drilldown stay in parity
+ok 35 - overview fixture payload stays under 200 KiB
+ok 36 - students/classes fixture payload stays under 200 KiB
+ok 37 - 400-day academy-wide conflict parity payload stays under 200 KiB
+ok 38 - textbooks fixture payload stays under 200 KiB
+ok 39 - aggregate excludes rosters, class summaries, and contact fields
+ok 40 - 400-day academy-wide conflict parity exposes the exact conflict branches
+ok 41 - 400-day academy-wide conflict parity returns the exact teacher overlap once
+ok 42 - 400-day academy-wide conflict parity returns the exact classroom overlap once
+ok 43 - 400-day exact parity preserves stable conflict grouping and merges affected students by key
+ok 44 - null detail inherits its parent academic event grade
+ok 45 - comma-separated detail grades match every listed grade
+ok 46 - student without a grade matches an inherited parent grade
+ok 47 - parent high-school grade excludes a different student grade
+ok 48 - comma-separated subject event grades use the shared matcher
+ok 49 - comma-separated fallback grades use the shared matcher
+ok 50 - non-exam parent event detail keeps legacy no-type-filter date precedence
+86200000-0000-4000-8000-000000000901
+{"sub":"86200000-0000-4000-8000-000000000901","role":"authenticated"}
+ok 51 - occupied classes produce teacher and classroom conflicts
+ok 52 - display data retains affected students
+ok 53 - resource conflict identity does not contain affected student IDs
+ok 54 - statistics monitoring does not reopen the retired task-link RPC
+ok 55 - the final validator still rejects a malformed resource identity with exact SQLSTATE
+1..55
