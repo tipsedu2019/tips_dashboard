@@ -1,0 +1,57 @@
+BEGIN
+NOTICE:  drop cascades to 5 other objects
+DETAIL:  drop cascades to policy timetable_plans_read on table timetable_plans
+drop cascades to policy timetable_members_read on table timetable_plan_members
+drop cascades to policy timetable_items_read on table timetable_plan_items
+drop cascades to policy timetable_slots_read on table timetable_plan_slots
+drop cascades to policy timetable_signals_read on table timetable_invalidation_signals
+NOTICE:  drop cascades to trigger timetable_plan_signal on table timetable_plans
+DO
+DROP TABLE
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+CREATE INDEX
+CREATE INDEX
+CREATE INDEX
+CREATE TABLE
+CREATE TABLE
+ALTER TABLE
+CREATE TABLE
+INSERT 0 1
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE TRIGGER
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+DO
+GRANT
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE POLICY
+CREATE FUNCTION
+ALTER FUNCTION
+REVOKE
+GRANT
+CREATE POLICY
+DO
+COMMIT

@@ -1,0 +1,808 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+                          is                          
+------------------------------------------------------
+ ok 1 - isolation fixture is actually repeatable read
+(1 row)
+
+SELECT 1
+                       lives_ok                       
+------------------------------------------------------
+ ok 2 - repeatable read snapshot reads remain allowed
+(1 row)
+
+SET
+                               throws_ok                               
+-----------------------------------------------------------------------
+ ok 3 - repeatable read actual public RPC cannot write pinned snapshot
+(1 row)
+
+RESET
+                             throws_ok                             
+-------------------------------------------------------------------
+ ok 4 - repeatable read direct bypass cannot write pinned snapshot
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 5 - repeatable read rejected writes preserve rows
+(1 row)
+
+ finish 
+--------
+ 1..5
+(1 row)
+
+ROLLBACK
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+                        is                         
+---------------------------------------------------
+ ok 1 - isolation fixture is actually serializable
+(1 row)
+
+SELECT 1
+                     lives_ok                      
+---------------------------------------------------
+ ok 2 - serializable snapshot reads remain allowed
+(1 row)
+
+SET
+                             throws_ok                              
+--------------------------------------------------------------------
+ ok 3 - serializable actual public RPC cannot write pinned snapshot
+(1 row)
+
+RESET
+                           throws_ok                            
+----------------------------------------------------------------
+ ok 4 - serializable direct bypass cannot write pinned snapshot
+(1 row)
+
+                        is                         
+---------------------------------------------------
+ ok 5 - serializable rejected writes preserve rows
+(1 row)
+
+ finish 
+--------
+ 1..5
+(1 row)
+
+ROLLBACK
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+UPDATE 0
+                             ok                             
+------------------------------------------------------------
+ ok 1 - unrelated textbook metadata takes no operating lock
+(1 row)
+
+SELECT 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 3
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 2
+SET CONSTRAINTS
+SET CONSTRAINTS
+              set_config              
+--------------------------------------
+ ad240000-0000-4000-8000-000000000901
+(1 row)
+
+CREATE FUNCTION
+                                 throws_ok                                 
+---------------------------------------------------------------------------
+ ok 2 - legacy status activation rejects teacher collision across subjects
+(1 row)
+
+                            throws_ok                             
+------------------------------------------------------------------
+ ok 3 - defaults RPC rejects room-only collision before returning
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 4 - direct dated makeup write rejects effective weekly teacher conflict
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 5 - initialize stale uses domain SQLSTATE
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 6 - preview stale uses domain SQLSTATE
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 7 - generation stale uses domain SQLSTATE
+(1 row)
+
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                 throws_ok                 
+-------------------------------------------
+ ok 8 - session stale uses domain SQLSTATE
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 9 - content stale uses domain SQLSTATE
+(1 row)
+
+                  throws_ok                  
+---------------------------------------------
+ ok 10 - backfill stale uses domain SQLSTATE
+(1 row)
+
+UPDATE 1
+                 throws_ok                 
+-------------------------------------------
+ ok 11 - verify stale uses domain SQLSTATE
+(1 row)
+
+                  throws_ok                  
+---------------------------------------------
+ ok 12 - activate stale uses domain SQLSTATE
+(1 row)
+
+                                      is                                      
+------------------------------------------------------------------------------
+ ok 13 - skipped source-slot/date replaces weekly default with no reservation
+(1 row)
+
+                                    lives_ok                                    
+--------------------------------------------------------------------------------
+ ok 14 - actual makeup can use a date released by skipped authoritative session
+(1 row)
+
+                               throws_ok                               
+-----------------------------------------------------------------------
+ ok 15 - removing skipped override cannot expose a conflicting default
+(1 row)
+
+                                    throws_ok                                    
+---------------------------------------------------------------------------------
+ ok 16 - session RPC restoration rejects actual dated occupancy before returning
+(1 row)
+
+                           lives_ok                           
+--------------------------------------------------------------
+ ok 17 - exception session uses exact half-open safe interval
+(1 row)
+
+                                is                                
+------------------------------------------------------------------
+ ok 18 - actual exception replaces weekly source reservation once
+(1 row)
+
+SET CONSTRAINTS
+SET CONSTRAINTS
+                           lives_ok                            
+---------------------------------------------------------------
+ ok 19 - gateway updates legacy defaults and status atomically
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 20 - legacy schedule_plan gateway checks dated teacher collision
+(1 row)
+
+                    throws_ok                     
+--------------------------------------------------
+ ok 21 - legacy gateway detects stale source JSON
+(1 row)
+
+                          throws_ok                          
+-------------------------------------------------------------
+ ok 22 - new unresolved active legacy occupancy fails closed
+(1 row)
+
+                                throws_ok                                 
+--------------------------------------------------------------------------
+ ok 23 - active normalized defaults cannot introduce unresolved resources
+(1 row)
+
+SET CONSTRAINTS
+SET CONSTRAINTS
+UPDATE 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                       lives_ok                       
+------------------------------------------------------
+ ok 24 - existing conflict permits metadata-only edit
+(1 row)
+
+                                  throws_ok                                  
+-----------------------------------------------------------------------------
+ ok 25 - same conflict pair with changed overlapping coordinates is rejected
+(1 row)
+
+                             lives_ok                              
+-------------------------------------------------------------------
+ ok 26 - unrelated safe occupancy edit preserves existing conflict
+(1 row)
+
+                            lives_ok                            
+----------------------------------------------------------------
+ ok 27 - existing overlap can be repaired to adjacent safe time
+(1 row)
+
+                             is                             
+------------------------------------------------------------
+ ok 28 - deferred flush cleans baseline after multiple RPCs
+(1 row)
+
+                    lives_ok                    
+------------------------------------------------
+ ok 29 - zero-row guarded statement is harmless
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 30 - zero-row statement baseline is cleaned
+(1 row)
+
+SET CONSTRAINTS
+                            lives_ok                             
+-----------------------------------------------------------------
+ ok 31 - immediate constraints support safe subsequent statement
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 32 - immediate constraints still guard subsequent conflicting statement
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 33 - rejected statement rollback leaves no baseline
+(1 row)
+
+SET CONSTRAINTS
+SET
+                                     is                                      
+-----------------------------------------------------------------------------
+ ok 34 - authenticated authorized reference includes complete dated contract
+(1 row)
+
+                           ok                           
+--------------------------------------------------------
+ ok 35 - shadow identity is class and source slot based
+(1 row)
+
+                         throws_ok                         
+-----------------------------------------------------------
+ ok 36 - authenticated cannot read or forge guard baseline
+(1 row)
+
+                      lives_ok                      
+----------------------------------------------------
+ ok 37 - gateway works as actual authenticated role
+(1 row)
+
+RESET
+SET
+                  throws_ok                   
+----------------------------------------------
+ ok 38 - anon cannot read operating reference
+(1 row)
+
+                  throws_ok                   
+----------------------------------------------
+ ok 39 - anon cannot mutate operating gateway
+(1 row)
+
+RESET
+INSERT 0 1
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                               throws_ok                                
+------------------------------------------------------------------------
+ ok 40 - generation under preparing class checks actual dated occupancy
+(1 row)
+
+UPDATE 1
+                                 lives_ok                                 
+--------------------------------------------------------------------------
+ ok 41 - safe generation retains existing projection and receipt behavior
+(1 row)
+
+                             is                              
+-------------------------------------------------------------
+ ok 42 - failed generation rolled back all inserted sessions
+(1 row)
+
+ set_config 
+------------
+ v1
+(1 row)
+
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                             is                             
+------------------------------------------------------------
+ ok 43 - closed class retains valid actual makeup occupancy
+(1 row)
+
+                                                                                        mutate_timetable_plan_v1                                                                                         
+---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"plan": {"id": "ad240000-0000-4000-8000-000000000701", "name": "기간 계획", "state": "draft", "metaRevision": 0, "targetEndDate": "2026-10-05", "changeSequence": 0, "targetStartDate": "2026-10-05"}}
+(1 row)
+
+CREATE FUNCTION
+SET
+                                       throws_ok                                        
+----------------------------------------------------------------------------------------
+ ok 44 - bounded recurring plan still reserves weekly default after dated session moved
+(1 row)
+
+                         lives_ok                         
+----------------------------------------------------------
+ ok 45 - period plan saves safe weekly and dated position
+(1 row)
+
+                    throws_ok                     
+--------------------------------------------------
+ ok 46 - half-specified target period is rejected
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 47 - bounded plan detects dated exception outside weekly default
+(1 row)
+
+                           throws_ok                           
+---------------------------------------------------------------
+ ok 48 - bounded plan detects actual makeup under closed class
+(1 row)
+
+RESET
+                             lives_ok                              
+-------------------------------------------------------------------
+ ok 49 - safe operating update ignores future plan draft occupancy
+(1 row)
+
+INSERT 0 1
+CREATE FUNCTION
+                            throws_ok                            
+-----------------------------------------------------------------
+ ok 50 - normalized makeup adapter conflicts at correct KST time
+(1 row)
+
+UPDATE 1
+                                   throws_ok                                   
+-------------------------------------------------------------------------------
+ ok 51 - normalized makeup adapter rejects unresolved room instead of guessing
+(1 row)
+
+UPDATE 1
+                          lives_ok                           
+-------------------------------------------------------------
+ ok 52 - normalized makeup adapter accepts unique exact room
+(1 row)
+
+                     is                     
+--------------------------------------------
+ ok 53 - makeup stores exact stable room ID
+(1 row)
+
+                               is                                
+-----------------------------------------------------------------
+ ok 54 - makeup KST start preserved independently of DB timezone
+(1 row)
+
+                                    lives_ok                                    
+--------------------------------------------------------------------------------
+ ok 55 - normalized revert remains guarded and restores original active session
+(1 row)
+
+                                is                                 
+-------------------------------------------------------------------
+ ok 56 - makeup revert preserves original session history identity
+(1 row)
+
+SET
+UPDATE 1
+                             lives_ok                             
+------------------------------------------------------------------
+ ok 57 - early KST makeup works when UTC instant is previous date
+(1 row)
+
+                     is                     
+--------------------------------------------
+ ok 58 - early KST session keeps local date
+(1 row)
+
+ direct_write 
+--------------
+ 
+(1 row)
+
+UPDATE 1
+                            lives_ok                             
+-----------------------------------------------------------------
+ ok 59 - KST 23:30 to next midnight is represented on start date
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 60 - midnight endpoint remains legal 1440 minutes
+(1 row)
+
+ direct_write 
+--------------
+ 
+(1 row)
+
+UPDATE 1
+                        throws_ok                        
+---------------------------------------------------------
+ ok 61 - cross-midnight interior requires separate slots
+(1 row)
+
+CREATE FUNCTION
+                          throws_ok                           
+--------------------------------------------------------------
+ ok 62 - legacy makeup effect cannot bypass teacher collision
+(1 row)
+
+                             is                             
+------------------------------------------------------------
+ ok 63 - failed legacy effect rolls calendar event back too
+(1 row)
+
+                      lives_ok                      
+----------------------------------------------------
+ ok 64 - legacy safe dated effect remains supported
+(1 row)
+
+                              lives_ok                              
+--------------------------------------------------------------------
+ ok 65 - legacy revert restores original and guarded calendar state
+(1 row)
+
+SELECT 1
+                           lives_ok                            
+---------------------------------------------------------------
+ ok 66 - content-only mixed projection keeps existing contract
+(1 row)
+
+SET CONSTRAINTS
+SET CONSTRAINTS
+                                is                                
+------------------------------------------------------------------
+ ok 67 - content-only projection emits no operating change signal
+(1 row)
+
+SELECT 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                                   ok                                   
+------------------------------------------------------------------------
+ ok 68 - resource catalog changes emit sanitized operating invalidation
+(1 row)
+
+                    is                     
+-------------------------------------------
+ ok 69 - all final guard baselines cleaned
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 70 - schedule guards do not create notification events
+(1 row)
+
+                        is                         
+---------------------------------------------------
+ ok 71 - schedule guards do not enqueue deliveries
+(1 row)
+
+                             is                              
+-------------------------------------------------------------
+ ok 72 - schedule guards preserve student enrollment history
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 73 - source-less identical session is not silently deduplicated by time
+(1 row)
+
+SET
+                                       throws_ok                                        
+----------------------------------------------------------------------------------------
+ ok 74 - actual authenticated create gateway cannot commit conflicting legacy occupancy
+(1 row)
+
+RESET
+INSERT 0 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+                                  is                                  
+----------------------------------------------------------------------
+ ok 75 - bounded plan never reports complete on unresolved dated data
+(1 row)
+
+                               is                                
+-----------------------------------------------------------------
+ ok 76 - revision poll agrees with bounded snapshot completeness
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 77 - unscoped legacy dated blocker prevents new weekly placement
+(1 row)
+
+                          lives_ok                          
+------------------------------------------------------------
+ ok 78 - existing unresolved data allows metadata-only edit
+(1 row)
+
+CREATE FUNCTION
+                     lives_ok                     
+--------------------------------------------------
+ ok 79 - past unresolved fixture remains readable
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 80 - past blocker retains independently known date
+(1 row)
+
+                                   is                                    
+-------------------------------------------------------------------------
+ ok 81 - past get_timetable_plan_v1 scopes completeness to review period
+(1 row)
+
+                                        is                                        
+----------------------------------------------------------------------------------
+ ok 82 - past get_timetable_plan_revision_v1 scopes completeness to review period
+(1 row)
+
+                           lives_ok                            
+---------------------------------------------------------------
+ ok 83 - past blocker allows unrelated new operating occupancy
+(1 row)
+
+                      lives_ok                      
+----------------------------------------------------
+ ok 84 - inside unresolved fixture remains readable
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 85 - inside blocker retains independently known date
+(1 row)
+
+                                    is                                     
+---------------------------------------------------------------------------
+ ok 86 - inside get_timetable_plan_v1 scopes completeness to review period
+(1 row)
+
+                                         is                                         
+------------------------------------------------------------------------------------
+ ok 87 - inside get_timetable_plan_revision_v1 scopes completeness to review period
+(1 row)
+
+                            throws_ok                            
+-----------------------------------------------------------------
+ ok 88 - inside blocker rejects new affected operating occupancy
+(1 row)
+
+                      lives_ok                       
+-----------------------------------------------------
+ ok 89 - outside unresolved fixture remains readable
+(1 row)
+
+                            is                            
+----------------------------------------------------------
+ ok 90 - outside blocker retains independently known date
+(1 row)
+
+                                     is                                     
+----------------------------------------------------------------------------
+ ok 91 - outside get_timetable_plan_v1 scopes completeness to review period
+(1 row)
+
+                                         is                                          
+-------------------------------------------------------------------------------------
+ ok 92 - outside get_timetable_plan_revision_v1 scopes completeness to review period
+(1 row)
+
+                             lives_ok                             
+------------------------------------------------------------------
+ ok 93 - outside blocker allows unrelated new operating occupancy
+(1 row)
+
+                      lives_ok                       
+-----------------------------------------------------
+ ok 94 - unknown unresolved fixture remains readable
+(1 row)
+
+                            is                            
+----------------------------------------------------------
+ ok 95 - unknown blocker retains independently known date
+(1 row)
+
+                                     is                                     
+----------------------------------------------------------------------------
+ ok 96 - unknown get_timetable_plan_v1 scopes completeness to review period
+(1 row)
+
+                                         is                                          
+-------------------------------------------------------------------------------------
+ ok 97 - unknown get_timetable_plan_revision_v1 scopes completeness to review period
+(1 row)
+
+                            throws_ok                             
+------------------------------------------------------------------
+ ok 98 - unknown blocker rejects new affected operating occupancy
+(1 row)
+
+                              lives_ok                               
+---------------------------------------------------------------------
+ ok 99 - legacy 10:00:30 remains diagnostic without rewriting source
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 100 - legacy 10:00:30 source is preserved exactly
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 101 - legacy 10:00:30 becomes date-scoped blocker
+(1 row)
+
+                                 is                                 
+--------------------------------------------------------------------
+ ok 102 - legacy 10:00:30 never becomes truncated canonical minutes
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 103 - legacy 10:00:30 makes affected preset incomplete
+(1 row)
+
+                               throws_ok                                
+------------------------------------------------------------------------
+ ok 104 - legacy 10:00:30 cannot expose truncated adjacent availability
+(1 row)
+
+                                 lives_ok                                 
+--------------------------------------------------------------------------
+ ok 105 - legacy 10:00:00.125 remains diagnostic without rewriting source
+(1 row)
+
+                            is                            
+----------------------------------------------------------
+ ok 106 - legacy 10:00:00.125 source is preserved exactly
+(1 row)
+
+                            is                            
+----------------------------------------------------------
+ ok 107 - legacy 10:00:00.125 becomes date-scoped blocker
+(1 row)
+
+                                   is                                   
+------------------------------------------------------------------------
+ ok 108 - legacy 10:00:00.125 never becomes truncated canonical minutes
+(1 row)
+
+                              is                               
+---------------------------------------------------------------
+ ok 109 - legacy 10:00:00.125 makes affected preset incomplete
+(1 row)
+
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 110 - legacy 10:00:00.125 cannot expose truncated adjacent availability
+(1 row)
+
+                           lives_ok                            
+---------------------------------------------------------------
+ ok 111 - legacy null session never crashes reader or baseline
+(1 row)
+
+                     is                      
+---------------------------------------------
+ ok 112 - legacy null element remains intact
+(1 row)
+
+                          ok                          
+------------------------------------------------------
+ ok 113 - legacy null has stable unknown-date blocker
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 114 - legacy null keeps bounded preset incomplete
+(1 row)
+
+                             throws_ok                             
+-------------------------------------------------------------------
+ ok 115 - legacy null blocks unsafe new occupancy without crashing
+(1 row)
+
+                            lives_ok                             
+-----------------------------------------------------------------
+ ok 116 - legacy string session never crashes reader or baseline
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 117 - legacy string element remains intact
+(1 row)
+
+                           ok                           
+--------------------------------------------------------
+ ok 118 - legacy string has stable unknown-date blocker
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 119 - legacy string keeps bounded preset incomplete
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 120 - legacy string blocks unsafe new occupancy without crashing
+(1 row)
+
+                            lives_ok                             
+-----------------------------------------------------------------
+ ok 121 - legacy number session never crashes reader or baseline
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 122 - legacy number element remains intact
+(1 row)
+
+                           ok                           
+--------------------------------------------------------
+ ok 123 - legacy number has stable unknown-date blocker
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 124 - legacy number keeps bounded preset incomplete
+(1 row)
+
+                              throws_ok                              
+---------------------------------------------------------------------
+ ok 125 - legacy number blocks unsafe new occupancy without crashing
+(1 row)
+
+ finish 
+--------
+ 1..125
+(1 row)
+
+ROLLBACK

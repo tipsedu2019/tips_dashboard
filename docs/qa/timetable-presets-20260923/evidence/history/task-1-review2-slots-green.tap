@@ -1,0 +1,17 @@
+✔ compact weekday groups expand without losing days (0.768792ms)
+✔ three-day groups preserve weekday order (0.107166ms)
+✔ mixed compact and single-day schedules preserve every slot (0.152417ms)
+✔ class list display combines weekdays that share the same time and details (0.14225ms)
+✔ empty resource positions and literal marker names display without decoding (0.151083ms)
+✔ legacy raw tilde details stay literal (0.097166ms)
+✔ class resource display splits multiple teachers and classrooms into rows (0.333916ms)
+✔ parenthesized slot details are copied to every day in a group (0.052542ms)
+✔ shared candidate details are removed but different details stay (0.14725ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 9
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 49.927916

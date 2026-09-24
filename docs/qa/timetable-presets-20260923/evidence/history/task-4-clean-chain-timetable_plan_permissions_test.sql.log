@@ -1,0 +1,208 @@
+BEGIN
+DO
+ no_plan 
+---------
+(0 rows)
+
+CREATE FUNCTION
+INSERT 0 5
+INSERT 0 5
+DELETE 2
+INSERT 0 2
+UPDATE 2
+INSERT 0 2
+CREATE FUNCTION
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000901
+(1 row)
+
+SET
+      lives_ok      
+--------------------
+ ok 1 - create plan
+(1 row)
+
+             throws_ok             
+-----------------------------------
+ ok 2 - direct table writes denied
+(1 row)
+
+                lives_ok                 
+-----------------------------------------
+ ok 3 - admin shares only linked teacher
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000903
+(1 row)
+
+             lives_ok             
+----------------------------------
+ ok 4 - shared teacher reads plan
+(1 row)
+
+             lives_ok             
+----------------------------------
+ ok 5 - shared editor edits draft
+(1 row)
+
+               throws_ok               
+---------------------------------------
+ ok 6 - teacher cannot manage metadata
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000904
+(1 row)
+
+              throws_ok              
+-------------------------------------
+ ok 7 - unshared teacher cannot read
+(1 row)
+
+                      is                      
+----------------------------------------------
+ ok 8 - RLS hides items from unshared teacher
+(1 row)
+
+                            is                            
+----------------------------------------------------------
+ ok 9 - RLS hides plan invalidation from unshared teacher
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000901
+(1 row)
+
+                                                                                mutate_timetable_plan_v1                                                                                 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"plan": {"id": "ac239000-0000-4000-8000-000000000001", "name": "공유 계획", "state": "draft", "metaRevision": 2, "targetEndDate": null, "changeSequence": 3, "targetStartDate": null}}
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000903
+(1 row)
+
+                    throws_ok                     
+--------------------------------------------------
+ ok 10 - revoked editor cannot replay old receipt
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000902
+(1 row)
+
+                lives_ok                 
+-----------------------------------------
+ ok 11 - staff access without membership
+(1 row)
+
+ set_config 
+------------
+ 
+(1 row)
+
+SET
+            throws_ok            
+---------------------------------
+ ok 12 - anon RPC execute denied
+(1 row)
+
+            throws_ok             
+----------------------------------
+ ok 13 - anon table select denied
+(1 row)
+
+RESET
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000901
+(1 row)
+
+SET
+                                 throws_ok                                  
+----------------------------------------------------------------------------
+ ok 14 - same request key from another actor cannot expose original receipt
+(1 row)
+
+                               is                               
+----------------------------------------------------------------
+ ok 15 - share candidates contain eligible linked teachers only
+(1 row)
+
+                    throws_ok                     
+--------------------------------------------------
+ ok 16 - private reader cannot be called directly
+(1 row)
+
+          throws_ok           
+------------------------------
+ ok 17 - receipts are private
+(1 row)
+
+                    throws_ok                    
+-------------------------------------------------
+ ok 18 - client cannot forge invalidation events
+(1 row)
+
+                        throws_ok                         
+----------------------------------------------------------
+ ok 19 - assistant cannot be shared by teacher membership
+(1 row)
+
+                                                                                mutate_timetable_plan_v1                                                                                 
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ {"plan": {"id": "ac239000-0000-4000-8000-000000000001", "name": "공유 계획", "state": "draft", "metaRevision": 3, "targetEndDate": null, "changeSequence": 4, "targetStartDate": null}}
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000904
+(1 row)
+
+            lives_ok            
+--------------------------------
+ ok 20 - shared viewer can read
+(1 row)
+
+             throws_ok             
+-----------------------------------
+ ok 21 - shared viewer cannot edit
+(1 row)
+
+                     throws_ok                     
+---------------------------------------------------
+ ok 22 - share candidates restricted to management
+(1 row)
+
+                       is                        
+-------------------------------------------------
+ ok 23 - server permissions mark viewer readonly
+(1 row)
+
+RESET
+UPDATE 1
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000902
+(1 row)
+
+SET
+                       throws_ok                       
+-------------------------------------------------------
+ ok 24 - staff role revocation applies on next request
+(1 row)
+
+RESET
+ finish 
+--------
+ 1..24
+(1 row)
+
+ROLLBACK

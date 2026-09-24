@@ -1,3 +1,4 @@
+import { makeupApprovalErrorStatus } from "@/features/makeup-requests/makeup-domain-errors.js"
 import { createClient, type SupabaseClient } from "@supabase/supabase-js"
 
 import {
@@ -280,9 +281,8 @@ export async function POST(request: Request) {
     if (error) throw error
     return completedApprovalResponse(data)
   } catch (error) {
-    const code = text((error as { code?: unknown })?.code)
     const message = text((error as { message?: unknown })?.message)
-    const status = code === "42501" ? 403 : code === "40001" ? 409 : code === "P0002" ? 404 : 503
+    const status = makeupApprovalErrorStatus(error)
     const userMessage = message === "makeup_room_collision"
       ? "보강 강의실 충돌이 있어 승인하지 못했습니다."
       : message === "makeup_request_source_changed"

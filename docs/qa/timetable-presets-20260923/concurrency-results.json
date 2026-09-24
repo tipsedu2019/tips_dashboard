@@ -1,0 +1,749 @@
+{
+  "run": "task8-a8fbd8be",
+  "container": "tips_timetable_20260923",
+  "transport": "network-none Docker Unix socket",
+  "ids": {
+    "admin": "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+    "editor": "d1c2c5c5-e082-4256-8bcb-699a4b4e3ea9",
+    "teacher1": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+    "teacher2": "a05cc232-5cad-470e-9e68-4fb8de12e9f1",
+    "room1": "1ace1851-2b97-4078-965d-0c3962998857",
+    "room2": "d36be419-4ad6-4d1d-a77f-7cac4db0d89e",
+    "legacy1": "c6d5bb7d-c3b3-476b-8ada-3822fda7289f",
+    "legacy2": "886f5cc2-6d4d-4415-a2cd-5dea647fc4e4",
+    "generator": "bfbc5d4b-5c8d-4119-9489-d36ce5bcef67",
+    "makeupClass": "2f47e4e2-d6d0-460f-adc6-9230b1401005",
+    "original": "b3570128-100d-4ff0-8547-38d5d1180f1a",
+    "request": "c77392d1-4c3d-4499-90d1-3a064393422a",
+    "plan": "ec6647c0-aab8-475d-b396-10bdf12221d9",
+    "target": "3b90797c-7e20-4a3c-b0fa-ef7978ef310c",
+    "item1": "0eed0eb4-7537-41c0-a153-8fc66d87231b",
+    "item2": "fabbcb88-cfed-4eb2-870b-7ecb28e67d69",
+    "slot1": "c11f9ebd-fafb-466f-90ae-05e2fac3e9ac",
+    "slot2": "b42c46e0-f4c6-4bc8-8940-caf5a590970a",
+    "generationSlot": "daaa23c6-3ec7-44cf-87e4-52902c60162a",
+    "promoted": "2a15c464-7428-482f-81aa-667bc2744ceb"
+  },
+  "races": [
+    {
+      "name": "same teacher / distinct room",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.update_class_operational_v1(p_class_id=>'886f5cc2-6d4d-4415-a2cd-5dea647fc4e4',p_patch=>'{\"status\":\"수강\"}'::jsonb,p_request_key=>'90df5bbb-0c9e-4829-80b2-6053ce46655c')::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "23P01",
+      "error": "ERROR:  23P01: timetable_resource_conflict\nCONTEXT:  PL/pgSQL function dashboard_private.assert_timetable_operational_conflicts_v1() line 13 at RAISE\nSQL statement \"SELECT dashboard_private.assert_timetable_operational_conflicts_v1()\"\nPL/pgSQL function public.update_class_operational_v1(uuid,jsonb,uuid,jsonb) line 23 at PERFORM\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "same room / distinct teacher",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.update_class_operational_v1(p_class_id=>'c6d5bb7d-c3b3-476b-8ada-3822fda7289f',p_patch=>'{\"status\":\"수강\"}'::jsonb,p_request_key=>'95073d36-c757-4f01-9fd9-c916432b1d18')::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "23P01",
+      "error": "ERROR:  23P01: timetable_resource_conflict\nCONTEXT:  PL/pgSQL function dashboard_private.assert_timetable_operational_conflicts_v1() line 13 at RAISE\nSQL statement \"SELECT dashboard_private.assert_timetable_operational_conflicts_v1()\"\nPL/pgSQL function public.update_class_operational_v1(uuid,jsonb,uuid,jsonb) line 23 at PERFORM\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "editors different items retained",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "d1c2c5c5-e082-4256-8bcb-699a4b4e3ea9"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.mutate_timetable_plan_item_v1(p_command=>'{\"operation\":\"save\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"expectedMetaRevision\":0,\"expectedItemRevision\":null,\"expectedShadowFingerprint\":\"ebf8ff1b08d2b6309302fc81132884d9\",\"requestKey\":\"2ccca3b4-6837-4aa7-86aa-53505327434a\",\"item\":{\"id\":\"fabbcb88-cfed-4eb2-870b-7ecb28e67d69\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"name\":\"second\",\"subject\":\"영어\",\"subjectAreaKey\":null,\"grade\":\"중2\",\"capacity\":12,\"tuition\":100000,\"defaultTeacherId\":\"9bf3f44d-dd97-466e-b5ce-1a44ba020a34\",\"defaultClassroomId\":\"1ace1851-2b97-4078-965d-0c3962998857\",\"durationMinutes\":30,\"pendingSlots\":[]},\"slots\":[]}'::jsonb)::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "00000",
+      "error": null
+    },
+    {
+      "name": "editors same item stale loser",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "d1c2c5c5-e082-4256-8bcb-699a4b4e3ea9"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.mutate_timetable_plan_item_v1(p_command=>'{\"operation\":\"save\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"expectedMetaRevision\":0,\"expectedItemRevision\":1,\"expectedShadowFingerprint\":\"ebf8ff1b08d2b6309302fc81132884d9\",\"requestKey\":\"73ef4606-dacc-4e5b-bd17-4a9a8d467221\",\"item\":{\"id\":\"0eed0eb4-7537-41c0-a153-8fc66d87231b\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"name\":\"loser\",\"subject\":\"영어\",\"subjectAreaKey\":null,\"grade\":\"중2\",\"capacity\":12,\"tuition\":100000,\"defaultTeacherId\":\"9bf3f44d-dd97-466e-b5ce-1a44ba020a34\",\"defaultClassroomId\":\"1ace1851-2b97-4078-965d-0c3962998857\",\"durationMinutes\":30,\"pendingSlots\":[]},\"slots\":[]}'::jsonb)::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "P0001",
+      "error": "ERROR:  P0001: timetable_stale\nCONTEXT:  PL/pgSQL function public.mutate_timetable_plan_item_v1(jsonb) line 17 at RAISE\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "operating first rejects old-shadow draft",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.mutate_timetable_plan_item_v1(p_command=>'{\"operation\":\"save\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"expectedMetaRevision\":0,\"expectedItemRevision\":2,\"expectedShadowFingerprint\":\"ebf8ff1b08d2b6309302fc81132884d9\",\"requestKey\":\"f243d3d3-5f27-473c-8d72-61555b1a6553\",\"item\":{\"id\":\"0eed0eb4-7537-41c0-a153-8fc66d87231b\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"name\":\"operating race\",\"subject\":\"영어\",\"subjectAreaKey\":null,\"grade\":\"중2\",\"capacity\":12,\"tuition\":100000,\"defaultTeacherId\":\"9bf3f44d-dd97-466e-b5ce-1a44ba020a34\",\"defaultClassroomId\":\"1ace1851-2b97-4078-965d-0c3962998857\",\"durationMinutes\":30,\"pendingSlots\":[]},\"slots\":[{\"id\":\"c11f9ebd-fafb-466f-90ae-05e2fac3e9ac\",\"itemId\":\"0eed0eb4-7537-41c0-a153-8fc66d87231b\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\",\"weekday\":1,\"startMinute\":1020,\"endMinute\":1050,\"teacherId\":\"9bf3f44d-dd97-466e-b5ce-1a44ba020a34\",\"classroomId\":\"1ace1851-2b97-4078-965d-0c3962998857\",\"sourceSlotId\":null}]}'::jsonb)::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "P0001",
+      "error": "ERROR:  P0001: timetable_stale\nCONTEXT:  PL/pgSQL function public.mutate_timetable_plan_item_v1(jsonb) line 20 at RAISE\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "draft first does not reserve operating",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.update_class_operational_v1(p_class_id=>'c6d5bb7d-c3b3-476b-8ada-3822fda7289f',p_patch=>'{\"status\":\"수강\"}'::jsonb,p_request_key=>'edccbbee-968a-4c03-9939-e1a038ca4048')::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "00000",
+      "error": null
+    },
+    {
+      "name": "planner promotion first / management loser",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.update_class_operational_v1(p_class_id=>'c6d5bb7d-c3b3-476b-8ada-3822fda7289f',p_patch=>'{\"status\":\"수강\"}'::jsonb,p_request_key=>'786435f9-f338-4d1b-b69f-9fb5f1bb8658')::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "23P01",
+      "error": "ERROR:  23P01: timetable_resource_conflict\nCONTEXT:  PL/pgSQL function dashboard_private.assert_timetable_operational_conflicts_v1() line 13 at RAISE\nSQL statement \"SELECT dashboard_private.assert_timetable_operational_conflicts_v1()\"\nPL/pgSQL function public.update_class_operational_v1(uuid,jsonb,uuid,jsonb) line 23 at PERFORM\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "management first / planner stale loser",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.commit_timetable_plan_transfer_v1(p_command=>'{\"request\":{\"source\":{\"kind\":\"plan\",\"planId\":\"ec6647c0-aab8-475d-b396-10bdf12221d9\"},\"target\":{\"kind\":\"operational\"},\"mode\":\"copy\",\"onConflict\":\"reject\",\"itemIds\":[\"fabbcb88-cfed-4eb2-870b-7ecb28e67d69\"]},\"previewFingerprint\":\"53cd337fb2932701088d920289abdca4\",\"requestKey\":\"c86d6be3-18f0-4c18-8e6b-b794dbbdcc94\"}'::jsonb)::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "P0001",
+      "error": "ERROR:  P0001: timetable_stale\nCONTEXT:  PL/pgSQL function public.commit_timetable_plan_transfer_v1(jsonb) line 15 at RAISE\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "session generate first / makeup save loser",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.transition_makeup_request_v2(p_makeup_request_id=>'c77392d1-4c3d-4499-90d1-3a064393422a',p_command=>'approve',p_patch=>'{\"actor_profile_id\":\"9b424770-7c62-4a7c-bd62-2cde6e7eeb7b\",\"schedule_plan_before\":{},\"schedule_plan_after\":{},\"makeup_academic_event_ids\":[],\"calendar_events\":[]}'::jsonb,p_expected_status=>'approval_pending',p_request_id=>'f3fb6c7d-eee4-4957-a767-543045b57943')::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "23P01",
+      "error": "ERROR:  23P01: timetable_resource_conflict\nCONTEXT:  PL/pgSQL function dashboard_private.assert_timetable_operational_conflicts_v1() line 34 at RAISE\nSQL statement \"SELECT dashboard_private.assert_timetable_operational_conflicts_v1()\"\nPL/pgSQL function public.transition_makeup_request_v2(uuid,text,jsonb,text,uuid) line 11 at PERFORM\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    },
+    {
+      "name": "makeup save first / session generate loser",
+      "actors": [
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b",
+        "9b424770-7c62-4a7c-bd62-2cde6e7eeb7b"
+      ],
+      "barrier": "first writer owns transaction lock; second observed waiting before release",
+      "pid": 52206,
+      "query": "select public.generate_class_lesson_sessions_v1(p_class_id=>'bfbc5d4b-5c8d-4119-9489-d36ce5bcef67',p_expected_schedule_revision=>0,p_date_from=>'2026-10-12',p_date_to=>'2026-10-12',p_request_key=>'92613b9e-c110-4773-8d47-8e66c80b3e48')::text;",
+      "waitEvent": "advisory",
+      "blockingPids": [
+        52207
+      ],
+      "waitEventType": "Lock",
+      "advisoryWaiting": 1,
+      "firstCode": "00000",
+      "secondCode": "23P01",
+      "error": "ERROR:  23P01: timetable_resource_conflict\nCONTEXT:  PL/pgSQL function dashboard_private.assert_timetable_operational_conflicts_v1() line 34 at RAISE\nSQL statement \"SELECT dashboard_private.assert_timetable_operational_conflicts_v1()\"\nPL/pgSQL function public.generate_class_lesson_sessions_v1(uuid,bigint,date,date,uuid,text) line 19 at PERFORM\nLOCATION:  exec_stmt_raise, pl_exec.c:3911\n"
+    }
+  ],
+  "checks": [
+    "identical request replay returned immutable receipt",
+    "current share revocation rejects existing receipt replay",
+    "snapshot-pinned RR public/direct writes return 25001/timetable_isolation_not_supported"
+  ],
+  "backendPids": [
+    52207,
+    52206
+  ],
+  "conflictSnapshot": {
+    "plan": {
+      "id": "ec6647c0-aab8-475d-b396-10bdf12221d9",
+      "name": "task8-a8fbd8be plan",
+      "state": "draft",
+      "metaRevision": 0,
+      "targetEndDate": null,
+      "changeSequence": 5,
+      "targetStartDate": null
+    },
+    "items": [
+      {
+        "id": "0eed0eb4-7537-41c0-a153-8fc66d87231b",
+        "name": "draft first",
+        "grade": "중2",
+        "state": "draft",
+        "planId": "ec6647c0-aab8-475d-b396-10bdf12221d9",
+        "subject": "영어",
+        "tuition": 100000,
+        "capacity": 12,
+        "revision": 3,
+        "appliedAt": null,
+        "pendingSlots": [],
+        "sourceClassId": null,
+        "appliedClassId": null,
+        "subjectAreaKey": null,
+        "durationMinutes": 30,
+        "defaultTeacherId": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+        "appliedTransferId": null,
+        "defaultClassroomId": "1ace1851-2b97-4078-965d-0c3962998857"
+      },
+      {
+        "id": "fabbcb88-cfed-4eb2-870b-7ecb28e67d69",
+        "name": "editor receipt",
+        "grade": "중2",
+        "state": "draft",
+        "planId": "ec6647c0-aab8-475d-b396-10bdf12221d9",
+        "subject": "영어",
+        "tuition": 100000,
+        "capacity": 12,
+        "revision": 2,
+        "appliedAt": null,
+        "pendingSlots": [],
+        "sourceClassId": null,
+        "appliedClassId": null,
+        "subjectAreaKey": null,
+        "durationMinutes": 30,
+        "defaultTeacherId": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+        "appliedTransferId": null,
+        "defaultClassroomId": "1ace1851-2b97-4078-965d-0c3962998857"
+      }
+    ],
+    "slots": [
+      {
+        "id": "c11f9ebd-fafb-466f-90ae-05e2fac3e9ac",
+        "itemId": "0eed0eb4-7537-41c0-a153-8fc66d87231b",
+        "planId": "ec6647c0-aab8-475d-b396-10bdf12221d9",
+        "weekday": 1,
+        "endMinute": 1050,
+        "teacherId": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+        "classroomId": "1ace1851-2b97-4078-965d-0c3962998857",
+        "startMinute": 1020,
+        "teacherName": "task8-a8fbd8be-teacher1",
+        "sourceSlotId": null,
+        "classroomName": "task8-a8fbd8be-room1"
+      }
+    ],
+    "members": [],
+    "asOfDate": "2026-09-23",
+    "capacity": {
+      "exceeded": false,
+      "maxItems": 500,
+      "maxSlots": 2000,
+      "itemCount": 2,
+      "slotCount": 1
+    },
+    "catalogs": {
+      "teachers": [
+        {
+          "id": "0d53e1b6-1eb3-43c2-b5e3-88790007b724",
+          "name": "task8-a788b607-editor",
+          "subjects": [
+            "영어팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "3513499b-e4bc-4a7f-892a-2665d58b3c70",
+          "name": "task8-23ca5d66-teacher1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "4f7bf6c3-868f-4d86-bd93-31e3151d37a1",
+          "name": "task8-a788b607-admin",
+          "subjects": [
+            "영어팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "526a5226-6a98-48cc-b5cc-ede069d5b804",
+          "name": "task8-a788b607-teacher1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "69161813-36f6-449c-a42c-b688be28044c",
+          "name": "task8-23ca5d66-teacher2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "88d9bb1e-f796-4984-82f9-97d881cf0038",
+          "name": "task8-067afe93-teacher2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+          "name": "task8-a8fbd8be-teacher1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "a05cc232-5cad-470e-9e68-4fb8de12e9f1",
+          "name": "task8-a8fbd8be-teacher2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "a3ba5c33-725e-4e77-8fb8-5af7d924a539",
+          "name": "task8-0a7d5bee-teacher1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "ae260000-0000-4000-8000-000000000101",
+          "name": "김선생",
+          "subjects": [
+            "수학팀",
+            "영어팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "ae260000-0000-4000-8000-000000000102",
+          "name": "이선생",
+          "subjects": [
+            "영어팀",
+            "수학팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "ae260000-0000-4000-8000-000000000103",
+          "name": "박선생",
+          "subjects": [
+            "과학팀",
+            "영어팀",
+            "수학팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "b3f2fbdd-29be-419d-85d1-bfe24615d7ec",
+          "name": "task8-067afe93-admin",
+          "subjects": [
+            "영어팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "b6ccd22f-0980-481c-8d95-d85c12223116",
+          "name": "task8-a788b607-teacher2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "bca9c556-af24-47a9-8e5d-e94218258eb7",
+          "name": "task8-0a7d5bee-teacher2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "e8595cb7-5e1f-4a27-aed2-17c769d884cc",
+          "name": "fixture",
+          "subjects": [
+            "영어팀"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "f8eb4159-7ec9-47db-8c89-0e6473ebbeb6",
+          "name": "task8-067afe93-teacher1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        }
+      ],
+      "classrooms": [
+        {
+          "id": "1ace1851-2b97-4078-965d-0c3962998857",
+          "name": "task8-a8fbd8be-room1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "221b5bdb-ce5f-4350-8620-31750dab71d9",
+          "name": "task8-23ca5d66-room1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "6426aea0-d024-4419-89b9-2067a1e719af",
+          "name": "task8-a788b607-room1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "64cdc46c-998f-4b36-a673-9d6d3cb9f969",
+          "name": "task8-0a7d5bee-room2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "73e4132d-e0dc-4499-a1cc-30c29c4d856e",
+          "name": "task8-23ca5d66-room2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "ae260000-0000-4000-8000-000000000201",
+          "name": "본관 1강",
+          "subjects": [
+            "영어",
+            "수학",
+            "과학"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "ae260000-0000-4000-8000-000000000202",
+          "name": "별관 2강",
+          "subjects": [
+            "영어",
+            "수학",
+            "과학"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "ae260000-0000-4000-8000-000000000203",
+          "name": "본관 3강",
+          "subjects": [
+            "영어",
+            "수학",
+            "과학"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "afc40aa0-ed09-4b5b-a757-e11f15a4d020",
+          "name": "task8-067afe93-room1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "d36be419-4ad6-4d1d-a77f-7cac4db0d89e",
+          "name": "task8-a8fbd8be-room2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "dae74ff2-1e4f-4d53-ac08-5ca064e0c8ff",
+          "name": "task8-067afe93-room2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "f154f1ce-2f14-4746-984a-9844211c917c",
+          "name": "task8-0a7d5bee-room1",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        },
+        {
+          "id": "fcf0c5c1-8370-42bc-b0bd-813288bc76f3",
+          "name": "task8-a788b607-room2",
+          "subjects": [
+            "영어"
+          ],
+          "isVisible": true
+        }
+      ]
+    },
+    "complete": true,
+    "permissions": {
+      "canEdit": true,
+      "canManage": true,
+      "canTransfer": true
+    },
+    "shadowSlots": [
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000301:ae260000-0000-4000-8000-000000000401",
+        "classId": "ae260000-0000-4000-8000-000000000301",
+        "weekday": 1,
+        "endMinute": 1020,
+        "teacherId": "ae260000-0000-4000-8000-000000000101",
+        "classroomId": "ae260000-0000-4000-8000-000000000201",
+        "startMinute": 900,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000401",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000301:ae260000-0000-4000-8000-000000000402",
+        "classId": "ae260000-0000-4000-8000-000000000301",
+        "weekday": 3,
+        "endMinute": 1020,
+        "teacherId": "ae260000-0000-4000-8000-000000000101",
+        "classroomId": "ae260000-0000-4000-8000-000000000201",
+        "startMinute": 900,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000402",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000301:ae260000-0000-4000-8000-000000000403",
+        "classId": "ae260000-0000-4000-8000-000000000301",
+        "weekday": 5,
+        "endMinute": 1020,
+        "teacherId": "ae260000-0000-4000-8000-000000000101",
+        "classroomId": "ae260000-0000-4000-8000-000000000201",
+        "startMinute": 900,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000403",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000302:ae260000-0000-4000-8000-000000000404",
+        "classId": "ae260000-0000-4000-8000-000000000302",
+        "weekday": 2,
+        "endMinute": 1080,
+        "teacherId": "ae260000-0000-4000-8000-000000000102",
+        "classroomId": "ae260000-0000-4000-8000-000000000202",
+        "startMinute": 960,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000404",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000302:ae260000-0000-4000-8000-000000000405",
+        "classId": "ae260000-0000-4000-8000-000000000302",
+        "weekday": 4,
+        "endMinute": 1080,
+        "teacherId": "ae260000-0000-4000-8000-000000000102",
+        "classroomId": "ae260000-0000-4000-8000-000000000202",
+        "startMinute": 960,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000405",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000303:ae260000-0000-4000-8000-000000000406",
+        "classId": "ae260000-0000-4000-8000-000000000303",
+        "weekday": 2,
+        "endMinute": 1200,
+        "teacherId": "ae260000-0000-4000-8000-000000000101",
+        "classroomId": "ae260000-0000-4000-8000-000000000201",
+        "startMinute": 1080,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000406",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000303:ae260000-0000-4000-8000-000000000407",
+        "classId": "ae260000-0000-4000-8000-000000000303",
+        "weekday": 4,
+        "endMinute": 1200,
+        "teacherId": "ae260000-0000-4000-8000-000000000101",
+        "classroomId": "ae260000-0000-4000-8000-000000000201",
+        "startMinute": 1080,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000407",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000304:ae260000-0000-4000-8000-000000000408",
+        "classId": "ae260000-0000-4000-8000-000000000304",
+        "weekday": 1,
+        "endMinute": 1260,
+        "teacherId": "ae260000-0000-4000-8000-000000000102",
+        "classroomId": "ae260000-0000-4000-8000-000000000202",
+        "startMinute": 1140,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000408",
+        "classRevision": 0
+      },
+      {
+        "id": "live:ae260000-0000-4000-8000-000000000304:ae260000-0000-4000-8000-000000000409",
+        "classId": "ae260000-0000-4000-8000-000000000304",
+        "weekday": 3,
+        "endMinute": 1260,
+        "teacherId": "ae260000-0000-4000-8000-000000000102",
+        "classroomId": "ae260000-0000-4000-8000-000000000202",
+        "startMinute": 1140,
+        "sourceSlotId": "ae260000-0000-4000-8000-000000000409",
+        "classRevision": 0
+      },
+      {
+        "id": "live:c6d5bb7d-c3b3-476b-8ada-3822fda7289f:7120deae-2465-bdcc-3602-62b5d3ee90c7",
+        "classId": "c6d5bb7d-c3b3-476b-8ada-3822fda7289f",
+        "weekday": 1,
+        "endMinute": 1050,
+        "teacherId": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+        "classroomId": "1ace1851-2b97-4078-965d-0c3962998857",
+        "startMinute": 1020,
+        "sourceSlotId": null,
+        "classRevision": 0
+      }
+    ],
+    "datedComplete": true,
+    "datedSessions": [
+      {
+        "id": "session:b3570128-100d-4ff0-8547-38d5d1180f1a",
+        "date": "2026-10-13",
+        "state": "active",
+        "classId": "2f47e4e2-d6d0-460f-adc6-9230b1401005",
+        "revision": 0,
+        "endMinute": 750,
+        "teacherId": "9bf3f44d-dd97-466e-b5ce-1a44ba020a34",
+        "classroomId": "d36be419-4ad6-4d1d-a77f-7cac4db0d89e",
+        "startMinute": 720,
+        "sourceSlotId": null
+      }
+    ],
+    "shadowClasses": [
+      {
+        "id": "ae260000-0000-4000-8000-000000000301",
+        "name": "고2 심화수학",
+        "grade": "고2",
+        "status": "수강",
+        "subject": "수학",
+        "revision": 0
+      },
+      {
+        "id": "ae260000-0000-4000-8000-000000000302",
+        "name": "고1 영어 독해와 문법",
+        "grade": "고1",
+        "status": "수강",
+        "subject": "영어",
+        "revision": 0
+      },
+      {
+        "id": "ae260000-0000-4000-8000-000000000303",
+        "name": "중3 수학",
+        "grade": "중3",
+        "status": "수강",
+        "subject": "수학",
+        "revision": 0
+      },
+      {
+        "id": "ae260000-0000-4000-8000-000000000304",
+        "name": "고2 영어 심화 긴 수업명 확인",
+        "grade": "고2",
+        "status": "수강",
+        "subject": "영어",
+        "revision": 0
+      },
+      {
+        "id": "c6d5bb7d-c3b3-476b-8ada-3822fda7289f",
+        "name": "task8-a8fbd8be legacy1",
+        "grade": null,
+        "status": "수강",
+        "subject": "영어",
+        "revision": 0
+      }
+    ],
+    "appliedSnapshots": [],
+    "datedFingerprint": "715e8f2ae610cfd54d2c4f0038f9530b",
+    "shadowFingerprint": "4923a62ee4f8fe7ff06d70e60c45b3c4",
+    "unresolvedOccupancies": [],
+    "datedUnresolvedOccupancies": []
+  },
+  "serialization": {
+    "code": "40001",
+    "text": "ERROR:  40001: could not serialize access due to concurrent update\nLOCATION:  GetTupleForTrigger, trigger.c:3468",
+    "stderr": "ERROR:  40001: could not serialize access due to concurrent update\nLOCATION:  GetTupleForTrigger, trigger.c:3468\n"
+  },
+  "finalWeeklyOverlaps": 0,
+  "passed": true,
+  "cleanup": "only run-owned plans archived; classes closed and dated fixture sessions removed; IDs retained for audit"
+}

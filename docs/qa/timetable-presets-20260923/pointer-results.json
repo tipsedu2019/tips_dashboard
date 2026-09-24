@@ -1,0 +1,87 @@
+{
+  "planId": "7508365a-e7e7-402e-aaa8-a88b7cbb65a3",
+  "itemId": "f5ea4170-2ace-48d6-80eb-68eac213c388",
+  "monId": "04c32bec-3557-411b-ad64-4d774a072a5e",
+  "wedId": "bf243bab-abf0-4484-8905-4a3c5e8e56c4",
+  "results": [
+    {
+      "view": "teacher-weekly",
+      "action": "same-time resource drag",
+      "passed": true,
+      "revision": 3
+    },
+    {
+      "view": "classroom-weekly",
+      "action": "same-time resource drag",
+      "passed": true,
+      "revision": 5
+    },
+    {
+      "view": "daily-teacher",
+      "action": "same-time resource drag",
+      "passed": true,
+      "revision": 7
+    },
+    {
+      "view": "daily-classroom",
+      "action": "same-time resource drag",
+      "passed": true,
+      "revision": 9
+    },
+    {
+      "action": "Escape",
+      "passed": true,
+      "saveRequests": 0
+    },
+    {
+      "action": "pointercancel",
+      "passed": true,
+      "saveRequests": 0
+    },
+    {
+      "action": "lostpointercapture",
+      "passed": true,
+      "saveRequests": 0
+    },
+    {
+      "action": "resize by five minutes",
+      "passed": true
+    },
+    {
+      "view": "teacher-weekly",
+      "action": "palette drop",
+      "passed": true
+    },
+    {
+      "view": "classroom-weekly",
+      "action": "palette drop",
+      "passed": true
+    },
+    {
+      "view": "daily-teacher",
+      "action": "palette drop",
+      "passed": true
+    },
+    {
+      "view": "daily-classroom",
+      "action": "palette drop",
+      "passed": true
+    },
+    {
+      "action": "cell center click preserves labeled start and duration",
+      "passed": true
+    },
+    {
+      "action": "60-character exact midnight form, uncertain failure retains input, identical retry receipt",
+      "passed": true
+    },
+    {
+      "action": "confirmed rejection corrected with new identity and fulfilled save",
+      "passed": true
+    },
+    {
+      "action": "ordinary mobile touch scroll remains native",
+      "passed": true
+    }
+  ]
+}

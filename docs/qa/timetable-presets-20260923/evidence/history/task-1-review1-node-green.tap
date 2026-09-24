@@ -1,0 +1,26 @@
+✔ compact weekday groups expand without losing days (1.798834ms)
+✔ three-day groups preserve weekday order (0.256209ms)
+✔ mixed compact and single-day schedules preserve every slot (0.431084ms)
+✔ class list display combines weekdays that share the same time and details (0.488667ms)
+✔ class resource display splits multiple teachers and classrooms into rows (0.1175ms)
+✔ parenthesized slot details are copied to every day in a group (0.155458ms)
+✔ shared candidate details are removed but different details stay (0.23125ms)
+✔ a retry reuses the action request key and its canonical defaults payload (1.178209ms)
+✔ RPC errors are mapped to safe schedule action states (0.105791ms)
+✔ generation preview sends only the bounded range and revision (0.085084ms)
+✔ bounded reader deduplicates one range, aborts a prior class, and trusts the RPC authority result (0.294417ms)
+✔ runtime-not-ready reloads legacy while other normalized read failures stay explicit (0.158792ms)
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (0.828334ms)
+✔ legacy schedule consumer retains per-slot teacher and room after normalized save projection (0.452ms)
+✔ projected mixed resource slots keep assigned and unassigned states in the legacy parser (0.228583ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.192166ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (13.914667ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.100458ms)
+ℹ tests 18
+ℹ suites 0
+ℹ pass 18
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 108.735

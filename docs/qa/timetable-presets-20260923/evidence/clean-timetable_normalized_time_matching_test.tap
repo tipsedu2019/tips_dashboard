@@ -1,0 +1,26 @@
+release2-rpc
+ac234000-0000-4000-8000-000000000901
+ok 1 - authenticated RPC preserves parsed rows without errors or duplicate matches
+ok 2 - retained single-digit start matches normalized comma resources
+ok 3 - single-digit start and end match normalized resources
+ok 4 - exact minutes match without rounding
+ok 5 - 24:00 end matches without wrapping to midnight
+ok 6 - zero-hour single-digit times match
+ok 7 - normalized explicit empty resources suppress text and summary fallback
+ok 8 - different valid start cannot borrow slot resources
+ok 9 - different valid end cannot borrow slot resources
+ok 10 - different weekday cannot borrow slot resources
+ok 11 - invalid start minutes cannot normalize into a valid tuple
+ok 12 - invalid end minutes cannot normalize into a valid tuple
+ok 13 - end past 1440 cannot borrow midnight slot resources
+ok 14 - zero-length interval at 1440 has no slot match
+ok 15 - reversed interval has no slot match
+ok 16 - invalid hours do not throw or acquire resources
+ok 17 - RPC retains source time spelling
+ok 18 - 17:13 remains exact minute 1033
+ok 19 - 24:00 remains exact minute 1440
+ok 20 - consumer preserves original schedule, summaries, storage mode and revision
+ok 21 - consumer preserves slot IDs and resource authority
+ok 22 - consumer preserves historical session snapshot and FK
+1..22
+NOTICE:  extension "pgtap" already exists, skipping

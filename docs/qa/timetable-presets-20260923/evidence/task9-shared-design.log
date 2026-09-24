@@ -1,0 +1,121 @@
+✔ sidebar defaults to icon collapse mode (2.717625ms)
+✔ nav user renders a profile avatar instead of the cart logo (0.554584ms)
+✔ nav user lets signed-in users edit avatar and password (0.571042ms)
+✔ sidebar keeps fallback permission status compact (0.283375ms)
+✔ todo navigation stays undiscoverable while legacy direct links keep query normalization (2.254167ms)
+✔ admin navigation nests notification settings inside environment settings (1.036959ms)
+✔ retired class group and period settings are absent from navigation and routes (0.44725ms)
+✔ role-based navigation exposes textbook requests to teachers without manager-only links (0.150083ms)
+✔ legacy admin redirect routes do not keep template implementation files (2.846709ms)
+✔ academic calendar alias does not keep unused sample calendar templates (1.05825ms)
+✔ root metadata points browser icons at the favicon asset (0.418417ms)
+✔ favicon asset matches the official TIPS logo (0.767333ms)
+✔ dashboard omits introductory briefing copy and redundant workspace heading (0.599459ms)
+✔ dashboard renders only the daily brief path instead of live statistics sources (0.766125ms)
+✔ admin statistics route stays in the dashboard navigation role boundary (0.591166ms)
+✔ dashboard focuses on student, enrollment, class, and conflict signals (1.220083ms)
+✔ dashboard exposes subject and division tabs with conflict process rows (2.250584ms)
+✔ dashboard metrics renders a cached summary before independently loading conflicts (0.713125ms)
+✔ dashboard renders academy-wide actionable conflict state before filters and metrics (0.874666ms)
+✔ dashboard keeps dense cards readable on mobile widths (0.534959ms)
+✔ lesson-design routes resolve to the actual design workspace title (0.292458ms)
+✔ class schedule list heading avoids explanatory copy (1.079792ms)
+✔ quick search remains a discoverable menu search (0.57575ms)
+✔ sidebar submenu disclosure stays discoverable (0.343875ms)
+✔ global shell controls use Korean action labels (0.701542ms)
+✔ assistant navigation only exposes allowed operation surfaces (0.608208ms)
+✔ homepage content and recruiting navigation are discoverable only to the actual admin role (0.205959ms)
+✔ global shell exposes stable browser-use targets (0.898334ms)
+✔ global shell avoids hidden palette and avatar over-render work (0.589292ms)
+✔ admin shell does not keep unused floating template controls (0.647333ms)
+✔ class schedule retains the homepage preview for internal operators (0.630333ms)
+✔ shared checkbox keeps a comfortable click target (3.296916ms)
+✔ settings row text inputs announce the edited row (2.090291ms)
+✔ select menus can show long option lists inside modals (4.653583ms)
+✔ ported option panels stay above high-layer management dialogs (2.758625ms)
+✔ shared dialog can expose explicit top close copy for unsaved forms (0.932208ms)
+✔ pager renders every current block number with semantic buttons and boundary states (153.05075ms)
+✔ pager disables navigation at empty and known boundaries (18.618709ms)
+✔ pager exposes only 10, 15, and 20 row choices with loading safety and a per-list navigation label (13.907ms)
+✔ pager renders the partial final block without removing later page buttons (10.014542ms)
+✔ page-size preference defaults to fixed 10 rows and rejects the removed automatic mode (16.290209ms)
+✔ stored fixed page-size preference is the only value restored (9.055ms)
+✔ management migrates legacy manual size once without overriding shared preference (9.716041ms)
+✔ page-size preference tolerates malformed and unavailable browser storage (8.044667ms)
+✔ legacy preference remains recoverable when writing the shared migration fails (7.997708ms)
+✔ search keeps Korean composition and does not issue a cleared search on IME Escape (621.149792ms)
+✔ Escape clears once without bubbling into the parent workflow and keeps input focus (334.467958ms)
+✔ selection changes preserve the actual search node, typed query, focus and table siblings (169.7125ms)
+✔ bulk edit opens on demand, keeps a failed draft, prevents repeat submission and restores search after success (169.387375ms)
+✔ cancel returns focus to the edit trigger and preserves the selection (77.904334ms)
+✔ read-only lists omit unused command space and cannot expose bulk edit (36.198625ms)
+✔ pinned wrapping cells inherit row interaction colors without changing legacy table defaults (120.987833ms)
+✔ sort button exposes the current state and describes the next direction (20.844584ms)
+✔ toolbar and viewport keep their semantic slots and forward the scrollport ref (13.57075ms)
+✔ management lists share the opt-in surface without replacing domain state ownership (0.982375ms)
+✔ toolbar search and filter retain DOM identity and focus through loading, feedback and recovery (20.036333ms)
+✔ light: body, supporting text, selection, primary and destructive states meet 4.5:1 (1.156541ms)
+ℹ --foreground/--background: 12.63:1
+ℹ --card-foreground/--card: 12.63:1
+ℹ --popover-foreground/--popover: 12.63:1
+ℹ --secondary-foreground/--secondary: 6.87:1
+ℹ --accent-foreground/--accent: 9.03:1
+ℹ --sidebar-foreground/--sidebar: 11.48:1
+ℹ --sidebar-accent-foreground/--sidebar-accent: 10.47:1
+ℹ --foreground/--workspace-background: 11.93:1
+ℹ --muted-foreground/--workspace-background: 5.09:1
+ℹ --muted-foreground/--sidebar: 4.90:1
+ℹ --primary/--sidebar-accent: 4.53:1
+ℹ --muted-foreground/--background: 5.40:1
+ℹ --muted-foreground/--card: 5.40:1
+ℹ --muted-foreground/--muted: 5.16:1
+ℹ --muted-foreground/--accent: 4.70:1
+ℹ --primary/--background: 5.46:1
+ℹ --primary/--card: 5.46:1
+ℹ --primary-foreground/--primary: 5.46:1
+ℹ --destructive/--background: 5.52:1
+ℹ --destructive/--card: 5.52:1
+ℹ --destructive-foreground/--destructive: 5.52:1
+ℹ --primary hover on --background: 4.54:1
+ℹ --primary hover on --card: 4.54:1
+ℹ --destructive hover on --background: 4.90:1
+ℹ --destructive hover on --card: 4.90:1
+✔ dark: body, supporting text, selection, primary and destructive states meet 4.5:1 (0.120875ms)
+ℹ --foreground/--background: 14.23:1
+ℹ --card-foreground/--card: 12.01:1
+ℹ --popover-foreground/--popover: 12.01:1
+ℹ --secondary-foreground/--secondary: 12.01:1
+ℹ --accent-foreground/--accent: 7.29:1
+ℹ --sidebar-foreground/--sidebar: 13.74:1
+ℹ --sidebar-accent-foreground/--sidebar-accent: 10.45:1
+ℹ --foreground/--workspace-background: 14.93:1
+ℹ --muted-foreground/--workspace-background: 8.30:1
+ℹ --muted-foreground/--sidebar: 7.64:1
+ℹ --primary/--sidebar-accent: 5.17:1
+ℹ --muted-foreground/--background: 7.91:1
+ℹ --muted-foreground/--card: 6.68:1
+ℹ --muted-foreground/--muted: 7.28:1
+ℹ --muted-foreground/--accent: 4.57:1
+ℹ --primary/--background: 7.04:1
+ℹ --primary/--card: 5.94:1
+ℹ --primary-foreground/--primary: 7.04:1
+ℹ --destructive/--background: 6.22:1
+ℹ --destructive/--card: 5.25:1
+ℹ --destructive-foreground/--destructive: 6.22:1
+ℹ --primary hover on --background: 5.92:1
+ℹ --primary hover on --card: 6.03:1
+ℹ --destructive hover on --background: 5.25:1
+ℹ --destructive hover on --card: 5.34:1
+✔ sidebar brand uses the official TIPS logo asset (0.594ms)
+✔ sidebar brand keeps the logo size and only repositions it in icon collapse mode (2.31825ms)
+✔ manual tabs move focus with arrows, Home and End without selecting, and skip disabled tabs (182.802458ms)
+✔ all triggers control one stable labelled panel, preserving child DOM and draft across accepted views (26.80975ms)
+✔ accepted deep-link selection reveals the clipped tab without moving focus or resetting the draft (22.117958ms)
+ℹ tests 63
+ℹ suites 0
+ℹ pass 63
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1365.170583

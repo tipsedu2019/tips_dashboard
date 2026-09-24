@@ -1,0 +1,27 @@
+
+/Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-plan-import-dialog.tsx
+  47:52  warning  The ref value 'epoch.current' will likely have changed by the time this effect cleanup function runs. If this ref points to a node rendered by React, copy 'epoch.current' to a variable inside the effect, and use that variable in the cleanup function  react-hooks/exhaustive-deps
+
+/Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-plan-picker.tsx
+  122:58  warning  React Hook useEffect has a missing dependency: 'persist'. Either include it or remove the dependency array  react-hooks/exhaustive-deps
+
+/Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-workspace.tsx
+  235:7  warning  Error: Calling setState synchronously within an effect can trigger cascading renders
+
+Effects are intended to synchronize state between React and external systems such as manually updating the DOM, state management libraries, or other platform APIs. In general, the body of an effect should do one or both of the following:
+* Update external systems with the latest state from React.
+* Subscribe for updates from some external system, calling setState in a callback function when external state changes.
+
+Calling setState synchronously within an effect body causes cascading renders that can hurt performance, and is not recommended. (https://react.dev/learn/you-might-not-need-an-effect).
+
+/Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/src/features/academic/timetable-workspace.tsx:235:7
+  233 |     if (error?.code === '42501' || error?.message === 'timetable_forbidden') {
+  234 |       if (plan.service) clearTimetableActorRecovery(plan.service.actorScope);
+> 235 |       setFormDirty(false); setPlanId(null); setReloadNonce(value => value + 1);
+      |       ^^^^^^^^^^^^ Avoid calling setState() directly within an effect
+  236 |     }
+  237 |   }, [plan.error, plan.service]);
+  238 |   const navigation = useDraftNavigation({ dirty: plan.dirty || formDirty });  react-hooks/set-state-in-effect
+
+✖ 3 problems (0 errors, 3 warnings)
+

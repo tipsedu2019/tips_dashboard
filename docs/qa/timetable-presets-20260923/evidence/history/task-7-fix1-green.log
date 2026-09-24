@@ -1,0 +1,47 @@
+✔ teacher-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.8455ms)
+✔ teacher-weekly: unplaced item drop creates one stable slot with target resource (0.066209ms)
+✔ classroom-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.080875ms)
+✔ classroom-weekly: unplaced item drop creates one stable slot with target resource (0.036667ms)
+✔ daily-teacher: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.0735ms)
+✔ daily-teacher: unplaced item drop creates one stable slot with target resource (0.04675ms)
+✔ daily-classroom: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.057417ms)
+✔ daily-classroom: unplaced item drop creates one stable slot with target resource (0.0385ms)
+✔ shadow never produces move, resize or unplace commands (0.172708ms)
+✔ exact typed minutes and midnight preserved, invalid overflow rejected (0.131417ms)
+✔ empty presets build panels from IDs, duplicate names do not merge; overlap lanes retain every slot (4.430208ms)
+✔ pointer cancel, Escape and capture-loss cannot commit; source/target panel identity counts as a move (0.101291ms)
+✔ teacher-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (60.334791ms)
+✔ classroom-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (12.206208ms)
+✔ daily-teacher: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.881416ms)
+✔ daily-classroom: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.569ms)
+✔ hidden operating subjects still block changed placements, while name-only edits preserve existing conflicts (0.32375ms)
+✔ empty resource catalogs produce no misleading day grids in any view (0.038542ms)
+✔ rendered class-list selection uses item IDs, preserves hidden selections and excludes applied/shadows (20.573417ms)
+✔ whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft (0.272667ms)
+✔ whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs (0.06ms)
+✔ single-slot form edit and add-placement preserve the complete differing Wednesday sibling (0.298791ms)
+✔ selected item IDs and final copy/move effects are explicit (0.590708ms)
+✔ unknown response retains byte-equivalent immutable command through new preview attempts and remount (3.295958ms)
+✔ committed refresh failure retries only reads and never repeats promotion (0.162416ms)
+✔ exact stale rejection permits explicit new selection preview and new key (0.441709ms)
+✔ preview blockers prevent commit and exact rejection pairs exclude unrelated SQL failures (0.176292ms)
+✔ late commit response from retired actor neither merges data nor invokes caches (0.185542ms)
+✔ permission revocation immediately clears caller canonical data on preview and commit (0.236208ms)
+✔ pending original JSON stays intact while labels show day time and resource names (9.87825ms)
+✔ resolving one pending placement atomically adds a new slot and preserves siblings and remaining originals (1.170834ms)
+✔ pending without a weekday retains original resources and duration until a day is chosen (0.414125ms)
+✔ pending known weekday survives missing time independently (0.229375ms)
+✔ science metadata correction saves the chosen catalog key and preserves placement IDs (0.214959ms)
+✔ preview sends exact canonical request with selected item IDs (0.711666ms)
+✔ malformed or mismatched preview is never commit-ready (0.21375ms)
+✔ malformed or mismatched preview is never commit-ready (0.050667ms)
+✔ malformed or mismatched preview is never commit-ready (0.055209ms)
+✔ science choices come from the authenticated active catalog contract (0.108959ms)
+ℹ tests 39
+ℹ suites 0
+ℹ pass 39
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 714.545375

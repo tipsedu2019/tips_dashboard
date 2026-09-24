@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
+import { parseClassScheduleSlots, formatClassScheduleSlots } from "../src/features/management/class-schedule-slots.ts";
 
 import {
   normalizeClassManagementRecord,
@@ -752,14 +753,15 @@ test("class schedule rows keep all five input columns equal to prevent overlap",
   assert.doesNotMatch(pageSource, /minmax\(96px,0\.55fr\)/);
 });
 
-test("class schedule parser does not treat classroom aliases as teachers", async () => {
-  const scheduleSource = await readFile(new URL("src/features/management/class-schedule-slots.ts", root), "utf8");
-
-  assert.match(scheduleSource, /function looksLikeClassroomAlias\(value: unknown\)/);
-  assert.match(scheduleSource, /const firstDetailIsTeacher = Boolean\(firstDetail && !looksLikeClassroomAlias\(firstDetail\)\)/);
-  assert.match(scheduleSource, /teacher: firstDetailIsTeacher \? firstDetail : getFallbackValue\(teachers, slotIndex\)/);
-  assert.match(scheduleSource, /classroom: firstDetailIsTeacher[\s\S]*: detailParts\[detailParts\.length - 1\] \|\| classroomsByDay\.get\(day\)/);
-  assert.doesNotMatch(scheduleSource, /const teacher = detailParts\.length > 1 \? detailParts\[0\]/);
+test("class schedule parser does not treat classroom aliases as teachers", () => {
+  for (const classroom of ["본3", "별4", "본관 3강"]) {
+    const [slot] = parseClassScheduleSlots(`월 18:00-19:00 (${classroom})`, "한지현", "");
+    assert.equal(slot.teacher, "한지현");
+    assert.equal(slot.classroom, classroom);
+  }
+  const [unassigned] = parseClassScheduleSlots("화 18:00-19:00 (, 별4)", "다른 요일 교사", "본3");
+  assert.equal(unassigned.teacher, "");
+  assert.equal(unassigned.classroom, "별4");
 });
 
 test("class schedule classroom choices are narrowed by the selected subject", async () => {
@@ -788,16 +790,19 @@ test("class official summary hides active textbook progress status", async () =>
 
 test("class official summary omits repeated schedule teacher and classroom details", async () => {
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
-  const scheduleSource = await readFile(new URL("src/features/management/class-schedule-slots.ts", root), "utf8");
   const summaryStart = pageSource.indexOf("const renderClassSummaryBar = () =>");
   const summaryEnd = pageSource.indexOf("  const renderRelationManagementSection", summaryStart);
   const summarySource = pageSource.slice(summaryStart, summaryEnd);
 
   assert.ok(summaryStart >= 0 && summaryEnd > summaryStart);
-  assert.match(scheduleSource, /const hasSharedScheduleDetails = uniqueTeachers\.length <= 1 && uniqueClassrooms\.length <= 1/);
-  assert.match(scheduleSource, /const details = hasSharedScheduleDetails \? "" : \[slot\.teacher, slot\.classroom\]\.filter\(Boolean\)\.join\(", "\)/);
+  const shared = parseClassScheduleSlots("월 18:00-19:00\n수 18:00-19:00", "한지현", "본3");
+  assert.deepEqual(formatClassScheduleSlots(shared), {
+    schedule: "월 18:00-19:00\n수 18:00-19:00", teacher: "한지현", classroom: "본3",
+  });
+  const partial = formatClassScheduleSlots([shared[0], { ...shared[1], teacher: "" }]);
+  assert.equal(partial.schedule, "월 18:00-19:00 (한지현, 본3)\n수 18:00-19:00 (, 본3)");
+  assert.equal(parseClassScheduleSlots(partial.schedule, partial.teacher, partial.classroom)[1].teacher, "");
   assert.match(summarySource, /const scheduleSummary = formatClassScheduleDisplayLines\([\s\S]*formatClassScheduleSlots\(getClassScheduleSlotsFromForm\(\)\)\.schedule,[\s\S]*\)\.join\(", "\) \|\| "시간 미정"/);
-  assert.doesNotMatch(scheduleSource, /const details = \[slot\.teacher, slot\.classroom\]\.filter\(Boolean\)\.join\(", "\)/);
   assert.match(pageSource, /stripSharedScheduleDetails\(record\.schedule, teacher, classroom\)/);
 });
 

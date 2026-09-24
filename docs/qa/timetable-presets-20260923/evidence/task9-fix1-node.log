@@ -1,0 +1,137 @@
+✔ schedule-only page exposes one save and return action even for a legacy progress URL (418.996041ms)
+✔ schedule-only return keeps an edited draft when the operator continues editing (226.898333ms)
+✔ calendar: holiday cancellation and linked makeup on the same day are both named (215.662375ms)
+✔ plan: same-class refreshed source preserves an authored draft (221.250375ms)
+✖ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (180.161459ms)
+✔ normalized session: real save reaches the service once and preserves edits made while pending (177.532083ms)
+✔ class-schedule: clean read, revert, protected close and confirmed destination (350.103958ms)
+✔ curriculum: clean read, revert, protected close and confirmed destination (217.695416ms)
+✔ curriculum/lesson-design: clean read, revert, protected close and confirmed destination (210.796125ms)
+✖ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (150.637958ms)
+✔ normalized session: unchanged/reverted draft is clean and accepted revision is reused (180.289208ms)
+✔ normalized read: a loading read must never fall through to a legacy classes update (258.419458ms)
+✖ plan: failed write retains its draft and a retry submits the current values (152.880708ms)
+✖ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (149.259292ms)
+✔ normalized session: accepted trimmed input becomes clean and later authoritative data replaces clean overrides (166.3895ms)
+✔ normalized schedule: calendar opens authoritative session editing without creating a legacy draft (153.415041ms)
+✔ normalized generation: a late preview from another month cannot authorize current-month creation (203.514625ms)
+✔ normalized generation: preview and creation each reject same-turn duplicate clicks (193.582166ms)
+✔ normalized generation previews dates without mutating saved sessions and disables an all-existing confirmation (149.194459ms)
+✔ teacher-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (1.860083ms)
+✔ teacher-weekly: unplaced item drop creates one stable slot with target resource (0.142667ms)
+✔ classroom-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.170583ms)
+✔ classroom-weekly: unplaced item drop creates one stable slot with target resource (0.074125ms)
+✔ daily-teacher: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.138ms)
+✔ daily-teacher: unplaced item drop creates one stable slot with target resource (0.080833ms)
+✔ daily-classroom: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.111917ms)
+✔ daily-classroom: unplaced item drop creates one stable slot with target resource (0.080792ms)
+✔ shadow never produces move, resize or unplace commands (0.366959ms)
+✔ exact typed minutes and midnight preserved, invalid overflow rejected (0.182708ms)
+✔ empty presets build panels from IDs, duplicate names do not merge; overlap lanes retain every slot (11.484375ms)
+✔ pointer cancel, Escape and capture-loss cannot commit; source/target panel identity counts as a move (0.110459ms)
+✔ teacher-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (78.73675ms)
+✔ classroom-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (15.573458ms)
+✔ daily-teacher: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (8.4325ms)
+✔ daily-classroom: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (7.62975ms)
+✔ hidden operating subjects still block changed placements, while name-only edits preserve existing conflicts (0.370833ms)
+✔ empty resource catalogs produce no misleading day grids in any view (0.04175ms)
+✔ rendered class-list selection uses item IDs, preserves hidden selections and excludes applied/shadows (23.598291ms)
+✔ whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft (0.293458ms)
+✔ whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs (0.063625ms)
+✔ single-slot form edit and add-placement preserve the complete differing Wednesday sibling (0.323541ms)
+✔ create: unknown receipt survives changed name (73.432583ms)
+✔ create: unknown receipt survives changed name and dialog reopen (24.444375ms)
+✔ clone: unknown receipt survives changed name (20.475417ms)
+✔ clone: unknown receipt survives changed name and dialog reopen (23.103667ms)
+✔ late share success cannot populate another actor/dialog (13.438417ms)
+✔ late share failure cannot populate another actor/dialog (11.24925ms)
+✔ late create success cannot change another actor's selection/dialog (13.839041ms)
+✔ late create failure cannot change another actor's selection/dialog (14.244458ms)
+✔ late share response cannot fill a newer dialog in the same actor scope (9.491167ms)
+✔ conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable (23.428291ms)
+✔ share receipt preserves later viewer-to-editor change for a separate confirmed-revision command (20.551875ms)
+✔ share receipt preserves later revocation for a separate confirmed-revision command (21.128291ms)
+✔ create: submitted immutable receipt survives full remount (8.902875ms)
+✔ clone: submitted immutable receipt survives full remount (7.615708ms)
+✔ rename: submitted immutable receipt survives full remount (6.873166ms)
+✔ share: submitted immutable receipt survives full remount (8.473542ms)
+✔ archive: submitted immutable receipt survives full remount (6.680167ms)
+✔ restore: submitted immutable receipt survives full remount (5.622167ms)
+✔ actor retirement purges pending metadata, picker list and recovery UI (5.355666ms)
+✔ Storage SecurityError keeps the submitted immutable request in memory and warns before reload (5.261375ms)
+✔ plan revocation preserves unrelated submitted metadata (9.205292ms)
+✔ plan revocation purges related submitted metadata (5.508209ms)
+✔ selected item IDs and final copy/move effects are explicit (0.7525ms)
+✔ unknown response retains byte-equivalent immutable command through new preview attempts and remount (3.452084ms)
+✔ committed refresh failure retries only reads and never repeats promotion (0.141833ms)
+✔ exact stale rejection permits explicit new selection preview and new key (0.137ms)
+✔ preview blockers prevent commit and exact rejection pairs exclude unrelated SQL failures (0.10175ms)
+✔ late commit response from retired actor neither merges data nor invokes caches (0.091958ms)
+✔ permission revocation immediately clears caller canonical data on preview and commit (0.111542ms)
+✔ pending original JSON stays intact while labels show day time and resource names (6.929041ms)
+✔ resolving one pending placement atomically adds a new slot and preserves siblings and remaining originals (0.605125ms)
+✔ pending without a weekday retains original resources and duration until a day is chosen (0.191916ms)
+✔ pending known weekday survives missing time independently (0.113125ms)
+✔ science metadata correction saves the chosen catalog key and preserves placement IDs (0.120666ms)
+ℹ tests 75
+ℹ suites 0
+ℹ pass 71
+ℹ fail 4
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 4464.5705
+
+✖ failing tests:
+
+test at tests/class-schedule-draft-navigation.test.mjs:223:1
+✖ plan: accepted save preserves input added while pending and failed re-read does not claim write failure (180.161459ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:226:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-draft-navigation.test.mjs:268:1
+✖ plan: submission then revert to old value remains dirty after accepted save; duplicate writes are blocked (150.637958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 1
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:272:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 1,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/class-schedule-draft-navigation.test.mjs:297:1
+✖ plan: failed write retains its draft and a retry submits the current values (152.880708ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:300:46
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:300:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/class-schedule-draft-navigation.test.mjs:308:1
+✖ actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled (149.259292ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:313:33
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/class-schedule-draft-navigation.test.mjs:313:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

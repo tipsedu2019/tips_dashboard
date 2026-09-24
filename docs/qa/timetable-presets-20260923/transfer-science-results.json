@@ -1,0 +1,10 @@
+{
+  "plan": "b2566ce8-33d3-42f5-a826-582e03a971cb",
+  "checks": [
+    "new fully placed science/high1 draft with null area is blocked by actual preview",
+    "affected preview row opens existing editor using active catalog options; ordinary item save preserves placement and resets preview",
+    "fresh preview promotes science with the chosen DB key; unknown commit disables metadata edits and retries identical command once"
+  ],
+  "errors": [],
+  "passed": true
+}

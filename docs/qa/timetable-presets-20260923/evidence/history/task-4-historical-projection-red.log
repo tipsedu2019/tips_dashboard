@@ -1,0 +1,149 @@
+BEGIN
+NOTICE:  extension "pgtap" already exists, skipping
+CREATE EXTENSION
+ no_plan 
+---------
+(0 rows)
+
+SET
+INSERT 0 1
+INSERT 0 3
+INSERT 0 3
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 4
+INSERT 0 1
+SELECT 1
+                                ok                                 
+-------------------------------------------------------------------
+ ok 1 - slot time uniqueness is deferrable for ID-preserving swaps
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000901
+(1 row)
+
+SELECT 1
+                             is                             
+------------------------------------------------------------
+ ok 2 - saving A preserves B schedule metadata and revision
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 3 - only A revision increments
+(1 row)
+
+                               is                               
+----------------------------------------------------------------
+ ok 4 - legacy schedule keeps per-slot teacher and room details
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 5 - legacy teacher projection keeps both resources
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 6 - legacy room projection keeps weekday assignments
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 7 - past session snapshot and slot FK remain unchanged
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 8 - same request key replays exact receipt
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 9 - stale revision has domain SQLSTATE
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 10 - B slot cannot be transferred through A save
+(1 row)
+
+                          throws_ok                           
+--------------------------------------------------------------
+ ok 11 - duplicate final time tuple is rejected before commit
+(1 row)
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                         lives_ok                                                                                                                                                                                                                                                                                                                                                                                                                                         
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ not ok 12 - valid final time swap preserves existing slot IDs                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           +
+ # Failed test 12: "valid final time swap preserves existing slot IDs"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   +
+ #     died: 23P01: timetable_resource_conflict                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          +
+ #         CONTEXT:                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      +
+ #             PL/pgSQL function dashboard_private.assert_timetable_operational_conflicts_v1() line 23 at RAISE                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          +
+ #             SQL statement "SELECT dashboard_private.assert_timetable_operational_conflicts_v1()"                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      +
+ #             PL/pgSQL function public.save_class_schedule_defaults_v1(uuid,bigint,jsonb,uuid,text) line 16 at PERFORM                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                  +
+ #             SQL statement "select public.save_class_schedule_defaults_v1('ac230000-0000-4000-8000-000000000301',1,'[{"id":"ac230000-0000-4000-8000-000000000401","weekday":1,"startTime":"10:00","endTime":"11:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":"ac230000-0000-4000-8000-000000000201","sortOrder":0},{"id":"ac230000-0000-4000-8000-000000000402","weekday":1,"startTime":"09:00","endTime":"10:00","teacherCatalogId":"ac230000-0000-4000-8000-000000000101","classroomCatalogId":"ac230000-0000-4000-8000-000000000201","sortOrder":1},{"id":"ac230000-0000-4000-8000-000000000403","weekday":3,"startTime":"14:00","endTime":"15:30","teacherCatalogId":"ac230000-0000-4000-8000-000000000102","classroomCatalogId":"ac230000-0000-4000-8000-000000000202","sortOrder":2}]'::jsonb,'ac230000-0000-4000-8000-000000000504',null)"+
+ #             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+(1 row)
+
+                             is                             
+------------------------------------------------------------
+ not ok 13 - first slot ID keeps its row after swap        +
+ # Failed test 13: "first slot ID keeps its row after swap"+
+ #         have: 09:00:00                                  +
+ #         want: 10:00:00
+(1 row)
+
+                             is                              
+-------------------------------------------------------------
+ not ok 14 - second slot ID keeps its row after swap        +
+ # Failed test 14: "second slot ID keeps its row after swap"+
+ #         have: 10:00:00                                   +
+ #         want: 09:00:00
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 15 - past session FK still targets original slot ID
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000903
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 16 - teacher role cannot save defaults
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000902
+(1 row)
+
+                                                                                                                                                                                                 lives_ok                                                                                                                                                                                                  
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ not ok 17 - staff can idempotently save unchanged defaults                                                                                                                                                                                                                                                                                                                                               +
+ # Failed test 17: "staff can idempotently save unchanged defaults"                                                                                                                                                                                                                                                                                                                                       +
+ #     died: P0001: class_schedule_stale                                                                                                                                                                                                                                                                                                                                                                  +
+ #         CONTEXT:                                                                                                                                                                                                                                                                                                                                                                                       +
+ #             PL/pgSQL function public.save_class_schedule_defaults_v1(uuid,bigint,jsonb,uuid,text) line 9 at RAISE                                                                                                                                                                                                                                                                                      +
+ #             SQL statement "select public.save_class_schedule_defaults_v1(                                                                                                                                                                                                                                                                                                                              +
+ #              'ac230000-0000-4000-8000-000000000301',2,                                                                                                                                                                                                                                                                                                                                                 +
+ #              (select coalesce(jsonb_agg(jsonb_build_object('id',id,'weekday',weekday,'startTime',to_char(start_time,'HH24:MI'),'endTime',to_char(end_time,'HH24:MI'),'teacherCatalogId',teacher_catalog_id,'classroomCatalogId',classroom_catalog_id,'sortOrder',sort_order) order by sort_order),'[]'::jsonb) from public.class_schedule_slots where class_id='ac230000-0000-4000-8000-000000000301'),+
+ #              'ac230000-0000-4000-8000-000000000506',null)"                                                                                                                                                                                                                                                                                                                                             +
+ #             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+(1 row)
+
+UPDATE 1
+ERROR:  class_schedule_stale
+CONTEXT:  PL/pgSQL function public.save_class_schedule_defaults_v1(uuid,bigint,jsonb,uuid,text) line 9 at RAISE

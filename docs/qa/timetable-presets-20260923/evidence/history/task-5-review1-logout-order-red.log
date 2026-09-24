@@ -1,0 +1,32 @@
+✔ actual React StrictMode effect replay retains a live controller that loads and saves (39.539334ms)
+✔ actor cleanup removes recovery for unmounted plans while keeping another actor (3.242375ms)
+✖ actual plan switch keeps same-actor drafts through child unmount for provider logout cleanup (4.984958ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 2
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 415.45125
+
+✖ failing tests:
+
+test at tests/timetable-plan-hook.node.ts:17:1
+✖ actual plan switch keeps same-actor drafts through child unmount for provider logout cleanup (4.984958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + '{"version":1,"entries":[{"edit":{"operation":"save","item":{"id":"item","planId":"p2","revision":1,"name":"Math","subject":"math","subjectAreaKey":null,"grade":"1","capacity":null,"tuition":null,"defaultTeacherId":null,"defaultClassroomId":null,"durationMinutes":null,"sourceClassId":null,"state":"draft","appliedClassId":null,"appliedTransferId":null,"appliedAt":null,"pendingSlots":[]},"slots":[{"id":"slot","itemId":"item","planId":"p2","weekday":1,"startMinute":600,"endMinute":650,"teacherId":"teacher","classroomId":"room","sourceSlotId":null}]},"submitted":{"operation":"save","planId":"p2","expectedMetaRevision":1,"expectedShadowFingerprint":"fingerprint","expectedItemRevision":1,"item":{"id":"item","planId":"p2","name":"Math","subject":"math","subjectAreaKey":null,"grade":"1","capacity":null,"tuition":null,"defaultTeacherId":null,"defaultClassroomId":null,"durationMinutes":null,"pendingSlots":[]},"slots":[{"id":"slot","itemId":"item","planId":"p2","weekday":1,"startMinute":600,"endMinute":650,"teacherId":"teacher","classroomId":"room","sourceSlotId":null}],"requestKey":"19a398dc-6ebb-4288-a691-42a46ed69b76"},"status":"error"}]}'
+  - null
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-hook.node.ts:17:2242)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '{"version":1,"entries":[{"edit":{"operation":"save","item":{"id":"item","planId":"p2","revision":1,"name":"Math","subject":"math","subjectAreaKey":null,"grade":"1","capacity":null,"tuition":null,"defaultTeacherId":null,"defaultClassroomId":null,"durationMinutes":null,"sourceClassId":null,"state":"draft","appliedClassId":null,"appliedTransferId":null,"appliedAt":null,"pendingSlots":[]},"slots":[{"id":"slot","itemId":"item","planId":"p2","weekday":1,"startMinute":600,"endMinute":650,"teacherId":"teacher","classroomId":"room","sourceSlotId":null}]},"submitted":{"operation":"save","planId":"p2","expectedMetaRevision":1,"expectedShadowFingerprint":"fingerprint","expectedItemRevision":1,"item":{"id":"item","planId":"p2","name":"Math","subject":"math","subjectAreaKey":null,"grade":"1","capacity":null,"tuition":null,"defaultTeacherId":null,"defaultClassroomId":null,"durationMinutes":null,"pendingSlots":[]},"slots":[{"id":"slot","itemId":"item","planId":"p2","weekday":1,"startMinute":600,"endMinute":650,"teacherId":"teacher","classroomId":"room","sourceSlotId":null}],"requestKey":"19a398dc-6ebb-4288-a691-42a46ed69b76"},"status":"error"}]}',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }

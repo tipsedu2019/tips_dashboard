@@ -1,0 +1,43 @@
+
+APPLY supabase/migrations/20260923063151_timetable_schedule_mutation_safety.sql
+BEGIN
+SET
+SET
+CREATE FUNCTION
+REVOKE
+DO
+ALTER TABLE
+ALTER TABLE
+CREATE FUNCTION
+CREATE FUNCTION
+COMMIT
+
+APPLY supabase/migrations/20260923065331_timetable_schedule_partial_resources.sql
+BEGIN
+SET
+SET
+DO
+DO
+COMMIT
+
+APPLY supabase/migrations/20260923070639_timetable_schedule_literal_resources.sql
+BEGIN
+SET
+SET
+DO
+DO
+COMMIT
+
+APPLY supabase/migrations/20260923073614_timetable_normalized_slot_resources.sql
+BEGIN
+SET
+SET
+DO
+COMMIT
+
+APPLY supabase/migrations/20260923074255_timetable_legacy_ambiguous_room_parser.sql
+BEGIN
+SET
+SET
+DO
+COMMIT

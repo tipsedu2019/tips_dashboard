@@ -1,0 +1,53 @@
+{
+  "boundary": "two independent Playwright contexts, actual isolated DB RPC; polling/focus invalidation, no provider Realtime",
+  "checks": [
+    {
+      "name": "independent actual actor sessions",
+      "passed": true,
+      "actorIds": [
+        "00000000-0000-4000-8000-000000000099",
+        "af249000-0000-4000-8000-000000000902"
+      ]
+    },
+    {
+      "name": "lost create response → reload → identical immutable request → one preset",
+      "passed": true,
+      "planId": "0c842a1e-32b6-4f25-8b49-8a16f96e0919",
+      "requestKey": "f57d6d6d-b708-4832-b60b-c4604a7c7af2"
+    },
+    {
+      "name": "preparing class import lost response → reload → same key → one preset and pending conflict",
+      "passed": true,
+      "planId": "7775b5c3-7c71-45f2-af36-e3af07349c2f",
+      "requestKey": "b383d5a7-5c63-49e9-b186-c4e87b55ade6"
+    },
+    {
+      "name": "different items edited by independent actors merge",
+      "passed": true
+    },
+    {
+      "name": "same item actual concurrent edits yield one winner and one exact stale response",
+      "passed": true
+    },
+    {
+      "name": "failed refreshed reference preserves good grid, disables previously enabled transfer and edit/create controls, sends zero mutation/transfer requests",
+      "passed": true
+    },
+    {
+      "name": "teacher share revocation removes only revoked view/name/metadata, preserves other permitted plan submitted recovery byte-for-byte and same-key receipt",
+      "passed": true,
+      "allowedId": "3f1e743a-561f-49eb-8a9b-855a316c5848",
+      "requestKey": "23c60d20-4406-4dd4-81de-ac64d7ee5019",
+      "otherRecoveryBoundary": "controller-format session storage seeded from real DB committed request; independent eligible teacher actual share revoke"
+    },
+    {
+      "name": "missing planner RPC leaves real operating read with no create action",
+      "passed": true
+    },
+    {
+      "name": "active shadow → new draft copies basics with zero placements and unchanged operating source",
+      "passed": true
+    }
+  ],
+  "passed": true
+}

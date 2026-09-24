@@ -1541,7 +1541,7 @@ const FULL_DAY_TIME_SLOTS = buildHalfHourSlots(0);
 function minutesToSlotIndex(value, startHour = 0) {
   const minutes = timeToMinutes(value);
   const baseMinutes = startHour * 60;
-  return Math.max(0, Math.floor((minutes - baseMinutes) / 30));
+  return Math.max(0, (minutes - baseMinutes) / 30);
 }
 
 function buildPaletteByClassId(rows = []) {
@@ -1656,7 +1656,7 @@ function buildGridBlock(row, columnIndex, palette, detailValue, lessonScheduleMa
     key: row.id,
     columnIndex,
     startSlot: minutesToSlotIndex(row.start),
-    endSlot: Math.max(minutesToSlotIndex(row.end), minutesToSlotIndex(row.start) + 1),
+    endSlot: Math.max(minutesToSlotIndex(row.end), minutesToSlotIndex(row.start) + 1 / 30),
     backgroundColor: palette.bg,
     borderColor: palette.border,
     textColor: palette.text,

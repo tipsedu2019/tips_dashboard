@@ -1,0 +1,21 @@
+✔ touching intervals are free but one minute of overlap conflicts (0.825333ms)
+✔ same item overlaps even with different resources and includes both resource reasons when shared (0.08125ms)
+✔ each plan is independent, while every plan checks the same active shadow (0.066042ms)
+✔ a source class is not exempt from its own live shadow (0.04675ms)
+✔ suggestions preserve resource IDs, selected weekday order and five minute sequence (0.187917ms)
+✔ suggestions avoid shadows even for matching source class and return empty when none fit (0.052333ms)
+✔ an unrelated preexisting conflict does not hide a safe new suggestion (0.041042ms)
+✔ four views project the same stable Monday and Wednesday slot IDs (0.702708ms)
+✔ resolveGridTarget uses cropped absolute minutes and only the view-owned resource (0.155041ms)
+✔ resolveMovedGridTarget snaps the movement delta, preserving a 17:13 origin (0.118625ms)
+✔ grid adapter rejects malformed weekday, coordinate, and time (0.162666ms)
+✔ moveSlot changes one slot without mutating the original or its duration (0.580917ms)
+✔ moveSlot rejects noninteger, invalid weekday, and crossing-midnight targets (0.191ms)
+ℹ tests 13
+ℹ suites 0
+ℹ pass 13
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 56.774959

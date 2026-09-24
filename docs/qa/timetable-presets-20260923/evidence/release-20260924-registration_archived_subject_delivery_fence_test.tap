@@ -1,0 +1,51 @@
+ok 1 - appointment delivery eligibility has one active-subject authority
+ok 2 - active-subject authority is a postgres-owned empty-search-path stable definer
+ok 3 - Google Chat observation source rejects archived tracks
+ok 4 - bundle source collection rejects archived level-test, consultation, and observation tracks
+ok 5 - bundle materialization serializes with archive and rechecks every collected track
+ok 6 - observation Alimtalk source rejects archived tracks
+ok 7 - appointment booking and reminder sources include active participants only
+ok 8 - waiting and admission sources include active tracks and enrollment plans only
+ok 9 - the retired automatic reminder synchronizer is a constant provider-zero no-op
+ok 10 - the retired automatic reminder claim returns no work
+ok 11 - final reminder prepare re-resolves and locks appointment source facts
+ok 12 - final Google Chat prepare locks an active track and re-resolves its source
+ok 13 - manual message provider marker keeps the current-source recheck
+ok 14 - message dedupe remains lifetime unique and is not released by archive state
+ok 15 - message business identities remain lifetime unique across subject archive
+ok 16 - bundle revisions remain lifetime unique across subject archive
+ok 17 - manual message claims do not reinterpret archive state as a released identity
+ok 18 - subject archive has no synchronous notification mutation function
+ok 19 - subject archive has no AFTER trigger that can lock notification rows
+ok 20 - every subject-track trigger is independent from delivery and reminder tables
+ok 21 - a shared appointment is active while either subject participant remains active
+ok 22 - pre-archive fixtures include a two-subject bundle and manual sending delivery but no automatic Chat job
+ok 23 - archiving one subject never blocks the underlying fact edit
+ok 24 - archiving one shared participant retains the reminder for the active subject
+ok 25 - archive fact commit does not mutate pre-marker or post-marker bundle work
+ok 26 - archive creates no automatic Chat job and preserves manual sending-delivery uncertainty
+ok 27 - fresh bundle rendering excludes the archived participant and gets a new audit identity
+ok 28 - fresh active-subject bundle can create a distinct outbox identity without rewriting history
+ok 29 - post-marker bundle identity remains lifetime unique after subject archive
+ok 30 - archiving the final subject also remains a fact-only successful edit
+ok 31 - archiving the final participant commits without synchronously touching its reminder
+ok 32 - archiving the last participant leaves the inert provider-zero row untouched
+service_role
+ok 33 - the retired reminder synchronizer remains a harmless no-op
+ok 34 - a directly seeded inert reminder is never claimable
+ok 35 - a directly seeded inert reminder never reactivates the automatic backlog
+
+ok 36 - retired synchronization leaves the inert reminder row and provider-marker uncertainty untouched
+ok 37 - restoring a subject remains a fact-only successful edit
+ok 38 - restoring a fact leaves the inert reminder state untouched
+service_role
+ok 39 - the retired reminder synchronizer cannot reactivate work after restore
+
+ok 40 - retired synchronization leaves the restored appointment reminder inert
+ok 41 - restore safely reuses the identical immutable active-subject bundle snapshot
+
+
+
+NOTICE:  extension "dblink" already exists, skipping
+ERROR:  password or GSSAPI delegated credentials required
+DETAIL:  Non-superusers must provide a password in the connection string or send delegated GSSAPI credentials.

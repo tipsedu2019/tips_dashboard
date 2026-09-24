@@ -67,7 +67,8 @@ test("a retry reuses the action request key and its canonical defaults payload",
 
 test("RPC errors are mapped to safe schedule action states", () => {
   for (const [error, expected] of [
-    [{ code: "40001", message: "class_schedule_stale" }, "stale"],
+    [{ code: "P0001", message: "class_schedule_stale" }, "stale"],
+    [{ code: "40001", message: "serialization_failure" }, "unknown"],
     [{ code: "42501", message: "class_schedule_forbidden" }, "forbidden"],
     [{ code: "P0001", message: "continuous_class_schedule_runtime_not_ready" }, "not_ready"],
     [{ code: "22023", message: "idempotency_key_reused" }, "idempotency"],

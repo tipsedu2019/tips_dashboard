@@ -1,0 +1,362 @@
+{
+  "task-8-performance-dev-before.json": {
+    "mode": "Next development webpack, root-owned 3261",
+    "viewport": {
+      "width": 1440,
+      "height": 1200
+    },
+    "network": "loopback-only synthetic read transport; no mutation",
+    "results": [
+      {
+        "items": 200,
+        "slots": 600,
+        "projectionFourViewsP95Ms": 1.464040999999952,
+        "pureDragAllDataP95Ms": 2.0489579999999705,
+        "frameCount": 212,
+        "frameP95Ms": 134.30000000000018,
+        "pointerToFrameP95Ms": 15.899999998509884,
+        "mutations": 0,
+        "providerCalls": 0
+      },
+      {
+        "items": 500,
+        "slots": 2000,
+        "projectionFourViewsP95Ms": 8.107125000000451,
+        "pureDragAllDataP95Ms": 24.305333999998766,
+        "frameCount": 268,
+        "frameP95Ms": 433.39999999999964,
+        "pointerToFrameP95Ms": 43.80000000074506,
+        "mutations": 0,
+        "providerCalls": 0
+      }
+    ]
+  },
+  "task-8-performance-release-before.json": {
+    "mode": "Next release webpack baseline",
+    "viewport": {
+      "width": 1440,
+      "height": 1200
+    },
+    "network": "loopback-only synthetic read transport; no mutation",
+    "results": [
+      {
+        "items": 200,
+        "slots": 600,
+        "projectionFourViewsP95Ms": 1.449416000000042,
+        "pureDragAllDataP95Ms": 2.089291000000003,
+        "frameCount": 232,
+        "frameP95Ms": 33.400000000000546,
+        "pointerToFrameP95Ms": 23.299999997019768,
+        "mutations": 0,
+        "providerCalls": 0
+      },
+      {
+        "items": 500,
+        "slots": 2000,
+        "projectionFourViewsP95Ms": 8.300499999999374,
+        "pureDragAllDataP95Ms": 24.2115419999991,
+        "frameCount": 263,
+        "frameP95Ms": 150,
+        "pointerToFrameP95Ms": 44.80000000074506,
+        "mutations": 0,
+        "providerCalls": 0
+      }
+    ]
+  },
+  "task-8-reference-before-guard.json": {
+    "mode": "PostgreSQL17 network-none Docker socket; timings include psql IPC",
+    "classCount": 200,
+    "historyWeeks": 13,
+    "datedSessions": 7800,
+    "measurements": [
+      {
+        "name": "operatingReference",
+        "samples": [
+          {
+            "durationMs": 156.08808299999873,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 156.01237500000025,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 155.90295800000058,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 146.3561669999999,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 151.45887499999844,
+            "payloadBytes": 2594645
+          }
+        ]
+      },
+      {
+        "name": "revisionPoll",
+        "samples": [
+          {
+            "durationMs": 120.69029200000114,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 117.6002499999995,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 117.74104199999965,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 147.0482090000005,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 144.20216699999946,
+            "payloadBytes": 165
+          }
+        ]
+      },
+      {
+        "name": "guardedOperatingWrite",
+        "samples": [
+          {
+            "durationMs": 11822.197208,
+            "payloadBytes": 694
+          },
+          {
+            "durationMs": 11351.509917,
+            "payloadBytes": 694
+          },
+          {
+            "durationMs": 11406.046750000001,
+            "payloadBytes": 694
+          }
+        ]
+      }
+    ],
+    "original": {
+      "durationMs": 18562.223584,
+      "code": "00000"
+    },
+    "equality": {
+      "datedRows": 7800,
+      "jsonbExact": true,
+      "payloadBytes": 2594645
+    },
+    "passed": true
+  },
+  "finalBrowser": {
+    "mode": "Next production webpack, final measured-height visible panels and pointer feedback",
+    "viewport": {
+      "width": 1440,
+      "height": 1200
+    },
+    "network": "loopback-only synthetic read transport; no mutation",
+    "results": [
+      {
+        "items": 200,
+        "slots": 600,
+        "projectionFourViewsP95Ms": 1.5459579999999846,
+        "pureDragAllDataP95Ms": 0.08037500000000364,
+        "frameCount": 138,
+        "frameP95Ms": 17.5,
+        "gestureFrameP95Ms": 17.59999999999991,
+        "pointerDownToFrameMs": 55.5,
+        "pointerUpToFrameMs": 73.5,
+        "pointerToFrameP95Ms": 17,
+        "longFrames": [
+          {
+            "duration": 60.19999999925494,
+            "blockingDuration": 0,
+            "renderStart": 3884.5,
+            "styleAndLayoutStart": 3884.5,
+            "startTime": 3840,
+            "scripts": [
+              {
+                "duration": 29.299999997019768,
+                "invoker": "DOMWindow.onkeydown",
+                "sourceFunctionName": "f",
+                "forcedStyleAndLayoutDuration": 0
+              }
+            ]
+          }
+        ],
+        "reactCommitCount": 94,
+        "mutations": 0,
+        "providerCalls": 0,
+        "offscreen": {
+          "heightBefore": 35473,
+          "heightAfter": 35473,
+          "dragPreview": true,
+          "cancelClean": true
+        }
+      },
+      {
+        "items": 500,
+        "slots": 2000,
+        "projectionFourViewsP95Ms": 8.285499999999956,
+        "pureDragAllDataP95Ms": 0.21649999999954161,
+        "frameCount": 196,
+        "frameP95Ms": 33.59999999999991,
+        "gestureFrameP95Ms": 33.69999999999982,
+        "pointerDownToFrameMs": 84.89999999850988,
+        "pointerUpToFrameMs": 122.19999999925494,
+        "pointerToFrameP95Ms": 36.599999997764826,
+        "longFrames": [
+          {
+            "duration": 64.09999999776483,
+            "blockingDuration": 13.7,
+            "renderStart": 1958.1000000014901,
+            "styleAndLayoutStart": 1958.199999999255,
+            "startTime": 1894.1000000014901,
+            "scripts": [
+              {
+                "duration": 62.5,
+                "invoker": "#document.onpointerdown",
+                "sourceFunctionName": "fT",
+                "forcedStyleAndLayoutDuration": 0.1
+              }
+            ]
+          },
+          {
+            "duration": 65.69999999925494,
+            "blockingDuration": 15.2,
+            "renderStart": 2106.900000002235,
+            "styleAndLayoutStart": 2106.900000002235,
+            "startTime": 2047.4000000022352,
+            "scripts": []
+          },
+          {
+            "duration": 52.29999999701977,
+            "blockingDuration": 0,
+            "renderStart": 2546.199999999255,
+            "styleAndLayoutStart": 2546.199999999255,
+            "startTime": 2528.900000002235,
+            "scripts": []
+          },
+          {
+            "duration": 65.10000000149012,
+            "blockingDuration": 0,
+            "renderStart": 3911.10000000149,
+            "styleAndLayoutStart": 3911.10000000149,
+            "startTime": 3846,
+            "scripts": []
+          },
+          {
+            "duration": 106.39999999850988,
+            "blockingDuration": 46.1,
+            "renderStart": 5818.60000000149,
+            "styleAndLayoutStart": 5818.60000000149,
+            "startTime": 5745.60000000149,
+            "scripts": [
+              {
+                "duration": 62.19999999925494,
+                "invoker": "DOMWindow.onkeydown",
+                "sourceFunctionName": "f",
+                "forcedStyleAndLayoutDuration": 0
+              }
+            ]
+          }
+        ],
+        "reactCommitCount": 94,
+        "mutations": 0,
+        "providerCalls": 0,
+        "offscreen": {
+          "heightBefore": 93133,
+          "heightAfter": 93133,
+          "dragPreview": true,
+          "cancelClean": true
+        }
+      }
+    ]
+  },
+  "finalReference": {
+    "mode": "PostgreSQL17 network-none Docker socket; timings include psql IPC",
+    "classCount": 200,
+    "historyWeeks": 13,
+    "datedSessions": 7800,
+    "measurements": [
+      {
+        "name": "operatingReference",
+        "samples": [
+          {
+            "durationMs": 147.46045800000047,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 139.87304099999983,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 152.52995800000008,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 147.9494169999998,
+            "payloadBytes": 2594645
+          },
+          {
+            "durationMs": 143.79899999999998,
+            "payloadBytes": 2594645
+          }
+        ]
+      },
+      {
+        "name": "revisionPoll",
+        "samples": [
+          {
+            "durationMs": 109.31283299999996,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 108.61725000000024,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 106.6474159999998,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 104.39437499999985,
+            "payloadBytes": 165
+          },
+          {
+            "durationMs": 106.03766700000051,
+            "payloadBytes": 165
+          }
+        ]
+      },
+      {
+        "name": "guardedOperatingWrite",
+        "samples": [
+          {
+            "durationMs": 479.48199999999997,
+            "payloadBytes": 694
+          },
+          {
+            "durationMs": 367.1855829999995,
+            "payloadBytes": 694
+          },
+          {
+            "durationMs": 367.09916599999997,
+            "payloadBytes": 694
+          }
+        ]
+      }
+    ],
+    "original": {
+      "durationMs": 22289.502791,
+      "code": "00000"
+    },
+    "equality": {
+      "datedRows": 7800,
+      "jsonbExact": true,
+      "payloadBytes": 2594645
+    },
+    "passed": true
+  },
+  "measurementCorrection": "Removed pointerHandlerP95Ms and handlerEndToReactCommitP95Ms: timing endpoint was registered before the product pointermove handler. Neither field measured the claimed interval. Independent frame, whole-gesture, input-to-frame, pure projection and LoAF evidence remains unchanged; no performance rerun or new performance claim."
+}

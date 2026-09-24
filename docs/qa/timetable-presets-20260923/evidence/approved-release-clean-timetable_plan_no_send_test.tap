@@ -1,0 +1,136 @@
+a8240000-0000-4000-8000-000000000001
+release2-rpc
+a8240000-0000-4000-8000-000000000001
+ok 1 - nonempty fixture: public.students
+ok 2 - nonempty fixture: public.student_class_enrollment_history
+ok 3 - nonempty fixture: public.ops_registration_enrollments
+ok 4 - nonempty fixture: public.ops_registration_observations
+ok 5 - nonempty fixture: public.ops_registration_admission_batches
+ok 6 - nonempty fixture: public.textbooks
+ok 7 - nonempty fixture: public.textbook_sales
+ok 8 - nonempty fixture: public.textbook_sale_lines
+ok 9 - nonempty fixture: public.class_lesson_sessions
+ok 10 - nonempty fixture: dashboard_private.notification_events
+ok 11 - nonempty fixture: dashboard_private.notification_deliveries
+ok 12 - nonempty fixture: public.ops_task_notification_deliveries
+ok 13 - operating copy count unchanged: originalClass
+ok 14 - operating copy count unchanged: public.students
+ok 15 - operating copy count unchanged: public.textbooks
+ok 16 - operating copy count unchanged: public.textbook_sales
+ok 17 - operating copy count unchanged: public.textbook_sale_lines
+ok 18 - operating copy count unchanged: public.class_lesson_sessions
+ok 19 - operating copy count unchanged: public.ops_registration_enrollments
+ok 20 - operating copy count unchanged: public.ops_registration_observations
+ok 21 - operating copy count unchanged: dashboard_private.notification_events
+ok 22 - operating copy count unchanged: public.makeup_notification_deliveries
+ok 23 - operating copy count unchanged: public.ops_task_notification_deliveries
+ok 24 - operating copy count unchanged: public.student_class_enrollment_history
+ok 25 - operating copy count unchanged: dashboard_private.notification_deliveries
+ok 26 - operating copy count unchanged: public.ops_registration_admission_batches
+ok 27 - operating copy core JSON unchanged: originalClass
+ok 28 - operating copy core JSON unchanged: public.students
+ok 29 - operating copy core JSON unchanged: public.textbooks
+ok 30 - operating copy core JSON unchanged: public.textbook_sales
+ok 31 - operating copy core JSON unchanged: public.textbook_sale_lines
+ok 32 - operating copy core JSON unchanged: public.class_lesson_sessions
+ok 33 - operating copy core JSON unchanged: public.ops_registration_enrollments
+ok 34 - operating copy core JSON unchanged: public.ops_registration_observations
+ok 35 - operating copy core JSON unchanged: dashboard_private.notification_events
+ok 36 - operating copy core JSON unchanged: public.makeup_notification_deliveries
+ok 37 - operating copy core JSON unchanged: public.ops_task_notification_deliveries
+ok 38 - operating copy core JSON unchanged: public.student_class_enrollment_history
+ok 39 - operating copy core JSON unchanged: dashboard_private.notification_deliveries
+ok 40 - operating copy core JSON unchanged: public.ops_registration_admission_batches
+ok 41 - operating copy expected new class count
+ok 42 - operating copy new class has no copied history
+ok 43 - operating move count unchanged: originalClass
+ok 44 - operating move count unchanged: public.students
+ok 45 - operating move count unchanged: public.textbooks
+ok 46 - operating move count unchanged: public.textbook_sales
+ok 47 - operating move count unchanged: public.textbook_sale_lines
+ok 48 - operating move count unchanged: public.class_lesson_sessions
+ok 49 - operating move count unchanged: public.ops_registration_enrollments
+ok 50 - operating move count unchanged: public.ops_registration_observations
+ok 51 - operating move count unchanged: dashboard_private.notification_events
+ok 52 - operating move count unchanged: public.makeup_notification_deliveries
+ok 53 - operating move count unchanged: public.ops_task_notification_deliveries
+ok 54 - operating move count unchanged: public.student_class_enrollment_history
+ok 55 - operating move count unchanged: dashboard_private.notification_deliveries
+ok 56 - operating move count unchanged: public.ops_registration_admission_batches
+ok 57 - operating move core JSON unchanged: originalClass
+ok 58 - operating move core JSON unchanged: public.students
+ok 59 - operating move core JSON unchanged: public.textbooks
+ok 60 - operating move core JSON unchanged: public.textbook_sales
+ok 61 - operating move core JSON unchanged: public.textbook_sale_lines
+ok 62 - operating move core JSON unchanged: public.class_lesson_sessions
+ok 63 - operating move core JSON unchanged: public.ops_registration_enrollments
+ok 64 - operating move core JSON unchanged: public.ops_registration_observations
+ok 65 - operating move core JSON unchanged: dashboard_private.notification_events
+ok 66 - operating move core JSON unchanged: public.makeup_notification_deliveries
+ok 67 - operating move core JSON unchanged: public.ops_task_notification_deliveries
+ok 68 - operating move core JSON unchanged: public.student_class_enrollment_history
+ok 69 - operating move core JSON unchanged: dashboard_private.notification_deliveries
+ok 70 - operating move core JSON unchanged: public.ops_registration_admission_batches
+ok 71 - operating move expected new class count
+ok 72 - operating move new class has no copied history
+ok 73 - plan copy count unchanged: originalClass
+ok 74 - plan copy count unchanged: public.students
+ok 75 - plan copy count unchanged: public.textbooks
+ok 76 - plan copy count unchanged: public.textbook_sales
+ok 77 - plan copy count unchanged: public.textbook_sale_lines
+ok 78 - plan copy count unchanged: public.class_lesson_sessions
+ok 79 - plan copy count unchanged: public.ops_registration_enrollments
+ok 80 - plan copy count unchanged: public.ops_registration_observations
+ok 81 - plan copy count unchanged: dashboard_private.notification_events
+ok 82 - plan copy count unchanged: public.makeup_notification_deliveries
+ok 83 - plan copy count unchanged: public.ops_task_notification_deliveries
+ok 84 - plan copy count unchanged: public.student_class_enrollment_history
+ok 85 - plan copy count unchanged: dashboard_private.notification_deliveries
+ok 86 - plan copy count unchanged: public.ops_registration_admission_batches
+ok 87 - plan copy core JSON unchanged: originalClass
+ok 88 - plan copy core JSON unchanged: public.students
+ok 89 - plan copy core JSON unchanged: public.textbooks
+ok 90 - plan copy core JSON unchanged: public.textbook_sales
+ok 91 - plan copy core JSON unchanged: public.textbook_sale_lines
+ok 92 - plan copy core JSON unchanged: public.class_lesson_sessions
+ok 93 - plan copy core JSON unchanged: public.ops_registration_enrollments
+ok 94 - plan copy core JSON unchanged: public.ops_registration_observations
+ok 95 - plan copy core JSON unchanged: dashboard_private.notification_events
+ok 96 - plan copy core JSON unchanged: public.makeup_notification_deliveries
+ok 97 - plan copy core JSON unchanged: public.ops_task_notification_deliveries
+ok 98 - plan copy core JSON unchanged: public.student_class_enrollment_history
+ok 99 - plan copy core JSON unchanged: dashboard_private.notification_deliveries
+ok 100 - plan copy core JSON unchanged: public.ops_registration_admission_batches
+ok 101 - plan copy expected new class count
+ok 102 - plan copy new class has no copied history
+ok 103 - plan move count unchanged: originalClass
+ok 104 - plan move count unchanged: public.students
+ok 105 - plan move count unchanged: public.textbooks
+ok 106 - plan move count unchanged: public.textbook_sales
+ok 107 - plan move count unchanged: public.textbook_sale_lines
+ok 108 - plan move count unchanged: public.class_lesson_sessions
+ok 109 - plan move count unchanged: public.ops_registration_enrollments
+ok 110 - plan move count unchanged: public.ops_registration_observations
+ok 111 - plan move count unchanged: dashboard_private.notification_events
+ok 112 - plan move count unchanged: public.makeup_notification_deliveries
+ok 113 - plan move count unchanged: public.ops_task_notification_deliveries
+ok 114 - plan move count unchanged: public.student_class_enrollment_history
+ok 115 - plan move count unchanged: dashboard_private.notification_deliveries
+ok 116 - plan move count unchanged: public.ops_registration_admission_batches
+ok 117 - plan move core JSON unchanged: originalClass
+ok 118 - plan move core JSON unchanged: public.students
+ok 119 - plan move core JSON unchanged: public.textbooks
+ok 120 - plan move core JSON unchanged: public.textbook_sales
+ok 121 - plan move core JSON unchanged: public.textbook_sale_lines
+ok 122 - plan move core JSON unchanged: public.class_lesson_sessions
+ok 123 - plan move core JSON unchanged: public.ops_registration_enrollments
+ok 124 - plan move core JSON unchanged: public.ops_registration_observations
+ok 125 - plan move core JSON unchanged: dashboard_private.notification_events
+ok 126 - plan move core JSON unchanged: public.makeup_notification_deliveries
+ok 127 - plan move core JSON unchanged: public.ops_task_notification_deliveries
+ok 128 - plan move core JSON unchanged: public.student_class_enrollment_history
+ok 129 - plan move core JSON unchanged: dashboard_private.notification_deliveries
+ok 130 - plan move core JSON unchanged: public.ops_registration_admission_batches
+ok 131 - plan move expected new class count
+ok 132 - plan move new class has no copied history
+1..132

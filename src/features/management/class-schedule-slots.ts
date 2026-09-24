@@ -133,7 +133,9 @@ export function parseClassScheduleSlots(
     const days = [...text(match[1])].filter((day): day is ClassScheduleDay => CLASS_SCHEDULE_DAY_SET.has(day));
     const startTime = text(match[2]);
     const endTime = text(match[3]);
-    const detailParts = text(match[4]).split(/[,，/]+/).map(text).filter(Boolean);
+    const detail = text(match[4]);
+    const hasResourcePair = detail.includes(",") || detail.includes("，");
+    const detailParts = detail.split(/[,，/]+/).map(text);
     const firstDetail = detailParts[0] || "";
     const firstDetailIsTeacher = Boolean(firstDetail && !looksLikeClassroomAlias(firstDetail));
 
@@ -144,11 +146,11 @@ export function parseClassScheduleSlots(
         day,
         startTime,
         endTime,
-        teacher: firstDetailIsTeacher ? firstDetail : getFallbackValue(teachers, slotIndex),
+        teacher: hasResourcePair ? firstDetail : firstDetailIsTeacher ? firstDetail : getFallbackValue(teachers, slotIndex),
         teacherCatalogId: null,
-        classroom: firstDetailIsTeacher
-          ? detailParts.slice(1).join(", ") || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex)
-          : detailParts[detailParts.length - 1] || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex),
+        classroom: hasResourcePair
+          ? detailParts.slice(1).join(", ")
+          : (detailParts.length > 1 || !firstDetailIsTeacher ? detailParts[detailParts.length - 1] : "") || classroomsByDay.get(day) || getFallbackValue(classrooms, slotIndex),
         classroomCatalogId: null,
         sortOrder: slotIndex,
       });
@@ -188,14 +190,16 @@ export function formatClassScheduleSlots(slots: ClassScheduleSlot[]) {
     .filter((slot) => Object.values(slot).some(Boolean));
   const uniqueTeachers = uniqueTextValues(normalizedSlots.map((slot) => slot.teacher));
   const uniqueClassrooms = uniqueTextValues(normalizedSlots.map((slot) => slot.classroom));
-  const hasSharedScheduleDetails = uniqueTeachers.length <= 1 && uniqueClassrooms.length <= 1;
+  const hasSharedScheduleDetails = new Set(normalizedSlots.map((slot) => slot.teacher)).size <= 1
+    && new Set(normalizedSlots.map((slot) => slot.classroom)).size <= 1;
 
   const schedule = normalizedSlots.filter((slot) => slot.day || slot.startTime || slot.endTime).map((slot) => {
     const timeRange = slot.startTime && slot.endTime
       ? `${slot.startTime}-${slot.endTime}`
       : [slot.startTime, slot.endTime].filter(Boolean).join("-");
     const summary = [slot.day, timeRange].filter(Boolean).join(" ");
-    const details = hasSharedScheduleDetails ? "" : [slot.teacher, slot.classroom].filter(Boolean).join(", ");
+    const details = hasSharedScheduleDetails ? ""
+      : `${slot.teacher}, ${slot.classroom}`;
     return [summary, details ? `(${details})` : ""].filter(Boolean).join(" ").trim();
   }).join("\n");
   const teacher = uniqueTeachers.join(", ");
@@ -235,7 +239,8 @@ export function formatClassScheduleDisplayLines(scheduleValue: unknown) {
   for (const match of matches) {
     const startTime = text(match[2]);
     const endTime = text(match[3]);
-    const detail = text(match[4]).replace(/\s+/g, " ");
+    const rawDetail = text(match[4]).replace(/\s+/g, " ");
+    const detail = rawDetail.endsWith(",") ? `${rawDetail} ` : rawDetail;
     const key = `${startTime}|${endTime}|${detail}`;
     const group = groups.get(key) || { days: [], startTime, endTime, detail };
     for (const day of [...text(match[1])].filter((value) => CLASS_SCHEDULE_DAY_SET.has(value))) {

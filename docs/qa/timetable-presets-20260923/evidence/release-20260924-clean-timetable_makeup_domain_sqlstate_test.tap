@@ -1,0 +1,36 @@
+release2-rpc
+
+a8230000-0000-4000-8000-000000000001
+service_role
+ok 1 - public final transition stale status
+ok 2 - missing source branch
+ok 3 - changed source branch
+ok 4 - legacy revert stale
+ok 5 - legacy apply stale
+ok 6 - legacy event ownership collision
+ok 7 - normalized apply missing session
+ok 8 - normalized revert missing session
+ok 9 - normalized apply revision branch
+release2-rpc
+
+ok 10 - normalized revert changed created session branch
+ok 11 - final room assertion collision
+prior-class
+prior-request
+prior-operation
+prior-reason
+ok 12 - public failure after context and first session update rolls back
+ok 13 - all five context settings restored after statement failure
+ok 14 - failed public effect leaves original session untouched
+ok 15 - failed effect leaves direct writes denied
+ok 16 - public normalized approval without fixture GUC
+ok 17 - approval restores all five caller context values
+ok 18 - actual public approval committed effect
+ok 19 - no direct-write permission leak after public effect
+ok 20 - public approval audit uses actual mutation key, operation and reason
+ok 21 - public normalized cancellation establishes and restores context
+ok 22 - revert restores all five caller context values
+ok 23 - revert leaves direct writes denied
+ok 24 - revert preserves original session identity
+ok 25 - public cancel audit uses actual mutation key, operation and reason
+1..25

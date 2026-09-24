@@ -58,6 +58,32 @@ test("class list display combines weekdays that share the same time and details"
   );
 });
 
+test("empty resource positions and literal marker names display without decoding", () => {
+  const slots = parseClassScheduleSlots(
+    "월 10:00-11:00 (교사 미지정, 강의실 미지정)\n화 10:00-11:00 (~v1:41~, ~41)\n수 14:00-15:30 (, )",
+    "교사 미지정, ~v1:41~",
+    "강의실 미지정(월), ~41(화)",
+  );
+  assert.deepEqual(slots.map(({ teacher, classroom }) => ({ teacher, classroom })), [
+    { teacher: "교사 미지정", classroom: "강의실 미지정" },
+    { teacher: "~v1:41~", classroom: "~41" },
+    { teacher: "", classroom: "" },
+  ]);
+  assert.deepEqual(formatClassScheduleDisplayLines(formatClassScheduleSlots(slots).schedule), [
+    "월 10:00-11:00 (교사 미지정, 강의실 미지정)",
+    "화 10:00-11:00 (~v1:41~, ~41)",
+    "수 14:00-15:30 (, )",
+  ]);
+});
+
+test("legacy raw tilde details stay literal", () => {
+  const slots = parseClassScheduleSlots("월 10:00-11:00 (~41, 강의실 1)", "~41", "강의실 1");
+  assert.equal(slots[0].teacher, "~41");
+  assert.deepEqual(formatClassScheduleDisplayLines("월 10:00-11:00 (~41, 강의실 1)"), ["월 10:00-11:00 (~41, 강의실 1)"]);
+  assert.deepEqual(formatClassScheduleDisplayLines("월 10:00-11:00 (A/B)"), ["월 10:00-11:00 (A/B)"]);
+  assert.equal(parseClassScheduleSlots("화 11:00-12:00 (교사 미지정)", "교사 미지정", "강의실 1")[0].teacher, "교사 미지정");
+});
+
 test("class resource display splits multiple teachers and classrooms into rows", () => {
   assert.deepEqual(splitClassResourceDisplayValues("양소윤, 김성은"), ["양소윤", "김성은"]);
   assert.deepEqual(
@@ -96,4 +122,13 @@ test("shared candidate details are removed but different details stay", () => {
     ),
     "금 21:30-23:00 (양소윤, 별7)\n토 15:30-17:00 (김성은, 본2)",
   );
+});
+
+for(const [detail,teacher,classroom] of [['홍길동','홍길동','1강의실'],['2강의실','김선생','2강의실'],['홍길동, 2강의실','홍길동','2강의실'],[', 2강의실','','2강의실'],['홍길동, ','홍길동',''],['홍길동/2강의실','홍길동','2강의실']]) test(`legacy management editor parsed resources: ${detail}`,()=>{
+ const [slot]=parseClassScheduleSlots(`월 17:13–18:43 (${detail})`,'김선생','1강의실');
+ assert.deepEqual({teacher:slot.teacher,classroom:slot.classroom,start:slot.startTime,end:slot.endTime},{teacher,classroom,start:'17:13',end:'18:43'});
+});
+test('teacher-only detail retains day-specific classroom for legacy editor',()=>{
+ const slots=parseClassScheduleSlots('월수 17:13-18:43 (홍길동)','김선생','1강의실(월), 2강의실(수)');
+ assert.deepEqual(slots.map(s=>s.classroom),['1강의실','2강의실']);
 });

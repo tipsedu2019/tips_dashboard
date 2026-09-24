@@ -1,0 +1,79 @@
+{
+  "status": "plan",
+  "nonExecuting": true,
+  "verified": 119,
+  "baselineSha256": "2d8144a9f73559bfee7f3e417e7cf6b3a9d5d6a5d059890b1db7e0c1e674942a",
+  "catalogSha256": "2e4c512dc82ce947cd643f4ce850e5077005a5eb2faaccd53e2aebdcd4308f7f",
+  "featureMigrations": [
+    {
+      "fileName": "20260923063151_timetable_schedule_mutation_safety.sql",
+      "status": "final",
+      "sha256": "4c696dd3f5f81201b21b0a188b22ec5712f8660b10c1921449b0a229179fdd86"
+    },
+    {
+      "fileName": "20260923065331_timetable_schedule_partial_resources.sql",
+      "status": "final",
+      "sha256": "2f3cd6910576de54a72392749f155175a6fc0207622e8cf816e2210ff9f1abdc"
+    },
+    {
+      "fileName": "20260923070639_timetable_schedule_literal_resources.sql",
+      "status": "final",
+      "sha256": "f62fc12aa838f3af15af1e86f7e9303d2260ec962d091fd43d16d437c999882a"
+    },
+    {
+      "fileName": "20260923073614_timetable_normalized_slot_resources.sql",
+      "status": "final",
+      "sha256": "47c3db6992e8506c1cf6ab198adf075fe7940cb20e7a9c325574dbfc04cd6eb2"
+    },
+    {
+      "fileName": "20260923074255_timetable_legacy_ambiguous_room_parser.sql",
+      "status": "final",
+      "sha256": "9cf4b9ccc6aac716e9314d031435527646efafe8e443041216bca2d930a3b8fe"
+    },
+    {
+      "fileName": "20260923075249_timetable_normalized_slot_time_matching.sql",
+      "status": "final",
+      "sha256": "233a19ad17a90a530c829a200d4d77866cc20cf96e3a7de174a7c7bdbea2eb34"
+    },
+    {
+      "fileName": "20260923081138_timetable_plan_storage.sql",
+      "status": "final",
+      "sha256": "e782461503ea539261bbfe1c84e437e765902199a361e9050f7bb2249ab92035"
+    },
+    {
+      "fileName": "20260923085008_timetable_operational_conflict_guards.sql",
+      "status": "final",
+      "sha256": "1a8a7f13d79753b41b9d11121a780824d93259401e810b33b25cad76d971cb20"
+    },
+    {
+      "fileName": "20260923120931_timetable_plan_transfers.sql",
+      "status": "final",
+      "sha256": "447000352b24a537275ee9f24de827ef881740c24c84a67c9d83835a3d962e9f"
+    },
+    {
+      "fileName": "20260923131454_timetable_makeup_domain_sqlstates.sql",
+      "status": "final",
+      "sha256": "ac705f9449e90fe1d2dc29406b6f0e8a5889e60ca40454b877396a6618c8c817"
+    },
+    {
+      "fileName": "20260923134651_timetable_reference_aggregation.sql",
+      "status": "final",
+      "sha256": "3f1ae143975e1cab355f6497ca481b71d242dde53833c8a736698d1da7d927a4"
+    },
+    {
+      "fileName": "20260923150523_timetable_plan_import_recovery.sql",
+      "status": "final",
+      "sha256": "4693aea069f4389660e9198ae15fc7c1f3d551fdffba1a6b90e5818d4e774a8c"
+    },
+    {
+      "fileName": "20260923164328_timetable_import_original_placement.sql",
+      "status": "final",
+      "sha256": "a8e4826aaaea9f70d2572f332a1ec3106a3f1ab30a2f50e0ce6afe8fa14a37d7"
+    },
+    {
+      "fileName": "20260924124904_timetable_legacy_reference_aggregation.sql",
+      "status": "final",
+      "sha256": "aa69ccd3170f7adbbe52732a35209bf8edd3876e4709413aed14e7492eb2087e"
+    }
+  ]
+}

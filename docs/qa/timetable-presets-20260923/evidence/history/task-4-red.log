@@ -1,0 +1,80 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 3
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 2
+SET CONSTRAINTS
+SET CONSTRAINTS
+              set_config              
+--------------------------------------
+ ad240000-0000-4000-8000-000000000901
+(1 row)
+
+CREATE FUNCTION
+                                       throws_ok                                       
+---------------------------------------------------------------------------------------
+ not ok 1 - legacy status activation rejects teacher collision across subjects        +
+ # Failed test 1: "legacy status activation rejects teacher collision across subjects"+
+ #       caught: no exception                                                         +
+ #       wanted: 23P01
+(1 row)
+
+                                  throws_ok                                   
+------------------------------------------------------------------------------
+ not ok 2 - defaults RPC rejects room-only collision before returning        +
+ # Failed test 2: "defaults RPC rejects room-only collision before returning"+
+ #       caught: no exception                                                +
+ #       wanted: 23P01
+(1 row)
+
+                                       throws_ok                                        
+----------------------------------------------------------------------------------------
+ not ok 3 - direct dated makeup write rejects effective weekly teacher conflict        +
+ # Failed test 3: "direct dated makeup write rejects effective weekly teacher conflict"+
+ #       caught: no exception                                                          +
+ #       wanted: 23P01
+(1 row)
+
+                        throws_ok                         
+----------------------------------------------------------
+ not ok 4 - initialize stale uses domain SQLSTATE        +
+ # Failed test 4: "initialize stale uses domain SQLSTATE"+
+ #       caught: 40001: class_schedule_stale             +
+ #       wanted: P0001: class_schedule_stale
+(1 row)
+
+                       throws_ok                       
+-------------------------------------------------------
+ not ok 5 - preview stale uses domain SQLSTATE        +
+ # Failed test 5: "preview stale uses domain SQLSTATE"+
+ #       caught: 40001: class_schedule_stale          +
+ #       wanted: P0001: class_schedule_stale
+(1 row)
+
+                        throws_ok                         
+----------------------------------------------------------
+ not ok 6 - generation stale uses domain SQLSTATE        +
+ # Failed test 6: "generation stale uses domain SQLSTATE"+
+ #       caught: 40001: class_schedule_stale             +
+ #       wanted: P0001: class_schedule_stale
+(1 row)
+
+                finish                
+--------------------------------------
+ 1..6
+ # Looks like you failed 6 tests of 6
+(2 rows)
+
+ROLLBACK

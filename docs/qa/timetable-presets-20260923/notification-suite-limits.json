@@ -1,0 +1,12 @@
+{
+  "origin": "eb23d7d8",
+  "producer": "dashboard_private.notification_import_makeup_retained_state_v1",
+  "source": "supabase/migrations/20260716192000_notification_makeup_adapter.sql",
+  "bodySha256": "d82bb7c54e6e1f70054bcc25e45671b32419c1208a1da87bb95b3c9122258a2a",
+  "installedExactlyMatchesOrigin": true,
+  "boundary": "55000/notification_makeup_legacy_rule_missing before timetable paths; fixture lacks a matching channel/audience makeup rule",
+  "singleWriter": "fixture SELECT registry makeup.submitted/subject_team/google_chat joins content_contracts returns no row; original assertions8/9/13/15 compare NULL. Later original test queries private notification_rules under authenticated and gets42501 before invoking its formatted RPC.",
+  "obsoleteTrigger": "public.makeup_notification_settings/reconcile_makeup_notification_settings_after_write_v1 exists in baseline; origin20260803150000 drops it. Rollback-only DROP pluslegacywriteACL fixes only adapter13/writer5, not missing registry contracts.",
+  "singleWriterFixtureJoinCount": 0,
+  "directPrivateReadSQLSTATE": "42501"
+}

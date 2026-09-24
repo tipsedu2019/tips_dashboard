@@ -1,0 +1,324 @@
+TypeError: activeElement$1.attachEvent is not a function
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3573:27)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+    at HTMLInputElementImpl._dispatch (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:243:9)
+✖ create: unknown receipt survives changed name (60.722083ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✖ create: unknown receipt survives changed name and dialog reopen (17.984292ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✖ clone: unknown receipt survives changed name (11.0925ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✖ clone: unknown receipt survives changed name and dialog reopen (11.535667ms)
+✖ late share success cannot populate another actor/dialog (10.819708ms)
+✖ late share failure cannot populate another actor/dialog (14.709333ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✖ late create success cannot change another actor's selection/dialog (15.248667ms)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+TypeError: activeElement$1.detachEvent is not a function
+    at stopWatchingForValueChange (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3546:26)
+    at handleEventsForInputEventPolyfill (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3570:12)
+    at /Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19638:15
+    at batchedUpdates$1 (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:3255:40)
+    at dispatchEventForPluginEventSystem (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:19320:7)
+    at dispatchEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23585:11)
+    at dispatchDiscreteEvent (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react-dom@19.2.3_react@19.2.3/node_modules/react-dom/cjs/react-dom-client.development.js:23553:11)
+    at HTMLDivElement.callTheUserObjectsOperation (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/generated/idl/EventListener.js:26:30)
+    at innerInvokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:360:16)
+    at invokeEventListeners (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/jsdom@29.1.1/node_modules/jsdom/lib/jsdom/living/events/EventTarget-impl.js:296:3)
+✖ late create failure cannot change another actor's selection/dialog (11.897542ms)
+✖ late share response cannot fill a newer dialog in the same actor scope (8.337625ms)
+ℹ tests 9
+ℹ suites 0
+ℹ pass 0
+ℹ fail 9
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 670.249916
+
+✖ failing tests:
+
+test at tests/timetable-plan-picker.test.mjs:44:71
+✖ create: unknown receipt survives changed name (60.722083ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+  +   name: '후속 입력',
+  -   name: '원래 요청',
+      operation: 'create',
+  +   planId: 'baad2c03-8aa3-4dc4-8575-493723f28893',
+  +   requestKey: 'c7f12e87-9ba7-4b65-b4da-c9eb517d055b',
+  -   planId: 'f5a12283-9879-447f-9a8d-69c3cb5aace7',
+  -   requestKey: '607074d9-ab39-458d-b499-c942dbc405ab',
+      targetEndDate: null,
+      targetStartDate: null
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:51:26)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'create', planId: 'baad2c03-8aa3-4dc4-8575-493723f28893', name: '후속 입력', requestKey: 'c7f12e87-9ba7-4b65-b4da-c9eb517d055b', targetStartDate: null, targetEndDate: null },
+    expected: { operation: 'create', planId: 'f5a12283-9879-447f-9a8d-69c3cb5aace7', name: '원래 요청', requestKey: '607074d9-ab39-458d-b499-c942dbc405ab', targetStartDate: null, targetEndDate: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:44:71
+✖ create: unknown receipt survives changed name and dialog reopen (17.984292ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+  + undefined
+  - {
+  -   name: '원래 요청',
+  -   operation: 'create',
+  -   planId: 'e7b8b48b-b196-41d8-acf9-80154ef5e19e',
+  -   requestKey: '12b3384c-4f86-4125-900f-2f1ca733b70e',
+  -   targetEndDate: null,
+  -   targetStartDate: null
+  - }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:51:26)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: { operation: 'create', planId: 'e7b8b48b-b196-41d8-acf9-80154ef5e19e', name: '원래 요청', requestKey: '12b3384c-4f86-4125-900f-2f1ca733b70e', targetStartDate: null, targetEndDate: null },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:44:71
+✖ clone: unknown receipt survives changed name (11.0925ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      expectedMetaRevision: 1,
+  +   name: '후속 입력',
+  -   name: '원래 요청',
+      operation: 'clone',
+  +   planId: '3855b2ad-1791-4629-8eb4-2ec44968c87e',
+  +   requestKey: 'dec00aac-f30e-4328-be87-6eb3f8a07a77',
+  -   planId: 'f65a5d71-b01e-456b-b568-d2a25948a130',
+  -   requestKey: 'd3de2585-8e40-4ae7-84da-997dc75f09f9',
+      sourcePlanId: 'source'
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:51:26)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'clone', planId: '3855b2ad-1791-4629-8eb4-2ec44968c87e', sourcePlanId: 'source', expectedMetaRevision: 1, name: '후속 입력', requestKey: 'dec00aac-f30e-4328-be87-6eb3f8a07a77' },
+    expected: { operation: 'clone', planId: 'f65a5d71-b01e-456b-b568-d2a25948a130', sourcePlanId: 'source', expectedMetaRevision: 1, name: '원래 요청', requestKey: 'd3de2585-8e40-4ae7-84da-997dc75f09f9' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:44:71
+✖ clone: unknown receipt survives changed name and dialog reopen (11.535667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly deep-equal:
+  + actual - expected
+  
+    {
+      expectedMetaRevision: 1,
+  +   name: '원본 복사',
+  -   name: '원래 요청',
+      operation: 'clone',
+  +   planId: 'a6daec01-3922-49b2-afca-4c5db13e277e',
+  +   requestKey: '90569c76-ae29-48bc-9dfb-4d4624757638',
+  -   planId: 'bc8b1140-bf5c-4fc3-ab75-0e94544fb1d5',
+  -   requestKey: 'ff586f4d-1cdd-4752-b9d4-07b0e10e8f4c',
+      sourcePlanId: 'source'
+    }
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:51:26)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: { operation: 'clone', planId: 'a6daec01-3922-49b2-afca-4c5db13e277e', sourcePlanId: 'source', expectedMetaRevision: 1, name: '원본 복사', requestKey: '90569c76-ae29-48bc-9dfb-4d4624757638' },
+    expected: { operation: 'clone', planId: 'bc8b1140-bf5c-4fc3-ab75-0e94544fb1d5', sourcePlanId: 'source', expectedMetaRevision: 1, name: '원래 요청', requestKey: 'ff586f4d-1cdd-4752-b9d4-07b0e10e8f4c' },
+    operator: 'deepStrictEqual',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:57:36
+✖ late share success cannot populate another actor/dialog (10.819708ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /A private/. Input:
+  
+  '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 공유선생님별 보기·편집 권한을 선택합니다.A private candidate공유 안 함보기편집취소저장'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:58:289)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 공유선생님별 보기·편집 권한을 선택합니다.A private candidate공유 안 함보기편집취소저장',
+    expected: /A private/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:57:36
+✖ late share failure cannot populate another actor/dialog (14.709333ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /A private/. Input:
+  
+  '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 공유선생님별 보기·편집 권한을 선택합니다.공유할 선생님이 없습니다.A private error취소저장'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:58:289)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 공유선생님별 보기·편집 권한을 선택합니다.공유할 선생님이 없습니다.A private error취소저장',
+    expected: /A private/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:60:36
+✖ late create success cannot change another actor's selection/dialog (15.248667ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(document.querySelector('[data-dialog]'))
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:61:277)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:60:36
+✖ late create failure cannot change another actor's selection/dialog (11.897542ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /response lost/. Input:
+  
+  '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 만들기기준 기간은 검토 범위입니다. 날짜가 되어도 운영 시간표에 자동 적용되지 않습니다.프리셋 이름기준 시작일기준 종료일response lost취소저장'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:61:425)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 만들기기준 기간은 검토 범위입니다. 날짜가 되어도 운영 시간표에 자동 적용되지 않습니다.프리셋 이름기준 시작일기준 종료일response lost취소저장',
+    expected: /response lost/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-picker.test.mjs:63:1
+✖ late share response cannot fill a newer dialog in the same actor scope (8.337625ms)
+  AssertionError [ERR_ASSERTION]: The input was expected to not match the regular expression /retired dialog candidate/. Input:
+  
+  '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 공유선생님별 보기·편집 권한을 선택합니다.retired dialog candidate공유 안 함보기편집취소저장'
+  
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:63:273)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '시간표운영 시간표원본보관함프리셋 만들기더보기이름·기준 기간 변경복제보관공유프리셋 공유선생님별 보기·편집 권한을 선택합니다.retired dialog candidate공유 안 함보기편집취소저장',
+    expected: /retired dialog candidate/,
+    operator: 'doesNotMatch',
+    diff: 'simple'
+  }

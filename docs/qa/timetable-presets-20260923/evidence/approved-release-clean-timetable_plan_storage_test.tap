@@ -1,0 +1,82 @@
+ac239000-0000-4000-8000-000000000901
+ok 1 - admin creates independent empty plan
+ok 2 - empty board is readable
+ok 3 - full catalogs support empty boards
+ok 4 - same actor and key replay exact result
+ok 5 - same key different body rejected
+ok 6 - item save does not increment metadata revision
+ok 7 - adjacent half-open placement and distinct item save succeed
+ok 8 - alternative plan created
+ok 9 - identical teacher room and time in another plan is independent
+ok 10 - composite FK rejects cross-plan item even for privileged insert
+ok 11 - same-item stale revision rejected
+ok 12 - same plan teacher and room conflict rejected
+ok 13 - lifecycle field injection rejected
+ok 14 - duplicate slot identity rejected
+ok 15 - same room conflicts even with another teacher
+ok 16 - same teacher conflicts even in another room
+ok 17 - same item overlaps even when both resources differ
+ok 18 - stale shadow fingerprint rejected
+ok 19 - source provenance is server-owned
+ok 20 - per plan signal matches item changes
+release2-rpc
+ok 21 - all subjects contribute authoritative shadows
+ok 22 - name-only edit preserves newly conflicting original occupancy
+ok 23 - hidden subject operational shadow blocks new placement
+ok 24 - safe repair moves out of unchanged live conflict
+ok 25 - hidden resource unchanged occupancy can be renamed
+ok 26 - hidden resource cannot acquire new occupancy
+v1
+ok 27 - deleted resource retains original stable UUID
+ok 28 - deleted resource snapshot permits non-occupancy edit
+ok 29 - second plan created independently
+ok 30 - other plan has independent occupancy
+ok 31 - another plan slot cannot be stolen
+ok 32 - metadata rename changes own revision
+ok 33 - metadata rename leaves item revision unchanged
+ok 34 - old metadata guard rejects save
+ok 35 - archive is metadata operation
+ok 36 - archived plans are readonly
+ok 37 - restore plan
+ok 38 - applied item whose source was deleted stays out of draft grid
+ok 39 - applied snapshot remains separate after applied class ID becomes null
+ok 40 - applied item is immutable
+ok 41 - clone preserves unavailable draft resources for repair
+ok 42 - whole clone copies draft slots only
+ok 43 - applied source clones to unplaced draft
+ok 44 - clone allocates new item IDs
+ok 45 - clone allocates new slot IDs
+ok 46 - explicit delete atomically removes item and slots
+ok 47 - delete removes its placements
+ok 48 - complete comma-separated legacy schedule resolves both tokens
+ok 49 - strict legacy reader keeps exact minutes
+ok 50 - legacy exact name resolves stable catalog UUID
+ok 51 - valid legacy occupancy complete
+ok 52 - unparseable legacy occupancy fails closed
+ok 53 - unresolved class is visible as blocker
+ok 54 - incomplete occupancy never becomes free time
+v1
+ok 55 - 500 items returned without truncation
+ok 56 - 2001-slot request rejected with exact producer pair before item insertion
+ok 57 - 501st item explicitly rejected
+ok 58 - over-capacity read does not truncate items
+ok 59 - over-capacity read does not truncate slots
+ok 60 - capacity overflow is explicitly incomplete
+ok 61 - over-capacity board mutations are blocked
+CONTRACT_SNAPSHOT={"plan": {"id": "ac239000-0000-4000-8000-000000000001", "name": "변경한 계획", "state": "draft", "metaRevision": 3, "targetEndDate": null, "changeSequence": 9, "targetStartDate": null}, "items": [{"id": "ac239000-0000-4000-8000-000000000011", "name": "초안", "grade": "중2", "state": "draft", "planId": "ac239000-0000-4000-8000-000000000001", "subject": "영어", "tuition": 100000, "capacity": 12, "revision": 5, "appliedAt": null, "pendingSlots": [], "sourceClassId": null, "appliedClassId": null, "subjectAreaKey": null, "durationMinutes": 60, "defaultTeacherId": "ac239000-0000-4000-8000-000000000101", "appliedTransferId": null, "defaultClassroomId": "ac239000-0000-4000-8000-000000000201"}, {"id": "ac239000-0000-4000-8000-000000000012", "name": "초안", "grade": "중2", "state": "applied", "planId": "ac239000-0000-4000-8000-000000000001", "subject": "영어", "tuition": 100000, "capacity": 12, "revision": 1, "appliedAt": "2026-09-24T12:22:24.181225+00:00", "pendingSlots": [], "sourceClassId": null, "appliedClassId": null, "subjectAreaKey": null, "durationMinutes": 60, "defaultTeacherId": "ac239000-0000-4000-8000-000000000101", "appliedTransferId": "ac239000-0000-4000-8000-000000000700", "defaultClassroomId": "ac239000-0000-4000-8000-000000000201"}], "slots": [{"id": "ac239000-0000-4000-8000-000000000111", "itemId": "ac239000-0000-4000-8000-000000000011", "planId": "ac239000-0000-4000-8000-000000000001", "weekday": 1, "endMinute": 780, "teacherId": "ac239000-0000-4000-8000-000000000101", "classroomId": "ac239000-0000-4000-8000-000000000201", "startMinute": 720, "teacherName": "동일 이름", "sourceSlotId": null, "classroomName": "동일 이름"}], "members": [], "asOfDate": "2026-09-24", "capacity": {"exceeded": false, "maxItems": 500, "maxSlots": 2000, "itemCount": 2, "slotCount": 2}, "catalogs": {"teachers": [{"id": "ac239000-0000-4000-8000-000000000102", "name": "다른 교사", "subjects": ["영어"], "isVisible": true}, {"id": "aeac5944-db69-4fe0-9f69-8b1b3a36d715", "name": "plan901", "subjects": ["영어팀"], "isVisible": true}, {"id": "e58003e3-d110-4f0c-82b9-72a184c6eb90", "name": "plan902", "subjects": ["영어팀"], "isVisible": true}, {"id": "ee2d4bb9-6f24-4bba-8402-33a9151dbe35", "name": "plan905", "subjects": ["영어팀"], "isVisible": true}, {"id": "ac239000-0000-4000-8000-000000000101", "name": "동일 이름", "subjects": [], "isMissing": true, "isVisible": false}], "classrooms": [{"id": "ac239000-0000-4000-8000-000000000201", "name": "동일 이름", "subjects": ["영어"], "isVisible": true}, {"id": "ac239000-0000-4000-8000-000000000202", "name": "다른 방", "subjects": ["영어"], "isVisible": true}]}, "complete": true, "permissions": {"canEdit": true, "canManage": true, "canTransfer": true}, "shadowSlots": [], "datedComplete": true, "datedSessions": [], "shadowClasses": [], "appliedSnapshots": [{"slots": [{"id": "ac239000-0000-4000-8000-000000000112", "itemId": "ac239000-0000-4000-8000-000000000012", "planId": "ac239000-0000-4000-8000-000000000001", "weekday": 1, "endMinute": 720, "teacherId": "ac239000-0000-4000-8000-000000000101", "classroomId": "ac239000-0000-4000-8000-000000000201", "startMinute": 660, "teacherName": "동일 이름", "sourceSlotId": null, "classroomName": "동일 이름"}], "itemId": "ac239000-0000-4000-8000-000000000012"}], "datedFingerprint": "d751713988987e9331980363e24189ce", "shadowFingerprint": "d81b8858ea1e2b3efa1a5451ea52b815", "unresolvedOccupancies": [], "datedUnresolvedOccupancies": []}
+ok 62 - deleted resource has explicit unavailable display metadata
+{"plan": {"id": "ac239000-0000-4000-8000-000000000005", "name": "UUID 원자성", "state": "draft", "metaRevision": 0, "targetEndDate": null, "changeSequence": 0, "targetStartDate": null}}
+ok 63 - uppercase UUID spelling cannot bypass duplicate slot identity
+ok 64 - mixed-case UUID rejection preserves all plan rows revisions signal and receipts
+ok 65 - compact UUID spelling cannot bypass duplicate slot identity
+ok 66 - equivalent compact UUID rejection preserves all plan rows revisions signal and receipts
+{"plan": {"id": "ac239000-0000-4000-8000-000000000006", "name": "괄호 legacy", "state": "draft", "metaRevision": 0, "targetEndDate": null, "changeSequence": 0, "targetStartDate": null}}
+ok 67 - valid parenthesized legacy schedule has complete snapshot
+ok 68 - per-slot parenthesized labels do not become global blockers
+ok 69 - both parenthesized legacy slots are materialized
+ok 70 - first legacy slot resolves its exact teacher room and minutes
+ok 71 - second legacy slot resolves a different teacher room and minutes
+ok 72 - first per-slot teacher shadow blocks even in another room
+ok 73 - second per-slot room shadow blocks even with another teacher
+ok 74 - parenthesized legacy shadows permit unrelated safe placement
+1..74

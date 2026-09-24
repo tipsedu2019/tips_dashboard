@@ -1,0 +1,65 @@
+{
+  "untouchedManualItems": [
+    {
+      "slots": [
+        {
+          "weekday": 5,
+          "endMinute": 1440,
+          "startMinute": 1410
+        },
+        {
+          "weekday": 6,
+          "endMinute": 1440,
+          "startMinute": 1410
+        }
+      ],
+      "itemId": "56d614fe-40ed-4861-9332-a1132524e00f",
+      "planId": "ae260000-0000-4000-8000-000000000001",
+      "revision": 1
+    },
+    {
+      "slots": [
+        {
+          "weekday": 1,
+          "endMinute": 610,
+          "startMinute": 550
+        },
+        {
+          "weekday": 2,
+          "endMinute": 600,
+          "startMinute": 540
+        },
+        {
+          "weekday": 3,
+          "endMinute": 1093,
+          "startMinute": 1033
+        }
+      ],
+      "itemId": "ae260000-0000-4000-8000-000000000501",
+      "planId": "ae260000-0000-4000-8000-000000000001",
+      "revision": 8
+    },
+    {
+      "slots": [
+        {
+          "weekday": 2,
+          "endMinute": 613,
+          "startMinute": 553
+        },
+        {
+          "weekday": 4,
+          "endMinute": 613,
+          "startMinute": 553
+        }
+      ],
+      "itemId": "e446fbd2-fa5b-4b4d-b244-96a997d896cd",
+      "planId": "48f732de-d3cf-4841-9dba-215dc14aa849",
+      "revision": 3
+    }
+  ],
+  "task8PointerPlan": {
+    "id": "fad77a15-b9f3-4a94-9249-7b9bfc2a51b1",
+    "state": "archived",
+    "items": 4
+  }
+}

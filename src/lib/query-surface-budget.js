@@ -20,6 +20,7 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_operations_annual_board_v1",
   "get_academic_event_detail_v1",
   "get_class_schedule_v1",
+  "get_class_schedule_defaults_v1",
   "get_operations_class_lesson_design_detail_v1",
   "list_operations_catalogs_v1",
   "list_active_science_subject_areas_v1",
@@ -84,7 +85,25 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   // timeout and retry(false) remain mandatory, as for close_class_atomic_v1.
   "create_class_with_group_memberships_v1",
 ])
+// Timetable final migrations 20260923081138 / 120931 / 134651 / 150523 / 164328:
+// one authorized plan/reference, sharing/import context, or atomic command receipt.
+// The plan list remains pageable; transport deadlines and retry(false) are required.
+const EXACT_TIMETABLE_CONTEXT_RPC_NAMES = new Set([
+  "list_timetable_import_sources_v1",
+  "preview_timetable_plan_import_v1",
+  "commit_timetable_plan_import_v1",
+  "list_timetable_share_candidates_v1",
+  "get_timetable_plan_v1",
+  "get_timetable_plan_revision_v1",
+  "get_timetable_operational_reference_v1",
+  "mutate_timetable_plan_item_v1",
+  "mutate_timetable_plan_v1",
+  "preview_timetable_plan_transfer_v1",
+  "commit_timetable_plan_transfer_v1",
+])
 const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
+  "initialize_new_class_schedule_v1",
+  "update_class_operational_v1",
   "save_class_schedule_defaults_v1",
   "preview_class_lesson_session_generation_v1",
   "generate_class_lesson_sessions_v1",
@@ -367,6 +386,7 @@ function isSurfacePath(surface, file) {
 
 function scriptKind(file) {
   if (file.endsWith(".tsx")) return ts.ScriptKind.TSX
+  if (file.endsWith(".jsx")) return ts.ScriptKind.JSX
   if (file.endsWith(".js")) return ts.ScriptKind.JS
   return ts.ScriptKind.TS
 }
@@ -1583,12 +1603,15 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
     const entryArguments = query.entryArguments ?? query.entry.arguments
     const rpcName = entryArguments[0] && argumentValue(entryArguments[0], constants)
     const exactNonpageableRpc = typeof rpcName === "string"
-      && (EXACT_SCALAR_RPC_NAMES.has(rpcName) || EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES.has(rpcName))
+      && (EXACT_SCALAR_RPC_NAMES.has(rpcName) || EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES.has(rpcName) || EXACT_TIMETABLE_CONTEXT_RPC_NAMES.has(rpcName))
     const argument = entryArguments[1] ? unwrap(entryArguments[1]) : null
     const numberedContract = entryArguments[0] && EXACT_NUMBERED_RPC_CONTRACTS.get(lexicalLiteralValue(entryArguments[0]))
     const hasSpread = argument && ts.isObjectLiteralExpression(argument) && argument.properties.some((property) => ts.isSpreadAssignment(property))
+    // list_timetable_plans_v1 (20260923081138) explicitly applies p_page_size
+    // to LIMIT/OFFSET. Its client cap is 30; this is not a strict 10/15/20 contract.
+    const limitArgument = rpcName === "list_timetable_plans_v1" ? "p_page_size" : "p_limit"
     const limits = argument && ts.isObjectLiteralExpression(argument) ? argument.properties.filter((property) => ts.isPropertyAssignment(property)
-      && ((ts.isIdentifier(property.name) && property.name.text === "p_limit") || (ts.isStringLiteral(property.name) && property.name.text === "p_limit"))) : []
+      && ((ts.isIdentifier(property.name) && property.name.text === limitArgument) || (ts.isStringLiteral(property.name) && property.name.text === limitArgument))) : []
     if (numberedContract) {
       const violation = numberedRpcLimitViolation(argument, numberedContract)
       if (violation) reasons.push(violation)

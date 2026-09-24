@@ -1,0 +1,151 @@
+BEGIN
+INSERT 0 1
+INSERT 0 1
+BEGIN
+CREATE EXTENSION
+ plan  
+-------
+ 1..21
+(1 row)
+
+INSERT 0 1
+                                                           set_config                                                           
+--------------------------------------------------------------------------------------------------------------------------------
+ {"sub": "87000000-0000-4000-8000-000000000001", "role": "authenticated", "email": "continuous-schedule-backfill@test.invalid"}
+(1 row)
+
+              set_config              
+--------------------------------------
+ 87000000-0000-4000-8000-000000000001
+(1 row)
+
+  set_config   
+---------------
+ authenticated
+(1 row)
+
+INSERT 0 1
+SELECT 1
+                             throws_ok                              
+--------------------------------------------------------------------
+ ok 1 - malformed backfill rows are rejected before shadow mutation
+(1 row)
+
+SELECT 1
+                   is                   
+----------------------------------------
+ ok 2 - backfill reports shadow storage
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 3 - backfill moves only the selected class to shadow
+(1 row)
+
+                    is                     
+-------------------------------------------
+ ok 4 - backfill persists one default slot
+(1 row)
+
+                       ok                       
+------------------------------------------------
+ ok 5 - slot tuple matches the approved payload
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 6 - backfill persists one legacy lesson session
+(1 row)
+
+                                     ok                                     
+----------------------------------------------------------------------------
+ ok 7 - legacy session tuple is exact and does not invent time or resources
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 8 - backfill does not rewrite the legacy source plan
+(1 row)
+
+                    is                     
+-------------------------------------------
+ ok 9 - backfill does not activate runtime
+(1 row)
+
+                          ok                          
+------------------------------------------------------
+ ok 10 - cutover stores counts and exact row evidence
+(1 row)
+
+                                is                                
+------------------------------------------------------------------
+ ok 11 - slot and session writes share the backfill audit context
+(1 row)
+
+                               ok                               
+----------------------------------------------------------------
+ ok 12 - same request key and body replay the original response
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 13 - idempotent replay creates no duplicate cutover
+(1 row)
+
+SELECT 1
+                     is                      
+---------------------------------------------
+ ok 14 - verify accepts exact persisted rows
+(1 row)
+
+                         ok                         
+----------------------------------------------------
+ ok 15 - successful verify records applied evidence
+(1 row)
+
+UPDATE 1
+                                       throws_ok                                        
+----------------------------------------------------------------------------------------
+ ok 16 - verify rejects a changed default schedule even when schedule_plan is unchanged
+(1 row)
+
+UPDATE 1
+ with_continuous_class_schedule_audit_context_v1 
+-------------------------------------------------
+ 
+(1 row)
+
+UPDATE 1
+SELECT 1
+                       ok                       
+------------------------------------------------
+ ok 17 - verify reports exact session row drift
+(1 row)
+
+                           ok                           
+--------------------------------------------------------
+ ok 18 - failed verify persists the mismatch issue code
+(1 row)
+
+UPDATE 1
+                              throws_ok                               
+----------------------------------------------------------------------
+ ok 19 - activation re-verifies current shadow rows and rejects drift
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 20 - failed activation leaves the class in shadow
+(1 row)
+
+UPDATE 1
+                        is                         
+---------------------------------------------------
+ ok 21 - verification also leaves runtime inactive
+(1 row)
+
+ finish 
+--------
+(0 rows)
+
+ROLLBACK

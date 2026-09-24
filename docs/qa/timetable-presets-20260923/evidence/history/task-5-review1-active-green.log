@@ -1,0 +1,32 @@
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (2.778ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.723292ms)
+✔ refresh preserves local draft and stale shows latest server (0.300083ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (1.58375ms)
+✔ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.265333ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.185875ms)
+✔ transient reference failure preserves prior display but blocks another save (0.160667ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.199375ms)
+✔ undo is a new revision-checked inverse command (0.888417ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.262792ms)
+✔ item A stale does not stop independent item B save (0.265667ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (2.373917ms)
+✔ accept-server drops only the conflicted item draft (0.190542ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.147125ms)
+✔ transfer delta applies source state and class labels atomically (0.324875ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.217333ms)
+✔ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.236875ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.075625ms)
+✔ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.131125ms)
+✔ own-save signal before receipt still drains queued second edit (0.185792ms)
+✔ paused retired controller rejects old action references and terminal destroy cannot resume (0.13075ms)
+✔ actual React StrictMode effect replay retains a live controller that loads and saves (38.576708ms)
+✔ actor cleanup removes recovery for unmounted plans while keeping another actor (3.451208ms)
+✔ actual plan switch keeps same-actor drafts through child unmount for provider logout cleanup (5.345875ms)
+ℹ tests 24
+ℹ suites 0
+ℹ pass 24
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 445.086541

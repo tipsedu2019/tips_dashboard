@@ -1,0 +1,72 @@
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (2.7645ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.64575ms)
+✔ refresh preserves local draft and stale shows latest server (0.229584ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (0.285833ms)
+✖ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.59075ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.179833ms)
+✔ transient reference failure preserves prior display but blocks another save (0.2225ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.173042ms)
+✔ undo is a new revision-checked inverse command (0.262917ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.201791ms)
+✔ item A stale does not stop independent item B save (0.215792ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (0.506417ms)
+✔ accept-server drops only the conflicted item draft (0.155834ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.129375ms)
+✔ transfer delta applies source state and class labels atomically (0.286416ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.18ms)
+✖ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.230209ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.068209ms)
+✖ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.152167ms)
+✔ own-save signal before receipt still drains queued second edit (0.160167ms)
+ℹ tests 20
+ℹ suites 0
+ℹ pass 17
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 63.166375
+
+✖ failing tests:
+
+test at tests/timetable-plan-controller.node.ts:19:1
+✖ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.59075ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:19:444)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /timetable_stale/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:31:1
+✖ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.230209ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:31:590)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /timetable_stale/,
+    operator: 'rejects',
+    diff: 'simple'
+  }
+
+test at tests/timetable-plan-controller.node.ts:33:1
+✖ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.152167ms)
+  AssertionError [ERR_ASSERTION]: Missing expected rejection.
+      at async TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-controller.node.ts:33:400)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: undefined,
+    expected: /timetable_stale/,
+    operator: 'rejects',
+    diff: 'simple'
+  }

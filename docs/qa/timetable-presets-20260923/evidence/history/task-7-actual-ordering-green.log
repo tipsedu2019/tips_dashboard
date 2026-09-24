@@ -1,0 +1,13 @@
+✔ preview sends exact canonical request with selected item IDs (0.596292ms)
+✔ malformed or mismatched preview is never commit-ready (0.173334ms)
+✔ malformed or mismatched preview is never commit-ready (0.044959ms)
+✔ malformed or mismatched preview is never commit-ready (0.052833ms)
+✔ actual plan-copy receipt replay at equal source sequence preserves newer operating reference (1016.390125ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1075.724542

@@ -1,5 +1,7 @@
 "use client"
 
+import { makeupDomainErrorMessage } from "./makeup-domain-errors.js"
+
 import { useDraftNavigation } from "@/hooks/use-draft-navigation"
 import {
   useCallback,
@@ -246,6 +248,8 @@ function getMakeupActionErrorMessage(error: unknown, fallback: string) {
   if (message === "makeup_request_input_invalid" || code === "22023") {
     return "휴보강 신청 정보를 저장할 수 없습니다. 수업·담당 선생님·결재자 연결을 확인해 주세요."
   }
+  const domainMessage = makeupDomainErrorMessage(error)
+  if (domainMessage) return domainMessage
   if (code === "42501" || code === "PGRST301") return "처리 권한 또는 로그인 상태를 확인한 후 다시 시도해 주세요."
   if (code === "40001" || code === "55P03") return "다른 작업이 처리 중입니다. 잠시 후 다시 시도해 주세요."
   if (/[가-힣]/.test(message) && !/SQL|rpc_|timeout|schema/i.test(message)) return message

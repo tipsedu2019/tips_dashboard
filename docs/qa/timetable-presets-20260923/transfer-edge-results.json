@@ -1,0 +1,20 @@
+{
+  "plans": [
+    "29ea39a6-1b13-4597-b222-3959d6622533",
+    "576a9e80-c6c5-48a9-82c7-03f44acebd2b",
+    "5da128ca-f01a-44fc-b0ce-a7730bbaea34"
+  ],
+  "checks": [
+    "explicit plan copy keep_pending preserves zero-slot source and new destination IDs",
+    "second plan copy preserves conflicting original slots as pending without overwriting drafts",
+    "plan move rejects unresolved selection; explicit exclusion moves two full items atomically",
+    "catalog hiding rejects stale preview; explicit fresh check blocks then permits restored catalog",
+    "applied clone creates new draft with original placement pending and all applied fields null",
+    "pending resolution prefills readable originals; cancel/conflict/unknown preserve pending and input; identical retry atomically resolves one pending and retains siblings",
+    "operating shadow modify invalidates preview; no second promotion",
+    "operating shadow close invalidates preview; no second promotion",
+    "operating shadow delete invalidates preview; no second promotion"
+  ],
+  "errors": [],
+  "passed": true
+}

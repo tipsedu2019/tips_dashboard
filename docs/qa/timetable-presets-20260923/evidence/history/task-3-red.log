@@ -1,0 +1,12 @@
+BEGIN
+NOTICE:  extension "pgtap" already exists, skipping
+CREATE EXTENSION
+ no_plan 
+---------
+(0 rows)
+
+CREATE FUNCTION
+INSERT 0 5
+INSERT 0 5
+ERROR:  duplicate key value violates unique constraint "teacher_catalogs_profile_id_key"
+DETAIL:  Key (profile_id)=(ac239000-0000-4000-8000-000000000903) already exists.

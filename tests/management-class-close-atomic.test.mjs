@@ -44,6 +44,7 @@ function makeClassCloseClient() {
     },
     rpc(name, args) {
       calls.push(["rpc", name, args]);
+      if (name === "update_class_operational_v1") return makeRpcQuery({ data: { closeResult: { id: CLASS_ID, classId: CLASS_ID, status: "종강", removedStudentCount: 2 } }, error: null });
       return makeRpcQuery({
         data: {
           id: CLASS_ID,
@@ -57,7 +58,7 @@ function makeClassCloseClient() {
   };
 }
 
-test("saving a class as closed strips the raw status write and finishes through one roster RPC", async () => {
+test("saving a class as closed commits metadata and the existing roster close through one gateway", async () => {
   const client = makeClassCloseClient();
   const service = createManagementService({
     supabase: client,
@@ -78,23 +79,15 @@ test("saving a class as closed strips the raw status write and finishes through 
 
   assert.equal(result.status, "종강");
   assert.deepEqual(client.calls, [
-    ["upsert", {
-      id: CLASS_ID,
-      name: "테스트",
-      class_type: "정규",
-      subject: "수학",
-      subject_area_key: null,
-      grade: "중1",
-      teacher: "",
-      schedule: "",
-      room: "",
-      capacity: 0,
-      fee: 0,
-      textbook_ids: [],
-    }],
-    ["rpc", "close_class_atomic_v1", {
+    ["rpc", "update_class_operational_v1", {
       p_class_id: CLASS_ID,
       p_request_key: REQUEST_KEY,
+      p_expected_schedule_plan: null,
+      p_patch: {
+        name: "테스트", class_type: "정규", subject: "수학", subject_area_key: null,
+        grade: "중1", teacher: "", schedule: "", room: "", capacity: 0, fee: 0,
+        status: "종강", textbook_ids: [],
+      },
     }],
   ]);
 });

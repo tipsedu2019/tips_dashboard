@@ -1,12 +1,14 @@
 "use client";
 
 import {
+  useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
   type ComponentType,
   type CSSProperties,
+  type MutableRefObject,
 } from "react";
 import {
   CalendarDays,
@@ -18,6 +20,9 @@ import {
   type LucideIcon,
   RotateCcw,
 } from "lucide-react";
+import { invalidatePublicClassesCacheAfterMutation } from '@/lib/public-classes-cache-invalidation.js';
+import { clearRegistrationTrackServiceCaches } from '@/features/tasks/registration-track-service';
+import { supabase } from '@/lib/supabase';
 import { toast } from "sonner";
 
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -48,6 +53,11 @@ import {
 } from "./records.js";
 import { getTimetablePanelLayout } from "./timetable-layout";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
+import { useDraftNavigation } from '@/hooks/use-draft-navigation';
+import { useTimetablePlan } from './use-timetable-plan';
+import { clearTimetablePlanRecovery } from './timetable-plan-recovery';
+import { TimetablePlanPicker } from './timetable-plan-picker';
+import { TimetablePlanWorkspace } from './timetable-plan-workspace';
 import styles from "./timetable-grid-skin.module.css";
 import TimetableGrid from "./components/legacy-timetable-grid.jsx";
 
@@ -203,7 +213,48 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 }
 
 export function AcademicTimetableWorkspace() {
+  const presetsEnabled = process.env.NEXT_PUBLIC_TIMETABLE_PRESETS_ENABLED !== "false";
   const [view, setView] = useState<TimetableView>("teacher-weekly");
+  const [planId, setPlanId] = useState<string | null>(null);
+  const operationalRefresh = useRef<(() => Promise<void>) | null>(null);
+  const [reloadNonce, setReloadNonce] = useState(0);
+  const [pickerDirty, setPickerDirty] = useState(false);
+  const [editorDirty, setEditorDirty] = useState(false);
+  const [transferDirty, setTransferDirty] = useState(false);
+  const plan = useTimetablePlan(planId);
+  const handleTransferred = useCallback(async (_result: import('./timetable-plan-contract').TransferResult, request: import('./timetable-plan-contract').TransferRequest) => {
+    setReloadNonce(value => value + 1);
+    if (request.target.kind === 'operational') {
+      clearRegistrationTrackServiceCaches();
+      const publicCache = await invalidatePublicClassesCacheAfterMutation(supabase, 'class');
+      await operationalRefresh.current?.();
+      if (publicCache.status === 'pending') throw Error('public_classes_cache_refresh_pending');
+    }
+  }, []);
+  useEffect(() => {
+    const error = plan.error as { code?: string; message?: string } | null;
+    if (error?.code === '42501' || error?.message === 'timetable_forbidden') {
+      let current = true;
+      queueMicrotask(() => { if (current) {
+        if (plan.service && planId) clearTimetablePlanRecovery(plan.service.actorScope, planId);
+        setPlanId(null); setReloadNonce(value => value + 1);
+      } });
+      return () => { current = false; };
+    }
+  }, [plan.error, plan.service, planId]);
+  const navigation = useDraftNavigation({ dirty: plan.dirty || pickerDirty || editorDirty || transferDirty });
+  const changePlan = (id: string | null) => navigation.requestLocalAction(() => {
+    setPlanId(id);
+  });
+  return <div className="space-y-4">
+    {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && plan.referenceStatus !== 'verified'} onCommitted={id => { setPlanId(id); }} onFormDirty={setPickerDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
+    <div hidden={Boolean(planId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
+    {planId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onEditorDirty={setEditorDirty} onTransferDirty={setTransferDirty} requestAction={navigation.requestLocalAction}/> : null}
+    {navigation.confirmation}
+  </div>;
+}
+
+function OperationalTimetableWorkspace({view, setView, refreshRef}: {refreshRef: MutableRefObject<(() => Promise<void>) | null>; view: TimetableView; setView: (view: TimetableView) => void}) {
   const [status, setStatus] = useState("수강");
   const [subject, setSubject] = useState("");
   const [gridCount, setGridCount] = useState(2);
@@ -219,6 +270,7 @@ export function AcademicTimetableWorkspace() {
     loading,
     error,
     refresh,
+    refreshVerified,
     successfulRequest,
     displayRequest,
     dataMatchesCurrentScope,
@@ -232,6 +284,7 @@ export function AcademicTimetableWorkspace() {
       subject: subject || null,
     },
   });
+  useEffect(() => { refreshRef.current = refreshVerified; return () => { refreshRef.current = null; }; }, [refreshRef, refreshVerified]);
   const displayTimetableRequest = useMemo(
     () =>
       displayRequest.mode === "timetable"

@@ -1,0 +1,27 @@
+✔ create: unknown receipt survives changed name (64.152833ms)
+✔ create: unknown receipt survives changed name and dialog reopen (20.87175ms)
+✔ clone: unknown receipt survives changed name (14.858708ms)
+✔ clone: unknown receipt survives changed name and dialog reopen (17.058167ms)
+✔ late share success cannot populate another actor/dialog (15.275167ms)
+✔ late share failure cannot populate another actor/dialog (12.981125ms)
+✔ late create success cannot change another actor's selection/dialog (16.519291ms)
+✔ late create failure cannot change another actor's selection/dialog (14.406042ms)
+✔ late share response cannot fill a newer dialog in the same actor scope (10.725125ms)
+✔ conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable (44.452208ms)
+✔ share receipt preserves later viewer-to-editor change for a separate confirmed-revision command (29.272167ms)
+✔ share receipt preserves later revocation for a separate confirmed-revision command (17.991792ms)
+✔ create: submitted immutable receipt survives full remount (9.6965ms)
+✔ clone: submitted immutable receipt survives full remount (7.859583ms)
+✔ rename: submitted immutable receipt survives full remount (7.527584ms)
+✔ share: submitted immutable receipt survives full remount (10.080042ms)
+✔ archive: submitted immutable receipt survives full remount (5.459292ms)
+✔ restore: submitted immutable receipt survives full remount (4.440917ms)
+✔ actor retirement purges pending metadata, picker list and recovery UI (5.498875ms)
+ℹ tests 19
+ℹ suites 0
+ℹ pass 19
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 968.557584

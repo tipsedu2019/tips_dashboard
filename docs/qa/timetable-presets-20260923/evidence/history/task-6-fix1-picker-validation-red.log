@@ -1,0 +1,27 @@
+✖ conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable (52.769875ms)
+ℹ tests 1
+ℹ suites 0
+ℹ pass 0
+ℹ fail 1
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 386.688417
+
+✖ failing tests:
+
+test at tests/timetable-plan-picker.test.mjs:74:1
+✖ conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable (52.769875ms)
+  AssertionError [ERR_ASSERTION]: Expected "actual" to be strictly unequal to:
+  
+  '9485152a-3b7c-47ea-b22d-6fde4a7c72f2'
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-picker.test.mjs:79:53)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '9485152a-3b7c-47ea-b22d-6fde4a7c72f2',
+    expected: '9485152a-3b7c-47ea-b22d-6fde4a7c72f2',
+    operator: 'notStrictEqual',
+    diff: 'simple'
+  }

@@ -1,0 +1,5 @@
+task-4-operational-green.log 88 [5, 5, 78]
+task-4-task1-regression.log 60 [60]
+task-4-storage-regression.log 73 [73]
+task-4-permission-regression.log 24 [24]
+Final migration bodies, original signatures, owners, search_path and private ACL: 43 PASS

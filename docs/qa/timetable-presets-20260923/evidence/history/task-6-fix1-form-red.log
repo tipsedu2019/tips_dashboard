@@ -1,0 +1,65 @@
+✔ teacher-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.841125ms)
+✔ teacher-weekly: unplaced item drop creates one stable slot with target resource (0.071625ms)
+✔ classroom-weekly: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.090375ms)
+✔ classroom-weekly: unplaced item drop creates one stable slot with target resource (0.097333ms)
+✔ daily-teacher: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.119084ms)
+✔ daily-teacher: unplaced item drop creates one stable slot with target resource (0.049833ms)
+✔ daily-classroom: move Monday alone across resource panel/column at identical time, preserve offset and all projections (0.069542ms)
+✔ daily-classroom: unplaced item drop creates one stable slot with target resource (0.049417ms)
+✔ shadow never produces move, resize or unplace commands (0.182875ms)
+✔ exact typed minutes and midnight preserved, invalid overflow rejected (0.150542ms)
+✔ empty presets build panels from IDs, duplicate names do not merge; overlap lanes retain every slot (4.523666ms)
+✔ pointer cancel, Escape and capture-loss cannot commit; source/target panel identity counts as a move (0.090833ms)
+✔ teacher-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (59.3975ms)
+✔ classroom-weekly: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (12.40975ms)
+✔ daily-teacher: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.621375ms)
+✔ daily-classroom: rendered empty-cell and drag-handle actions expose canonical coordinates, shadows have no handles (6.480666ms)
+✔ hidden operating subjects still block changed placements, while name-only edits preserve existing conflicts (0.310167ms)
+✔ empty resource catalogs produce no misleading day grids in any view (0.039667ms)
+✔ rendered class-list selection uses item IDs, preserves hidden selections and excludes applied/shadows (16.807208ms)
+✖ whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft (0.102875ms)
+✖ whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs (0.055375ms)
+✖ single-slot form edit and add-placement preserve the complete differing Wednesday sibling (0.067833ms)
+ℹ tests 22
+ℹ suites 0
+ℹ pass 19
+ℹ fail 3
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 489.232333
+
+✖ failing tests:
+
+test at tests/timetable-plan-interaction.test.mjs:57:1
+✖ whole-item weekdays replace Mon/Wed with Tue/Thu in one command while preserving per-slot differences and pending draft (0.102875ms)
+  TypeError: interaction.placementFormDefaults is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-interaction.test.mjs:59:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-plan-interaction.test.mjs:66:1
+✖ whole teacher change is explicit and preserves differing slot times, lengths, rooms and IDs (0.055375ms)
+  TypeError: interaction.placementFormDefaults is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-interaction.test.mjs:67:29)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/timetable-plan-interaction.test.mjs:73:1
+✖ single-slot form edit and add-placement preserve the complete differing Wednesday sibling (0.067833ms)
+  TypeError: interaction.placementFormDefaults is not a function
+      at TestContext.<anonymous> (file:///Users/hyunjun/.codex/worktrees/timetable-presets/tips_dashboard/tests/timetable-plan-interaction.test.mjs:75:73)
+      at Test.runInAsyncScope (node:async_hooks:227:14)
+      at Test.run (node:internal/test_runner/test:1382:25)
+      at Test.processPendingSubtests (node:internal/test_runner/test:960:18)
+      at Test.postRun (node:internal/test_runner/test:1522:19)
+      at Test.run (node:internal/test_runner/test:1447:12)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

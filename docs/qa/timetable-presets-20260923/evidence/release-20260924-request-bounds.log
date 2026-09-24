@@ -1,0 +1,11 @@
+✔ installed transport sends a 30-row plan page and makes only one request on a transient failure (12.289083ms)
+✔ caller cancellation aborts the installed PostgREST transport without retrying (0.63925ms)
+✔ every plan request retains the 8-second deadline even without a caller signal (1.439292ms)
+ℹ tests 3
+ℹ suites 0
+ℹ pass 3
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 88.2485

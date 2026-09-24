@@ -136,7 +136,7 @@ async function editor(t, route = 'class-schedule') {
 }
 function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, billingPeriods: p.billingPeriods.map((period, index) => index ? period : {...period, color: name}) }))); }
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
-const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_'));
+const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_') || r.name === 'update_class_operational_v1');
 
 test('schedule-only page exposes one save and return action even for a legacy progress URL', async t => {
   const page = await editor(t, 'curriculum/lesson-design');
@@ -224,7 +224,7 @@ test('plan: accepted save preserves input added while pending and failed re-read
   const page = await editor(t); await editPlan(page, 'SUBMITTED');
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 1);
-  assert.equal(saveRequests(page)[0].args.schedule_plan.billingPeriods[0].color, 'SUBMITTED');
+  assert.equal(saveRequests(page)[0].args.p_patch.schedule_plan.billingPeriods[0].color, 'SUBMITTED');
   await editPlan(page, 'ADDED WHILE SAVING');
   await finishSave(page, null, true);
   assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'ADDED WHILE SAVING');
@@ -303,7 +303,7 @@ test('plan: failed write retains its draft and a retry submits the current value
   assert.equal(page.observed.lessonDesignSaveError.includes('internal'), false);
   await act(async () => { void page.observed.handleSaveLessonPlan(); });
   assert.equal(saveRequests(page).length, 2);
-  assert.equal(saveRequests(page).at(-1).args.schedule_plan.billingPeriods[0].color, 'RETRY DRAFT');
+  assert.equal(saveRequests(page).at(-1).args.p_patch.schedule_plan.billingPeriods[0].color, 'RETRY DRAFT');
 });
 test('actor: a late accepted save cannot replace the new actor draft or leave dirty protection enabled', async t => {
   const page = await editor(t); await editPlan(page, 'OLD ACTOR');

@@ -1,0 +1,46 @@
+✔ saving a class as closed commits metadata and the existing roster close through one gateway (1.003875ms)
+✔ legacy class archive entry point also uses the atomic close RPC (0.493334ms)
+✔ an ambiguous class close retry reuses the same request key (0.234667ms)
+✔ a post-close cache refresh retry replays the committed request key (0.126292ms)
+✔ a successful close keeps its receipt key for an outer workflow retry (0.086541ms)
+✔ the detail save flow does not rewrite removed period group memberships (2.034959ms)
+✔ normalized defaults preserve slot and catalog IDs through the five-column editor (0.821167ms)
+✔ normalized defaults retain full comma-containing catalog names (0.1295ms)
+✔ legacy schedule consumer retains per-slot teacher and room after normalized save projection (0.381667ms)
+✔ projected mixed resource slots keep assigned and unassigned states in the legacy parser (0.165291ms)
+✔ literal absence labels and former escape tokens remain assigned names (0.184541ms)
+✔ normalized metadata writes omit schedule-owned legacy columns (0.326959ms)
+✔ management service calls defaults, save, and initialization RPCs with revision and idempotency keys (9.969709ms)
+✔ a missing defaults RPC keeps legacy class creation available (0.08525ms)
+✔ actual bulk merged-row save resolves each class mode before status update (0.276792ms)
+✔ actual bulk merged-row save resolves each class mode before name update (0.139667ms)
+✔ bulk save fails closed if authoritative storage mode cannot be read (0.198666ms)
+✔ ready management roster assignment returns only the committed atomic RPC projection (1.421042ms)
+✔ ready management roster rejects an incomplete or mismatched committed projection (0.347542ms)
+✔ maintenance management roster controls fail closed before any table or RPC write (0.14575ms)
+✔ ready management roster removal returns the committed removed projection (0.122ms)
+✔ a missing ready management roster RPC invalidates readiness instead of falling back (0.11825ms)
+✔ ready student and class saves strip canonical roster fields and direct student status (10.469291ms)
+✔ student physical deletion checks reverse roster links and immutable history (0.37675ms)
+✔ teacher catalog saves ignore unchanged rows before audit-triggering upserts (0.109084ms)
+✔ teacher catalog saves do not update linked profiles when profile fields are unchanged (0.277041ms)
+✔ student upserts retry without optional counseling fields when the live schema is stale (0.16825ms)
+✔ class metadata updates retry without optional class type while preserving operation fields (0.173209ms)
+✔ student class relation changes update only canonical roster arrays (0.215125ms)
+✔ student class relation changes roll back the student side if the class write fails (0.146792ms)
+✔ operating retry retains request key and payload; refresh failure is committed (1.440792ms)
+✔ operating conflict preserves inputs and separates true serialization failure (0.228792ms)
+✔ date authority frees actual date but recurring plan still reserves weekly shadow (0.316333ms)
+✔ dated exception and source-less legacy occupancy are additive and identify exact date (0.162ms)
+✔ period suggestions include dated reservations and never offer incomplete range (0.38425ms)
+✔ actual management consumer uses atomic gateway and keeps retry key after lost response (0.810542ms)
+✔ metadata-only UPDATE does not claim success for zero affected rows (0.281834ms)
+✔ committed defaults and initialization retain a pending cache refresh receipt (0.152791ms)
+ℹ tests 38
+ℹ suites 0
+ℹ pass 38
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 99.510458

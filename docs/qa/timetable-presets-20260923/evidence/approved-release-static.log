@@ -1,0 +1,31 @@
+✔ new active migrations reject explicit 40001 raises with a stable diagnostic (2.073458ms)
+✔ pre-cutoff explicit 40001 raises remain grandfathered (2.72425ms)
+✔ 40001 handlers remain allowed while new 23514 and P0001 domain raises remain valid (0.171292ms)
+✔ notification transient classifiers do not retry bare 40001 domain errors (3.304333ms)
+✔ final-schema pgTAP enforces exact owner, empty search path, ACL rows, and denial mutations (0.712375ms)
+✔ linked ledger accepts only fully matched unique 14-digit migration versions (1.830917ms)
+✔ linked ledger rejects malformed Supabase CLI JSON output (0.281ms)
+✔ linked ledger rejects pending, remote-only, mismatched, duplicate, and malformed receipts (0.232458ms)
+✔ query receipt accepts only one exact true contract row and ignores envelope metadata (0.168792ms)
+✔ CLI validates captured ledger and query receipts without interpreting receipt metadata (26.276458ms)
+✔ 공유 DB의 학습지 이력 누락은 거부하고 정확한 원격 버전 정렬 후 SQL 재실행은 0건이다 (8.758333ms)
+✔ linked ledger 이후의 forward migrations만 순서대로 넣고 하나의 rollback envelope를 보존한다 (7.126667ms)
+✔ emoji in SQL literals, identifiers, comments and dollar bodies preserves UTF-16 statement offsets (2.954708ms)
+✔ 각 forward migration 경계에서 deferred constraint events를 commit처럼 검증한다 (1.633958ms)
+✔ Supabase CLI 2.115 JSON ledger에서 forward migrations만 정확히 고른다 (1.576375ms)
+✔ Supabase CLI JSON ledger 구조가 다르면 fail closed 한다 (4.647125ms)
+✔ remote max가 최신 local migration이면 schema mutation 없이 focused test만 만든다 (1.185791ms)
+✔ remote version이 없는 ledger는 fail closed 한다 (0.724125ms)
+✔ remote-only 또는 과거 local-only ledger drift는 migration 선택 전에 fail closed 한다 (1.241375ms)
+✔ 현재 final manifest의 exact interleaved pending 집합만 운영 remote max 이전이어도 사전 검증한다 (11.77075ms)
+✔ forward migration 파일과 linked ledger의 pending 집합이 다르면 fail closed 한다 (0.935791ms)
+✔ migration이나 focused test가 transaction 밖으로 탈출하려 하면 거부한다 (3.907833ms)
+✔ opaque SQL 밖의 psql meta command와 prepared transaction 우회를 모두 거부한다 (4.259583ms)
+ℹ tests 23
+ℹ suites 0
+ℹ pass 23
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 93.130667

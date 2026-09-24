@@ -26,6 +26,7 @@ import {
   type DashboardRole,
 } from "@/lib/auth-utils"
 import { getAuthErrorMessage } from "@/lib/auth-error-messages"
+import { clearTimetableActorRecovery } from "@/features/academic/timetable-plan-recovery"
 import { createAuthResolutionCoordinator } from "@/lib/auth-resolution-coordinator.js"
 import {
   loadAuthSession,
@@ -162,6 +163,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   )
   const authResolutionRef = useRef(createAuthResolutionCoordinator())
   const activeSessionUserIdRef = useRef<string | null>(null)
+  const timetableActorScopeRef = useRef<string | null>(null)
   const profileRequestRef = useRef<{
     key: string
     promise: Promise<DashboardProfileResult> | null
@@ -180,6 +182,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const resetAnonymousSession = (resolution: AuthResolutionToken) => {
       if (!authResolutionRef.current.markResolvedProfile(resolution)) return
+      if (timetableActorScopeRef.current) clearTimetableActorRecovery(timetableActorScopeRef.current)
+      timetableActorScopeRef.current = null
       activeSessionUserIdRef.current = null
       profileRequestRef.current = { key: "", promise: null }
       setSession(null)
@@ -260,6 +264,12 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const applyResolvedProfile = (resolvedProfile: ResolvedDashboardProfile) => {
       if (!isActive || !authResolutionRef.current.markResolvedProfile(resolvedProfile)) return
 
+      const nextActorScope = resolvedProfile.user?.id && resolvedProfile.user.role
+        ? `${resolvedProfile.user.id}:${normalizeDashboardRole(resolvedProfile.user.role)}` : null
+      if (timetableActorScopeRef.current && timetableActorScopeRef.current !== nextActorScope) {
+        clearTimetableActorRecovery(timetableActorScopeRef.current)
+      }
+      timetableActorScopeRef.current = nextActorScope
       setUser(resolvedProfile.user)
       setAuthError(resolvedProfile.authError)
       setLoading(false)
@@ -426,6 +436,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           return false
         }
 
+        if (timetableActorScopeRef.current) clearTimetableActorRecovery(timetableActorScopeRef.current)
+        timetableActorScopeRef.current = null
         return true
       },
     }),

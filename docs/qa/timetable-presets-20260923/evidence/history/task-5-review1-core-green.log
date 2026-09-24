@@ -1,0 +1,35 @@
+✔ serializes two edits, retains newer intent across reverse responses and uses latest item revision (2.4305ms)
+✔ ambiguous failure retries immutable request while newer draft stays queued (0.681833ms)
+✔ refresh preserves local draft and stale shows latest server (0.225042ms)
+✔ reload recovers submitted identity; actor or plan switch never exposes previous draft (0.313333ms)
+✔ receipt replay cannot lower a newer snapshot item or restore old coordinates (0.369ms)
+✔ poll compares composite fingerprint even without plan sequence change (0.175375ms)
+✔ transient reference failure preserves prior display but blocks another save (0.264209ms)
+✔ permission revocation clears scoped snapshot and same-tab recovery (0.219417ms)
+✔ undo is a new revision-checked inverse command (0.276083ms)
+✔ undo refuses to rebase across a collaborator edit of the same item (0.223708ms)
+✔ item A stale does not stop independent item B save (0.2425ms)
+✔ explicit reapply uses latest revision and a new request key while retaining the local draft (0.8765ms)
+✔ accept-server drops only the conflicted item draft (0.338917ms)
+✔ late read and save permission failures from a retired epoch leave newly loaded state alone (0.19875ms)
+✔ transfer delta applies source state and class labels atomically (0.331167ms)
+✔ ambiguous save visible in refresh still replays original receipt key and body (0.210916ms)
+✔ replayed old receipt cannot auto-send newer queued intent over collaborator revision (0.219791ms)
+✔ late successful read from retired epoch cannot reopen old scope data (0.088459ms)
+✔ older successful receipt cannot resurrect an item deleted in newer authoritative snapshot (0.122416ms)
+✔ own-save signal before receipt still drains queued second edit (0.171333ms)
+✔ uses canonical RPC arguments and forwards AbortSignal (0.766666ms)
+✔ rejects malformed snapshot and never reports synthetic empty success (0.185917ms)
+✔ calls real transfer RPC names and requires atomic label metadata (0.101208ms)
+✔ transfer result without labels or complete snapshot fails closed (0.133ms)
+✔ minimal signals refresh selected plan or operating shadow; visible poll and focus recover missed events (0.2195ms)
+✔ plan metadata mutation uses canonical command envelope (0.461792ms)
+✔ transfer delta lacking full source metadata and dated reference is invalid (0.077417ms)
+ℹ tests 27
+ℹ suites 0
+ℹ pass 27
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 67.591

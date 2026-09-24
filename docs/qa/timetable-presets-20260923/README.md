@@ -1,0 +1,83 @@
+# Timetable preset UI — local evidence, 2026-09-23
+
+Task6 verifies the shared preset editor in teacher-weekly, classroom-weekly, daily-teacher and daily-classroom views. These are synthetic localhost records, not production data or deployment evidence.
+
+## Evidence
+
+- `browser-results.json` and `1440/390-light/dark-0..3.png`: all 16 view/viewport/theme combinations passed. Each rendered the same 14 unique canonical slots, with no page overflow or JavaScript page errors. The four `operational-*.png` images retain the operational reference view. View indices: 0 teacher-weekly, 1 classroom-weekly, 2 daily-teacher, 3 daily-classroom.
+- `pointer-results.json`: actual browser pointer move and palette drop in every view; same-time cross-resource move; unchanged sibling slot IDs/minutes; resize by five minutes; Escape, pointercancel and capture-loss cancellation without save; centered cell click uses its labeled start and the selected lesson duration; 60-character form input; exact end24:00; uncertain-save retry preserves identical command/key; conclusive rejection correction uses a new key. `pointer-interaction-mobile.png` records the isolated touch context, whose native scroll was exercised through CDP touch events.
+- `panel-export.png` is the **actual downloaded image**, not a page screenshot: 3369×3369, 499332 bytes. Preset name, view, timestamp, Monday–Sunday and the complete09:00–24:00 axis are visible without cropping. `panel-export.json` contains the actual filename. Export uses minimum1123px width and scale3, and hides editing handles.
+
+## Independent manual checks
+
+Root used CUA against the same loopback app and actual isolated DB. The original Monday slot was edited to09:10–10:10 while Wednesday17:13–18:13 and both IDs stayed intact; actual resource drags succeeded in all four views. Friday and Saturday23:30–24:00 were saved atomically and reread as endMinute1440. A teacher conflict retained form inputs/focus; Escape→continue retained them; five ordered recommendations were usable. At390px the Sheet selected an item, closed, then cell/form placement added Tuesday while preserving Monday/Wednesday. Empty preset creation, rename, clone, archive(readonly), restore(editable) were checked. Root independently inspected the actual exported PNG. Detailed contemporaneous notes are in the ignored Task6 working report directory.
+
+## Reproduction and boundaries
+
+The existing annual fixture server is extended by `scripts/qa/timetable-plan-rpc-bridge.mjs`. It allowlists typed RPCs, fixes the synthetic actor, and calls PostgreSQL through docker exec in network-none container `tips_timetable_20260923`. It has no database-network or production fallback. `scripts/qa/timetable-plan-fixture-seed.sql` supplies the matching operational labels and DB shadow records; seed only the designated synthetic fixture, never an unrelated database. The original annual fixture remains available.
+
+With Next on3261 and the fixture proxy/API on3260/3262:
+
+```sh
+node scripts/qa/timetable-plan-browser.mjs
+node scripts/qa/timetable-plan-pointer-browser.mjs
+node scripts/qa/timetable-plan-export-browser.mjs
+```
+
+Scripts launch their own isolated Chromium, not the user's existing browser. Pointer QA creates its own synthetic plan and archives it after success. Runtime uses the existing bundled Playwright package; no package install is required.
+
+The bridge has no Supabase Realtime provider; WebSocket delivery is unverified. Product watcher code was preserved; fixture DB save/read and polling/focus paths were checked separately. Sharing across actual actors, Task7 transfer, Task9 import, CI/build, production migrations/deployment and operational promotion are separate gates. No sends were performed.
+
+## Fix round1 — receipt recovery, actor isolation, whole-item scope
+
+`fix1-results.json` preserves real DB RED→GREEN evidence for create/clone response loss, plus focused test and manual CUA results. The old picker from bddfcdc4 was loaded only in an isolated rendered React harness; no running app rollback occurred. Each create/clone committed to the actual synthetic DB, its response was withheld, then input was changed (with and without dialog close/reopen). Old implementation persisted two distinct plans in all four cases; fixed implementation replayed exactly the original body/key/planId and persisted one. Successful receipt recovery retained later input for a separate rename of that confirmed plan. All test-created plans were archived afterwards; existing source/main/manual plans were not changed.
+
+Optional actual-DB test (requires the designated fixture above, never a production endpoint):
+
+```sh
+TIMETABLE_PICKER_FIXTURE_DB=1 node --test --experimental-strip-types --test-name-pattern='unknown receipt' tests/timetable-plan-picker.test.mjs
+```
+
+Default picker tests use delayed promises and run without DB access. They render the actual component, then switch actors or dialog generations before completing share/create requests; retired success/failure must not populate candidates/errors, change selection, close the new dialog, or keep its busy state. There are no source-regex assertions.
+
+Focused command: `node --test --experimental-strip-types tests/timetable-plan-interaction.test.mjs tests/timetable-plan-picker.test.mjs tests/timetable-plan-controller.node.ts` —62/62passed. Full tsc and changed-file lint passed. Includes explicit conclusive-rejection discard progression and narrowly classified picker validation correction; unknown error pairs keep the immutable request.
+
+Root CUA used only `수동 관리 QA 수정 복사` to create `전체 변경 검증` with two09:13–10:13 slots. Whole teacher Kim→Lee saved revision2 with both IDs/days/times/room unchanged. Whole weekdays Mon/Wed→Tue/Thu saved revision3 with both IDs/times/Lee/room unchanged and no leftover Mon/Wed. Root verified accessible names of all four whole-change checkboxes after the FormControl/aria-label fix. Different per-slot times, lengths and resources, pending drafts, and single-slot/add sibling preservation are additionally covered by focused interaction tests. The explicit whole-edit controls affect only checked fields; unselected fields retain each slot's own value.
+
+No full matrix rerun was needed for this scoped fix. Previous image/export evidence remains the initial Task6 evidence; no new export or live Realtime/provider/production claim is made by this fix.
+
+## Fix round2 — share recovery retains later permission input
+
+Focused rendered-component tests reproduced two failures before the fix: retrying the original viewer share closed the dialog and discarded a later editor choice or revocation. The fixed picker preserves changed members after identical original body/key replay and keeps the dialog open. A separate explicit save uses returned metadata revision7 and a new key; unrelated members remain intact, and revision8 success closes the dialog. This round used deferred services only and changed no real access permissions or fixture DB records.
+
+`node --test --experimental-strip-types tests/timetable-plan-picker.test.mjs` passed12/12; full tsc, picker/test lint and diff-check passed. Browser matrix/export/actual-DB tests were not rerun. The final SQL provenance was corrected: mutate_timetable_plan_v1 is redefined at20260923085008_timetable_operational_conflict_guards.sql:2712, with partial-date validation before receipt lookup. Classifier behavior was not changed. Metadata recovery still lasts through dialog close/reopen within the picker session; full page reload/remount persistence remains an explicit boundary relative to spec section7.
+
+
+## Task7 — selected transfers and pending recovery
+
+`transfer-browser-results.json` records actual migrated-RPC checks at 1440px and 390px. Each viewport selected three drafts after excluding a zero-slot item, committed while the response was deliberately lost, closed/reopened the dialog, and retried the identical command/key. Exactly three operating classes existed. Selecting 운영 시간표 displayed those classes through the actual DB-backed operating reader; another preset read the new labeled shadows. The `transfer-{1440,390}-{preview,complete,operating}.png` files are the corresponding original screenshots. Both runs had zero page errors. Root independently inspected both preview screenshots and found no overflow or obscured controls.
+
+`transfer-edge-results.json` records nine further actual DB/browser checks: explicit plan copy with unresolved items, second copy preserving conflicts as pending, strict move plus selection exclusion, catalog hiding and recheck, applied→new draft, atomic pending resolution, and operating shadow modification/close/deletion invalidating old previews. `transfer-pending-readable.png` shows the original weekday/time/resources in the existing add-placement form, with human labels instead of UUID JSON; `transfer-edge-complete.png` records the completed edge run. Cancel, conflict and unknown response preserve the pending original and form input. Receipt retry removes only the chosen pending entry while adding its new slot and retaining sibling IDs.
+
+```sh
+node scripts/qa/timetable-transfer-browser.mjs
+node scripts/qa/timetable-transfer-edge-browser.mjs
+TIMETABLE_TRANSFER_FIXTURE_DB=1 node --test --experimental-strip-types tests/timetable-transfer-service.test.mjs
+```
+
+These scripts use separate headless Chromium contexts, only loopback3260/3262, and their own synthetic plans/resources. The `x-timetable-fixture-db: 1` header explicitly selects the actual `get_academic_timetable_range_v1(date,date,text,text,text)` reader; the original annual/manual baseline retains its fixed rows. Successful QA plans are archived, created operating classes closed, and QA catalogs removed. The existing manual item remained at revision8. Fixture proxy/API session3609 is the last running instance recorded for this task.
+
+Final focused tests passed109/109; actual DB receipt ordering5/5; relevant shared design contracts10/10; pgTAP133/133; full TypeScript and changed-file ESLint passed. SQL checks cover all12 direction/mode/selection-count combinations, auth/revocation, strict pending rules, 17:13 and24:00, rollback on last insertion, immutable existing class/student/history/session rows, and stale fingerprints. Plan-only receipt replay with equal source sequence retains newer operating references and requires a coherent refresh. Pending overflow conversion is rejected at the existing2000-entry limit.
+
+The fixture public cache invalidation endpoint acknowledges synthetically. This proves product invocation and postcommit error separation, not public provider refresh. Live Realtime, two actual browser accounts with share revocation, concurrent two-connection races, performance/full regression, production migration, deployment and real promotion remain separate Task8/9 or release gates. Task7's permission proof combines actual DB roles/revocation with client clear tests.
+
+Deletion lifecycle verification has a narrow limitation: the existing class DELETE audit trigger fails with23503 `dashboard_audit_logs_class_id_fkey`. The edge/pgTAP fixture therefore temporarily disables only `classes.dashboard_audit_classes` for its own synthetic deletion within a transaction and restores it before completion; exceptions roll back the transaction. Final trigger state is `O`. This isolates applied-state/FK and shadow fingerprint behavior; it does not validate the production class deletion flow or modify its audit contract. No sends were performed.
+
+
+## Task7 review fix1 — science metadata and partial pending weekday
+
+`transfer-science-results.json` records three successful actual DB/browser checks with zero page errors. A new fully placed 과학/고1 draft with no subject area is blocked by preview; its `수업 정보 수정` button opens the existing whole-item form, whose 과학 영역 options come from `list_active_science_subject_areas_v1()`. Saving one catalog choice preserves slot ID and17:13–17:43, returns to a fresh preview, and creates exactly one active science class. Deliberate committed-response loss disables row metadata editing; retry submits the identical command/key. `transfer-science-correction.png` and `transfer-science-complete.png` preserve the actual views. Root independently inspected the correction screenshot and results.
+
+Run `node scripts/qa/timetable-transfer-science-browser.mjs` against the same isolated fixture. Because its science catalogs were empty, this script reused the subject/settings seed statements from the existing20260722090000 migration. It reads the actual catalog key, restores its previous active flag, archives its plan, closes its class and removes its own resources. Seeded area rows remain inactive to satisfy the closed synthetic class FK. This is synthetic fixture preparation; product code has no hardcoded science keys. Fixture proxy session30851 replaced the stopped prior proxy.
+
+Focused RED reproduced missing science form data, missing catalog service, and Monday lost when time was unknown. GREEN passed39/39 across transfer interaction/service and placement interaction tests; full tsc and amended-file lint passed. Pending weekday now survives independently of time, preserving the raw original. Prior SQL133/133 and broader UI results remain earlier evidence; SQL definitions/ACLs were unchanged and the whole suite was not rerun for this focused fix. No production/provider/send claim is added.

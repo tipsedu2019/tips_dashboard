@@ -1,0 +1,36 @@
+✔ actual React StrictMode effect replay retains a live controller that loads and saves (41.453875ms)
+✔ actor cleanup removes recovery for unmounted plans while keeping another actor (4.239708ms)
+✔ actual plan switch keeps same-actor drafts through child unmount for provider logout cleanup (9.659625ms)
+✔ create: unknown receipt survives changed name (63.485625ms)
+✔ create: unknown receipt survives changed name and dialog reopen (18.948625ms)
+✔ clone: unknown receipt survives changed name (12.547583ms)
+✔ clone: unknown receipt survives changed name and dialog reopen (14.896916ms)
+✔ late share success cannot populate another actor/dialog (11.231792ms)
+✔ late share failure cannot populate another actor/dialog (10.148833ms)
+✔ late create success cannot change another actor's selection/dialog (13.147833ms)
+✔ late create failure cannot change another actor's selection/dialog (16.858792ms)
+✔ late share response cannot fill a newer dialog in the same actor scope (9.438667ms)
+✔ conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable (23.830833ms)
+✔ share receipt preserves later viewer-to-editor change for a separate confirmed-revision command (16.371042ms)
+✔ share receipt preserves later revocation for a separate confirmed-revision command (15.725459ms)
+✔ create: submitted immutable receipt survives full remount (8.929167ms)
+✔ clone: submitted immutable receipt survives full remount (6.557125ms)
+✔ rename: submitted immutable receipt survives full remount (6.952833ms)
+✔ share: submitted immutable receipt survives full remount (9.042667ms)
+✔ archive: submitted immutable receipt survives full remount (5.753208ms)
+✔ restore: submitted immutable receipt survives full remount (4.231458ms)
+✔ actor retirement purges pending metadata, picker list and recovery UI (4.391958ms)
+✔ Storage SecurityError keeps the submitted immutable request in memory and warns before reload (4.593541ms)
+✔ plan revocation preserves unrelated submitted metadata (4.971333ms)
+✔ plan revocation purges related submitted metadata (4.416791ms)
+✔ one plan revocation preserves other plan submitted recovery and actor lifetime (0.446083ms)
+✔ unrelated metadata remains while transfers targeting revoked plan are removed (0.091ms)
+✔ plan revocation tolerates unavailable storage (0.061917ms)
+ℹ tests 28
+ℹ suites 0
+ℹ pass 28
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 660.945667

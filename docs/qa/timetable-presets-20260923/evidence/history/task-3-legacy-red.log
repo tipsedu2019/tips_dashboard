@@ -1,0 +1,382 @@
+BEGIN
+NOTICE:  extension "pgtap" already exists, skipping
+CREATE EXTENSION
+ no_plan 
+---------
+(0 rows)
+
+CREATE FUNCTION
+INSERT 0 5
+INSERT 0 5
+DELETE 2
+INSERT 0 2
+UPDATE 2
+INSERT 0 2
+CREATE FUNCTION
+              set_config              
+--------------------------------------
+ ac239000-0000-4000-8000-000000000901
+(1 row)
+
+SET
+                  lives_ok                   
+---------------------------------------------
+ ok 1 - admin creates independent empty plan
+(1 row)
+
+               is               
+--------------------------------
+ ok 2 - empty board is readable
+(1 row)
+
+                    is                     
+-------------------------------------------
+ ok 3 - full catalogs support empty boards
+(1 row)
+
+SELECT 1
+                      is                       
+-----------------------------------------------
+ ok 4 - same actor and key replay exact result
+(1 row)
+
+                throws_ok                
+-----------------------------------------
+ ok 5 - same key different body rejected
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 6 - item save does not increment metadata revision
+(1 row)
+
+                              lives_ok                              
+--------------------------------------------------------------------
+ ok 7 - adjacent half-open placement and distinct item save succeed
+(1 row)
+
+                throws_ok                 
+------------------------------------------
+ ok 8 - same-item stale revision rejected
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 9 - same plan teacher and room conflict rejected
+(1 row)
+
+                 throws_ok                  
+--------------------------------------------
+ ok 10 - lifecycle field injection rejected
+(1 row)
+
+                throws_ok                 
+------------------------------------------
+ ok 11 - duplicate slot identity rejected
+(1 row)
+
+                       throws_ok                       
+-------------------------------------------------------
+ ok 12 - same room conflicts even with another teacher
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 13 - same teacher conflicts even in another room
+(1 row)
+
+                         throws_ok                          
+------------------------------------------------------------
+ ok 14 - same item overlaps even when both resources differ
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 15 - stale shadow fingerprint rejected
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 16 - source provenance is server-owned
+(1 row)
+
+                      is                      
+----------------------------------------------
+ ok 17 - per plan signal matches item changes
+(1 row)
+
+RESET
+INSERT 0 1
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 1
+SET
+                          is                           
+-------------------------------------------------------
+ ok 18 - all subjects contribute authoritative shadows
+(1 row)
+
+                               lives_ok                                
+-----------------------------------------------------------------------
+ ok 19 - name-only edit preserves newly conflicting original occupancy
+(1 row)
+
+                           throws_ok                            
+----------------------------------------------------------------
+ ok 20 - hidden subject operational shadow blocks new placement
+(1 row)
+
+                         lives_ok                         
+----------------------------------------------------------
+ ok 21 - safe repair moves out of unchanged live conflict
+(1 row)
+
+RESET
+UPDATE 1
+SET
+                          lives_ok                          
+------------------------------------------------------------
+ ok 22 - hidden resource unchanged occupancy can be renamed
+(1 row)
+
+                      throws_ok                       
+------------------------------------------------------
+ ok 23 - hidden resource cannot acquire new occupancy
+(1 row)
+
+RESET
+DELETE 1
+ set_config 
+------------
+ v1
+(1 row)
+
+UPDATE 1
+DELETE 1
+SET
+                          is                           
+-------------------------------------------------------
+ ok 24 - deleted resource retains original stable UUID
+(1 row)
+
+                           lives_ok                           
+--------------------------------------------------------------
+ ok 25 - deleted resource snapshot permits non-occupancy edit
+(1 row)
+
+                 lives_ok                  
+-------------------------------------------
+ ok 26 - second plan created independently
+(1 row)
+
+                   lives_ok                   
+----------------------------------------------
+ ok 27 - other plan has independent occupancy
+(1 row)
+
+                 throws_ok                  
+--------------------------------------------
+ ok 28 - another plan slot cannot be stolen
+(1 row)
+
+                   lives_ok                   
+----------------------------------------------
+ ok 29 - metadata rename changes own revision
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 30 - metadata rename leaves item revision unchanged
+(1 row)
+
+                throws_ok                
+-----------------------------------------
+ ok 31 - old metadata guard rejects save
+(1 row)
+
+               lives_ok                
+---------------------------------------
+ ok 32 - archive is metadata operation
+(1 row)
+
+              throws_ok              
+-------------------------------------
+ ok 33 - archived plans are readonly
+(1 row)
+
+       lives_ok       
+----------------------
+ ok 34 - restore plan
+(1 row)
+
+RESET
+INSERT 0 1
+UPDATE 1
+SET
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 35 - applied item whose source was deleted stays out of draft grid
+(1 row)
+
+                                      is                                       
+-------------------------------------------------------------------------------
+ ok 36 - applied snapshot remains separate after applied class ID becomes null
+(1 row)
+
+             throws_ok             
+-----------------------------------
+ ok 37 - applied item is immutable
+(1 row)
+
+                            lives_ok                            
+----------------------------------------------------------------
+ ok 38 - clone preserves unavailable draft resources for repair
+(1 row)
+
+                     is                      
+---------------------------------------------
+ ok 39 - whole clone copies draft slots only
+(1 row)
+
+                       is                        
+-------------------------------------------------
+ ok 40 - applied source clones to unplaced draft
+(1 row)
+
+                  ok                  
+--------------------------------------
+ ok 41 - clone allocates new item IDs
+(1 row)
+
+                  ok                  
+--------------------------------------
+ ok 42 - clone allocates new slot IDs
+(1 row)
+
+                         lives_ok                          
+-----------------------------------------------------------
+ ok 43 - explicit delete atomically removes item and slots
+(1 row)
+
+                  is                   
+---------------------------------------
+ ok 44 - delete removes its placements
+(1 row)
+
+RESET
+INSERT 0 1
+SET
+                                        is                                         
+-----------------------------------------------------------------------------------
+ not ok 45 - complete comma-separated legacy schedule resolves both tokens        +
+ # Failed test 45: "complete comma-separated legacy schedule resolves both tokens"+
+ #         have: 0                                                                +
+ #         want: 2
+(1 row)
+
+                              is                              
+--------------------------------------------------------------
+ not ok 46 - strict legacy reader keeps exact minutes        +
+ # Failed test 46: "strict legacy reader keeps exact minutes"+
+ #         have: NULL                                        +
+ #         want: 1033
+(1 row)
+
+                                 is                                 
+--------------------------------------------------------------------
+ not ok 47 - legacy exact name resolves stable catalog UUID        +
+ # Failed test 47: "legacy exact name resolves stable catalog UUID"+
+ #         have: NULL                                              +
+ #         want: ac239000-0000-4000-8000-000000000102
+(1 row)
+
+                         is                          
+-----------------------------------------------------
+ not ok 48 - valid legacy occupancy complete        +
+ # Failed test 48: "valid legacy occupancy complete"+
+ #         have: false                              +
+ #         want: true
+(1 row)
+
+RESET
+UPDATE 1
+SET
+                        is                         
+---------------------------------------------------
+ ok 49 - unparseable legacy occupancy fails closed
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 50 - unresolved class is visible as blocker
+(1 row)
+
+                      throws_ok                       
+------------------------------------------------------
+ ok 51 - incomplete occupancy never becomes free time
+(1 row)
+
+RESET
+ set_config 
+------------
+ v1
+(1 row)
+
+UPDATE 1
+INSERT 0 500
+SET
+                      is                       
+-----------------------------------------------
+ ok 52 - 500 items returned without truncation
+(1 row)
+
+               throws_ok                
+----------------------------------------
+ ok 53 - 501st item explicitly rejected
+(1 row)
+
+RESET
+INSERT 0 1
+INSERT 0 2001
+SET
+                         is                         
+----------------------------------------------------
+ ok 54 - over-capacity read does not truncate items
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 55 - over-capacity read does not truncate slots
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 56 - capacity overflow is explicitly incomplete
+(1 row)
+
+                     throws_ok                     
+---------------------------------------------------
+ ok 57 - over-capacity board mutations are blocked
+(1 row)
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     ?column?                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      
+-------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ CONTRACT_SNAPSHOT={"plan": {"id": "ac239000-0000-4000-8000-000000000001", "name": "변경한 계획", "state": "draft", "metaRevision": 3, "targetEndDate": null, "changeSequence": 9, "targetStartDate": null}, "items": [{"id": "ac239000-0000-4000-8000-000000000011", "name": "초안", "grade": "중2", "state": "draft", "planId": "ac239000-0000-4000-8000-000000000001", "subject": "영어", "tuition": 100000, "capacity": 12, "revision": 5, "appliedAt": null, "pendingSlots": [], "sourceClassId": null, "appliedClassId": null, "subjectAreaKey": null, "durationMinutes": 60, "defaultTeacherId": "ac239000-0000-4000-8000-000000000101", "appliedTransferId": null, "defaultClassroomId": "ac239000-0000-4000-8000-000000000201"}, {"id": "ac239000-0000-4000-8000-000000000012", "name": "초안", "grade": "중2", "state": "applied", "planId": "ac239000-0000-4000-8000-000000000001", "subject": "영어", "tuition": 100000, "capacity": 12, "revision": 1, "appliedAt": "2026-09-23T08:25:59.747803+00:00", "pendingSlots": [], "sourceClassId": null, "appliedClassId": null, "subjectAreaKey": null, "durationMinutes": 60, "defaultTeacherId": "ac239000-0000-4000-8000-000000000101", "appliedTransferId": "ac239000-0000-4000-8000-000000000700", "defaultClassroomId": "ac239000-0000-4000-8000-000000000201"}], "slots": [{"id": "ac239000-0000-4000-8000-000000000111", "itemId": "ac239000-0000-4000-8000-000000000011", "planId": "ac239000-0000-4000-8000-000000000001", "weekday": 1, "endMinute": 780, "teacherId": "ac239000-0000-4000-8000-000000000101", "classroomId": "ac239000-0000-4000-8000-000000000201", "startMinute": 720, "teacherName": "동일 이름", "sourceSlotId": null, "classroomName": "동일 이름"}], "members": [], "capacity": {"exceeded": false, "maxItems": 500, "maxSlots": 2000, "itemCount": 2, "slotCount": 2}, "catalogs": {"teachers": [{"id": "9499fae1-81a2-4588-a837-dd958a92cceb", "name": "plan901", "subjects": ["영어팀"], "isVisible": true}, {"id": "9d4374af-e482-4b4b-8c84-69a044da0f55", "name": "plan902", "subjects": ["영어팀"], "isVisible": true}, {"id": "9fb87b1a-0c26-4531-9ae6-92461963b4f5", "name": "plan905", "subjects": ["영어팀"], "isVisible": true}, {"id": "ac239000-0000-4000-8000-000000000102", "name": "다른 교사", "subjects": ["영어"], "isVisible": true}], "classrooms": [{"id": "ac239000-0000-4000-8000-000000000201", "name": "동일 이름", "subjects": ["영어"], "isVisible": true}, {"id": "ac239000-0000-4000-8000-000000000202", "name": "다른 방", "subjects": ["영어"], "isVisible": true}]}, "complete": true, "permissions": {"canEdit": true, "canManage": true, "canTransfer": true}, "shadowSlots": [], "shadowClasses": [], "appliedSnapshots": [{"slots": [{"id": "ac239000-0000-4000-8000-000000000112", "itemId": "ac239000-0000-4000-8000-000000000012", "planId": "ac239000-0000-4000-8000-000000000001", "weekday": 1, "endMinute": 720, "teacherId": "ac239000-0000-4000-8000-000000000101", "classroomId": "ac239000-0000-4000-8000-000000000201", "startMinute": 660, "teacherName": "동일 이름", "sourceSlotId": null, "classroomName": "동일 이름"}], "itemId": "ac239000-0000-4000-8000-000000000012"}], "shadowFingerprint": "a2dfe2a74df63962558ac8ca5aaa9295", "unresolvedOccupancies": []}
+(1 row)
+
+                                       ok                                       
+--------------------------------------------------------------------------------
+ not ok 58 - deleted resource has explicit unavailable display metadata        +
+ # Failed test 58: "deleted resource has explicit unavailable display metadata"
+(1 row)
+
+                finish                 
+---------------------------------------
+ 1..58
+ # Looks like you failed 5 tests of 58
+(2 rows)
+
+ROLLBACK

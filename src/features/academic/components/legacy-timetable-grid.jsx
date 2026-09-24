@@ -1,6 +1,8 @@
 import { memo, useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Trash2 } from 'lucide-react';
+import { layoutOverlapLanes } from '../timetable-plan-interaction.ts';
+import { TimetablePlanGrid } from './timetable-plan-grid.jsx';
 
 function TimetableBlock({
   block,
@@ -31,10 +33,12 @@ function TimetableBlock({
     ? [tooltipDetails.teacher, tooltipDetails.classroom].filter(Boolean)
     : [];
 
+  const blockHeight = (block.endSlot - block.startSlot) * slotHeight;
   const classNames = [
     'timetable-block',
     'is-' + density,
-    (block.endSlot - block.startSlot) * slotHeight < 76 ? 'is-short' : '',
+    blockHeight < 76 ? 'is-short' : '',
+    blockHeight < 46 ? 'is-single-line' : '',
     block.clickable && !isGhost ? 'clickable' : '',
     block.editable ? 'editable' : '',
     isGhost ? 'ghost' : '',
@@ -132,16 +136,16 @@ function TimetableBlock({
       <div
         ref={blockRef}
         className={classNames}
-        role={isReadOnlyDetail ? "button" : undefined}
-        tabIndex={isReadOnlyDetail ? 0 : undefined}
+        role={isReadOnlyDetail || block.clickable ? "button" : undefined}
+        tabIndex={isReadOnlyDetail || block.clickable ? 0 : undefined}
         aria-label={isReadOnlyDetail ? [block.title, tooltipDetails?.schedule, tooltipDetails?.teacher, tooltipDetails?.classroom].filter(Boolean).join(", ") : undefined}
         aria-expanded={isReadOnlyDetail ? isTooltipOpen : undefined}
         aria-describedby={isReadOnlyDetail && isTooltipOpen ? tooltipId : undefined}
         onFocus={isReadOnlyDetail ? openTooltip : undefined}
         onBlur={isReadOnlyDetail ? closeTooltip : undefined}
-        onKeyDown={isReadOnlyDetail ? (event) => {
+        onKeyDown={isReadOnlyDetail || block.clickable ? (event) => {
           if (event.key === "Escape") { event.stopPropagation(); closeTooltip(); }
-          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openTooltip(); }
+          if (event.key === "Enter" || event.key === " ") { event.preventDefault(); if (block.clickable) onClick?.(); else openTooltip(); }
         } : undefined}
         onClick={block.clickable && !isGhost && !suppressClick ? onClick : isReadOnlyDetail ? openTooltip : undefined}
         onMouseDown={isGhost ? undefined : onMouseDown}
@@ -366,12 +370,14 @@ function TimetableGrid({
     const starts = new Map();
     const active = new Map();
 
-    blocks.forEach((block) => {
-      starts.set(`${block.columnIndex}-${block.startSlot}`, block);
-      for (let row = block.startSlot; row < block.endSlot; row += 1) {
-        active.set(`${block.columnIndex}-${row}`, block);
-      }
-    });
+    for (const columnIndex of new Set(blocks.map(block => block.columnIndex))) {
+      const lanes = layoutOverlapLanes(blocks.filter(block => block.columnIndex === columnIndex).map(block => ({...block, id:block.key,startMinute:block.startSlot*30,endMinute:block.endSlot*30})));
+      lanes.forEach(block => {
+        const key = `${block.columnIndex}-${Math.floor(block.startSlot)}`;
+        starts.set(key, [...(starts.get(key) || []), block]);
+        for (let row = Math.floor(block.startSlot); row < block.endSlot; row += 1) active.set(`${block.columnIndex}-${row}`, block);
+      });
+    }
 
     return { starts, active };
   }, [blocks]);
@@ -425,6 +431,7 @@ function TimetableGrid({
     }
 
     const moved =
+      dragPreviewState.sourceGridKey !== dragPreviewState.targetGridKey ||
       dragPreviewState.block.columnIndex !== dragPreviewState.targetColumnIndex ||
       dragPreviewState.block.startSlot !== dragPreviewState.targetStartSlot;
 
@@ -713,7 +720,7 @@ function TimetableGrid({
   }, []);
 
   const handlePointerScrollStart = useCallback((event) => {
-    if (!event.pointerType || event.pointerType === 'mouse') {
+    if (event.target.closest?.('[data-plan-handle]') || !event.pointerType || event.pointerType === 'mouse') {
       return;
     }
 
@@ -738,7 +745,7 @@ function TimetableGrid({
   }, []);
 
   const handlePointerScrollMove = useCallback((event) => {
-    if (!event.pointerType || event.pointerType === 'mouse') {
+    if (event.target.closest?.('[data-plan-handle]') || !event.pointerType || event.pointerType === 'mouse') {
       return;
     }
 
@@ -860,7 +867,7 @@ function TimetableGrid({
               </div>
 
               {columns.map((column, columnIndex) => {
-                const blockStart = blockMap.starts.get(`${columnIndex}-${rowIndex}`);
+                const blockStarts = blockMap.starts.get(`${columnIndex}-${rowIndex}`);
                 const activeBlock = blockMap.active.get(`${columnIndex}-${rowIndex}`);
                 const isHoveredColumn = crosshairEnabled && hoveredSlot?.col === columnIndex;
                 const isHoveredRow = crosshairEnabled && hoveredSlot && rowIndex >= hoveredSlot.startRow && rowIndex < hoveredSlot.endRow;
@@ -940,8 +947,8 @@ function TimetableGrid({
                       startSelection(columnIndex, rowIndex);
                     }}
                   >
-                    {blockStart ? (
-                      <TimetableBlock
+                    {(blockStarts || []).map(blockStart => (
+                      <div key={blockStart.key} style={{position:'absolute',top:(blockStart.startSlot-rowIndex)*slotHeight,left:`${blockStart.lane/blockStart.laneCount*100}%`,width:`${100/blockStart.laneCount}%`}}><TimetableBlock
                         block={blockStart}
                         isSourceDragging={
                           sharedDragEnabled
@@ -962,8 +969,8 @@ function TimetableGrid({
                           event.stopPropagation();
                           startDrag(blockStart);
                         }}
-                      />
-                    ) : null}
+                      /></div>
+                    ))}
 
                     {ghostStartsHere ? (
                       <TimetableBlock
@@ -995,4 +1002,7 @@ function TimetableGrid({
   );
 }
 
-export default memo(TimetableGrid);
+function TimetableGridRouter(props) {
+  return props.planGrid ? <TimetablePlanGrid {...props.planGrid} BlockComponent={TimetableBlock} /> : <TimetableGrid {...props} />;
+}
+export default memo(TimetableGridRouter);

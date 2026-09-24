@@ -4,10 +4,10 @@ create extension if not exists pgtap with schema extensions;
 
 select plan(32);
 
-select has_column('public', 'dashboard_audit_logs', 'class_id');
-select has_column('public', 'dashboard_audit_logs', 'request_key');
-select has_column('public', 'dashboard_audit_logs', 'request_operation');
-select has_column('public', 'dashboard_audit_logs', 'change_reason');
+select has_column('public'::name, 'dashboard_audit_logs'::name, 'class_id'::name, 'dashboard_audit_logs.class_id exists');
+select has_column('public'::name, 'dashboard_audit_logs'::name, 'request_key'::name, 'dashboard_audit_logs.request_key exists');
+select has_column('public'::name, 'dashboard_audit_logs'::name, 'request_operation'::name, 'dashboard_audit_logs.request_operation exists');
+select has_column('public'::name, 'dashboard_audit_logs'::name, 'change_reason'::name, 'dashboard_audit_logs.change_reason exists');
 
 select ok(
   not exists (
@@ -23,8 +23,8 @@ select ok(
   'authenticated cannot directly insert audit rows'
 );
 
-select has_table('dashboard_private', 'continuous_class_schedule_runtime');
-select has_table('dashboard_private', 'class_schedule_cutovers');
+select has_table('dashboard_private'::name, 'continuous_class_schedule_runtime'::name, 'private continuous_class_schedule_runtime exists');
+select has_table('dashboard_private'::name, 'class_schedule_cutovers'::name, 'private class_schedule_cutovers exists');
 select is(
   public.continuous_class_schedule_runtime_version(),
   0,

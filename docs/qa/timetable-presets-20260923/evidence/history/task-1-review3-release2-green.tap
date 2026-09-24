@@ -1,0 +1,13 @@
+✔ a retry reuses the action request key and its canonical defaults payload (0.726833ms)
+✔ RPC errors are mapped to safe schedule action states (0.112083ms)
+✔ generation preview sends only the bounded range and revision (0.086709ms)
+✔ bounded reader deduplicates one range, aborts a prior class, and trusts the RPC authority result (0.298583ms)
+✔ runtime-not-ready reloads legacy while other normalized read failures stay explicit (0.156417ms)
+ℹ tests 5
+ℹ suites 0
+ℹ pass 5
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 70.650917

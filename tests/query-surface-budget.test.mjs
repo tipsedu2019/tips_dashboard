@@ -2985,3 +2985,26 @@ test("actual registration adapters expose bounded literal queries without source
       .some((entry) => entry.reason === "list_retry_false_missing"), file)
   }
 })
+
+
+test("JSX array rendering is not parsed as a database query, while real JSX queries remain checked", () => {
+  const inspect = source => inspectQuerySurfaceSource({surface:"academic", file:"src/features/academic/timetable-plan-grid.jsx", source});
+  assert.deepEqual(inspect('export function Grid() { return <div>{Array.from({length: 30}, (_, i) => <span key={i}>{i}</span>)}</div> }'), []);
+  assert.ok(inspect('export async function load(client) { return client.from("classes").select("*") } export function Grid() { return <div/> }').some(x => x.reason === "list_select_star"));
+});
+
+test("timetable pages require a literal bounded page size and retain transport controls", () => {
+  const rpc = args => `client.rpc("list_timetable_plans_v1", ${args}).abortSignal(AbortSignal.timeout(8_000)).retry(false)`;
+  assert.deepEqual(inspectReleaseQuery(rpc('{p_page: 1, p_page_size: 30}')), []);
+  for (const args of ['{}', '{p_page_size: 31}', '{p_page_size: size}', '{p_page_size: 30, ...options}', '{p_limit: 30}']) assert.ok(inspectReleaseQuery(rpc(args)).length > 0, args);
+  assert.ok(inspectReleaseQuery('client.rpc("unknown_page_v1", {p_page_size: 30}).abortSignal(AbortSignal.timeout(8_000)).retry(false)').length > 0);
+  assert.ok(inspectReleaseQuery('client.rpc("list_timetable_plans_v1", {p_page_size: 30})').some(x => x.reason === "list_abort_signal_missing"));
+});
+
+test("timetable purpose-complete contexts do not exempt unknown names or missing transport bounds", () => {
+  for (const name of ['get_timetable_plan_v1', 'get_timetable_plan_revision_v1', 'get_timetable_operational_reference_v1', 'list_timetable_share_candidates_v1', 'list_timetable_import_sources_v1', 'preview_timetable_plan_import_v1', 'commit_timetable_plan_import_v1', 'mutate_timetable_plan_v1', 'mutate_timetable_plan_item_v1', 'preview_timetable_plan_transfer_v1', 'commit_timetable_plan_transfer_v1', 'get_class_schedule_defaults_v1', 'initialize_new_class_schedule_v1', 'update_class_operational_v1']) {
+    assert.deepEqual(inspectReleaseQuery(`client.rpc("${name}", {}).abortSignal(AbortSignal.timeout(8_000)).retry(false)`), [], name);
+    assert.ok(inspectReleaseQuery(`client.rpc("${name}", {})`).some(x => x.reason === "list_retry_false_missing"), name);
+    assert.ok(inspectReleaseQuery(`client.rpc("${name}_unreviewed", {}).abortSignal(AbortSignal.timeout(8_000)).retry(false)`).length > 0, name);
+  }
+});

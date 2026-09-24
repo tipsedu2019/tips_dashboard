@@ -1,0 +1,377 @@
+BEGIN
+DO
+ no_plan 
+---------
+(0 rows)
+
+SET
+INSERT 0 1
+INSERT 0 3
+INSERT 0 3
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+  set_config  
+--------------
+ release2-rpc
+(1 row)
+
+INSERT 0 4
+INSERT 0 1
+SELECT 1
+                                ok                                 
+-------------------------------------------------------------------
+ ok 1 - slot time uniqueness is deferrable for ID-preserving swaps
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000901
+(1 row)
+
+SELECT 1
+                             is                             
+------------------------------------------------------------
+ ok 2 - saving A preserves B schedule metadata and revision
+(1 row)
+
+                is                 
+-----------------------------------
+ ok 3 - only A revision increments
+(1 row)
+
+                               is                               
+----------------------------------------------------------------
+ ok 4 - legacy schedule keeps per-slot teacher and room details
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 5 - legacy teacher projection keeps both resources
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 6 - legacy room projection keeps weekday assignments
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 7 - past session snapshot and slot FK remain unchanged
+(1 row)
+
+                      is                       
+-----------------------------------------------
+ ok 8 - same request key replays exact receipt
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 9 - stale revision has domain SQLSTATE
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 10 - B slot cannot be transferred through A save
+(1 row)
+
+                          throws_ok                           
+--------------------------------------------------------------
+ ok 11 - duplicate final time tuple is rejected before commit
+(1 row)
+
+                         lives_ok                          
+-----------------------------------------------------------
+ ok 12 - valid final time swap preserves existing slot IDs
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 13 - first slot ID keeps its row after swap
+(1 row)
+
+                       is                        
+-------------------------------------------------
+ ok 14 - second slot ID keeps its row after swap
+(1 row)
+
+                           is                           
+--------------------------------------------------------
+ ok 15 - past session FK still targets original slot ID
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000903
+(1 row)
+
+                 throws_ok                 
+-------------------------------------------
+ ok 16 - teacher role cannot save defaults
+(1 row)
+
+              set_config              
+--------------------------------------
+ ac230000-0000-4000-8000-000000000902
+(1 row)
+
+                        lives_ok                        
+--------------------------------------------------------
+ ok 17 - staff can idempotently save unchanged defaults
+(1 row)
+
+UPDATE 1
+SELECT 1
+                            is                             
+-----------------------------------------------------------
+ ok 18 - mixed slots project explicit unassigned resources
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 19 - teacher summary only names assigned teachers
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 20 - room summary only names assigned rooms
+(1 row)
+
+                         is                          
+-----------------------------------------------------
+ ok 21 - both-unassigned normalized slot stays empty
+(1 row)
+
+SELECT 4
+                          is                           
+-------------------------------------------------------
+ ok 22 - legacy timetable returns all four mixed slots
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 23 - legacy timetable keeps fully assigned teacher
+(1 row)
+
+                           is                            
+---------------------------------------------------------
+ ok 24 - legacy timetable keeps fully assigned classroom
+(1 row)
+
+                         is                          
+-----------------------------------------------------
+ ok 25 - legacy timetable keeps teacher-only teacher
+(1 row)
+
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 26 - legacy timetable does not borrow a room for teacher-only slot
+(1 row)
+
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 27 - legacy timetable does not borrow a teacher for room-only slot
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 28 - legacy timetable keeps room-only classroom
+(1 row)
+
+                                   is                                   
+------------------------------------------------------------------------
+ ok 29 - legacy timetable does not borrow a teacher for unassigned slot
+(1 row)
+
+                                 is                                  
+---------------------------------------------------------------------
+ ok 30 - legacy timetable does not borrow a room for unassigned slot
+(1 row)
+
+INSERT 0 2
+INSERT 0 2
+SELECT 1
+                                              is                                              
+----------------------------------------------------------------------------------------------
+ ok 31 - literal placeholder names and escape-prefix names have unambiguous projected details
+(1 row)
+
+SELECT 3
+                                       is                                       
+--------------------------------------------------------------------------------
+ ok 32 - timetable preserves assigned teacher whose name matches absence marker
+(1 row)
+
+                                     is                                      
+-----------------------------------------------------------------------------
+ ok 33 - timetable preserves assigned room whose name matches absence marker
+(1 row)
+
+                                is                                 
+-------------------------------------------------------------------
+ ok 34 - timetable preserves literal former encoding token teacher
+(1 row)
+
+                       is                       
+------------------------------------------------
+ ok 35 - timetable preserves literal tilde room
+(1 row)
+
+                            is                            
+----------------------------------------------------------
+ ok 36 - timetable keeps a truly unassigned teacher empty
+(1 row)
+
+                          is                           
+-------------------------------------------------------
+ ok 37 - timetable keeps a truly unassigned room empty
+(1 row)
+
+SET
+                                             is                                              
+---------------------------------------------------------------------------------------------
+ ok 38 - authenticated timetable RPC preserves literal marker name under invoker ACL and RLS
+(1 row)
+
+                                             is                                             
+--------------------------------------------------------------------------------------------
+ ok 39 - authenticated timetable RPC preserves literal tilde room under invoker ACL and RLS
+(1 row)
+
+RESET
+INSERT 0 1
+INSERT 0 1
+SELECT 1
+                                     is                                     
+----------------------------------------------------------------------------
+ ok 40 - comma catalog names remain literal in the compatibility projection
+(1 row)
+
+                          is                          
+------------------------------------------------------
+ ok 41 - normalized Monday slot retains comma teacher
+(1 row)
+
+                         is                         
+----------------------------------------------------
+ ok 42 - normalized Tuesday slot retains comma room
+(1 row)
+
+SET
+                                      is                                      
+------------------------------------------------------------------------------
+ ok 43 - authenticated normalized timetable uses full comma teacher from slot
+(1 row)
+
+                              is                              
+--------------------------------------------------------------
+ ok 44 - authenticated normalized timetable keeps Monday room
+(1 row)
+
+                                is                                
+------------------------------------------------------------------
+ ok 45 - authenticated normalized timetable keeps Tuesday teacher
+(1 row)
+
+                                    is                                     
+---------------------------------------------------------------------------
+ ok 46 - authenticated normalized timetable uses full comma room from slot
+(1 row)
+
+                                   is                                    
+-------------------------------------------------------------------------
+ ok 47 - authenticated normalized timetable keeps explicit empty teacher
+(1 row)
+
+                                  is                                  
+----------------------------------------------------------------------
+ ok 48 - authenticated normalized timetable keeps explicit empty room
+(1 row)
+
+RESET
+UPDATE 1
+UPDATE 1
+                              is                              
+--------------------------------------------------------------
+ ok 49 - pre-existing raw tilde teacher detail is not decoded
+(1 row)
+
+                            is                             
+-----------------------------------------------------------
+ ok 50 - pre-existing raw tilde room detail is not decoded
+(1 row)
+
+UPDATE 1
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 51 - legacy ambiguous comma teacher keeps original room classifier
+(1 row)
+
+UPDATE 1
+                                 is                                  
+---------------------------------------------------------------------
+ ok 52 - legacy exact two-position empty resources suppress fallback
+(1 row)
+
+UPDATE 1
+                                is                                 
+-------------------------------------------------------------------
+ ok 53 - legacy exact two-position literal markers remain assigned
+(1 row)
+
+UPDATE 1
+UPDATE 1
+                                  is                                   
+-----------------------------------------------------------------------
+ ok 54 - shadow ambiguous comma teacher keeps original room classifier
+(1 row)
+
+UPDATE 1
+UPDATE 1
+                                 is                                 
+--------------------------------------------------------------------
+ ok 55 - legacy single-detail literal marker teacher stays assigned
+(1 row)
+
+UPDATE 1
+                                is                                
+------------------------------------------------------------------
+ ok 56 - shadow mode keeps previous single-detail literal parsing
+(1 row)
+
+ reconcile_continuous_schedule_shadow_slots_v1 
+-----------------------------------------------
+ 
+(1 row)
+
+                                        is                                        
+----------------------------------------------------------------------------------
+ ok 57 - shadow reconciliation updates an existing tuple without changing slot ID
+(1 row)
+
+                               is                                
+-----------------------------------------------------------------
+ ok 58 - shadow reconciliation does not insert a duplicate tuple
+(1 row)
+
+ set_config 
+------------
+ 
+(1 row)
+
+                      throws_ok                      
+-----------------------------------------------------
+ ok 59 - unauthenticated caller cannot save defaults
+(1 row)
+
+                    ok                     
+-------------------------------------------
+ ok 60 - anon retains no public save grant
+(1 row)
+
+ finish 
+--------
+ 1..60
+(1 row)
+
+ROLLBACK

@@ -1,0 +1,9 @@
+independent actual actor sessions
+lost create response → reload → identical immutable request → one preset
+preparing class import lost response → reload → same key → one preset and pending conflict
+different items edited by independent actors merge
+same item actual concurrent edits yield one winner and one exact stale response
+failed refreshed reference preserves good grid, disables previously enabled transfer and edit/create controls, sends zero mutation/transfer requests
+teacher share revocation removes only revoked view/name/metadata, preserves other permitted plan submitted recovery byte-for-byte and same-key receipt
+missing planner RPC leaves real operating read with no create action
+active shadow → new draft copies basics with zero placements and unchanged operating source

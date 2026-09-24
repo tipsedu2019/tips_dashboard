@@ -1,0 +1,220 @@
+BEGIN
+ok 1 - isolation fixture is actually repeatable read
+SELECT 1
+ok 2 - repeatable read snapshot reads remain allowed
+SET
+ok 3 - repeatable read actual public RPC cannot write pinned snapshot
+RESET
+ok 4 - repeatable read direct bypass cannot write pinned snapshot
+ok 5 - repeatable read rejected writes preserve rows
+1..5
+ROLLBACK
+BEGIN
+ok 1 - isolation fixture is actually serializable
+SELECT 1
+ok 2 - serializable snapshot reads remain allowed
+SET
+ok 3 - serializable actual public RPC cannot write pinned snapshot
+RESET
+ok 4 - serializable direct bypass cannot write pinned snapshot
+ok 5 - serializable rejected writes preserve rows
+1..5
+ROLLBACK
+BEGIN
+UPDATE 0
+ok 1 - unrelated textbook metadata takes no operating lock
+SELECT 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 1
+INSERT 0 2
+INSERT 0 2
+INSERT 0 3
+release2-rpc
+INSERT 0 2
+SET CONSTRAINTS
+SET CONSTRAINTS
+ad240000-0000-4000-8000-000000000901
+CREATE FUNCTION
+ok 2 - legacy status activation rejects teacher collision across subjects
+ok 3 - defaults RPC rejects room-only collision before returning
+ok 4 - direct dated makeup write rejects effective weekly teacher conflict
+ok 5 - initialize stale uses domain SQLSTATE
+ok 6 - preview stale uses domain SQLSTATE
+ok 7 - generation stale uses domain SQLSTATE
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 8 - session stale uses domain SQLSTATE
+ok 9 - content stale uses domain SQLSTATE
+ok 10 - backfill stale uses domain SQLSTATE
+UPDATE 1
+ok 11 - verify stale uses domain SQLSTATE
+ok 12 - activate stale uses domain SQLSTATE
+ok 13 - skipped source-slot/date replaces weekly default with no reservation
+ok 14 - actual makeup can use a date released by skipped authoritative session
+ok 15 - removing skipped override cannot expose a conflicting default
+ok 16 - session RPC restoration rejects actual dated occupancy before returning
+ok 17 - exception session uses exact half-open safe interval
+ok 18 - actual exception replaces weekly source reservation once
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 19 - gateway updates legacy defaults and status atomically
+ok 20 - legacy schedule_plan gateway checks dated teacher collision
+ok 21 - legacy gateway detects stale source JSON
+ok 22 - new unresolved active legacy occupancy fails closed
+ok 23 - active normalized defaults cannot introduce unresolved resources
+SET CONSTRAINTS
+SET CONSTRAINTS
+UPDATE 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 24 - existing conflict permits metadata-only edit
+ok 25 - same conflict pair with changed overlapping coordinates is rejected
+ok 26 - unrelated safe occupancy edit preserves existing conflict
+ok 27 - existing overlap can be repaired to adjacent safe time
+ok 28 - deferred flush cleans baseline after multiple RPCs
+ok 29 - zero-row guarded statement is harmless
+ok 30 - zero-row statement baseline is cleaned
+SET CONSTRAINTS
+ok 31 - immediate constraints support safe subsequent statement
+ok 32 - immediate constraints still guard subsequent conflicting statement
+ok 33 - rejected statement rollback leaves no baseline
+SET CONSTRAINTS
+SET
+ok 34 - authenticated authorized reference includes complete dated contract
+ok 35 - shadow identity is class and source slot based
+ok 36 - authenticated cannot read or forge guard baseline
+ok 37 - gateway works as actual authenticated role
+RESET
+SET
+ok 38 - anon cannot read operating reference
+ok 39 - anon cannot mutate operating gateway
+RESET
+INSERT 0 1
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 40 - generation under preparing class checks actual dated occupancy
+UPDATE 1
+ok 41 - safe generation retains existing projection and receipt behavior
+ok 42 - failed generation rolled back all inserted sessions
+v1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 43 - closed class retains valid actual makeup occupancy
+{"plan": {"id": "ad240000-0000-4000-8000-000000000701", "name": "기간 계획", "state": "draft", "metaRevision": 0, "targetEndDate": "2026-10-05", "changeSequence": 0, "targetStartDate": "2026-10-05"}}
+CREATE FUNCTION
+SET
+ok 44 - bounded recurring plan still reserves weekly default after dated session moved
+ok 45 - period plan saves safe weekly and dated position
+ok 46 - half-specified target period is rejected
+ok 47 - bounded plan detects dated exception outside weekly default
+ok 48 - bounded plan detects actual makeup under closed class
+RESET
+ok 49 - safe operating update ignores future plan draft occupancy
+INSERT 0 1
+CREATE FUNCTION
+ok 50 - normalized makeup adapter conflicts at correct KST time
+UPDATE 1
+ok 51 - normalized makeup adapter rejects unresolved room instead of guessing
+UPDATE 1
+ok 52 - normalized makeup adapter accepts unique exact room
+ok 53 - makeup stores exact stable room ID
+ok 54 - makeup KST start preserved independently of DB timezone
+ok 55 - normalized revert remains guarded and restores original active session
+ok 56 - makeup revert preserves original session history identity
+SET
+UPDATE 1
+ok 57 - early KST makeup works when UTC instant is previous date
+ok 58 - early KST session keeps local date
+
+UPDATE 1
+ok 59 - KST 23:30 to next midnight is represented on start date
+ok 60 - midnight endpoint remains legal 1440 minutes
+
+UPDATE 1
+ok 61 - cross-midnight interior requires separate slots
+CREATE FUNCTION
+ok 62 - legacy makeup effect cannot bypass teacher collision
+ok 63 - failed legacy effect rolls calendar event back too
+ok 64 - legacy safe dated effect remains supported
+ok 65 - legacy revert restores original and guarded calendar state
+SELECT 1
+ok 66 - content-only mixed projection keeps existing contract
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 67 - content-only projection emits no operating change signal
+SELECT 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 68 - resource catalog changes emit sanitized operating invalidation
+ok 69 - all final guard baselines cleaned
+ok 70 - schedule guards do not create notification events
+ok 71 - schedule guards do not enqueue deliveries
+ok 72 - schedule guards preserve student enrollment history
+ok 73 - source-less identical session is not silently deduplicated by time
+SET
+ok 74 - actual authenticated create gateway cannot commit conflicting legacy occupancy
+RESET
+INSERT 0 1
+UPDATE 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ok 75 - bounded plan never reports complete on unresolved dated data
+ok 76 - revision poll agrees with bounded snapshot completeness
+ok 77 - unscoped legacy dated blocker prevents new weekly placement
+ok 78 - existing unresolved data allows metadata-only edit
+CREATE FUNCTION
+ok 79 - past unresolved fixture remains readable
+ok 80 - past blocker retains independently known date
+ok 81 - past get_timetable_plan_v1 scopes completeness to review period
+ok 82 - past get_timetable_plan_revision_v1 scopes completeness to review period
+ok 83 - past blocker allows unrelated new operating occupancy
+ok 84 - inside unresolved fixture remains readable
+ok 85 - inside blocker retains independently known date
+ok 86 - inside get_timetable_plan_v1 scopes completeness to review period
+ok 87 - inside get_timetable_plan_revision_v1 scopes completeness to review period
+ok 88 - inside blocker rejects new affected operating occupancy
+ok 89 - outside unresolved fixture remains readable
+ok 90 - outside blocker retains independently known date
+ok 91 - outside get_timetable_plan_v1 scopes completeness to review period
+ok 92 - outside get_timetable_plan_revision_v1 scopes completeness to review period
+ok 93 - outside blocker allows unrelated new operating occupancy
+ok 94 - unknown unresolved fixture remains readable
+ok 95 - unknown blocker retains independently known date
+ok 96 - unknown get_timetable_plan_v1 scopes completeness to review period
+ok 97 - unknown get_timetable_plan_revision_v1 scopes completeness to review period
+ok 98 - unknown blocker rejects new affected operating occupancy
+ok 99 - legacy 10:00:30 remains diagnostic without rewriting source
+ok 100 - legacy 10:00:30 source is preserved exactly
+ok 101 - legacy 10:00:30 becomes date-scoped blocker
+ok 102 - legacy 10:00:30 never becomes truncated canonical minutes
+ok 103 - legacy 10:00:30 makes affected preset incomplete
+ok 104 - legacy 10:00:30 cannot expose truncated adjacent availability
+ok 105 - legacy 10:00:00.125 remains diagnostic without rewriting source
+ok 106 - legacy 10:00:00.125 source is preserved exactly
+ok 107 - legacy 10:00:00.125 becomes date-scoped blocker
+ok 108 - legacy 10:00:00.125 never becomes truncated canonical minutes
+ok 109 - legacy 10:00:00.125 makes affected preset incomplete
+ok 110 - legacy 10:00:00.125 cannot expose truncated adjacent availability
+ok 111 - legacy null session never crashes reader or baseline
+ok 112 - legacy null element remains intact
+ok 113 - legacy null has stable unknown-date blocker
+ok 114 - legacy null keeps bounded preset incomplete
+ok 115 - legacy null blocks unsafe new occupancy without crashing
+ok 116 - legacy string session never crashes reader or baseline
+ok 117 - legacy string element remains intact
+ok 118 - legacy string has stable unknown-date blocker
+ok 119 - legacy string keeps bounded preset incomplete
+ok 120 - legacy string blocks unsafe new occupancy without crashing
+ok 121 - legacy number session never crashes reader or baseline
+ok 122 - legacy number element remains intact
+ok 123 - legacy number has stable unknown-date blocker
+ok 124 - legacy number keeps bounded preset incomplete
+ok 125 - legacy number blocks unsafe new occupancy without crashing
+1..125
+ROLLBACK

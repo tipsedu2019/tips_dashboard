@@ -1,0 +1,16 @@
+✔ create: unknown receipt survives changed name (405.1305ms)
+ℹ {"mode":"create","reopen":false,"persistedIds":["de6c281d-5970-43ba-bb5f-9544996d98d6"],"persistedCount":1}
+✔ create: unknown receipt survives changed name and dialog reopen (276.446916ms)
+ℹ {"mode":"create","reopen":true,"persistedIds":["6f236351-f694-49d1-bd79-c65d552c1227"],"persistedCount":1}
+✔ clone: unknown receipt survives changed name (320.049459ms)
+ℹ {"mode":"clone","reopen":false,"persistedIds":["11103b41-bcc1-4b12-b352-de24561e2edf"],"persistedCount":1}
+✔ clone: unknown receipt survives changed name and dialog reopen (353.318ms)
+ℹ {"mode":"clone","reopen":true,"persistedIds":["4ac9b4c1-6b68-4e9a-b218-09b57fac1996"],"persistedCount":1}
+ℹ tests 4
+ℹ suites 0
+ℹ pass 4
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 1693.933083

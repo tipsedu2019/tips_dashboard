@@ -1,0 +1,84 @@
+begin;
+select no_plan();
+select has_function('public','list_timetable_import_sources_v1',array[]::text[],'manager source picker exists');
+select has_function('public','preview_timetable_plan_import_v1',array['jsonb'],'safe preview exists');
+select has_function('public','commit_timetable_plan_import_v1',array['jsonb'],'atomic import exists');
+create function pg_temp.i(n int) returns uuid language sql immutable as $$select ('af249100-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
+insert into auth.users(id,aud,role,email,raw_app_meta_data,raw_user_meta_data) values(pg_temp.i(901),'authenticated','authenticated','task9-sql-admin@test.invalid','{}','{}'),(pg_temp.i(902),'authenticated','authenticated','task9-sql-teacher@test.invalid','{}','{}');
+insert into public.profiles(id,name,role) values(pg_temp.i(901),'Task9 admin','admin'),(pg_temp.i(902),'Task9 teacher','teacher') on conflict(id) do update set role=excluded.role;
+delete from public.teacher_catalogs where profile_id=pg_temp.i(902);
+insert into public.teacher_catalogs(id,name,subjects,profile_id) values(pg_temp.i(101),'Task9 SQL 교사',array['영어'],pg_temp.i(902));
+update public.profiles set teacher_catalog_id=pg_temp.i(101) where id=pg_temp.i(902);
+insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.i(201),'Task9 SQL 강의실',array['영어']);
+insert into public.classes(id,name,subject,grade,status,schedule_storage_mode,capacity,fee) values(pg_temp.i(301),'Task9 준비 A','영어','중2','개강 준비','normalized',12,100000),(pg_temp.i(302),'Task9 준비 B','영어','중3','개강 준비','normalized',8,90000);
+select set_config('app.class_schedule_mutation','release2-rpc',true);
+insert into public.class_schedule_slots(id,class_id,weekday,start_time,end_time,teacher_catalog_id,classroom_catalog_id,teacher_name,classroom_name) values(pg_temp.i(401),pg_temp.i(301),2,'03:13','04:43',pg_temp.i(101),pg_temp.i(201),'Task9 SQL 교사','Task9 SQL 강의실'),(pg_temp.i(402),pg_temp.i(302),2,'03:13','04:43',pg_temp.i(101),pg_temp.i(201),'Task9 SQL 교사','Task9 SQL 강의실');
+insert into public.app_preferences(key,value) select 'planner:term:task9sql:영어:'||surface,
+jsonb_build_object('entries',jsonb_build_object('private-old-key',jsonb_build_object('classId',pg_temp.i(301),'className','Task9 옛 수업','subject','영어','studentIds',jsonb_build_array('PRIVATE-STUDENT'),'status','PRIVATE-STATUS','unknown',jsonb_build_object('secret','PRIVATE-NESTED'),'scheduleLines',jsonb_build_array(
+jsonb_build_object('day','금','start','23:30','end','24:00','teacher','Task9 SQL 교사','classroom','Task9 SQL 강의실','studentIds','PRIVATE-LINE'),
+jsonb_build_object('day','수','start','17:13','end','18:43','teacher','없는 교사','classroom','Task9 SQL 강의실','raw',jsonb_build_object('private','PRIVATE-RAW')),
+jsonb_build_object('day','unknown','start',jsonb_build_object('student','PRIVATE-TIME'),'teacher',jsonb_build_object('private','PRIVATE-TEACHER'),'status','PRIVATE-NESTED-STATUS'))))) from unnest(array['teacher-weekly','classroom-weekly','daily-teacher','daily-classroom']) surface;
+insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room) values
+(pg_temp.i(303),'Final en dash','영어','개강 준비','legacy','월 17:13–18:43','Task9 SQL 교사','Task9 SQL 강의실'),
+(pg_temp.i(304),'Final malformed','영어','개강 준비','legacy','수 17:xx–18:43 (기존 교사)','Task9 SQL 교사','Task9 SQL 강의실'),
+(pg_temp.i(305),'Final unknown day','영어','개강 준비','legacy','시간 확인 필요 (수영쌤)','Task9 SQL 교사','Task9 SQL 강의실');
+create temp table original_classes as select md5(jsonb_agg(to_jsonb(c) order by id)::text) hash from public.classes c;
+create temp table original_preferences as select md5(jsonb_agg(to_jsonb(p) order by key)::text) hash from public.app_preferences p;
+create temp table originals as select (select count(*) from public.class_lesson_sessions) sessions,(select count(*) from dashboard_private.notification_deliveries) deliveries;
+select set_config('request.jwt.claim.sub',pg_temp.i(901)::text,true);
+set local role authenticated;
+select is((select count(*)::int from jsonb_array_elements(public.list_timetable_import_sources_v1()->'legacyCandidates') x where x->>'key' like 'planner:term:task9sql:%'),4,'four independent historical surfaces remain separate candidates');
+select throws_ok($$select public.preview_timetable_plan_import_v1('{"kind":"legacy","key":"unrelated:private"}')$$,'22023','timetable_invalid','only planner prefix permitted');
+create temp table previews as select public.preview_timetable_plan_import_v1(jsonb_build_object('kind','preparation','classIds',jsonb_build_array(pg_temp.i(301),pg_temp.i(302)))) prep, public.preview_timetable_plan_import_v1('{"kind":"legacy","key":"planner:term:task9sql:영어:teacher-weekly"}') legacy;
+select ok((select legacy::text !~ 'PRIVATE-|studentIds|"status"|"unknown":|private-old-key' from previews),'safe preview excludes raw keys, students, status and nested unknown personal data');
+create temp table commands as select jsonb_build_object('source',prep->'source','sourceFingerprint',prep->>'sourceFingerprint','name','Task9 imported preparing','requestKey','task9-prep') prep,jsonb_build_object('source',legacy->'source','sourceFingerprint',legacy->>'sourceFingerprint','name','Task9 imported legacy','requestKey','task9-legacy') legacy from previews;
+create temp table results as select public.commit_timetable_plan_import_v1(prep) prep,public.commit_timetable_plan_import_v1(legacy) legacy from commands;
+select is((select public.commit_timetable_plan_import_v1(c.prep) from commands c),(select prep from results),'same immutable import receipt creates one preset');
+select throws_ok($$select public.commit_timetable_plan_import_v1((select prep||'{"name":"changed"}' from commands))$$,'22023','timetable_invalid','same import key with changed body is rejected');
+create temp table snapshots as select public.get_timetable_plan_v1((prep#>>'{plan,id}')::uuid) prep,public.get_timetable_plan_v1((legacy#>>'{plan,id}')::uuid) legacy from results;
+select is((select jsonb_array_length(prep->'items') from snapshots),2,'both selected preparing classes copied');
+select is((select jsonb_array_length(prep->'slots') from snapshots),1,'first valid placement confirmed');
+select is((select sum(jsonb_array_length(x->'pendingSlots'))::int from snapshots,jsonb_array_elements(prep->'items') x),1,'conflicting placement retained pending');
+select is((select prep#>>'{slots,0,startMinute}' from snapshots),'193','normalized minute precision preserved');
+select is((select prep#>>'{slots,0,sourceSlotId}' from snapshots),pg_temp.i(401)::text,'server-derived normalized source provenance retained');
+select ok((select not exists(select 1 from jsonb_array_elements(prep->'items') x where (x->>'id')::uuid in(pg_temp.i(301),pg_temp.i(302))) from snapshots),'new item UUIDs independent of source classes');
+select ok((select legacy::text !~ 'PRIVATE-|studentIds|PRIVATE-NESTED' from snapshots),'nested pending sourceText is also whitelisted');
+select is((select legacy#>>'{slots,0,endMinute}' from snapshots),'1440','historical midnight preserved');
+select is((select sum(jsonb_array_length(x->'pendingSlots'))::int from snapshots,jsonb_array_elements(legacy->'items') x),2,'missing resource and invalid time remain pending');
+select set_config('request.jwt.claim.sub',pg_temp.i(902)::text,true);
+select throws_ok($$select public.list_timetable_import_sources_v1()$$,'42501','timetable_forbidden','eligible teacher cannot list global legacy preferences');
+select throws_ok($$select public.preview_timetable_plan_import_v1('{"kind":"legacy","key":"planner:term:task9sql:영어:teacher-weekly"}')$$,'42501','timetable_forbidden','teacher cannot preview recovery');
+select throws_ok($$select public.commit_timetable_plan_import_v1((select prep from commands))$$,'42501','timetable_forbidden','teacher cannot replay manager import receipt');
+reset role;
+select is((select md5(jsonb_agg(to_jsonb(c) order by id)::text) from public.classes c),(select hash from original_classes),'every source class and status unchanged');
+select is((select md5(jsonb_agg(to_jsonb(p) order by key)::text) from public.app_preferences p),(select hash from original_preferences),'raw historical preference rows unchanged');
+select is((select count(*) from public.class_lesson_sessions),(select sessions from originals),'no lesson history created or changed');
+select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from originals),'no notification delivery created');
+update public.app_preferences set value=jsonb_set(value,'{entries,private-old-key,className}','"changed source"') where key='planner:term:task9sql:영어:teacher-weekly';
+select set_config('request.jwt.claim.sub',pg_temp.i(901)::text,true);
+set local role authenticated;
+select throws_ok($$select public.commit_timetable_plan_import_v1((select legacy||'{"requestKey":"stale-source"}' from commands))$$,'P0001','timetable_stale','changed historical source after preview fails exact non-concurrency SQLSTATE');
+select is((select public.commit_timetable_plan_import_v1(c.legacy) from commands c),(select legacy from results),'completed receipt remains same after source changes');
+reset role;
+select ok(not has_function_privilege('anon','public.preview_timetable_plan_import_v1(jsonb)','execute'),'anonymous preview denied');
+select ok(not has_function_privilege('authenticated','dashboard_private.timetable_import_source_v1(jsonb)','execute'),'private raw-source helper inaccessible');
+update public.app_preferences set value=jsonb_set(value,'{entries,private-old-key,subject}','null') where key='planner:term:task9sql:영어:daily-teacher';
+select set_config('request.jwt.claim.sub',pg_temp.i(901)::text,true);
+set local role authenticated;
+select throws_ok($$select public.preview_timetable_plan_import_v1('{"kind":"legacy","key":"planner:term:task9sql:영어:daily-teacher"}')$$,'22023','timetable_import_metadata_missing','missing subject cannot become invented promotable English');
+select is(public.preview_timetable_plan_import_v1(jsonb_build_object('kind','preparation','classIds',jsonb_build_array(pg_temp.i(305))))#>>'{entries,0,scheduleLines,0,day}','','malformed text never infers a weekday from a teacher name');
+create temp table repair_preview as select public.preview_timetable_plan_import_v1(jsonb_build_object('kind','preparation','classIds',jsonb_build_array(pg_temp.i(303),pg_temp.i(304)))) value;
+select is((select value#>>'{entries,0,scheduleLines,0,day}' from repair_preview),'월','en dash preview preserves weekday');
+select is((select value#>>'{entries,0,scheduleLines,0,start}' from repair_preview),'17:13','en dash preview preserves exact minutes');
+select is((select value#>>'{entries,1,scheduleLines,0,originalSchedule}' from repair_preview),'수 17:xx–18:43 (기존 교사)','malformed preview preserves only supported original schedule string');
+select is((select value#>>'{entries,1,scheduleLines,0,day}' from repair_preview),'수','malformed preview keeps available weekday');
+create temp table repair_result as select public.commit_timetable_plan_import_v1(jsonb_build_object('source',value->'source','sourceFingerprint',value->>'sourceFingerprint','name','Final repair','requestKey','final-repair')) value from repair_preview;
+create temp table repair_snapshot as select public.get_timetable_plan_v1((value#>>'{plan,id}')::uuid) value from repair_result;
+select is((select value#>>'{slots,0,startMinute}' from repair_snapshot),'1033','en dash commit retains 17:13 integer minutes');
+select is((select value#>>'{slots,0,endMinute}' from repair_snapshot),'1123','en dash commit retains 18:43 integer minutes');
+select is((select (x#>>'{pendingSlots,0,sourceText}')::jsonb->>'originalSchedule' from repair_snapshot,jsonb_array_elements(value->'items') x where x->>'name'='Final malformed'),'수 17:xx–18:43 (기존 교사)','pending commit retains original for correction');
+select is((select x#>>'{pendingSlots,0,weekday}' from repair_snapshot,jsonb_array_elements(value->'items') x where x->>'name'='Final malformed'),'3','pending commit retains original weekday');
+select is((select x#>>'{pendingSlots,0,reason}' from repair_snapshot,jsonb_array_elements(value->'items') x where x->>'name'='Final malformed'),'invalid_time','pending diagnostic explains malformed time');
+reset role;
+select * from finish();
+rollback;

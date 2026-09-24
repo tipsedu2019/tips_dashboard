@@ -8,6 +8,207 @@ set local timezone = 'Asia/Seoul';
 set local statement_timeout = '120s';
 set local lock_timeout = '5s';
 
+-- Run remote fixture setup/cleanup before local catalog writes acquire the
+-- transaction-wide timetable lock; otherwise the parent waits on its own lock.
+-- A committed reminder fixture is owned by remote sessions so one backend can
+-- hold its row lock while another archives the subject.  The fact write must
+-- not wait on, update, or otherwise depend on that delivery row.
+select dblink_connect(
+  'archive_delivery_lock_setup',
+  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=5432 dbname=' || current_database()
+    || ' user=postgres password=postgres'
+    || ' application_name=archive_delivery_lock_setup'
+);
+select dblink_connect(
+  'archive_delivery_lock_blocker',
+  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=5432 dbname=' || current_database()
+    || ' user=postgres password=postgres'
+    || ' application_name=archive_delivery_lock_blocker'
+);
+select dblink_connect(
+  'archive_delivery_lock_writer',
+  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
+    || ' port=5432 dbname=' || current_database()
+    || ' user=postgres password=postgres'
+    || ' application_name=archive_delivery_lock_writer'
+);
+
+select dblink_exec('archive_delivery_lock_setup', $remote$
+  do $archive_delivery_setup$
+  begin
+    insert into auth.users(
+      id, instance_id, aud, role, email, encrypted_password,
+      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
+      created_at, updated_at
+    ) values (
+      '98719999-0000-4000-8000-000000000001',
+      '00000000-0000-0000-0000-000000000000',
+      'authenticated', 'authenticated',
+      'archive-delivery-lock@example.invalid',
+      crypt('archive-delivery-lock-only', gen_salt('bf')), now(),
+      '{"provider":"email","providers":["email"]}'::jsonb,
+      '{}'::jsonb, now(), now()
+    );
+    insert into public.profiles(id, role, name, email, created_at, updated_at)
+    values (
+      '98719999-0000-4000-8000-000000000001', 'admin',
+      '과목 저장 잠금 분리', 'archive-delivery-lock@example.invalid', now(), now()
+    )
+    on conflict (id) do update
+    set role = excluded.role,
+        name = excluded.name,
+        email = excluded.email,
+        updated_at = excluded.updated_at;
+    insert into public.ops_tasks(
+      id, title, type, status, priority, requested_by, student_name
+    ) values (
+      '98719999-0000-4000-8000-000000000101',
+      '등록: 알림 잠금 분리', 'registration', 'requested', 'normal',
+      '98719999-0000-4000-8000-000000000001', '잠금분리학생'
+    );
+    insert into public.ops_registration_details(task_id, parent_phone)
+    values ('98719999-0000-4000-8000-000000000101', '01098719999');
+    insert into public.ops_registration_subject_tracks(
+      id, task_id, subject, pipeline_status, migration_review_required,
+      workflow_status, workflow_revision, director_profile_id,
+      director_assignment_source, director_assigned_at
+    ) values (
+      '98719999-0000-4000-8000-000000000201',
+      '98719999-0000-4000-8000-000000000101',
+      '영어', 'inquiry', false, 'inquiry', 1,
+      '98719999-0000-4000-8000-000000000001', 'manual', now()
+    );
+    insert into public.ops_registration_appointments(
+      id, task_id, kind, scheduled_at, place, status,
+      notification_revision, schedule_confirmed_at
+    ) values (
+      '98719999-0000-4000-8000-000000000301',
+      '98719999-0000-4000-8000-000000000101',
+      'visit_consultation', now() + interval '7 days', '본관 상담실',
+      'scheduled', 1, now() - interval '2 days'
+    );
+    insert into public.ops_registration_consultations(
+      id, track_id, appointment_id, mode, status, director_profile_id
+    ) values (
+      '98719999-0000-4000-8000-000000000401',
+      '98719999-0000-4000-8000-000000000201',
+      '98719999-0000-4000-8000-000000000301',
+      'visit', 'scheduled', '98719999-0000-4000-8000-000000000001'
+    );
+    insert into dashboard_private.registration_customer_reminder_jobs(
+      job_id, appointment_id, task_id, message_kind, source_revision,
+      scheduled_for, due_at, available_at, request_key, status
+    ) values (
+      '98719999-0000-4000-8000-000000000501',
+      '98719999-0000-4000-8000-000000000301',
+      '98719999-0000-4000-8000-000000000101',
+      'appointment_reminder', 1, now() + interval '7 days',
+      now() + interval '6 days', now(),
+      '98719999-0000-4000-8000-000000000502', 'pending'
+    );
+  end;
+  $archive_delivery_setup$;
+$remote$);
+
+select dblink_exec('archive_delivery_lock_blocker', 'begin');
+select dblink_exec('archive_delivery_lock_blocker', $remote$
+  do $archive_delivery_blocker$
+  begin
+    perform job.job_id
+    from dashboard_private.registration_customer_reminder_jobs job
+    where job.job_id = '98719999-0000-4000-8000-000000000501'
+    for update;
+    if not found then
+      raise exception 'archive_delivery_lock_target_missing';
+    end if;
+  end;
+  $archive_delivery_blocker$;
+$remote$);
+
+select dblink_exec('archive_delivery_lock_writer', $remote$
+  create or replace function pg_temp.capture_archive_delivery_lock_v1()
+  returns text
+  language plpgsql
+  as $capture$
+  begin
+    perform pg_catalog.set_config('lock_timeout', '750ms', true);
+    begin
+      update public.ops_registration_subject_tracks
+      set archived_at = pg_catalog.clock_timestamp(),
+          archived_by = '98719999-0000-4000-8000-000000000001'
+      where id = '98719999-0000-4000-8000-000000000201';
+      return '00000';
+    exception
+      when others then
+        return sqlstate;
+    end;
+  end;
+  $capture$;
+$remote$);
+
+select is(
+  (
+    select result.result_sqlstate
+    from dblink(
+      'archive_delivery_lock_writer',
+      'select pg_temp.capture_archive_delivery_lock_v1()'
+    ) result(result_sqlstate text)
+  ),
+  '00000',
+  'subject archive commits while its reminder row is locked by another backend'
+);
+
+select is(
+  (
+    select result.state
+    from dblink(
+      'archive_delivery_lock_setup',
+      $remote$select pg_catalog.jsonb_build_object(
+        'archived', track.archived_at is not null,
+        'jobStatus', job.status,
+        'jobError', job.last_error_code
+      )::text
+      from public.ops_registration_subject_tracks track
+      join dashboard_private.registration_customer_reminder_jobs job
+        on job.task_id = track.task_id
+      where track.id = '98719999-0000-4000-8000-000000000201'
+        and job.job_id = '98719999-0000-4000-8000-000000000501'$remote$
+    ) result(state text)
+  )::jsonb,
+  '{"archived":true,"jobError":null,"jobStatus":"pending"}'::jsonb,
+  'the lock-independent archive leaves the committed inert reminder row byte-for-byte unchanged'
+);
+
+select dblink_exec('archive_delivery_lock_blocker', 'rollback');
+select dblink_exec('archive_delivery_lock_setup', $remote$
+  do $archive_delivery_cleanup$
+  begin
+    delete from dashboard_private.registration_customer_reminder_jobs
+    where job_id = '98719999-0000-4000-8000-000000000501';
+    delete from public.ops_registration_consultations
+    where id = '98719999-0000-4000-8000-000000000401';
+    delete from public.ops_registration_appointments
+    where id = '98719999-0000-4000-8000-000000000301';
+    delete from public.ops_registration_subject_tracks
+    where id = '98719999-0000-4000-8000-000000000201';
+    delete from public.ops_registration_details
+    where task_id = '98719999-0000-4000-8000-000000000101';
+    delete from public.ops_tasks
+    where id = '98719999-0000-4000-8000-000000000101';
+    delete from public.profiles
+    where id = '98719999-0000-4000-8000-000000000001';
+    delete from auth.users
+    where id = '98719999-0000-4000-8000-000000000001';
+  end;
+  $archive_delivery_cleanup$;
+$remote$);
+select dblink_disconnect('archive_delivery_lock_writer');
+select dblink_disconnect('archive_delivery_lock_blocker');
+select dblink_disconnect('archive_delivery_lock_setup');
+
+
 select has_function(
   'dashboard_private',
   'registration_appointment_has_active_subject_v1',
@@ -731,6 +932,8 @@ values (
   array['영어']::text[], true, 9872, '본관'
 );
 
+-- Seed historical session-only class before enforcing its unchanged baseline.
+set constraints all deferred;
 insert into public.classes(
   id, name, subject, status, schedule_storage_mode, schedule_plan
 )
@@ -764,6 +967,12 @@ values (
   '98710000-0000-4000-8000-000000000602', '발송차단 101호',
   'manual', 7
 );
+
+-- Seal only the historical fixture baseline; guards remain active for assertions.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
+set constraints all immediate;
 
 insert into public.ops_registration_appointments(
   id, task_id, kind, scheduled_at, place, status,
@@ -1218,203 +1427,6 @@ select ok(
   'restore safely reuses the identical immutable active-subject bundle snapshot'
 );
 
--- A committed reminder fixture is owned by remote sessions so one backend can
--- hold its row lock while another archives the subject.  The fact write must
--- not wait on, update, or otherwise depend on that delivery row.
-select dblink_connect(
-  'archive_delivery_lock_setup',
-  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
-    || ' port=5432 dbname=' || current_database()
-    || ' user=postgres password=postgres'
-    || ' application_name=archive_delivery_lock_setup'
-);
-select dblink_connect(
-  'archive_delivery_lock_blocker',
-  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
-    || ' port=5432 dbname=' || current_database()
-    || ' user=postgres password=postgres'
-    || ' application_name=archive_delivery_lock_blocker'
-);
-select dblink_connect(
-  'archive_delivery_lock_writer',
-  'hostaddr=' || pg_catalog.host(pg_catalog.inet_server_addr())
-    || ' port=5432 dbname=' || current_database()
-    || ' user=postgres password=postgres'
-    || ' application_name=archive_delivery_lock_writer'
-);
-
-select dblink_exec('archive_delivery_lock_setup', $remote$
-  do $archive_delivery_setup$
-  begin
-    insert into auth.users(
-      id, instance_id, aud, role, email, encrypted_password,
-      email_confirmed_at, raw_app_meta_data, raw_user_meta_data,
-      created_at, updated_at
-    ) values (
-      '98719999-0000-4000-8000-000000000001',
-      '00000000-0000-0000-0000-000000000000',
-      'authenticated', 'authenticated',
-      'archive-delivery-lock@example.invalid',
-      crypt('archive-delivery-lock-only', gen_salt('bf')), now(),
-      '{"provider":"email","providers":["email"]}'::jsonb,
-      '{}'::jsonb, now(), now()
-    );
-    insert into public.profiles(id, role, name, email, created_at, updated_at)
-    values (
-      '98719999-0000-4000-8000-000000000001', 'admin',
-      '과목 저장 잠금 분리', 'archive-delivery-lock@example.invalid', now(), now()
-    )
-    on conflict (id) do update
-    set role = excluded.role,
-        name = excluded.name,
-        email = excluded.email,
-        updated_at = excluded.updated_at;
-    insert into public.ops_tasks(
-      id, title, type, status, priority, requested_by, student_name
-    ) values (
-      '98719999-0000-4000-8000-000000000101',
-      '등록: 알림 잠금 분리', 'registration', 'requested', 'normal',
-      '98719999-0000-4000-8000-000000000001', '잠금분리학생'
-    );
-    insert into public.ops_registration_details(task_id, parent_phone)
-    values ('98719999-0000-4000-8000-000000000101', '01098719999');
-    insert into public.ops_registration_subject_tracks(
-      id, task_id, subject, pipeline_status, migration_review_required,
-      workflow_status, workflow_revision, director_profile_id,
-      director_assignment_source, director_assigned_at
-    ) values (
-      '98719999-0000-4000-8000-000000000201',
-      '98719999-0000-4000-8000-000000000101',
-      '영어', 'inquiry', false, 'inquiry', 1,
-      '98719999-0000-4000-8000-000000000001', 'manual', now()
-    );
-    insert into public.ops_registration_appointments(
-      id, task_id, kind, scheduled_at, place, status,
-      notification_revision, schedule_confirmed_at
-    ) values (
-      '98719999-0000-4000-8000-000000000301',
-      '98719999-0000-4000-8000-000000000101',
-      'visit_consultation', now() + interval '7 days', '본관 상담실',
-      'scheduled', 1, now() - interval '2 days'
-    );
-    insert into public.ops_registration_consultations(
-      id, track_id, appointment_id, mode, status, director_profile_id
-    ) values (
-      '98719999-0000-4000-8000-000000000401',
-      '98719999-0000-4000-8000-000000000201',
-      '98719999-0000-4000-8000-000000000301',
-      'visit', 'scheduled', '98719999-0000-4000-8000-000000000001'
-    );
-    insert into dashboard_private.registration_customer_reminder_jobs(
-      job_id, appointment_id, task_id, message_kind, source_revision,
-      scheduled_for, due_at, available_at, request_key, status
-    ) values (
-      '98719999-0000-4000-8000-000000000501',
-      '98719999-0000-4000-8000-000000000301',
-      '98719999-0000-4000-8000-000000000101',
-      'appointment_reminder', 1, now() + interval '7 days',
-      now() + interval '6 days', now(),
-      '98719999-0000-4000-8000-000000000502', 'pending'
-    );
-  end;
-  $archive_delivery_setup$;
-$remote$);
-
-select dblink_exec('archive_delivery_lock_blocker', 'begin');
-select dblink_exec('archive_delivery_lock_blocker', $remote$
-  do $archive_delivery_blocker$
-  begin
-    perform job.job_id
-    from dashboard_private.registration_customer_reminder_jobs job
-    where job.job_id = '98719999-0000-4000-8000-000000000501'
-    for update;
-    if not found then
-      raise exception 'archive_delivery_lock_target_missing';
-    end if;
-  end;
-  $archive_delivery_blocker$;
-$remote$);
-
-select dblink_exec('archive_delivery_lock_writer', $remote$
-  create or replace function pg_temp.capture_archive_delivery_lock_v1()
-  returns text
-  language plpgsql
-  as $capture$
-  begin
-    perform pg_catalog.set_config('lock_timeout', '750ms', true);
-    begin
-      update public.ops_registration_subject_tracks
-      set archived_at = pg_catalog.clock_timestamp(),
-          archived_by = '98719999-0000-4000-8000-000000000001'
-      where id = '98719999-0000-4000-8000-000000000201';
-      return '00000';
-    exception
-      when others then
-        return sqlstate;
-    end;
-  end;
-  $capture$;
-$remote$);
-
-select is(
-  (
-    select result.result_sqlstate
-    from dblink(
-      'archive_delivery_lock_writer',
-      'select pg_temp.capture_archive_delivery_lock_v1()'
-    ) result(result_sqlstate text)
-  ),
-  '00000',
-  'subject archive commits while its reminder row is locked by another backend'
-);
-
-select is(
-  (
-    select result.state
-    from dblink(
-      'archive_delivery_lock_setup',
-      $remote$select pg_catalog.jsonb_build_object(
-        'archived', track.archived_at is not null,
-        'jobStatus', job.status,
-        'jobError', job.last_error_code
-      )::text
-      from public.ops_registration_subject_tracks track
-      join dashboard_private.registration_customer_reminder_jobs job
-        on job.task_id = track.task_id
-      where track.id = '98719999-0000-4000-8000-000000000201'
-        and job.job_id = '98719999-0000-4000-8000-000000000501'$remote$
-    ) result(state text)
-  )::jsonb,
-  '{"archived":true,"jobError":null,"jobStatus":"pending"}'::jsonb,
-  'the lock-independent archive leaves the committed inert reminder row byte-for-byte unchanged'
-);
-
-select dblink_exec('archive_delivery_lock_blocker', 'rollback');
-select dblink_exec('archive_delivery_lock_setup', $remote$
-  do $archive_delivery_cleanup$
-  begin
-    delete from dashboard_private.registration_customer_reminder_jobs
-    where job_id = '98719999-0000-4000-8000-000000000501';
-    delete from public.ops_registration_consultations
-    where id = '98719999-0000-4000-8000-000000000401';
-    delete from public.ops_registration_appointments
-    where id = '98719999-0000-4000-8000-000000000301';
-    delete from public.ops_registration_subject_tracks
-    where id = '98719999-0000-4000-8000-000000000201';
-    delete from public.ops_registration_details
-    where task_id = '98719999-0000-4000-8000-000000000101';
-    delete from public.ops_tasks
-    where id = '98719999-0000-4000-8000-000000000101';
-    delete from public.profiles
-    where id = '98719999-0000-4000-8000-000000000001';
-    delete from auth.users
-    where id = '98719999-0000-4000-8000-000000000001';
-  end;
-  $archive_delivery_cleanup$;
-$remote$);
-select dblink_disconnect('archive_delivery_lock_writer');
-select dblink_disconnect('archive_delivery_lock_blocker');
-select dblink_disconnect('archive_delivery_lock_setup');
 
 select * from finish();
 

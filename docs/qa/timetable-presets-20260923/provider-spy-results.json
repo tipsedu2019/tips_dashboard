@@ -1,0 +1,41 @@
+{
+  "boundary": "actual transfer service with socket DB RPC; global network/provider fetch spy",
+  "rows": [
+    {
+      "target": "operational",
+      "mode": "copy",
+      "realRpc": true,
+      "immutableReplay": true,
+      "queueRowsBefore": 1,
+      "queueDelta": 0,
+      "providerFetchCalls": 0
+    },
+    {
+      "target": "operational",
+      "mode": "move",
+      "realRpc": true,
+      "immutableReplay": true,
+      "queueRowsBefore": 1,
+      "queueDelta": 0,
+      "providerFetchCalls": 0
+    },
+    {
+      "target": "plan",
+      "mode": "copy",
+      "realRpc": true,
+      "immutableReplay": true,
+      "queueRowsBefore": 1,
+      "queueDelta": 0,
+      "providerFetchCalls": 0
+    },
+    {
+      "target": "plan",
+      "mode": "move",
+      "realRpc": true,
+      "immutableReplay": true,
+      "queueRowsBefore": 1,
+      "queueDelta": 0,
+      "providerFetchCalls": 0
+    }
+  ]
+}
