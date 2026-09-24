@@ -1,0 +1,41 @@
+{
+  "classCount": 50,
+  "legacySessions": 6400,
+  "source": "synthetic field shape and aggregate volume only; no production rows copied",
+  "measurements": [
+    {
+      "name": "legacyReference",
+      "durationMs": 183.8268750000002,
+      "datedRows": 0,
+      "fingerprint": "d9fb7cfe877cb524c3940094d6ddb7cd",
+      "unresolvedRows": 6400
+    },
+    {
+      "name": "legacyReference",
+      "durationMs": 195.51883399999997,
+      "datedRows": 0,
+      "fingerprint": "d9fb7cfe877cb524c3940094d6ddb7cd",
+      "unresolvedRows": 6400
+    },
+    {
+      "name": "legacyReference",
+      "durationMs": 186.65687499999967,
+      "datedRows": 0,
+      "fingerprint": "d9fb7cfe877cb524c3940094d6ddb7cd",
+      "unresolvedRows": 6400
+    },
+    {
+      "name": "actualSignupAndDeferredGuards",
+      "durationMs": 590.4806659999999
+    }
+  ],
+  "semanticParity": {
+    "exactJson": true
+  },
+  "legacyContentOccupancyUnchanged": true,
+  "previous": {
+    "sqlstate": "57014",
+    "durationMs": 2001.365625
+  },
+  "passed": true
+}

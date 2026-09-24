@@ -1,0 +1,10 @@
+ac240000-0000-4000-8000-000000000001
+ok 1 - incomplete legacy dated occupancy remains a blocker
+ok 2 - actual authenticated content save and deferred occupancy guard succeed
+ok 3 - textbook and progress edits preserve the complete reference and fingerprint
+ok 4 - progress is persisted
+ok 5 - textbook content is persisted without rewriting originals
+ok 6 - a real occupancy change still fails closed with exact SQLSTATE
+ok 7 - rejected occupancy change preserves the original date
+ok 8 - signup catalog trigger preserves existing incomplete occupancy
+1..8

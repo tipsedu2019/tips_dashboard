@@ -594,6 +594,11 @@
       "fileName": "20260923164328_timetable_import_original_placement.sql",
       "status": "final",
       "sha256": "a8e4826aaaea9f70d2572f332a1ec3106a3f1ab30a2f50e0ce6afe8fa14a37d7"
+    },
+    {
+      "fileName": "20260924124904_timetable_legacy_reference_aggregation.sql",
+      "status": "final",
+      "sha256": "aa69ccd3170f7adbbe52732a35209bf8edd3876e4709413aed14e7492eb2087e"
     }
   ]
 }
