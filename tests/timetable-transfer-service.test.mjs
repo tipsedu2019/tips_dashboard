@@ -1,6 +1,7 @@
+import { withRpcQueryControls } from './helpers/rpc-query-fixture.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { createTimetablePlanService } from '../src/features/academic/timetable-plan-service.ts';
+import { createTimetablePlanService as createService } from '../src/features/academic/timetable-plan-service.ts';
 const request={source:{kind:'plan',planId:'source'},target:{kind:'plan',planId:'target'},mode:'copy',itemIds:['one'],onConflict:'reject'};
 const valid={request,fingerprint:'server',shadowFingerprint:'shadow',mappings:[{sourceId:'one',action:'create_plan_item'}],blockers:[],warnings:[]};
 test('preview sends exact canonical request with selected item IDs',async()=>{let called;const service=createTimetablePlanService({actorScope:'actor',client:{rpc:(...args)=>{called=args;return Promise.resolve({data:valid,error:null});}}});assert.deepEqual(await service.previewTransfer(request),valid);assert.deepEqual(called,['preview_timetable_plan_transfer_v1',{p_request:request}]);});
@@ -38,3 +39,5 @@ test('science choices come from the authenticated active catalog contract',async
  assert.equal(typeof service.listScienceSubjectAreas,'function');
  assert.deepEqual(await service.listScienceSubjectAreas(),[{key:'dynamic-key',label:'실제 영역'}]);assert.deepEqual(calls,[['list_active_science_subject_areas_v1',{}]]);
 });
+
+function createTimetablePlanService(options) { return createService({ ...options, client: withRpcQueryControls(options.client) }); }

@@ -1,3 +1,4 @@
+import { withRpcQueryControls } from './helpers/rpc-query-fixture.mjs';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createTimetableOperationalMutation } from '../src/features/academic/timetable-operational-service.ts';
@@ -23,7 +24,7 @@ test('operating conflict preserves inputs and separates true serialization failu
   assert.equal(refreshed,false);assert.equal(input.patch.schedule,'월 09:00-10:00');
 });
 
-import { createManagementService } from '../src/features/management/management-service.js';
+import { createManagementService as createService } from '../src/features/management/management-service.js';
 import { effectiveOperatingSlots, findOperatingConflicts, suggestPlacements, operatingReferenceComplete } from '../src/features/academic/timetable-conflicts.ts';
 const weekly={id:'live:class:source',classId:'class',sourceSlotId:'source',weekday:1,startMinute:540,endMinute:600,teacherId:'teacher',classroomId:'room',classRevision:1};
 const candidate={id:'candidate',itemId:'item',planId:'plan',weekday:1,startMinute:550,endMinute:570,teacherId:'teacher',classroomId:'other-room',sourceSlotId:null};
@@ -63,7 +64,7 @@ test('actual management consumer uses atomic gateway and keeps retry key after l
 
 test('metadata-only UPDATE does not claim success for zero affected rows', async()=>{
  const calls=[];
- const service=createManagementService({supabase:{from(table){assert.equal(table,'classes');return {update(patch){calls.push(patch);return {eq(){return this;},async select(){return {data:[],error:null};}};}};}},probeRegistrationRuntime:async()=>({mode:'ready'}),refreshPublicClassesCache:async()=>{throw new Error('must not refresh');}});
+ const service=createManagementService({supabase:{from(table){assert.equal(table,'classes');return {update(patch){calls.push(patch);return {eq(){return this;},select(){return this;},limit(){return this;},order(){return this;},abortSignal(){return this;},retry(){return this;},then(resolve){return Promise.resolve({data:[],error:null}).then(resolve);}};}};}},probeRegistrationRuntime:async()=>({mode:'ready'}),refreshPublicClassesCache:async()=>{throw new Error('must not refresh');}});
  await assert.rejects(service.updateClass({id:'missing',name:'metadata'}),error=>error.code==='P0002');
  for(const key of ['status','teacher','room','schedule'])assert.equal(key in calls[0],false);
 });
@@ -76,3 +77,5 @@ test('committed defaults and initialization retain a pending cache refresh recei
   assert.equal(result.publicClassesCacheRefresh.status,'pending');
  }
 });
+
+function createManagementService(options) { return createService({ ...options, supabase: options.supabase.rpc ? withRpcQueryControls(options.supabase) : options.supabase }); }

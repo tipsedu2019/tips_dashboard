@@ -372,7 +372,11 @@ function makeClassUpsertClient(errorColumn) {
           calls.push(payload);
           return {
             eq(column, id) { assert.equal(column, "id"); assert.equal(id, "class-1"); return this; },
-            async select() {
+            select(columns) { assert.ok(columns.includes("id")); assert.ok(!columns.includes("*")); return this; },
+            limit(value) { assert.equal(value, 1); return this; },
+            order(key) { assert.equal(key, "id"); return this; },
+            abortSignal(signal) { assert.ok(signal instanceof AbortSignal); return this; },
+            async retry(enabled) { assert.equal(enabled, false);
               if (Object.prototype.hasOwnProperty.call(payload, errorColumn)) {
                 return {
                   data: null,

@@ -870,7 +870,7 @@ test("class mutations capture lifecycle before writes and editor close revokes i
 
   assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => \{\s*const result = await action\.saveSession/);
   assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\.id\)[\s\S]*?const \{ error: updateError \} = await client/);
-  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => await action\.generateSessions/);
+  assert.match(source, /const mutationToken = lessonMutationLifecycleRef\.current\?\.capture\(selectedRow\?\.id\)[\s\S]*?mutate: async \(\) => \{\s*const result = await action\.generateSessions[\s\S]*?normalizedScheduleRequestKeys\.current\.delete\(requestBody\);\s*return result;/);
   assert.match(source, /requestLessonDesignClose[\s\S]*?lessonMutationLifecycleRef\.current\?\.revoke\(\)/);
   assert.match(source, /runClassMutationWithLifecycle/);
   const refreshBody = source.match(/const refreshSelectedLessonDetail = useCallback[\s\S]*?\n\s*\}, \[/)?.[0] || "";

@@ -5,7 +5,7 @@ import type {
 } from './timetable-plan-contract.ts';
 
 type RpcName = keyof TimetablePlanRpcContract | 'preview_timetable_plan_transfer_v1' | 'commit_timetable_plan_transfer_v1';
-type RpcQuery = PromiseLike<{ data: unknown; error: unknown }> & { abortSignal?: (signal: AbortSignal) => RpcQuery };
+type RpcQuery = PromiseLike<{ data: unknown; error: unknown }> & { abortSignal: (signal: AbortSignal) => RpcQuery; retry: (enabled: false) => RpcQuery };
 export type TimetableRpcClient = { rpc: (name: RpcName, args: Record<string, unknown>) => RpcQuery };
 export type RequestOptions = { signal?: AbortSignal };
 const invalid = () => new Error('timetable_plan_response_invalid');
@@ -167,9 +167,39 @@ export function requireTimetableTransferResult(value: unknown, sourcePlanId: str
 export function createTimetablePlanService({ client, actorScope }: { client: TimetableRpcClient; actorScope: string }) {
   if (!client || typeof client.rpc !== 'function' || !actorScope.trim()) throw new Error('timetable_plan_scope_missing');
   async function invoke(name: RpcName, args: Record<string, unknown>, options: RequestOptions = {}): Promise<unknown> {
-    let query = client.rpc(name, args);
-    if (options.signal && typeof query.abortSignal === 'function') query = query.abortSignal(options.signal);
-    const { data, error } = await query;
+    const signal = options.signal
+      ? AbortSignal.any([options.signal, AbortSignal.timeout(8_000)])
+      : AbortSignal.timeout(8_000);
+    const execute = () => {
+      switch (name) {
+        case 'list_timetable_import_sources_v1':
+          return client.rpc('list_timetable_import_sources_v1', args).abortSignal(signal).retry(false);
+        case 'preview_timetable_plan_import_v1':
+          return client.rpc('preview_timetable_plan_import_v1', args).abortSignal(signal).retry(false);
+        case 'commit_timetable_plan_import_v1':
+          return client.rpc('commit_timetable_plan_import_v1', args).abortSignal(signal).retry(false);
+        case 'list_timetable_plans_v1':
+          return client.rpc('list_timetable_plans_v1', { p_archived: args.p_archived, p_page: args.p_page, p_page_size: 30 }).abortSignal(signal).retry(false);
+        case 'list_active_science_subject_areas_v1':
+          return client.rpc('list_active_science_subject_areas_v1', args).abortSignal(signal).retry(false);
+        case 'list_timetable_share_candidates_v1':
+          return client.rpc('list_timetable_share_candidates_v1', args).abortSignal(signal).retry(false);
+        case 'get_timetable_plan_v1':
+          return client.rpc('get_timetable_plan_v1', args).abortSignal(signal).retry(false);
+        case 'get_timetable_plan_revision_v1':
+          return client.rpc('get_timetable_plan_revision_v1', args).abortSignal(signal).retry(false);
+        case 'mutate_timetable_plan_item_v1':
+          return client.rpc('mutate_timetable_plan_item_v1', args).abortSignal(signal).retry(false);
+        case 'mutate_timetable_plan_v1':
+          return client.rpc('mutate_timetable_plan_v1', args).abortSignal(signal).retry(false);
+        case 'preview_timetable_plan_transfer_v1':
+          return client.rpc('preview_timetable_plan_transfer_v1', args).abortSignal(signal).retry(false);
+        case 'commit_timetable_plan_transfer_v1':
+          return client.rpc('commit_timetable_plan_transfer_v1', args).abortSignal(signal).retry(false);
+        default: throw new Error('timetable_plan_rpc_unknown');
+      }
+    };
+    const { data, error } = await execute();
     if (error) throw error;
     if (options.signal?.aborted) throw options.signal.reason ?? new DOMException('Aborted', 'AbortError');
     return data;
@@ -197,7 +227,7 @@ export function createTimetablePlanService({ client, actorScope }: { client: Tim
       return result as { plan: PlanSnapshot['plan'] };
     },
     listPlans: async (archived = false, page = 1, options?: RequestOptions) => {
-      const result = await invoke('list_timetable_plans_v1', { p_archived: archived, p_page: page, p_page_size: 50 }, options);
+      const result = await invoke('list_timetable_plans_v1', { p_archived: archived, p_page: page, p_page_size: 30 }, options);
       if (!record(result) || !Array.isArray(result.plans) || !result.plans.every(planMetadata)
         || !integer(result.total) || typeof result.canManage !== 'boolean') throw invalid();
       return result as PlanList;

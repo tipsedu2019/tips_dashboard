@@ -44,7 +44,7 @@ function makeClassCloseClient() {
     },
     rpc(name, args) {
       calls.push(["rpc", name, args]);
-      if (name === "update_class_operational_v1") return Promise.resolve({ data: { closeResult: { id: CLASS_ID, classId: CLASS_ID, status: "종강", removedStudentCount: 2 } }, error: null });
+      if (name === "update_class_operational_v1") return makeRpcQuery({ data: { closeResult: { id: CLASS_ID, classId: CLASS_ID, status: "종강", removedStudentCount: 2 } }, error: null });
       return makeRpcQuery({
         data: {
           id: CLASS_ID,

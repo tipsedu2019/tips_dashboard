@@ -1,9 +1,10 @@
+import { withRpcQueryControls } from './helpers/rpc-query-fixture.mjs';
 import assert from 'node:assert/strict';
 import test, {mock} from 'node:test';
 import {readFile,writeFile} from 'node:fs/promises';
 import {isMakeupDomainConflict,makeupApprovalErrorStatus,makeupDomainErrorMessage} from '../src/features/makeup-requests/makeup-domain-errors.js';
 import {validateLocalArguments,PsqlConnection} from '../scripts/verify-timetable-concurrency.mjs';
-import {createTimetablePlanService} from '../src/features/academic/timetable-plan-service.ts';
+import {createTimetablePlanService as createService} from '../src/features/academic/timetable-plan-service.ts';
 import {findOperatingConflicts} from '../src/features/academic/timetable-conflicts.ts';
 for(const [code,message] of [['P0001','makeup_request_stale_status'],['P0001','makeup_request_source_changed'],['P0001','makeup_schedule_plan_stale'],['P0001','makeup_lesson_session_stale'],['23P01','makeup_room_collision'],['23P01','makeup_calendar_event_conflict'],['23P01','timetable_resource_conflict']])test(`actual makeup producer pair maps HTTP409 and actionable message: ${message}`,()=>{const e={code,message};assert.equal(isMakeupDomainConflict(e),true);assert.equal(makeupApprovalErrorStatus(e),409);assert.ok(makeupDomainErrorMessage(e));});
 test('unknown P0001 is not silently conclusive; real40001 remains a database retry',()=>{assert.equal(isMakeupDomainConflict({code:'P0001',message:'unknown'}),false);assert.equal(makeupApprovalErrorStatus({code:'P0001',message:'unknown'}),503);assert.equal(isMakeupDomainConflict({code:'23P01',message:'unknown'}),false);assert.equal(makeupApprovalErrorStatus({code:'23P01',message:'unknown'}),503);assert.equal(isMakeupDomainConflict({code:'40001',message:'could not serialize access'}),false);assert.equal(makeupApprovalErrorStatus({code:'40001'}),409);});
@@ -50,3 +51,5 @@ test('changed occupancy preserves exact ordered full-scope conflict results, inc
   assert.deepEqual(findConflicts(s.slots,shadows,changed),expected);
  }
 });
+
+function createTimetablePlanService(options) { return createService({ ...options, client: withRpcQueryControls(options.client) }); }

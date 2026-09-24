@@ -14,11 +14,6 @@ const DEFAULT_CLASS_STATUS = "수강";
 const DEFAULT_CLASS_TYPE = "정규";
 const ARCHIVED_CLASS_STATUS = "종강";
 const DASHBOARD_ROLES = ["admin", "staff", "teacher", "assistant", "viewer"];
-const CONTINUOUS_CLASS_SCHEDULE_RPC = {
-  getDefaults: "get_class_schedule_defaults_v1",
-  initializeNewClass: "initialize_new_class_schedule_v1",
-  saveDefaults: "save_class_schedule_defaults_v1",
-};
 const CLASS_REPLACE_GROUPS_RPC = "replace_class_group_memberships_v1";
 const MANAGEMENT_LIST_PAGE_SIZES = new Set([10, 15, 20]);
 const MANAGEMENT_LIST_DEFAULT_PAGE_SIZE = 20;
@@ -1217,12 +1212,14 @@ async function updateClassMetadataRows(client, payload) {
     const { data, error } = await client.from("classes")
       .update(stripPayloadFields(value, ["id"]))
       .eq("id", payload.id)
-      .select();
+      .select("id,name,subject,grade,status,capacity,fee,teacher,room,schedule,student_ids,waitlist_ids,textbook_ids,closed_at,closed_by,color,created_at,end_date,lessons,period,schedule_plan,schedule_revision,schedule_storage_mode,start_date,term_id,textbook_info")
+      .limit(1).order("id")
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false);
     if (error) throw error;
     if (!Array.isArray(data) || data.length !== 1) {
       throw Object.assign(new Error("수업을 찾을 수 없거나 수정 권한이 없습니다."), { code: "P0002" });
     }
-    return data;
+    return data.map((row) => ({ ...value, ...row }));
   };
   try {
     return await write(payload);
@@ -1709,9 +1706,9 @@ export function createManagementService(options = {}) {
       };
       let scheduleOwnership = options.scheduleOwnership;
       if (options.resolveScheduleOwnership) {
-        const { data: defaults, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.getDefaults, {
+        const { data: defaults, error } = await client.rpc("get_class_schedule_defaults_v1", {
           p_class_id: trimText(record.id),
-        });
+        }).abortSignal(AbortSignal.timeout(8_000)).retry(false);
         if (error) throw error;
         if (!["legacy", "shadow", "normalized"].includes(defaults?.storageMode)) {
           throw new Error("수업 일정 저장 방식을 확인한 뒤 다시 시도해 주세요.");
@@ -1728,7 +1725,8 @@ export function createManagementService(options = {}) {
         const requestKey = options.requestKey || operationalRequestKeys.get(body) || generateId();
         operationalRequestKeys.set(body, requestKey);
         const action = createTimetableOperationalMutation({ requestKey,
-          rpc: (name, args) => client.rpc(name, args), refresh: () => refreshPublicClassesCache("class") });
+          rpc: (_name, args) => client.rpc("update_class_operational_v1", args)
+            .abortSignal(AbortSignal.timeout(8_000)).retry(false), refresh: () => refreshPublicClassesCache("class") });
         const { data, refreshStatus } = await action.save({ classId: payload.id, patch });
         operationalRequestKeys.delete(body);
         const result = data?.closeResult || data?.classRow || data || null;
@@ -1744,9 +1742,9 @@ export function createManagementService(options = {}) {
 
     async getClassScheduleDefaults(classId) {
       const client = ensureClient(supabase);
-      const { data, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.getDefaults, {
+      const { data, error } = await client.rpc("get_class_schedule_defaults_v1", {
         p_class_id: trimText(classId),
-      });
+      }).abortSignal(AbortSignal.timeout(8_000)).retry(false);
       if (error) {
         if (isMissingContinuousScheduleRpc(error)) return null;
         throw error;
@@ -1762,13 +1760,13 @@ export function createManagementService(options = {}) {
       reason = null,
     } = {}) {
       const client = ensureClient(supabase);
-      const { data, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.saveDefaults, {
+      const { data, error } = await client.rpc("save_class_schedule_defaults_v1", {
         p_class_id: trimText(classId),
         p_expected_schedule_revision: expectedScheduleRevision,
         p_slots: Array.isArray(slots) ? slots : [],
         p_request_key: trimText(requestKey),
         p_reason: reason,
-      });
+      }).abortSignal(AbortSignal.timeout(8_000)).retry(false);
       if (error) throw error;
       let publicClassesCacheRefresh;
       try { publicClassesCacheRefresh = await refreshPublicClassesCache("schedule"); }
@@ -1784,13 +1782,13 @@ export function createManagementService(options = {}) {
       requestKey,
     } = {}) {
       const client = ensureClient(supabase);
-      const { data, error } = await client.rpc(CONTINUOUS_CLASS_SCHEDULE_RPC.initializeNewClass, {
+      const { data, error } = await client.rpc("initialize_new_class_schedule_v1", {
         p_class_id: trimText(classId),
         p_expected_schedule_revision: expectedScheduleRevision,
         p_expected_schedule_plan_hash: trimText(expectedSchedulePlanHash),
         p_slots: Array.isArray(slots) ? slots : [],
         p_request_key: trimText(requestKey),
-      });
+      }).abortSignal(AbortSignal.timeout(8_000)).retry(false);
       if (error) throw error;
       let publicClassesCacheRefresh;
       try { publicClassesCacheRefresh = await refreshPublicClassesCache("schedule"); }

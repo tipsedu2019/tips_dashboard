@@ -1,3 +1,4 @@
+import { withRpcQueryControls } from './helpers/rpc-query-fixture.mjs';
 import test from "node:test";
 import assert from "node:assert/strict";
 
@@ -9,7 +10,7 @@ import {
 } from "../src/features/management/class-schedule-slots.ts";
 import {
   buildClassMetadataPayload,
-  createManagementService,
+  createManagementService as createService,
 } from "../src/features/management/management-service.js";
 
 const CLASS_ID = "10000000-0000-4000-8000-000000000001";
@@ -255,3 +256,5 @@ test("bulk save fails closed if authoritative storage mode cannot be read", asyn
   await assert.rejects(service.updateClass({ id: CLASS_ID, status: "수강" }, { resolveScheduleOwnership: true }), /수업 일정 저장 방식을 확인/);
   assert.equal(writes, 0);
 });
+
+function createManagementService(options) { return createService({ ...options, supabase: options.supabase.rpc ? withRpcQueryControls(options.supabase) : options.supabase }); }
