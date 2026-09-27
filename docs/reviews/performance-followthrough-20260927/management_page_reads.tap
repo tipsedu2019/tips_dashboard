@@ -1,0 +1,36 @@
+ok 1 - management page RPC exists
+ok 2 - management default class period RPC exists
+ok 3 - management stats RPC exists
+ok 4 - management filter option RPC exists
+ok 5 - management detail RPC exists
+ok 6 - management relation page RPC exists
+ok 7 - management class textbook candidate RPC exists
+ok 8 - public.list_management_page_v1(text,jsonb,text,uuid,integer) is fixed-search-path security-invoker and authenticated-only
+ok 9 - public.get_management_default_class_period_v1() is fixed-search-path security-invoker and authenticated-only
+ok 10 - public.get_management_stats_v1(text,jsonb) is fixed-search-path security-invoker and authenticated-only
+ok 11 - public.list_management_filter_options_v1(text,jsonb) is fixed-search-path security-invoker and authenticated-only
+ok 12 - public.get_management_detail_v1(text,uuid) is fixed-search-path security-invoker and authenticated-only
+ok 13 - public.list_management_detail_relation_page_v1(text,uuid,text,text,uuid,integer) is fixed-search-path security-invoker and authenticated-only
+ok 14 - public.list_management_class_textbook_candidates_v1(uuid,text,jsonb,text,uuid,integer) is fixed-search-path security-invoker and authenticated-only
+ok 15 - authenticated invoker can execute inline-validated management list RPC
+ok 16 - missing filter keys are rejected
+ok 17 - unknown filter keys are rejected
+ok 18 - cross-kind filters are rejected
+ok 19 - list page is capped at 30
+ok 20 - partial cursor is rejected
+ok 21 - cross-kind relation is rejected
+91000000-0000-4000-8000-000000000900
+ok 22 - authenticated invoker can read selected student detail
+ok 23 - authenticated invoker class detail uses approved science-area interface
+ok 24 - authenticated invoker can read selected textbook detail
+ok 25 - server reads 30 plus one boundary row
+ok 26 - Korean numeric collation sorts 2 before 10
+ok 27 - 31st and 32nd rows remain after the client boundary cursor
+ok 28 - stats uses the same full filtered set rather than first-page length
+ok 29 - student status filter is applied by the aggregate
+ok 30 - filter options are built from the full filtered collection beyond row 30
+ok 31 - each filter option collection is hard-capped at 500
+ok 32 - detail reads the exact selected record even when it is outside page one
+ok 33 - student detail returns only its three paged relation branches
+ok 34 - management first page, continuation, and exact detail emit ANALYZE/BUFFERS plans with a bounded response
+1..34

@@ -609,6 +609,16 @@
       "fileName": "20260927103000_performance_catalog_and_workload.sql",
       "status": "final",
       "sha256": "cb55652cc72e41860de0560d3baa6b75ea0f6eea4ef85222ac2df5b6220066e5"
+    },
+    {
+      "fileName": "20260927130000_makeup_approval_collision_candidates.sql",
+      "status": "final",
+      "sha256": "38a41f5890318f9e48ddc23ff7987865dfc9046ad2e06ff55231ea7b3a190a85"
+    },
+    {
+      "fileName": "20260927141000_student_enrollment_batch_reads.sql",
+      "status": "final",
+      "sha256": "04d90be530041537dfcb92389c767bdf9118098a50ce051e3bf6b2a20fe6bfe8"
     }
   ]
 }

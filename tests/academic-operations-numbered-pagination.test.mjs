@@ -60,7 +60,8 @@ function response(domain, request, totalCount = 260, patch = {}) {
       viewModeCounts: { all: 270, unlinked: 10, unscheduled: 0, update: 0, done: 260 } },
     filterOptions: { periods: [{ value: id(900), label: '학기', isDefault: true }], statuses: ['수강'], subjects: ['수학'], grades: ['고1'], teachers: ['교사'], classrooms: [] },
   } : { stats: { total: totalCount, active: totalCount, draft: 0 }, filterOptions: { terms: [], subjects: ['수학'], grades: ['고1'], teachers: [], syncGroups: [{ value: id(900), label: '그룹' }] },
-    syncGroupCounts: [{ groupId: id(900), memberCount: totalCount, representativeClassId: id(999) }] }), ...patch };
+    syncGroupCounts: [{ groupId: id(900), memberCount: totalCount, representativeClassId: id(999) }] }),
+    ...(request.args.p_include_scope_metadata === false ? { stats: null, filterOptions: null } : {}), ...patch };
 }
 async function setup(t, domain, initial = {}) {
   const dom = new JSDOM('<div id="root"></div>', { url: `https://test.invalid/admin/${domain === 'academic' ? 'curriculum' : 'class-schedule'}${initial.search || ''}` });
@@ -118,6 +119,46 @@ async function setup(t, domain, initial = {}) {
     auth: async (patch) => { auth = { ...auth, ...patch }; await render(); }, remount: async () => { mountKey++; await render(); },
   };
 }
+test('academic: five pages reuse scope metadata, refresh and expiry recompute it', async (t) => {
+  const page = await setup(t, 'academic');
+  const originalNow = Date.now;
+  let now = originalNow(); Date.now = () => now;
+  t.after(() => { Date.now = originalNow; });
+  await act(async () => page.finish(page.numbered()[0]));
+  const stats = page.state.data.stats;
+  for (let next = 2; next <= 5; next++) {
+    await act(async () => { void page.state.goToPage(next); });
+    assert.equal(page.numbered().at(-1).args.p_include_scope_metadata, false);
+    await act(async () => page.finish(page.numbered().at(-1)));
+    assert.deepEqual(page.state.data.stats, stats);
+  }
+  now += 30_001;
+  await act(async () => { void page.state.goToPage(6); });
+  assert.equal(page.numbered().at(-1).args.p_include_scope_metadata, true);
+  await act(async () => page.finish(page.numbered().at(-1)));
+  await act(async () => { void page.state.refresh(); });
+  assert.equal(page.numbered().at(-1).args.p_include_scope_metadata, true);
+  await act(async () => page.finish(page.numbered().at(-1)));
+  await page.render({ search: 'new' });
+  assert.equal(page.numbered().at(-1).args.p_include_scope_metadata, true);
+});
+
+for (const drift of ['total', 'period']) test(`academic: ${drift} drift cannot combine fresh rows with obsolete metadata`, async (t) => {
+  const page = await setup(t, 'academic');
+  await act(async () => page.finish(page.numbered()[0]));
+  await act(async () => { void page.state.goToPage(2); });
+  assert.equal(page.numbered()[1].args.p_include_scope_metadata, false);
+  const total = drift === 'total' ? 259 : 260;
+  const patch = drift === 'period' ? { resolvedPeriodId: id(900) } : {};
+  await act(async () => page.finish(page.numbered()[1], total, patch));
+  assert.equal(page.state.page, 1, 'keep accepted page while metadata is refreshed');
+  assert.equal(page.numbered()[2].args.p_include_scope_metadata, true);
+  await act(async () => page.finish(page.numbered()[2], total, patch));
+  assert.equal(page.state.page, 2);
+  assert.equal(page.state.data.stats.total, total);
+  assert.equal(page.state.data.resolvedPeriodId, patch.resolvedPeriodId || null);
+});
+
 for (const domain of ['academic', 'operations']) {
   test(`${domain}: accepted scope owns paging after failed filter while explicit Retry retains the failed target`, async (t) => {
     const page = await setup(t, domain, { request: { page: 11 } });

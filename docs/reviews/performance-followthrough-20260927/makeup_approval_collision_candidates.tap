@@ -1,0 +1,19 @@
+ok 1 - anon cannot read server context
+ok 2 - authenticated cannot bypass row scope
+ok 3 - stable invoker does not change caller privileges
+ok 4 - anon exact SQLSTATE
+ok 5 - authenticated exact SQLSTATE
+ok 6 - service role executes entire pure-helper chain
+ok 7 - invalid shape exact SQLSTATE
+ok 8 - invalid slot exact SQLSTATE
+ok 9 - no slots read no candidates
+ok 10 - pending plus legacy and high precision survive, historical adjacent inactive excluded
+ok 11 - weekly candidates preserve room overrides and multi-day schedules
+ok 12 - dated events narrowed; legacy raw note and JS whitespace retained
+ok 13 - ambiguous target retains candidates instead of assuming timezone
+ok 14 - 1000 unrelated reservations do not change payload
+ok 15 - 10000 historical reservations and 2000 unrelated classes/events do not change payload
+ok 16 - no notification events
+ok 17 - no fanout jobs
+ok 18 - no provider deliveries
+1..18

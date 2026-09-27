@@ -45,6 +45,13 @@ select is(dashboard_private.management_student_enrollment_summary_v1(('95100000-
   jsonb_build_object('status',state,'registeredCount',registered,'waitlistCount',waiting),
   'canonical classification and deduplicated counts for student '||n) from cases;
 
+select ok((select bool_and(batch.value=dashboard_private.management_student_enrollment_summary_v1(batch.student_id))
+  from dashboard_private.management_student_enrollment_summaries_v1() batch),
+  'batch summaries equal canonical single-student summaries including reciprocal duplicates and waiting precedence');
+select ok(not prosecdef and provolatile='s' and has_function_privilege('authenticated',oid,'execute')
+  and not has_function_privilege('anon',oid,'execute'), 'batch reader preserves invoker visibility and ACL')
+from pg_proc where oid='dashboard_private.management_student_enrollment_summaries_v1()'::regprocedure;
+
 with cases(state,expected) as (values ('재원',4),('대기',1),('퇴원',1)), results as (
   select *,public.list_management_numbered_page_v1('students',pg_temp.student_filters(state),1,10,'[]') page from cases
 )
@@ -122,6 +129,10 @@ select is(dashboard_private.management_student_enrollment_summary_v1('95100000-0
   '{"status":"퇴원","registeredCount":0,"waitlistCount":0}'::jsonb,'hidden classes cannot leak through counts');
 select is((select count(*) from dashboard_private.management_student_enrollments_v1('95100000-0000-4000-8000-000000000006')),
   0::bigint,'hidden student cannot expose reciprocal class memberships');
+select is((select value from dashboard_private.management_student_enrollment_summaries_v1() where student_id='95100000-0000-4000-8000-000000000001'),
+  '{"status":"퇴원","registeredCount":0,"waitlistCount":0}'::jsonb,'batch counts do not disclose hidden classes');
+select is((select count(*) from dashboard_private.management_student_enrollment_summaries_v1() where student_id='95100000-0000-4000-8000-000000000006'),
+  0::bigint,'batch result omits hidden students');
 reset role;
 set local role anon;
 select throws_ok($$select dashboard_private.management_student_enrollment_summary_v1('95100000-0000-4000-8000-000000000001')$$,

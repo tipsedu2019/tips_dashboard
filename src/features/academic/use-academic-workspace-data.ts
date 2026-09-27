@@ -112,17 +112,34 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
   const pageScopeAdoption = useRef(false);
   const desired = useRef<{ service: typeof service; fingerprint: string; navigationKey: string; scope: string; pageSize: DataTablePageSize; preferenceRevision: number } | null>(null);
   const controller = useRef<ReturnType<typeof createNumberedPageController<NumberedResult["rows"][number]>> | null>(null);
+  const scopeMetadata = useRef<{ service: typeof service; scope: string; expiresAt: number; result: NumberedResult } | null>(null);
   useEffect(() => {
     serviceRef.current = service;
+    scopeMetadata.current = null;
     const instance = createNumberedPageController<NumberedResult["rows"][number]>({
       async loadPage({ scope, page, pageSize, signal }) {
         if (!service || serviceRef.current !== service) throw new Error("stale_actor");
         const current = JSON.parse(scope) as Extract<AcademicWorkspaceRequest, { mode: "curriculum" }>;
         const filters = { periodId: null, search: current.search, status: current.status, subject: current.subject,
           grade: current.grade, teacher: current.teacher, classroom: current.classroom, viewMode: current.viewMode };
-        const result = await service.readCurriculumNumberedPage({
-          filters: filters as import("./academic-read-service.js").CurriculumNumberedFilters, page, pageSize, signal, includeScopeMetadata: true,
+        const cached = scopeMetadata.current?.service === service && scopeMetadata.current.scope === scope
+          && scopeMetadata.current.expiresAt > Date.now() ? scopeMetadata.current : null;
+        const read = (includeScopeMetadata: boolean) => service.readCurriculumNumberedPage({
+          filters: filters as import("./academic-read-service.js").CurriculumNumberedFilters, page, pageSize, signal, includeScopeMetadata,
         });
+        let result = await read(!cached);
+        signal.throwIfAborted();
+        // A changed default period or row count invalidates the entire metadata
+        // snapshot. Fetch a coherent page instead of inventing updated totals.
+        if (cached && (result.resolvedPeriodId !== cached.result.resolvedPeriodId || result.totalCount !== cached.result.totalCount)) {
+          result = await read(true);
+          signal.throwIfAborted();
+        }
+        if (result.stats && result.filterOptions) {
+          if (serviceRef.current === service) scopeMetadata.current = { service, scope, expiresAt: Date.now() + 30_000, result };
+        } else if (cached?.result.stats && cached.result.filterOptions) {
+          result = { ...result, stats: cached.result.stats, filterOptions: cached.result.filterOptions };
+        }
         return result;
       },
       onChange(snapshot) {
@@ -210,6 +227,7 @@ export function useAcademicWorkspaceData(request: AcademicWorkspaceRequest) {
   }, [service, persistPageSizePreference]);
   const refresh = useCallback(() => {
     if (!service || serviceRef.current !== service) return Promise.resolve();
+    scopeMetadata.current = null;
     return isNumbered ? controller.current?.retry() || Promise.resolve() : loadRange();
   }, [controller, isNumbered, loadRange, service]);
   const loadCurriculumDetail = useCallback(async (classId: string) => {

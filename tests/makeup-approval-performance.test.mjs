@@ -24,7 +24,7 @@ test('approval reads exact detail and preserves labels without loading workspace
   assert.deepEqual(sends.map(s => s.url), ['/api/makeup-requests/approve', '/api/notifications/legacy/makeup']);
 });
 
-function routeFixture({ kind = 'cancel_only', collision = false, denied = false } = {}) {
+function routeFixture({ kind = 'cancel_only', collision = false, denied = false, contextError = null, invalidContext = false } = {}) {
   const calls = [], request = { id: id(1), status: 'approval_pending', approver_profile_id: id(804), class_id: id(600), class_name: '수업', subject: '영어', request_kind: kind, cancel_date: '2026-10-01', makeup_start_at: '2026-10-02T09:00:00+09:00', makeup_end_at: '2026-10-02T10:00:00+09:00', makeup_classroom: 'A' };
   let attempts = 0;
   function query(table) {
@@ -41,10 +41,17 @@ function routeFixture({ kind = 'cancel_only', collision = false, denied = false 
     return chain;
   }
   const client = { auth: { getUser: async () => ({ data: { user: { id: id(804) } }, error: null }) }, from: query,
-    async rpc(name, args) {
-      calls.push({ name, args }); attempts++;
-      if (attempts === 1) return { data: null, error: { code: '22023', message: 'makeup_calendar_effects_invalid' } };
-      return { data: { request, sourceEventId: id(999) }, error: null };
+    rpc(name, args) {
+      const call = { name, args }; calls.push(call);
+      if (name === 'get_makeup_approval_collision_context_v1') return {
+        abortSignal(signal) { call.signal = signal; return this; },
+        retry(value) { call.retry = value; return Promise.resolve({ error: contextError, data: invalidContext ? {} : {
+          classes: collision ? [{ id: id(601), name: '다른 반', schedule: '금 09:00-10:00', room: 'A' }] : [], requests: [], academicEvents: [],
+        } }); },
+      };
+      attempts++;
+      if (attempts === 1) return Promise.resolve({ data: null, error: { code: '22023', message: 'makeup_calendar_effects_invalid' } });
+      return Promise.resolve({ data: { request, sourceEventId: id(999) }, error: null });
     } };
   const handler = modules(null, { '@supabase/supabase-js': { createClient: () => client } })('src/app/api/makeup-requests/approve/route.ts').POST;
   return { calls, run: () => handler(new Request('https://fixture.invalid/api/makeup-requests/approve', { method: 'POST', headers: { authorization: 'Bearer fixture' }, body: JSON.stringify({ requestId: id(1), mutationRequestId: id(2), expectedStatus: 'approval_pending', note: '' }) })) };
@@ -59,12 +66,20 @@ for (const kind of ['cancel_only', 'cancel_makeup']) test(`server ${kind} keeps 
   const collections = fixture.calls.filter(c => c.table && !c.steps.some(s => s.method === 'eq'));
   if (kind === 'cancel_only') assert.equal(collections.length, 0);
   else {
-    assert.deepEqual(collections.map(c => c.table).sort(), ['academic_events','classes','makeup_requests']);
-    assert.ok(collections.every(c => c.steps.find(s => s.method === 'select').args[0] !== '*'));
-    assert.ok(collections.find(c => c.table === 'makeup_requests').steps.some(s => s.method === 'in' && s.args[0] === 'status'));
+    assert.equal(collections.length, 0, 'no whole collection pagination');
+    const context = fixture.calls.filter(c => c.name === 'get_makeup_approval_collision_context_v1');
+    assert.equal(context.length, 1);
+    assert.equal(context[0].args.p_slots[0].startAt, '2026-10-02T09:00:00+09:00');
+    assert.ok(context[0].signal instanceof AbortSignal);
+    assert.equal(context[0].retry, false);
     const conflicting = routeFixture({ kind, collision: true });
     assert.notEqual((await conflicting.run()).status, 200);
     assert.equal(conflicting.calls.filter(c => c.name === 'transition_makeup_request_v2').length, 1, 'no approval write after collision');
+    for (const failure of [{ contextError: { message: 'timeout', code: '57014' } }, { invalidContext: true }]) {
+      const failed = routeFixture({ kind, ...failure });
+      assert.notEqual((await failed.run()).status, 200);
+      assert.equal(failed.calls.filter(c => c.name === 'transition_makeup_request_v2').length, 1, 'failed collision read never permits approval');
+    }
   }
   const denied = routeFixture({ denied: true }); assert.equal((await denied.run()).status, 403);
   assert.equal(denied.calls.filter(c => c.name).length, 0);

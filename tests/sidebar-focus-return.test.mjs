@@ -35,7 +35,10 @@ async function setup(t, { mobile = true, defaultOpen = true, menuTooltip = false
   function Content() {
     const { setOpenMobile } = useSidebar()
     const [route, setRoute] = React.useState("original")
-    navigate = href => { window.history.pushState({}, "", href); setRoute("next") }
+    React.useEffect(() => {
+      navigate = href => { window.history.pushState({}, "", href); setRoute("next") }
+      return () => { navigate = () => {} }
+    }, [])
     React.useEffect(() => { if (route === "next" && !realNavigation) document.querySelector("h1")?.focus() }, [route])
     return h(React.Fragment, null,
       h(Sidebar, null,
