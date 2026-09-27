@@ -1833,7 +1833,7 @@ test("registration create persists one flat fact row without runtime, workflow, 
   );
 
   assertIncludesAll(source, [
-    'import { RegistrationApplicationCreate } from "./registration-application-create"',
+    'const RegistrationApplicationCreate = dynamic(() => import("./registration-application-create").then((module) => module.RegistrationApplicationCreate)',
     "FACT_ONLY_REGISTRATION_PERSISTENCE",
     "createRegistrationCase",
     "createRegistrationCreateAttempt",
@@ -2305,7 +2305,7 @@ test("registration create keeps counselor assignment out of inquiry-only intake"
   );
 
   assertIncludesAll(workspaceSource, [
-    'from "./registration-application-create"',
+    'import("./registration-application-create").then((module) => module.RegistrationApplicationCreate)',
     "<RegistrationApplicationCreate",
   ]);
   assertIncludesAll(createFunctionSource, [
@@ -3854,7 +3854,7 @@ test("word retest workflow guidance lives in a global manual outside task dialog
   ]);
 
   assertIncludesAll(workspaceSource, [
-    'import { WordRetestManualDialog } from "./word-retest-manual-dialog"',
+    'const WordRetestManualDialog = dynamic(() => import("./word-retest-manual-dialog").then((module) => module.WordRetestManualDialog)',
     "const [wordRetestManualOpen, setWordRetestManualOpen] = useState(false)",
     "<WordRetestManualDialog",
     "open={wordRetestManualOpen}",
