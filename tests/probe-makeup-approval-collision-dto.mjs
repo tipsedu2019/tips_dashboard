@@ -13,7 +13,9 @@ assert.ok(project); assert.ok(config.includes(`[db]\nport = ${url.port}\n`));
 const fixture = await readFile('supabase/tests/makeup_approval_collision_candidates_test.sql', 'utf8');
 const end = fixture.indexOf('create temp table before_counts');
 assert.ok(end > 0);
-const sql = fixture.slice(0, end) + `
+// The wire probe uses fixture setup only; pgTAP is installed in the separate
+// test transaction by the Supabase runner and is unnecessary here.
+const sql = fixture.slice(0, end).replace('select no_plan();', '') + `
 set local role service_role;
 select jsonb_build_object('slots',pg_temp.slots(),'scoped',public.get_makeup_approval_collision_context_v1(pg_temp.slots()),
  'full',jsonb_build_object('classes',(select jsonb_agg(to_jsonb(c)) from public.classes c),
