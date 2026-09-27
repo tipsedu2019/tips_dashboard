@@ -247,6 +247,7 @@ export function NavMain({
                     <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isParentActive}>
                       <Link
                         href={item.url}
+                        prefetch={false}
                         onClick={(event) => closeCurrentMenu(event, item.url)}
                         aria-current={isUrlActive(item.url) ? "page" : undefined}
                         aria-label={getNavMoveLabel(item.title)}
@@ -280,6 +281,7 @@ export function NavMain({
                             <SidebarMenuSubButton asChild className="cursor-pointer" isActive={isUrlActive(subItem.url)}>
                               <Link
                                 href={subItem.url}
+                                prefetch={false}
                                 onClick={(event) => closeCurrentMenu(event, subItem.url)}
                                 aria-current={isUrlActive(subItem.url) ? "page" : undefined}
                                 aria-label={getNavMoveLabel(subItem.title)}
@@ -314,6 +316,7 @@ export function NavMain({
                   <SidebarMenuButton asChild tooltip={item.title} className="cursor-pointer" isActive={isUrlActive(item.url)}>
                     <Link
                       href={item.url}
+                      prefetch={false}
                         onClick={(event) => closeCurrentMenu(event, item.url)}
                       aria-current={isUrlActive(item.url) ? "page" : undefined}
                         aria-label={getNavMoveLabel(item.title)}

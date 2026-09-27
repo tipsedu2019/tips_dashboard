@@ -100,7 +100,7 @@ export function DashboardDailyBrief() {
           <ul className="grid overflow-hidden rounded-[var(--radius-surface)] border border-border/70 bg-card" aria-label="오늘 일정">
             {brief.upcoming.map((item) => (
               <li key={`${item.sourceKind}:${item.sourceId}`} className="border-b border-border/60 last:border-b-0">
-                <Link href={item.href} className="grid min-h-20 grid-cols-[48px_minmax(0,1fr)] items-center gap-3 px-4 py-4 sm:px-6 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[64px_minmax(0,1fr)]">
+                <Link href={item.href} prefetch={false} className="grid min-h-20 grid-cols-[48px_minmax(0,1fr)] items-center gap-3 px-4 py-4 sm:px-6 hover:bg-muted/50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-ring md:grid-cols-[64px_minmax(0,1fr)]">
                   <time dateTime={item.scheduledAt} className="text-sm font-semibold tabular-nums md:text-base">{formatTime(item.scheduledAt)}</time>
                   <span className="min-w-0 [overflow-wrap:anywhere]">
                     <span className="block text-sm font-semibold leading-6 md:text-base">{item.title}</span>
@@ -113,10 +113,10 @@ export function DashboardDailyBrief() {
         ) : brief ? (
           <div className="rounded-[var(--radius-surface)] border border-border/70 bg-card px-5 py-8">
             <p className="text-sm text-muted-foreground">오늘 예정된 레벨테스트·방문상담·청강이 없습니다.</p>
-            <Link href="/admin/registration?view=calendar" className={registrationLinkClass}>등록 일정 보기</Link>
+            <Link href="/admin/registration?view=calendar" prefetch={false} className={registrationLinkClass}>등록 일정 보기</Link>
           </div>
         ) : null}
-        {brief && total > 5 && brief.upcoming.length > 0 ? <Link href="/admin/registration?view=calendar" className={`${registrationLinkClass} justify-self-start`}>등록 일정 보기</Link> : null}
+        {brief && total > 5 && brief.upcoming.length > 0 ? <Link href="/admin/registration?view=calendar" prefetch={false} className={`${registrationLinkClass} justify-self-start`}>등록 일정 보기</Link> : null}
       </div>
     </section>
   )

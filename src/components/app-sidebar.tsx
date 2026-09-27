@@ -67,6 +67,7 @@ export function AppSidebar({ ...props }: React.ComponentProps<typeof Sidebar>) {
               >
                 <Link
                   href={sidebarBrand.href}
+                  prefetch={false}
                   onClick={(event) => { if (isMobile && !event.defaultPrevented && !event.metaKey && !event.ctrlKey && !event.shiftKey && !event.altKey && window.location.pathname === sidebarBrand.href) setOpenMobile(false) }}
                   aria-label="대시보드 홈으로 이동"
                   title="대시보드"
