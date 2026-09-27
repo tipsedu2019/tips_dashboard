@@ -1,0 +1,28 @@
+{
+  "date": "2026-09-27",
+  "boundary": "isolated synthetic database and local real UI; production tracked separately",
+  "nodeTests": 179,
+  "pgTap": 710,
+  "typecheck": "pass",
+  "eslint": "pass",
+  "originalClassesAndSlotsUnchanged": true,
+  "noSend": true,
+  "views": [
+    "teacher-weekly",
+    "classroom-weekly",
+    "daily-teacher",
+    "daily-classroom"
+  ],
+  "browserChecks": [
+    "create preset",
+    "save unrelated Monday 10:00-11:00",
+    "all four projections with teacher panel selected",
+    "fixed 09:00-24:00",
+    "new tab reopen",
+    "unknown room Tuesday 19:30 rejected with specific class label",
+    "Tuesday 21:30 saved",
+    "390px no page overflow"
+  ],
+  "beforeRegression": "scoped-before-regression.tap",
+  "sqlResults": "scoped-final-20260927-clean-sql-results.json"
+}

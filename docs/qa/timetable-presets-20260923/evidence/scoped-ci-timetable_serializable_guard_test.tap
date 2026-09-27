@@ -1,0 +1,6 @@
+ok 1 - isolation fixture is actually serializable
+ok 2 - serializable snapshot reads remain allowed
+ok 3 - serializable actual public RPC cannot write pinned snapshot
+ok 4 - serializable direct bypass cannot write pinned snapshot
+ok 5 - serializable rejected writes preserve rows
+1..5

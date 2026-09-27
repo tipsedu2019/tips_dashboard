@@ -95,3 +95,12 @@ test('successful but lost delete stays immutable and recoverable after reload wi
  c=createTimetablePlanController({service:h.service,actorScope:'actor',planId:'plan',storage});await c.load();assert.equal(c.snapshot().pendingOperations[0].name,'Math');assert.equal(c.failureKind('item'),'uncertain');await assert.rejects(c.discardRejected('item'));await assert.rejects(c.resolveStale('item','accept_server'));
  const retry=c.retry('item');assert.deepEqual(h.calls[1],h.calls[0]);h.pending[1].resolve({planId:'plan',metaRevision:1,changeSequence:2,shadowFingerprint:'fingerprint',item:null,slots:[],removedItemIds:['item']});await retry;assert.equal(c.snapshot().dirty,false);assert.deepEqual(c.snapshot().pendingOperations,[]);c.destroy();
 });
+
+test('scoped v2 uncertainty does not stale the whole board or block an unrelated save', async()=>{
+ const h=makeService(); h.setServer({...snapshot(),complete:false,datedComplete:false,occupancyValidationVersion:2,
+ unresolvedOccupancies:[{classId:'legacy',label:'기존 수업',scope:'all',resourceId:null,reason:'unresolved_resource',weekday:2,startMinute:1170,endMinute:1290,teacherId:'teacher',classroomId:null}]});
+ const c=createTimetablePlanController({service:h.service,actorScope:'actor',planId:'plan',storage:memoryStorage()});
+ await c.load(); assert.equal(c.snapshot().referenceStatus,'verified');assert.notEqual(c.snapshot().saveState,'stale');
+ const saved=c.dispatch(edit(650));assert.equal(h.calls.length,1);h.pending[0].resolve(result(2,650,2));await saved;
+ assert.equal(c.snapshot().dirty,false);assert.equal(c.snapshot().snapshot?.slots[0].startMinute,650);c.destroy();
+});
