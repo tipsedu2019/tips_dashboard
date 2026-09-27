@@ -6,14 +6,14 @@ ok 5 - get_textbook_inventory_summary_v1 exists
 ok 6 - get_textbook_master_detail_v1 exists
 ok 7 - get_textbook_inventory_balance_v1 exists
 ok 8 - check_textbook_master_duplicate_v1 exists
-ok 9 - check_textbook_master_duplicate_v1 stable invoker, fixed search path, authenticated-only ACL
-ok 10 - get_textbook_inventory_balance_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 9 - list_textbook_master_page_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 10 - get_textbook_master_summary_v1 stable invoker, fixed search path, authenticated-only ACL
 ok 11 - get_textbook_inventory_summary_v1 stable invoker, fixed search path, authenticated-only ACL
 ok 12 - get_textbook_master_detail_v1 stable invoker, fixed search path, authenticated-only ACL
-ok 13 - get_textbook_master_summary_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 13 - list_textbook_inventory_page_v1 stable invoker, fixed search path, authenticated-only ACL
 ok 14 - list_textbook_inventory_history_page_v1 stable invoker, fixed search path, authenticated-only ACL
-ok 15 - list_textbook_inventory_page_v1 stable invoker, fixed search path, authenticated-only ACL
-ok 16 - list_textbook_master_page_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 15 - get_textbook_inventory_balance_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 16 - check_textbook_master_duplicate_v1 stable invoker, fixed search path, authenticated-only ACL
 ok 17 - textbooks retains RLS
 ok 18 - textbook_inventory_locations retains RLS
 ok 19 - textbook_stock_moves retains RLS

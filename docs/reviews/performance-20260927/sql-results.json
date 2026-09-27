@@ -3,9 +3,9 @@
     "file": "performance_catalog_taxonomy_test.sql",
     "exit": 0,
     "plans": [
-      "6"
+      "12"
     ],
-    "passed": 6,
+    "passed": 12,
     "failed": []
   },
   {

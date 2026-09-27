@@ -4,6 +4,12 @@ ok 2 - authorized writes recompute all taxonomy inputs
 a2000000-0000-4000-8000-000000000901
 ok 3 - authorized page key uses current generated taxonomy
 ok 4 - renamed book remains visible
-ok 5 - read optimization emits no notification events
-ok 6 - read optimization emits no deliveries
-1..6
+ok 5 - service_role INSERT preserves existing write permission
+ok 6 - service_role UPDATE recomputes generated taxonomy
+ok 7 - service_role generated value equals canonical taxonomy
+ok 8 - service_role updated value equals canonical taxonomy
+ok 9 - anon still cannot execute generated taxonomy wrapper
+ok 10 - granted classification chain remains pure invoker with fixed search path
+ok 11 - read optimization emits no notification events
+ok 12 - read optimization emits no deliveries
+1..12

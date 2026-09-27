@@ -69,6 +69,26 @@ select is((select taxonomy from dashboard_private.textbook_read_keys_v1() where 
  (select read_taxonomy from public.textbooks where id=pg_temp.tid(201)), 'authorized page key uses current generated taxonomy');
 select is((select count(*)::int from dashboard_private.textbook_read_keys_v1() where title='고2 수학'),1,'renamed book remains visible');
 reset role;
+set local role service_role;
+select lives_ok($q$insert into public.textbooks(id,title,name,subject,school_levels,grade_levels,sub_subject) values
+ ('a2000000-0000-4000-8000-000000000950','서버 교재','서버 교재','english',array['middle'],array['m1'],'독해')$q$,
+ 'service_role INSERT preserves existing write permission');
+select lives_ok($q$update public.textbooks set subject='math',title='고3 수학',grade_levels=array['h3']
+ where id='a2000000-0000-4000-8000-000000000201'$q$,
+ 'service_role UPDATE recomputes generated taxonomy');
+select is((select read_taxonomy from public.textbooks where id=pg_temp.tid(950)),
+ (select dashboard_private.textbook_taxonomy_v1(to_jsonb(t)) from public.textbooks t where id=pg_temp.tid(950)),
+ 'service_role generated value equals canonical taxonomy');
+select is((select read_taxonomy from public.textbooks where id=pg_temp.tid(201)),
+ (select dashboard_private.textbook_taxonomy_v1(to_jsonb(t)) from public.textbooks t where id=pg_temp.tid(201)),
+ 'service_role updated value equals canonical taxonomy');
+reset role;
+select ok(not has_function_privilege('anon', 'dashboard_private.textbook_stored_taxonomy_v1(text,text,text,text,text,text,text,text,text,text[],text[],text)', 'execute'),
+ 'anon still cannot execute generated taxonomy wrapper');
+select ok((select bool_and(not p.prosecdef and p.provolatile='i' and p.proconfig @> array['search_path=""'])
+ from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='dashboard_private'
+ and p.proname in ('textbook_stored_taxonomy_v1','textbook_taxonomy_v1','textbook_trim_v1','textbook_subject_v1','textbook_school_v1','textbook_grade_v1','textbook_compact_v1')),
+ 'granted classification chain remains pure invoker with fixed search path');
 select is((select count(*) from dashboard_private.notification_events),(select events from send_before),'read optimization emits no notification events');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from send_before),'read optimization emits no deliveries');
 select * from finish(); rollback;

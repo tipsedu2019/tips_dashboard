@@ -13,3 +13,10 @@ Task 4: complete (commits 062c860..062c860, tests: node --test --experimental-st
 Task 6: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/registration-subject-capability-probe.test.mjs tests/registration-runtime-probe.test.mjs → ℹ duration_ms 219.02375)
 Task 5: complete (commits 062c860..062c860, tests: python3 docs/reviews/performance-20260927/verify-local-sql.py tips_timetable_perf_20260927 → 378 assertions passed across 5 SQL suites)
 Task 7: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/management-numbered-pagination.test.mjs tests/public-content-performance.test.mjs tests/makeup-approval-performance.test.mjs tests/registration-subject-capability-probe.test.mjs → ℹ duration_ms 3845.256958)
+
+Final review: fresh gpt-6-astra reviewer inspected 062c8601..06443e11 read-only; one P2 generated taxonomy service_role permission regression.
+Final: fixed pure inference EXECUTE chain for service_role; INSERT RED SQLSTATE 42501 then INSERT/UPDATE/parity/anon/no-send GREEN 12/12; related SQL384/384. No second review.
+Final: Ruling: Production p95/root cause, operational lock duration and deployment success — maintain explicit operating measurement/release gates; local evidence cannot prove them.
+Final: Ruling: Calendar reservation data success and real OS IME — browser fixture lacks reservation RPC and composition uses event simulation; retain smoke-test limitations.
+Final: Ruling: Actual notification delivery — intentionally no-send; no provider outcome claimed.
+Final: Ruling: Initial dynamic form focuses Save during fallback — no automatic submit, focus loss or keyboard blockage established; retain existing validation and defer initial-focus polish.

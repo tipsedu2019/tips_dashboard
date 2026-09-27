@@ -14,6 +14,17 @@ create function dashboard_private.textbook_stored_taxonomy_v1(
 $f$;
 revoke all on function dashboard_private.textbook_stored_taxonomy_v1(text,text,text,text,text,text,text,text,text,text[],text[],text) from public,anon;
 grant execute on function dashboard_private.textbook_stored_taxonomy_v1(text,text,text,text,text,text,text,text,text,text[],text[],text) to authenticated,service_role;
+-- Existing service-role INSERT/UPDATE must also execute the pure inference chain.
+-- These immutable invokers only transform their arguments; no data-bearing read
+-- guard or projection is granted, and PUBLIC/anon privileges stay unchanged.
+grant execute on function
+ dashboard_private.textbook_taxonomy_v1(jsonb),
+ dashboard_private.textbook_trim_v1(text),
+ dashboard_private.textbook_subject_v1(text),
+ dashboard_private.textbook_school_v1(text),
+ dashboard_private.textbook_grade_v1(text),
+ dashboard_private.textbook_compact_v1(text)
+ to service_role;
 alter table public.textbooks add column read_taxonomy jsonb generated always as (
  dashboard_private.textbook_stored_taxonomy_v1(title,name,subject,category,publisher,isbn13,barcode,school_level,grade_level,school_levels,grade_levels,sub_subject)
 ) stored;

@@ -1,0 +1,16 @@
+ok 1 - stored taxonomy equals canonical inference after insert
+a2000000-0000-4000-8000-000000000901
+ok 2 - authorized writes recompute all taxonomy inputs
+a2000000-0000-4000-8000-000000000901
+ok 3 - authorized page key uses current generated taxonomy
+ok 4 - renamed book remains visible
+not ok 5 - service_role INSERT preserves existing write permission
+# Failed test 5: "service_role INSERT preserves existing write permission"
+#     died: 42501: permission denied for function textbook_taxonomy_v1
+#         CONTEXT:
+#             SQL function "textbook_stored_taxonomy_v1" statement 1
+#             SQL statement "insert into public.textbooks(id,title,name,subject,school_levels,grade_levels) values
+#              ('a2000000-0000-4000-8000-000000000950','서버 교재','서버 교재','english',array['middle'],array['m1'])"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ok 6 - service_role UPDATE recomputes generated taxonomy
+ERROR:  permission denied for function textbook_taxonomy_v1
