@@ -1,0 +1,34 @@
+{
+  "classCount": 50,
+  "legacySessions": 6400,
+  "source": "synthetic field shape and aggregate volume only; no production rows copied",
+  "measurements": [
+    {
+      "name": "legacyReference",
+      "durationMs": 250.66058399999997,
+      "datedRows": 0,
+      "fingerprint": "844d4576a45e230dc4915efbde16672a",
+      "unresolvedRows": 6400
+    },
+    {
+      "name": "legacyReference",
+      "durationMs": 266.134334,
+      "datedRows": 0,
+      "fingerprint": "844d4576a45e230dc4915efbde16672a",
+      "unresolvedRows": 6400
+    },
+    {
+      "name": "legacyReference",
+      "durationMs": 241.47849999999994,
+      "datedRows": 0,
+      "fingerprint": "844d4576a45e230dc4915efbde16672a",
+      "unresolvedRows": 6400
+    },
+    {
+      "name": "actualSignupAndDeferredGuards",
+      "durationMs": 774.9607080000001
+    }
+  ],
+  "legacyContentOccupancyUnchanged": true,
+  "passed": true
+}

@@ -1,0 +1,67 @@
+release2-rpc
+ok 1 - slot time uniqueness is deferrable for ID-preserving swaps
+ac230000-0000-4000-8000-000000000901
+ok 2 - saving A preserves B schedule metadata and revision
+ok 3 - only A revision increments
+ok 4 - legacy schedule keeps per-slot teacher and room details
+ok 5 - legacy teacher projection keeps both resources
+ok 6 - legacy room projection keeps weekday assignments
+ok 7 - past session snapshot and slot FK remain unchanged
+ok 8 - same request key replays exact receipt
+ok 9 - stale revision has domain SQLSTATE
+ok 10 - B slot cannot be transferred through A save
+ok 11 - duplicate final time tuple is rejected before commit
+ok 12 - valid final time swap preserves existing slot IDs
+ok 13 - first slot ID keeps its row after swap
+ok 14 - second slot ID keeps its row after swap
+ok 15 - past session FK still targets original slot ID
+ac230000-0000-4000-8000-000000000903
+ok 16 - teacher role cannot save defaults
+ac230000-0000-4000-8000-000000000902
+ok 17 - staff can idempotently save unchanged defaults
+ok 18 - mixed slots project explicit unassigned resources
+ok 19 - teacher summary only names assigned teachers
+ok 20 - room summary only names assigned rooms
+ok 21 - both-unassigned normalized slot stays empty
+ok 22 - legacy timetable returns all four mixed slots
+ok 23 - legacy timetable keeps fully assigned teacher
+ok 24 - legacy timetable keeps fully assigned classroom
+ok 25 - legacy timetable keeps teacher-only teacher
+ok 26 - legacy timetable does not borrow a room for teacher-only slot
+ok 27 - legacy timetable does not borrow a teacher for room-only slot
+ok 28 - legacy timetable keeps room-only classroom
+ok 29 - legacy timetable does not borrow a teacher for unassigned slot
+ok 30 - legacy timetable does not borrow a room for unassigned slot
+ok 31 - literal placeholder names and escape-prefix names have unambiguous projected details
+ok 32 - timetable preserves assigned teacher whose name matches absence marker
+ok 33 - timetable preserves assigned room whose name matches absence marker
+ok 34 - timetable preserves literal former encoding token teacher
+ok 35 - timetable preserves literal tilde room
+ok 36 - timetable keeps a truly unassigned teacher empty
+ok 37 - timetable keeps a truly unassigned room empty
+ok 38 - authenticated timetable RPC preserves literal marker name under invoker ACL and RLS
+ok 39 - authenticated timetable RPC preserves literal tilde room under invoker ACL and RLS
+ok 40 - comma catalog names remain literal in the compatibility projection
+ok 41 - normalized Monday slot retains comma teacher
+ok 42 - normalized Tuesday slot retains comma room
+ok 43 - authenticated normalized timetable uses full comma teacher from slot
+ok 44 - authenticated normalized timetable keeps Monday room
+ok 45 - authenticated normalized timetable keeps Tuesday teacher
+ok 46 - authenticated normalized timetable uses full comma room from slot
+ok 47 - authenticated normalized timetable keeps explicit empty teacher
+ok 48 - authenticated normalized timetable keeps explicit empty room
+ok 49 - pre-existing raw tilde teacher detail is not decoded
+ok 50 - pre-existing raw tilde room detail is not decoded
+ok 51 - legacy ambiguous comma teacher keeps original room classifier
+ok 52 - legacy exact two-position empty resources suppress fallback
+ok 53 - legacy exact two-position literal markers remain assigned
+ok 54 - shadow ambiguous comma teacher keeps original room classifier
+ok 55 - legacy single-detail literal marker teacher stays assigned
+ok 56 - shadow mode keeps previous single-detail literal parsing
+
+ok 57 - shadow reconciliation updates an existing tuple without changing slot ID
+ok 58 - shadow reconciliation does not insert a duplicate tuple
+
+ok 59 - unauthenticated caller cannot save defaults
+ok 60 - anon retains no public save grant
+1..60

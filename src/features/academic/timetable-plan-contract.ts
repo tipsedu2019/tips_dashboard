@@ -64,6 +64,12 @@ export type PendingSlot = {
 };
 
 export type OccupancyBlocker = {
+  /** Omitted bounds remain unknown; known bounds limit only the affected time. */
+  weekday?: number | null;
+  startMinute?: number | null;
+  endMinute?: number | null;
+  teacherId?: string | null;
+  classroomId?: string | null;
   /** Opaque identity for the unresolved occupancy; names/notes are excluded. */
   occupancyFingerprint?: string;
   classId: string;
@@ -82,7 +88,8 @@ export type DropTarget = {
 
 export type TimetableConflict = {
   date?: string;
-  kind: "teacher" | "classroom" | "same_class";
+  kind: "teacher" | "classroom" | "same_class" | "unresolved";
+  label?: string;
   slotId: string;
   otherSlotId: string;
 };
@@ -124,6 +131,8 @@ export type ShadowClass = {
   revision: number;
 };
 export type DatedTimetableSession = {
+  /** Explicit legacy default provenance; never a normalized source-slot ID. */
+  inheritedWeeklySlotId?: string;
   id: string;
   classId: string;
   sourceSlotId: string | null;
@@ -137,6 +146,8 @@ export type DatedTimetableSession = {
 };
 export type DatedOccupancyBlocker = OccupancyBlocker & { date: string | null; sessionId?: string };
 export type TimetableOperatingReference = {
+  /** v2 distinguishes unresolved occupancy from a failed/incomplete read. */
+  occupancyValidationVersion?: 2;
   /** Server business date in Asia/Seoul; weekly defaults never rewrite history. */
   asOfDate: string;
   shadowSlots: ShadowSlot[];

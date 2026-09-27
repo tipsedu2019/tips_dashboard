@@ -599,6 +599,11 @@
       "fileName": "20260924124904_timetable_legacy_reference_aggregation.sql",
       "status": "final",
       "sha256": "aa69ccd3170f7adbbe52732a35209bf8edd3876e4709413aed14e7492eb2087e"
+    },
+    {
+      "fileName": "20260927071716_timetable_scoped_occupancy.sql",
+      "status": "final",
+      "sha256": "6fc4bfa1e0e2aecb6552e38d5a21c47987ba41fd6ef49cc88d095fb53d4323ea"
     }
   ]
 }

@@ -40,3 +40,13 @@
 원본 baseline이 가진 obsolete notification trigger를 origin의 좁은 DROP/legacy write ACL 경계로 맞추지만, 오래된 notification 전체 suite를 모두 정상화하는 작업은 아니다. missing registry/content-contract join/55000 import/private ACL 제한은 QA REPORT에 남겼다. 예전 전체 migration을 다시 적용하여 최신 정의를 덮어쓰지 않는다.
 
 최종 수정 검증은 `--container tips_timetable_finalfix_verified_20260924 --prefix final-fix-verified`로 별도 DB를 생성했다. 새 재현 때는 중복되지 않는 `tips_timetable_` 이름과 evidence prefix를 세 스크립트(clean-replay, clean-sql, final-audit)에 동일하게 전달한다. 원래 `tips_timetable_20260923`, `tips_timetable_20260923_replay` 및 수동 fixture를 reset/stop/remove하지 않는다.
+
+## 2026-09-27 기존 수업 호환성
+
+`occupancyValidationVersion: 2`는 정상 조회된 미확정 점유와 조회 실패를 구분한다. `complete`/`datedComplete`는 기존 진단 의미를 유지한다. 화면은 v2에서 전체 편집을 잠그지 않고 서버와 동일한 요일·반개구간·자원 검사로 관련 배치만 거절한다. 확인 불가능한 시간은 보수적으로 유지하며 용량 초과·권한·조회 실패·낡은 revision 검사는 그대로다.
+
+기존 normalized 슬롯의 UUID가 비었으면 보존된 이름과 정확히 일치하는 유일한 카탈로그 항목만 읽기에서 연결한다. 중복·없는 이름은 추측하지 않는다. 기존 수업/슬롯/회차를 UPDATE하는 마이그레이션은 없다.
+
+기존 `class-schedule-planner.js`가 생성한 **앞으로의 일반 회차**(`active`, `isForced:false`, 보강/원본 날짜 없음, 개별 시간·자원 필드 없음, 유일한 회차 ID)만 정규 시간표의 해당 요일 전체 배치를 참조한다. 과거 회차·강제 추가·보강·명시적 덮어쓰기는 이 규칙을 쓰지 않는다. `sourceSlotId`는 null 그대로이고 `inheritedWeeklySlotId`로 일반 회차의 출처를 별도 표시하여 정규 그림자와 중복 예약하지 않는다. 미확정 정규 시간은 같은 범위의 날짜별 blocker로 남긴다.
+
+이전 배포 보고서의 기존 수업 수정/강의실 배정 승인 요청은 철회됐다. 사용자가 기존 자료를 정리해야 프리셋을 쓸 수 있다는 요구로 해석하지 않는다.

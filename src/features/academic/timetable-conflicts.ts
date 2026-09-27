@@ -1,4 +1,4 @@
-import type { DropTarget, PlanSlot, ShadowSlot, TimetableConflict, TimetableOperatingReference } from "./timetable-plan-contract.ts";
+import type { DropTarget, OccupancyBlocker, PlanSlot, ShadowSlot, TimetableConflict, TimetableOperatingReference } from "./timetable-plan-contract.ts";
 import { assertInterval, assertWeekday } from "./timetable-plan-model.ts";
 
 type OccupiedSlot = Pick<PlanSlot, "id" | "weekday" | "startMinute" | "endMinute" | "teacherId" | "classroomId">;
@@ -103,6 +103,7 @@ export function effectiveOperatingSlots(reference: TimetableOperatingReference, 
     && !sessions.some((session) => session.sourceSlotId !== null
       && session.classId === slot.classId && session.sourceSlotId === slot.sourceSlotId));
   return [...defaults, ...sessions.flatMap((session) => {
+    if (defaults.some(slot => slot.id === session.inheritedWeeklySlotId)) return [];
     if (session.state === "skipped" || session.state === "tbd" || session.startMinute === null
       || session.endMinute === null || session.teacherId === null || session.classroomId === null) return [];
     return [{ id: session.id, classId: session.classId, sourceSlotId: session.sourceSlotId,
@@ -114,10 +115,21 @@ export function effectiveOperatingSlots(reference: TimetableOperatingReference, 
 export function findOperatingConflicts(slots: readonly PlanSlot[], reference: TimetableOperatingReference,
   period?: { startDate: string; endDate: string } | null): TimetableConflict[] {
   const conflicts = findConflicts(slots, reference.shadowSlots);
+  const blockers: Array<OccupancyBlocker & { date?: string | null }> = [
+    ...reference.unresolvedOccupancies,
+    ...(period ? reference.datedUnresolvedOccupancies.filter(blocker => blocker.date === null
+      || (blocker.date >= period.startDate && blocker.date <= period.endDate)) : []),
+  ];
+  for (const slot of slots) for (const blocker of blockers) {
+    if (blockerIntersects(slot, blocker)) conflicts.push({ kind: 'unresolved', slotId: slot.id,
+      otherSlotId: `unresolved:${blocker.classId}:${blocker.occupancyFingerprint ?? ''}`,
+      label: blocker.label, ...(blocker.date ? { date: blocker.date } : {}) });
+  }
   if (!period) return conflicts;
   for (const session of reference.datedSessions) {
     if (session.date < period.startDate || session.date > period.endDate
       || session.state === "skipped" || session.state === "tbd") continue;
+    if (reference.shadowSlots.some(shadow => shadow.id === session.inheritedWeeklySlotId)) continue;
     // Suppress only a genuinely identical source reservation; source-less
     // legacy sessions are never merged by names or similar coordinates.
     if (reference.shadowSlots.some((shadow) => session.sourceSlotId !== null
@@ -135,6 +147,23 @@ export function findOperatingConflicts(slots: readonly PlanSlot[], reference: Ti
 
 export function operatingReferenceComplete(reference: TimetableOperatingReference,
   period?: { startDate: string; endDate: string } | null): boolean {
+  // A successfully read v2 blocker is a local placement constraint, not a stale
+  // board. Transport failures still invalidate referenceStatus in the controller.
+  if (reference.occupancyValidationVersion === 2) {
+    return !('capacity' in reference && (reference.capacity as { exceeded: boolean }).exceeded);
+  }
   return reference.complete && (!period || !reference.datedUnresolvedOccupancies.some((blocker) =>
     blocker.date === null || (blocker.date >= period.startDate && blocker.date <= period.endDate)));
+}
+
+/** Kept equivalent to timetable_blocker_intersects_v2 on the server. */
+function blockerIntersects(slot: PlanSlot, blocker: OccupancyBlocker & { date?: string | null }): boolean {
+  const weekday = blocker.weekday ?? (blocker.date ? new Date(`${blocker.date}T00:00:00Z`).getUTCDay() : null);
+  if (weekday !== null && weekday !== slot.weekday) return false;
+  if (blocker.startMinute != null && blocker.endMinute != null
+    && (slot.startMinute >= blocker.endMinute || blocker.startMinute >= slot.endMinute)) return false;
+  if (blocker.scope === 'resource') return blocker.resourceId === null
+    || blocker.resourceId === slot.teacherId || blocker.resourceId === slot.classroomId;
+  return blocker.teacherId == null || blocker.classroomId == null
+    || blocker.teacherId === slot.teacherId || blocker.classroomId === slot.classroomId;
 }

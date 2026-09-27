@@ -1,0 +1,37 @@
+ac239000-0000-4000-8000-000000000901
+ok 1 - create plan
+ok 2 - direct table writes denied
+ok 3 - admin shares only linked teacher
+ac239000-0000-4000-8000-000000000903
+ok 4 - shared teacher reads plan
+ok 5 - shared editor edits draft
+ok 6 - teacher cannot manage metadata
+ac239000-0000-4000-8000-000000000904
+ok 7 - unshared teacher cannot read
+ok 8 - RLS hides items from unshared teacher
+ok 9 - RLS hides plan invalidation from unshared teacher
+ac239000-0000-4000-8000-000000000901
+{"plan": {"id": "ac239000-0000-4000-8000-000000000001", "name": "공유 계획", "state": "draft", "metaRevision": 2, "targetEndDate": null, "changeSequence": 3, "targetStartDate": null}}
+ac239000-0000-4000-8000-000000000903
+ok 10 - revoked editor cannot replay old receipt
+ac239000-0000-4000-8000-000000000902
+ok 11 - staff access without membership
+
+ok 12 - anon RPC execute denied
+ok 13 - anon table select denied
+ac239000-0000-4000-8000-000000000901
+ok 14 - same request key from another actor cannot expose original receipt
+ok 15 - share candidates contain eligible linked teachers only
+ok 16 - private reader cannot be called directly
+ok 17 - receipts are private
+ok 18 - client cannot forge invalidation events
+ok 19 - assistant cannot be shared by teacher membership
+{"plan": {"id": "ac239000-0000-4000-8000-000000000001", "name": "공유 계획", "state": "draft", "metaRevision": 3, "targetEndDate": null, "changeSequence": 4, "targetStartDate": null}}
+ac239000-0000-4000-8000-000000000904
+ok 20 - shared viewer can read
+ok 21 - shared viewer cannot edit
+ok 22 - share candidates restricted to management
+ok 23 - server permissions mark viewer readonly
+ac239000-0000-4000-8000-000000000902
+ok 24 - staff role revocation applies on next request
+1..24

@@ -1,0 +1,61 @@
+release2-rpc
+ac270000-0000-4000-8000-000000000901
+ok 1 - create future preset with existing unresolved occupancy
+not ok 2 - snapshot advertises scoped validation, not global lock
+# Failed test 2: "snapshot advertises scoped validation, not global lock"
+#         have: NULL
+#         want: 2
+not ok 3 - normalized labels resolve without writing missing UUIDs
+# Failed test 3: "normalized labels resolve without writing missing UUIDs"
+#         have: 0
+#         want: 1
+not ok 4 - undecided room keeps exact weekday
+# Failed test 4: "undecided room keeps exact weekday"
+#         have: NULL
+#         want: 2
+not ok 5 - undecided room keeps exact interval
+# Failed test 5: "undecided room keeps exact interval"
+#         have: NULL
+#         want: 1170
+not ok 6 - real legacy regular producer shape inherits every default interval
+# Failed test 6: "real legacy regular producer shape inherits every default interval"
+#         have: 0
+#         want: 2
+not ok 7 - inherited legacy rows never invent normalized source authority
+# Failed test 7: "inherited legacy rows never invent normalized source authority"
+#     (test result was NULL)
+ok 8 - legacy default provenance is not double counted as a second reservation
+not ok 9 - unrelated Monday saves despite unresolved Tuesday
+# Failed test 9: "unrelated Monday saves despite unresolved Tuesday"
+#     died: 23P01: timetable_resource_conflict
+#         CONTEXT:
+#             PL/pgSQL function dashboard_private.validate_timetable_item_slots_v1(uuid,uuid,text,jsonb,jsonb) line 18 at RAISE
+#             SQL statement "SELECT dashboard_private.validate_timetable_item_slots_v1(pid,iid,item->>'subject',p_command->'slots',ref)"
+#             PL/pgSQL function public.mutate_timetable_plan_item_v1(jsonb) line 30 at PERFORM
+#             SQL statement "select public.mutate_timetable_plan_item_v1(pg_temp.command(11,1,600,660))"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ok 10 - resolved normalized shadow still prevents teacher and room overlap
+ok 11 - only the undecided room interval blocks new placement
+not ok 12 - half-open interval immediately after uncertainty saves
+# Failed test 12: "half-open interval immediately after uncertainty saves"
+#     died: 23P01: timetable_resource_conflict
+#         CONTEXT:
+#             PL/pgSQL function dashboard_private.validate_timetable_item_slots_v1(uuid,uuid,text,jsonb,jsonb) line 18 at RAISE
+#             SQL statement "SELECT dashboard_private.validate_timetable_item_slots_v1(pid,iid,item->>'subject',p_command->'slots',ref)"
+#             PL/pgSQL function public.mutate_timetable_plan_item_v1(jsonb) line 30 at PERFORM
+#             SQL statement "select public.mutate_timetable_plan_item_v1(pg_temp.command(12,2,1290,1350))"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ok 13 - unplaced draft saves regardless of uncertainty
+ok 14 - dated period can be selected without locking unrelated draft editing
+not ok 15 - unrelated placement saves with dated review period
+# Failed test 15: "unrelated placement saves with dated review period"
+#     died: 23P01: timetable_resource_conflict
+#         CONTEXT:
+#             PL/pgSQL function dashboard_private.validate_timetable_item_slots_v1(uuid,uuid,text,jsonb,jsonb) line 18 at RAISE
+#             SQL statement "SELECT dashboard_private.validate_timetable_item_slots_v1(pid,iid,item->>'subject',p_command->'slots',ref)"
+#             PL/pgSQL function public.mutate_timetable_plan_item_v1(jsonb) line 30 at PERFORM
+#             SQL statement "select public.mutate_timetable_plan_item_v1(pg_temp.command(14,4,600,660))"
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ERROR:  timetable_invalid
+CONTEXT:  PL/pgSQL function dashboard_private.evaluate_timetable_transfer_v1(jsonb) line 26 at RAISE
+PL/pgSQL function public.preview_timetable_plan_transfer_v1(jsonb) line 4 at RETURN

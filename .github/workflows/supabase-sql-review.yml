@@ -132,6 +132,18 @@ jobs:
             --test supabase/tests/academic_curriculum_unscoped_period_test.sql \
             --test supabase/tests/academic_scoped_reads_test.sql \
             --test supabase/tests/timetable_continuous_class_scope_test.sql \
+            --test supabase/tests/timetable_guard_aggregation_test.sql \
+            --test supabase/tests/timetable_legacy_content_preservation_test.sql \
+            --test supabase/tests/timetable_makeup_domain_sqlstate_test.sql \
+            --test supabase/tests/timetable_normalized_time_matching_test.sql \
+            --test supabase/tests/timetable_operational_conflicts_test.sql \
+            --test supabase/tests/timetable_plan_import_test.sql \
+            --test supabase/tests/timetable_plan_no_send_test.sql \
+            --test supabase/tests/timetable_plan_permissions_test.sql \
+            --test supabase/tests/timetable_plan_storage_test.sql \
+            --test supabase/tests/timetable_plan_transfers_test.sql \
+            --test supabase/tests/timetable_schedule_mutation_safety_test.sql \
+            --test supabase/tests/timetable_scoped_occupancy_test.sql \
             --test supabase/tests/academic_operations_numbered_pages_test.sql \
             --test supabase/tests/textbook_stock_count_atomic_test.sql \
             --probe tests/probe-textbook-stock-count-concurrency.mjs \

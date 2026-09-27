@@ -1,0 +1,17 @@
+ac220000-0000-4000-8000-000000000900
+v1
+
+ok 1 - null group includes grouped and ungrouped active classes
+ok 2 - stale explicit group is ignored
+ok 3 - future class appears in preparation status
+ok 4 - historical class appears in ended status
+ok 5 - exactly three status choices
+ok 6 - retired group catalog is not loaded
+ok 7 - subject scope still applies
+ok 8 - range guard keeps exact SQLSTATE
+
+ok 9 - missing actor rejected
+ok 10 - final function preserves invoker RLS
+ok 11 - anonymous execution remains denied
+ok 12 - final definition never queries retired membership tables
+1..12

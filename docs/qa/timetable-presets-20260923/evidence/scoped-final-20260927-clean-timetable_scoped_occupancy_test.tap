@@ -1,0 +1,31 @@
+release2-rpc
+ac270000-0000-4000-8000-000000000901
+ok 1 - create future preset with existing unresolved occupancy
+ok 2 - snapshot advertises scoped validation, not global lock
+ok 3 - normalized labels resolve without writing missing UUIDs
+ok 4 - undecided room keeps exact weekday
+ok 5 - undecided room keeps exact interval
+ok 6 - real legacy regular producer shape inherits every default interval
+ok 7 - inherited legacy rows never invent normalized source authority
+ok 8 - normalized dated retained labels resolve read-only
+ok 9 - legacy default provenance is not double counted as a second reservation
+ok 10 - unrelated Monday saves despite unresolved Tuesday
+ok 11 - resolved normalized shadow still prevents teacher and room overlap
+ok 12 - only the undecided room interval blocks new placement
+ok 13 - half-open interval immediately after uncertainty saves
+ok 14 - unplaced draft saves regardless of uncertainty
+ok 15 - dated period can be selected without locking unrelated draft editing
+ok 16 - unrelated placement saves with dated review period
+ok 17 - promotion preview checks selected placements only
+ok 18 - actual isolated promotion succeeds despite unrelated incomplete room
+ok 19 - planning and isolated promotion preserve every original class field
+ok 20 - null source UUIDs and retained labels remain byte-for-byte unchanged
+ok 21 - no notification event from presets or promotion
+ok 22 - no notification delivery
+ok 23 - new private reader inaccessible to authenticated callers
+ok 24 - new private matcher inaccessible to anon
+ok 25 - normalized dated source UUIDs remain null
+ok 26 - non-default and past records remain explicit uncertainty
+ok 27 - duplicate label does not guess a teacher UUID
+ok 28 - ambiguous retained name remains a scoped blocker
+1..28

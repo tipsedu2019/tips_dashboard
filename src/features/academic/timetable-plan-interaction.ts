@@ -155,7 +155,9 @@ export function finishPointerSession(session: PointerSession, reason: string): P
     const moved = origin.view !== target.view || origin.panelKey !== target.panelKey || origin.columnKey !== target.columnKey || Math.round((target.visibleStartMinute + target.rowPosition * target.slotMinutes - origin.visibleStartMinute - origin.rowPosition * origin.slotMinutes) / 5) !== 0;
     return moved ? { kind: 'move', ...session } : null;
 }
+class PlacementConflictError extends Error {}
 export function planErrorLabel(error: unknown) {
+    if (error instanceof PlacementConflictError) return error.message;
     if (error && typeof error === 'object' && 'code' in error && error.code === 'PGRST202') return '프리셋 기능을 사용할 수 없습니다. 운영 시간표는 계속 확인할 수 있습니다.';
     if (error && typeof error === 'object' && 'message' in error && error.message === 'timetable_import_metadata_missing') return '원본 초안의 과목 정보가 없어 가져올 수 없습니다. 원본을 확인해 주세요.';
     const text = error instanceof Error ? error.message : typeof error === 'object' && error && 'message' in error ? String(error.message) : '';
@@ -180,11 +182,14 @@ export function validatePlacementEdit(snapshot: PlanSnapshot, edit: TimetableIte
     const conflicts = [...findConflicts(all, snapshot.shadowSlots, new Set(changed.map(slot => slot.id))), ...findOperatingConflicts(changed, snapshot, snapshot.plan.targetStartDate && snapshot.plan.targetEndDate ? { startDate: snapshot.plan.targetStartDate, endDate: snapshot.plan.targetEndDate } : null)].filter(c => changed.some(s => s.id === c.slotId || s.id === c.otherSlotId));
     if (conflicts.length) {
         const conflict = conflicts[0];
+        if (conflict.kind === 'unresolved') {
+            throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${conflict.label || '기존 수업'}의 시간·선생님·강의실을 확인해야 이 시간에 배치할 수 있습니다.`);
+        }
         const otherId = conflict.otherSlotId;
         const other = snapshot.shadowSlots.find(s => s.id === otherId);
         const planSlot = all.find(s => s.id === otherId);
         const name = other ? snapshot.shadowClasses.find(c => c.id === other.classId)?.name : snapshot.items.find(i => i.id === planSlot?.itemId)?.name;
-        throw Error(`${conflict.date ? conflict.date + ' · ' : ''}${name || '다른 수업'}과 ${conflict.kind === 'teacher' ? '선생님' : conflict.kind === 'classroom' ? '강의실' : '수업'} 시간이 겹칩니다.`);
+        throw new PlacementConflictError(`${conflict.date ? conflict.date + ' · ' : ''}${name || '다른 수업'}과 ${conflict.kind === 'teacher' ? '선생님' : conflict.kind === 'classroom' ? '강의실' : '수업'} 시간이 겹칩니다.`);
     }
 }
 function resourceLabel(options: PlanSnapshot['catalogs']['teachers'], id: string) { const row = options.find(r => r.id === id); return row ? `${row.name}${!row.isVisible || row.isMissing ? ' (사용 불가)' : ''}` : '사용 불가'; }

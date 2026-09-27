@@ -48,15 +48,23 @@ const resourceOption = (value: unknown) => record(value) && string(value.id) && 
   && value.subjects.every(string) && (value.isMissing === undefined || typeof value.isMissing === 'boolean');
 const occupancyBlocker = (value: unknown) => record(value) && string(value.classId)
   && string(value.label) && (value.scope === 'all' || value.scope === 'resource')
-  && nullableString(value.resourceId) && ['unresolved_time', 'unresolved_resource', 'incomplete_read'].includes(String(value.reason));
+  && nullableString(value.resourceId) && ['unresolved_time', 'unresolved_resource', 'incomplete_read'].includes(String(value.reason))
+  && (value.weekday == null || (integer(value.weekday) && Number(value.weekday) >= 0 && Number(value.weekday) <= 6))
+  && ((value.startMinute == null && value.endMinute == null)
+    || (integer(value.startMinute) && integer(value.endMinute) && Number(value.startMinute) >= 0
+      && Number(value.startMinute) < Number(value.endMinute) && Number(value.endMinute) <= 1440))
+  && (value.teacherId === undefined || nullableString(value.teacherId))
+  && (value.classroomId === undefined || nullableString(value.classroomId));
 const datedSession = (value: unknown) => record(value) && string(value.id) && string(value.classId)
+  && (value.inheritedWeeklySlotId === undefined || string(value.inheritedWeeklySlotId))
   && nullableString(value.sourceSlotId) && dateKey(value.date)
   && ['active', 'exception', 'makeup', 'skipped', 'tbd'].includes(String(value.state))
   && (value.startMinute === null || integer(value.startMinute))
   && (value.endMinute === null || integer(value.endMinute))
   && nullableString(value.teacherId) && nullableString(value.classroomId) && integer(value.revision);
 export function requireTimetableOperatingReference(value: unknown): TimetableOperatingReference {
-  if (!record(value) || !dateKey(value.asOfDate) || !Array.isArray(value.shadowSlots)
+  if (!record(value) || (value.occupancyValidationVersion !== undefined && value.occupancyValidationVersion !== 2)
+    || !dateKey(value.asOfDate) || !Array.isArray(value.shadowSlots)
     || !value.shadowSlots.every(shadowSlot) || !Array.isArray(value.shadowClasses)
     || !value.shadowClasses.every(shadowClass) || !record(value.catalogs)
     || !Array.isArray(value.catalogs.teachers) || !value.catalogs.teachers.every(resourceOption)

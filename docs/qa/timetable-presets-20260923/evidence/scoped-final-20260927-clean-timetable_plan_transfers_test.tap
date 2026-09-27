@@ -1,0 +1,141 @@
+a7230000-0000-4000-8000-000000000901
+ok 1 - transfer preview exists
+ok 2 - atomic transfer exists
+ok 3 - anon denied
+ok 4 - private evaluator denied
+a7230000-0000-4000-8000-000000000001
+a7230000-0000-4000-8000-000000000002
+ok 5 - same plan denied
+ok 6 - duplicate selection denied
+ok 7 - operating keep_pending denied
+ok 8 - move keep_pending denied
+ok 9 - client conflict bypass denied
+ok 10 - 0-copy-1 all selected mappings
+ok 11 - 0-copy-1 immutable replay
+ok 12 - 0-copy-1 source count
+ok 13 - 0-copy-1 canonical source excludes applied
+ok 14 - 0-copy-1 new active classes
+ok 15 - 0-copy-1 no roster textbook history copied
+ok 16 - 0-copy-1 no sessions generated
+ok 17 - 0-copy-3 all selected mappings
+ok 18 - 0-copy-3 immutable replay
+ok 19 - 0-copy-3 source count
+ok 20 - 0-copy-3 canonical source excludes applied
+ok 21 - 0-copy-3 new active classes
+ok 22 - 0-copy-3 no roster textbook history copied
+ok 23 - 0-copy-3 no sessions generated
+ok 24 - 0-copy-4 all selected mappings
+ok 25 - 0-copy-4 immutable replay
+ok 26 - 0-copy-4 source count
+ok 27 - 0-copy-4 canonical source excludes applied
+ok 28 - 0-copy-4 new active classes
+ok 29 - 0-copy-4 no roster textbook history copied
+ok 30 - 0-copy-4 no sessions generated
+ok 31 - 0-move-1 all selected mappings
+ok 32 - 0-move-1 immutable replay
+ok 33 - 0-move-1 source count
+ok 34 - 0-move-1 canonical source excludes applied
+ok 35 - 0-move-1 new active classes
+ok 36 - 0-move-1 no roster textbook history copied
+ok 37 - 0-move-1 no sessions generated
+ok 38 - 0-move-3 all selected mappings
+ok 39 - 0-move-3 immutable replay
+ok 40 - 0-move-3 source count
+ok 41 - 0-move-3 canonical source excludes applied
+ok 42 - 0-move-3 new active classes
+ok 43 - 0-move-3 no roster textbook history copied
+ok 44 - 0-move-3 no sessions generated
+ok 45 - 0-move-4 all selected mappings
+ok 46 - 0-move-4 immutable replay
+ok 47 - 0-move-4 source count
+ok 48 - 0-move-4 canonical source excludes applied
+ok 49 - 0-move-4 new active classes
+ok 50 - 0-move-4 no roster textbook history copied
+ok 51 - 0-move-4 no sessions generated
+ok 52 - 2-copy-1 all selected mappings
+ok 53 - 2-copy-1 immutable replay
+ok 54 - 2-copy-1 source count
+ok 55 - 2-copy-1 canonical source excludes applied
+ok 56 - 2-copy-1 destination stays draft
+ok 57 - 2-copy-1 independent new slot IDs
+ok 58 - 2-copy-3 all selected mappings
+ok 59 - 2-copy-3 immutable replay
+ok 60 - 2-copy-3 source count
+ok 61 - 2-copy-3 canonical source excludes applied
+ok 62 - 2-copy-3 destination stays draft
+ok 63 - 2-copy-3 independent new slot IDs
+ok 64 - 2-copy-4 all selected mappings
+ok 65 - 2-copy-4 immutable replay
+ok 66 - 2-copy-4 source count
+ok 67 - 2-copy-4 canonical source excludes applied
+ok 68 - 2-copy-4 destination stays draft
+ok 69 - 2-copy-4 independent new slot IDs
+ok 70 - 2-move-1 all selected mappings
+ok 71 - 2-move-1 immutable replay
+ok 72 - 2-move-1 source count
+ok 73 - 2-move-1 canonical source excludes applied
+ok 74 - 2-move-1 destination stays draft
+ok 75 - 2-move-1 independent new slot IDs
+ok 76 - 2-move-3 all selected mappings
+ok 77 - 2-move-3 immutable replay
+ok 78 - 2-move-3 source count
+ok 79 - 2-move-3 canonical source excludes applied
+ok 80 - 2-move-3 destination stays draft
+ok 81 - 2-move-3 independent new slot IDs
+ok 82 - 2-move-4 all selected mappings
+ok 83 - 2-move-4 immutable replay
+ok 84 - 2-move-4 source count
+ok 85 - 2-move-4 canonical source excludes applied
+ok 86 - 2-move-4 destination stays draft
+ok 87 - 2-move-4 independent new slot IDs
+ok 88 - transfer preserves 17:13 exactly
+ok 89 - transfer preserves endMinute1440 as 24:00
+ok 90 - canonical promoted shadow retains endMinute1440
+ok 91 - unselected pending/zero slots ignored
+ok 92 - pending and zero slot rejected for whole promotion
+ok 93 - all moves reject pending and zero slots
+ok 94 - keep_pending preserves complete unresolved original
+ok 95 - keep_pending copies zero slot item too
+ok 96 - destination existing draft conflicts
+ok 97 - conflicting confirmed slot becomes pending
+ok 98 - pending retains original exact minutes
+ok 99 - conflict copy never inserts occupied confirmed slot
+ok 100 - conflict conversion respects per-item pending capacity
+ok 101 - catalog hiding invalidates preview
+ok 102 - hidden catalog explicit blocker
+a7230000-0000-4000-8000-000000000902
+ok 103 - editor cannot promote
+ok 104 - eligible editor copies into authorized destination
+ok 105 - permission revocation also denies immutable receipt replay
+ok 106 - destination share revoked before commit
+a7230000-0000-4000-8000-000000000901
+ok 107 - last insert fails batch
+ok 108 - rollback leaves no new classes
+ok 109 - rollback preserves all source items
+ok 110 - rollback removes audit receipt
+ok 111 - rollback removes mutation receipt
+ok 112 - copy last insert fails whole batch
+ok 113 - failed copy rolls back earlier applied update
+ok 114 - failed copy leaves no created classes
+ok 115 - failed copy removes audit receipt
+release2-rpc
+ok 116 - future actual session blocks operating promotion
+ok 117 - skipped actual session has no occupancy
+ok 118 - dated session change invalidates commit
+ok 119 - target revision invalidates preview
+ok 120 - all pre-existing classes remain byte equivalent
+ok 121 - student states remain unchanged
+ok 122 - enrollment histories remain unchanged
+ok 123 - all pre-existing sessions remain unchanged
+ok 124 - applied item cannot promote with new key
+ok 125 - source copy retained as applied
+ok 126 - other plans see new labeled shadow
+ok 127 - source_class_id never excludes operating shadow
+ok 128 - existing operating class remains byte equivalent
+v1
+ok 129 - replay after closing returns original immutable result
+ok 130 - audit trigger restored inside rollback-only fixture
+ok 131 - FK null never revives applied draft
+ok 132 - deleted class clears only FK
+ok 133 - same key body mutation rejected
+1..133

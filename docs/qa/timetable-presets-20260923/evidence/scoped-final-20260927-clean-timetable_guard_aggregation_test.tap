@@ -1,0 +1,17 @@
+ok 1 - unchanged existing conflict is repairable
+ok 2 - new dated teacher collision
+ok 3 - new dated room collision
+ok 4 - same class sibling collision
+ok 5 - deleting conflicting row repairs history
+ok 6 - duplicate source key multiplicity increase
+ok 7 - duplicate source key multiplicity unchanged
+ok 8 - past actual collision still checked
+ok 9 - new unknown occupancy rejected
+ok 10 - existing unknown with no new occupancy allowed
+ok 11 - removed skipped override exposes conflicting future default
+ok 12 - past skipped override removal cannot expose a default
+ok 13 - unknown label-only change preserves occupancy
+ok 14 - unknown removal is allowed
+ok 15 - unknown duplicate retains original set semantics
+ok 16 - changed unknown fingerprint remains rejected
+1..16
