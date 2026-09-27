@@ -137,6 +137,8 @@ jobs:
             --test supabase/tests/timetable_makeup_domain_sqlstate_test.sql \
             --test supabase/tests/timetable_normalized_time_matching_test.sql \
             --test supabase/tests/timetable_operational_conflicts_test.sql \
+            --test supabase/tests/timetable_repeatable_read_guard_test.sql \
+            --test supabase/tests/timetable_serializable_guard_test.sql \
             --test supabase/tests/timetable_plan_import_test.sql \
             --test supabase/tests/timetable_plan_no_send_test.sql \
             --test supabase/tests/timetable_plan_permissions_test.sql \

@@ -1,0 +1,12 @@
+begin isolation level repeatable read;
+select no_plan();
+select is(current_setting('transaction_isolation'),'repeatable read','isolation fixture is actually repeatable read');
+create temporary table isolation_before as select count(*) n from public.classes;
+select lives_ok($q$select dashboard_private.read_timetable_operating_reference_v1()$q$,'repeatable read snapshot reads remain allowed');
+set local role authenticated;
+select throws_ok($q$select public.save_class_schedule_defaults_v1('ad240000-0000-4000-8000-000000000301',0,'[]','ad240000-0000-4000-8000-000000000999')$q$,'25001','timetable_isolation_not_supported','repeatable read actual public RPC cannot write pinned snapshot');
+reset role;
+select throws_ok($q$update public.classes set schedule='blocked' where false$q$,'25001','timetable_isolation_not_supported','repeatable read direct bypass cannot write pinned snapshot');
+select is((select count(*) from public.classes),(select n from isolation_before),'repeatable read rejected writes preserve rows');
+select * from finish();
+rollback;

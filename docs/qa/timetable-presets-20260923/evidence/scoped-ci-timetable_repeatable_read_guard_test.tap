@@ -1,0 +1,6 @@
+ok 1 - isolation fixture is actually repeatable read
+ok 2 - repeatable read snapshot reads remain allowed
+ok 3 - repeatable read actual public RPC cannot write pinned snapshot
+ok 4 - repeatable read direct bypass cannot write pinned snapshot
+ok 5 - repeatable read rejected writes preserve rows
+1..5

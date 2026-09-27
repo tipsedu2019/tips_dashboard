@@ -1,0 +1,12 @@
+begin isolation level serializable;
+select no_plan();
+select is(current_setting('transaction_isolation'),'serializable','isolation fixture is actually serializable');
+create temporary table isolation_before as select count(*) n from public.classes;
+select lives_ok($q$select dashboard_private.read_timetable_operating_reference_v1()$q$,'serializable snapshot reads remain allowed');
+set local role authenticated;
+select throws_ok($q$select public.save_class_schedule_defaults_v1('ad240000-0000-4000-8000-000000000301',0,'[]','ad240000-0000-4000-8000-000000000999')$q$,'25001','timetable_isolation_not_supported','serializable actual public RPC cannot write pinned snapshot');
+reset role;
+select throws_ok($q$update public.classes set schedule='blocked' where false$q$,'25001','timetable_isolation_not_supported','serializable direct bypass cannot write pinned snapshot');
+select is((select count(*) from public.classes),(select n from isolation_before),'serializable rejected writes preserve rows');
+select * from finish();
+rollback;
