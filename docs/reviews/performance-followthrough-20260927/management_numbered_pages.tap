@@ -1,0 +1,125 @@
+ok 1 - numbered management RPC exists
+ok 2 - fixed-search-path stable invoker keeps authenticated-only ACL
+ok 3 - classes retains RLS
+ok 4 - students retains RLS
+ok 5 - textbooks retains RLS
+ok 6 - cursor RPC is preserved
+94000000-0000-4000-8000-000000000900
+ok 7 - students page 11 contains the requested parent rows and full count
+ok 8 - classes page 11 contains the requested parent rows and full count
+ok 9 - textbooks page 11 contains the requested parent rows and full count
+ok 10 - students final partial page retains full total
+ok 11 - classes final partial page retains full total
+ok 12 - textbooks final partial page retains full total
+ok 13 - students out-of-range page preserves requested index and count without integer overflow
+ok 14 - classes out-of-range page preserves requested index and count without integer overflow
+ok 15 - textbooks out-of-range page preserves requested index and count without integer overflow
+ok 16 - allowed page size 10
+ok 17 - allowed page size 15
+ok 18 - allowed page size 20
+ok 19 - static traversal has no omitted or duplicated students
+ok 20 - Korean numeric collation orders 2 before 10
+ok 21 - descending primary student status reverses the business status order
+ok 22 - equal selected sort keys use ascending unique ID, not incidental scan order
+ok 23 - class secondary descending title is applied globally
+ok 24 - textbook numeric price sorts globally
+ok 25 - default textbook ordering prioritizes subject before title
+ok 26 - selected class parent is enriched with canonical roster count
+ok 27 - selected textbook parent is enriched with related class count
+ok 28 - students DTO has a matching final cursor counterpart with an identical projection
+ok 29 - classes DTO has a matching final cursor counterpart with an identical projection
+ok 30 - textbooks DTO has a matching final cursor counterpart with an identical projection
+ok 31 - students combined filters match existing full-filter stats
+ok 32 - classes combined filters match existing full-filter stats
+ok 33 - textbooks combined filters match existing full-filter stats
+ok 34 - students truly empty result
+ok 35 - classes truly empty result
+ok 36 - textbooks truly empty result
+ok 37 - invalid page 0
+ok 38 - invalid page -1
+ok 39 - invalid page null
+ok 40 - invalid size 5
+ok 41 - invalid size 30
+ok 42 - invalid size null
+ok 43 - invalid sort null
+ok 44 - invalid sort 'null'::jsonb
+ok 45 - invalid sort '{}'::jsonb
+ok 46 - invalid sort '[{"id":"teacher","desc":false}]'::jsonb
+ok 47 - invalid sort '[{"id":"title","desc":"asc"}]'::jsonb
+ok 48 - invalid sort '[{"id":"title","desc":false,"extra":true}]'::jsonb
+ok 49 - invalid sort '[{"id":"title","desc":false},{"id":"title","desc":true}]'::jsonb
+ok 50 - invalid sort '[{"id":"title","desc":false},{"id":"school","desc":false},{"id":"grade","desc":false}]'::jsonb
+ok 51 - missing filters
+ok 52 - null search
+ok 53 - cross-kind filters
+ok 54 - null kind
+ok 55 - non-string filter
+ok 56 - unknown filter
+ok 57 - derived sort stays disabled: enrollmentStatus
+ok 58 - derived sort stays disabled: weeklyHours
+ok 59 - students accepts scalar sort title desc=false
+ok 60 - students accepts scalar sort status desc=false
+ok 61 - students accepts scalar sort school desc=false
+ok 62 - students accepts scalar sort grade desc=false
+ok 63 - students accepts scalar sort contact desc=false
+ok 64 - students accepts scalar sort parentContact desc=false
+ok 65 - students accepts scalar sort title desc=true
+ok 66 - students accepts scalar sort status desc=true
+ok 67 - students accepts scalar sort school desc=true
+ok 68 - students accepts scalar sort grade desc=true
+ok 69 - students accepts scalar sort contact desc=true
+ok 70 - students accepts scalar sort parentContact desc=true
+ok 71 - classes accepts scalar sort title desc=false
+ok 72 - classes accepts scalar sort status desc=false
+ok 73 - classes accepts scalar sort subject desc=false
+ok 74 - classes accepts scalar sort grade desc=false
+ok 75 - classes accepts scalar sort schedule desc=false
+ok 76 - classes accepts scalar sort teacher desc=false
+ok 77 - classes accepts scalar sort classroom desc=false
+ok 78 - classes accepts scalar sort capacity desc=false
+ok 79 - classes accepts scalar sort tuition desc=false
+ok 80 - classes accepts scalar sort title desc=true
+ok 81 - classes accepts scalar sort status desc=true
+ok 82 - classes accepts scalar sort subject desc=true
+ok 83 - classes accepts scalar sort grade desc=true
+ok 84 - classes accepts scalar sort schedule desc=true
+ok 85 - classes accepts scalar sort teacher desc=true
+ok 86 - classes accepts scalar sort classroom desc=true
+ok 87 - classes accepts scalar sort capacity desc=true
+ok 88 - classes accepts scalar sort tuition desc=true
+ok 89 - textbooks accepts scalar sort title desc=false
+ok 90 - textbooks accepts scalar sort status desc=false
+ok 91 - textbooks accepts scalar sort subject desc=false
+ok 92 - textbooks accepts scalar sort publisher desc=false
+ok 93 - textbooks accepts scalar sort price desc=false
+ok 94 - textbooks accepts scalar sort updatedAt desc=false
+ok 95 - textbooks accepts scalar sort title desc=true
+ok 96 - textbooks accepts scalar sort status desc=true
+ok 97 - textbooks accepts scalar sort subject desc=true
+ok 98 - textbooks accepts scalar sort publisher desc=true
+ok 99 - textbooks accepts scalar sort price desc=true
+ok 100 - textbooks accepts scalar sort updatedAt desc=true
+ok 101 - students RLS hides parent from both count and page
+ok 102 - classes RLS hides parent from both count and page
+ok 103 - textbooks RLS hides parent from both count and page
+ok 104 - last-page deletion keeps count authoritative
+ok 105 - students records wrapper timing/buffers for page 1
+ok 106 - students records wrapper timing/buffers for page 6
+ok 107 - students records wrapper timing/buffers for page 12
+ok 108 - classes records wrapper timing/buffers for page 1
+ok 109 - classes records wrapper timing/buffers for page 6
+ok 110 - classes records wrapper timing/buffers for page 12
+ok 111 - textbooks records wrapper timing/buffers for page 1
+ok 112 - textbooks records wrapper timing/buffers for page 6
+ok 113 - textbooks records wrapper timing/buffers for page 12
+# {"kind": "classes", "page": 1, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 0.702, "Local Read Blocks": 0, "Shared Hit Blocks": 362, "Shared Read Blocks": 0, "Actual Startup Time": 0.701, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.007, "Execution Time": 0.704}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "classes", "page": 6, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 0.578, "Local Read Blocks": 0, "Shared Hit Blocks": 362, "Shared Read Blocks": 0, "Actual Startup Time": 0.578, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.002, "Execution Time": 0.579}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "classes", "page": 12, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 0.378, "Local Read Blocks": 0, "Shared Hit Blocks": 83, "Shared Read Blocks": 0, "Actual Startup Time": 0.378, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.002, "Execution Time": 0.379}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "students", "page": 1, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 5.999, "Local Read Blocks": 0, "Shared Hit Blocks": 2208, "Shared Read Blocks": 0, "Actual Startup Time": 5.999, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.002, "Execution Time": 6.003}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "students", "page": 6, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 6.054, "Local Read Blocks": 0, "Shared Hit Blocks": 2170, "Shared Read Blocks": 0, "Actual Startup Time": 6.054, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.002, "Execution Time": 6.057}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "students", "page": 12, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 2.120, "Local Read Blocks": 0, "Shared Hit Blocks": 110, "Shared Read Blocks": 0, "Actual Startup Time": 2.120, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.002, "Execution Time": 2.122}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "textbooks", "page": 1, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 0.593, "Local Read Blocks": 0, "Shared Hit Blocks": 412, "Shared Read Blocks": 0, "Actual Startup Time": 0.593, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.001, "Execution Time": 0.594}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "textbooks", "page": 6, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 0.562, "Local Read Blocks": 0, "Shared Hit Blocks": 412, "Shared Read Blocks": 0, "Actual Startup Time": 0.561, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.002, "Execution Time": 0.563}], "evidence": "management_numbered_wrapper_plan"}
+# {"kind": "textbooks", "page": 12, "plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 0.348, "Local Read Blocks": 0, "Shared Hit Blocks": 52, "Shared Read Blocks": 0, "Actual Startup Time": 0.347, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.001, "Execution Time": 0.349}], "evidence": "management_numbered_wrapper_plan"}
+ok 114 - anonymous caller cannot execute numbered endpoint
+1..114

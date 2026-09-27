@@ -1,0 +1,36 @@
+95000000-0000-4000-8000-000000000900
+ok 1 - canonical classification and deduplicated counts for student 1
+ok 2 - canonical classification and deduplicated counts for student 2
+ok 3 - canonical classification and deduplicated counts for student 3
+ok 4 - canonical classification and deduplicated counts for student 4
+ok 5 - canonical classification and deduplicated counts for student 5
+ok 6 - canonical classification and deduplicated counts for student 6
+ok 7 - batch summaries equal canonical single-student summaries including reciprocal duplicates and waiting precedence
+ok 8 - batch reader preserves invoker visibility and ACL
+ok 9 - 재원 filter agrees across numbered, cursor and stats endpoints
+ok 10 - 대기 filter agrees across numbered, cursor and stats endpoints
+ok 11 - 퇴원 filter agrees across numbered, cursor and stats endpoints
+ok 12 - dependent school options use derived waiting status
+ok 13 - ascending status order puts waiting between enrolled and withdrawn
+ok 14 - withdrawn sorts last
+# {"page": {"page": 1, "rows": [{"id": "95100000-0000-4000-8000-000000000001", "kind": "students", "name": "__enrollment_status__ 학생 1", "grade": "중2", "school": "상태학교 1", "status": "재원", "contact": null, "sortKey": "__enrollment_status__ 학생 1", "updatedAt": "2026-09-27T14:01:37.34989+00:00", "storedStatus": "퇴원", "parentContact": null, "waitlistCount": 0, "registeredCount": 1}, {"id": "95100000-0000-4000-8000-000000000004", "kind": "students", "name": "__enrollment_status__ 학생 4", "grade": "중2", "school": "상태학교 4", "status": "재원", "contact": null, "sortKey": "__enrollment_status__ 학생 4", "updatedAt": "2026-09-27T14:01:37.34989+00:00", "storedStatus": "재원", "parentContact": null, "waitlistCount": 1, "registeredCount": 1}, {"id": "95100000-0000-4000-8000-000000000005", "kind": "students", "name": "__enrollment_status__ 학생 5", "grade": "중2", "school": "상태학교 5", "status": "재원", "contact": null, "sortKey": "__enrollment_status__ 학생 5", "updatedAt": "2026-09-27T14:01:37.34989+00:00", "storedStatus": "재원", "parentContact": null, "waitlistCount": 0, "registeredCount": 35}, {"id": "95100000-0000-4000-8000-000000000006", "kind": "students", "name": "__enrollment_status__ 학생 6", "grade": "중2", "school": "상태학교 6", "status": "재원", "contact": null, "sortKey": "__enrollment_status__ 학생 6", "updatedAt": "2026-09-27T14:01:37.34989+00:00", "storedStatus": "재원", "parentContact": null, "waitlistCount": 0, "registeredCount": 1}, {"id": "95100000-0000-4000-8000-000000000002", "kind": "students", "name": "__enrollment_status__ 학생 2", "grade": "중2", "school": "상태학교 2", "status": "대기", "contact": null, "sortKey": "__enrollment_status__ 학생 2", "updatedAt": "2026-09-27T14:01:37.34989+00:00", "storedStatus": "퇴원", "parentContact": null, "waitlistCount": 1, "registeredCount": 0}, {"id": "95100000-0000-4000-8000-000000000003", "kind": "students", "name": "__enrollment_status__ 학생 3", "grade": "중2", "school": "상태학교 3", "status": "퇴원", "contact": null, "sortKey": "__enrollment_status__ 학생 3", "updatedAt": "2026-09-27T14:01:37.34989+00:00", "storedStatus": "재원", "parentContact": null, "waitlistCount": 0, "registeredCount": 0}], "pageSize": 10, "totalCount": 6}, "evidence": "student_enrollment_wire"}
+ok 15 - list/detail authoritative status and counts agree for __enrollment_status__ 학생 1
+ok 16 - list/detail authoritative status and counts agree for __enrollment_status__ 학생 4
+ok 17 - list/detail authoritative status and counts agree for __enrollment_status__ 학생 5
+ok 18 - list/detail authoritative status and counts agree for __enrollment_status__ 학생 6
+ok 19 - list/detail authoritative status and counts agree for __enrollment_status__ 학생 2
+ok 20 - list/detail authoritative status and counts agree for __enrollment_status__ 학생 3
+ok 21 - legacy stored status is retained separately for compatible writes
+ok 22 - relation details stay bounded at 30 while full count remains 35
+ok 23 - relation pagination reaches all classes without duplicates
+ok 24 - management_student_enrollments_v1 retains stable invoker and authenticated-only execution
+ok 25 - management_student_enrollment_summary_v1 retains stable invoker and authenticated-only execution
+ok 26 - final patched numbered endpoint retains exact validation SQLSTATE
+# {"plan": [{"Plan": {"Node Type": "Result", "Plan Rows": 1, "Plan Width": 32, "Total Cost": 0.26, "Actual Rows": 1, "Actual Loops": 1, "Startup Cost": 0.00, "Async Capable": false, "Parallel Aware": false, "Local Hit Blocks": 0, "Temp Read Blocks": 0, "Actual Total Time": 125.733, "Local Read Blocks": 0, "Shared Hit Blocks": 956, "Shared Read Blocks": 0, "Actual Startup Time": 125.733, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Planning": {"Local Hit Blocks": 0, "Temp Read Blocks": 0, "Local Read Blocks": 0, "Shared Hit Blocks": 0, "Shared Read Blocks": 0, "Temp Written Blocks": 0, "Local Dirtied Blocks": 0, "Local Written Blocks": 0, "Shared Dirtied Blocks": 0, "Shared Written Blocks": 0}, "Triggers": [], "Planning Time": 0.001, "Execution Time": 125.736}], "classes": 535, "evidence": "student_enrollment_scale_plan", "students": 1000}
+ok 27 - filtered page count covers every student in the larger fixture
+ok 28 - hidden classes cannot leak through counts
+ok 29 - hidden student cannot expose reciprocal class memberships
+ok 30 - batch counts do not disclose hidden classes
+ok 31 - batch result omits hidden students
+ok 32 - anonymous users cannot execute helper
+1..32

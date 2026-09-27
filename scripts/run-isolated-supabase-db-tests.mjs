@@ -43,6 +43,10 @@ const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_po
 const PROBE_DEPENDENCIES = Object.freeze({
   "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
   "tests/probe-dashboard-workload-dto.mjs": ["src/features/dashboard/workload-contract.ts"],
+  "tests/probe-makeup-approval-collision-dto.mjs": [
+    "src/features/makeup-requests/makeup-request-model.js", "src/features/academic/records.js",
+    "src/lib/class-status.js", "src/lib/class-schedule-planner.js", "src/lib/academic-director-assignment.js",
+  ],
   "tests/probe-registration-visit-cancellation-dto.mjs": [
     "src/features/tasks/registration-visit-cancellation-service.ts", "src/lib/promise-timeout.ts",
   ],

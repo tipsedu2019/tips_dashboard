@@ -1,0 +1,148 @@
+ok 1 - makeup numbered API exists
+ok 2 - independent makeup detail exists
+ok 3 - independent complete reservation context exists
+
+ok 4 - valid complete fixture
+# seed notification events=0, jobs=0
+ok 5 - no seed provider delivery
+ok 6 - new reader invoker/ACL get_makeup_detail_v1
+ok 7 - new reader invoker/ACL list_makeup_numbered_page_v1
+ok 8 - new reader invoker/ACL get_makeup_reservation_context_v1
+ok 9 - request RLS retained
+# {"schemaname":"public","tablename":"makeup_requests","policyname":"makeup_requests_assistant_hard_deny","permissive":"RESTRICTIVE","roles":["authenticated"],"cmd":"ALL","qual":"(NOT ((COALESCE(( SELECT (auth.jwt() ->> 'role'::text)), ''::text) = 'authenticated'::text) AND (( SELECT auth.uid() AS uid) IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM profiles profile\n  WHERE ((profile.id = ( SELECT auth.uid() AS uid)) AND (profile.role = 'assistant'::text))))))","with_check":"(NOT ((COALESCE(( SELECT (auth.jwt() ->> 'role'::text)), ''::text) = 'authenticated'::text) AND (( SELECT auth.uid() AS uid) IS NOT NULL) AND (EXISTS ( SELECT 1\n   FROM profiles profile\n  WHERE ((profile.id = ( SELECT auth.uid() AS uid)) AND (profile.role = 'assistant'::text))))))"}
+ok 10 - final assistant restrictive policy retained
+ok 11 - manager counts ignore all table filters; admin is approver on revision113 so mine1
+ok 12 - default ordering preserves createdAtDESC before deterministic idDESC tie
+ok 13 - direct page11 unique descending ID order
+ok 14 - partial final page
+ok 15 - empty out-of-range preserves authoritative count
+ok 16 - out-of-range total112
+ok 17 - all numbered pages no omissions/duplicates
+ok 18 - size15
+ok 19 - size20
+ok 20 - Korean numeric2 before10
+ok 21 - off-page event participates before page selection
+ok 22 - equal timestamp greatest event ID note wins full-filter selection
+ok 23 - full event history deterministic idDESC
+ok 24 - off-page detail full history
+ok 25 - only selected-page histories enriched
+ok 26 - equal-time combined cancellation kinds use greatest ID
+ok 27 - combined view subject teacher period end-slot date and selected-column text
+ok 28 - period cancel date matching
+ok 29 - custom open boundary plus date/time fallback slot
+ok 30 - source offset timestamp display preserves full endpoints
+ok 31 - stored approvedAt preferred over latest event
+ok 32 - stored canceledAt preferred over latest cancellation
+ok 33 - system approval notes suppressed
+ok 34 - matching cancellation notes suppressed
+
+ok 35 - system-note suppression matches all25 JavaScript whitespace characters
+ok 36 - system-note suppression excludes U0085 just like JavaScript
+ok 37 - full-filter finalNote search suppresses NBSP FEFF system note before paging
+ok 38 - full-filter finalNote search retains U0085 ordinary note
+ok 39 - system-note pattern retains non-ASCII digits just like JavaScript
+ok 40 - system-note pattern retains non-ASCII digits just like JavaScript
+ok 41 - JS trim NBSP FEFF while U0085/internal spaces retained
+ok 42 - date+time fallback converts canonical offset date into Seoul day
+ok 43 - date+time fallback interprets explicit zoneless day as Seoul
+ok 44 - view counts ignore table filters
+ok 45 - subject facet current view ignoring subject/search
+ok 46 - teacher request facet current view plus selected subject ignoring search
+ok 47 - visible catalog relative Korean numeric order preserves signup-created catalogs too
+ok 48 - catalog-first option keeps zero despite matching request
+ok 49 - teacher subject normalization excludes U0085 hidden and other subject
+ok 50 - catalog ID teacher filter exact
+ok 51 - malformed raw source remains display searchable
+ok 52 - all nineteen table display keys match raw UI strings and dash fallbacks
+ok 53 - full-scope search and sort column status
+ok 54 - full-scope search and sort column className
+ok 55 - full-scope search and sort column subject
+ok 56 - full-scope search and sort column teacher
+ok 57 - full-scope search and sort column requester
+ok 58 - full-scope search and sort column reason
+ok 59 - full-scope search and sort column cancelDate
+ok 60 - full-scope search and sort column makeupAt
+ok 61 - full-scope search and sort column makeupRoom
+ok 62 - full-scope search and sort column approver
+ok 63 - full-scope search and sort column submittedAt
+ok 64 - full-scope search and sort column revisionRequestedAt
+ok 65 - full-scope search and sort column approvedAt
+ok 66 - full-scope search and sort column rejectedAt
+ok 67 - full-scope search and sort column canceledAt
+ok 68 - full-scope search and sort column returnedReason
+ok 69 - full-scope search and sort column rejectedReason
+ok 70 - full-scope search and sort column finalNote
+ok 71 - full-scope search and sort column canceledNote
+ok 72 - makeupPending exact status
+ok 73 - refundPending exact status
+ok 74 - closed all3 terminal statuses
+ok 75 - complete all-room context includes off-page active reservations
+ok 76 - page1 target context includes page11 conflicting different-room evidence
+ok 77 - independent active tagged ID even with no overlapping reservation slots; orphan canceled excluded
+ok 78 - canonical adjacent rows excluded, every ambiguous source including unknown date-only fallback retained
+ok 79 - offsetless source preserved raw, not cast to instant
+ok 80 - collision wire seven fields plus private raw slots only for ambiguous date fallback; no histories/profiles
+ok 81 - direct detail preserves entire ordered raw legacy JSON-array string
+ok 82 - unrelated list search remains available with private raw envelope
+ok 83 - ambiguous date fallback affected period has named compatibility SQLSTATE
+ok 84 - ambiguous date fallback affected slot search has named compatibility SQLSTATE
+ok 85 - ambiguous date fallback affected room sort has named compatibility SQLSTATE
+ok 86 - unrelated subject scope does not inherit compatibility failure
+ok 87 - unrelated teacher scope does not inherit compatibility failure
+ok 88 - page0 SQLSTATE22023
+ok 89 - size5 SQLSTATE22023
+ok 90 - size30 SQLSTATE22023
+ok 91 - action not interactive filter
+ok 92 - client authority override rejected
+ok 93 - preset bounds required
+ok 94 - invalid actual date SQLSTATE22023
+ok 95 - reversed date SQLSTATE22023
+ok 96 - null detail ID invalid
+ok 97 - invalid context timestamp SQLSTATE22023
+
+ok 98 - teacher only involved rows
+ok 99 - mine only own involved revision
+ok 100 - off-page unrelated detail cannot bypass RLS
+ok 101 - active IDs enforce teacher RLS independently
+
+ok 102 - unrelated authenticated actor cannot observe private compatibility error
+ok 103 - unknown-date conservative candidate remains RLS-authorized
+
+ok 104 - real assistant restrictive deny
+ok 105 - assistant detail denied
+ok 106 - assistant participant detail still hard-denied
+ok 107 - assistant context both projections empty
+
+ok 108 - no resolved UID denied
+ok 109 - anonymous execution denied
+ok 110 - anonymous detail denied
+ok 111 - anonymous context denied
+ok 112 - reads no notification events
+ok 113 - reads no jobs
+ok 114 - reads no deliveries
+ok 115 - reads no request events
+ok 116 - source precision helper is invoker pinned and authenticated-only
+
+# precision seed notification events=0, jobs=0
+# precision PG cast=2026-08-31 00:01:00+00; target end=2026-08-31T00:01:00.000Z
+# precision PG cast=2026-08-31 00:00:01+00; target end=2026-08-31T00:00:01.000Z
+# precision PG cast=2026-09-01 00:00:00+00; target end=2026-09-01T00:00:00.000Z
+
+ok 117 - high-precision source remains candidate at boundary 201
+ok 118 - high-precision source remains candidate at boundary 202
+ok 119 - high-precision source remains candidate at boundary 203
+ok 120 - candidate retains raw fractional source precision
+ok 121 - unproved higher-precision nonoverlap remains a conservative candidate
+ok 122 - safe zero-to-three fractional digit nonoverlap stays excluded
+ok 123 - high-precision date fallback keeps raw detail for exact JS normalization
+ok 124 - high-precision date fallback is explicitly outside SQL date-key equivalence
+ok 125 - Seoul-day rollover source stays a raw conservative reservation candidate
+ok 126 - high-precision date fallback uses existing scoped compatibility error, not rounded period keys
+ok 127 - safe millisecond date fallback retains existing Seoul day
+
+ok 128 - precision candidates remain authorized by existing RLS
+ok 129 - precision reads no notification events
+ok 130 - precision reads no jobs
+ok 131 - precision fixture and reads no deliveries
+ok 132 - precision reads no request history writes
+1..132

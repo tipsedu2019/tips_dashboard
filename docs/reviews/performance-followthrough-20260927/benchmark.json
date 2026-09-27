@@ -1,0 +1,295 @@
+{
+  "source": "isolated synthetic DB; not field latency",
+  "samplesPerVariant": 25,
+  "students": 1000,
+  "classes": 535,
+  "samples": [
+    {
+      "variant": "before",
+      "ms": 327.7,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 43.362,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 330.473,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 43.016,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 330.549,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.903,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 328.536,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 43.008,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 339.946,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 68.603,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 332.649,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.596,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 334.825,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.051,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 330.859,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.307,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 333.482,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.076,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 327.927,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.278,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 326.733,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.505,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 327.488,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 41.827,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 327.323,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.516,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 328.569,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.569,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 327.656,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.838,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 327.582,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.102,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 328.587,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 43.019,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 332.071,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.13,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 332.071,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 43.02,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 331.209,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.655,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 329.967,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.368,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 332.75,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.34,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 331.499,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.392,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 330.801,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 41.797,
+      "sharedHits": 81
+    },
+    {
+      "variant": "before",
+      "ms": 332.144,
+      "sharedHits": 81028
+    },
+    {
+      "variant": "after",
+      "ms": 42.588,
+      "sharedHits": 81
+    }
+  ],
+  "roleParity": [
+    {
+      "role": "admin",
+      "equal": true
+    },
+    {
+      "role": "staff",
+      "equal": true
+    },
+    {
+      "role": "teacher",
+      "equal": true
+    },
+    {
+      "role": "assistant",
+      "equal": true
+    },
+    {
+      "role": "viewer",
+      "equal": true
+    }
+  ],
+  "before": {
+    "n": 25,
+    "p50Ms": 330.549,
+    "p95Ms": 334.825,
+    "maxMs": 339.946,
+    "maxSharedHits": 81028
+  },
+  "after": {
+    "n": 25,
+    "p50Ms": 42.516,
+    "p95Ms": 43.362,
+    "maxMs": 68.603,
+    "maxSharedHits": 81
+  },
+  "passed": true
+}

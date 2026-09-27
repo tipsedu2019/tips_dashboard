@@ -1,0 +1,34 @@
+[
+  {
+    "name": "student_enrollment_status",
+    "passed": 32
+  },
+  {
+    "name": "makeup_approval_collision_candidates",
+    "passed": 18
+  },
+  {
+    "name": "management_numbered_pages",
+    "passed": 114
+  },
+  {
+    "name": "management_page_reads",
+    "passed": 34
+  },
+  {
+    "name": "academic_operations_numbered_pages",
+    "passed": 134
+  },
+  {
+    "name": "makeup_numbered_pages",
+    "passed": 132
+  },
+  {
+    "name": "timetable_makeup_domain_sqlstate",
+    "passed": 25
+  },
+  {
+    "name": "timetable_operational_conflicts",
+    "passed": 127
+  }
+]

@@ -8,7 +8,6 @@ import {
   extractMakeupCalendarMeta,
   hasMakeupPart,
   normalizeMakeupSlots,
-  MAKEUP_CALENDAR_NOTE_MARKER,
 } from "@/features/makeup-requests/makeup-request-model.js"
 import { buildAcademicEventMutationPayload } from "@/features/operations/academic-event-utils.js"
 import { attemptMakeupApprovalReplay } from "@/features/makeup-requests/makeup-approval-replay.js"
@@ -73,24 +72,6 @@ async function readOne(client: SupabaseClient, table: string, id: string) {
   if (error) throw error
   if (!isRecord(data)) throw new Error("makeup_approval_source_invalid")
   return data
-}
-
-async function readRows(client: SupabaseClient, table: string, columns: string) {
-  const pageSize = 1000
-  const rows: JsonRecord[] = []
-  for (let from = 0; ; from += pageSize) {
-    let query = client.from(table).select(columns)
-    if (table === "makeup_requests") query = query.in("status", ["approval_pending", "manager_pending", "makeup_pending", "completed"])
-    if (table === "academic_events") query = query.like("note", `%${MAKEUP_CALENDAR_NOTE_MARKER}%`)
-    const { data, error } = await query
-      .order("id", { ascending: true })
-      .range(from, from + pageSize - 1)
-      .abortSignal(AbortSignal.timeout(8_000)).retry(false)
-    if (error) throw error
-    const page = asArray(data).filter(isRecord)
-    rows.push(...page)
-    if (page.length < pageSize) return rows
-  }
 }
 
 function isRefundApproval(events: JsonRecord[]) {
@@ -267,12 +248,14 @@ export async function POST(request: Request) {
       if (hasMakeupPart(requestRow)) {
         // Keep legacy schedule parsing and pending reservations in the preflight;
         // locked database guards still make the final concurrency decision.
-        const [classes, requests, academicEvents] = await Promise.all([
-          readRows(serverClient, "classes", "id,name,subject,grade,teacher,room,schedule"),
-          readRows(serverClient, "makeup_requests", "id,status,class_name,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots"),
-          readRows(serverClient, "academic_events", "id,title,note"),
-        ])
-        assertNoRoomCollision(requestRow, classes, requests, academicEvents, [])
+        const { data: context, error: contextError } = await serverClient.rpc("get_makeup_approval_collision_context_v1", {
+          p_slots: normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom)),
+        }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+        if (contextError) throw contextError
+        if (!isRecord(context) || ![context.classes, context.requests, context.academicEvents].every(
+          (rows) => Array.isArray(rows) && rows.every(isRecord),
+        )) throw new Error("makeup_approval_context_invalid")
+        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [])
       }
       Object.assign(patch, buildApprovalEffects(requestRow, classRow))
     }
