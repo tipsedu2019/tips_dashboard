@@ -1,0 +1,17 @@
+{
+  "baseCommit":"360887b9914d36b656b7329f53efea4275dbd4c9",
+  "url":"https://tipsedu.co.kr/admin/dashboard",
+  "width":1440,
+  "height":900,
+  "cacheDisabled":true,
+  "action":"dashboard reload, no menu interaction",
+  "appJsRequests":59,
+  "appJsEncodedBytes":919094,
+  "prefetchRequests":53,
+  "prefetchEncodedBytes":40847,
+  "prefetchedRoutes":["/admin/public-content","/admin/classes","/admin/students","/admin/textbooks","/admin/registration","/admin/curriculum","/admin/word-retests","/admin/timetable","/admin/academic-calendar","/admin/makeup-requests","/admin/withdrawal","/admin/transfer","/admin/dashboard"],
+  "extraAdminPageChunks":11,
+  "traceTruncated":false,
+  "knownUnrelatedErrors":[{"path":"/manifest.webmanifest","status":404,"count":2}],
+  "note":"CDP encodedDataLength includes response overhead. Chrome extension scripts are excluded. This measures downloads, not user-perceived latency or DB RPC count."
+}

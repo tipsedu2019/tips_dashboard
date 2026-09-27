@@ -30,7 +30,7 @@ async function setup(t, { mobile = true, defaultOpen = true, menuTooltip = false
   const { NavMain } = loadNotificationComponent("src/components/nav-main.tsx", new Map([
     ["@/components/ui/sidebar", sidebarModule],
     ["next/navigation", {useRouter: () => ({prefetch() {}}), usePathname: () => window.location.pathname, useSearchParams: () => new URLSearchParams(window.location.search)}],
-    ["next/link", {__esModule: true, default: React.forwardRef(function Link({href, children, onClick, ...props}, ref) {return h("a", {...props, ref, href, onClick(event) {onClick?.(event); if (!event.defaultPrevented) {event.preventDefault(); navigate(href)} }}, children)})}],
+    ["next/link", {__esModule: true, default: React.forwardRef(function Link({href, children, onClick, prefetch: _prefetch, ...props}, ref) {void _prefetch; return h("a", {...props, ref, href, onClick(event) {onClick?.(event); if (!event.defaultPrevented) {event.preventDefault(); navigate(href)} }}, children)})}],
   ]))
   function Content() {
     const { setOpenMobile } = useSidebar()
