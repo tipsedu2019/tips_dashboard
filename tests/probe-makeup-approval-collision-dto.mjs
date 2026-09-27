@@ -18,9 +18,13 @@ assert.ok(end > 0);
 const sql = fixture.slice(0, end).replace('select no_plan();', '') + `
 set local role service_role;
 select jsonb_build_object('slots',pg_temp.slots(),'scoped',public.get_makeup_approval_collision_context_v1(pg_temp.slots()),
- 'full',jsonb_build_object('classes',(select jsonb_agg(to_jsonb(c)) from public.classes c),
- 'requests',(select jsonb_agg(to_jsonb(r)) from public.makeup_requests r),
- 'academicEvents',(select jsonb_agg(to_jsonb(e)) from public.academic_events e)));
+ 'full',jsonb_build_object('classes',(select jsonb_agg(to_jsonb(c)) from
+   (select id,name,subject,grade,teacher,room,schedule from public.classes)c),
+ 'requests',(select jsonb_agg(to_jsonb(r)) from
+   (select id,status,class_name,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots from public.makeup_requests
+    where status in('approval_pending','manager_pending','makeup_pending','completed'))r),
+ 'academicEvents',(select jsonb_agg(to_jsonb(e)) from
+   (select id,title,note from public.academic_events where note like '%[[TIPS_MAKEUP]]%')e)));
 rollback;`;
 const child = spawn('docker', ['exec', '-i', `supabase_db_${project}`, 'psql', '-XqAt', '-v', 'ON_ERROR_STOP=1', '-U', 'postgres', '-d', 'postgres'], { stdio: ['pipe', 'pipe', 'pipe'] });
 const chunks = [], errors = [];
@@ -32,6 +36,7 @@ const wire = JSON.parse(Buffer.concat(chunks).toString().split('\n').findLast(li
 const collisions = context => buildRoomAvailability({ ...context, slots: wire.slots }).flatMap(room =>
   room.collisions.map(collision => `${room.name}:${collision.source}:${collision.id}`)).sort();
 const before = collisions(wire.full), after = collisions(wire.scoped);
-assert.ok(before.length >= 6, 'nonempty producer wire exercises classes, pending, legacy dates, and events');
+assert.ok(before.length >= 7, 'nonempty producer wire exercises classes, pending, legacy dates, and JS whitespace');
 assert.deepEqual(after, before, 'real SQL candidates preserve actual JS collision decisions');
-console.log(JSON.stringify({ status: 'passed', collisions: after.length, fullBytes: JSON.stringify(wire.full).length, scopedBytes: JSON.stringify(wire.scoped).length }));
+console.log(JSON.stringify({ status: 'passed', collisions: after.length,
+  fullBytes: Buffer.byteLength(JSON.stringify(wire.full)), scopedBytes: Buffer.byteLength(JSON.stringify(wire.scoped)) }));
