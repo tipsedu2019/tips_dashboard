@@ -1,0 +1,39 @@
+✔ real Next stale detail is replaced by authoritative absence and cannot resurrect during a later outage (1.969958ms)
+✔ real Next lookup cache is per class, uses 600 seconds and the full-public invalidation tag (1.097834ms)
+✔ real Next provider outage keeps only bounded explicit snapshots and never caches failures (0.305916ms)
+✔ public names cannot smuggle raw names behind an existing mask (0.618541ms)
+✔ review whitespace and 8000-character Korean text retain exact content (0.532833ms)
+✔ scores stay strings and blank scores are not changed to zero (0.178583ms)
+✔ only approved local asset paths or typed upload references are accepted (0.294583ms)
+✔ mutation snapshot rejects duplicate IDs, bad version, hidden fields and mismatched types (0.242ms)
+✔ approved seed preserves all 3921 source records and stable identities (35.573ms)
+✔ only an authenticated actual admin can apply, and cross-origin requests never call store (8.58575ms)
+✔ server repeats review validation before a single atomic apply (1.03825ms)
+✔ public kind read respects successful empty data, masks names and projects no draft/private data (0.767958ms)
+✔ disabled public reading and failed source are unavailable, never a fabricated empty success (0.250791ms)
+✔ initialization can use management while public reads and assets remain explicitly closed (10.013167ms)
+✔ aggregate statistics route rejects assistant and viewer roles before cache access (1.514333ms)
+✔ aggregate statistics handler rejects assistant before it claims a cache entry (14.093166ms)
+✔ statistics private cache is actor scoped, aggregate only, and recorded in the reviewed ledger (8.247667ms)
+✔ statistics cache wrappers use service-only definer CAS and bounded actor cleanup (1.255ms)
+✔ statistics cache source specifies takeover, force, invalidation, and stale-finalize CAS (1.168083ms)
+✔ statistics source migration is recorded once in the reviewed baseline ledger (1.0915ms)
+✔ statistics source RPC validates the four discriminated tab contracts (1.983333ms)
+✔ statistics aggregate returns only tab data and excludes heavyweight source rows (2.524958ms)
+✔ statistics source owns the deterministic Korean numeric collation and fails closed on drift (1.504459ms)
+✔ statistics drilldowns are bounded keyset pages with one shared normalized-name expression (1.569917ms)
+✔ statistics RPC ACL, RLS fixtures, parity oracle, and payload budget are explicit (1.936959ms)
+✔ statistics pgTAP uses executable fixtures and cursor, RLS, parity, and payload assertions (1.350375ms)
+✔ statistics source preserves exam-rule parity and merges students by stable conflict key (1.619042ms)
+✔ statistics exam sources share parent-aware comma-grade matching semantics (2.361667ms)
+✔ statistics source normalizes legacy textbook statuses and expands multi-day schedules (0.565625ms)
+✔ statistics enrollment counts deduplicate the class fixture across aggregate and drilldowns (1.590916ms)
+✔ statistics class grade grouping and drilldown share direct-or-name-plus-student inference (2.448625ms)
+ℹ tests 31
+ℹ suites 0
+ℹ pass 31
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 150.266917

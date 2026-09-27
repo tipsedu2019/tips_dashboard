@@ -697,3 +697,55 @@ test("class detail totals remain exact beyond the 30-row relation page and missi
     assert.ok(detail.raw.student_ids.length<=30,'detail must not replace paging with an unbounded roster');
   }
 });
+
+
+test("metadata survives paging cancellation, expires and invalidates on filter, refresh and actor changes", async (t) => {
+  const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  const io = transport(), rpc = io.supabase.rpc, metadata = [];
+  io.supabase.rpc = (name, args) => {
+    if (!['get_management_stats_v1', 'list_management_filter_options_v1'].includes(name)) return rpc(name, args);
+    const pending = Promise.withResolvers();
+    const request = { name, args, ...pending }; metadata.push(request);
+    return { abortSignal(signal) { request.signal = signal; return this; }, retry() { return pending.promise; } };
+  };
+  const { useManagementRecords } = loadHook(io.supabase);
+  let state, now = 1000;
+  const originalNow = Date.now; Date.now = () => now;
+  const root = createRoot(document.getElementById('root'));
+  t.after(async () => { Date.now = originalNow; await act(async () => root.unmount()); dom.window.close(); });
+  function Probe({ page = 1, search = '', actor = 'A', pageSize = 10, sort }) {
+    const result = useManagementRecords('students', { ...filters, search }, { page, pageSize, sort, authorizationScope: actor, enabled: true });
+    useEffect(() => { state = result; }); return null;
+  }
+  const render = (props = {}) => act(async () => root.render(createElement(Probe, props)));
+  await render();
+  for (let page = 2; page <= 5; page++) await render({ page });
+  assert.equal(metadata.length, 2, 'five pages need five page reads and one metadata pair');
+  assert.equal(io.requests.length, 5);
+  assert.equal(io.requests[0].signal.aborted, true);
+  assert.equal(metadata[0].signal.aborted, false, 'metadata is independent from page cancellation');
+  await act(async () => {
+    metadata[0].resolve({ data: { total: 260 }, error: null });
+    metadata[1].resolve({ data: { schools: ['합성 학교'] }, error: null });
+    io.finish(4);
+  });
+  assert.deepEqual(state.filterOptions.schools, ['합성 학교']);
+  await render({ pageSize: 15, sort: [{ id: 'school', desc: true }] });
+  assert.equal(metadata.length, 2);
+  now += 30_001;
+  await render({ page: 2 });
+  assert.equal(metadata.length, 4, 'expired metadata revalidates');
+  await render({ search: 'new' });
+  assert.equal(metadata[2].signal.aborted, true, 'obsolete filters are canceled');
+  assert.equal(metadata.length, 6);
+  await act(async () => { state.refresh(); });
+  assert.equal(metadata[4].signal.aborted, true);
+  assert.equal(metadata.length, 8, 'explicit refresh invalidates metadata');
+  await render({ actor: 'B' });
+  assert.equal(metadata[6].signal.aborted, true);
+  assert.deepEqual(state.filterOptions, {}, 'old actor metadata never leaks');
+  await act(async () => metadata[6].resolve({ data: { total: 999 }, error: null }));
+  await act(async () => metadata[7].resolve({ data: { secret: true }, error: null }));
+  assert.deepEqual(state.filterOptions, {});
+});

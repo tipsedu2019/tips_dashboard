@@ -98,7 +98,7 @@ test("curriculum workspace delegates all filters and numbered navigation to the 
   const source = await readFile(new URL("src/features/academic/curriculum-workspace.tsx", root), "utf8");
   const hookSource = await readFile(new URL("src/features/academic/use-academic-workspace-data.ts", root), "utf8");
   assert.doesNotMatch(source, /periodId:/);
-  assert.match(source, /\n\s+search,/);
+  assert.match(source, /search: serverSearch,/);
   assert.match(source, /status,/);
   assert.match(source, /subject,/);
   assert.match(source, /grade,/);

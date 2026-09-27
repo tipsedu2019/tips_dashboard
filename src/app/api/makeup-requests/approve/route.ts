@@ -8,6 +8,7 @@ import {
   extractMakeupCalendarMeta,
   hasMakeupPart,
   normalizeMakeupSlots,
+  MAKEUP_CALENDAR_NOTE_MARKER,
 } from "@/features/makeup-requests/makeup-request-model.js"
 import { buildAcademicEventMutationPayload } from "@/features/operations/academic-event-utils.js"
 import { attemptMakeupApprovalReplay } from "@/features/makeup-requests/makeup-approval-replay.js"
@@ -74,15 +75,17 @@ async function readOne(client: SupabaseClient, table: string, id: string) {
   return data
 }
 
-async function readRows(client: SupabaseClient, table: string) {
+async function readRows(client: SupabaseClient, table: string, columns: string) {
   const pageSize = 1000
   const rows: JsonRecord[] = []
   for (let from = 0; ; from += pageSize) {
-    const { data, error } = await client
-      .from(table)
-      .select("*")
+    let query = client.from(table).select(columns)
+    if (table === "makeup_requests") query = query.in("status", ["approval_pending", "manager_pending", "makeup_pending", "completed"])
+    if (table === "academic_events") query = query.like("note", `%${MAKEUP_CALENDAR_NOTE_MARKER}%`)
+    const { data, error } = await query
       .order("id", { ascending: true })
       .range(from, from + pageSize - 1)
+      .abortSignal(AbortSignal.timeout(8_000)).retry(false)
     if (error) throw error
     const page = asArray(data).filter(isRecord)
     rows.push(...page)
@@ -261,13 +264,16 @@ export async function POST(request: Request) {
       final_note: note,
     }
     if (!isRefundApproval(eventRows)) {
-      const [classes, requests, academicEvents, classrooms] = await Promise.all([
-        readRows(serverClient, "classes"),
-        readRows(serverClient, "makeup_requests"),
-        readRows(serverClient, "academic_events"),
-        readRows(serverClient, "classroom_catalogs"),
-      ])
-      assertNoRoomCollision(requestRow, classes, requests, academicEvents, classrooms)
+      if (hasMakeupPart(requestRow)) {
+        // Keep legacy schedule parsing and pending reservations in the preflight;
+        // locked database guards still make the final concurrency decision.
+        const [classes, requests, academicEvents] = await Promise.all([
+          readRows(serverClient, "classes", "id,name,subject,grade,teacher,room,schedule"),
+          readRows(serverClient, "makeup_requests", "id,status,class_name,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots"),
+          readRows(serverClient, "academic_events", "id,title,note"),
+        ])
+        assertNoRoomCollision(requestRow, classes, requests, academicEvents, [])
+      }
       Object.assign(patch, buildApprovalEffects(requestRow, classRow))
     }
 

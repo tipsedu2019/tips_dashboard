@@ -1,0 +1,9 @@
+ok 1 - stored taxonomy equals canonical inference after insert
+a2000000-0000-4000-8000-000000000901
+ok 2 - authorized writes recompute all taxonomy inputs
+a2000000-0000-4000-8000-000000000901
+ok 3 - authorized page key uses current generated taxonomy
+ok 4 - renamed book remains visible
+ok 5 - read optimization emits no notification events
+ok 6 - read optimization emits no deliveries
+1..6

@@ -45,7 +45,7 @@ function academicRow(n) {
     textbookCount: 1, textbookCatalog: [], textbookTitles: [], textbookSummary: '1권 연결', textbookOverflowCount: 0, textbookScopeLabels: [],
     totalSessions: 1, completedSessions: 2, updatedSessions: 2, delayedSessions: 0, plannedSessions: 2, progressTargetSessions: 1,
     delayedProgressSessions: 0, plannedProgressSessions: 2, progressPercent: 200, progressTargetPercent: 200,
-    lastUpdatedAt: '', stateLabel: '계획 완료', latestNoteSummary: '', latestNoteSessionLabel: '', pendingSessionLabels: [], nextSession: null, sessionSummaries: [], searchText: `수업 ${n}` };
+    lastUpdatedAt: '', stateLabel: '일정 편성', latestNoteSummary: '', latestNoteSessionLabel: '', pendingSessionLabels: [], nextSession: null, sessionSummaries: [], searchText: `수업 ${n}` };
 }
 const operationsRow = (n) => ({ id: id(n), name: `[가] 수업 ${n}`, subject: '수학', grade: '고1', schedule: '', termId: null,
   teacherName: null, termName: null, syncGroupId: null, syncGroupName: null, status: '', updatedAt: null });
@@ -529,7 +529,7 @@ for (const domain of ['academic', 'operations']) {
   });
 }
 
-test('operations: exact detail opens independently and progress draft/lifecycle survive page replacement, then auth clears them', async (t) => {
+test('operations: exact detail opens independently and progress draft/lifecycle survive rerender, then auth clears them', async (t) => {
   const page = await setup(t, 'operations', { workspace: true, search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board` });
   const detailRequest = page.requests.find((r) => r.name === 'get_operations_class_lesson_design_detail_v1');
   assert.ok(detailRequest);
@@ -539,25 +539,23 @@ test('operations: exact detail opens independently and progress draft/lifecycle 
       sessions: [{ id: 'session-one', sessionNumber: 1, date: '2026-08-03', billingLabel: '8월', textbookEntries: [{ id: 'entry-one', textbookId: id(700), plan: { start: '1', end: '2', label: '저장 범위' } }] }] } },
     textbooks: [{ id: id(700), title: '정확한 교재', subject: '수학' }], teacherCatalogs: [], classroomCatalogs: [] };
   await act(async () => detailRequest.resolve({ error: null, data: detail }));
-  // Exact detail is independent even while the list is still pending.
+  // The detail route deliberately suppresses the background list.
   assert.match(document.querySelector('[data-testid="lesson-design-modal-dialog"]')?.textContent || '', /OFF PAGE EXACT/);
-  await act(async () => page.finish(page.numbered()[0]));
-  const board = document.querySelector('[data-testid^="lesson-board-session-"]');
-  assert.ok(board, `actual lesson board row exists: ${document.querySelector('[data-testid="lesson-design-modal-dialog"]')?.textContent}`);
-  await act(async () => board.click());
-  const input = document.querySelector('input[aria-label$="표시 문구"]');
-  assert.ok(input, 'actual progress editor');
+  assert.equal(page.numbered().length, 0);
+  await act(async () => page.requests.find(r => r.name === 'continuous_class_schedule_runtime_version').resolve({ data: 1, error: null }));
+  await act(async () => page.requests.find(r => r.name === 'get_class_schedule_v1').resolve({ data: { authoritativeSource: 'legacy' }, error: null }));
+  const input = document.querySelector('input[aria-label="8월 종료일"]');
+  assert.ok(input, 'actual schedule period editor');
   const reactProps = input[Object.keys(input).find((key) => key.startsWith('__reactProps'))];
-  await act(async () => reactProps.onChange({ target: { value: 'UNSAVED PROGRESS' } }));
+  await act(async () => reactProps.onChange({ target: { value: '2026-09-07' } }));
   const observed = { ...page.observed };
-  await act(async () => document.querySelector('button[aria-label="2 페이지"]').click());
-  assert.equal(page.numbered().at(-1).args.p_page, 2);
-  await act(async () => page.finish(page.numbered().at(-1)));
-  assert.equal(document.querySelector('input[aria-label$="표시 문구"]').value, 'UNSAVED PROGRESS');
+  await page.render();
+  assert.equal(page.numbered().length, 0);
+  assert.equal(document.querySelector('input[aria-label="8월 종료일"]').value, '2026-09-07');
   assert.deepEqual(page.observed, observed);
   assert.equal(page.requests.filter((r) => r.name === 'get_operations_class_lesson_design_detail_v1').length, 1);
   await page.auth({ user: null, role: null });
-  assert.equal(document.querySelector('input[aria-label$="표시 문구"]'), null);
+  assert.equal(document.querySelector('input[aria-label="8월 종료일"]'), null);
   assert.equal(document.body.textContent.includes('OFF PAGE EXACT'), false);
   assert.equal(page.observed.requestedClassId, '');
   assert.equal(page.requests.some((r) => !/^(get_|list_|continuous_class_schedule_runtime_version)/.test(r.name)), false, 'no mutation or send');
@@ -581,20 +579,19 @@ for (const change of ['role', 'actor']) test(`operations: actual detail rejects 
 test('curriculum: a focused row opens its exact action and return context while nested links keep native keys', async (t) => {
   const page = await setup(t, 'academic', { workspace: true, search: '?subject=수학&view=update&page=2' });
   const row = { ...academicRow(11), totalSessions: 8, progressTargetSessions: 4, plannedProgressSessions: 3,
-    delayedProgressSessions: 1, progressTargetPercent: 75, stateLabel: '진도 미배정' };
+    delayedProgressSessions: 1, progressTargetPercent: 75, stateLabel: '일정 연장 필요' };
   await act(async () => page.finish(page.numbered()[0], 11, { rows: [row] }));
   const desktop = document.querySelector(`[data-testid="curriculum-desktop-row-${row.id}"]`);
   assert.ok(desktop, document.body.textContent);
   const link = desktop.querySelector('a');
   const expected = new URL(link.href);
-  assert.equal(expected.searchParams.get('section'), 'lesson-design-board');
+  assert.equal(expected.searchParams.get('section'), 'lesson-design-periods');
   assert.equal(expected.searchParams.get('classId'), row.id);
   const returnUrl = new URL(expected.searchParams.get('returnTo'), window.location.origin);
   assert.equal(returnUrl.pathname, '/admin/curriculum');
   assert.deepEqual(Object.fromEntries(returnUrl.searchParams), { subject: '수학', view: 'update', page: '2' });
-  const progress = desktop.querySelector('[role="progressbar"]');
-  assert.equal(progress.getAttribute('aria-valuenow'), '75');
-  assert.equal(progress.getAttribute('aria-valuetext'), '3/4회 배정', 'use textbook-target sessions, not all eight sessions');
+  assert.match(desktop.textContent, /일정 연장 필요/);
+  assert.match(desktop.textContent, /8회/);
   const initialHref = window.location.href;
   for (const key of ['Enter', ' ']) {
     const nested = new window.KeyboardEvent('keydown', { key, bubbles: true, cancelable: true });
@@ -630,7 +627,7 @@ test('curriculum: classification focus and accepted rows survive pending and fai
   const page = await setup(t, 'academic', { workspace: true });
   await act(async () => page.finish(page.numbered()[0]));
   const content = [...document.querySelectorAll('tbody tr')].map((row) => row.textContent);
-  const button = [...document.querySelectorAll('[data-testid="curriculum-work-queue"] button')].find((entry) => entry.textContent.includes('진도 미배정'));
+  const button = [...document.querySelectorAll('[data-testid="curriculum-work-queue"] button')].find((entry) => entry.textContent.includes('일정 연장 필요'));
   button.focus();
   await act(async () => button.click());
   assert.equal(page.numbered().at(-1).args.p_filters.viewMode, 'update');
@@ -669,4 +666,46 @@ test('shared progress: visual fill and accessible value agree for known, bounded
     assert.equal(bar.querySelector('[data-slot="progress-indicator"]').style.transform, `translateX(${transform})`);
     assert.equal(bar.getAttribute('data-state'), value === null ? 'indeterminate' : Number(expected) === max ? 'complete' : 'loading');
   }
+});
+
+for (const domain of ['academic', 'operations']) {
+  test(`${domain}: replacing ranges aborts transport, including unmount`, async (t) => {
+    const page = await setup(t, domain, { request: { mode: domain === 'academic' ? 'timetable' : 'calendar', dateFrom: '2026-09-01', dateTo: '2026-09-07', filters: {} } });
+    for (const [dateFrom, dateTo] of [['2026-09-08', '2026-09-14'], ['2026-09-15', '2026-09-21']]) await page.render({ dateFrom, dateTo });
+    const ranges = page.requests.filter(r => r.name.includes('range'));
+    assert.equal(ranges.length, 3);
+    assert.deepEqual(ranges.map(r => r.signal.aborted), [true, true, false]);
+    await act(async () => ranges[0].reject(new Error('obsolete failure')));
+    assert.equal(page.state.error, null);
+    await page.unmount();
+    assert.ok(ranges.every(r => r.signal.aborted));
+  });
+}
+
+for (const domain of ['academic', 'operations']) test(`${domain}: search coalesces typing, respects IME, Enter, clear and history`, async (t) => {
+  const page = await setup(t, domain, { workspace: true });
+  await act(async () => page.finish(page.numbered()[0]));
+  const input = () => document.querySelector('input[type="search"]');
+  const handlers = () => input()[Object.keys(input()).find(key => key.startsWith('__reactProps'))];
+  for (const value of ['a', 'ab', 'abc', 'abcd']) await act(async () => handlers().onChange({ target: { value }, nativeEvent: {} }));
+  assert.equal(page.numbered().length, 1);
+  await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+  assert.equal(page.numbered().length, 2);
+  assert.equal(page.numbered().at(-1).args.p_filters.search, 'abcd');
+  await act(async () => handlers().onCompositionStart());
+  await act(async () => handlers().onChange({ target: { value: 'ㄱ' }, nativeEvent: { isComposing: true } }));
+  await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+  assert.equal(page.numbered().length, 2);
+  await act(async () => handlers().onCompositionEnd({ currentTarget: { value: '가' } }));
+  await act(async () => handlers().onKeyDown({ key: 'Enter', nativeEvent: { isComposing: false }, preventDefault() {} }));
+  assert.equal(page.numbered().at(-1).args.p_filters.search, '가');
+  await act(async () => handlers().onChange({ target: { value: '' }, nativeEvent: {} }));
+  assert.equal(page.numbered().at(-1).args.p_filters.search, '');
+  await act(async () => handlers().onChange({ target: { value: 'pending' }, nativeEvent: {} }));
+  window.history.pushState(null, '', '?q=restored&page=3'); await page.render();
+  assert.equal(page.numbered().at(-1).args.p_filters.search, 'restored');
+  assert.equal(page.numbered().at(-1).args.p_page, 3);
+  const count = page.numbered().length;
+  await act(async () => new Promise(resolve => setTimeout(resolve, 280)));
+  assert.equal(page.numbered().length, count, 'old timer cannot override restored search');
 });

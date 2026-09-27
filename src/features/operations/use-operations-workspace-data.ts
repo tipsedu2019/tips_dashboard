@@ -84,6 +84,7 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest, 
   const [rangeError, setRangeError] = useState<string | null>(null);
   const [densityError, setDensityError] = useState<{ service: typeof service; fingerprint: string; value: DenseResult } | null>(null);
   const rangeRevision = useRef(0);
+  const rangeController = useRef<AbortController | null>(null);
   const [preferenceRevision, setPreferenceRevision] = useState(0);
   const pageScopeAdoption = useRef(false);
   const desired = useRef<{ service: typeof service; fingerprint: string; navigationKey: string; scope: string; pageSize: DataTablePageSize; preferenceRevision: number } | null>(null);
@@ -131,15 +132,18 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest, 
 
   const loadRange = useCallback(async () => {
     if (!enabled || !service || isNumbered || serviceRef.current !== service) return;
+    rangeController.current?.abort();
+    const abortController = new AbortController();
+    rangeController.current = abortController;
     const revision = ++rangeRevision.current;
     setRangeLoading(true); setRangeError(null);
     try {
-      const next = await service.load(stableRequest) as OperationsResult;
+      const next = await service.load(stableRequest, { signal: abortController.signal }) as OperationsResult;
       if (serviceRef.current !== service || revision !== rangeRevision.current || fingerprintRef.current !== fingerprint) return;
       if (isDenseResult(next)) { setDensityError({ service, fingerprint, value: next }); return; }
       setRange({ service, data: next, request: stableRequest }); setDensityError(null);
     } catch (error) {
-      if (serviceRef.current === service && revision === rangeRevision.current && fingerprintRef.current === fingerprint)
+      if (!abortController.signal.aborted && serviceRef.current === service && revision === rangeRevision.current && fingerprintRef.current === fingerprint)
         setRangeError(getErrorMessage(error, "운영 데이터를 불러오지 못했습니다."));
     } finally {
       if (serviceRef.current === service && revision === rangeRevision.current) setRangeLoading(false);
@@ -148,7 +152,10 @@ export function useOperationsWorkspaceData(request: OperationsWorkspaceRequest, 
   useEffect(() => {
     void loadRange();
     const revision = rangeRevision.current;
-    return () => { if (rangeRevision.current === revision) rangeRevision.current = revision + 1; };
+    return () => {
+      rangeController.current?.abort();
+      if (rangeRevision.current === revision) rangeRevision.current = revision + 1;
+    };
   }, [loadRange]);
 
   const [catalogs, setCatalogs] = useState<{ service: typeof service; value: unknown } | null>(null);

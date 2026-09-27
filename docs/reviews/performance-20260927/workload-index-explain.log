@@ -1,0 +1,65 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+SET
+                         ok                         
+----------------------------------------------------
+ ok 1 - workload source preserves RLS and is stable
+(1 row)
+
+                ok                 
+-----------------------------------
+ ok 2 - anon cannot read aggregate
+(1 row)
+
+               ok               
+--------------------------------
+ ok 3 - anon cannot read detail
+(1 row)
+
+SET
+INSERT 0 4
+INSERT 0 4
+INSERT 0 13
+INSERT 0 1
+INSERT 0 3
+INSERT 0 3
+INSERT 0 1
+INSERT 0 20000
+SET
+ANALYZE
+                                                                                  QUERY PLAN                                                                                  
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Result  (cost=0.53..0.54 rows=1 width=8) (actual time=0.007..0.008 rows=1 loops=1)
+   Buffers: shared hit=4
+   InitPlan 1
+     ->  Limit  (cost=0.41..0.53 rows=1 width=8) (actual time=0.006..0.006 rows=1 loops=1)
+           Buffers: shared hit=4
+           ->  Index Only Scan using ops_task_events_status_entered_idx on ops_task_events  (cost=0.41..1195.62 rows=10001 width=8) (actual time=0.006..0.006 rows=1 loops=1)
+                 Index Cond: ((task_id = '98010000-0000-4000-8000-000000000002'::uuid) AND (after_value = 'requested'::text))
+                 Heap Fetches: 1
+                 Buffers: shared hit=4
+ Planning:
+   Buffers: shared hit=60
+ Planning Time: 0.090 ms
+ Execution Time: 0.018 ms
+(13 rows)
+
+DROP INDEX
+                                                                     QUERY PLAN                                                                     
+----------------------------------------------------------------------------------------------------------------------------------------------------
+ Aggregate  (cost=661.02..661.03 rows=1 width=8) (actual time=1.431..1.432 rows=1 loops=1)
+   Buffers: shared hit=286
+   ->  Seq Scan on ops_task_events  (cost=0.00..636.02 rows=10001 width=8) (actual time=0.003..1.182 rows=10001 loops=1)
+         Filter: ((task_id = '98010000-0000-4000-8000-000000000002'::uuid) AND (field_name = 'status'::text) AND (after_value = 'requested'::text))
+         Rows Removed by Filter: 10000
+         Buffers: shared hit=286
+ Planning:
+   Buffers: shared hit=10
+ Planning Time: 0.031 ms
+ Execution Time: 1.439 ms
+(10 rows)
+
+ROLLBACK

@@ -35,6 +35,7 @@ async function loadProbeFactory() {
   vm.runInNewContext(compiled, {
     module: sandboxModule,
     exports: sandboxModule.exports,
+    AbortController, AbortSignal, setTimeout, clearTimeout,
   });
   return sandboxModule.exports;
 }
@@ -112,7 +113,8 @@ function createClient(results) {
       rpc(name) {
         calls.push(name);
         assert.ok(queue.length > 0, "unexpected capability RPC call");
-        return queue.shift();
+        const result = queue.shift();
+        return { limit(count) { assert.equal(count, 4); return this; }, abortSignal(signal) { assert.ok(signal); return this; }, retry(value) { assert.equal(value, false); return this; }, then(resolve, reject) { return Promise.resolve(result).then(resolve, reject); } };
       },
     },
   };
@@ -307,4 +309,33 @@ test("returned capabilities are deeply immutable and cannot poison cached or sha
     () => { capabilities[2].gradeLevels.push("중3"); },
     (error) => error?.name === "TypeError",
   );
+});
+
+
+test("capability timeout aborts transport, releases the in-flight slot and ignores late success", async () => {
+  const { createRegistrationSubjectCapabilityProbe } = await loadProbeFactory();
+  const requests = [];
+  const client = { rpc() {
+    const pending = Promise.withResolvers(); requests.push(pending);
+    return { limit(count) { assert.equal(count, 4); return this; }, then: pending.promise.then.bind(pending.promise), abortSignal(signal) { pending.signal = signal; return this; }, retry() { return this; } };
+  } };
+  const probe = createRegistrationSubjectCapabilityProbe(client, { timeoutMs: 15 });
+  const first = probe.probe(); assert.equal(first, probe.probe(), "concurrent calls share one request");
+  await assert.rejects(first, /registration_subject_capability_timeout/);
+  assert.equal(requests[0].signal.aborted, true);
+  const retry = probe.probe(); assert.equal(requests.length, 2);
+  requests[1].resolve({ data: validRows(), error: null }); await retry;
+  requests[0].resolve({ data: [], error: null });
+  assert.equal((await probe.probe()).find(row => row.subject === '과학').isActive, true);
+});
+test("capability metadata expires and reset aborts an obsolete request", async () => {
+  const { createRegistrationSubjectCapabilityProbe } = await loadProbeFactory();
+  let now = 0, count = 0, signal;
+  const probe = createRegistrationSubjectCapabilityProbe({ rpc() {
+    count++; return { limit() { return this; }, abortSignal(value) { signal = value; return this; }, retry() { return this; }, then(resolve) { return Promise.resolve({ data: validRows(), error: null }).then(resolve); } };
+  } }, { now: () => now, maxAgeMs: 30 });
+  await probe.probe(); await probe.probe(); assert.equal(count, 1);
+  now = 31; await probe.probe(); assert.equal(count, 2);
+  probe.reset(); assert.equal(signal.aborted, true);
+  await probe.probe(); assert.equal(count, 3);
 });

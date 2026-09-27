@@ -1,0 +1,96 @@
+{
+  "observedDate": "2026-09-22",
+  "sourceCommit": "b0f16bf5e5001edcdb25410fd68a8be3297adde3",
+  "productionAppCommit": null,
+  "method": "Authenticated Chrome CDP Network events, ordinary network and existing browser cache. Paths, aggregate counts and timings only; no headers, credentials, query strings or response bodies retained. Limited samples; not route-ready timing or p95.",
+  "samples": [
+    {
+      "action": "students reload",
+      "httpStatus": 200,
+      "rpcDurationMs": {
+        "profiles": 574,
+        "get_management_stats_v1": 1306,
+        "list_management_filter_options_v1": 1323,
+        "list_management_numbered_page_v1": 1356
+      },
+      "displayedRows": 10,
+      "totalRows": 352
+    },
+    {
+      "action": "students next page",
+      "httpStatus": 200,
+      "rpcDurationMs": {
+        "get_management_stats_v1": 1206,
+        "list_management_filter_options_v1": 1205,
+        "list_management_numbered_page_v1": 963
+      },
+      "acceptedRange": [
+        11,
+        20
+      ]
+    },
+    {
+      "action": "textbooks first entry",
+      "httpStatus": 200,
+      "rpcDurationMs": {
+        "get_textbook_master_options_v1": 1086,
+        "get_textbook_operations_summary_v1": 1167,
+        "list_textbook_master_page_v1": 1036,
+        "get_textbook_master_summary_v1": 1155
+      },
+      "displayedRows": 10,
+      "totalRows": 362
+    },
+    {
+      "action": "registration first entry",
+      "startedAtUtc": "2026-09-22T09:39:17.436Z",
+      "ui": "Page load failure",
+      "abortedAtMs": {
+        "get_ops_task_list_stats_v1": 8000,
+        "list_ops_task_numbered_page_v1": 7999,
+        "registration_observation_runtime_version": 11993,
+        "registration_subject_tracks_runtime_version": 15001
+      },
+      "completed": {
+        "rpc": "list_registration_subject_capabilities_v1",
+        "httpStatus": 200,
+        "durationMs": 23771,
+        "protocol": "h3",
+        "sendEndMs": 1.757,
+        "receiveHeadersStartMs": 23769.333
+      }
+    },
+    {
+      "action": "timetable after registration",
+      "aborted": [
+        "get_academic_timetable_range_v1"
+      ]
+    },
+    {
+      "action": "dashboard first entry",
+      "aborted": [
+        "get_dashboard_workload_v1",
+        "get_dashboard_daily_brief_v1"
+      ],
+      "ui": "Workload and daily brief load failure"
+    },
+    {
+      "action": "registration re-entry",
+      "httpStatus": 200,
+      "rpcDurationMs": {
+        "registration_observation_runtime_version": 153,
+        "registration_subject_tracks_runtime_version": 105,
+        "get_ops_task_list_stats_v1": 1139,
+        "list_ops_task_numbered_page_v1": 1164
+      }
+    },
+    {
+      "action": "dashboard re-entry",
+      "httpStatus": 200,
+      "rpcDurationMs": {
+        "get_dashboard_workload_v1": 552,
+        "get_dashboard_daily_brief_v1": 501
+      }
+    }
+  ]
+}

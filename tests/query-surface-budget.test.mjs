@@ -2915,7 +2915,7 @@ test("registration exact-purpose RPCs retain transport controls and do not allow
     "get_registration_management_notification_preview_v1", "ensure_registration_workflow_notification_v4",
     "get_registration_customer_guidance_settings_v1", "get_registration_observation_explicit_chat_preview_v1",
     "begin_registration_observation_explicit_chat_v1", "register_registration_observation_explicit_chat_attempt_v1",
-    "finish_registration_observation_explicit_chat_v1",
+    "finish_registration_observation_explicit_chat_v1", "list_registration_subject_capabilities_v1",
   ]
   const inspect = (name, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)") => inspectQuerySurfaceSource({
     surface: "tasks", file: "src/features/tasks/registration-bounded-fixture.ts",

@@ -1,0 +1,1262 @@
+{
+  "observedDate": "2026-09-22",
+  "project": "tips dashboard",
+  "projectRef": "slnjqlzzhewblvttiidk",
+  "sourceCommit": "b0f16bf5e5001edcdb25410fd68a8be3297adde3",
+  "health": [
+    {
+      "observed_at": "2026-09-22 09:34:46.038005+00",
+      "server_start": "2026-09-05 06:18:28.479569+00",
+      "database_stats_reset": null,
+      "statements_reset": "2026-08-13 11:19:02.403204+00",
+      "latest_migration": "20260922064700",
+      "client_connections": 14,
+      "lock_waiters": 0,
+      "idle_transactions": 0
+    }
+  ],
+  "advisors": [
+    {
+      "name": "unindexed_foreign_keys",
+      "count": 163,
+      "level": "INFO",
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0001_unindexed_foreign_keys"
+    },
+    {
+      "name": "auth_rls_initplan",
+      "count": 38,
+      "level": "WARN",
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0003_auth_rls_initplan"
+    },
+    {
+      "name": "no_primary_key",
+      "count": 1,
+      "level": "INFO",
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0004_no_primary_key"
+    },
+    {
+      "name": "unused_index",
+      "count": 122,
+      "level": "INFO",
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0005_unused_index"
+    },
+    {
+      "name": "multiple_permissive_policies",
+      "count": 73,
+      "level": "WARN",
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0006_multiple_permissive_policies"
+    },
+    {
+      "name": "duplicate_index",
+      "count": 1,
+      "level": "WARN",
+      "remediation": "https://supabase.com/docs/guides/database/database-linter?lint=0009_duplicate_index"
+    }
+  ],
+  "initialStatements": [
+    {
+      "queryid": "6668890235570166898",
+      "calls": 4394303,
+      "total_ms": "14864087.6",
+      "mean_ms": "3.38",
+      "max_ms": "3668.0",
+      "rows": 4394303,
+      "shared_blks_hit": 251794175,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": "save_registration_level_test_result_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "5360251647081715348",
+      "calls": 111379961,
+      "total_ms": "4858310.8",
+      "mean_ms": "0.04",
+      "max_ms": "2503.1",
+      "rows": 111379961,
+      "shared_blks_hit": 193653,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "-1977991744889982606",
+      "calls": 3794,
+      "total_ms": "2593735.0",
+      "mean_ms": "683.64",
+      "max_ms": "7987.4",
+      "rows": 3794,
+      "shared_blks_hit": 13535178,
+      "shared_blks_read": 13,
+      "temp_blks_written": 0,
+      "rpc_name": "get_ops_task_list_stats_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "7748696535954727283",
+      "calls": 2034,
+      "total_ms": "1709192.1",
+      "mean_ms": "840.31",
+      "max_ms": "7955.6",
+      "rows": 2034,
+      "shared_blks_hit": 6895498,
+      "shared_blks_read": 47,
+      "temp_blks_written": 0,
+      "rpc_name": "list_ops_task_numbered_page_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "388345080100055067",
+      "calls": 152746,
+      "total_ms": "1530404.0",
+      "mean_ms": "10.02",
+      "max_ms": "6477.5",
+      "rows": 152746,
+      "shared_blks_hit": 14458551,
+      "shared_blks_read": 7,
+      "temp_blks_written": 0,
+      "rpc_name": "save_registration_appointment_details_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-8932018060531781035",
+      "calls": 1372,
+      "total_ms": "1347120.8",
+      "mean_ms": "981.87",
+      "max_ms": "7929.4",
+      "rows": 1372,
+      "shared_blks_hit": 4416385,
+      "shared_blks_read": 2,
+      "temp_blks_written": 0,
+      "rpc_name": "list_ops_task_page_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-733869263948011471",
+      "calls": 236,
+      "total_ms": "1204948.7",
+      "mean_ms": "5105.71",
+      "max_ms": "57861.3",
+      "rows": 0,
+      "shared_blks_hit": 211768,
+      "shared_blks_read": 455,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "-1622013188914390694",
+      "calls": 1641,
+      "total_ms": "1192926.5",
+      "mean_ms": "726.95",
+      "max_ms": "7825.2",
+      "rows": 1641,
+      "shared_blks_hit": 5559120,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": "list_ops_task_page_v2",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-5708723254081763768",
+      "calls": 219,
+      "total_ms": "801326.2",
+      "mean_ms": "3659.02",
+      "max_ms": "32035.1",
+      "rows": 52918,
+      "shared_blks_hit": 657,
+      "shared_blks_read": 0,
+      "temp_blks_written": 269723,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "9019130059908486202",
+      "calls": 559,
+      "total_ms": "706301.4",
+      "mean_ms": "1263.51",
+      "max_ms": "7782.0",
+      "rows": 559,
+      "shared_blks_hit": 3488953,
+      "shared_blks_read": 3,
+      "temp_blks_written": 0,
+      "rpc_name": "get_ops_task_list_stats_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-4435691372498862300",
+      "calls": 755,
+      "total_ms": "686348.9",
+      "mean_ms": "909.07",
+      "max_ms": "7671.2",
+      "rows": 755,
+      "shared_blks_hit": 1134721,
+      "shared_blks_read": 1728,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    },
+    {
+      "queryid": "6854946553275048423",
+      "calls": 895,
+      "total_ms": "583320.5",
+      "mean_ms": "651.75",
+      "max_ms": "4504.6",
+      "rows": 895,
+      "shared_blks_hit": 399229,
+      "shared_blks_read": 81,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-796813411176191138",
+      "calls": 5683,
+      "total_ms": "572837.6",
+      "mean_ms": "100.80",
+      "max_ms": "7476.8",
+      "rows": 5683,
+      "shared_blks_hit": 1983066,
+      "shared_blks_read": 6,
+      "temp_blks_written": 0,
+      "rpc_name": "list_management_filter_options_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "3171824151696105606",
+      "calls": 961,
+      "total_ms": "493672.9",
+      "mean_ms": "513.71",
+      "max_ms": "7738.3",
+      "rows": 961,
+      "shared_blks_hit": 1038502,
+      "shared_blks_read": 16,
+      "temp_blks_written": 0,
+      "rpc_name": "get_registration_observation_manager_detail_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "2101240385447156220",
+      "calls": 4174,
+      "total_ms": "469224.1",
+      "mean_ms": "112.42",
+      "max_ms": "6990.2",
+      "rows": 4174,
+      "shared_blks_hit": 1288966,
+      "shared_blks_read": 1,
+      "temp_blks_written": 0,
+      "rpc_name": "list_management_page_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "247834426482193327",
+      "calls": 1047,
+      "total_ms": "412729.9",
+      "mean_ms": "394.20",
+      "max_ms": "7650.6",
+      "rows": 1047,
+      "shared_blks_hit": 3088438,
+      "shared_blks_read": 126,
+      "temp_blks_written": 0,
+      "rpc_name": "get_dashboard_daily_brief_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-2647655532108368607",
+      "calls": 112,
+      "total_ms": "376075.1",
+      "mean_ms": "3357.81",
+      "max_ms": "33450.9",
+      "rows": 8736,
+      "shared_blks_hit": 1434,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "3040550314783602683",
+      "calls": 5933,
+      "total_ms": "375291.9",
+      "mean_ms": "63.26",
+      "max_ms": "6082.4",
+      "rows": 5933,
+      "shared_blks_hit": 1907572,
+      "shared_blks_read": 3,
+      "temp_blks_written": 0,
+      "rpc_name": "get_management_stats_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "4073446881872305746",
+      "calls": 646,
+      "total_ms": "365217.8",
+      "mean_ms": "565.35",
+      "max_ms": "6716.0",
+      "rows": 646,
+      "shared_blks_hit": 740834,
+      "shared_blks_read": 31,
+      "temp_blks_written": 0,
+      "rpc_name": "get_registration_customer_reminder_summaries_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-287944272780888404",
+      "calls": 1730,
+      "total_ms": "357317.5",
+      "mean_ms": "206.54",
+      "max_ms": "6971.5",
+      "rows": 1730,
+      "shared_blks_hit": 676580,
+      "shared_blks_read": 7,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    },
+    {
+      "queryid": "3013837108747144101",
+      "calls": 791,
+      "total_ms": "356152.2",
+      "mean_ms": "450.26",
+      "max_ms": "6656.2",
+      "rows": 791,
+      "shared_blks_hit": 1318917,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-7726440967385220442",
+      "calls": 359,
+      "total_ms": "341579.8",
+      "mean_ms": "951.48",
+      "max_ms": "5496.8",
+      "rows": 429364,
+      "shared_blks_hit": 0,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "-8650249982117915687",
+      "calls": 1730,
+      "total_ms": "295060.0",
+      "mean_ms": "170.55",
+      "max_ms": "3049.9",
+      "rows": 1730,
+      "shared_blks_hit": 1055160,
+      "shared_blks_read": 88,
+      "temp_blks_written": 0,
+      "rpc_name": "get_registration_notification_processing_readiness_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-7821780334453251234",
+      "calls": 8208151,
+      "total_ms": "289946.8",
+      "mean_ms": "0.04",
+      "max_ms": "648.6",
+      "rows": 8208151,
+      "shared_blks_hit": 165019,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "3393632725691790249",
+      "calls": 2000,
+      "total_ms": "249070.3",
+      "mean_ms": "124.54",
+      "max_ms": "9830.2",
+      "rows": 2000,
+      "shared_blks_hit": 82903,
+      "shared_blks_read": 4,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "7289533814779297773",
+      "calls": 748,
+      "total_ms": "234243.7",
+      "mean_ms": "313.16",
+      "max_ms": "6871.0",
+      "rows": 748,
+      "shared_blks_hit": 627684,
+      "shared_blks_read": 10,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-8856799461280935852",
+      "calls": 362,
+      "total_ms": "234171.1",
+      "mean_ms": "646.88",
+      "max_ms": "7061.1",
+      "rows": 78048,
+      "shared_blks_hit": 2486250,
+      "shared_blks_read": 899,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "other"
+    },
+    {
+      "queryid": "-4375340006383067359",
+      "calls": 158,
+      "total_ms": "230043.8",
+      "mean_ms": "1455.97",
+      "max_ms": "7116.5",
+      "rows": 158,
+      "shared_blks_hit": 286983,
+      "shared_blks_read": 2,
+      "temp_blks_written": 0,
+      "rpc_name": "list_textbook_master_page_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "9204580270357058000",
+      "calls": 854,
+      "total_ms": "229626.8",
+      "mean_ms": "268.88",
+      "max_ms": "4143.2",
+      "rows": 854,
+      "shared_blks_hit": 674835,
+      "shared_blks_read": 83,
+      "temp_blks_written": 0,
+      "rpc_name": "get_dashboard_statistics_sources_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-6426763785217029978",
+      "calls": 1335,
+      "total_ms": "221536.7",
+      "mean_ms": "165.95",
+      "max_ms": "3963.7",
+      "rows": 1335,
+      "shared_blks_hit": 3037099,
+      "shared_blks_read": 1,
+      "temp_blks_written": 0,
+      "rpc_name": "claim_registration_customer_reminder_job_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "1228076338502860155",
+      "calls": 757,
+      "total_ms": "215154.9",
+      "mean_ms": "284.22",
+      "max_ms": "5953.2",
+      "rows": 757,
+      "shared_blks_hit": 839965,
+      "shared_blks_read": 31,
+      "temp_blks_written": 0,
+      "rpc_name": "reap_notification_leases_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "1075894822247767544",
+      "calls": 539,
+      "total_ms": "213915.6",
+      "mean_ms": "396.87",
+      "max_ms": "6818.9",
+      "rows": 539,
+      "shared_blks_hit": 490806,
+      "shared_blks_read": 47,
+      "temp_blks_written": 0,
+      "rpc_name": "apply_notification_fanout_batch_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-3277238784680330107",
+      "calls": 243,
+      "total_ms": "211965.8",
+      "mean_ms": "872.29",
+      "max_ms": "7055.5",
+      "rows": 243,
+      "shared_blks_hit": 104174,
+      "shared_blks_read": 79,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    },
+    {
+      "queryid": "-4768609170483594042",
+      "calls": 117,
+      "total_ms": "203721.5",
+      "mean_ms": "1741.21",
+      "max_ms": "7076.6",
+      "rows": 117,
+      "shared_blks_hit": 218493,
+      "shared_blks_read": 19,
+      "temp_blks_written": 0,
+      "rpc_name": "get_textbook_master_summary_v1",
+      "category": "postgrest"
+    },
+    {
+      "queryid": "7719737286968120699",
+      "calls": 224,
+      "total_ms": "199973.5",
+      "mean_ms": "892.74",
+      "max_ms": "5981.8",
+      "rows": 224,
+      "shared_blks_hit": 99206,
+      "shared_blks_read": 0,
+      "temp_blks_written": 0,
+      "rpc_name": null,
+      "category": "postgrest"
+    }
+  ],
+  "tableStats": [
+    {
+      "schemaname": "public",
+      "relname": "ops_registration_subject_tracks",
+      "n_live_tup": 47,
+      "n_dead_tup": 38,
+      "seq_scan": 175210338,
+      "seq_tup_read": 2272092597,
+      "idx_scan": 160524098,
+      "total_bytes": 172032
+    },
+    {
+      "schemaname": "public",
+      "relname": "ops_registration_consultations",
+      "n_live_tup": 44,
+      "n_dead_tup": 21,
+      "seq_scan": 90289927,
+      "seq_tup_read": 939304809,
+      "idx_scan": 85561,
+      "total_bytes": 155648
+    },
+    {
+      "schemaname": "public",
+      "relname": "ops_registration_details",
+      "n_live_tup": 43,
+      "n_dead_tup": 45,
+      "seq_scan": 28161887,
+      "seq_tup_read": 350261417,
+      "idx_scan": 142494,
+      "total_bytes": 163840
+    },
+    {
+      "schemaname": "public",
+      "relname": "ops_registration_appointments",
+      "n_live_tup": 42,
+      "n_dead_tup": 40,
+      "seq_scan": 6147779,
+      "seq_tup_read": 99541146,
+      "idx_scan": 69168220,
+      "total_bytes": 4874240
+    },
+    {
+      "schemaname": "public",
+      "relname": "profiles",
+      "n_live_tup": 33,
+      "n_dead_tup": 31,
+      "seq_scan": 4738105,
+      "seq_tup_read": 66034524,
+      "idx_scan": 126036780,
+      "total_bytes": 122880
+    },
+    {
+      "schemaname": "public",
+      "relname": "students",
+      "n_live_tup": 485,
+      "n_dead_tup": 61,
+      "seq_scan": 39303,
+      "seq_tup_read": 18753608,
+      "idx_scan": 55272,
+      "total_bytes": 253952
+    },
+    {
+      "schemaname": "public",
+      "relname": "classes",
+      "n_live_tup": 73,
+      "n_dead_tup": 3,
+      "seq_scan": 190473,
+      "seq_tup_read": 12221372,
+      "idx_scan": 47018,
+      "total_bytes": 1048576
+    },
+    {
+      "schemaname": "public",
+      "relname": "gemini_api_usage_logs",
+      "n_live_tup": 4386,
+      "n_dead_tup": 0,
+      "seq_scan": 1232,
+      "seq_tup_read": 5180367,
+      "idx_scan": 2708,
+      "total_bytes": 2621440
+    },
+    {
+      "schemaname": "dashboard_private",
+      "relname": "notification_worker_heartbeats",
+      "n_live_tup": 3235,
+      "n_dead_tup": 0,
+      "seq_scan": 2011,
+      "seq_tup_read": 4640445,
+      "idx_scan": 2284,
+      "total_bytes": 1630208
+    },
+    {
+      "schemaname": "public",
+      "relname": "class_schedule_sync_group_members",
+      "n_live_tup": 74,
+      "n_dead_tup": 20,
+      "seq_scan": 55486,
+      "seq_tup_read": 3883302,
+      "idx_scan": 4408,
+      "total_bytes": 73728
+    },
+    {
+      "schemaname": "dashboard_private",
+      "relname": "notification_watchdog_heartbeats",
+      "n_live_tup": 2168,
+      "n_dead_tup": 0,
+      "seq_scan": 1753,
+      "seq_tup_read": 3734328,
+      "idx_scan": 0,
+      "total_bytes": 557056
+    },
+    {
+      "schemaname": "public",
+      "relname": "ops_tasks",
+      "n_live_tup": 306,
+      "n_dead_tup": 93,
+      "seq_scan": 17876,
+      "seq_tup_read": 3552396,
+      "idx_scan": 145358944,
+      "total_bytes": 458752
+    },
+    {
+      "schemaname": "public",
+      "relname": "ops_task_events",
+      "n_live_tup": 2278,
+      "n_dead_tup": 215,
+      "seq_scan": 2278,
+      "seq_tup_read": 2487437,
+      "idx_scan": 1266,
+      "total_bytes": 15794176
+    },
+    {
+      "schemaname": "public",
+      "relname": "textbook_stock_counts",
+      "n_live_tup": 21,
+      "n_dead_tup": 0,
+      "seq_scan": 115630,
+      "seq_tup_read": 2428230,
+      "idx_scan": 0,
+      "total_bytes": 65536
+    },
+    {
+      "schemaname": "public",
+      "relname": "textbook_publishers",
+      "n_live_tup": 27,
+      "n_dead_tup": 0,
+      "seq_scan": 62472,
+      "seq_tup_read": 1686729,
+      "idx_scan": 273,
+      "total_bytes": 106496
+    },
+    {
+      "schemaname": "dashboard_private",
+      "relname": "notification_deliveries",
+      "n_live_tup": 1780,
+      "n_dead_tup": 258,
+      "seq_scan": 1839,
+      "seq_tup_read": 1649776,
+      "idx_scan": 13731,
+      "total_bytes": 2228224
+    },
+    {
+      "schemaname": "public",
+      "relname": "textbooks",
+      "n_live_tup": 371,
+      "n_dead_tup": 1,
+      "seq_scan": 4260,
+      "seq_tup_read": 1571458,
+      "idx_scan": 162703,
+      "total_bytes": 409600
+    },
+    {
+      "schemaname": "public",
+      "relname": "textbook_publisher_supplier_links",
+      "n_live_tup": 27,
+      "n_dead_tup": 0,
+      "seq_scan": 57425,
+      "seq_tup_read": 1550475,
+      "idx_scan": 0,
+      "total_bytes": 98304
+    },
+    {
+      "schemaname": "public",
+      "relname": "academic_schools",
+      "n_live_tup": 26,
+      "n_dead_tup": 0,
+      "seq_scan": 71830,
+      "seq_tup_read": 1145800,
+      "idx_scan": 4760,
+      "total_bytes": 81920
+    },
+    {
+      "schemaname": "public",
+      "relname": "ops_registration_enrollments",
+      "n_live_tup": 13,
+      "n_dead_tup": 16,
+      "seq_scan": 139582,
+      "seq_tup_read": 991934,
+      "idx_scan": 22,
+      "total_bytes": 204800
+    },
+    {
+      "schemaname": "dashboard_private",
+      "relname": "notification_event_fanout_jobs",
+      "n_live_tup": 1101,
+      "n_dead_tup": 256,
+      "seq_scan": 1165,
+      "seq_tup_read": 961077,
+      "idx_scan": 8676,
+      "total_bytes": 565248
+    },
+    {
+      "schemaname": "public",
+      "relname": "dashboard_audit_logs",
+      "n_live_tup": 14279,
+      "n_dead_tup": 583,
+      "seq_scan": 65,
+      "seq_tup_read": 903592,
+      "idx_scan": 1962,
+      "total_bytes": 27811840
+    },
+    {
+      "schemaname": "public",
+      "relname": "academic_curriculum_profiles",
+      "n_live_tup": 21,
+      "n_dead_tup": 0,
+      "seq_scan": 26211,
+      "seq_tup_read": 550431,
+      "idx_scan": 1338,
+      "total_bytes": 114688
+    },
+    {
+      "schemaname": "public",
+      "relname": "academic_supplement_materials",
+      "n_live_tup": 28,
+      "n_dead_tup": 0,
+      "seq_scan": 10198,
+      "seq_tup_read": 285544,
+      "idx_scan": 0,
+      "total_bytes": 65536
+    },
+    {
+      "schemaname": "dashboard_private",
+      "relname": "notification_dispatch_ownership_claims",
+      "n_live_tup": 322,
+      "n_dead_tup": 49,
+      "seq_scan": 776,
+      "seq_tup_read": 216097,
+      "idx_scan": 5786232,
+      "total_bytes": 311296
+    }
+  ],
+  "laterMigrations": [
+    {
+      "version": "20260921114313",
+      "name": "textbook_lifecycle_atomic"
+    },
+    {
+      "version": "20260921114314",
+      "name": "signup_identity_isolation"
+    },
+    {
+      "version": "20260921132000",
+      "name": "purchase_group_return_state"
+    },
+    {
+      "version": "20260921132001",
+      "name": "signup_teacher_ownership"
+    },
+    {
+      "version": "20260921133800",
+      "name": "purchase_return_read_consistency"
+    },
+    {
+      "version": "20260921141000",
+      "name": "signup_confirmation_link"
+    },
+    {
+      "version": "20260921144020",
+      "name": "student_enrollment_status"
+    },
+    {
+      "version": "20260922012306",
+      "name": "dashboard_workload_reads"
+    },
+    {
+      "version": "20260922021144",
+      "name": "retire_standalone_approvals"
+    },
+    {
+      "version": "20260922021343",
+      "name": "validate_standalone_approvals_retirement"
+    },
+    {
+      "version": "20260922023940",
+      "name": "timetable_continuous_class_scope"
+    },
+    {
+      "version": "20260922054047",
+      "name": "curriculum_schedule_and_class_textbooks"
+    },
+    {
+      "version": "20260922064700",
+      "name": "validate_class_textbook_usage"
+    }
+  ],
+  "statementBaseline": [
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "-1622013188914390694",
+      "calls": 1641,
+      "total_exec_time": 1192926.527011,
+      "mean_exec_time": 726.950961006093,
+      "max_exec_time": 7825.218601,
+      "rpc_name": "list_ops_task_page_v2"
+    },
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "-1977991744889982606",
+      "calls": 3794,
+      "total_exec_time": 2593734.950025,
+      "mean_exec_time": 683.641262526359,
+      "max_exec_time": 7987.447237,
+      "rpc_name": "get_ops_task_list_stats_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "-4375340006383067359",
+      "calls": 158,
+      "total_exec_time": 230043.798565,
+      "mean_exec_time": 1455.97340863924,
+      "max_exec_time": 7116.471348,
+      "rpc_name": "list_textbook_master_page_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "-4768609170483594042",
+      "calls": 117,
+      "total_exec_time": 203721.520076,
+      "mean_exec_time": 1741.20957329915,
+      "max_exec_time": 7076.614472,
+      "rpc_name": "get_textbook_master_summary_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "-8932018060531781035",
+      "calls": 1372,
+      "total_exec_time": 1347120.767365,
+      "mean_exec_time": 981.866448516763,
+      "max_exec_time": 7929.354783,
+      "rpc_name": "list_ops_task_page_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "6668890235570166898",
+      "calls": 4394303,
+      "total_exec_time": 14864087.6111388,
+      "mean_exec_time": 3.38258140395402,
+      "max_exec_time": 3668.028078,
+      "rpc_name": "save_registration_level_test_result_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:37:29.474802+00",
+      "queryid": "7748696535954727283",
+      "calls": 2034,
+      "total_exec_time": 1709192.138712,
+      "mean_exec_time": 840.310785994099,
+      "max_exec_time": 7955.596911,
+      "rpc_name": "list_ops_task_numbered_page_v1"
+    }
+  ],
+  "textbookAfterBrowser": [
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "-2534419249908589578",
+      "db_role": "authenticated",
+      "calls": 47,
+      "total_exec_time": 35358.865779,
+      "mean_exec_time": 752.316293170213,
+      "min_exec_time": 22.944699,
+      "max_exec_time": 3477.650757,
+      "rpc_name": "get_dashboard_workload_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "2322935409788751024",
+      "db_role": "postgres",
+      "calls": 2,
+      "total_exec_time": 0.670958,
+      "mean_exec_time": 0.335479,
+      "min_exec_time": 0.213164,
+      "max_exec_time": 0.457794,
+      "rpc_name": "get_dashboard_workload_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "6801253443446838011",
+      "db_role": "postgres",
+      "calls": 2,
+      "total_exec_time": 1.707516,
+      "mean_exec_time": 0.853758,
+      "min_exec_time": 0.693208,
+      "max_exec_time": 1.014308,
+      "rpc_name": "get_dashboard_workload_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "3200857031676897666",
+      "db_role": "authenticated",
+      "calls": 110,
+      "total_exec_time": 160454.99735,
+      "mean_exec_time": 1458.68179409091,
+      "min_exec_time": 53.532283,
+      "max_exec_time": 6800.697964,
+      "rpc_name": "get_textbook_master_options_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "-4768609170483594042",
+      "db_role": "authenticated",
+      "calls": 118,
+      "total_exec_time": 204756.888631,
+      "mean_exec_time": 1735.22786975424,
+      "min_exec_time": 491.576733,
+      "max_exec_time": 7076.614472,
+      "rpc_name": "get_textbook_master_summary_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "129138368123257141",
+      "db_role": "authenticated",
+      "calls": 105,
+      "total_exec_time": 162399.691147,
+      "mean_exec_time": 1546.66372520952,
+      "min_exec_time": 388.892704,
+      "max_exec_time": 7587.633589,
+      "rpc_name": "get_textbook_operations_summary_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "-4375340006383067359",
+      "db_role": "authenticated",
+      "calls": 159,
+      "total_exec_time": 230951.155042,
+      "mean_exec_time": 1452.52298768553,
+      "min_exec_time": 423.976901,
+      "max_exec_time": 7116.471348,
+      "rpc_name": "list_textbook_master_page_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "-1425519760236665772",
+      "db_role": "postgres",
+      "calls": 2,
+      "total_exec_time": 29.321998,
+      "mean_exec_time": 14.660999,
+      "min_exec_time": 13.212397,
+      "max_exec_time": 16.109601,
+      "rpc_name": null
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "-6149712190075132802",
+      "db_role": "postgres",
+      "calls": 2,
+      "total_exec_time": 99.117831,
+      "mean_exec_time": 49.5589155,
+      "min_exec_time": 44.890654,
+      "max_exec_time": 54.227177,
+      "rpc_name": null
+    },
+    {
+      "observed_at": "2026-09-22 09:39:25.025078+00",
+      "queryid": "-5643166835332626705",
+      "db_role": "postgres",
+      "calls": 2,
+      "total_exec_time": 60.578251,
+      "mean_exec_time": 30.2891255,
+      "min_exec_time": 18.536943,
+      "max_exec_time": 42.041308,
+      "rpc_name": null
+    }
+  ],
+  "registrationAfterBrowser": [
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "-1977991744889982606",
+      "db_role": "authenticated",
+      "calls": 3806,
+      "mean_ms": "690.21",
+      "max_ms": "7987.45",
+      "total_exec_time": 2626946.161852,
+      "rpc_name": "get_ops_task_list_stats_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "9019130059908486202",
+      "db_role": "authenticated",
+      "calls": 559,
+      "mean_ms": "1263.51",
+      "max_ms": "7782.03",
+      "total_exec_time": 706301.35056,
+      "rpc_name": "get_ops_task_list_stats_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "-2725337262678660823",
+      "db_role": "authenticated",
+      "calls": 9,
+      "mean_ms": "362.82",
+      "max_ms": "831.19",
+      "total_exec_time": 3265.400432,
+      "rpc_name": "get_ops_task_list_stats_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "-4126474863158030171",
+      "db_role": "authenticated",
+      "calls": 5,
+      "mean_ms": "240.96",
+      "max_ms": "622.35",
+      "total_exec_time": 1204.809687,
+      "rpc_name": "get_ops_task_list_stats_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "7748696535954727283",
+      "db_role": "authenticated",
+      "calls": 2044,
+      "mean_ms": "847.83",
+      "max_ms": "7955.60",
+      "total_exec_time": 1732957.209589,
+      "rpc_name": "list_ops_task_numbered_page_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "-6883654448245775718",
+      "db_role": "authenticated",
+      "calls": 9,
+      "mean_ms": "111.83",
+      "max_ms": "525.81",
+      "total_exec_time": 1006.486496,
+      "rpc_name": "list_ops_task_numbered_page_v1"
+    },
+    {
+      "observed_at": "2026-09-22 09:40:38.186418+00",
+      "queryid": "6687384468128469707",
+      "db_role": "authenticated",
+      "calls": 547,
+      "mean_ms": "346.39",
+      "max_ms": "7516.66",
+      "total_exec_time": 189475.200961,
+      "rpc_name": "list_registration_subject_capabilities_v1"
+    }
+  ],
+  "activityAfterBrowser": [
+    {
+      "observed_at": "2026-09-22 09:40:31.234666+00",
+      "state": "idle",
+      "wait_event_type": "Client",
+      "wait_event": "ClientRead",
+      "connections": 12,
+      "max_query_age_seconds": "1480817.91",
+      "max_transaction_age_seconds": null
+    },
+    {
+      "observed_at": "2026-09-22 09:40:31.234666+00",
+      "state": "idle",
+      "wait_event_type": null,
+      "wait_event": null,
+      "connections": 1,
+      "max_query_age_seconds": "1.80",
+      "max_transaction_age_seconds": null
+    }
+  ],
+  "functionHashes": [
+    {
+      "schema": "public",
+      "name": "get_ops_task_list_stats_v1",
+      "md5": "975cd27fe78d60c74179a308fc603fe3"
+    },
+    {
+      "schema": "public",
+      "name": "get_textbook_master_summary_v1",
+      "md5": "ff34b1206f09a4394de21e249b56ac22"
+    },
+    {
+      "schema": "public",
+      "name": "list_ops_task_numbered_page_v1",
+      "md5": "af1dffdd4f426585991d7254653c3169"
+    },
+    {
+      "schema": "public",
+      "name": "list_textbook_master_page_v1",
+      "md5": "8073459659bd25d3e8e2221f4143175b"
+    },
+    {
+      "schema": "dashboard_private",
+      "name": "ops_registration_task_stats_v1",
+      "md5": "b407e05137ddf464ade17a50f2a5c8f6"
+    },
+    {
+      "schema": "dashboard_private",
+      "name": "ops_task_numbered_keys_v1",
+      "md5": "400c9584b42945dd27f069b8b2381f9e",
+      "config": [
+        "search_path=\"\"",
+        "TimeZone=Asia/Seoul",
+        "plan_cache_mode=force_custom_plan"
+      ]
+    },
+    {
+      "schema": "dashboard_private",
+      "name": "textbook_master_project_v1",
+      "md5": "9fd2852494e4e07376209c4b8d1a7208",
+      "config": [
+        "search_path=\"\""
+      ]
+    },
+    {
+      "schema": "dashboard_private",
+      "name": "textbook_read_keys_v1",
+      "md5": "4dcea3fc750d95b38107eeb9b7410fc6",
+      "config": [
+        "search_path=\"\""
+      ]
+    },
+    {
+      "schema": "dashboard_private",
+      "name": "textbook_summary_v1",
+      "md5": "e5b531cfaeb09f98a0e7befa644d874a",
+      "config": [
+        "search_path=\"\""
+      ]
+    }
+  ],
+  "indexes": [
+    {
+      "schemaname": "public",
+      "tablename": "academic_curriculum_profiles",
+      "indexname": "academic_curriculum_profiles_pkey",
+      "indexdef": "CREATE UNIQUE INDEX academic_curriculum_profiles_pkey ON public.academic_curriculum_profiles USING btree (id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "academic_curriculum_profiles",
+      "indexname": "academic_curriculum_profiles_school_grade_subject_key",
+      "indexdef": "CREATE UNIQUE INDEX academic_curriculum_profiles_school_grade_subject_key ON public.academic_curriculum_profiles USING btree (school_id, grade, subject)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "academic_curriculum_profiles",
+      "indexname": "academic_curriculum_profiles_school_id_grade_subject_key",
+      "indexdef": "CREATE UNIQUE INDEX academic_curriculum_profiles_school_id_grade_subject_key ON public.academic_curriculum_profiles USING btree (school_id, grade, subject)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "academic_curriculum_profiles",
+      "indexname": "academic_curriculum_profiles_year_school_grade_subject_key",
+      "indexdef": "CREATE UNIQUE INDEX academic_curriculum_profiles_year_school_grade_subject_key ON public.academic_curriculum_profiles USING btree (academic_year, school_id, grade, subject)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "students",
+      "indexname": "students_counseling_note_idx",
+      "indexdef": "CREATE INDEX students_counseling_note_idx ON public.students USING btree (id) WHERE (btrim(counseling_note) <> ''::text)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "students",
+      "indexname": "students_makeedu_student_no_idx",
+      "indexdef": "CREATE INDEX students_makeedu_student_no_idx ON public.students USING btree (makeedu_student_no) WHERE ((makeedu_student_no IS NOT NULL) AND (makeedu_student_no <> ''::text))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "students",
+      "indexname": "students_pkey",
+      "indexdef": "CREATE UNIQUE INDEX students_pkey ON public.students USING btree (id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "students",
+      "indexname": "students_status_idx",
+      "indexdef": "CREATE INDEX students_status_idx ON public.students USING btree (status)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "textbook_stock_counts",
+      "indexname": "textbook_stock_counts_pkey",
+      "indexdef": "CREATE UNIQUE INDEX textbook_stock_counts_pkey ON public.textbook_stock_counts USING btree (id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "textbook_stock_moves",
+      "indexname": "textbook_stock_moves_pkey",
+      "indexdef": "CREATE UNIQUE INDEX textbook_stock_moves_pkey ON public.textbook_stock_moves USING btree (id)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "textbook_stock_moves",
+      "indexname": "textbook_stock_moves_purchase_lifecycle_key",
+      "indexdef": "CREATE UNIQUE INDEX textbook_stock_moves_purchase_lifecycle_key ON public.textbook_stock_moves USING btree (purchase_order_line_id, move_type) WHERE ((purchase_order_line_id IS NOT NULL) AND (move_type = ANY (ARRAY['purchase_receipt'::text, 'return_out'::text])))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "textbook_stock_moves",
+      "indexname": "textbook_stock_moves_sale_transition_key",
+      "indexdef": "CREATE UNIQUE INDEX textbook_stock_moves_sale_transition_key ON public.textbook_stock_moves USING btree (sale_line_id, move_type) WHERE ((sale_line_id IS NOT NULL) AND (move_type = ANY (ARRAY['sale_issue'::text, 'return_in'::text])))"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "textbook_stock_moves",
+      "indexname": "textbook_stock_moves_textbook_location_idx",
+      "indexdef": "CREATE INDEX textbook_stock_moves_textbook_location_idx ON public.textbook_stock_moves USING btree (textbook_id, location_id, moved_at)"
+    },
+    {
+      "schemaname": "public",
+      "tablename": "textbook_stock_moves",
+      "indexname": "textbook_stock_moves_textbook_scope_location_idx",
+      "indexdef": "CREATE INDEX textbook_stock_moves_textbook_scope_location_idx ON public.textbook_stock_moves USING btree (textbook_id, copy_scope, location_id, moved_at)"
+    }
+  ],
+  "workloadIndexes": [
+    {
+      "tablename": "makeup_request_events",
+      "indexname": "makeup_request_events_mutation_request_uidx",
+      "indexdef": "CREATE UNIQUE INDEX makeup_request_events_mutation_request_uidx ON public.makeup_request_events USING btree (mutation_request_id) WHERE (mutation_request_id IS NOT NULL)"
+    },
+    {
+      "tablename": "makeup_request_events",
+      "indexname": "makeup_request_events_pkey",
+      "indexdef": "CREATE UNIQUE INDEX makeup_request_events_pkey ON public.makeup_request_events USING btree (id)"
+    },
+    {
+      "tablename": "makeup_request_events",
+      "indexname": "makeup_request_events_request_idx",
+      "indexdef": "CREATE INDEX makeup_request_events_request_idx ON public.makeup_request_events USING btree (request_id, created_at DESC)"
+    },
+    {
+      "tablename": "ops_task_events",
+      "indexname": "ops_task_events_pkey",
+      "indexdef": "CREATE UNIQUE INDEX ops_task_events_pkey ON public.ops_task_events USING btree (id)"
+    },
+    {
+      "tablename": "ops_task_events",
+      "indexname": "ops_task_events_request_event_uidx",
+      "indexdef": "CREATE UNIQUE INDEX ops_task_events_request_event_uidx ON public.ops_task_events USING btree (request_id, event_type, COALESCE(field_name, ''::text)) WHERE (request_id IS NOT NULL)"
+    }
+  ]
+}

@@ -78,6 +78,9 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "begin_registration_observation_explicit_chat_v1",
   "register_registration_observation_explicit_chat_attempt_v1",
   "finish_registration_observation_explicit_chat_v1",
+  // Academic foundation: primary-key subject constrained to 영어/수학/과학;
+  // complete capability metadata, with independent transport limits.
+  "list_registration_subject_capabilities_v1",
   "current_dashboard_role",
   "close_class_atomic_v1",
   // 20260909152352 + class_period_membership_optional_test.sql: creates one

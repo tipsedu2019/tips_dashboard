@@ -1,0 +1,7 @@
+[BABEL] Note: The code generator has deoptimised the styling of /Users/hyunjun/.codex/worktrees/performance-remediation-20260927/tips_dashboard/src/features/tasks/ops-task-workspace.tsx as it exceeds the max of 500KB.
+
+/Users/hyunjun/.codex/worktrees/performance-remediation-20260927/tips_dashboard/tests/curriculum-filter-panel.test.mjs
+  169:9  warning  'actionSource' is assigned a value but never used  @typescript-eslint/no-unused-vars
+
+✖ 1 problem (0 errors, 1 warning)
+

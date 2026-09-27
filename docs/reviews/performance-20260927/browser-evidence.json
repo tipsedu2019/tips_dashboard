@@ -1,0 +1,38 @@
+{
+  "environment": "isolated synthetic API; Next development webpack; no live data or writes",
+  "desktop": {
+    "viewport": 1200,
+    "documentWidth": 1200,
+    "search": "합성 수업 24",
+    "rows": 1,
+    "focus": "수업 검색",
+    "clearRestoresCount": 24
+  },
+  "mobile": {
+    "viewport": 390,
+    "documentWidth": 390,
+    "search": "합성 수업 24",
+    "rows": 1,
+    "focus": "수업 검색"
+  },
+  "loading": {
+    "delayMs": 2500,
+    "oldResultRetained": true,
+    "loadingStatus": true
+  },
+  "error": {
+    "oldResultRetained": true,
+    "previousResultMessage": true,
+    "retryAvailable": true
+  },
+  "coverageLimits": [
+    "Actual OS IME composition covered by React event tests, not real keyboard composition",
+    "Synthetic development UI is not production latency proof",
+    "Registration calendar data RPC not mocked; module rendering and error state only"
+  ],
+  "registration": {
+    "createFirstOpen": "loading fallback then complete form; no submit",
+    "calendarFirstOpen": "calendar module loaded; data error due missing synthetic reservation route",
+    "initialCreateFocus": "save button receives initial focus while chunk loads; review requested"
+  }
+}

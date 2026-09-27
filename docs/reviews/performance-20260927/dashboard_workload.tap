@@ -1,0 +1,27 @@
+ok 1 - workload source preserves RLS and is stable
+ok 2 - anon cannot read aggregate
+ok 3 - anon cannot read detail
+98000000-0000-4000-8000-000000000001
+ok 4 - closed and archived records excluded; two registration subjects count separately
+ok 5 - review waits on requester
+ok 6 - enrollment processing belongs to management, not former counselor
+ok 7 - approval waits on actual approver
+ok 8 - unrelated edits do not reset stage age
+ok 9 - aggregate agrees with full authorized source
+ok 10 - cumulative elapsed time includes time in preceding stages
+ok 11 - team detail matches team totals
+ok 12 - detail page bounded to ten
+ok 13 - second page has remaining rows
+ok 14 - same-name owners stay separate
+ok 15 - stage and cumulative age filter applied before counting
+ok 16 - request timestamp stays distinct from current stage entry
+ok 17 - aggregate elapsed seconds supports weighted means
+ok 18 - invalid page fails decisively
+ok 19 - unbounded page size rejected
+98000000-0000-4000-8000-000000000004
+ok 20 - unrelated teacher cannot infer team workloads through aggregation
+ok 21 - detail applies same RLS
+
+{}
+ok 22 - authenticated role alone without identity is rejected
+1..22
