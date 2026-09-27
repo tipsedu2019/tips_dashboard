@@ -1,0 +1,47 @@
+[
+  {
+    "file": "performance_catalog_taxonomy_test.sql",
+    "exit": 0,
+    "plans": [
+      "12"
+    ],
+    "passed": 12,
+    "failed": []
+  },
+  {
+    "file": "textbook_inventory_numbered_reads_test.sql",
+    "exit": 0,
+    "plans": [
+      "198"
+    ],
+    "passed": 198,
+    "failed": []
+  },
+  {
+    "file": "dashboard_workload_test.sql",
+    "exit": 0,
+    "plans": [
+      "22"
+    ],
+    "passed": 22,
+    "failed": []
+  },
+  {
+    "file": "timetable_makeup_domain_sqlstate_test.sql",
+    "exit": 0,
+    "plans": [
+      "25"
+    ],
+    "passed": 25,
+    "failed": []
+  },
+  {
+    "file": "timetable_operational_conflicts_test.sql",
+    "exit": 0,
+    "plans": [
+      "127"
+    ],
+    "passed": 127,
+    "failed": []
+  }
+]

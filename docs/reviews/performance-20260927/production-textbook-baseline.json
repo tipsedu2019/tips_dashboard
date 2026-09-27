@@ -1,0 +1,27 @@
+{
+  "measuredAt": "2026-09-27T10:18:48.293Z",
+  "scenario": "교재관리 기본 재고 탭 진입",
+  "requests": [
+    {
+      "path": "/rest/v1/rpc/get_textbook_master_options_v1",
+      "status": 200,
+      "durationMs": 1734
+    },
+    {
+      "path": "/rest/v1/rpc/get_textbook_operations_summary_v1",
+      "status": 200,
+      "durationMs": 2046
+    },
+    {
+      "path": "/rest/v1/rpc/list_textbook_master_page_v1",
+      "status": 200,
+      "durationMs": 1916
+    },
+    {
+      "path": "/rest/v1/rpc/get_textbook_master_summary_v1",
+      "status": 200,
+      "durationMs": 2250
+    }
+  ],
+  "truncated": false
+}

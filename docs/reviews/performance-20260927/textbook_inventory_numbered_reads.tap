@@ -1,0 +1,214 @@
+ok 1 - list_textbook_master_page_v1 exists
+ok 2 - list_textbook_inventory_page_v1 exists
+ok 3 - list_textbook_inventory_history_page_v1 exists
+ok 4 - get_textbook_master_summary_v1 exists
+ok 5 - get_textbook_inventory_summary_v1 exists
+ok 6 - get_textbook_master_detail_v1 exists
+ok 7 - get_textbook_inventory_balance_v1 exists
+ok 8 - check_textbook_master_duplicate_v1 exists
+ok 9 - list_textbook_master_page_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 10 - get_textbook_master_summary_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 11 - get_textbook_inventory_summary_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 12 - get_textbook_master_detail_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 13 - list_textbook_inventory_page_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 14 - list_textbook_inventory_history_page_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 15 - get_textbook_inventory_balance_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 16 - check_textbook_master_duplicate_v1 stable invoker, fixed search path, authenticated-only ACL
+ok 17 - textbooks retains RLS
+ok 18 - textbook_inventory_locations retains RLS
+ok 19 - textbook_stock_moves retains RLS
+ok 20 - textbook_stock_counts retains RLS
+a2000000-0000-4000-8000-000000000901
+ok 21 - valid master filter object is accepted
+ok 22 - master direct page11 numeric global order
+ok 23 - full filtered master count excludes inactive and subject
+ok 24 - numeric title 2 precedes10
+ok 25 - inventory priority/quantity/title order on direct page11
+ok 26 - inventory count uses full eligible keys
+ok 27 - history direct page11 sorts newest first
+ok 28 - history full filtered count
+ok 29 - strict master size 10
+ok 30 - strict master size 15
+ok 31 - strict master size 20
+ok 32 - strict inventory size 10
+ok 33 - strict inventory size 15
+ok 34 - strict inventory size 20
+ok 35 - strict history size 10
+ok 36 - strict history size 15
+ok 37 - strict history size 20
+ok 38 - off-end retains exact count/request without overflow
+ok 39 - empty authorized scope
+ok 40 - static master traversal has no omission/duplicate
+ok 41 - all configured locations initialized and null location is unassigned
+ok 42 - all-time movement balance
+ok 43 - student all-time balance
+ok 44 - teacher all-time balance
+ok 45 - explicit nonzero amount else unit_amount times signed quantity
+ok 46 - off-filter active duplicate title counts globally
+ok 47 - shortage negative or1..3 excludes zero
+ok 48 - zero inventory means unused
+ok 49 - global surplus filter still shows selected-location zero quantity
+ok 50 - zero location quantity recommendation retained
+ok 51 - missing elapsed days wire null not0/99999/stringInfinity
+ok 52 - rolling24hour UTC count date elapsed days
+ok 53 - recent count and sufficient selected balance
+ok 54 - quality facets use taxonomy but exclude search
+ok 55 - inventory facets precede only their own filter
+ok 56 - summary totals retain all list filters
+ok 57 - audit facets precede only audit filter
+ok 58 - inventory summary total retains audit filter
+ok 59 - master price total sums all111 matching books, not a page or quantity times price
+ok 60 - price total includes zero/negative stock books from both normalized subjects
+ok 61 - subject totals reconcile to same full-filter scope in configured subject order
+ok 62 - summary retains null-location legacy quantity
+ok 63 - summary totals selected configured location across all matching books
+ok 64 - inventory summary price total includes final audit filter
+ok 65 - empty summary has no fabricated subject groups
+ok 66 - empty summary still initializes all configured location maps
+ok 67 - missing selected detail explicit null
+ok 68 - duplicate preview preserves exact title and subject matching, not quality compact-key rule
+ok 69 - duplicate excludes editor ID
+ok 70 - explicit balance context preserves selected quantity
+ok 71 - UUID case spelling cannot turn an authoritative balance into zero
+ok 72 - partial balance context fails explicitly
+ok 73 - count and its adjustment movement are separate parents
+ok 74 - equal UTC event time resolves by kind then id
+ok 75 - count displayed date is not session-local timestamptz
+ok 76 - linked adjustment ID preserved
+ok 77 - count delta counted minus expected
+ok 78 - date UTC ordering independent of session timezone
+# TB2_WIRE_CONTEXT {"dbRole": "authenticated", "actorId": "a2000000-0000-4000-8000-000000000901"}
+# TB2_WIRE {"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000203", "name": "Parity 203", "price": 10000, "title": "Parity 203", "isbn13": "tb2-203", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 0, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 0, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": false, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 0, "locationSummary": [], "studentQuantity": 0, "teacherQuantity": 0, "subject_area_key": null, "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "quality-title", "filters": {"search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookMasterPage"}
+# TB2_WIRE {"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000203", "title": "Parity 203", "reason": "재고 부족", "source": {"id": "a2000000-0000-4000-8000-000000000203", "name": "Parity 203", "price": 10000, "title": "Parity 203", "isbn13": "tb2-203", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 0, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 0, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": false, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 0, "locationSummary": [], "studentQuantity": 0, "teacherQuantity": 0, "subject_area_key": null, "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}, "status": "recommended", "dueLabel": "실사 이력 없음", "publisher": "출판사", "locationId": "a2000000-0000-4000-8000-000000000900", "locationName": "본관", "isRecommended": true, "latestCountAt": "", "currentQuantity": 0, "isCountedThisCycle": false, "daysSinceLatestCount": null}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "audit-priority", "filters": {"audit": "all", "search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookInventoryPage"}
+# TB2_WIRE {"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000201", "title": "Parity 201", "reason": "29일 남음", "source": {"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}, "status": "done", "dueLabel": "29일 남음", "publisher": "출판사", "locationId": "a2000000-0000-4000-8000-000000000900", "locationName": "본관", "isRecommended": false, "latestCountAt": "2026-09-26", "currentQuantity": 12, "isCountedThisCycle": true, "daysSinceLatestCount": 1}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "audit-priority", "filters": {"audit": "all", "search": "Parity 201", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookInventoryPage"}
+# TB2_WIRE {"data": {"page": 1, "rows": [{"at": "2026-08-31", "id": "count-a2000000-0000-4000-8000-000000002003", "kind": "count", "memo": "", "actor": "-", "action": "실사 0→-2", "change": "-2권", "actorId": "", "sourceId": "a2000000-0000-4000-8000-000000002003", "actorLabel": "", "linkedMoveId": "a2000000-0000-4000-8000-000000001006", "locationName": "본관", "textbookTitle": "Parity 202"}, {"at": "2026-08-31T09:00:00+09:00", "id": "move-a2000000-0000-4000-8000-000000001006", "kind": "move", "memo": "", "actor": "-", "action": "실사 조정", "change": "-2권", "actorId": "", "sourceId": "a2000000-0000-4000-8000-000000001006", "actorLabel": "", "linkedMoveId": "", "locationName": "본관", "textbookTitle": "Parity 202"}], "pageSize": 10, "totalCount": 2}, "input": {"page": 1, "sort": "event-desc", "filters": {"locationId": null, "textbookId": "a2000000-0000-4000-8000-000000000202"}, "pageSize": 10}, "method": "listTextbookInventoryHistoryPage"}
+# TB2_WIRE {"data": {"locations": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "sortOrder": 10}, {"id": "a2000000-0000-4000-8000-000000000910", "code": "__tb2_annex__", "name": "별관", "sortOrder": 20}], "stockValue": 0, "totalCount": 1, "qualityCounts": {"all": 118, "inactive": 1, "attention": 1, "duplicate": 1, "missingCode": 0, "missingPrice": 0, "missingCategory": 0, "subjectMismatch": 0, "missingPublisher": 0}, "subjectTotals": [{"subject": "english", "stockValue": 0, "totalCount": 1, "totalQuantity": 0, "salePriceTotal": 10000}], "totalQuantity": 0, "salePriceTotal": 10000, "inventoryCounts": {"all": 1, "unused": 1, "surplus": 0, "negative": 0, "shortage": 0}, "studentQuantity": 0, "teacherQuantity": 0, "subSubjectOptions": ["내신", "단어", "독해", "듣기", "모고", "문법"], "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}, "input": {"search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "subSubject": "all", "schoolLevel": "all"}, "method": "getTextbookMasterSummary"}
+# TB2_WIRE {"data": {"locations": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "sortOrder": 10}, {"id": "a2000000-0000-4000-8000-000000000910", "code": "__tb2_annex__", "name": "별관", "sortOrder": 20}], "stockValue": 0, "totalCount": 1, "auditCounts": {"all": 1, "done": 0, "pending": 0, "recommended": 1}, "qualityCounts": {"all": 118, "inactive": 1, "attention": 1, "duplicate": 1, "missingCode": 0, "missingPrice": 0, "missingCategory": 0, "subjectMismatch": 0, "missingPublisher": 0}, "subjectTotals": [{"subject": "english", "stockValue": 0, "totalCount": 1, "totalQuantity": 0, "salePriceTotal": 10000}], "totalQuantity": 0, "salePriceTotal": 10000, "inventoryCounts": {"all": 1, "unused": 1, "surplus": 0, "negative": 0, "shortage": 0}, "studentQuantity": 0, "teacherQuantity": 0, "subSubjectOptions": ["내신", "단어", "독해", "듣기", "모고", "문법"], "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}}, "input": {"audit": "all", "search": "Parity 203", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "method": "getTextbookInventorySummary"}
+# TB2_WIRE {"data": {"row": {"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}}, "input": "a2000000-0000-4000-8000-000000000201", "method": "getTextbookMasterDetail"}
+# TB2_WIRE {"data": {"rows": [{"stockValue": 977, "textbookId": "a2000000-0000-4000-8000-000000000201", "totalQuantity": 10, "currentQuantity": 12, "studentQuantity": 9, "teacherQuantity": 1, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}, {"stockValue": 0, "textbookId": "a2000000-0000-4000-8000-000000000204", "totalQuantity": 2, "currentQuantity": 2, "studentQuantity": 0, "teacherQuantity": 2, "locationQuantities": {"a2000000-0000-4000-8000-000000000900": 2, "a2000000-0000-4000-8000-000000000910": 0}, "studentLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 0, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 2, "a2000000-0000-4000-8000-000000000910": 0}}], "locationId": "a2000000-0000-4000-8000-000000000900"}, "input": {"locationId": "a2000000-0000-4000-8000-000000000900", "textbookIds": ["a2000000-0000-4000-8000-000000000201", "a2000000-0000-4000-8000-000000000204"]}, "method": "getTextbookInventoryBalance"}
+# TB2_WIRE {"data": {"totalCount": 1, "previewRows": [{"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}]}, "input": {"title": "Parity 201", "subject": "english", "category": "", "excludeId": null, "publisher": ""}, "method": "checkTextbookMasterDuplicate"}
+ok 79 - page0 invalid exact SQLSTATE
+ok 80 - size25 invalid exact SQLSTATE
+ok 81 - unknown sort rejected
+ok 82 - unknown filter rejected
+ok 83 - unknown quality rejected
+ok 84 - list_textbook_master_page_v1: null page
+ok 85 - list_textbook_inventory_page_v1: null page
+ok 86 - list_textbook_inventory_history_page_v1: null page
+ok 87 - list_textbook_master_page_v1: zero page
+ok 88 - list_textbook_inventory_page_v1: zero page
+ok 89 - list_textbook_inventory_history_page_v1: zero page
+ok 90 - list_textbook_master_page_v1: negative page
+ok 91 - list_textbook_inventory_page_v1: negative page
+ok 92 - list_textbook_inventory_history_page_v1: negative page
+ok 93 - list_textbook_master_page_v1: null size
+ok 94 - list_textbook_inventory_page_v1: null size
+ok 95 - list_textbook_inventory_history_page_v1: null size
+ok 96 - list_textbook_master_page_v1: size5
+ok 97 - list_textbook_inventory_page_v1: size5
+ok 98 - list_textbook_inventory_history_page_v1: size5
+ok 99 - list_textbook_master_page_v1: size25
+ok 100 - list_textbook_inventory_page_v1: size25
+ok 101 - list_textbook_inventory_history_page_v1: size25
+ok 102 - list_textbook_master_page_v1 rejects NULL
+ok 103 - list_textbook_master_page_v1 rejects 'wrong'
+ok 104 - list_textbook_inventory_page_v1 rejects NULL
+ok 105 - list_textbook_inventory_page_v1 rejects 'wrong'
+ok 106 - list_textbook_inventory_history_page_v1 rejects NULL
+ok 107 - list_textbook_inventory_history_page_v1 rejects 'wrong'
+ok 108 - list_textbook_master_page_v1 rejects malformed filters NULL
+ok 109 - list_textbook_master_page_v1 rejects malformed filters '{}'::jsonb
+ok 110 - list_textbook_master_page_v1 rejects malformed filters '[]'::jsonb
+ok 111 - list_textbook_inventory_page_v1 rejects malformed filters NULL
+ok 112 - list_textbook_inventory_page_v1 rejects malformed filters '{}'::jsonb
+ok 113 - list_textbook_inventory_page_v1 rejects malformed filters '[]'::jsonb
+ok 114 - list_textbook_inventory_history_page_v1 rejects malformed filters NULL
+ok 115 - list_textbook_inventory_history_page_v1 rejects malformed filters '{}'::jsonb
+ok 116 - list_textbook_inventory_history_page_v1 rejects malformed filters '[]'::jsonb
+ok 117 - inventory off-end retains full count
+ok 118 - history off-end retains full count and requested page
+ok 119 - nonfinite SQL date remains explicit, not erased
+ok 120 - invalid-date reason differs from missing date
+ok 121 - invalid-date Infinity>=30 recommends active sufficient balance
+ok 122 - nonfinite elapsed date explicit null sentinel
+# TB2_WIRE {"data": {"page": 1, "rows": [{"id": "a2000000-0000-4000-8000-000000000201", "title": "Parity 201", "reason": "실사일 확인 필요", "source": {"id": "a2000000-0000-4000-8000-000000000201", "name": "Parity 201", "price": 10000, "title": "Parity 201", "isbn13": "tb2-201", "status": "active", "barcode": null, "subject": "english", "category": "독해", "publisher": "출판사", "salePrice": 10000, "list_price": 0, "sale_price": 10000, "stockValue": 977, "grade_level": "m2", "sub_subject": "독해", "grade_levels": ["m2"], "publisher_id": null, "qualityScore": 8, "school_level": "middle", "is_returnable": false, "qualityIssues": {"inactive": false, "duplicate": true, "missingCode": false, "missingPrice": false, "missingCategory": false, "subjectMismatch": false, "missingPublisher": false}, "school_levels": ["middle"], "totalQuantity": 10, "locationSummary": [{"id": "a2000000-0000-4000-8000-000000000900", "code": "__tb2_main__", "name": "본관", "quantity": 12, "sortOrder": 10}], "studentQuantity": 9, "teacherQuantity": 1, "subject_area_key": null, "locationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 12, "a2000000-0000-4000-8000-000000000910": 0}, "default_supplier_id": null, "studentLocationQuantities": {"unassigned": -2, "a2000000-0000-4000-8000-000000000900": 11, "a2000000-0000-4000-8000-000000000910": 0}, "teacherLocationQuantities": {"a2000000-0000-4000-8000-000000000900": 1, "a2000000-0000-4000-8000-000000000910": 0}}, "status": "recommended", "dueLabel": "실사일 확인 필요", "publisher": "출판사", "locationId": "a2000000-0000-4000-8000-000000000900", "locationName": "본관", "isRecommended": true, "latestCountAt": "infinity", "currentQuantity": 12, "isCountedThisCycle": false, "daysSinceLatestCount": null}], "pageSize": 10, "totalCount": 1}, "input": {"page": 1, "sort": "audit-priority", "filters": {"audit": "all", "search": "Parity 201", "quality": "all", "subject": "english", "inventory": "all", "gradeLevel": "all", "locationId": "a2000000-0000-4000-8000-000000000900", "subSubject": "all", "schoolLevel": "all"}, "pageSize": 10}, "method": "listTextbookInventoryPage"}
+ok 123 - unknown selected location is not a real zero balance
+ok 124 - empty IDs still validate selected location context
+ok 125 - JS trim removes tabs/newlines for missing publisher
+ok 126 - JS trim removes tabs/newlines for missing code
+ok 127 - case-insensitive Roman numeral math hint survives lowercasing
+ok 128 - title JS trim removes tab and NBSP
+ok 129 - NFKC compact duplicate key crosses width and outer whitespace
+ok 130 - master detail location summary follows actual ledger nonnumeric label order
+ok 131 - same-rank location labels use existing nonnumeric Korean locale order
+ok 132 - subsubject labels use existing nonnumeric Korean locale order
+ok 133 - inventory list canonicalizes uppercase selected location UUID
+ok 134 - inventory summary canonicalizes uppercase selected location UUID
+ok 135 - uppercase inventory UUID retains selected location label
+ok 136 - task-local label collation is deterministic nonnumeric Korean ICU
+ok 137 - internal JS whitespace preserves NBSP Roman numeral hint
+ok 138 - detail location label uses JS trim
+ok 139 - detail location code uses JS trim
+ok 140 - summary location label uses JS trim
+ok 141 - summary location code uses JS trim
+ok 142 - inventory location label uses JS trim
+ok 143 - history location label uses JS trim
+ok 144 - raw whitespace name stays selected before trim in ledger location summary
+ok 145 - summary preserves selected whitespace name before trim
+ok 146 - inventory empty trimmed name uses its own display dash
+ok 147 - history absent trimmed lookup label retains original ID fallback
+ok 148 - empty raw name chooses code before trim
+ok 149 - inventory empty raw name chooses trimmed code
+ok 150 - history empty raw name maps trimmed code
+ok 151 - valid explicit taxonomy row matches canonical m2 public filter
+ok 152 - accepted NBSP grade filter normalizes to m2
+ok 153 - valid explicit subsubject remains selected despite NBSP category text
+ok 154 - actual pure taxonomy helper preserves legacy NBSP category inference
+ok 155 - equal subject/score/title keys use stable ID across page boundary
+ok 156 - duplicate check counts outside its preview
+ok 157 - duplicate preview is independently bounded10
+a2000000-0000-4000-8000-000000000902
+ok 158 - staff authorized same scope
+ok 159 - staff executes master page
+ok 160 - staff executes inventory page
+ok 161 - staff executes history page
+ok 162 - staff executes master summary
+ok 163 - staff executes inventory summary
+ok 164 - staff executes master detail
+ok 165 - staff executes inventory balance
+ok 166 - staff executes duplicate
+a2000000-0000-4000-8000-000000000903
+ok 167 - teacher denied master page
+ok 168 - teacher denied inventory page
+ok 169 - teacher denied history page
+ok 170 - teacher denied master summary
+ok 171 - teacher denied inventory summary
+ok 172 - teacher denied master detail
+ok 173 - teacher denied inventory balance
+ok 174 - teacher denied duplicate
+ok 175 - balance rejects teacher before unavailable location context
+ok 176 - teacher denied management page despite master write policy
+ok 177 - teacher denied management summary
+ok 178 - empty balance context still checks server authority
+
+ok 179 - missing authenticated identity denied master page
+ok 180 - missing authenticated identity denied inventory page
+ok 181 - missing authenticated identity denied history page
+ok 182 - missing authenticated identity denied master summary
+ok 183 - missing authenticated identity denied inventory summary
+ok 184 - missing authenticated identity denied master detail
+ok 185 - missing authenticated identity denied inventory balance
+ok 186 - missing authenticated identity denied duplicate
+ok 187 - anon denied master page
+ok 188 - anon denied inventory page
+ok 189 - anon denied history page
+ok 190 - anon denied master summary
+ok 191 - anon denied inventory summary
+ok 192 - anon denied master detail
+ok 193 - anon denied inventory balance
+ok 194 - anon denied duplicate
+ok 195 - anon execute denied under actual anon role
+ok 196 - fixture and reads created no notification event
+ok 197 - fixture and reads created no fanout job
+ok 198 - fixture and reads created no provider delivery
+1..198

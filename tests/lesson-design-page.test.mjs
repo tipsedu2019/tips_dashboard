@@ -469,7 +469,9 @@ test("class schedule overview opens the official class schedule detail with pres
   assert.doesNotMatch(detailHrefSource, /params\.set\("section", resolvedSectionId\)/);
   assert.doesNotMatch(detailHrefSource, /params\.set\("sessionId", resolvedSessionId\)/);
   assert.match(detailHrefSource, /params\.set\("returnTo", normalizedReturnTo\)/);
-  assert.match(source, /const \[search, setSearch\] = useState\(\(\) => text\(searchParams\.get\("q"\)\)\)/);
+  assert.match(source, /const searchInput = useCommittedSearch\(text\(searchParams\.get\("q"\)\)\)/);
+  assert.match(source, /value: search, committed: serverSearch, reset: setSearch/);
+  assert.match(source, /search: serverSearch,/);
   assert.match(source, /const classScheduleReturnPath = useMemo/);
   assert.match(source, /router\.replace\(nextHref, \{ scroll: false \}\)/);
   assert.match(source, /const rememberClassScheduleListPosition = useCallback/);

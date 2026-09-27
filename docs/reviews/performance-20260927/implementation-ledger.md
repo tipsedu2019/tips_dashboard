@@ -1,0 +1,22 @@
+# SDD ledger — plan: docs/superpowers/plans/2026-09-27-performance-remediation.md
+Task 1: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/management-numbered-pagination.test.mjs tests/management-numbered-service.test.mjs → ℹ duration_ms 4169.4995)
+Task 3: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/public-content-performance.test.mjs tests/public-content-contract.test.mjs → ℹ duration_ms 118.248875)
+Task 2: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/academic-operations-numbered-pagination.test.mjs tests/academic-scoped-reads.test.mjs tests/operations-scoped-reads.test.mjs → ℹ duration_ms 7593.054166)
+
+Pre-flight: Tasks 1 and 2 share numbered-page lifecycle contracts; preserve page controller cancellation and actor scope. Tasks 4 and 5 share final makeup guard definitions; do not modify guards. Task 6 and Task 3 share initial bundle imports; no eager media fetch added.
+Task 4: Ruling: Legacy class schedules and makeup event dates are embedded in freeform strings/notes — retain projected class schedules, active requests and tagged events rather than an unsafe date predicate; cancel-only skips them. Database collision guard remains authoritative.
+Task 5: Ruling: Keep independent page and summary RPCs and their progressive/error semantics — store immutable taxonomy in a generated column with automatic write freshness, rather than a combined RPC or cache requiring mutation invalidation. Stock aggregation remains per RPC.
+Task 6: Ruling: Capability configuration is a fixed three-subject metadata response proved by primary key and CHECK in final SQL — add only its exact name to query checker, with 8-second deadline and retry(false) still mandatory; read up to four to reject unexpected extra rows.
+Task 7: Ruling: Existing tests referenced retired academic state labels/progress UI — update fixtures/assertions to current origin/main behavior; preserve behavioral scope, draft and authorization checks.
+Task 7: Ruling: Implementation was integrated in one working tree before committing — earlier task-done ranges 062c860..062c860 represent test gates, not committed task isolation; final branch review covers the entire final diff.
+Task 4: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/makeup-approval-performance.test.mjs tests/makeup-request-workspace.test.mjs tests/notification-makeup-adapter.test.mjs → ℹ duration_ms 2464.62625)
+Task 6: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/registration-subject-capability-probe.test.mjs tests/registration-runtime-probe.test.mjs → ℹ duration_ms 219.02375)
+Task 5: complete (commits 062c860..062c860, tests: python3 docs/reviews/performance-20260927/verify-local-sql.py tips_timetable_perf_20260927 → 378 assertions passed across 5 SQL suites)
+Task 7: complete (commits 062c860..062c860, tests: node --test --experimental-strip-types tests/management-numbered-pagination.test.mjs tests/public-content-performance.test.mjs tests/makeup-approval-performance.test.mjs tests/registration-subject-capability-probe.test.mjs → ℹ duration_ms 3845.256958)
+
+Final review: fresh gpt-6-astra reviewer inspected 062c8601..06443e11 read-only; one P2 generated taxonomy service_role permission regression.
+Final: fixed pure inference EXECUTE chain for service_role; INSERT RED SQLSTATE 42501 then INSERT/UPDATE/parity/anon/no-send GREEN 12/12; related SQL384/384. No second review.
+Final: Ruling: Production p95/root cause, operational lock duration and deployment success — maintain explicit operating measurement/release gates; local evidence cannot prove them.
+Final: Ruling: Calendar reservation data success and real OS IME — browser fixture lacks reservation RPC and composition uses event simulation; retain smoke-test limitations.
+Final: Ruling: Actual notification delivery — intentionally no-send; no provider outcome claimed.
+Final: Ruling: Initial dynamic form focuses Save during fallback — no automatic submit, focus loss or keyboard blockage established; retain existing validation and defer initial-focus polish.

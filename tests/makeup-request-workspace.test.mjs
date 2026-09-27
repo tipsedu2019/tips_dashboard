@@ -852,7 +852,7 @@ test("makeup workspace includes approver queues form fields and room availabilit
   assert.ok(workspaceSource.lastIndexOf("결재자") > workspaceSource.lastIndexOf("보강 강의실"));
   assert.match(workspaceSource, /SelectValue placeholder="강의실 선택"/);
   assert.match(serviceSource, /makeup_classroom: hasMakeup \? firstSlot\.classroom : null/);
-  assert.match(serviceSource, /for \(const slot of slots\)/);
+  assert.match(makeupApprovalRouteSource, /for \(const slot of slots\)/);
 });
 
 test("makeup requests auto-select the year-aware director by catalog ID and revalidate submissions", () => {
@@ -1011,7 +1011,7 @@ test("makeup approval completes makeup-bearing requests and keeps cancel-only re
   assert.doesNotMatch(workspaceSource, /completeMakeupRequest/);
   assert.match(serviceSource, /approveMakeupRequest/);
   assert.match(serviceSource, /const nextStatus = isRefundApprovalRequest\(request\) \? "refund_pending" : hasMakeupPart\(request\) \? "completed" : "makeup_pending"/);
-  assert.match(serviceSource, /if \(!isRefundApproval && hasMakeupPart\(request\)\)/);
+  assert.match(makeupApprovalRouteSource, /if \(hasMakeupPart\(requestRow\)\)/);
   assert.match(serviceSource, /fetch\("\/api\/makeup-requests\/approve"/);
   assert.match(serviceSource, /expectedStatus: request\.status/);
   assert.match(serviceSource, /mutationRequestId: crypto\.randomUUID\(\)/);
@@ -1202,7 +1202,7 @@ test("makeup workspace keeps cancellation and fixed subject ordering without loc
   assert.match(workspaceSource, /filterValue/);
   assert.match(workspaceSource, /getMakeupRequestTableValue/);
   assert.match(workspaceSource, /MakeupRequestResizableHeaderCell/);
-  assert.match(workspaceSource, /aria-label=\{`\$\{label\} 필터\/정렬`\}/);
+  assert.match(workspaceSource, /aria-label=\{`\$\{label\} 정렬`\}/);
   assert.match(workspaceSource, /cursor-col-resize/);
   assert.match(workspaceSource, /onPointerDown/);
   assert.match(workspaceSource, /role="columnheader"/);
@@ -1345,9 +1345,9 @@ test("makeup workspace opens row details and uses cards on narrow viewports", ()
   assert.match(detailCardSource, /variant\?: "full" \| "compact" \| "detail"/);
   assert.match(detailCardSource, /if \(variant === "detail"\)/);
   assert.match(detailCardSource, /aria-label="휴보강 상세 신청서"/);
-  assert.match(detailCardSource, /수업/);
-  assert.match(detailCardSource, /과목/);
-  assert.match(detailCardSource, /선생님/);
+  assert.match(detailCardSource, /request\.className/);
+  assert.match(detailCardSource, /request\.subject/);
+  assert.match(detailCardSource, /request\.teacherLabel/);
   assert.match(detailCardSource, /사유/);
   assert.match(detailCardSource, /휴강일/);
   assert.match(detailCardSource, /보강일시/);

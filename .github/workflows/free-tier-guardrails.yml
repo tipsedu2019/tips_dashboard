@@ -49,6 +49,13 @@ jobs:
         run: node --test --experimental-strip-types tests/dashboard-workload.test.mjs tests/dashboard-workload-interaction.test.mjs
       - name: Verify timetable scoped occupancy and collaboration
         run: node --test --experimental-strip-types tests/timetable-*.test.mjs tests/timetable-*.node.ts
+      - name: Verify performance request ownership and bounded reads
+        run: |
+          node --test --experimental-strip-types \
+            tests/academic-operations-numbered-pagination.test.mjs \
+            tests/public-content-performance.test.mjs \
+            tests/makeup-approval-performance.test.mjs \
+            tests/registration-subject-capability-probe.test.mjs
       - name: Verify shared dashboard design contracts
         run: |
           node --test --experimental-strip-types \

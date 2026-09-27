@@ -550,7 +550,7 @@ export function createOperationsReadService(options = {}) {
       if (error) throw error;
       return assertClassScheduleNumberedResponse(data, { page, pageSize });
     },
-    async load(request) {
+    async load(request, { signal } = {}) {
       if (request?.mode === "calendar") {
         const range = assertRange(request.dateFrom, request.dateTo, 42);
         const response = await unwrapRpc(
@@ -558,7 +558,7 @@ export function createOperationsReadService(options = {}) {
             p_date_from: range.dateFrom,
             p_date_to: range.dateTo,
           })
-            .abortSignal(AbortSignal.timeout(8_000))
+            .abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000))
             .retry(false),
         );
         return assertCalendarResponse(response, range);
@@ -571,7 +571,7 @@ export function createOperationsReadService(options = {}) {
         return assertAnnualResponse(
           await unwrapRpc(
             client.rpc("get_operations_annual_board_v1", { p_academic_year: academicYear })
-              .abortSignal(AbortSignal.timeout(8_000))
+              .abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000))
               .retry(false),
           ),
           academicYear,

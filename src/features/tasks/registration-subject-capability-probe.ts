@@ -15,8 +15,13 @@ type RegistrationSubjectCapabilityProbeResult = {
   error: unknown
 }
 
+type CapabilityRequest = PromiseLike<RegistrationSubjectCapabilityProbeResult> & {
+  abortSignal: (signal: AbortSignal) => CapabilityRequest
+  retry: (enabled: boolean) => CapabilityRequest
+  limit: (count: number) => CapabilityRequest
+}
 export type RegistrationSubjectCapabilityProbeClient = {
-  rpc: (name: string) => PromiseLike<RegistrationSubjectCapabilityProbeResult>
+  rpc: (name: string) => CapabilityRequest
 }
 
 export type RegistrationSubjectCapabilityProbe = {
@@ -178,12 +183,17 @@ function parseCapabilities(value: unknown) {
 
 async function readRegistrationSubjectCapabilities(
   client: RegistrationSubjectCapabilityProbeClient | null,
+  signal: AbortSignal,
 ): Promise<readonly RegistrationSubjectCapability[]> {
   if (!client) {
     throw new Error("Registration subject capability client is unavailable.")
   }
 
-  const response = await client.rpc(REGISTRATION_SUBJECT_CAPABILITY_RPC)
+  // Three supported subjects plus one sentinel: extra rows still fail validation.
+  const response = await client.rpc("list_registration_subject_capabilities_v1")
+    .limit(4)
+    .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)]))
+    .retry(false)
   if (response.error) {
     if (isMissingCapabilityFunction(response.error)) {
       return COMPATIBILITY_CAPABILITIES
@@ -196,28 +206,45 @@ async function readRegistrationSubjectCapabilities(
 
 export function createRegistrationSubjectCapabilityProbe(
   client: RegistrationSubjectCapabilityProbeClient | null,
+  options: { timeoutMs?: number; maxAgeMs?: number; now?: () => number } = {},
 ): RegistrationSubjectCapabilityProbe {
   let cachedCapabilities: readonly RegistrationSubjectCapability[] | null = null
   let inFlight: Promise<readonly RegistrationSubjectCapability[]> | null = null
   let generation = 0
+  let controller: AbortController | null = null
+  let cachedAt = 0
+  const now = options.now || Date.now
+  const maxAgeMs = options.maxAgeMs ?? 30_000
+  const timeoutMs = options.timeoutMs ?? 8_000
 
   function reset() {
     generation += 1
+    controller?.abort()
     cachedCapabilities = null
     inFlight = null
   }
 
   function probe() {
-    if (cachedCapabilities) return Promise.resolve(cachedCapabilities)
+    if (cachedCapabilities && now() - cachedAt < maxAgeMs) return Promise.resolve(cachedCapabilities)
     if (inFlight) return inFlight
 
     const requestGeneration = generation
-    const request = readRegistrationSubjectCapabilities(client)
+    const abort = new AbortController()
+    controller = abort
+    let timer: ReturnType<typeof setTimeout>
+    const timeout = new Promise<never>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error("registration_subject_capability_timeout"))
+        abort.abort()
+      }, timeoutMs)
+    })
+    const request = Promise.race([readRegistrationSubjectCapabilities(client, abort.signal), timeout])
       .then((capabilities) => {
-        if (requestGeneration === generation) cachedCapabilities = capabilities
+        if (requestGeneration === generation) { cachedCapabilities = capabilities; cachedAt = now() }
         return capabilities
       })
       .finally(() => {
+        clearTimeout(timer)
         if (inFlight === request) inFlight = null
       })
     inFlight = request

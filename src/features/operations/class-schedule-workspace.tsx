@@ -3,6 +3,7 @@
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
 import Link from "next/link";
 import { preserveScheduleLearningContent, scheduleOnlyDraft } from "./schedule-only-plan";
+import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
@@ -2225,7 +2226,8 @@ export function ClassScheduleWorkspace() {
   const isLessonDesignModalRoute = searchParams.get("lessonDesign") === "1" && !isLessonDesignPage;
   const requestedClassId = text(searchParams.get("classId"));
   const classScheduleListRef = useRef<HTMLDivElement | null>(null);
-  const [search, setSearch] = useState(() => text(searchParams.get("q")));
+  const searchInput = useCommittedSearch(text(searchParams.get("q")));
+  const { value: search, committed: serverSearch, reset: setSearch } = searchInput;
   const [subject, setSubject] = useState(() => text(searchParams.get("subject")));
   const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
   const [teacher, setTeacher] = useState(() => text(searchParams.get("teacher")));
@@ -2301,7 +2303,7 @@ export function ClassScheduleWorkspace() {
   const operationsRequest = useMemo(
     () => ({
       mode: "class_schedule" as const,
-      search,
+      search: serverSearch,
       subject: subject || null,
       grade: grade || null,
       teacher: teacher || null,
@@ -2309,7 +2311,7 @@ export function ClassScheduleWorkspace() {
       page: navigation.page,
       navigationKey: navigation.key,
     }),
-    [grade, navigation, search, subject, teacher],
+    [grade, navigation, serverSearch, subject, teacher],
   );
   const {
     data: scopedData,
@@ -5126,7 +5128,10 @@ export function ClassScheduleWorkspace() {
         <AcademicFilterToolbar
           searchValue={search}
           searchPlaceholder="반명, 선생님, 시간표로 검색"
-          onSearchChange={setSearch}
+          onSearchChange={searchInput.onChange}
+          onSearchCompositionStart={searchInput.onCompositionStart}
+          onSearchCompositionEnd={searchInput.onCompositionEnd}
+          onSearchSubmit={searchInput.onSubmit}
           filters={[
             {
               label: "과목",

@@ -1,5 +1,6 @@
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 import { randomUUID } from "node:crypto";
+import { MEDIA_PATH } from "../content-contract.ts";
 import type {
   ContentChange,
   ContentEntry,
@@ -81,6 +82,7 @@ export type ContentStore = {
     upload: { signedUrl: string; path: string; token: string };
   }>;
   preview(reference: string): Promise<string>;
+  previews(references: string[]): Promise<Record<string, string>>;
 };
 function adminStore(db: SupabaseClient, env: ContentEnvironment): ContentStore {
   return {
@@ -197,6 +199,15 @@ function adminStore(db: SupabaseClient, env: ContentEnvironment): ContentStore {
       if (error || !data) throw new ContentStoreError("unavailable");
       return { reference: `storage:${path}`, upload: data };
     },
+    async previews(references) {
+      const paths = [...new Set(references.filter((reference) => MEDIA_PATH.test(reference)).map((reference) => reference.slice(8)))];
+      if (!paths.length) return {};
+      const { data, error } = await db.storage.from(MEDIA_BUCKET).createSignedUrls(paths, 600);
+      if (error || !data) throw new ContentStoreError("unavailable");
+      return Object.fromEntries(data.filter((item) => item.path && paths.includes(item.path)).map((item) => [
+        `storage:${item.path}`, item.error ? "" : item.signedUrl || "",
+      ]));
+    },
     async preview(reference) {
       const { data, error } = await db.storage
         .from(MEDIA_BUCKET)
@@ -258,16 +269,17 @@ export async function publishedEntries(
   throw new ContentStoreError("unavailable");
 }
 export async function publicAsset(env: ContentEnvironment, path: string) {
-  const rows = await publishedEntries(env, "teacher");
   const reference = `storage:${path}`;
-  if (
-    !rows.some(
-      (row) =>
-        row.data.portraitUrl === reference || row.data.videoUrl === reference,
-    )
-  )
-    throw new ContentStoreError("not_found");
+  if (!MEDIA_PATH.test(reference)) throw new ContentStoreError("not_found");
   const config = settings(env);
+  if (!config.url || !config.key) throw new ContentStoreError("unavailable");
+  const match = await client(config.url, config.key)
+    .from("public_site_entries").select("id")
+    .eq("kind", "teacher").eq("is_published", true)
+    .or(`data->>portraitUrl.eq.${reference},data->>videoUrl.eq.${reference}`)
+    .limit(1).retry(false);
+  if (match.error) throw new ContentStoreError("unavailable");
+  if (!match.data?.length) throw new ContentStoreError("not_found");
   if (!config.service) throw new ContentStoreError("unavailable");
   const { data, error } = await client(config.url, config.service)
     .storage.from(MEDIA_BUCKET)

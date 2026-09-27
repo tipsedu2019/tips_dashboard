@@ -40,6 +40,7 @@ type ClassFilterPanelProps = {
   searchValue: string;
   searchPlaceholder: string;
   onSearchChange: (value: string, options?: { syncUrl?: boolean }) => void;
+  onSearchSubmit?: () => void;
   onSearchCompositionStart?: () => void;
   onSearchCompositionEnd?: (value: string) => void;
   summaryLabel?: ReactNode;
@@ -67,6 +68,7 @@ export function ClassFilterPanel({
   searchValue,
   searchPlaceholder,
   onSearchChange,
+  onSearchSubmit,
   onSearchCompositionStart,
   onSearchCompositionEnd,
   summaryLabel,
@@ -132,6 +134,12 @@ export function ClassFilterPanel({
             placeholder={searchPlaceholder}
             value={searchValue}
             onChange={(event) => onSearchChange(event.target.value, { syncUrl: !isComposingSearchInput(event) })}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+                event.preventDefault();
+                onSearchSubmit?.();
+              }
+            }}
             onCompositionStart={onSearchCompositionStart}
             onCompositionEnd={(event) => onSearchCompositionEnd?.(event.currentTarget.value)}
             className="h-9 pl-9 pr-9"

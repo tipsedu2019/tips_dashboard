@@ -1,0 +1,40 @@
+{
+  "commit": "b0f16bf5e5001edcdb25410fd68a8be3297adde3",
+  "evidence": "Real hooks and services transpiled in React/JSDOM with mocked RPC transport; no database or network.",
+  "managementPaging": {
+    "pages": 5,
+    "rpcCounts": {
+      "get_management_stats_v1": 5,
+      "list_management_filter_options_v1": 5,
+      "list_management_numbered_page_v1": 5
+    }
+  },
+  "academicRange": {
+    "rangeRequests": 3,
+    "abortedAfter3Views": 0,
+    "abortedAfterUnmount": 0
+  },
+  "operationsRange": {
+    "rangeRequests": 3,
+    "abortedAfter3Views": 0,
+    "abortedAfterUnmount": 0
+  },
+  "curriculumSearch": {
+    "rpcRequests": 5,
+    "searches": [
+      "",
+      "a",
+      "ab",
+      "abc",
+      "abcd"
+    ],
+    "abortedSupersededRequests": 4,
+    "scopeMetadataFlags": [
+      true,
+      true,
+      true,
+      true,
+      true
+    ]
+  }
+}

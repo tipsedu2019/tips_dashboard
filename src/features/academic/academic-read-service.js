@@ -389,7 +389,7 @@ export function createAcademicReadService(options = {}) {
       if (error) throw error;
       return assertCurriculumNumberedResponse(data, { filters, page, pageSize, includeScopeMetadata });
     },
-    async load(request) {
+    async load(request, { signal } = {}) {
       if (request?.mode === "timetable") {
         const range = assertRange(request.dateFrom, request.dateTo);
         const response = await unwrapRpc(
@@ -400,7 +400,7 @@ export function createAcademicReadService(options = {}) {
             p_status: text(request.filters?.status) || null,
             p_subject: text(request.filters?.subject) || null,
           })
-            .abortSignal(AbortSignal.timeout(8_000))
+            .abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000))
             .retry(false),
         );
         return assertTimetableResponse(response, range);

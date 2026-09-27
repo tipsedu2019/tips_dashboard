@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { type KeyboardEvent, useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { ArrowUpRight, ClipboardList } from "lucide-react";
 
@@ -228,7 +229,8 @@ export function AcademicCurriculumWorkspace() {
   const searchParams = useSearchParams();
   const searchParamString = searchParams.toString();
   const desktopListRef = useRef<HTMLDivElement | null>(null);
-  const [search, setSearch] = useState(() => text(searchParams.get("q")));
+  const searchInput = useCommittedSearch(text(searchParams.get("q")));
+  const { value: search, committed: serverSearch, reset: setSearch } = searchInput;
   const [status, setStatus] = useState(() => text(searchParams.get("status")) || DEFAULT_CURRICULUM_STATUS_FILTER);
   const [subject, setSubject] = useState(() => text(searchParams.get("subject")));
   const [grade, setGrade] = useState(() => text(searchParams.get("grade")));
@@ -262,7 +264,7 @@ export function AcademicCurriculumWorkspace() {
     refresh,
   } = useAcademicWorkspaceData({
     mode: "curriculum",
-    search,
+    search: serverSearch,
     status,
     subject: subject || null,
     grade: grade || null,
@@ -563,7 +565,10 @@ export function AcademicCurriculumWorkspace() {
           className={DATA_TABLE_TOOLBAR_CLASS_NAME}
           searchValue={search}
           searchPlaceholder="수업 검색"
-          onSearchChange={setSearch}
+          onSearchChange={searchInput.onChange}
+          onSearchCompositionStart={searchInput.onCompositionStart}
+          onSearchCompositionEnd={searchInput.onCompositionEnd}
+          onSearchSubmit={searchInput.onSubmit}
           showReset={hasActiveFilters}
           onReset={resetFilters}
         />

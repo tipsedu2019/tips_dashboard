@@ -29,7 +29,10 @@ type AcademicFilterToolbarProps = {
   title?: string;
   searchValue: string;
   searchPlaceholder: string;
-  onSearchChange: (value: string) => void;
+  onSearchChange: (value: string, options?: { syncUrl?: boolean }) => void;
+  onSearchCompositionStart?: () => void;
+  onSearchCompositionEnd?: (value: string) => void;
+  onSearchSubmit?: () => void;
   filters: ToolbarFilter[];
   onReset?: () => void;
   showReset?: boolean;
@@ -47,6 +50,9 @@ export function AcademicFilterToolbar({
   searchValue,
   searchPlaceholder,
   onSearchChange,
+  onSearchCompositionStart,
+  onSearchCompositionEnd,
+  onSearchSubmit,
   filters,
   onReset,
   showReset = false,
@@ -91,8 +97,18 @@ export function AcademicFilterToolbar({
         <div className="relative">
           <Search className="text-muted-foreground absolute top-1/2 left-3 size-4 -translate-y-1/2" />
           <Input
+            type="search"
+            aria-label={searchPlaceholder}
             value={searchValue}
-            onChange={(event) => onSearchChange(event.target.value)}
+            onChange={(event) => onSearchChange(event.target.value, { syncUrl: !("isComposing" in event.nativeEvent && event.nativeEvent.isComposing) })}
+            onCompositionStart={onSearchCompositionStart}
+            onCompositionEnd={(event) => onSearchCompositionEnd?.(event.currentTarget.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && !event.nativeEvent.isComposing && event.nativeEvent.keyCode !== 229) {
+                event.preventDefault();
+                onSearchSubmit?.();
+              }
+            }}
             placeholder={searchPlaceholder}
             className="h-10 pl-9"
           />

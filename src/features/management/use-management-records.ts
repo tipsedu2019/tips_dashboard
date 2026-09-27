@@ -815,6 +815,7 @@ export function useManagementRecords(
   const [metadataOwner, setMetadataOwner] = useState("");
   const controllerRef = useRef<ReturnType<typeof createNumberedPageController<ManagementRow>> | null>(null);
   const lastRequestKeyRef = useRef("");
+  const invalidateMetadataRef = useRef<() => void>(() => {});
   const onQueryChangeRef = useRef(onQueryChange);
   useEffect(() => { onQueryChangeRef.current = onQueryChange; }, [onQueryChange]);
   const filters = useMemo(() => {
@@ -839,26 +840,39 @@ export function useManagementRecords(
   useEffect(() => {
     let active = true;
     lastRequestKeyRef.current = "";
+    // One scope per mounted owner: pages/sorts share in-flight metadata, while
+    // changing filters or mutating data invalidates it independently of page reads.
+    let metadata: { key: string; controller: AbortController; expiresAt: number } | null = null;
+    const invalidateMetadata = () => { metadata?.controller.abort(); metadata = null; };
+    invalidateMetadataRef.current = invalidateMetadata;
     const controller = createNumberedPageController<ManagementRow>({
       loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal }) => {
         if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
         const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
         const effectiveFilters = request.filters;
-        const requestSignal = AbortSignal.any([signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
-        setMetadataFailure(null);
-        const metadata = Promise.all([
-          supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
-          supabase.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(requestSignal).retry(false),
-        ]);
-        void metadata.then(([statsResult, optionsResult]) => {
-          if (!active || signal.aborted) return;
-          if (statsResult.error || optionsResult.error) throw statsResult.error || optionsResult.error;
-          setMetadataOwner(owner);
-          setStats(aggregateToStats(kind, (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) || {}));
-          setFilterOptions((Array.isArray(optionsResult.data) ? optionsResult.data[0] : optionsResult.data) || {});
-        }).catch((error) => {
-          if (active && !signal.aborted) setMetadataFailure({ owner, error: error instanceof Error ? error.message : "목록 부가 정보를 불러오지 못했습니다." });
-        });
+        const metadataKey = JSON.stringify(effectiveFilters);
+        if (!metadata || metadata.key !== metadataKey || Date.now() >= metadata.expiresAt) {
+          invalidateMetadata();
+          const entry = { key: metadataKey, controller: new AbortController(), expiresAt: Infinity };
+          metadata = entry;
+          const metadataSignal = AbortSignal.any([entry.controller.signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
+          setMetadataFailure(null);
+          void Promise.all([
+            supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(metadataSignal).retry(false),
+            supabase.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(metadataSignal).retry(false),
+          ]).then(([statsResult, optionsResult]) => {
+            if (!active || metadata !== entry || entry.controller.signal.aborted) return;
+            if (statsResult.error || optionsResult.error) throw statsResult.error || optionsResult.error;
+            entry.expiresAt = Date.now() + 30_000;
+            setMetadataOwner(owner);
+            setStats(aggregateToStats(kind, (Array.isArray(statsResult.data) ? statsResult.data[0] : statsResult.data) || {}));
+            setFilterOptions((Array.isArray(optionsResult.data) ? optionsResult.data[0] : optionsResult.data) || {});
+          }).catch((error) => {
+            if (!active || metadata !== entry || entry.controller.signal.aborted) return;
+            metadata = null;
+            setMetadataFailure({ owner, error: error instanceof Error ? error.message : "목록 부가 정보를 불러오지 못했습니다." });
+          });
+        }
         const result = await numberedService.readPage({ kind, filters: effectiveFilters, page: requestedPage, pageSize: requestedSize, sort: request.sort, signal });
         return { ...result, rows: normalizeManagementRows(kind, result.rows.map((row) => listRowToSource(kind, row)), true) };
       },
@@ -877,6 +891,7 @@ export function useManagementRecords(
     controllerRef.current = controller;
     return () => {
       active = false;
+      invalidateMetadata();
       controller.dispose();
       if (controllerRef.current === controller) controllerRef.current = null;
     };
@@ -966,16 +981,19 @@ export function useManagementRecords(
 
   const reloadRow = useCallback(async (id: string) => {
     const detailRow = await loadDetail(id);
-    if (detailRow) await controllerRef.current?.retry();
+    if (detailRow) { invalidateMetadataRef.current(); await controllerRef.current?.retry(); }
     return detailRow;
   }, [loadDetail]);
 
   const removeRows = useCallback((ids: string[]) => {
     // Keep the displayed count and rows from one server snapshot until reconciliation.
-    if (ids.length) void controllerRef.current?.retry();
+    if (ids.length) { invalidateMetadataRef.current(); void controllerRef.current?.retry(); }
   }, []);
 
-  const refresh = useCallback(async () => { if (enabled) await controllerRef.current?.retry(); }, [enabled]);
+  const refresh = useCallback(async () => {
+    invalidateMetadataRef.current();
+    if (enabled) await controllerRef.current?.retry();
+  }, [enabled]);
   const displayed = snapshot?.authorizationScope === authorizationScope && snapshot.kind === kind ? snapshot : null;
   const displayedQueryScope = displayed?.scope || scope;
   const displayedSort = useMemo(() => JSON.parse(displayedQueryScope).sort as ManagementNumberedSort, [displayedQueryScope]);

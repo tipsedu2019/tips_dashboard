@@ -1,0 +1,81 @@
+BEGIN
+ no_plan 
+---------
+(0 rows)
+
+SET
+SET
+SET
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+SELECT 1
+INSERT 0 3
+INSERT 0 3
+INSERT 0 2
+INSERT 0 113
+UPDATE 1
+UPDATE 1
+INSERT 0 8
+UPDATE 1
+INSERT 0 10
+INSERT 0 3
+INSERT 0 111
+SET
+              set_config              
+--------------------------------------
+ a2000000-0000-4000-8000-000000000901
+(1 row)
+
+                                set_config                                
+--------------------------------------------------------------------------
+ {"sub": "a2000000-0000-4000-8000-000000000901", "role": "authenticated"}
+(1 row)
+
+Timing is on.
+ count 
+-------
+   121
+(1 row)
+
+Time: 25.338 ms
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=32) (actual time=29.648..29.648 rows=1 loops=1)
+   Buffers: shared hit=520 read=1
+ Planning Time: 0.012 ms
+ Execution Time: 29.650 ms
+(4 rows)
+
+Time: 29.783 ms
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=32) (actual time=30.990..30.990 rows=1 loops=1)
+   Buffers: shared hit=253
+ Planning Time: 0.011 ms
+ Execution Time: 30.992 ms
+(4 rows)
+
+Time: 31.098 ms
+SET
+Time: 0.044 ms
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=32) (actual time=22.893..22.894 rows=1 loops=1)
+   Buffers: shared hit=222
+ Planning Time: 0.010 ms
+ Execution Time: 22.895 ms
+(4 rows)
+
+Time: 22.976 ms
+                                      QUERY PLAN                                       
+---------------------------------------------------------------------------------------
+ Result  (cost=0.00..0.26 rows=1 width=32) (actual time=30.781..30.781 rows=1 loops=1)
+   Buffers: shared hit=163
+ Planning Time: 0.009 ms
+ Execution Time: 30.783 ms
+(4 rows)
+
+Time: 30.919 ms
+ROLLBACK
+Time: 0.289 ms

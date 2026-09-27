@@ -604,6 +604,11 @@
       "fileName": "20260927071716_timetable_scoped_occupancy.sql",
       "status": "final",
       "sha256": "6fc4bfa1e0e2aecb6552e38d5a21c47987ba41fd6ef49cc88d095fb53d4323ea"
+    },
+    {
+      "fileName": "20260927103000_performance_catalog_and_workload.sql",
+      "status": "final",
+      "sha256": "cb55652cc72e41860de0560d3baa6b75ea0f6eea4ef85222ac2df5b6220066e5"
     }
   ]
 }

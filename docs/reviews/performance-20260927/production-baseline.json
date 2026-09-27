@@ -1,0 +1,83 @@
+{
+  "measuredAt": "2026-09-27T10:15:34.622Z",
+  "baseSha": "062c8601f2b502f123661d8f13130cf51a012ec3",
+  "scenario": "학생 관리 1~5 페이지, 기본 필터, 읽기 전용",
+  "requests": [
+    {
+      "path": "/rest/v1/rpc/get_management_stats_v1",
+      "status": 200,
+      "durationMs": 1400
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_filter_options_v1",
+      "status": 200,
+      "durationMs": 1426
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_numbered_page_v1",
+      "status": 200,
+      "durationMs": 1402
+    },
+    {
+      "path": "/rest/v1/rpc/get_management_stats_v1",
+      "status": 200,
+      "durationMs": 1051
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_filter_options_v1",
+      "status": 200,
+      "durationMs": 1050
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_numbered_page_v1",
+      "status": 200,
+      "durationMs": 1069
+    },
+    {
+      "path": "/rest/v1/rpc/get_management_stats_v1",
+      "status": 200,
+      "durationMs": 1072
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_filter_options_v1",
+      "status": 200,
+      "durationMs": 865
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_numbered_page_v1",
+      "status": 200,
+      "durationMs": 1073
+    },
+    {
+      "path": "/rest/v1/rpc/get_management_stats_v1",
+      "status": 200,
+      "durationMs": 989
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_filter_options_v1",
+      "status": 200,
+      "durationMs": 1038
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_numbered_page_v1",
+      "status": 200,
+      "durationMs": 988
+    },
+    {
+      "path": "/rest/v1/rpc/get_management_stats_v1",
+      "status": 200,
+      "durationMs": 1016
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_filter_options_v1",
+      "status": 200,
+      "durationMs": 1044
+    },
+    {
+      "path": "/rest/v1/rpc/list_management_numbered_page_v1",
+      "status": 200,
+      "durationMs": 1222
+    }
+  ],
+  "truncated": false
+}

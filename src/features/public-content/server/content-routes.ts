@@ -210,15 +210,16 @@ export function createContentAdminHandlers({
           subject,
           status,
         });
+        const references = [...new Set(result.entries.filter((row) => row.kind === "teacher")
+          .flatMap((row) => [row.data.portraitUrl, row.data.videoUrl]).filter((value) => MEDIA_PATH.test(value)))];
+        const previews = references.length ? await identity.store.previews(references).catch(() => ({} as Record<string, string>)) : {};
         for (const row of result.entries) {
           if (row.kind !== "teacher") continue;
           row.previewUrls = {};
           for (const key of ["portraitUrl", "videoUrl"]) {
             const value = row.data[key];
             if (MEDIA_PATH.test(value))
-              row.previewUrls[key] = await identity.store
-                .preview(value)
-                .catch(() => "");
+              row.previewUrls[key] = previews[value] || "";
             else if (value.startsWith("/assets/"))
               row.previewUrls[key] = new URL(
                 value,

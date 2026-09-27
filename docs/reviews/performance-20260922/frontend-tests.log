@@ -1,0 +1,443 @@
+✖ academic: accepted scope owns paging after failed filter while explicit Retry retains the failed target (204.079208ms)
+✖ academic: accepted 10 size owns paging after failed 15 preference (80.424458ms)
+✖ academic: accepted 10 size owns paging after failed 20 preference (48.930875ms)
+✖ academic: accepted 20 size owns paging after failed 10 preference (47.27825ms)
+✖ academic: workspace failed filter pager recovery adopts controls URL and return path without page1 replay (390.328292ms)
+✖ academic: effect replay retains restored page and a live controller (47.660667ms)
+✖ academic: accepted-page acknowledgement does not suppress later range-to-list reads (37.439041ms)
+✖ academic: unresolved auth does not issue reads and readiness recovery cannot stick loading (44.6205ms)
+✖ academic: real hook direct page11, retained errors, retry and shrink clamp (36.148875ms)
+✖ academic: filters and size reset atomically, stale metadata cannot replace accepted rows (45.711958ms)
+✔ academic: resolved auth readiness, role change and logout mask rows and reject old callbacks (43.581625ms)
+✔ operations: accepted scope owns paging after failed filter while explicit Retry retains the failed target (56.949ms)
+✔ operations: accepted 10 size owns paging after failed 15 preference (34.635458ms)
+✔ operations: accepted 10 size owns paging after failed 20 preference (40.529375ms)
+✔ operations: accepted 20 size owns paging after failed 10 preference (41.491084ms)
+✔ operations: workspace failed filter pager recovery adopts controls URL and return path without page1 replay (475.057958ms)
+✔ operations: effect replay retains restored page and a live controller (45.755583ms)
+✔ operations: accepted-page acknowledgement does not suppress later range-to-list reads (31.718209ms)
+✔ operations: unresolved auth does not issue reads and readiness recovery cannot stick loading (38.300875ms)
+✔ operations: real hook direct page11, retained errors, retry and shrink clamp (51.493ms)
+✔ operations: filters and size reset atomically, stale metadata cannot replace accepted rows (33.853208ms)
+✔ operations: resolved auth readiness, role change and logout mask rows and reject old callbacks (31.030541ms)
+▶ unchanged timetable, calendar and annual hooks keep their range readers and independent catalogs
+  ✔ timetable (41.4215ms)
+  ✔ calendar (28.588ms)
+  ✔ annual (35.0595ms)
+✔ unchanged timetable, calendar and annual hooks keep their range readers and independent catalogs (105.483209ms)
+✖ academic: displayed rows, totals and pager survive failed navigation and remain outside scrollport (85.713209ms)
+✔ operations: displayed rows, totals and pager survive failed navigation and remain outside scrollport (354.449041ms)
+✔ academic: refresh retries restored pending page7 instead of displayed old page11 (30.877625ms)
+✔ operations: refresh retries restored pending page7 instead of displayed old page11 (31.710833ms)
+✔ academic: range density recovery belongs only to its matching requested range (27.922084ms)
+✔ operations: range density recovery belongs only to its matching requested range (30.772916ms)
+✖ academic: unfiltered dataset survives detail return without restoring a period selector (89.103375ms)
+✖ academic: legacy period alias is removed without narrowing to one group (79.165167ms)
+✔ academic: queued URL writer cannot outlive logout (93.279333ms)
+✔ academic: queued URL writer cannot outlive role (78.678416ms)
+✔ academic: queued URL writer cannot outlive back (82.741125ms)
+✔ academic: queued URL writer cannot outlive unmount (195.63475ms)
+✖ academic: paging and runtime legacy period input remain on the unfiltered scope (52.053625ms)
+✔ operations: catalogs settle independently and old logout session cannot seed the real cache (32.208375ms)
+✔ operations: independent catalog failure remains visible and refresh can recover without erasing page rows (82.149292ms)
+✖ academic: acknowledged self-written URL restores after pending navigation (91.944708ms)
+✖ academic: acknowledged self-written URL restores after error navigation (76.262084ms)
+✖ academic: actual workspace page11 restoration and mounted Back preserve all controls before one read (71.265833ms)
+✖ academic: DTO through real records builder and workspace rows preserves server full-name numeric order (79.249ms)
+✔ operations: acknowledged self-written URL restores after pending navigation (454.778875ms)
+✔ operations: acknowledged self-written URL restores after error navigation (312.358333ms)
+✔ operations: actual workspace page11 restoration and mounted Back preserve all controls before one read (262.532333ms)
+✔ operations: DTO through real records builder and workspace rows preserves server full-name numeric order (188.608375ms)
+✖ operations: exact detail opens independently and progress draft/lifecycle survive page replacement, then auth clears them (312.882417ms)
+✔ operations: actual detail rejects an old role completion for the same requested class (148.048917ms)
+✔ operations: actual detail rejects an old actor completion for the same requested class (157.273792ms)
+✖ curriculum: a focused row opens its exact action and return context while nested links keep native keys (59.50025ms)
+✔ curriculum: initial read failure exposes retry without claiming an empty result or leaking the exception (75.699708ms)
+✖ curriculum: classification focus and accepted rows survive pending and failed reads, then Retry accepts the selected scope (65.974417ms)
+✔ shared progress: visual fill and accessible value agree for known, bounded, custom and unknown totals (40.692959ms)
+✔ academic: page11 is one exact RPC, flat DTO, no fallback, deadline and retryfalse (4.501458ms)
+✔ academic: rejects invalid page, size and raw filters before RPC (0.802917ms)
+✔ academic: accepts all approved sizes and preserves an empty out-of-range count (0.485541ms)
+✔ academic: rejects malformed envelope, IDs, metadata and detail payloads (0.803917ms)
+✔ academic: real caller cancellation and 8000ms deadline both abort the issued RPC (0.282084ms)
+✔ academic: every required row field is validated and valid SQL wrappers are unwrapped (0.905833ms)
+✔ operations: page11 is one exact RPC, flat DTO, no fallback, deadline and retryfalse (0.307875ms)
+✔ operations: rejects invalid page, size and raw filters before RPC (0.180708ms)
+✔ operations: accepts all approved sizes and preserves an empty out-of-range count (0.105958ms)
+✔ operations: rejects malformed envelope, IDs, metadata and detail payloads (1.241542ms)
+✔ operations: real caller cancellation and 8000ms deadline both abort the issued RPC (0.326417ms)
+✔ operations: every required row field is validated and valid SQL wrappers are unwrapped (0.564875ms)
+✔ numbered rows accept the full canonical PostgreSQL UUID domain, not only legacy v1-v5 IDs (0.223625ms)
+✔ academic: keeps alias, sessionKey and >100 percent; metadata=false is explicit null without cache reads (0.414416ms)
+✔ operations: group representatives may be outside page, but counts and catalog membership must be valid (0.29325ms)
+✔ academic absent-period responses must resolve to a UUID or null, never an invented alias (0.225417ms)
+✔ student classification uses full server counts and preserves legacy write status (0.690167ms)
+✔ student page defaults to enrolled, offers exactly three statuses, and resets to enrolled (1481.894584ms)
+✔ student enrollment popover loads on demand, retries and reaches the next relation page (40.151417ms)
+✔ RPC through real hook and table preserves descending titles (241.866125ms)
+✔ RPC through real hook and table preserves natural numeric titles (221.616583ms)
+✔ RPC through real hook and table preserves primary teacher and secondary descending titles (277.60675ms)
+✔ retired class periods stay ignored across refresh, mutation retry and shrink clamp (52.940583ms)
+✔ class page failure is retryable without resolving a default period (63.640042ms)
+✔ initial failed class load keeps visible caption and pager unknown, but true zero stays empty (223.283042ms)
+✔ class pages load even when no default period is available (57.9785ms)
+✔ late class results after filter changes cannot overwrite the current scope (63.064458ms)
+✔ late class results after actor changes cannot overwrite the current scope (75.62875ms)
+✔ late class results after role changes cannot overwrite the current scope (63.275417ms)
+✔ late class results after disabled list changes cannot overwrite the current scope (65.091041ms)
+✔ actual manual size handler never requests old page with the new size during transition URL reset (435.090584ms)
+✔ management defaults to fixed 10 rows without an automatic measurement callback (194.825042ms)
+✔ actual confirmed deletion has one reconciliation owner (remaining 101) (187.935375ms)
+✔ actual confirmed deletion has one reconciliation owner (remaining 100) (182.019625ms)
+✔ actual confirmed deletion retains rows and does not refresh when the mutation fails (171.993042ms)
+✔ management hook uses direct server pages, sort resets, refresh and independent detail under StrictMode (58.194542ms)
+✔ URL and saved sorts are sanitized with per-kind defaults and preserve unrelated parameters (22.151917ms)
+✔ filter changes reset page atomically, while retired period parameters preserve restore (0.221167ms)
+✔ numbered navigation notifies Next history rather than copying its internal bypass marker (0.15925ms)
+✔ StrictMode mount replay creates a live controller and authorization aborts pending totals (55.15625ms)
+✔ retired period URL cleanup issues only one numbered page request (57.660458ms)
+✔ metadata failure stays visible without discarding a successful numbered page (55.136375ms)
+✔ authorized detail catalogs remain available through metadata failure and clear on role or logout (61.9ms)
+✔ the real table renders server page rows unchanged, routes sort headers and disables derived sorts (175.547667ms)
+✔ new student enrollment column preserves saved visibility, size and order (407.118041ms)
+✔ statistics cache key fixes actor, role, contract, tab, filter, and range order (0.477291ms)
+✔ private route cache shares ready aggregates across handlers for exactly ten minutes (12.762333ms)
+✔ concurrent claimant deduplicates calculation and waiters poll 100/250/500 before 503 (0.624ms)
+✔ failures are not saved and force refresh discards a superseded slow response (0.793458ms)
+✔ private cache isolates actor, role, tab, filters, and ranges (0.624541ms)
+✔ client memory cache loads only the active tab, deduplicates in flight, and expires without browser storage (0.257375ms)
+✔ browser cache never extends a server hit beyond authoritative expiresAt (0.211208ms)
+✔ browser cache rejects expired or malformed snapshots without retaining them (0.095ms)
+✔ browser cache rejects a valid-looking envelope without its own data field (0.078125ms)
+✔ force refresh stays pending across StrictMode cleanup and dependency abort until success (0.100666ms)
+✔ keyed snapshots never expose the prior tab, preset, or filter result (0.056375ms)
+✔ range presets are tab-specific, URL allowlisted, and use local calendar bounds (9.6885ms)
+✔ browser statistics request sends only bearer plus validated GET query and honors cancellation (0.604292ms)
+✔ production route keeps service role on cache wrappers and user JWT on invoker statistics (4.243917ms)
+✔ snapshot hook retains same-key refresh errors and isolates query and role changes (158.605833ms)
+✔ retired closing scopes never mount readers, even when legacy inputs enable them (200.017708ms)
+✔ actual hook restores page 11 directly with strict service rows and no full-load transport (96.942959ms)
+✔ URL-restored size owns the first request and Back-size restoration reuses the matching summary (74.235417ms)
+✔ URL-restored sizes are ephemeral route state and only explicit UI size changes persist (94.559625ms)
+✔ master owns exact RPC/filter/sort/mode and all three persisted sizes (76.980125ms)
+✔ requests owns exact RPC/filter/sort/mode and all three persisted sizes (139.572459ms)
+✔ purchase owns exact RPC/filter/sort/mode and all three persisted sizes (53.45125ms)
+✔ sales owns exact RPC/filter/sort/mode and all three persisted sizes (60.822708ms)
+✔ saleHistory owns exact RPC/filter/sort/mode and all three persisted sizes (64.394625ms)
+✔ inventory owns exact RPC/filter/sort/mode and all three persisted sizes (59.161834ms)
+✔ inventoryHistory owns exact RPC/filter/sort/mode and all three persisted sizes (64.260375ms)
+✔ direct 10 to 11 retains page/count during pending failure and retries exactly the failed target (56.566875ms)
+✔ empty out-of-range count uses the shared single clamp and retains accepted data if count changes again (55.58025ms)
+✔ one simultaneous filter/size reset leaves the accepted old filters intact until a successful new page (55.256667ms)
+✔ request/order and secondary scopes navigate and pause independently (73.695417ms)
+✔ pause aborts page and summary; same-filter resume preserves interrupted target and restoration takes precedence (51.12625ms)
+✔ summary-first arrival never lets a summary overwrite rows/page/full count (51.84475ms)
+✔ page-first arrival never lets a summary overwrite rows/page/full count (55.85675ms)
+✔ summary failure/retry is independent and obsolete filter completion cannot contaminate accepted page (54.81825ms)
+✔ page-only and size-only navigation reuse a matching full-filter summary, including one still pending (51.5195ms)
+✔ auth readiness and actor/role gate all resources, including operations (46.055625ms)
+✔ same-ID role change and logout/relogin clear all resources and reject stale callbacks/completions (52.856416ms)
+✔ late page/summary/operations from the prior role cannot publish into the new role (49.84175ms)
+✔ refreshVisible waits for enabled pages and summaries without starting disabled reads (55.731084ms)
+✔ normal unmount invalidates retained summary/operations/refresh callbacks (54.014959ms)
+✔ auth unmount invalidates retained summary/operations/refresh callbacks (54.993042ms)
+✔ auth-boundary remount creates a working lifetime without reviving the disposed owner callbacks (51.480333ms)
+✔ StrictMode lifetime cleanup/setup replay keeps current summary callbacks working (57.32ms)
+ℹ tests 144
+ℹ suites 0
+ℹ pass 123
+ℹ fail 21
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 6406.351167
+
+✖ failing tests:
+
+test at tests/academic-operations-numbered-pagination.test.mjs:122:3
+✖ academic: accepted scope owns paging after failed filter while explicit Retry retains the failed target (204.079208ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  + actual - expected
+  
+  + 'FAILED_FILTER'
+  - ''
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:132:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async startSubtestAfterBootstrap (node:internal/test_runner/harness:387:3) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 'FAILED_FILTER',
+    expected: '',
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:146:5
+✖ academic: accepted 10 size owns paging after failed 15 preference (80.424458ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  15 !== 10
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:157:14)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 15,
+    expected: 10,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:146:5
+✖ academic: accepted 10 size owns paging after failed 20 preference (48.930875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  20 !== 10
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:157:14)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 20,
+    expected: 10,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:146:5
+✖ academic: accepted 20 size owns paging after failed 10 preference (47.27825ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  10 !== 20
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:157:14)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 10,
+    expected: 20,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:169:3
+✖ academic: workspace failed filter pager recovery adopts controls URL and return path without page1 replay (390.328292ms)
+  TypeError: Cannot read properties of null (reading 'click')
+      at file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:176:80
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:176:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:197:3
+✖ academic: effect replay retains restored page and a live controller (47.660667ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 11
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:202:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 11,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:206:3
+✖ academic: accepted-page acknowledgement does not suppress later range-to-list reads (37.439041ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at Object.finish (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:117:59)
+      at file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:211:32
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:211:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:218:3
+✖ academic: unresolved auth does not issue reads and readiness recovery cannot stick loading (44.6205ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  null !== 260
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:229:53)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: 260,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:231:3
+✖ academic: real hook direct page11, retained errors, retry and shrink clamp (36.148875ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 11
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:235:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 11,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:246:3
+✖ academic: filters and size reset atomically, stale metadata cannot replace accepted rows (45.711958ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  1 !== 11
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:251:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 1,
+    expected: 11,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:293:50
+✖ academic: displayed rows, totals and pager survive failed navigation and remain outside scrollport (85.713209ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(pager)
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:302:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:357:1
+✖ academic: unfiltered dataset survives detail return without restoring a period selector (89.103375ms)
+  TypeError: Cannot read properties of null (reading 'href')
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:361:33)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:369:1
+✖ academic: legacy period alias is removed without narrowing to one group (79.165167ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  '동일학기' !== null
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:377:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: '동일학기',
+    expected: null,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:398:1
+✖ academic: paging and runtime legacy period input remain on the unfiltered scope (52.053625ms)
+  TypeError: Cannot read properties of undefined (reading 'args')
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:402:34)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:439:51
+✖ academic: acknowledged self-written URL restores after pending navigation (91.944708ms)
+  TypeError: Cannot read properties of null (reading 'click')
+      at file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:442:80
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:442:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:439:51
+✖ academic: acknowledged self-written URL restores after error navigation (76.262084ms)
+  TypeError: Cannot read properties of null (reading 'click')
+      at file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:442:80
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:442:11)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:482:3
+✖ academic: actual workspace page11 restoration and mounted Back preserve all controls before one read (71.265833ms)
+  AssertionError [ERR_ASSERTION]: The expression evaluated to a falsy value:
+  
+    assert.ok(document.querySelector('button[aria-label="11 페이지"][aria-current="page"]'))
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:488:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:518:3
+✖ academic: DTO through real records builder and workspace rows preserves server full-name numeric order (79.249ms)
+  AssertionError [ERR_ASSERTION]: Expected values to be strictly equal:
+  
+  0 !== 3
+  
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:527:12)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: true,
+    code: 'ERR_ASSERTION',
+    actual: 0,
+    expected: 3,
+    operator: 'strictEqual',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:532:1
+✖ operations: exact detail opens independently and progress draft/lifecycle survive page replacement, then auth clears them (312.882417ms)
+  TypeError: Cannot read properties of undefined (reading 'resolve')
+      at Object.finish (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:117:59)
+      at file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:544:30
+      at process.env.NODE_ENV.exports.act (/Users/hyunjun/Documents/Codex/tips_dashboard/node_modules/.pnpm/react@19.2.3/node_modules/react/cjs/react.development.js:814:22)
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:544:9)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)
+
+test at tests/academic-operations-numbered-pagination.test.mjs:581:1
+✖ curriculum: a focused row opens its exact action and return context while nested links keep native keys (59.50025ms)
+  AssertionError [ERR_ASSERTION]: 수업계획을 불러오지 못했습니다. 다시 시도해 주세요.다시 시도필터2수강 · 수학수업 상태수강과목수학학년전체 학년선생님전체 선생님강의실전체 강의실조건 초기화전체—일정 없음—일정 연장 필요—일정 편성—수업계획 조회 실패
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:587:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7) {
+    generatedMessage: false,
+    code: 'ERR_ASSERTION',
+    actual: null,
+    expected: true,
+    operator: '==',
+    diff: 'simple'
+  }
+
+test at tests/academic-operations-numbered-pagination.test.mjs:629:1
+✖ curriculum: classification focus and accepted rows survive pending and failed reads, then Retry accepts the selected scope (65.974417ms)
+  TypeError: Cannot read properties of undefined (reading 'focus')
+      at TestContext.<anonymous> (file:///private/tmp/tips-perf-current-20260922/tests/academic-operations-numbered-pagination.test.mjs:634:10)
+      at async Test.run (node:internal/test_runner/test:1389:7)
+      at async Test.processPendingSubtests (node:internal/test_runner/test:960:7)

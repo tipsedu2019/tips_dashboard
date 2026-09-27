@@ -1,0 +1,17 @@
+{
+  "signedPreview": {
+    "status": 200,
+    "rows": 20,
+    "simulatedEachSignLatencyMs": 20,
+    "signCalls": 40,
+    "maxConcurrency": 1,
+    "elapsedMs": 850
+  },
+  "publicAsset": {
+    "uniqueAssets": 5,
+    "catalogQueries": 5,
+    "catalogRowsPerQuery": 20,
+    "signRequests": 5,
+    "note": "Mocked transport only; no network or production mutation"
+  }
+}

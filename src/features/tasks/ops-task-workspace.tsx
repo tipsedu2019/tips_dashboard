@@ -1,5 +1,7 @@
 "use client"
 
+import dynamic from "next/dynamic"
+
 import { DataTableToolbar, DataTableCommandRow, DATA_TABLE_LAYOUT_CLASS_NAME, DATA_TABLE_PAGER_CLASS_NAME, DATA_TABLE_MOBILE_ITEM_CLASS_NAME } from "@/components/data-table/data-table-surface"
 import { DataTableSearchField } from "@/components/data-table/data-table-search-field"
 import { useDataTableColumns } from "@/components/data-table/data-table-columns"
@@ -190,7 +192,9 @@ import {
   getRegistrationCaseTabCounts,
   type RegistrationCaseListViewItem,
 } from "./registration-case-list-model"
-import { RegistrationAppointmentCalendar } from "./registration-appointment-calendar"
+const RegistrationAppointmentCalendar = dynamic(() => import("./registration-appointment-calendar").then((module) => module.RegistrationAppointmentCalendar), {
+  loading: () => <div role="status" className="p-4 text-sm text-muted-foreground">불러오는 중…</div>,
+})
 import type {
   RegistrationAppointmentCalendarItem,
   RegistrationAppointmentCalendarKindCounts,
@@ -238,7 +242,9 @@ import {
   type RegistrationObservationClient,
 } from "./registration-observation-service"
 import { isRegistrationObservationWorkflowStatus } from "./registration-workflow-status.js"
-import { RegistrationApplicationCreate } from "./registration-application-create"
+const RegistrationApplicationCreate = dynamic(() => import("./registration-application-create").then((module) => module.RegistrationApplicationCreate), {
+  loading: () => <div role="status" className="p-4 text-sm text-muted-foreground">불러오는 중…</div>,
+})
 import { resolveRegistrationCreateCatalogStatus } from "./registration-application-model"
 import {
   createRegistrationCreateAttempt,
@@ -260,7 +266,9 @@ import {
   shouldEnableRegistrationSubjectTrackFixture,
 } from "./registration-track-fixture-runtime"
 import type { RegistrationSubjectTrackFixtureState } from "./registration-track-fixtures"
-import { WordRetestManualDialog } from "./word-retest-manual-dialog"
+const WordRetestManualDialog = dynamic(() => import("./word-retest-manual-dialog").then((module) => module.WordRetestManualDialog), {
+  loading: () => <div role="status" className="p-4 text-sm text-muted-foreground">불러오는 중…</div>,
+})
 
 type RegistrationSubjectTrackFixtureModule = typeof import("./registration-track-fixtures")
 

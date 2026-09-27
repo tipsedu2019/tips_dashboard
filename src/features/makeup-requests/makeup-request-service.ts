@@ -2,7 +2,6 @@
 
 import { supabase } from "@/lib/supabase"
 import {
-  buildRoomAvailability,
   canTransitionMakeupRequest,
   getMakeupRequestEffectiveYear,
   getMakeupRequestKind,
@@ -13,6 +12,7 @@ import {
   resolveMakeupApprovalGroup,
   type MakeupRequestKind,
 } from "./makeup-request-model.js"
+import { readMakeupDetail } from "./makeup-numbered-service"
 import { runIdempotentMakeupCreate } from "./makeup-create-attempt.js"
 import { getMakeupWorkspaceLoadErrorMessage, MAKEUP_TABLE_TIMEOUT_MS } from "./makeup-request-loading"
 import { createNotificationControlPlaneService } from "@/features/notifications/notification-control-plane-service"
@@ -374,7 +374,7 @@ function mapClass(row: Row): MakeupClassOption {
   }
 }
 
-function mapRequest(row: Row, profilesById: Map<string, MakeupProfileOption>, teachersById: Map<string, MakeupTeacherOption>, eventsByRequestId = new Map<string, MakeupRequestEvent[]>()) {
+function mapRequest(row: Row, profilesById: Map<string, Pick<MakeupProfileOption, "label">>, teachersById: Map<string, Pick<MakeupTeacherOption, "name">>, eventsByRequestId = new Map<string, MakeupRequestEvent[]>()) {
   const id = text(row.id)
   const requesterId = text(row.requester_id)
   const teacherCatalogId = text(row.teacher_catalog_id)
@@ -839,15 +839,11 @@ async function loadSingleMakeupRequest(requestId: string, data?: MakeupRequestWo
 
 export async function approveMakeupRequest(requestId: string, actorId: string, note = "") {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const { request, data } = await loadSingleMakeupRequest(requestId)
+  const request = await readMakeupDetail({ id: requestId })
+  if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
   const nextStatus = isRefundApprovalRequest(request) ? "refund_pending" : hasMakeupPart(request) ? "completed" : "makeup_pending"
   if (!canTransitionMakeupRequest(request.status, nextStatus, { isApprover: request.approverProfileId === actorId })) {
     throw new Error("결재 승인 권한이 없습니다.")
-  }
-
-  const isRefundApproval = nextStatus === "refund_pending"
-  if (!isRefundApproval && hasMakeupPart(request)) {
-    assertRoomAvailableForCompletion(request, data)
   }
 
   const { data: sessionData } = await supabase.auth.getSession()
@@ -874,9 +870,23 @@ export async function approveMakeupRequest(requestId: string, actorId: string, n
   if (!text(requestRow.id) || !sourceEventId) {
     throw new Error("휴보강 승인 결과가 올바르지 않습니다.")
   }
-  const profilesById = new Map(data.profiles.map((profile) => [profile.id, profile]))
-  const teachersById = new Map(data.teachers.map((teacher) => [teacher.id, teacher]))
-  const approvedRequest = mapRequest(requestRow, profilesById, teachersById)
+  // Identity labels came from the exact, authorized detail DTO; approval cannot
+  // change its participants. Keep the committed mutation response authoritative.
+  const profilesById = new Map([
+    [request.requesterId, { label: request.requesterLabel }],
+    [request.teacherProfileId, { label: request.teacherLabel }],
+    [request.approverProfileId, { label: request.approverLabel }],
+    [request.approvedBy, { label: request.approvedByLabel }],
+    [request.completedBy, { label: request.completedByLabel }],
+    [request.canceledBy, { label: request.canceledByLabel }],
+  ].filter(([id]) => Boolean(id)) as [string, { label: string }][])
+  const teachersById = new Map([
+    [request.teacherCatalogId, { name: request.teacherLabel }],
+    [request.approverTeacherCatalogId, { name: request.approverLabel }],
+  ])
+  const approvedRequest = { ...mapRequest(requestRow, profilesById, teachersById),
+    requesterLabel: request.requesterLabel, teacherLabel: request.teacherLabel, approverLabel: request.approverLabel,
+  }
   await dispatchLegacyMakeupNotification(sourceEventId)
   return approvedRequest
 }
@@ -986,30 +996,6 @@ export async function resubmitMakeupRequest(requestId: string, input: MakeupRequ
     p_request_id: crypto.randomUUID(),
   }, data)
   return result.request
-}
-
-function assertRoomAvailableForCompletion(request: MakeupRequest, data: MakeupRequestWorkspaceData) {
-  const slots = request.makeupSlots.length > 0
-    ? request.makeupSlots
-    : [{ id: "slot-1", startAt: request.makeupStartAt, endAt: request.makeupEndAt, classroom: request.makeupClassroom }]
-
-  for (const slot of slots) {
-    const classroom = text(slot.classroom || request.makeupClassroom)
-    const availability = buildRoomAvailability({
-      classrooms: data.classrooms,
-      classes: data.classes,
-      requests: data.requests,
-      academicEvents: data.academicEvents,
-      slots: [{ ...slot, classroom }],
-      currentRequestId: request.id,
-      subject: request.subject,
-    })
-    const target = availability.find((room) => room.name === classroom)
-    if (target && target.collisions.length > 0) {
-      const details = target.collisions.map((collision) => collision.title || collision.detail).filter(Boolean).join(", ")
-      throw new Error(`보강 강의실 충돌이 있습니다: ${details}`)
-    }
-  }
 }
 
 export async function cancelCompletedMakeupRequest(requestId: string, actorId: string, note = "") {
