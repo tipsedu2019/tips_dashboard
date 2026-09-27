@@ -1,0 +1,23 @@
+{
+  "measuredAt": "2026-09-27T10:18:00.271Z",
+  "scenario": "수업 검색 abcd 연속 입력, 최초 조회 제외",
+  "rpcs": [
+    {
+      "path": "/rest/v1/rpc/get_academic_curriculum_numbered_page_v2",
+      "failed": true
+    },
+    {
+      "path": "/rest/v1/rpc/get_academic_curriculum_numbered_page_v2",
+      "failed": true
+    },
+    {
+      "path": "/rest/v1/rpc/get_academic_curriculum_numbered_page_v2",
+      "failed": true
+    },
+    {
+      "path": "/rest/v1/rpc/get_academic_curriculum_numbered_page_v2",
+      "failed": false
+    }
+  ],
+  "truncated": false
+}

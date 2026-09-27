@@ -4,7 +4,7 @@
 -- that migration: replacing an immutable function alone does not backfill it.
 begin;
 set local lock_timeout = '5s';
-set local statement_timeout = '120s';
+set local statement_timeout = '10s';
 create function dashboard_private.textbook_stored_taxonomy_v1(
  p_title text,p_name text,p_subject text,p_category text,p_publisher text,p_isbn13 text,p_barcode text,
  p_school_level text,p_grade_level text,p_school_levels text[],p_grade_levels text[],p_sub_subject text
@@ -25,6 +25,10 @@ grant execute on function
  dashboard_private.textbook_grade_v1(text),
  dashboard_private.textbook_compact_v1(text)
  to service_role;
+-- One-time rewrite: production preflight on 2026-09-27 counted 371 textbooks
+-- (400 KiB total). Keep generated values atomic with existing writes; abort
+-- rather than continue if lock acquisition exceeds 5s or rewriting exceeds 10s.
+-- squawk-ignore adding-field-with-default
 alter table public.textbooks add column read_taxonomy jsonb generated always as (
  dashboard_private.textbook_stored_taxonomy_v1(title,name,subject,category,publisher,isbn13,barcode,school_level,grade_level,school_levels,grade_levels,sub_subject)
 ) stored;
@@ -70,6 +74,11 @@ language plpgsql stable security invoker set search_path='' as $$ begin
       when p.latest<>'' and p.days<30 then 'done' else 'pending' end from prepared p;
 end $$;
 -- Latest entry into the current task status; excludes unrelated audit events.
+-- Production preflight counted 1,511 events (13.5 MiB heap), with no waiting
+-- locks. Build atomically with the taxonomy change so failure rolls both back.
+-- The 5s lock and 10s statement limits bound this one-time write interruption;
+-- a timeout requires rescheduling, not an automatic retry or timeout increase.
+-- squawk-ignore require-concurrent-index-creation
 create index ops_task_events_status_entered_idx
  on public.ops_task_events(task_id,after_value,created_at desc)
  where field_name='status';
