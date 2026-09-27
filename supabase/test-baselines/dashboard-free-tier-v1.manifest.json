@@ -619,6 +619,11 @@
       "fileName": "20260927141000_student_enrollment_batch_reads.sql",
       "status": "final",
       "sha256": "04d90be530041537dfcb92389c767bdf9118098a50ce051e3bf6b2a20fe6bfe8"
+    },
+    {
+      "fileName": "20260927151448_curriculum_session_read_aggregation.sql",
+      "status": "final",
+      "sha256": "4956c90de275bbdc2e5eb0bf5927e15b2b02d52d9d5e0c42c4aae4ebc9201385"
     }
   ]
 }

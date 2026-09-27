@@ -1,0 +1,348 @@
+{
+  "source": "isolated synthetic DB, not production latency",
+  "samplesPerVariant": 25,
+  "classes": 105,
+  "savedSessionsPerClass": 120,
+  "roleParity": [
+    {
+      "role": "admin",
+      "comparisons": 14,
+      "equal": true
+    },
+    {
+      "role": "staff",
+      "comparisons": 14,
+      "equal": true
+    },
+    {
+      "role": "teacher",
+      "comparisons": 14,
+      "equal": true
+    },
+    {
+      "role": "assistant",
+      "comparisons": 14,
+      "equal": true
+    },
+    {
+      "role": "viewer",
+      "comparisons": 14,
+      "equal": true
+    }
+  ],
+  "samples": [
+    {
+      "variant": "before",
+      "ms": 69.352,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.752,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.89,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.62,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.536,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 14.303,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 70.688,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 14.235,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 69.451,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.986,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.463,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.709,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.943,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.596,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.854,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.984,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 69.497,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.9,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.644,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 14.075,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.996,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.703,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.477,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.601,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 69.428,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.833,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 69.838,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 14.453,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 69.468,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.878,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.507,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.892,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.221,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.505,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.181,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.842,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.742,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.701,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.768,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.631,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.771,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.55,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.015,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.592,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 68.201,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.631,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.833,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.588,
+      "sharedHits": 22,
+      "tempReads": 0
+    },
+    {
+      "variant": "before",
+      "ms": 67.565,
+      "sharedHits": 64,
+      "tempReads": 0
+    },
+    {
+      "variant": "after",
+      "ms": 13.465,
+      "sharedHits": 22,
+      "tempReads": 0
+    }
+  ],
+  "before": {
+    "n": 25,
+    "p50Ms": 68.463,
+    "p95Ms": 69.838,
+    "maxMs": 70.688
+  },
+  "after": {
+    "n": 25,
+    "p50Ms": 13.709,
+    "p95Ms": 14.303,
+    "maxMs": 14.453
+  },
+  "passed": true
+}

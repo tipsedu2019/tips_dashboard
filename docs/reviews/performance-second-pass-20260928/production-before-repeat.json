@@ -1,0 +1,90 @@
+[
+  {
+    "receipt": {
+      "atUTC": "2026-09-27T15:25:39.81144+00:00",
+      "samples": [
+        {
+          "page": 2,
+          "sample": 1,
+          "metadata": false,
+          "sharedHits": 543,
+          "executionMs": 132.153,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 2,
+          "sample": 2,
+          "metadata": false,
+          "sharedHits": 543,
+          "executionMs": 131.232,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 2,
+          "sample": 3,
+          "metadata": false,
+          "sharedHits": 543,
+          "executionMs": 131.947,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 2,
+          "sample": 4,
+          "metadata": false,
+          "sharedHits": 543,
+          "executionMs": 131,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 2,
+          "sample": 5,
+          "metadata": false,
+          "sharedHits": 543,
+          "executionMs": 135.648,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 1,
+          "sample": 1,
+          "metadata": true,
+          "sharedHits": 545,
+          "executionMs": 130.849,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 1,
+          "sample": 2,
+          "metadata": true,
+          "sharedHits": 545,
+          "executionMs": 133.024,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 1,
+          "sample": 3,
+          "metadata": true,
+          "sharedHits": 545,
+          "executionMs": 129.731,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 1,
+          "sample": 4,
+          "metadata": true,
+          "sharedHits": 545,
+          "executionMs": 131.099,
+          "tempReadBlocks": 0
+        },
+        {
+          "page": 1,
+          "sample": 5,
+          "metadata": true,
+          "sharedHits": 545,
+          "executionMs": 129.601,
+          "tempReadBlocks": 0
+        }
+      ],
+      "functionMd5": "75ca3d5621c51ff9ead62a1e8c805197"
+    }
+  }
+]

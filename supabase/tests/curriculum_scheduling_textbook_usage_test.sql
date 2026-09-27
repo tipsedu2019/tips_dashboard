@@ -88,5 +88,84 @@ select lives_ok($$update public.classes set textbook_ids=jsonb_build_array(pg_te
 reset role;
 select is((select textbook_ids from public.classes where id=pg_temp.fid(1)),'[]'::jsonb,'viewer cannot change class textbook data');
 reset role;
+
+-- Reader optimization must preserve saved-date validation, storage precedence,
+-- state normalization, next-session identity and the exact last-update value.
+select set_config('request.jwt.claim.sub',pg_temp.fid(900)::text,true);
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.fid(900),'role','authenticated')::text,true);
+update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions}',schedule_plan->'sessions'||jsonb_build_array(
+ jsonb_build_object('id','bad-empty','date',''),
+ jsonb_build_object('id','bad-null','date',null),
+ jsonb_build_object('id','bad-format','date','2028-2-1'),
+ jsonb_build_object('id','bad-number','date',123),
+ jsonb_build_object('id','ignored-skipped','date',(current_date+1)::text,'state','skipped'),
+ jsonb_build_object('id','legacy:force','date',(current_date+2)::text,'state','force_active'),
+ jsonb_build_object('id','legacy:makeup','date',(current_date-5)::text,'state','makeup'),
+ jsonb_build_object('id','legacy:exception','date',(current_date+4)::text,'scheduleState','exception','state','skipped'),
+ jsonb_build_object('sessionKey','legacy:tbd','date',(current_date+3)::text,'state','tbd'),
+ jsonb_build_object('id','legacy:default','date',(current_date+6)::text)
+)) where id=pg_temp.fid(1);
+insert into public.class_lesson_sessions(id,class_id,session_key,session_date,schedule_state,origin,updated_at) values
+(pg_temp.fid(950),pg_temp.fid(3),'newer-active',current_date+5,'active','manual','2098-01-01T00:00:00Z'),
+(pg_temp.fid(951),pg_temp.fid(3),'newest-skipped',current_date+1,'skipped','manual','2099-01-01T00:00:00Z');
+set local role authenticated;
+create temporary table optimized_result as select public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,true) data;
+select is((select (r->>'totalSessions')::int from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),7,'saved invalid/empty/non-string dates and skipped states remain excluded');
+select is((select (r->>'plannedSessions')::int from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),2,'past active and makeup sessions retain planned count');
+select is((select r#>>'{nextSession,sessionId}' from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'legacy:force','next session excludes skipped dates and preserves saved identity');
+select is((select r#>>'{nextSession,scheduleState}' from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'active','force-active saved state is normalized exactly once');
+select is((select r->>'lastUpdatedAt' from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1)::text),'','saved sessions retain empty last-update value');
+select is((select (r->>'totalSessions')::int from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(3)::text),2,'normalized storage ignores saved copies and skipped rows');
+select is((select r->>'lastUpdatedAt' from optimized_result,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(3)::text),(select max(updated_at::text) from public.class_lesson_sessions where class_id=pg_temp.fid(3) and schedule_state<>'skipped'),'last-update aggregate retains text ordering and excludes skipped sessions');
+select is(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,false)->'rows',(select data->'rows' from optimized_result),'metadata-free page has identical rows');
+select is(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,false)->'stats','null'::jsonb,'metadata-free page omits statistics');
+select is(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),2147483647,20,false)->'rows','[]'::jsonb,'oversized page preserves safe bigint offset and empty rows');
+select throws_ok($$select public.get_academic_curriculum_numbered_page_v2('[]',1,10,true)$$,'22023','academic_numbered_filters_invalid','final optimized function preserves exact invalid-filter SQLSTATE');
+select throws_ok($$select public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,11,true)$$,'22023','academic_numbered_request_invalid','final optimized function preserves exact invalid-page SQLSTATE');
+reset role;
+create policy curriculum_perf_hidden_class on public.classes as restrictive for select to authenticated using (id<>pg_temp.fid(1));
+create policy curriculum_perf_hidden_session on public.class_lesson_sessions as restrictive for select to authenticated using (id<>pg_temp.fid(950));
+set local role authenticated;
+select ok(not exists(select 1 from jsonb_array_elements(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,true)->'rows') r where r->>'id'=pg_temp.fid(1)::text),'materialized schedules do not reveal a hidden class');
+select is((select (r->>'totalSessions')::int from jsonb_array_elements(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,true)->'rows') r where r->>'id'=pg_temp.fid(3)::text),1,'materialized schedules retain session RLS');
+select is((select r->>'lastUpdatedAt' from jsonb_array_elements(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,true)->'rows') r where r->>'id'=pg_temp.fid(3)::text),(select max(updated_at::text) from public.class_lesson_sessions where class_id=pg_temp.fid(3) and schedule_state<>'skipped'),'hidden session cannot affect last-update metadata');
+reset role;
+select set_config('request.jwt.claim.sub','',true);
+select set_config('request.jwt.claims','{}',true);
+set local role authenticated;
+select throws_ok($$select public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(),1,10,true)$$,'42501','authentication_required','missing actor is still rejected by final function');
+reset role;
+
+-- Page-first session work must retain the full eligible total, numeric ordering,
+-- and selected-class data on middle/final/empty pages at every supported size.
+select set_config('request.jwt.claim.sub',pg_temp.fid(900)::text,true);
+select set_config('request.jwt.claims',jsonb_build_object('sub',pg_temp.fid(900),'role','authenticated')::text,true);
+insert into public.classes(id,name,status,subject,schedule_storage_mode,schedule_plan)
+select pg_temp.fid(1000+n),'__curriculum_pages__ '||n,'수강',case when n%2=0 then '수학' else '영어' end,'legacy',
+ jsonb_build_object('sessions',case when n%5=0 then '[]'::jsonb else
+   (select jsonb_agg(jsonb_build_object('id','page-'||n||'-'||d,'date',
+     (current_date+case when n%3=0 then -d else d end)::text,'state','active')) from generate_series(1,n) d) end)
+from generate_series(1,25) n;
+set local role authenticated;
+create temporary table middle_page as select public.get_academic_curriculum_numbered_page_v2(
+ pg_temp.filters('{"search":"__curriculum_pages__"}'),2,10,false) data;
+select is((select data->>'totalCount' from middle_page),'25','middle page retains all eligible classes in total');
+select is((select jsonb_agg(r->>'id' order by ord) from middle_page,jsonb_array_elements(data->'rows') with ordinality rows(r,ord)),
+ (select jsonb_agg(pg_temp.fid(1000+n)::text order by n) from generate_series(11,20) n),'middle page retains natural numeric class order');
+select is((select (r->>'totalSessions')::int from middle_page,jsonb_array_elements(data->'rows') r where r->>'id'=pg_temp.fid(1011)::text),11,'middle page calculates the selected class sessions');
+select is(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters('{"search":"__curriculum_pages__"}'),3,10,false)->>'page','3','last partial page retains requested page number');
+select is(jsonb_array_length(public.get_academic_curriculum_numbered_page_v2(pg_temp.filters('{"search":"__curriculum_pages__"}'),3,10,false)->'rows'),5,'last partial page contains five rows');
+select is(
+ public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(jsonb_build_object('search','__curriculum_pages__','viewMode',mode)),page,size,false)->'rows',
+ public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(jsonb_build_object('search','__curriculum_pages__','viewMode',mode)),page,size,true)->'rows',
+ format('metadata-free %s page %s size %s matches complete-scope rows',mode,page,size))
+from unnest(array['all','unlinked','unscheduled','update','done']) mode
+cross join generate_series(1,4) page cross join unnest(array[10,15,20]) size;
+select is(
+ public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(jsonb_build_object('search','__curriculum_pages__','viewMode',mode)),1,10,false)->'totalCount',
+ public.get_academic_curriculum_numbered_page_v2(pg_temp.filters(jsonb_build_object('search','__curriculum_pages__','viewMode',mode)),1,10,true)->'totalCount',
+ format('%s view retains complete-scope total',mode))
+from unnest(array['all','unlinked','unscheduled','update','done']) mode;
+reset role;
 select * from finish();
 rollback;
