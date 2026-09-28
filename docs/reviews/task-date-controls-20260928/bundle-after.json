@@ -1,0 +1,508 @@
+{
+  "routes": {
+    "registration": {
+      "files": [
+        {
+          "path": "static/chunks/9153-10181515d84fed26.js",
+          "bytes": 8754,
+          "gzipBytes": 3546
+        },
+        {
+          "path": "static/chunks/9118-b8b63f497921dc88.js",
+          "bytes": 13658,
+          "gzipBytes": 5295
+        },
+        {
+          "path": "static/chunks/app/not-found-f4cf39155742fbb6.js",
+          "bytes": 263,
+          "gzipBytes": 195
+        },
+        {
+          "path": "static/chunks/948ae797-3c169ce5f99310e1.js",
+          "bytes": 62504,
+          "gzipBytes": 13287
+        },
+        {
+          "path": "static/chunks/3985-8ab90c35e15f80b7.js",
+          "bytes": 171087,
+          "gzipBytes": 47604
+        },
+        {
+          "path": "static/chunks/9317-709f5e04ed461fdd.js",
+          "bytes": 10470,
+          "gzipBytes": 4472
+        },
+        {
+          "path": "static/chunks/app/layout-e38e903040788ac3.js",
+          "bytes": 1723,
+          "gzipBytes": 866
+        },
+        {
+          "path": "static/chunks/1859-ef38eb81dff5d9ad.js",
+          "bytes": 28179,
+          "gzipBytes": 9180
+        },
+        {
+          "path": "static/chunks/7508-fba3c8a9ece7aee3.js",
+          "bytes": 56173,
+          "gzipBytes": 20372
+        },
+        {
+          "path": "static/chunks/1804-ea9495329ec21be5.js",
+          "bytes": 7498,
+          "gzipBytes": 2898
+        },
+        {
+          "path": "static/chunks/7353-468501752946fd45.js",
+          "bytes": 21318,
+          "gzipBytes": 6429
+        },
+        {
+          "path": "static/chunks/7662-7ae385f0aa5979aa.js",
+          "bytes": 12091,
+          "gzipBytes": 4649
+        },
+        {
+          "path": "static/chunks/2065-8141e36816f7e90f.js",
+          "bytes": 12175,
+          "gzipBytes": 3803
+        },
+        {
+          "path": "static/chunks/6207-9f68e480198bf2b8.js",
+          "bytes": 21907,
+          "gzipBytes": 7633
+        },
+        {
+          "path": "static/chunks/app/admin/layout-833f9aea40db8596.js",
+          "bytes": 83227,
+          "gzipBytes": 23655
+        },
+        {
+          "path": "static/chunks/9647-3bee20a0eca87f23.js",
+          "bytes": 19142,
+          "gzipBytes": 6709
+        },
+        {
+          "path": "static/chunks/7940-819ad22da37f4e00.js",
+          "bytes": 9042,
+          "gzipBytes": 3321
+        },
+        {
+          "path": "static/chunks/8141-d561196d67ee1a66.js",
+          "bytes": 7736,
+          "gzipBytes": 2994
+        },
+        {
+          "path": "static/chunks/8101-740fc3e8f9d4b9c3.js",
+          "bytes": 17657,
+          "gzipBytes": 5000
+        },
+        {
+          "path": "static/chunks/3250-5aef921647327c1e.js",
+          "bytes": 12920,
+          "gzipBytes": 4848
+        },
+        {
+          "path": "static/chunks/3681-bb018c9e03569b6b.js",
+          "bytes": 9589,
+          "gzipBytes": 3413
+        },
+        {
+          "path": "static/chunks/9128-72af23d014eeda49.js",
+          "bytes": 112315,
+          "gzipBytes": 29085
+        },
+        {
+          "path": "static/chunks/3935-7d0e16676178265e.js",
+          "bytes": 560979,
+          "gzipBytes": 145089
+        },
+        {
+          "path": "static/chunks/app/admin/registration/page-89d60300d3a6245f.js",
+          "bytes": 195,
+          "gzipBytes": 164
+        }
+      ],
+      "bytes": 1260602,
+      "gzipBytes": 354507
+    },
+    "transfer": {
+      "files": [
+        {
+          "path": "static/chunks/9153-10181515d84fed26.js",
+          "bytes": 8754,
+          "gzipBytes": 3546
+        },
+        {
+          "path": "static/chunks/9118-b8b63f497921dc88.js",
+          "bytes": 13658,
+          "gzipBytes": 5295
+        },
+        {
+          "path": "static/chunks/app/not-found-f4cf39155742fbb6.js",
+          "bytes": 263,
+          "gzipBytes": 195
+        },
+        {
+          "path": "static/chunks/948ae797-3c169ce5f99310e1.js",
+          "bytes": 62504,
+          "gzipBytes": 13287
+        },
+        {
+          "path": "static/chunks/3985-8ab90c35e15f80b7.js",
+          "bytes": 171087,
+          "gzipBytes": 47604
+        },
+        {
+          "path": "static/chunks/9317-709f5e04ed461fdd.js",
+          "bytes": 10470,
+          "gzipBytes": 4472
+        },
+        {
+          "path": "static/chunks/app/layout-e38e903040788ac3.js",
+          "bytes": 1723,
+          "gzipBytes": 866
+        },
+        {
+          "path": "static/chunks/1859-ef38eb81dff5d9ad.js",
+          "bytes": 28179,
+          "gzipBytes": 9180
+        },
+        {
+          "path": "static/chunks/7508-fba3c8a9ece7aee3.js",
+          "bytes": 56173,
+          "gzipBytes": 20372
+        },
+        {
+          "path": "static/chunks/1804-ea9495329ec21be5.js",
+          "bytes": 7498,
+          "gzipBytes": 2898
+        },
+        {
+          "path": "static/chunks/7353-468501752946fd45.js",
+          "bytes": 21318,
+          "gzipBytes": 6429
+        },
+        {
+          "path": "static/chunks/7662-7ae385f0aa5979aa.js",
+          "bytes": 12091,
+          "gzipBytes": 4649
+        },
+        {
+          "path": "static/chunks/2065-8141e36816f7e90f.js",
+          "bytes": 12175,
+          "gzipBytes": 3803
+        },
+        {
+          "path": "static/chunks/6207-9f68e480198bf2b8.js",
+          "bytes": 21907,
+          "gzipBytes": 7633
+        },
+        {
+          "path": "static/chunks/app/admin/layout-833f9aea40db8596.js",
+          "bytes": 83227,
+          "gzipBytes": 23655
+        },
+        {
+          "path": "static/chunks/9647-3bee20a0eca87f23.js",
+          "bytes": 19142,
+          "gzipBytes": 6709
+        },
+        {
+          "path": "static/chunks/7940-819ad22da37f4e00.js",
+          "bytes": 9042,
+          "gzipBytes": 3321
+        },
+        {
+          "path": "static/chunks/8141-d561196d67ee1a66.js",
+          "bytes": 7736,
+          "gzipBytes": 2994
+        },
+        {
+          "path": "static/chunks/8101-740fc3e8f9d4b9c3.js",
+          "bytes": 17657,
+          "gzipBytes": 5000
+        },
+        {
+          "path": "static/chunks/3250-5aef921647327c1e.js",
+          "bytes": 12920,
+          "gzipBytes": 4848
+        },
+        {
+          "path": "static/chunks/3681-bb018c9e03569b6b.js",
+          "bytes": 9589,
+          "gzipBytes": 3413
+        },
+        {
+          "path": "static/chunks/9128-72af23d014eeda49.js",
+          "bytes": 112315,
+          "gzipBytes": 29085
+        },
+        {
+          "path": "static/chunks/3935-7d0e16676178265e.js",
+          "bytes": 560979,
+          "gzipBytes": 145089
+        },
+        {
+          "path": "static/chunks/app/admin/transfer/page-7cf503abf12fd458.js",
+          "bytes": 195,
+          "gzipBytes": 164
+        }
+      ],
+      "bytes": 1260602,
+      "gzipBytes": 354507
+    },
+    "withdrawal": {
+      "files": [
+        {
+          "path": "static/chunks/9153-10181515d84fed26.js",
+          "bytes": 8754,
+          "gzipBytes": 3546
+        },
+        {
+          "path": "static/chunks/9118-b8b63f497921dc88.js",
+          "bytes": 13658,
+          "gzipBytes": 5295
+        },
+        {
+          "path": "static/chunks/app/not-found-f4cf39155742fbb6.js",
+          "bytes": 263,
+          "gzipBytes": 195
+        },
+        {
+          "path": "static/chunks/948ae797-3c169ce5f99310e1.js",
+          "bytes": 62504,
+          "gzipBytes": 13287
+        },
+        {
+          "path": "static/chunks/3985-8ab90c35e15f80b7.js",
+          "bytes": 171087,
+          "gzipBytes": 47604
+        },
+        {
+          "path": "static/chunks/9317-709f5e04ed461fdd.js",
+          "bytes": 10470,
+          "gzipBytes": 4472
+        },
+        {
+          "path": "static/chunks/app/layout-e38e903040788ac3.js",
+          "bytes": 1723,
+          "gzipBytes": 866
+        },
+        {
+          "path": "static/chunks/1859-ef38eb81dff5d9ad.js",
+          "bytes": 28179,
+          "gzipBytes": 9180
+        },
+        {
+          "path": "static/chunks/7508-fba3c8a9ece7aee3.js",
+          "bytes": 56173,
+          "gzipBytes": 20372
+        },
+        {
+          "path": "static/chunks/1804-ea9495329ec21be5.js",
+          "bytes": 7498,
+          "gzipBytes": 2898
+        },
+        {
+          "path": "static/chunks/7353-468501752946fd45.js",
+          "bytes": 21318,
+          "gzipBytes": 6429
+        },
+        {
+          "path": "static/chunks/7662-7ae385f0aa5979aa.js",
+          "bytes": 12091,
+          "gzipBytes": 4649
+        },
+        {
+          "path": "static/chunks/2065-8141e36816f7e90f.js",
+          "bytes": 12175,
+          "gzipBytes": 3803
+        },
+        {
+          "path": "static/chunks/6207-9f68e480198bf2b8.js",
+          "bytes": 21907,
+          "gzipBytes": 7633
+        },
+        {
+          "path": "static/chunks/app/admin/layout-833f9aea40db8596.js",
+          "bytes": 83227,
+          "gzipBytes": 23655
+        },
+        {
+          "path": "static/chunks/9647-3bee20a0eca87f23.js",
+          "bytes": 19142,
+          "gzipBytes": 6709
+        },
+        {
+          "path": "static/chunks/7940-819ad22da37f4e00.js",
+          "bytes": 9042,
+          "gzipBytes": 3321
+        },
+        {
+          "path": "static/chunks/8141-d561196d67ee1a66.js",
+          "bytes": 7736,
+          "gzipBytes": 2994
+        },
+        {
+          "path": "static/chunks/8101-740fc3e8f9d4b9c3.js",
+          "bytes": 17657,
+          "gzipBytes": 5000
+        },
+        {
+          "path": "static/chunks/3250-5aef921647327c1e.js",
+          "bytes": 12920,
+          "gzipBytes": 4848
+        },
+        {
+          "path": "static/chunks/3681-bb018c9e03569b6b.js",
+          "bytes": 9589,
+          "gzipBytes": 3413
+        },
+        {
+          "path": "static/chunks/9128-72af23d014eeda49.js",
+          "bytes": 112315,
+          "gzipBytes": 29085
+        },
+        {
+          "path": "static/chunks/3935-7d0e16676178265e.js",
+          "bytes": 560979,
+          "gzipBytes": 145089
+        },
+        {
+          "path": "static/chunks/app/admin/withdrawal/page-af9723a2714ed049.js",
+          "bytes": 195,
+          "gzipBytes": 164
+        }
+      ],
+      "bytes": 1260602,
+      "gzipBytes": 354507
+    },
+    "word-retests": {
+      "files": [
+        {
+          "path": "static/chunks/9153-10181515d84fed26.js",
+          "bytes": 8754,
+          "gzipBytes": 3546
+        },
+        {
+          "path": "static/chunks/9118-b8b63f497921dc88.js",
+          "bytes": 13658,
+          "gzipBytes": 5295
+        },
+        {
+          "path": "static/chunks/app/not-found-f4cf39155742fbb6.js",
+          "bytes": 263,
+          "gzipBytes": 195
+        },
+        {
+          "path": "static/chunks/948ae797-3c169ce5f99310e1.js",
+          "bytes": 62504,
+          "gzipBytes": 13287
+        },
+        {
+          "path": "static/chunks/3985-8ab90c35e15f80b7.js",
+          "bytes": 171087,
+          "gzipBytes": 47604
+        },
+        {
+          "path": "static/chunks/9317-709f5e04ed461fdd.js",
+          "bytes": 10470,
+          "gzipBytes": 4472
+        },
+        {
+          "path": "static/chunks/app/layout-e38e903040788ac3.js",
+          "bytes": 1723,
+          "gzipBytes": 866
+        },
+        {
+          "path": "static/chunks/1859-ef38eb81dff5d9ad.js",
+          "bytes": 28179,
+          "gzipBytes": 9180
+        },
+        {
+          "path": "static/chunks/7508-fba3c8a9ece7aee3.js",
+          "bytes": 56173,
+          "gzipBytes": 20372
+        },
+        {
+          "path": "static/chunks/1804-ea9495329ec21be5.js",
+          "bytes": 7498,
+          "gzipBytes": 2898
+        },
+        {
+          "path": "static/chunks/7353-468501752946fd45.js",
+          "bytes": 21318,
+          "gzipBytes": 6429
+        },
+        {
+          "path": "static/chunks/7662-7ae385f0aa5979aa.js",
+          "bytes": 12091,
+          "gzipBytes": 4649
+        },
+        {
+          "path": "static/chunks/2065-8141e36816f7e90f.js",
+          "bytes": 12175,
+          "gzipBytes": 3803
+        },
+        {
+          "path": "static/chunks/6207-9f68e480198bf2b8.js",
+          "bytes": 21907,
+          "gzipBytes": 7633
+        },
+        {
+          "path": "static/chunks/app/admin/layout-833f9aea40db8596.js",
+          "bytes": 83227,
+          "gzipBytes": 23655
+        },
+        {
+          "path": "static/chunks/9647-3bee20a0eca87f23.js",
+          "bytes": 19142,
+          "gzipBytes": 6709
+        },
+        {
+          "path": "static/chunks/7940-819ad22da37f4e00.js",
+          "bytes": 9042,
+          "gzipBytes": 3321
+        },
+        {
+          "path": "static/chunks/8141-d561196d67ee1a66.js",
+          "bytes": 7736,
+          "gzipBytes": 2994
+        },
+        {
+          "path": "static/chunks/8101-740fc3e8f9d4b9c3.js",
+          "bytes": 17657,
+          "gzipBytes": 5000
+        },
+        {
+          "path": "static/chunks/3250-5aef921647327c1e.js",
+          "bytes": 12920,
+          "gzipBytes": 4848
+        },
+        {
+          "path": "static/chunks/3681-bb018c9e03569b6b.js",
+          "bytes": 9589,
+          "gzipBytes": 3413
+        },
+        {
+          "path": "static/chunks/9128-72af23d014eeda49.js",
+          "bytes": 112315,
+          "gzipBytes": 29085
+        },
+        {
+          "path": "static/chunks/3935-7d0e16676178265e.js",
+          "bytes": 560979,
+          "gzipBytes": 145089
+        },
+        {
+          "path": "static/chunks/app/admin/word-retests/page-004ec4b21d4bcab7.js",
+          "bytes": 195,
+          "gzipBytes": 164
+        }
+      ],
+      "bytes": 1260602,
+      "gzipBytes": 354507
+    }
+  }
+}
