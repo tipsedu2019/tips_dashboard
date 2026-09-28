@@ -1071,13 +1071,44 @@ for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} date
   assert.equal(document.querySelector('[role="alert"]'), null);
 });
 
+for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} incomplete period cannot retain another tab's results`, async t => {
+  const page = await workspace(t, { workspace: type });
+  const first = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(page.requests.indexOf(first), 1, [operationPatch(type, '이전 탭 학생')]));
+  await act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === '직접입력').click());
+  const before = page.requests.length;
+  const tab = document.querySelector('[role="tab"][aria-selected="true"]');
+  await act(async () => tab.focus());
+  await act(async () => pressTabKey(tab, 'End'));
+  const target = document.activeElement;
+  assert.notEqual(target, tab);
+  await act(async () => pressTabKey(target, 'Enter'));
+  const reads = page.requests.slice(before);
+  const key = type === 'word_retest' ? 'queue' : 'view';
+  const latest = reads.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  assert.ok(latest, 'the newly selected tab must load its own page');
+  assert.notEqual(latest.args.p_filters[key], first.args.p_filters[key]);
+  for (const request of reads) {
+    assert.equal(request.args.p_filters[key], latest.args.p_filters[key]);
+    assert.equal(request.args.p_filters.period, 'all');
+    assert.equal(request.args.p_filters.dateFrom, null);
+    assert.equal(request.args.p_filters.dateTo, null);
+  }
+  await act(async () => page.finish(page.requests.indexOf(latest), 0));
+  assert.equal(document.body.textContent.includes('이전 탭 학생'), false);
+});
+
 test('period draft commitment preserves prior scope and resets on viewer change or invalid initial dates', async t => {
   const { root } = await setup(t);
   const load = modules({});
   const { useOpsTaskPeriodFilters } = load('src/features/tasks/use-ops-task-period-filters.ts');
   const { createDefaultOpsTaskPageFilters } = load('src/features/tasks/ops-task-service.ts');
   let result;
-  function Probe({ filters, owner }) { result = useOpsTaskPeriodFilters(filters, owner); return null; }
+  function Probe({ filters, owner }) {
+    const committed = useOpsTaskPeriodFilters(filters, owner);
+    useEffect(() => { result = committed; });
+    return null;
+  }
   const defaults = createDefaultOpsTaskPageFilters('withdrawal', 'actor-a');
   const render = async (filters, owner = 'actor-a:withdrawal') => act(async () => root.render(createElement(Probe, { filters, owner })));
   await render({ ...defaults, period: 'today' });
