@@ -1,0 +1,79 @@
+{
+  "windowStart": "2026-09-28 02:10:36.950517+00",
+  "windowEnd": "2026-09-28 02:10:59.480794+00",
+  "source": "Controlled browser registration reload; each observed RPC added exactly one PostgreSQL call; no planning times recorded",
+  "deltas": [
+    {
+      "rpc": "get_ops_task_list_stats_v1",
+      "calls": 1,
+      "sqlExecutionMs": 862.7475080001168,
+      "sharedHits": 3076
+    },
+    {
+      "rpc": "registration_observation_runtime_version",
+      "calls": 1,
+      "sqlExecutionMs": 580.5887469999725,
+      "sharedHits": 731
+    },
+    {
+      "rpc": "registration_subject_tracks_runtime_version",
+      "calls": 1,
+      "sqlExecutionMs": 8.931242999999995,
+      "sharedHits": 3
+    },
+    {
+      "rpc": "list_registration_subject_capabilities_v1",
+      "calls": 1,
+      "sqlExecutionMs": 543.1617379999952,
+      "sharedHits": 1060
+    },
+    {
+      "rpc": "list_ops_task_numbered_page_v1",
+      "calls": 1,
+      "sqlExecutionMs": 995.9883300000802,
+      "sharedHits": 5830
+    }
+  ],
+  "config": {
+    "jit": "off",
+    "max_connections": "60",
+    "track_io_timing": "off",
+    "pg_stat_statements.track": "top",
+    "shared_preload_libraries": "pg_stat_statements, pgaudit, plpgsql, plpgsql_check, pg_cron, pg_net, pgsodium, auto_explain, pg_tle, plan_filter, supabase_vault",
+    "pg_stat_statements.track_planning": "off"
+  },
+  "connections": [
+    {
+      "count": 11,
+      "state": "idle",
+      "usename": "authenticator",
+      "wait_event": "ClientRead",
+      "wait_event_type": "Client",
+      "application_name": "postgrest"
+    },
+    {
+      "count": 1,
+      "state": "active",
+      "usename": "postgres",
+      "wait_event": null,
+      "wait_event_type": null,
+      "application_name": "mgmt-api"
+    },
+    {
+      "count": 1,
+      "state": "idle",
+      "usename": "supabase_admin",
+      "wait_event": "ClientRead",
+      "wait_event_type": "Client",
+      "application_name": ""
+    },
+    {
+      "count": 1,
+      "state": "idle",
+      "usename": "supabase_admin",
+      "wait_event": "ClientRead",
+      "wait_event_type": "Client",
+      "application_name": "postgres_exporter"
+    }
+  ]
+}

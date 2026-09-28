@@ -238,6 +238,11 @@ select is(
  fixture.rows,'final numbered projection preserves all stored enrollment metadata '||fixture.track_id)
 from enrollment_fixture fixture;
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"01012345678"}'),1,10)->>'totalCount','2','normalized phone search');
+select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats visit place"}'),1,10)->>'totalCount','1','narrow key selection retains normalized visit-place search');
+select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats visit place"}'),1,10)->'rows'->0->'registrationTracks'->0->>'visitPlace','stats-visit-place','selected row still receives the full visit DTO');
+select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats-only 2"}'),1,10)->>'totalCount','1','archived-only parent remains visible in inquiry');
+select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats-only 2"}'),1,10)->'rows'->0->'registrationTracks','[]'::jsonb,'archived tracks are excluded from the selected parent DTO');
+select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"stats-only 2","view":"completed"}'),1,10)->>'totalCount','0','archived-only parent cannot enter another view');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration',jsonb_build_object('search','np-views','view',v)),1,10)->>'totalCount',expected,'positive membership for registration view '||v)
 from (values('inquiry','1'),('level_test','1'),('consultation_requested','1'),('consultation_completed','1'),('waiting','3'),('observation','3'),('enrollment','1'),('payment','1'),('completed','3')) f(v,expected);
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration','{"search":"np-representative","view":"consultation_requested"}'),1,10)->'rows'->0->'registrationTracks'->0->>'id','96500000-0000-4000-8000-000000000002','matching track precedes lower-ID authorized sibling');
@@ -277,6 +282,8 @@ from unnest(array['requestedById','requestedTeam','assigneeId','assigneeTeam']) 
 select pg_temp.parity('registration',jsonb_build_object('view',v)) from unnest(array['inquiry','level_test','consultation_requested','consultation_completed','waiting','observation','enrollment','payment','completed']) v;
 select pg_temp.parity('registration',jsonb_build_object('search','np-views','view',v)) from unnest(array['inquiry','level_test','consultation_requested','consultation_completed','waiting','observation','enrollment','payment','completed']) v;
 select pg_temp.parity('registration','{"search":"np-consult-order","view":"consultation_requested"}');
+select pg_temp.parity('registration','{"search":"stats-only"}');
+select pg_temp.parity('registration','{"search":"stats visit place"}');
 select pg_temp.parity(t,jsonb_build_object('view',v,'period',p)) from unnest(array['withdrawal','transfer']) t cross join unnest(array['applicant','operations','closed']) v cross join unnest(array['all','today','week','month']) p;
 select pg_temp.parity(t,jsonb_build_object('period','custom','dateFrom',current_date::text,'dateTo',current_date::text)) from unnest(array['withdrawal','transfer','word_retest']) t;
 select pg_temp.parity(t,jsonb_build_object(k,v)) from unnest(array['withdrawal','transfer']) t cross join (values('subject','-'),('subject','영어'),('teacher','미지정'),('teacher','교사 2')) f(k,v);
