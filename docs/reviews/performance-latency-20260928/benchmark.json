@@ -1,0 +1,1379 @@
+{
+  "source": "isolated synthetic DB; not field latency",
+  "cases": 500,
+  "tracks": 1000,
+  "samplesPerVariant": 25,
+  "parity": [
+    {
+      "actor": 1,
+      "filter": 0,
+      "equal": true
+    },
+    {
+      "actor": 1,
+      "filter": 1,
+      "equal": true
+    },
+    {
+      "actor": 1,
+      "filter": 2,
+      "equal": true
+    },
+    {
+      "actor": 1,
+      "filter": 3,
+      "equal": true
+    },
+    {
+      "actor": 2,
+      "filter": 0,
+      "equal": true
+    },
+    {
+      "actor": 2,
+      "filter": 1,
+      "equal": true
+    },
+    {
+      "actor": 2,
+      "filter": 2,
+      "equal": true
+    },
+    {
+      "actor": 2,
+      "filter": 3,
+      "equal": true
+    },
+    {
+      "actor": 3,
+      "filter": 0,
+      "equal": true
+    },
+    {
+      "actor": 3,
+      "filter": 1,
+      "equal": true
+    },
+    {
+      "actor": 3,
+      "filter": 2,
+      "equal": true
+    },
+    {
+      "actor": 3,
+      "filter": 3,
+      "equal": true
+    }
+  ],
+  "samples": [
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.579,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.031,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.083,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.791,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.613,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.288,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.966,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.978,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.609,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.212,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.005,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.712,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.556,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.162,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.931,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 13.135,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.77,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.069,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.946,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.599,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.748,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.384,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.114,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.595,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.465,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.132,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.986,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.587,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.529,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.758,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.934,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.334,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.607,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.262,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.768,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.812,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 13.081,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.463,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.669,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 13.03,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.953,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 19.505,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.721,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.648,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.664,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.344,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 18.238,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 13.058,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "after",
+      "ms": 12.528,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 0,
+      "variant": "before",
+      "ms": 17.978,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.288,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.741,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.651,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.616,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.798,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.594,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.637,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 18.088,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.514,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.936,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.987,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.327,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 15.693,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.63,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.788,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.242,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.04,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.627,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.908,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.216,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 15.982,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.313,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.63,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.044,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 15.945,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.406,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 21.013,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.082,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.565,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.424,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 21.574,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.328,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.498,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.67,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 21.712,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.489,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.247,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.788,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 21.136,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.344,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 20.656,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 25.15,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 22.336,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 17.362,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.713,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.75,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 21.419,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.419,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "after",
+      "ms": 16.49,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 1,
+      "variant": "before",
+      "ms": 20.87,
+      "sharedHits": 9426
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.954,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.171,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.712,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.562,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.823,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.968,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.951,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.737,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.312,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.09,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.806,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.306,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.584,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.693,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.065,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.468,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.405,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.57,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.707,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.628,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.367,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.986,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.725,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.479,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.744,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.62,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.247,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.819,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.876,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.099,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.115,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.539,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.766,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.052,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.936,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 13.187,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.757,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.327,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.259,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.702,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.408,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.171,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.167,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.606,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.928,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 17.471,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.169,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.392,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "after",
+      "ms": 12.625,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 2,
+      "variant": "before",
+      "ms": 18.339,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.827,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.459,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.972,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.608,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.31,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.678,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.242,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.428,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.74,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.635,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.554,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.545,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.588,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.73,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.527,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.806,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 13.016,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.127,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.718,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.789,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.477,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.412,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.871,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.482,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.8,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.112,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.775,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.37,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.399,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.945,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.949,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.606,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.425,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.083,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.098,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.454,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.902,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.646,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 18.273,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.704,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.541,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.973,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.801,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.482,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.596,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.874,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.96,
+      "sharedHits": 14452
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.671,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "after",
+      "ms": 12.398,
+      "sharedHits": 7268
+    },
+    {
+      "filter": 3,
+      "variant": "before",
+      "ms": 17.69,
+      "sharedHits": 14452
+    }
+  ],
+  "firstInvocation": [
+    {
+      "variant": "before",
+      "ms": 20.112,
+      "sharedHits": 15590
+    },
+    {
+      "variant": "after",
+      "ms": 14.21,
+      "sharedHits": 7300
+    }
+  ],
+  "results": [
+    {
+      "filter": {
+        "taskType": "registration",
+        "search": "",
+        "statuses": [],
+        "view": "inquiry",
+        "consultationOwnerId": null
+      },
+      "before": {
+        "n": 25,
+        "p50Ms": 18.114,
+        "p95Ms": 18.721,
+        "maxMs": 19.505,
+        "maxSharedHits": 14452
+      },
+      "after": {
+        "n": 25,
+        "p50Ms": 12.648,
+        "p95Ms": 13.081,
+        "maxMs": 13.135,
+        "maxSharedHits": 7268
+      }
+    },
+    {
+      "filter": {
+        "taskType": "registration",
+        "search": "scale student 12",
+        "statuses": [],
+        "view": "inquiry",
+        "consultationOwnerId": null
+      },
+      "before": {
+        "n": 25,
+        "p50Ms": 20.788,
+        "p95Ms": 22.336,
+        "maxMs": 25.15,
+        "maxSharedHits": 9426
+      },
+      "after": {
+        "n": 25,
+        "p50Ms": 16.344,
+        "p95Ms": 18.088,
+        "maxMs": 20.656,
+        "maxSharedHits": 7268
+      }
+    },
+    {
+      "filter": {
+        "taskType": "registration",
+        "search": "",
+        "statuses": [],
+        "view": "consultation_requested",
+        "consultationOwnerId": "94000000-0000-4000-8000-000000000001"
+      },
+      "before": {
+        "n": 25,
+        "p50Ms": 18.099,
+        "p95Ms": 18.725,
+        "maxMs": 18.986,
+        "maxSharedHits": 14452
+      },
+      "after": {
+        "n": 25,
+        "p50Ms": 12.625,
+        "p95Ms": 12.954,
+        "maxMs": 13.187,
+        "maxSharedHits": 7268
+      }
+    },
+    {
+      "filter": {
+        "taskType": "registration",
+        "search": "",
+        "statuses": [
+          "requested"
+        ],
+        "view": "completed",
+        "consultationOwnerId": null
+      },
+      "before": {
+        "n": 25,
+        "p50Ms": 17.96,
+        "p95Ms": 18.527,
+        "maxMs": 18.646,
+        "maxSharedHits": 14452
+      },
+      "after": {
+        "n": 25,
+        "p50Ms": 12.588,
+        "p95Ms": 12.902,
+        "maxMs": 13.016,
+        "maxSharedHits": 7268
+      }
+    }
+  ],
+  "passed": true
+}
