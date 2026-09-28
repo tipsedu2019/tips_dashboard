@@ -183,9 +183,40 @@ select id,'교사 2',current_date,2,8 from public.ops_tasks where id in ('970000
 insert into public.ops_transfer_details(task_id,from_teacher_name,to_teacher_name,to_class_name,from_class_end_date,to_class_start_date)
 select id,'교사 2','교사 10',null,current_date-1,current_date from public.ops_tasks where id in ('98000000-0000-4000-8000-000000000004','98000000-0000-4000-8000-000000000005');
 
+-- Stats-only cases cover the two fields kept from the row summary view.
+insert into public.ops_tasks(id,title,type,status,priority,requested_by,subject)
+select ('93900000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
+ 'stats-only '||n,'registration','requested','normal','94000000-0000-4000-8000-000000000001','영어'
+from generate_series(1,2) n;
+insert into public.ops_registration_details(task_id)
+select ('93900000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid from generate_series(1,2) n;
+insert into public.ops_registration_subject_tracks(id,task_id,subject,pipeline_status,workflow_status,workflow_revision,archived_at,archived_by)
+select ('93910000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,
+ ('93900000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid,'영어','inquiry','inquiry',1,
+ case when n=2 then now() end,case when n=2 then '94000000-0000-4000-8000-000000000001'::uuid end
+from generate_series(1,2) n;
+insert into public.ops_registration_appointments(id,task_id,kind,scheduled_at,place,status,notification_revision)
+values('93920000-0000-4000-8000-000000000001','93900000-0000-4000-8000-000000000001',
+ 'visit_consultation','2026-10-01 19:00+09','stats-visit-place','scheduled',1);
+insert into public.ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id)
+values('93930000-0000-4000-8000-000000000001','93910000-0000-4000-8000-000000000001',
+ '93920000-0000-4000-8000-000000000001','visit','scheduled','94000000-0000-4000-8000-000000000001');
+
 create temp table no_send_before as select (select count(*) from dashboard_private.notification_deliveries) deliveries,(select count(*) from public.ops_registration_messages) messages;
 grant select on no_send_before to authenticated;
 set local role authenticated;
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration',jsonb_build_object('search','np-views','view',v)))->>'total',expected,'stats membership for view '||v)
+from (values('inquiry','1'),('level_test','1'),('consultation_requested','1'),('consultation_completed','1'),('waiting','3'),('observation','3'),('enrollment','1'),('payment','1'),('completed','3')) f(v,expected);
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views"}'))->'byView',
+ '{"inquiry":1,"level_test":1,"consultation_requested":1,"consultation_completed":1,"waiting":3,"observation":3,"enrollment":1,"payment":1,"completed":3}'::jsonb,'stats retain sibling view counts');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"stats-only"}'))->>'total','1','stats exclude archived subject membership');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"stats visit place"}'))->>'total','1','stats retain normalized visit place search');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"01012345678"}'))->>'total','2','stats retain normalized phone search and parent deduplication');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views","statuses":["done"]}'))->>'total','0','stats filter task status');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views","view":"consultation_requested","consultationOwnerId":"94000000-0000-4000-8000-000000000003"}'))->>'total','0','stats filter consultation owner');
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration','{"search":"np-views","view":"consultation_requested"}'))->'metrics',
+ '{"consultationMine":1,"consultationAll":1}'::jsonb,'stats retain consultation metrics');
+select throws_ok($$select public.get_ops_task_list_stats_v1('registration','{}'::jsonb)$$,'22023','ops_task_filters_invalid','final stats reject invalid filters with exact SQLSTATE');
 select is(public.list_ops_task_numbered_page_v1('general',pg_temp.task_filters('general'),11,10)->'rows'->0->>'id','95000000-0000-4000-8000-000000000101','direct page11 tied ID');
 select is(public.list_ops_task_numbered_page_v1('general',pg_temp.task_filters('general'),11,10)-'rows','{"page":11,"pageSize":10,"totalCount":101}'::jsonb,'exact count and requested page');
 select is(jsonb_array_length(public.list_ops_task_numbered_page_v1('general',pg_temp.task_filters('general'),11,10)->'rows'),1,'last partial page');
@@ -328,6 +359,7 @@ reset role;
 select set_config('request.jwt.claims','{"sub":"94000000-0000-4000-8000-000000000002","role":"authenticated"}',true);
 select set_config('request.jwt.claim.sub','94000000-0000-4000-8000-000000000002',true);
 set local role authenticated;
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration'))->>'total','2','stats retain linked teacher RLS');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration'),1,10)->>'totalCount','2','linked teacher sees authorized parent cases');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration'),1,10)->'rows'->0->'registrationTracks'->0->'observationAttemptCount','null'::jsonb,'observation tuple remains masked for unassigned teacher');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration'),1,10)->'rows'->0->'registrationTracks'->0->'observationSummaryVisible','false'::jsonb,'masked observation tuple does not claim visibility');
@@ -335,15 +367,17 @@ reset role;
 select set_config('request.jwt.claims','{"sub":"94000000-0000-4000-8000-000000000003","role":"authenticated"}',true);
 select set_config('request.jwt.claim.sub','94000000-0000-4000-8000-000000000003',true);
 set local role authenticated;
+select is(public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration'))->>'total','0','stats hide unauthorized parents');
 select is(public.list_ops_task_numbered_page_v1('registration',pg_temp.task_filters('registration'),1,10)->>'totalCount','0','unlinked authenticated user cannot count hidden parents');
 reset role;
 set local role anon;
+select throws_ok($$select public.get_ops_task_list_stats_v1('registration',pg_temp.task_filters('registration'))$$,'42501',null,'anon cannot execute final stats RPC');
 select throws_ok($$select public.list_ops_task_numbered_page_v1('general',pg_temp.task_filters('general'),1,10)$$,'42501',null,'anon cannot execute numbered RPC');
 reset role;
 select ok(not p.prosecdef and (coalesce('search_path='=any(p.proconfig),false) or coalesce('search_path=""'=any(p.proconfig),false))
  and has_function_privilege('authenticated',p.oid,'EXECUTE') and not has_function_privilege('anon',p.oid,'EXECUTE') and not has_function_privilege('public',p.oid,'EXECUTE'),
  p.proname||' is fixed-path invoker and authenticated-only') from pg_proc p join pg_namespace n on n.oid=p.pronamespace
-where (n.nspname='dashboard_private' and p.proname in ('ops_task_numbered_keys_v1','ops_task_numbered_project_v1','ops_withdrawal_numbered_scalar_v1','ops_transfer_numbered_scalar_v1','ops_word_retest_numbered_scalar_v1')) or (n.nspname='public' and p.proname='list_ops_task_numbered_page_v1');
+where (n.nspname='dashboard_private' and p.proname in ('ops_registration_task_stats_v1','ops_task_numbered_keys_v1','ops_task_numbered_project_v1','ops_withdrawal_numbered_scalar_v1','ops_transfer_numbered_scalar_v1','ops_word_retest_numbered_scalar_v1')) or (n.nspname='public' and p.proname='list_ops_task_numbered_page_v1');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from no_send_before),'reads create zero notification deliveries');
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from no_send_initial),'disabled fixture setup also creates zero deliveries');
 select is((select count(*) from public.ops_registration_messages),(select messages from no_send_before),'reads create zero registration messages');
