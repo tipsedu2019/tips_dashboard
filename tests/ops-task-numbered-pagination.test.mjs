@@ -1044,17 +1044,20 @@ test('retired task hotkeys do not move focus or request form submission', async 
 for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} date drafts issue no page or stats requests until the range is complete`, async t => {
   const page = await workspace(t, { workspace: type });
   const first = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
-  await act(async () => page.finish(page.requests.indexOf(first), 0));
+  await act(async () => page.finish(page.requests.indexOf(first), 1, [operationPatch(type, '기간 유지 학생')]));
   const initialRequestCount = page.requests.length;
   const custom = [...document.querySelectorAll('button')].find(b => b.textContent === '직접입력');
   assert.ok(custom);
   await act(async () => custom.click());
   assert.equal(page.requests.length, initialRequestCount, 'empty range must not reach either RPC');
+  assert.ok(document.body.textContent.includes('기간 유지 학생'));
   const period = () => currentComponentProps(type === 'word_retest' ? 'WordRetestPeriodFilterBar' : 'WithdrawalPeriodFilterBar');
   await act(async () => period().onStartDateChange('2026-09-01'));
   assert.equal(page.requests.length, initialRequestCount, 'one bound keeps the accepted result');
+  assert.ok(document.body.textContent.includes('기간 유지 학생'));
   await act(async () => period().onEndDateChange('2026-08-31'));
   assert.equal(page.requests.length, initialRequestCount, 'reversed range remains a draft');
+  assert.ok(document.body.textContent.includes('기간 유지 학생'));
   assert.ok(document.querySelector('[role="alert"]')?.textContent.includes('종료일은 시작일보다 빠를 수 없습니다.'));
   await act(async () => period().onEndDateChange('2026-09-30'));
   const reads = page.requests.slice(initialRequestCount);
