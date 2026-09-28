@@ -16,6 +16,7 @@ import { ArrowDown, ArrowUp, CalendarDays, Check, ChevronLeft, ChevronRight, Che
 import { Badge } from "@/components/ui/badge"
 import { DataTablePagination } from "@/components/data-table/data-table-pagination"
 import { getCompleteOpsTaskFixturePage, useOpsTaskNumberedPage } from "./use-ops-task-numbered-page"
+import { getOpsTaskPeriodDraftError, useOpsTaskPeriodFilters } from "./use-ops-task-period-filters"
 import { useDataTablePageSize } from "@/hooks/use-data-table-page-size"
 import { readOpsTaskListNavigation, writeOpsTaskListNavigation } from "./ops-task-list-navigation"
 import type { DataTablePageSize } from "@/lib/numbered-pagination"
@@ -5897,6 +5898,9 @@ function WithdrawalPeriodFilterBar({
             placeholder="종료일"
             ariaLabel={`${labelPrefix} 기간 종료일`}
           />
+          {getOpsTaskPeriodDraftError(startDate, endDate) ? (
+            <p role="alert" className="col-span-full text-sm text-destructive">{getOpsTaskPeriodDraftError(startDate, endDate)}</p>
+          ) : null}
         </div>
       ) : null}
     </div>
@@ -8055,7 +8059,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     [canDelete, currentUserId, isAdmin, registrationViewerRole],
   )
   const workspaceLabel = WORKSPACE_LABELS[workspace]
-  const taskPageFilters = useMemo<OpsTaskPageFilters>(() => {
+  const taskPageFilterDraft = useMemo<OpsTaskPageFilters>(() => {
     if (scopedTaskType === "registration") {
       return {
         taskType: "registration",
@@ -8139,6 +8143,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     wordRetestTeacherFilter,
   ])
 
+  const taskPageFilters = useOpsTaskPeriodFilters(taskPageFilterDraft, JSON.stringify([navigationActorScope, pathname, scopedTaskType]))
   const numberedServerPage = !registrationFixtureRequested && !wordRetestFixtureRequested
   const fixturePageSize = useDataTablePageSize(`ops-task:${scopedTaskType}`)
   const [fixturePage, setFixturePage] = useState(1)
@@ -15131,6 +15136,9 @@ function WordRetestPeriodFilterBar({
             placeholder="종료일"
             ariaLabel="단어 재시험 기간 종료일"
           />
+          {getOpsTaskPeriodDraftError(startDate, endDate) ? (
+            <p role="alert" className="col-span-full text-sm text-destructive">{getOpsTaskPeriodDraftError(startDate, endDate)}</p>
+          ) : null}
         </div>
       )}
     </div>
