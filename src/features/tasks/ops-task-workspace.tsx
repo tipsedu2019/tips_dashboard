@@ -56,11 +56,20 @@ function DateControlLoading() {
   return <Skeleton role="status" aria-label="날짜 입력 불러오는 중" className="h-9 w-full" />
 }
 
+function DateTimeControlLoading() {
+  return (
+    <div role="status" aria-label="날짜와 시각 입력 불러오는 중" className="grid min-w-0 gap-2 sm:grid-cols-2">
+      <Skeleton className="h-9 w-full" />
+      <Skeleton className="h-9 w-full" />
+    </div>
+  )
+}
+
 const DatePickerControl = dynamic(() => import("@/components/ui/date-time-picker").then((module) => module.DatePickerControl), {
   loading: DateControlLoading,
 })
 const DateTimePickerControl = dynamic(() => import("@/components/ui/date-time-picker").then((module) => module.DateTimePickerControl), {
-  loading: DateControlLoading,
+  loading: DateTimeControlLoading,
 })
 
 import {
