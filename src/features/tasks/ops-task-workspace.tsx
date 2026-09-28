@@ -36,11 +36,8 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from "@/components/ui/empty"
-import {
-  DatePickerControl,
-  DateTimePickerControl,
-  type DateTimePickerDraftState,
-} from "@/components/ui/date-time-picker"
+import type { DateTimePickerDraftState } from "@/components/ui/date-time-picker"
+import { Skeleton } from "@/components/ui/skeleton"
 import { Input } from "@/components/ui/input"
 import { GoogleChatDeliveryControl } from "@/features/notifications/notification-delivery-control"
 import { Popover, PopoverAnchor, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -54,6 +51,17 @@ import { supabase } from "@/lib/supabase"
 import { useUnsavedNavigationGuard } from "@/hooks/use-unsaved-navigation-guard"
 import { pushLocalHistoryState } from "@/lib/unsaved-history-fallback"
 import { useAuth } from "@/providers/auth-provider"
+
+function DateControlLoading() {
+  return <Skeleton role="status" aria-label="날짜 입력 불러오는 중" className="h-9 w-full" />
+}
+
+const DatePickerControl = dynamic(() => import("@/components/ui/date-time-picker").then((module) => module.DatePickerControl), {
+  loading: DateControlLoading,
+})
+const DateTimePickerControl = dynamic(() => import("@/components/ui/date-time-picker").then((module) => module.DateTimePickerControl), {
+  loading: DateControlLoading,
+})
 
 import {
   OPS_TASK_STATUSES,
