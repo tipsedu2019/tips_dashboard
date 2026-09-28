@@ -624,6 +624,11 @@
       "fileName": "20260927151448_curriculum_session_read_aggregation.sql",
       "status": "final",
       "sha256": "4956c90de275bbdc2e5eb0bf5927e15b2b02d52d9d5e0c42c4aae4ebc9201385"
+    },
+    {
+      "fileName": "20260928010618_registration_stats_narrow_summary.sql",
+      "status": "final",
+      "sha256": "1aeeb251213739d9aa12d2cd6ad6efc832fff3d06cfc9dbda8fd6f270c4b939c"
     }
   ]
 }
