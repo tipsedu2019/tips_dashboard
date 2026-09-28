@@ -629,6 +629,11 @@
       "fileName": "20260928010618_registration_stats_narrow_summary.sql",
       "status": "final",
       "sha256": "1aeeb251213739d9aa12d2cd6ad6efc832fff3d06cfc9dbda8fd6f270c4b939c"
+    },
+    {
+      "fileName": "20260928021444_registration_numbered_keys_narrow_summary.sql",
+      "status": "final",
+      "sha256": "d4b3c450540a19fed98582cf56f224d93d5fdf54383720fa49e2249b7c2ceb64"
     }
   ]
 }
