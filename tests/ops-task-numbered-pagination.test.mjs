@@ -1041,6 +1041,92 @@ test('retired task hotkeys do not move focus or request form submission', async 
   assert.equal(page.requests.length, before);
 });
 
+for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} date drafts issue no page or stats requests until the range is complete`, async t => {
+  const page = await workspace(t, { workspace: type });
+  const first = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(page.requests.indexOf(first), 1, [operationPatch(type, '기간 유지 학생')]));
+  const initialRequestCount = page.requests.length;
+  const custom = [...document.querySelectorAll('button')].find(b => b.textContent === '직접입력');
+  assert.ok(custom);
+  await act(async () => custom.click());
+  assert.equal(page.requests.length, initialRequestCount, 'empty range must not reach either RPC');
+  assert.ok(document.body.textContent.includes('기간 유지 학생'));
+  const period = () => currentComponentProps(type === 'word_retest' ? 'WordRetestPeriodFilterBar' : 'WithdrawalPeriodFilterBar');
+  await act(async () => period().onStartDateChange('2026-09-01'));
+  assert.equal(page.requests.length, initialRequestCount, 'one bound keeps the accepted result');
+  assert.ok(document.body.textContent.includes('기간 유지 학생'));
+  await act(async () => period().onEndDateChange('2026-08-31'));
+  assert.equal(page.requests.length, initialRequestCount, 'reversed range remains a draft');
+  assert.ok(document.body.textContent.includes('기간 유지 학생'));
+  assert.ok(document.querySelector('[role="alert"]')?.textContent.includes('종료일은 시작일보다 빠를 수 없습니다.'));
+  await act(async () => period().onEndDateChange('2026-09-30'));
+  const reads = page.requests.slice(initialRequestCount);
+  assert.deepEqual(reads.map(r => r.name).sort(), ['get_ops_task_list_stats_v1', 'list_ops_task_numbered_page_v1']);
+  for (const request of reads) {
+    assert.equal(request.args.p_filters.period, 'custom');
+    assert.equal(request.args.p_filters.dateFrom, '2026-09-01');
+    assert.equal(request.args.p_filters.dateTo, '2026-09-30');
+  }
+  assert.equal(reads.find(r => r.name === 'list_ops_task_numbered_page_v1').args.p_page, 1);
+  assert.equal(document.querySelector('[role="alert"]'), null);
+});
+
+for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} incomplete period cannot retain another tab's results`, async t => {
+  const page = await workspace(t, { workspace: type });
+  const first = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  await act(async () => page.finish(page.requests.indexOf(first), 1, [operationPatch(type, '이전 탭 학생')]));
+  await act(async () => [...document.querySelectorAll('button')].find(b => b.textContent === '직접입력').click());
+  const before = page.requests.length;
+  const tab = document.querySelector('[role="tab"][aria-selected="true"]');
+  await act(async () => tab.focus());
+  await act(async () => pressTabKey(tab, 'End'));
+  const target = document.activeElement;
+  assert.notEqual(target, tab);
+  await act(async () => pressTabKey(target, 'Enter'));
+  const reads = page.requests.slice(before);
+  const key = type === 'word_retest' ? 'queue' : 'view';
+  const latest = reads.find(r => r.name === 'list_ops_task_numbered_page_v1');
+  assert.ok(latest, 'the newly selected tab must load its own page');
+  assert.notEqual(latest.args.p_filters[key], first.args.p_filters[key]);
+  for (const request of reads) {
+    assert.equal(request.args.p_filters[key], latest.args.p_filters[key]);
+    assert.equal(request.args.p_filters.period, 'all');
+    assert.equal(request.args.p_filters.dateFrom, null);
+    assert.equal(request.args.p_filters.dateTo, null);
+  }
+  await act(async () => page.finish(page.requests.indexOf(latest), 0));
+  assert.equal(document.body.textContent.includes('이전 탭 학생'), false);
+});
+
+test('period draft commitment preserves prior scope and resets on viewer change or invalid initial dates', async t => {
+  const { root } = await setup(t);
+  const load = modules({});
+  const { useOpsTaskPeriodFilters } = load('src/features/tasks/use-ops-task-period-filters.ts');
+  const { createDefaultOpsTaskPageFilters } = load('src/features/tasks/ops-task-service.ts');
+  let result;
+  function Probe({ filters, owner }) {
+    const committed = useOpsTaskPeriodFilters(filters, owner);
+    useEffect(() => { result = committed; });
+    return null;
+  }
+  const defaults = createDefaultOpsTaskPageFilters('withdrawal', 'actor-a');
+  const render = async (filters, owner = 'actor-a:withdrawal') => act(async () => root.render(createElement(Probe, { filters, owner })));
+  await render({ ...defaults, period: 'today' });
+  const today = result;
+  for (const [dateFrom, dateTo] of [[null, null], ['2026-09-01', null], ['2026-09-02', '2026-09-01'], ['2026-02-30', '2026-03-01'], ['0000-01-01', '2026-09-30']]) {
+    await render({ ...defaults, search: 'draft search', period: 'custom', dateFrom, dateTo });
+    assert.equal(result, today, 'all consumers retain the same accepted filter object');
+  }
+  const invalid = { ...defaults, period: 'custom', dateFrom: '2026-09-01', dateTo: null };
+  await render(invalid, 'actor-b:withdrawal');
+  assert.equal(result.period, 'all');
+  assert.equal(result.dateFrom, null);
+  assert.equal(result.dateTo, null);
+  await render({ ...defaults, period: 'custom', dateFrom: '2024-02-29', dateTo: '2024-02-29' });
+  assert.equal(result.period, 'custom');
+  assert.equal(result.dateFrom, '2024-02-29');
+});
+
 for (const type of ['withdrawal', 'transfer', 'word_retest']) test(`${type} first read failure is recoverable without a false empty result`, async t => {
   const page = await workspace(t, { workspace: type });
   const request = page.requests.find(r => r.name === 'list_ops_task_numbered_page_v1');
