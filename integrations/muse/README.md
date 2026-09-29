@@ -26,7 +26,7 @@ The following runtime capabilities were reported directly by Muse on 2026-09-29 
 - `/opt/hatch/skills/skill-creator/bin/scaffold-connector-skill --provider <provider>` generates the connector's auth instructions after connection.
 - Python `add_surrogate_to_request(request, credential_name, allowed_hosts=[...])` injects an `hsurr:*` surrogate. The actual key is substituted by Sentinel; never read or export it.
 - Use HTTPS, fixed connector hosts and a no-redirect urllib opener. Do not derive a new trusted host from arbitrary CLI input. Host restrictions are not API path restrictions; the server enforces scopes/actions.
-- Muse prepared `~/workspace/skills/tips-admin-api/SKILL.md` and `bin/tips-admin` in its own workspace. Its reported 47/47 v1 offline tests include receipt-to-preview comparisons and are Muse-side evidence, not independently executed tests in this repository.
+- Muse prepared `~/workspace/skills/tips-admin-api/SKILL.md` and `bin/tips-admin` in its own workspace. Its reported 47/47 v1 offline tests include receipt-to-preview comparisons (the later v2 compatibility run reconstructed the temporary v1 suite in a maintained test file, rather than rerunning the identical original file) and are Muse-side evidence, not independently executed tests in this repository.
 
 Conversation: https://muse.ai/thread/35b3ea22-938e-4c5e-be65-e1b77a457ac3
 
@@ -47,7 +47,7 @@ New grants also require `classes:read` and explicit class IDs. Existing v1 crede
 2. POST `/classes/{id}/changes/preview` with `expectedVersion`, `window`, `reason`, and at least one of `basic`, `weeklySlots`, or `lessons`. Input allows only declared fields; no raw schedule-plan PATCH is exposed. Up to 14 existing weekly slot edits and 50 dated edits can be combined atomically for one class. Times are integer minutes; full timing includes teacher/room UUIDs.
 3. A dated item is `{date,lessonId?,state,timing?,makeup?}`. State is `scheduled|cancelled|skipped|undecided`. `makeup` is null or `{date,startMinute,endMinute,teacherId,classroomId}` and is allowed only with `cancelled`. Omitting it preserves an existing linked makeup while keeping a cancellation; null clears it. Removing a makeup retains its historical row as skipped. A makeup is edited through its original lesson. Both original and target dates must be today or later and inside the window, including an existing makeup being replaced.
 4. Preview returns `before`/`after` workspaces plus ten-minute `previewToken`/`expiresAt`. Journal the preview's class ID and `after.verificationHash` under origin + API version + credential ID. POST `/operations` uses the v1 request-key protocol. Applied receipt `class.id` and `class.verificationHash` must match the preview, as must `operationId`. Missing expectations or any mismatch are unconfirmed. Versions and timestamps are excluded from the verification hash.
-5. Recover with GET `/operations/{key}`; use GET `/operations?page=1` to discover credential-local history (20 per page). List entries are discovery only; fetch the exact receipt before deciding completion. Unknown/timeout must not create a new key, preview or browser write. Cache refresh and external-send states follow the v1 rules below.
+5. Recover with GET `/operations/{key}`; use GET `/operations?page=1` to discover credential-local history (20 per page). List entries are discovery only; fetch the exact receipt before deciding completion. Unknown/timeout and a write HTTP 5xx or malformed response without a valid durable receipt are unconfirmed, even if the server may already have committed. They must not create a new key, preview or browser write. Recover with the same request key; only a valid failed receipt confirms a failed business operation. Cache refresh and external-send states follow the v1 rules below.
 
 Important semantics:
 
@@ -93,6 +93,7 @@ node scripts/run-isolated-supabase-db-tests.mjs --review-head --execute --author
   --request-id agent-api-local-review \
   --test supabase/tests/agent_api_scoped_schedule_test.sql \
   --test supabase/tests/agent_api_class_changes_test.sql \
+  --probe tests/probe-agent-class-edit-dto.mjs \
   --test supabase/tests/timetable_operational_conflicts_test.sql
 ```
 
