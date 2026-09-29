@@ -27,12 +27,19 @@ export function createTimetableOperationalMutation({ requestKey, rpc, refresh }:
 }
 
 export function timetableOperationalErrorMessage(error: unknown, fallback: string): string {
-  const value = error as { code?: string; message?: string } | null;
+  const value = error as { code?: string; message?: string; name?: string } | null;
   if (value?.code === "23P01" && value.message === "timetable_resource_conflict") {
     return "같은 선생님 또는 강의실의 일정이 겹치거나 확인이 필요한 일정이 있습니다. 입력을 확인해 주세요.";
   }
   if (value?.message === "class_schedule_stale" || value?.message === "timetable_stale") {
     return "운영 일정이 변경되었습니다. 입력을 유지한 채 최신 일정을 다시 불러와 주세요.";
+  }
+  if (value?.code === "57014") {
+    return "일정 확인에 시간이 오래 걸려 저장이 중단되었습니다. 잠시 후 다시 저장해 주세요.";
+  }
+  if (value?.name === "TimeoutError" || value?.name === "AbortError"
+    || /^(TimeoutError|AbortError):/.test(value?.message || "")) {
+    return "저장 결과를 확인하지 못했습니다. 입력은 유지되었으니 다시 저장해 주세요.";
   }
   return fallback;
 }

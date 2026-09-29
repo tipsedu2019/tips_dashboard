@@ -38,6 +38,23 @@ test("delete recognition does not exempt broader writes, returning reads, or ord
   }
 })
 
+test("only the exact idempotent class mutation gets a bounded 20-second response budget", () => {
+  const mutation = `client.rpc("update_class_operational_v1", {p_class_id:id,p_patch:patch,p_request_key:key,p_expected_schedule_plan:prior})`
+  assert.deepEqual(inspectReleaseQuery(`${mutation}.abortSignal(AbortSignal.timeout(20_000)).retry(false)`), [])
+  assert.deepEqual(inspectReleaseQuery(`${mutation}.abortSignal(AbortSignal.timeout(8_000)).retry(false)`), [])
+  for (const query of [
+    `client.rpc("get_operations_class_lesson_design_detail_v1", {p_class_id:id})`,
+    `client.rpc("save_class_schedule_defaults_v1", {p_class_id:id})`,
+    `client.rpc("list_ops_task_page_v1", {p_limit:30})`,
+    `client.rpc("update_class_operational_v2", {})`,
+    `client.from("academic_events").delete().eq("id",id)`,
+  ]) assert.ok(inspectReleaseQuery(`${query}.abortSignal(AbortSignal.timeout(20_000)).retry(false)`).some(v=>v.reason==='list_abort_signal_missing'),query)
+  assert.ok(inspectReleaseQuery(`${mutation}.abortSignal(AbortSignal.timeout(30_000)).retry(false)`).some(v=>v.reason==='list_abort_signal_missing'))
+  assert.ok(inspectReleaseQuery(`${mutation}.retry(false)`).some(v=>v.reason==='list_abort_signal_missing'))
+  assert.ok(inspectReleaseQuery(`${mutation}.abortSignal(AbortSignal.timeout(20_000))`).some(v=>v.reason==='list_retry_false_missing'))
+  assert.ok(inspectReleaseQuery(`${mutation}.abortSignal(AbortSignal.timeout(20_000)).retry(true)`).some(v=>v.reason==='list_retry_false_missing'))
+})
+
 test("a final explicit root limit bounds a dynamic range without accepting unsafe overrides", () => {
   const tail = `.order("id").abortSignal(AbortSignal.timeout(8_000)).retry(false)`
   const prefix = `client.from("academic_events").select("id")`

@@ -344,6 +344,36 @@ test('normalized read: a loading read must never fall through to a legacy classe
   assert.equal(saveRequests(page).length, 0);
   assert.equal(dirty(), true);
 });
+test('plan: a response after eight seconds can finish without aborting an already committed save', async t => {
+  const page = await editor(t); await editPlan(page, 'SLOW COMMIT');
+  const deadlines = [];
+  t.mock.method(AbortSignal, 'timeout', ms => {
+    const controller = new AbortController(); deadlines.push({ms,controller}); return controller.signal;
+  });
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  const request = saveRequests(page)[0];
+  // Advance a deterministic virtual clock past the former browser deadline.
+  for (const {ms,controller} of deadlines) if (ms <= 9000) controller.abort(new DOMException('signal timed out','TimeoutError'));
+  assert.equal(request.signal.aborted, false, 'a 9-second successful response must remain receivable');
+  assert.equal(deadlines[0].ms, 20_000);
+  await finishSave(page);
+  assert.match(page.observed.lessonDesignSaveNotice, /저장/);
+  assert.equal(page.observed.lessonDesignSaveError, '');
+});
+test('plan: unknown timeout outcome preserves the draft and reuses the identical idempotent request', async t => {
+  const page = await editor(t); await editPlan(page, 'RETAINED');
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  const first = saveRequests(page)[0];
+  await act(async () => first.resolve({data:null,error:{code:'',message:'TimeoutError: signal timed out'}}));
+  assert.match(page.observed.lessonDesignSaveError, /저장 결과를 확인하지 못했습니다/);
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'RETAINED');
+  assert.equal(saveRequests(page).length, 1, 'no automatic mutation retry');
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  assert.deepEqual(saveRequests(page)[1].args, first.args);
+  await finishSave(page);
+  assert.equal(page.observed.lessonDesignSaveError, '');
+});
+
 test('plan: failed write retains its draft and a retry submits the current values', async t => {
   const page = await editor(t); await editPlan(page, 'RETRY DRAFT');
   await act(async () => { void page.observed.handleSaveLessonPlan(); });

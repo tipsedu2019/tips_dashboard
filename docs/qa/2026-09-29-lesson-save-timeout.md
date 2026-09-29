@@ -45,3 +45,34 @@ No source class or schedule rows are backfilled.
 
 Production application, browser save and persisted readback are separate release
 checks. Local results above do not establish those outcomes.
+
+## Production follow-up: response deadline
+
+PR #83 was merged as `8d76d1e47bbb3b0987083498c4dc8988ebf446b1`.
+Production migration workflow `36569139511` and Vercel deployment
+`dpl_D25ghSmTjZ24XW92qKZUDZen3AGT` succeeded. All three deployed function bodies,
+private ACLs, search paths, and migration version `20260929121505` matched the
+locally tested definitions.
+
+The actual browser save then committed the intended schedule, but its request was
+aborted at 7.976 seconds by the frontend's 8-second deadline. No new PostgreSQL
+statement timeout was logged for that attempt. Independent DB readback confirmed
+the requested cancellation/makeup dates and count, with the other billing-period
+sessions unchanged. This was an unknown client outcome, not a rejected DB write.
+
+The follow-up gives this legacy schedule mutation a bounded 20-second response
+budget while retaining one request, disabled transport retries, and the same
+idempotency key for an unchanged manual retry. It distinguishes unknown
+abort/timeout outcomes from confirmed server cancellation and input validation.
+Read requests retain their existing limits. Two real-workspace regressions fail
+before and pass after: a response at virtual 9 seconds remains receivable, and an
+unknown timeout preserves the draft and replays identical arguments/request key.
+All 33 focused workspace/legacy/installed-transport tests pass; ESLint and
+migration-layout verification also pass. No additional database migration.
+
+The query-budget validator recognizes the exact `update_class_operational_v1`
+receipt mutation with either its existing 8-second budget or the new bounded
+20-second response budget. Read APIs, other mutations, absent deadlines, budgets
+above 20 seconds and automatic retries remain rejected. No file-wide exception or
+legacy-debt allowance is added. All 28 focused deadline/query-contract cases pass,
+and the changed-worktree free-tier query verifier passes.
