@@ -100,8 +100,9 @@ export function effectiveOperatingSlots(reference: TimetableOperatingReference, 
   const day = new Date(`${date}T00:00:00Z`).getUTCDay();
   const sessions = reference.datedSessions.filter((session) => session.date === date);
   const defaults = reference.shadowSlots.filter((slot) => date >= reference.asOfDate && slot.weekday === day
-    && !sessions.some((session) => session.sourceSlotId !== null
-      && session.classId === slot.classId && session.sourceSlotId === slot.sourceSlotId));
+    && !sessions.some((session) => session.classId === slot.classId
+      && ((session.sourceSlotId !== null && session.sourceSlotId === slot.sourceSlotId)
+        || ((session.state === "skipped" || session.state === "tbd") && session.inheritedWeeklySlotId === slot.id))));
   return [...defaults, ...sessions.flatMap((session) => {
     if (defaults.some(slot => slot.id === session.inheritedWeeklySlotId)) return [];
     if (session.state === "skipped" || session.state === "tbd" || session.startMinute === null

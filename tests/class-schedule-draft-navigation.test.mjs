@@ -135,6 +135,24 @@ async function editor(t, route = 'class-schedule') {
   return page;
 }
 function editPlan(page, name) { return act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, billingPeriods: p.billingPeriods.map((period, index) => index ? period : {...period, color: name}) }))); }
+
+test('legacy month count includes makeup and excludes cancelled lessons, and save preserves entered resources', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await act(async () => page.observed.updateLessonPlanDraft(p => ({ ...p, selectedDays:[2,0], sessions:[],
+    billingPeriods:[{id:'oct',month:10,label:'10월',startDate:'2026-09-29',endDate:'2026-10-27'}],
+    sessionStates:{'2026-10-13':{state:'exception'},'2026-10-18':{state:'exception'},'2026-10-09':{state:'makeup'}},
+  })));
+  const period = document.querySelector('[id^="lesson-design-period-detail-"]');
+  assert.equal(period.querySelector('[data-slot="badge"]').textContent, '8회');
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  assert.equal(saveRequests(page).length,0);
+  assert.match(page.observed.lessonDesignSaveError,/2026-10-09/);
+  await act(async () => page.observed.updateLessonPlanDraft(p => ({...p,sessionSchedules:{'2026-10-09':{startTime:'19:20',endTime:'21:20',teacherCatalogId:id(101),classroomCatalogId:id(201)}}})));
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  assert.equal(saveRequests(page).length,1);
+  const makeup = saveRequests(page)[0].args.p_patch.schedule_plan.sessions.find(s => s.date==='2026-10-09');
+  assert.equal(makeup.startTime,'19:20'); assert.equal(makeup.classroomCatalogId,id(201));
+});
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_') || r.name === 'update_class_operational_v1');
 
@@ -214,6 +232,14 @@ async function normalizedEditor(t) {
   assert.ok(page.observed.normalizedLessonSessionDraft, JSON.stringify(page.observed.lessonDesignSnapshot?.sessions));
   return page;
 }
+test('normalized exception overrides still count as occupied lessons', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await page.normalized({status:'ready',value:{source:'normalized',data:{scheduleRevision:1,contentHash:'override',sessions:[
+    {id:id(600),session_key:'session-one',session_date:'2026-08-03',session_number:1,revision:1,schedule_state:'exception'},
+  ]}}});
+  const period = document.querySelector('[id^="lesson-design-period-detail-"]');
+  assert.equal(period.querySelector('[data-slot="badge"]').textContent, '1회');
+});
 test('plan: same-class refreshed source preserves an authored draft', async t => {
   const page = await editor(t); await editPlan(page, 'ADDITIONAL INPUT');
   const next = detail(); next.classItem.schedulePlan.className = 'SERVER REFRESH';
