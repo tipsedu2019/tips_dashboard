@@ -54,6 +54,28 @@ select is((select count(*) from dashboard_private.notification_deliveries),(sele
 select ok(not has_function_privilege('authenticated','dashboard_private.read_timetable_class_weekly_v2(public.classes)','execute'),'new private reader inaccessible to authenticated callers');
 select ok(not has_function_privilege('anon','dashboard_private.timetable_blocker_intersects_v2(jsonb,jsonb)','execute'),'new private matcher inaccessible to anon');
 select ok((select teacher_catalog_id is null and classroom_catalog_id is null from public.class_lesson_sessions where id=pg_temp.sid(501)),'normalized dated source UUIDs remain null');
+-- Closed classes retain dated uncertainty, but a plain future regular row
+-- whose weekday no longer matches still has its single known resource pair.
+select set_config('app.class_close_mutation','v1',true);
+insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room,schedule_plan) values
+(pg_temp.sid(305),'closed off-weekday legacy','영어','종강','legacy','수 18:00-19:30','other scoped teacher','other scoped room',jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','old-regular','date',pg_temp.next_day(5),'scheduleState','active','isForced',false))));
+create temp table off_weekday_original as select to_jsonb(c) row from public.classes c where id=pg_temp.sid(305);
+update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
+set constraints all immediate;set constraints all deferred;
+select is((select b->>'teacherId' from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text),pg_temp.sid(102)::text,'off-weekday regular uncertainty retains its uniquely resolved teacher');
+select ok((select b->>'startMinute' is null and b->>'endMinute' is null and b->>'classroomId'=pg_temp.sid(202)::text from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text),'time stays unknown while the known room is retained');
+create function pg_temp.makeup_with(t int,r int,k int) returns jsonb language sql as $$
+ select public.update_class_operational_v1(pg_temp.sid(303),jsonb_build_object('schedule_plan',jsonb_set(schedule_plan,'{sessions}',jsonb_build_array(jsonb_build_object('id','scoped-makeup','date',pg_temp.next_day(5),'scheduleState','makeup','startTime','19:20','endTime','21:20','teacherCatalogId',pg_temp.sid(t),'classroomCatalogId',pg_temp.sid(r))))),pg_temp.sid(k),schedule_plan) from public.classes where id=pg_temp.sid(303)
+$$;
+set local role authenticated;
+select lives_ok($q$select pg_temp.makeup_with(101,201,601);set constraints all immediate;set constraints all deferred$q$,'unrelated teacher AND room can save against closed-class unknown time');
+select throws_ok($q$select pg_temp.makeup_with(102,201,602)$q$,'23P01','timetable_resource_conflict','same teacher remains blocked at every time on the uncertain date');
+select throws_ok($q$select pg_temp.makeup_with(101,202,603)$q$,'23P01','timetable_resource_conflict','same room remains blocked at every time on the uncertain date');
+reset role;
+select is((select to_jsonb(c) from public.classes c where id=pg_temp.sid(305)),(select row from off_weekday_original),'uncertainty refinement never rewrites the closed class');
+-- Mixed-resource schedules must not choose one of the resource pairs.
+update public.classes set schedule='수 18:00-19:30; 목 18:00-19:30 (scoped teacher, scoped room)' where id=pg_temp.sid(305);
+select ok((select b->>'teacherId' is null and b->>'classroomId' is null from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.sid(305)::text),'mixed resources remain conservative for an unmatched weekday');
 -- Forced, makeup, explicit overrides, missing producer marker and duplicate
 -- identities cannot acquire regular-default authority from date similarity.
 update public.classes set schedule_plan=jsonb_build_object('sessions',jsonb_build_array(

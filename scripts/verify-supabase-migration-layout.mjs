@@ -40,7 +40,7 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
 // step reordering cannot expand Supabase secret scope before the verifier exits.
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "c0933c12fb02c5c7ad8c91df5bf3e7850fac6f26fec81c998e50815ad0955e1f"
+  "50ce43297e701ed649c9f8a4c6bb9e88396b69833d75b3f38a6ee256abec2fe2"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([

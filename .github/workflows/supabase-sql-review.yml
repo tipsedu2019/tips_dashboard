@@ -135,6 +135,7 @@ jobs:
             --test supabase/tests/timetable_continuous_class_scope_test.sql \
             --test supabase/tests/timetable_guard_aggregation_test.sql \
             --test supabase/tests/timetable_legacy_content_preservation_test.sql \
+            --test supabase/tests/timetable_lesson_save_performance_test.sql \
             --test supabase/tests/timetable_makeup_domain_sqlstate_test.sql \
             --test supabase/tests/timetable_normalized_time_matching_test.sql \
             --test supabase/tests/timetable_operational_conflicts_test.sql \
