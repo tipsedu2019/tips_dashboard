@@ -103,6 +103,9 @@ export function compileClassEdit(context, request, { today = new Intl.DateTimeFo
   const touched = new Set();
   for (const change of request.lessons) {
     if (change.date < today || change.makeup?.date < today) fail('agent_past_change');
+    // Legacy overrides are keyed by date, so an ID cannot isolate one of two
+    // lessons on that date. Reject instead of editing both behind the caller.
+    if (context.storageMode !== 'normalized' && workspace.lessons.filter(row=>row.date === change.date).length > 1) fail('agent_ambiguous_lesson');
     selectLesson(workspace, change);
     touched.add(change.date);
     if (change.makeup) touched.add(change.makeup.date);

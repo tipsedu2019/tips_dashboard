@@ -663,7 +663,12 @@
     {
       "fileName": "20260929130122_agent_api_class_changes.sql",
       "status": "final",
-      "sha256": "d491691f450604c622be67ae0c83e833955eee6087c29f2efae1ab1b4209a62c"
+      "sha256": "797985bbb2c27410dc3b9ba4974d4e665f594514f94fdd7545c96f6447f35b2e"
+    },
+    {
+      "fileName": "20260929132914_agent_legacy_dated_override.sql",
+      "status": "final",
+      "sha256": "75856b015a854c0b597a1748147ab9e0664863a243771aa0a022b0f251b0ebf0"
     }
   ]
 }

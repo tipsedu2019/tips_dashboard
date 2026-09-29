@@ -5,7 +5,7 @@ import { classEditRequest } from '../src/features/agent-api/server/class-edit-co
 import { classWorkspace, compileClassEdit } from '../src/features/agent-api/server/class-edit-compiler.mjs';
 import { normalizeSchedulePlan } from '../src/lib/class-schedule-planner.js';
 import { createAgentEditApiHandler } from '../src/features/agent-api/server/http-v2.ts';
-import { id, window, timing, monday, target, fixture } from './fixtures/agent-class-edit-fixture.mjs';
+import { id, window, timing, monday, target, fixture, makeSqlFixture } from './fixtures/agent-class-edit-fixture.mjs';
 const request=(context,extra)=>classEditRequest.parse({expectedVersion:context.version,window,reason:'synthetic test',...extra});
 test('contract rejects empty, arbitrary, reversed and ambiguous edits',()=>{
  const c=fixture(); for(const extra of [{},{basic:{student_ids:[]}},{lessons:[{date:monday[0],state:'scheduled',makeup:{date:target,...timing}}]},{lessons:[{date:monday[0],state:'skipped'},{date:monday[0],state:'cancelled'}]},{lessons:[{date:monday[0],state:'scheduled',timing:{...timing,endMinute:500}}]}]) assert.throws(()=>request(c,extra));
@@ -39,6 +39,7 @@ test('normalized virtual cancellation and linked makeup have stable IDs before p
 test('cannot guess ambiguous dates, existing makeup sources, past edits, periods or catalogs',()=>{
  const c=fixture(); c.plan.sessions.push({...c.plan.sessions[0],id:id(999)});
  assert.throws(()=>compileClassEdit(c,request(c,{lessons:[{date:monday[0],state:'skipped'}]})),/agent_ambiguous_lesson/);
+ assert.throws(()=>compileClassEdit(c,request(c,{lessons:[{date:monday[0],lessonId:c.plan.sessions[0].id,state:'skipped'}]})),/agent_ambiguous_lesson/);
  const empty=fixture();empty.plan={};assert.throws(()=>compileClassEdit(empty,request(empty,{lessons:[{date:monday[0],state:'skipped'}]})),/agent_missing_billing_period/);
  const valid=fixture();assert.throws(()=>compileClassEdit(valid,request(valid,{lessons:[{date:monday[0],state:'scheduled',timing:{...timing,teacherId:id(99)}}]})),/agent_invalid_catalog/);
  assert.throws(()=>compileClassEdit(valid,request(valid,{lessons:[{date:monday[0],state:'skipped'}]}),{today:'2100-01-01'}),/agent_past_change/);
@@ -75,8 +76,7 @@ test('HTTP rejects raw compiler payload and bounds queries before RPC',async()=>
 });
 
 test('SQL integration fixture is exact real compiler output',()=>{
- const c=fixture();let n=800;const command=compileClassEdit(c,{expectedVersion:c.version,window,reason:'synthetic test',basic:{name:'Changed by agent'},lessons:[{date:monday[0],state:'cancelled',makeup:{date:target,...timing}}]},{uuid:()=>id(n++)});
  const sql=readFileSync(new URL('../supabase/tests/agent_api_class_changes_test.sql',import.meta.url),'utf8');
  const payload=sql.match(/insert into compiler_fixture values \('(.+)'::jsonb\);/)[1].replaceAll("''", "'");
- assert.deepEqual(JSON.parse(payload),{plan:c.plan,command,source:monday[0],target});
+ assert.deepEqual(JSON.parse(payload),makeSqlFixture(compileClassEdit));
 });

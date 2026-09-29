@@ -82,7 +82,7 @@ end$$;
 -- No notification/approval/financial RPC is called by this adapter.
 create function dashboard_private.agent_apply_edit_v2(p_class_id uuid,p_command jsonb,p_key uuid) returns void
 language plpgsql security definer set search_path='' as $$
-declare c public.classes; patch jsonb:=coalesce(p_command->'patch','{}'); s jsonb; d date; actor uuid; teacher text; room text; sid uuid; source_id uuid; parent_id uuid; existing public.class_lesson_sessions; subject text;
+declare c public.classes; patch jsonb:=coalesce(p_command->'patch','{}'); s jsonb; d date; actor uuid; teacher text; room text; sid uuid; source_id uuid; parent_id uuid; existing public.class_lesson_sessions; subject text; r jsonb;
 begin
  actor:=dashboard_private.assert_continuous_class_schedule_actor_v1(false);
  perform dashboard_private.lock_timetable_operating_resources_v1();
@@ -135,7 +135,24 @@ begin
  if p_command?'sessions' then perform dashboard_private.project_continuous_class_schedule_plan_v1(c.id);end if;
  elsif p_command?'slots' or p_command?'sessions' then raise exception using errcode='22023',message='agent_invalid';
  end if;
+
+ -- Legacy parsing validates occupancy identity, not active catalog eligibility.
+ -- Re-resolve edited resources at execution as normalized writers already do.
+ if c.schedule_storage_mode<>'normalized' then
+ if patch?'schedule_plan' then
+ for s in select value from jsonb_array_elements(patch#>'{schedule_plan,sessions}') x where coalesce(p_command->'changedDates','[]') ? (x->>'date') and coalesce(x->>'scheduleState',x->>'state','active') in('active','makeup') loop
+ if s->>'teacherCatalogId' is not null then perform dashboard_private.resolve_continuous_schedule_catalog_name_v1('teacher',(s->>'teacherCatalogId')::uuid,subject);end if;
+ if s->>'classroomCatalogId' is not null then perform dashboard_private.resolve_continuous_schedule_catalog_name_v1('classroom',(s->>'classroomCatalogId')::uuid,subject);end if;
+ end loop;
+ end if;
+ end if;
  if patch<>'{}'::jsonb then perform public.update_class_operational_v1(c.id,patch,p_key,case when patch?'schedule_plan' then coalesce(c.schedule_plan,'{}') else null end);end if;
+ if c.schedule_storage_mode<>'normalized' and patch?'schedule' then
+ r:=dashboard_private.read_timetable_weekly_reference_v1();
+ for s in select value from jsonb_array_elements(r->'shadowSlots') x where x->>'classId'=c.id::text loop
+ perform dashboard_private.resolve_continuous_schedule_catalog_name_v1('teacher',(s->>'teacherId')::uuid,subject);
+ perform dashboard_private.resolve_continuous_schedule_catalog_name_v1('classroom',(s->>'classroomId')::uuid,subject);
+ end loop;end if;
  perform dashboard_private.assert_timetable_operational_conflicts_v1();
 end$$;
 
@@ -199,7 +216,7 @@ begin
  result:=jsonb_build_object('operationId',key,'state','applied','classContext',after_state,'window',preview.command->'window','appliedAt',clock_timestamp(),'executor',cred.label,'actorProfileId',cred.created_by,'sourceReference',nullif(p_input->>'sourceReference',''),'requesterVerified',false);
  exception when others then
  get stacked diagnostics err=message_text,statecode=returned_sqlstate;
- result:=jsonb_build_object('operationId',key,'state','failed','error',jsonb_build_object('code',case when statecode='23P01' then 'timetable_resource_conflict' when err in('agent_stale','agent_preview_expired','agent_not_found','agent_approval_workflow_required','agent_class_not_active','agent_past_change','class_schedule_stale','continuous_class_schedule_runtime_not_ready') then err else 'agent_write_failed' end,'sqlstate',statecode));
+ result:=jsonb_build_object('operationId',key,'state','failed','error',jsonb_build_object('code',case when statecode='23P01' then 'timetable_resource_conflict' when err='class_schedule_catalog_invalid' then 'agent_invalid_catalog' when err in('agent_stale','agent_preview_expired','agent_not_found','agent_approval_workflow_required','agent_class_not_active','agent_past_change','class_schedule_stale','continuous_class_schedule_runtime_not_ready') then err else 'agent_write_failed' end,'sqlstate',statecode));
  end;
  result:=result||jsonb_build_object('notifications',jsonb_build_object('state','not_requested'),'externalSync',jsonb_build_object('state','not_requested'),'reply',jsonb_build_object('state','not_requested'));
  insert into dashboard_private.agent_edit_operations(credential_id,request_key,preview_id,class_id,source_reference,state,result) values(cred.id,key,token,preview.class_id,nullif(p_input->>'sourceReference',''),result->>'state',result);
