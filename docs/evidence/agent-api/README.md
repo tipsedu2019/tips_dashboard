@@ -32,3 +32,13 @@
 - 실제 Vault → HTTPS 헤더 치환과 실제 운영 쓰기는 아직 검증되지 않았습니다. Muse의 41개 CLI 자체 테스트는 Muse 보고 결과입니다.
 
 재현 명령 및 활성화 절차는 [Muse 연동 문서](../../../integrations/muse/README.md)에 있습니다.
+
+## 수업 수정 API v2
+
+- 기본 정보, 기존 주간 슬롯, 미래 날짜별 휴강/보강의 단일 수업 일괄 변경을 추가했습니다. 대상을 먼저 읽고 exact ID로 미리보기 → 저장 → 결과 해시 대조를 수행합니다. 과거 기록 수정·승인 전환·외부 발송은 제공하지 않습니다.
+- v2 컴파일러/HTTP 12개 통과: 실제 legacy planner 소비 결과, 학습 내용·과거 이력 보존, 날짜/카탈로그/모호성 거부, normalized 연결 ID, 응답 개인정보 제외, 캐시 실패 복구. 그중 SQL fixture는 실제 JS compiler 출력과 일치함을 검증합니다. v1 HTTP 11개와 공용 캐시 5개를 합한 28개 통과.
+- v2 pgTAP 35개와 기존 v1 52개 통과. 실제 compiler JSON이 최종 DB writer에서 저장되는 것을 확인하고, 두 저장 방식·동시 충돌 SQLSTATE `23P01`·일괄 rollback·scope·멱등·승인 경계·계정 정지/폐기·no-send를 확인했습니다.
+- 기존 legacy content preservation, scoped occupancy, lesson save performance pgTAP도 함께 통과했습니다. 격리 DB lint 및 postdeploy 계약을 확인하고 런타임을 정리했습니다.
+- 설정/탐색/공용 대화상자 회귀와 v2를 합한 81개 통과. 원문 key 발급은 합성 transport의 무권한 fake 값으로만 검사했습니다.
+- 새 발급 폼의 [데스크톱](class-edit-scopes-desktop.png)과 [390px 모바일](class-edit-scopes-mobile.png)을 확인했습니다. 기준 화면과 공용 디자인 구성은 위와 같습니다. 수정 권한 미선택 시 발급 비활성, 선택 범위의 정확한 RPC 전달, 읽기/1일 기본값을 확인했습니다.
+- Muse는 v2 CLI를 추가하고 자체 mock 25개 통과를 보고했습니다. 운영 배포, 실제 키 발급, Vault/Sentinel 인증, 실제 수업 수정은 아직 수행하지 않았습니다.

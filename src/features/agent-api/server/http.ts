@@ -10,14 +10,14 @@ const query = z.object({ search: z.string().max(100).optional(), status: z.enum(
 const preview = z.object({ expectedVersion: z.string().regex(/^[a-f0-9]{64}$/), slotId: z.string().min(1).max(160), startMinute: z.number().int().min(0).max(1439), endMinute: z.number().int().min(1).max(1440), reason: z.string().trim().min(1).max(300) }).strict().refine(v => v.endMinute > v.startMinute);
 const commit = z.object({ previewToken: uuid, sourceReference: z.string().max(500).optional() }).strict();
 const headers = { "Cache-Control": "no-store", "Vary": "Authorization", "X-Content-Type-Options": "nosniff" };
-class HttpError extends Error {
+export class HttpError extends Error {
   status: number;
   constructor(status: number, code: string) { super(code); this.status = status; }
 }
-function record(v: unknown): Record<string, unknown> | null { return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null; }
-function response(body: unknown, status = 200) { return Response.json(body, { status, headers: { ...headers, ...(status === 429 ? { "Retry-After": "60" } : {}), ...(status === 401 ? { "WWW-Authenticate": 'Bearer realm="tips-agent"' } : {}) } }); }
-const knownCodes = new Set(["agent_unauthorized", "agent_forbidden", "agent_scope_forbidden", "agent_class_not_active", "agent_not_found", "agent_invalid", "agent_invalid_range", "agent_no_change", "agent_unsupported_catalog_label", "agent_stale", "agent_preview_expired", "agent_idempotency_key_reused", "agent_preview_consumed", "agent_rate_limited", "timetable_resource_conflict", "class_schedule_stale", "class_schedule_closed", "class_schedule_forbidden", "continuous_class_schedule_runtime_not_ready", "agent_write_failed"]);
-function errorStatus(code: string): number {
+export function record(v: unknown): Record<string, unknown> | null { return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null; }
+export function response(body: unknown, status = 200) { return Response.json(body, { status, headers: { ...headers, ...(status === 429 ? { "Retry-After": "60" } : {}), ...(status === 401 ? { "WWW-Authenticate": 'Bearer realm="tips-agent"' } : {}) } }); }
+export const knownCodes = new Set(["agent_unauthorized", "agent_forbidden", "agent_scope_forbidden", "agent_class_not_active", "agent_not_found", "agent_invalid", "agent_invalid_range", "agent_no_change", "agent_unsupported_catalog_label", "agent_stale", "agent_preview_expired", "agent_idempotency_key_reused", "agent_preview_consumed", "agent_rate_limited", "timetable_resource_conflict", "class_schedule_stale", "class_schedule_closed", "class_schedule_forbidden", "continuous_class_schedule_runtime_not_ready", "agent_write_failed", "agent_approval_workflow_required", "agent_past_change", "agent_invalid_catalog", "agent_ambiguous_lesson", "agent_edit_makeup_source", "agent_incomplete_schedule", "agent_missing_billing_period", "agent_timing_required", "agent_makeup_date_occupied"]);
+export function errorStatus(code: string): number {
   if (code === "agent_unauthorized") return 401;
   if (["agent_forbidden", "agent_scope_forbidden", "agent_class_not_active", "class_schedule_closed", "class_schedule_forbidden"].includes(code)) return 403;
   if (code === "agent_not_found") return 404;
@@ -26,13 +26,13 @@ function errorStatus(code: string): number {
   if (["agent_write_failed", "continuous_class_schedule_runtime_not_ready"].includes(code)) return 503;
   return 422;
 }
-async function jsonBody(request: Request): Promise<unknown> {
+export async function jsonBody(request: Request, limit = 8192): Promise<unknown> {
   if (request.headers.get("content-type")?.split(";", 1)[0].trim() !== "application/json") throw new HttpError(415, "json_required");
   const reader = request.body?.getReader();
   if (!reader) throw new HttpError(400, "invalid_request");
   const chunks: Uint8Array[] = []; let size = 0;
   try {
-    for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength; if (size > 8192) { await reader.cancel(); throw new HttpError(413, "request_too_large"); } chunks.push(next.value); }
+    for (;;) { const next = await reader.read(); if (next.done) break; size += next.value.byteLength; if (size > limit) { await reader.cancel(); throw new HttpError(413, "request_too_large"); } chunks.push(next.value); }
     return JSON.parse(Buffer.concat(chunks).toString("utf8"));
   } catch (e) { if (e instanceof HttpError) throw e; throw new HttpError(400, "invalid_json"); }
   finally { reader.releaseLock(); }

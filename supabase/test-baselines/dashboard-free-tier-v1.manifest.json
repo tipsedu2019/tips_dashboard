@@ -659,6 +659,11 @@
       "fileName": "20260929121505_lesson_save_conflict_validation_performance.sql",
       "status": "final",
       "sha256": "184eb0ba449c75080f63d20d59049f428ab3014c9fbf8d5177b31ebfba590ed7"
+    },
+    {
+      "fileName": "20260929130122_agent_api_class_changes.sql",
+      "status": "final",
+      "sha256": "d491691f450604c622be67ae0c83e833955eee6087c29f2efae1ab1b4209a62c"
     }
   ]
 }
