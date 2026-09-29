@@ -644,6 +644,11 @@
       "fileName": "20260929112742_lesson_design_teacher_subject_aliases.sql",
       "status": "final",
       "sha256": "bbffd465a538dcb2fb2d8e105c0621576ebd26e0e98c53b35640bf621a13db43"
+    },
+    {
+      "fileName": "20260929121505_lesson_save_conflict_validation_performance.sql",
+      "status": "final",
+      "sha256": "184eb0ba449c75080f63d20d59049f428ab3014c9fbf8d5177b31ebfba590ed7"
     }
   ]
 }

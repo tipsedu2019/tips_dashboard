@@ -1,5 +1,13 @@
 begin;
 select no_plan();
+create or replace function pg_temp.original_effective_date(r jsonb, d date)
+returns setof jsonb language sql stable set search_path='' as $f$
+ select x||jsonb_build_object('date',d) from jsonb_array_elements(r->'shadowSlots') x
+ where d>=(r->>'asOfDate')::date and (x->>'weekday')::int=extract(dow from d)::int and not exists(
+ select 1 from jsonb_array_elements(r->'datedSessions') s where s->>'classId'=x->>'classId' and (s->>'sourceSlotId'=x->>'sourceSlotId' or (s->>'state' in('skipped','tbd') and s->>'inheritedWeeklySlotId'=x->>'id')) and (s->>'date')::date=d)
+ union all
+ select s from jsonb_array_elements(r->'datedSessions') s where (s->>'date')::date=d and s->>'state' in('active','exception','makeup') and not exists(select 1 from jsonb_array_elements(r->'shadowSlots') w where s->>'inheritedWeeklySlotId'=w->>'id' and d>=(r->>'asOfDate')::date and (w->>'weekday')::int=extract(dow from d)::int)
+$f$;
 create temp table guard_fixture(value jsonb);
 create function pg_temp.fixture_reference() returns jsonb language sql stable as $$select value from guard_fixture$$;
 create or replace function pg_temp.original_guard()
@@ -57,5 +65,27 @@ select pg_temp.check_case('unknown label-only change preserves occupancy',pg_tem
 select pg_temp.check_case('unknown removal is allowed',pg_temp.ref('[]','[]','[{"date":"2026-01-05","reason":"incomplete_read"}]'),pg_temp.ref('[]','[]'),'00000');
 select pg_temp.check_case('unknown duplicate retains original set semantics',pg_temp.ref('[]','[]','[{"date":"2026-01-05","reason":"incomplete_read"}]'),pg_temp.ref('[]','[]','[{"date":"2026-01-05","reason":"incomplete_read"},{"date":"2026-01-05","reason":"incomplete_read"}]'),'00000');
 select pg_temp.check_case('changed unknown fingerprint remains rejected',pg_temp.ref('[]','[]','[{"date":"2026-01-05","occupancyFingerprint":"before"}]'),pg_temp.ref('[]','[]','[{"date":"2026-01-05","occupancyFingerprint":"after"}]'),'23P01/timetable_resource_conflict');
+-- Date pruning must include the removed side and all dates after a weekly edit.
+select pg_temp.check_case('moved override exposes collision on the old date',pg_temp.ref(jsonb_build_array((a-'date')||'{"sourceSlotId":"source"}'),jsonb_build_array(a||'{"sourceSlotId":"source","state":"skipped"}',teacher)),pg_temp.ref(jsonb_build_array((a-'date')||'{"sourceSlotId":"source"}'),jsonb_build_array(a||'{"sourceSlotId":"source","state":"skipped","date":"2026-01-12"}',teacher)),'23P01/timetable_resource_conflict') from g;
+select pg_temp.check_case('new weekly slot collides with unchanged distant actual session',pg_temp.ref('[]',jsonb_build_array(teacher||'{"date":"2026-12-28"}')),pg_temp.ref(jsonb_build_array(a-'date'),jsonb_build_array(teacher||'{"date":"2026-12-28"}')),'23P01/timetable_resource_conflict') from g;
+select pg_temp.check_case('weekly removal exposes inherited actual collision',pg_temp.ref(jsonb_build_array(a-'date'),jsonb_build_array(a||'{"id":"inherited","inheritedWeeklySlotId":"a","startMinute":700,"endMinute":760}',teacher||'{"startMinute":700,"endMinute":760}')),pg_temp.ref('[]',jsonb_build_array(a||'{"id":"inherited","inheritedWeeklySlotId":"a","startMinute":700,"endMinute":760}',teacher||'{"startMinute":700,"endMinute":760}')),'23P01/timetable_resource_conflict') from g;
+-- Compare the new materialized-date reader to the previously deployed definition.
+-- Covers every schedule state, explicit source overrides, inherited defaults,
+-- another class sharing a source id, duplicate rows, past dates and future dates.
+with fixtures as (
+ select pg_temp.ref(jsonb_build_array((a-'date')||'{"sourceSlotId":"source"}',teacher-'date'),
+   jsonb_build_array(a||jsonb_build_object('state',state,'sourceSlotId',source,'inheritedWeeklySlotId',inherited),
+     a||jsonb_build_object('state',state,'sourceSlotId',source,'inheritedWeeklySlotId',inherited),
+     teacher||jsonb_build_object('state',state,'sourceSlotId',source,'date','2026-01-12'),
+     a||'{"date":"2025-01-06"}')) ref
+ from g cross join unnest(array['active','exception','makeup','skipped','tbd']) state
+ cross join unnest(array[null,'source','other']) source
+ cross join unnest(array[null,'a','b']) inherited
+), compared as (
+ select ref,d,(select jsonb_agg(v order by v) from pg_temp.original_effective_date(ref,d) v) expected,
+ (select jsonb_agg(v order by v) from dashboard_private.timetable_effective_date_v1(ref,d) v) actual
+ from fixtures cross join unnest(array[date '2025-01-06',date '2026-01-05',date '2026-01-12',date '2026-01-13']) d
+)
+select ok(bool_and(expected is not distinct from actual),'effective-date materialization preserves all 180 prior result multisets') from compared;
 select * from finish();
 rollback;
