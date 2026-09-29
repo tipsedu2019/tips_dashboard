@@ -2,7 +2,8 @@
 
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
 import Link from "next/link";
-import { preserveScheduleLearningContent, scheduleOnlyDraft } from "./schedule-only-plan";
+import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
+import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -2038,21 +2039,9 @@ function countLessonGroupSessions<
     sessionNumber: number;
     scheduleState: string;
   },
->(sessions: T[] = []) {
-  const nonMakeupSessions = sessions.filter((session) => session.scheduleState !== "makeup");
-  const numberedSessions = new Set(
-    nonMakeupSessions
-      .map((session) => Number(session.sessionNumber || 0))
-      .filter((sessionNumber) => Number.isFinite(sessionNumber) && sessionNumber > 0),
-  );
-  const unnumberedSessionCount = nonMakeupSessions.filter(
-    (session) => !Number.isFinite(Number(session.sessionNumber || 0)) || Number(session.sessionNumber || 0) <= 0,
-  ).length;
-  if (numberedSessions.size > 0 || unnumberedSessionCount > 0) {
-    return numberedSessions.size + unnumberedSessionCount;
-  }
-
-  return sessions.length;
+>(sessions: T[] = [], normalized = false) {
+  const cancelled = normalized ? ['skipped', 'tbd'] : ['exception', 'skipped', 'tbd'];
+  return sessions.filter(session => !cancelled.includes(session.scheduleState)).length;
 }
 
 function compareLessonSessionsByDate<
@@ -2825,12 +2814,15 @@ export function ClassScheduleWorkspace() {
     [lessonPlanDraft, normalizeLessonDraft],
   );
   const lessonPlanForSave = useMemo(
-    () =>
-      normalizedLessonPlan
-        ? { ...(buildSchedulePlanForSave(normalizedLessonPlan, lessonPlanDefaults) as Record<string, unknown>),
-          ...(isNormalizedLessonSchedule ? { sessions: normalizedLessonPlan.sessions } : {}) }
-        : null,
-    [isNormalizedLessonSchedule, lessonPlanDefaults, normalizedLessonPlan],
+    () => {
+      if (!normalizedLessonPlan) return null;
+      const generated = buildSchedulePlanForSave(normalizedLessonPlan, lessonPlanDefaults) as Record<string, unknown>;
+      if (isNormalizedLessonSchedule) return { ...generated, sessions: normalizedLessonPlan.sessions };
+      if (!lessonPlanBaseline) return generated;
+      return preserveUneditedLegacyPeriods(generated,
+        (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>, lessonPlanBaseline);
+    },
+    [isNormalizedLessonSchedule, lessonPlanDefaults, normalizedLessonPlan, lessonPlanBaseline, selectedRowClassItem],
   );
   const lessonDesignSnapshot = useMemo(() => {
     if (!normalizedScheduleData || !lessonPlanForSave) return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, lessonPlanForSave);
@@ -3666,6 +3658,8 @@ export function ClassScheduleWorkspace() {
       mutate: async () => {
         const schedulePlan = preserveScheduleLearningContent(lessonPlanForSave, (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>);
         const expectedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
+        const validationError = legacyLessonScheduleValidationError(schedulePlan, expectedPlan);
+        if (validationError) throw { code: "legacy_lesson_details_required", message: validationError };
         const body = JSON.stringify({ classId: selectedRow.id, schedulePlan, expectedPlan });
         if (legacyScheduleRequestRef.current?.body !== body) legacyScheduleRequestRef.current = { body, key: crypto.randomUUID() };
         const { error: updateError } = await client.rpc("update_class_operational_v1", {
@@ -3686,7 +3680,9 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("저장한 내용을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async (error: unknown) => setLessonDesignSaveError(timetableOperationalErrorMessage(error, "수업계획을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
+      onError: async (error: unknown) => setLessonDesignSaveError((error as { code?: string })?.code === "legacy_lesson_details_required"
+        ? String((error as { message: string }).message)
+        : timetableOperationalErrorMessage(error, "수업계획을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
       onSettled: async () => {
         if (lessonPlanSaveRef.current === submission) lessonPlanSaveRef.current = null;
         setIsLessonDesignSaving(false);
@@ -4333,6 +4329,12 @@ export function ClassScheduleWorkspace() {
     { key: "teacher", label: `선생님 ${lessonDesignTeacherName || "미정"}` },
     { key: "classroom", label: `강의실 ${lessonDesignClassroomName || "미정"}` },
   ];
+  const legacyLessonDetails = selectedLessonSession ? {
+    startTime: selectedLessonSession.startTime,
+    endTime: selectedLessonSession.endTime,
+    teacherCatalogId: selectedLessonSession.teacherCatalogId || (teacherCatalogOptions.filter(option => option.name === lessonDesignTeacherName).length === 1 ? teacherCatalogOptions.find(option => option.name === lessonDesignTeacherName)?.id || "" : ""),
+    classroomCatalogId: selectedLessonSession.classroomCatalogId || (classroomCatalogOptions.filter(option => option.name === lessonDesignClassroomName).length === 1 ? classroomCatalogOptions.find(option => option.name === lessonDesignClassroomName)?.id || "" : ""),
+  } : null;
   const lessonDesignReturnLabel = getLessonDesignReturnLabel(requestedLessonReturnPath);
   const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel(lessonDesignReturnLabel);
 
@@ -4539,6 +4541,12 @@ export function ClassScheduleWorkspace() {
                         </div>
 
                         <div className="mt-3 grid gap-2">
+                          {legacyLessonDetails && (selectedLessonSessionEditableState === "makeup" || selectedLessonSessionEditableState === "force_active" || legacyLessonDetails.startTime || legacyLessonDetails.endTime) ? (
+                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions}
+                              onChange={value => updateLessonPlanDraft(current => ({ ...current,
+                                sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}), [selectedLessonSession.dateValue]: value },
+                              }))} />
+                          ) : null}
                           <Textarea
                             value={selectedLessonSessionEditableMemo}
                             onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}
@@ -4767,7 +4775,7 @@ export function ClassScheduleWorkspace() {
                         <div className="flex flex-wrap items-center justify-between gap-3">
                           <div className="flex flex-wrap items-center gap-2">
                             <p className="font-medium text-foreground">{period.label}</p>
-                            <Badge variant="secondary">{countLessonGroupSessions(periodSessions)}회</Badge>
+                            <Badge variant="secondary">{countLessonGroupSessions(periodSessions, isNormalizedLessonSchedule)}회</Badge>
                           </div>
                           <div className="flex flex-wrap gap-2">
                             {periodSessions.length > 0 ? (

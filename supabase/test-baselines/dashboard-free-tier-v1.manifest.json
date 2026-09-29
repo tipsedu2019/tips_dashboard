@@ -634,6 +634,11 @@
       "fileName": "20260928021444_registration_numbered_keys_narrow_summary.sql",
       "status": "final",
       "sha256": "d4b3c450540a19fed98582cf56f224d93d5fdf54383720fa49e2249b7c2ceb64"
+    },
+    {
+      "fileName": "20260929100158_legacy_lesson_schedule_compatibility.sql",
+      "status": "final",
+      "sha256": "f575e0d687beb0e602eb9ca06eb07828cd56338a4306557985d80ac62f661309"
     }
   ]
 }

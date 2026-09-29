@@ -950,6 +950,29 @@ function getProgressStatusFromEntries(textbookEntries = []) {
   return "partial";
 }
 
+const SESSION_OCCUPANCY_FIELDS = ['startTime', 'endTime', 'teacherCatalogId', 'classroomCatalogId', 'teacherName', 'classroomName'];
+
+function sessionOccupancy(session = {}) {
+  return Object.fromEntries(SESSION_OCCUPANCY_FIELDS.filter(key => Object.hasOwn(session, key)).map(key => [key, session[key]]));
+}
+
+function normalizeSessionSchedules(rawPlan = {}) {
+  const result = {};
+  const sessions = Array.isArray(rawPlan.sessions) ? rawPlan.sessions : [];
+  const dateCounts = new Map();
+  for (const session of sessions) dateCounts.set(session.date, (dateCounts.get(session.date) || 0) + 1);
+  for (const session of sessions) {
+    if (session.date && dateCounts.get(session.date) === 1) {
+      const details = sessionOccupancy(session);
+      if (Object.keys(details).length) result[session.date] = details;
+    }
+  }
+  for (const [date, details] of Object.entries(rawPlan.sessionSchedules || {})) {
+    if (parseDateValue(date) && details && typeof details === 'object') result[date] = sessionOccupancy(details);
+  }
+  return result;
+}
+
 function normalizeExistingSession(session = {}, textbooks = []) {
   const scheduleState =
     String(session.scheduleState || session.state || "active").trim() ||
@@ -1145,6 +1168,7 @@ export function normalizeSchedulePlan(rawPlan, defaults = {}) {
     globalSessionCount,
   );
   const sessionStates = normalizeSessionStates(rawPlan?.sessionStates);
+  const sessionSchedules = normalizeSessionSchedules(rawPlan || {});
   const textbooks = normalizeTextbookCatalog(rawPlan, defaults);
 
   const normalized = {
@@ -1155,6 +1179,7 @@ export function normalizeSchedulePlan(rawPlan, defaults = {}) {
     globalSessionCount,
     billingPeriods,
     sessionStates,
+    sessionSchedules,
     textbooks,
     sessions: Array.isArray(rawPlan?.sessions) ? rawPlan.sessions : [],
     history: Array.isArray(rawPlan?.history) ? rawPlan.history : [],
@@ -1174,6 +1199,7 @@ export function calculateSchedulePlan(planInput) {
   const selectedDays = uniqueSortedDays(safePlanInput.selectedDays);
   const globalSessionCount = getRecommendedSessionCount(selectedDays);
   const sessionStates = normalizeSessionStates(safePlanInput.sessionStates);
+  const sessionSchedules = normalizeSessionSchedules(safePlanInput);
   const billingPeriods = ensureUniqueBillingPeriodIds(
     (safePlanInput.billingPeriods || []).map((period, index) =>
       createBillingPeriod(period, index, selectedDays, globalSessionCount),
@@ -1342,6 +1368,7 @@ export function calculateSchedulePlan(planInput) {
         existing,
         textbooks,
       });
+      Object.assign(session, sessionSchedules[entry.date] || {});
 
       sessions.push(session);
 
@@ -1600,6 +1627,7 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
       color: period.color,
     })),
     sessionStates: normalized.sessionStates,
+    sessionSchedules: normalized.sessionSchedules,
     textbooks: calculated.textbooks.map((textbook, index) => ({
       textbookId: textbook.textbookId,
       order: index,
@@ -1617,6 +1645,7 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
       rangePresets: normalizeTextbookRangePresets(textbook.rangePresets),
     })),
     sessions: calculated.sessions.map((session) => ({
+      ...sessionOccupancy(session),
       id: session.id,
       sessionKey: session.sessionKey || session.session_key || session.id,
       billingId: session.billingId,
