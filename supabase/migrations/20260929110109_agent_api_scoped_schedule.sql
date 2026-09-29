@@ -16,6 +16,8 @@ create table dashboard_private.agent_credentials (
  revoked_at timestamptz,
  last_used_at timestamptz,
  rate_window timestamptz,
+ -- Per-minute counter: the sole writer rejects at 60 before incrementing and resets each minute.
+ -- squawk-ignore prefer-bigint-over-int
  rate_count integer not null default 0
 );
 create table dashboard_private.agent_previews (

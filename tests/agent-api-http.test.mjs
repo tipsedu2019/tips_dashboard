@@ -18,3 +18,22 @@ test('unknown operation is never manufactured into failure or success',async()=>
 test('sanitizes raw SQL errors and supplies typed rate/auth errors',async()=>{const h=harness({data:null,error:{message:'password=do-not-print secret',code:'XX000'}});const res=await h.run(req('health'),['health']);assert.equal(res.status,503);assert.ok(!(await res.text()).includes('do-not-print'));const rate=harness({data:{error:{code:'agent_rate_limited'}},error:null});const rr=await rate.run(req('health'),['health']);assert.equal(rr.status,429);assert.equal(rr.headers.get('retry-after'),'60')});
 test('bounds streaming bodies and requires JSON',async()=>{for(const [body,headers,status] of [['x'.repeat(9000),{},413],['{',{},400],['{}',{'content-type':'text/plain'},415]]){const h=harness();const res=await h.run(req('operations',{method:'POST',body,headers:{'Idempotency-Key':key,...headers}}),['operations']);assert.equal(res.status,status);assert.equal(h.calls.length,0)}});
 test('public schema has stable operations without revealing credentials',async()=>{const h=harness(undefined,false);const r=await h.run(req('openapi',{auth:false}),['openapi']);assert.equal(r.status,200);const spec=await r.json();assert.equal(spec.openapi,'3.1.0');assert.equal(Object.keys(spec.paths).length,7);assert.equal(h.calls.length,0)});
+
+test('applied commit and receipt lookup refresh public cache only after an authorized receipt',async()=>{
+ const receipt={operationId:key,state:'applied',class:{id}};let refreshes=0;
+ const run=createAgentApiHandler({enabled:()=>true,rpc:async()=>({data:{data:receipt},error:null}),refreshPublicCache:()=>{refreshes++}});
+ for(const [path,parts,options] of [['operations',['operations'],{method:'POST',body:{previewToken:id},headers:{'Idempotency-Key':key}}],['operations/'+key,['operations',key],{}]]){
+  const res=await run(req(path,options),parts);assert.equal(res.status,200);assert.equal((await res.json()).data.publicCache.state,'invalidated');
+ }
+ assert.equal(refreshes,2);
+ for(const state of ['failed','unknown']){
+  const guarded=createAgentApiHandler({enabled:()=>true,rpc:async()=>({data:{data:{operationId:key,state,error:{code:'agent_stale'}}},error:null}),refreshPublicCache:()=>{throw new Error('must not run')}});
+  const data=await (await guarded(req('operations/'+key),['operations',key])).json();assert.ok(!('publicCache' in data.data));
+ }
+});
+test('cache failure preserves applied result and recovery does not repeat business write',async()=>{
+ const receipt={operationId:key,state:'applied',class:{id}};const actions=[];
+ const run=createAgentApiHandler({enabled:()=>true,rpc:async(_name,input)=>{actions.push(input.p_action);return {data:{data:receipt},error:null}},refreshPublicCache:()=>{throw new Error('cache unavailable')}});
+ const res=await run(req('operations/'+key),['operations',key]);assert.equal(res.status,200);
+ const body=await res.json();assert.equal(body.data.state,'applied');assert.equal(body.data.publicCache.state,'pending');assert.equal(body.error,null);assert.deepEqual(actions,['operation']);
+});

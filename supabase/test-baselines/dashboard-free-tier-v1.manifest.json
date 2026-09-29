@@ -643,7 +643,7 @@
     {
       "fileName": "20260929110109_agent_api_scoped_schedule.sql",
       "status": "final",
-      "sha256": "0363bb418bf0b1b8c17b95bf08077ce6ade556efae5fa58b2cadea52e69d7bee"
+      "sha256": "50f8bcc39ec77dc8dea68aa87c2b908b96e0ca54829fb07ccad5c3a58ac9793e"
     },
     {
       "fileName": "20260929113744_agent_api_audit_history_decoupling.sql",

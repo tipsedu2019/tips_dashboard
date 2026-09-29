@@ -37,7 +37,7 @@ async function jsonBody(request: Request): Promise<unknown> {
   } catch (e) { if (e instanceof HttpError) throw e; throw new HttpError(400, "invalid_json"); }
   finally { reader.releaseLock(); }
 }
-export function createAgentApiHandler(dependencies: { enabled: () => boolean; rpc: AgentRpc }) {
+export function createAgentApiHandler(dependencies: { enabled: () => boolean; rpc: AgentRpc; refreshPublicCache?: () => void | Promise<void> }) {
   return async (request: Request, path: string[]): Promise<Response> => {
     try {
       if (path.join("/") === "openapi" && request.method === "GET") return response(agentOpenApi);
@@ -72,11 +72,21 @@ export function createAgentApiHandler(dependencies: { enabled: () => boolean; rp
       if (error) { const code = String(error.code); throw new HttpError(knownCodes.has(code) ? errorStatus(code) : 503, knownCodes.has(code) ? code : "agent_api_unavailable"); }
       const data = record(envelope.data);
       if (!data) throw new HttpError(503, "agent_api_unavailable");
+      // The durable business receipt remains authoritative if cache refresh fails.
+      // Receipt lookup/replay can safely recover this separate, idempotent effect.
+      let outgoing = data;
+      if (data.state === "applied" && ["commit", "operation"].includes(action)) {
+        let cacheState = "pending";
+        try {
+          if (dependencies.refreshPublicCache) { await dependencies.refreshPublicCache(); cacheState = "invalidated"; }
+        } catch { /* Never relabel an already committed operation as failed. */ }
+        outgoing = { ...data, publicCache: { state: cacheState } };
+      }
       const failed = data.state === "failed";
       const failedCode = String(record(data.error)?.code || "agent_write_failed");
       // A known failed operation is persisted and returned with its receipt.
       // GET operation status itself succeeded even when the operation failed.
-      return response({ data, error: failed ? record(data.error) : null }, failed && action === "commit" ? errorStatus(failedCode) : 200);
+      return response({ data: outgoing, error: failed ? record(data.error) : null }, failed && action === "commit" ? errorStatus(failedCode) : 200);
     } catch (e) {
       if (e instanceof z.ZodError) return response({ data: null, error: { code: "invalid_request" } }, 400);
       if (e instanceof HttpError) return response({ data: null, error: { code: e.message } }, e.status);

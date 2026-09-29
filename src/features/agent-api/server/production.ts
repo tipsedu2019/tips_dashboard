@@ -1,8 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
+import { revalidatePath, revalidateTag } from "next/cache";
+import { invalidatePublicClassesCache } from "@/server/public-classes-cache-invalidation.js";
 import { createAgentApiHandler } from "./http.ts";
 
 export const handleAgentApiRequest = createAgentApiHandler({
   enabled: () => process.env.TIPS_AGENT_API_ENABLED === "true",
+  refreshPublicCache: () => invalidatePublicClassesCache({ revalidateTag, revalidatePath }),
   rpc: async (name, input) => {
     const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
