@@ -31,7 +31,7 @@ create function pg_temp.sid(n int) returns uuid language sql immutable as $$sele
 create function pg_temp.day(n int) returns date language sql stable as $$select (now() at time zone 'Asia/Seoul')::date+7+((n-extract(dow from (now() at time zone 'Asia/Seoul')::date)::int+7)%7)$$;
 insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.sid(901),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','legacy-save@test.invalid');
 insert into public.profiles(id,role,name) values(pg_temp.sid(901),'admin','legacy save fixture') on conflict(id) do update set role='admin';
-insert into public.teacher_catalogs(id,name,subjects) values(pg_temp.sid(101),'legacy save teacher',array['영어']);
+insert into public.teacher_catalogs(id,name,subjects) values(pg_temp.sid(101),'legacy save teacher',array['영어팀']);
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.sid(201),'legacy save room',array['영어']);
 insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room,schedule_plan) values
 (pg_temp.sid(301),'legacy save fixture','영어','수강','legacy','화 19:20-21:20; 일 15:00-17:00','legacy save teacher','legacy save room',jsonb_build_object('sessions',jsonb_build_array(
@@ -70,5 +70,40 @@ select is((select count(*) from dashboard_private.notification_events),(select e
 select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from no_send),'no notification delivery');
 select ok(not has_function_privilege('authenticated','dashboard_private.read_timetable_operating_reference_v1()','execute'),'private reference ACL remains restricted');
 select ok((select prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'security definer and empty search path preserved');
+
+-- Exercise the actual lesson-detail producer with team labels from the catalog.
+insert into public.teacher_catalogs(id,name,subjects,is_visible) values
+(pg_temp.sid(110),'alias English teacher',array['영어'],true),
+(pg_temp.sid(111),'alias math teacher',array['수학팀'],true),
+(pg_temp.sid(112),'alias science teacher',array['과학팀'],true),
+(pg_temp.sid(113),'alias unrestricted teacher','{}',true),
+(pg_temp.sid(114),'alias hidden teacher',array['영어팀'],false),
+(pg_temp.sid(115),'alias unrelated teacher',array['국어'],true);
+insert into public.academic_subject_settings(subject,grade_levels) values('과학',array['고1','고2','고3']) on conflict(subject) do nothing;
+insert into public.academic_subject_areas(subject,area_key,label,sort_order,is_active) values('과학','integrated_science','합성 과학',99999,true) on conflict(subject,area_key) do update set is_active=true;
+insert into public.classes(id,name,subject,status,subject_area_key,grade) values
+(pg_temp.sid(310),'alias reverse class','영어팀','개강 준비',null,'고1'),
+(pg_temp.sid(311),'alias math class','수학','개강 준비',null,'고1'),
+(pg_temp.sid(312),'alias science class','과학','개강 준비','integrated_science','고1');
+set local role authenticated;
+select ok(exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(301))->'teacherCatalogs') t where t->>'id'=pg_temp.sid(101)::text),'authenticated lesson detail includes the English-team teacher for an English class');
+select ok(exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(310))->'teacherCatalogs') t where t->>'id'=pg_temp.sid(110)::text),'team-labelled class includes the canonical-subject teacher');
+select ok(exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(311))->'teacherCatalogs') t where t->>'id'=pg_temp.sid(111)::text),'math alias is supported');
+select ok(exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(312))->'teacherCatalogs') t where t->>'id'=pg_temp.sid(112)::text),'science alias is supported');
+select ok(exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(301))->'teacherCatalogs') t where t->>'id'=pg_temp.sid(113)::text),'unrestricted teacher remains selectable');
+select ok(not exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(301))->'teacherCatalogs') t where t->>'id'=any(array[pg_temp.sid(111)::text,pg_temp.sid(112)::text,pg_temp.sid(114)::text,pg_temp.sid(115)::text])),'hidden and other-subject teachers stay excluded');
+select is(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(301))#>'{classItem,schedulePlan}',(select schedule_plan from public.classes where id=pg_temp.sid(301)),'detail returns the unchanged saved plan');
+select is(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(301))->'textbooks','[]'::jsonb,'schedule-only detail keeps retired textbook payload empty');
+reset role;
+create policy lesson_alias_teacher_rls on public.teacher_catalogs as restrictive for select to authenticated using(id<>pg_temp.sid(101));
+set local role authenticated;
+select ok(not exists(select 1 from jsonb_array_elements(public.get_operations_class_lesson_design_detail_v1(pg_temp.sid(301))->'teacherCatalogs') t where t->>'id'=pg_temp.sid(101)::text),'lesson teacher choices respect caller RLS');
+reset role;
+select ok((select not prosecdef and proconfig @> array['search_path=""'] from pg_proc where oid='public.get_operations_class_lesson_design_detail_v1(uuid)'::regprocedure),'lesson detail retains security invoker and empty search path');
+select ok(not has_function_privilege('anon','public.get_operations_class_lesson_design_detail_v1(uuid)','execute'),'anonymous access remains denied');
+select ok(not has_function_privilege('authenticated','dashboard_private.registration_observation_teacher_subject_matches_v1(text,text[])','execute'),'private alias-helper execution is not expanded');
+set local role anon;
+select throws_ok($q$select public.get_operations_class_lesson_design_detail_v1('ac290000-0000-4000-8000-000000000301')$q$,'42501','permission denied for function get_operations_class_lesson_design_detail_v1','anonymous RPC fails with exact permission SQLSTATE');
+reset role;
 select * from finish();
 rollback;

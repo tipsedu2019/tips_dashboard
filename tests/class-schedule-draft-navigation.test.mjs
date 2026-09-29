@@ -156,6 +156,30 @@ test('legacy month count includes makeup and excludes cancelled lessons, and sav
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_') || r.name === 'update_class_operational_v1');
 
+test('lesson-detail team catalog populates the makeup selector and selection preserves entered times on save', async t => {
+  const page = await setup(t, 'operations', { workspace: true, search: `?lessonDesign=1&classId=${id(999)}`, route:'curriculum/lesson-design' });
+  const payload = detail();
+  Object.assign(payload.classItem,{subject:'영어',teacher:'합성 담당',room:'합성 강의실'});
+  payload.teacherCatalogs = [{id:id(101),name:'합성 담당',subjects:['영어팀'],isVisible:true}];
+  payload.classroomCatalogs = [{id:id(201),name:'합성 강의실',subjects:['영어'],isVisible:true}];
+  await act(async () => page.requests.find(r => r.name==='get_operations_class_lesson_design_detail_v1').resolve({error:null,data:payload}));
+  await act(async () => page.observed.updateLessonPlanDraft(p => ({...p,selectedDays:[2,0],sessions:[],
+    billingPeriods:[{id:'oct',month:10,label:'10월',startDate:'2026-09-29',endDate:'2026-10-27'}],
+    sessionStates:{'2026-10-13':{state:'exception'},'2026-10-18':{state:'exception'},'2026-10-09':{state:'makeup'}},
+    sessionSchedules:{'2026-10-09':{startTime:'19:20',endTime:'20:20'}},
+  })));
+  await act(async () => document.querySelector('button[aria-label="2026-10-09 보강"]').click());
+  const teacher = document.querySelector('select[aria-label="2026-10-09 선생님"]');
+  assert.ok(teacher);
+  assert.deepEqual(Array.from(teacher.options).map(o=>[o.value,o.textContent]),[['','선택'],[id(101),'합성 담당']]);
+  await act(async () => { teacher.value=id(101); teacher.dispatchEvent(new window.Event('change',{bubbles:true})); });
+  await act(async () => { void page.observed.handleSaveLessonPlan(); });
+  assert.equal(saveRequests(page).length,1);
+  const makeup=saveRequests(page)[0].args.p_patch.schedule_plan.sessions.find(s=>s.date==='2026-10-09');
+  assert.equal(makeup.teacherCatalogId,id(101)); assert.equal(makeup.classroomCatalogId,id(201));
+  assert.equal(makeup.startTime,'19:20'); assert.equal(makeup.endTime,'20:20');
+});
+
 test('schedule-only page exposes one save and return action even for a legacy progress URL', async t => {
   const page = await editor(t, 'curriculum/lesson-design');
   const workspace = document.querySelector('[role="region"][aria-label="일정 편성 작업 영역"]');
