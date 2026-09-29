@@ -1,0 +1,1526 @@
+#!/usr/bin/env python3
+"""tips-admin: dedicated CLI for the Tips academy operations API.
+
+Scope: class / academic-calendar reads, and preview/commit/result-query of a
+single weekly-slot time change. Nothing else.
+
+Auth: Secure Vault credential via authd surrogates ONLY. This process only
+ever handles ``hsurr:*`` surrogate values; Sentinel/authd replace them with
+the real credential on approved outbound requests. The real secret never
+appears in arguments, files, logs, or stdout.
+
+Rules enforced here:
+  - Python urllib + bundled dynamic_credentials helper only (no curl).
+  - Redirects are refused.
+  - The base URL's host is cross-checked against the FIXED credential host
+    list from connection time (TIPS_API_ALLOWED_HOSTS / --allowed-hosts);
+    an arbitrary --base-url is never newly trusted. HTTPS only.
+  - Journal (0600, locked, fsync before POST), partitioned by API origin
+    + health credentialId: if a record already exists for the same
+    previewToken, no new UUID is minted and no new preview is started to
+    bypass it; the existing requestKey is queried first.
+  - Commit failures (HTTP 409/422/403, ...) preserve the receipt inside
+    `data`: the envelope is printed before exiting non-zero.
+  - state=unknown is neither failure nor success: no new-key retry, no
+    browser bypass, report as unconfirmed.
+  - expectedVersion / class.version are opaque SHA256 strings: never
+    compared by magnitude.
+  - A successful preview records its expectation (previewToken, before.id,
+    after.weeklySlots, expiresAt) in the origin+credentialId journal
+    partition. An applied commit/replay receipt must then match the
+    expectation: data.operationId == sent Idempotency-Key, data.class.id ==
+    the preview's class id, and the weekly slots' weekday/startMinute/
+    endMinute/teacherId/classroomId (sorted comparison; slot ids may change,
+    version/timestamp never compared) equal preview.after. Any mismatch, or
+    a missing expectation record, -> UNCONFIRMED (exit 4), never exit 0.
+  - data.publicCache.state ('invalidated'|'pending') is an AUXILIARY per-HTTP-
+    attempt public-guide cache state, displayed separately on stderr. It never
+    changes applied's meaning, exit codes, or preview-match verification:
+    pending does not mean the business operation failed, and invalidated does
+    not confirm the change is visible on the public page. A stale cache is
+    retried with the SAME operation GET; never mint a new preview/key/commit
+    for a cache refresh.
+  - Fixed error codes: agent_stale, agent_preview_expired,
+    agent_idempotency_key_reused, agent_preview_consumed,
+    timetable_resource_conflict, agent_approval_workflow_required.
+  - preview is valid 10 minutes and returns expiresAt; all slot minutes,
+    days of week, and academic dates are Asia/Seoul.
+  - Exit codes: 0 ok; 2 usage/config refusal; 3 confirmed failure
+    (state=failed, HTTP 4xx/5xx other than 429); 4 unconfirmed (unknown
+    state, response loss, receipt verification mismatch); 5 rate-limited
+    (429, Retry-After reported, no automatic retry).
+  - A 429 on commit does NOT mint a new key: the operator queries the same
+    key first (operations get --request-key <same key>).
+  - 401/403/409 -> hard stop, never bypass via browser/UI.
+  - The journal assumes a SINGLE executor. A sync folder + file lock does
+    NOT prevent duplicate execution across machines; do not rely on it.
+
+API v2 (base path /api/v2; v1 commands keep working on /api/v1):
+  - Commands: workspace get (class details + lessons in a date window),
+    catalogs get (teachers/classrooms name->ID lookup), changes preview
+    (atomic per-class change: basic/weeklySlots/lessons), operations list
+    (paged recovery). operations commit/get work on both versions; the
+    journal partition and the preview record carry apiVersion.
+  - Journal partition: <base>/<api-origin>/v<1|2>/<credentialId>/
+    operations.jsonl. v1 and v2 records never mix.
+  - /health returns apiVersion ('1'|'2'), credentialId, scopes. New v2
+    scopes: class-details:read, class-info:write, weekly-plan:write,
+    lesson-plan:write. Existing keys are NOT auto-expanded: missing scope
+    -> refusal before any request (exit 2).
+  - changes preview validates client-side: window dates valid; lesson
+    dates and makeup dates are today-or-later (Asia/Seoul); lessons <= 50;
+    weeklySlots items are modifications of EXISTING ids (all of id,
+    weekday, startMinute, endMinute, teacherId, classroomId, sortOrder
+    required; no add/remove); makeup only on state=cancelled, otherwise
+    abort. Ambiguous date/source -> abort, never guess.
+  - A weekly template change takes effect IMMEDIATELY: a "from October"
+    style request with no end date is written as per-date lessons inside
+    the window; with no end date at all, confirm with the operator first.
+  - v2 preview records its expectation (previewToken, before.id,
+    after.verificationHash, expiresAt). An applied receipt must match:
+    data.operationId == sent Idempotency-Key, data.class.id ==
+    preview.before.id, data.class.verificationHash ==
+    preview.after.verificationHash. verificationHash covers the semantic
+    state of basic/weeklySlots/lessons (version/timestamp excluded).
+    Missing expectation or any mismatch -> UNCONFIRMED (exit 4), never
+    exit 0. This hash check also applies to applied receipts preserved
+    from HTTP error responses. v1 slot-field verification is unchanged.
+  - error.code=agent_approval_workflow_required: the change overlaps an
+    approved item -> hard stop, no automatic bypass.
+  - Out of scope: deletion, payment/fee collection, message sending,
+    approval changes.
+"""
+
+from __future__ import annotations
+
+import argparse
+import datetime
+import fcntl
+import hashlib
+import http.client
+import json
+import os
+import re
+import sys
+import urllib.error
+import urllib.parse
+import urllib.request
+import uuid
+import typing
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+from dynamic_credentials import add_surrogate_to_request, DynamicCredentialError
+
+SKILL_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+DEFAULT_JOURNAL = os.path.join(SKILL_ROOT, "journal", "operations.jsonl")
+REQUEST_TIMEOUT = 30
+
+
+class NoRedirectHandler(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        raise urllib.error.HTTPError(
+            newurl, code, f"redirect refused ({code} -> {newurl})", headers, fp
+        )
+
+
+def fail(msg: str, code: int = 2) -> typing.NoReturn:
+    print(f"tips-admin: error: {msg}", file=sys.stderr)
+    sys.exit(code)
+
+
+def parse_args(argv: list[str]) -> argparse.Namespace:
+    p = argparse.ArgumentParser(prog="tips-admin", description=__doc__.splitlines()[0])
+    p.add_argument("--base-url", default=os.environ.get("TIPS_API_BASE_URL", ""),
+                   help="API base URL, e.g. https://<host>/api/v1 (or $TIPS_API_BASE_URL). "
+                        "Its host must be in --allowed-hosts; never trusted on its own.")
+    p.add_argument("--allowed-hosts",
+                   default=os.environ.get("TIPS_API_ALLOWED_HOSTS", ""),
+                   help="comma-separated FIXED host list from connection time "
+                        "(or $TIPS_API_ALLOWED_HOSTS). Required.")
+    p.add_argument("--credential", default=os.environ.get("TIPS_API_CREDENTIAL", "custom.tips-admin-api"),
+                   help="authd credential name (or $TIPS_API_CREDENTIAL)")
+    p.add_argument("--journal", default=os.environ.get("TIPS_API_JOURNAL", DEFAULT_JOURNAL),
+                   help="journal BASE directory, 0600 (or $TIPS_API_JOURNAL). The real file is "
+                        "<base>/<api-origin>/v<1|2>/<credentialId>/operations.jsonl, so api "
+                        "versions, test/prod and reissued-key records never mix.")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("health", help="GET /health (auth + scope probe)")
+
+    c = sub.add_parser("classes", help="class reads")
+    csub = c.add_subparsers(dest="classes_cmd", required=True)
+    s = csub.add_parser("search", help="GET /classes")
+    s.add_argument("--search", default="")
+    s.add_argument("--status", default="")
+    s.add_argument("--page", type=int, default=1)
+    g = csub.add_parser("get", help="GET /classes/{id}")
+    g.add_argument("--id", required=True, help="class UUID (names are never accepted)")
+
+    w = csub.add_parser("weekly-time", help="weekly slot time change")
+    wsub = w.add_subparsers(dest="wt_cmd", required=True)
+    pv = wsub.add_parser("preview", help="POST /classes/{id}/weekly-time/preview")
+    pv.add_argument("--id", required=True, help="class UUID")
+    pv.add_argument("--slot-id", required=True)
+    pv.add_argument("--start-minute", type=int, required=True)
+    pv.add_argument("--end-minute", type=int, required=True)
+    pv.add_argument("--expected-version", required=True,
+                    help="opaque version string (SHA256); never compared by magnitude")
+    pv.add_argument("--reason", required=True)
+
+    o = sub.add_parser("operations", help="commit / query operations")
+    osub = o.add_subparsers(dest="ops_cmd", required=True)
+    cm = osub.add_parser("commit", help="POST /operations")
+    cm.add_argument("--preview-token", required=True)
+    cm.add_argument("--source-reference", default="",
+                    help="original message LINK only; never message content")
+    cm.add_argument("--idempotency-key", default="",
+                    help="client UUID for retry of the SAME commit. When omitted and the "
+                         "journal already holds this previewToken, the existing "
+                         "requestKey is queried first and no new UUID is minted.")
+    q = osub.add_parser("get", help="GET /operations/{requestKey}")
+    q.add_argument("--request-key", required=True)
+    li = osub.add_parser("list", help="GET /operations?page=N (paged recovery)")
+    li.add_argument("--page", type=int, default=1)
+
+    ws = sub.add_parser("workspace", help="v2 class workspace reads")
+    wssub = ws.add_subparsers(dest="ws_cmd", required=True)
+    wg = wssub.add_parser("get", help="GET /classes/{id}?from&to (<=93 days, v2 only)")
+    wg.add_argument("--class-id", required=True, help="class UUID (names are never accepted; v2 has no /classes search: resolve the UUID first with an /api/v1 base, e.g. tips-admin --base-url https://<host>/api/v1 classes search --search ...")
+    wg.add_argument("--from", dest="from_date", required=True)
+    wg.add_argument("--to", dest="to_date", required=True)
+
+    cat = sub.add_parser("catalogs", help="v2 teacher/classroom ID lookup")
+    catsub = cat.add_subparsers(dest="cat_cmd", required=True)
+    cg = catsub.add_parser("get", help="GET /classes/{id}/catalogs (v2 only)")
+    cg.add_argument("--class-id", required=True, help="class UUID (names are never accepted; v2 has no /classes search: resolve the UUID first with an /api/v1 base, e.g. tips-admin --base-url https://<host>/api/v1 classes search --search ...")
+    cg.add_argument("--kind", required=True, choices=["teachers", "classrooms"])
+    cg.add_argument("--search", default="")
+    cg.add_argument("--page", type=int, default=1)
+
+    ch = sub.add_parser("changes", help="v2 atomic per-class changes")
+    chsub = ch.add_subparsers(dest="ch_cmd", required=True)
+    cpv = chsub.add_parser("preview", help="POST /classes/{id}/changes/preview (v2 only)")
+    cpv.add_argument("--class-id", required=True, help="class UUID (names are never accepted; v2 has no /classes search: resolve the UUID first with an /api/v1 base, e.g. tips-admin --base-url https://<host>/api/v1 classes search --search ...")
+    cpv.add_argument("--expected-version", required=True,
+                     help="opaque version string (SHA256); never compared by magnitude")
+    cpv.add_argument("--from", dest="from_date", required=True)
+    cpv.add_argument("--to", dest="to_date", required=True)
+    cpv.add_argument("--reason", required=True)
+    cpv.add_argument("--basic-json", default="",
+                     help="JSON object with changed basic fields only "
+                          "(name,classType,subject,subjectAreaKey,grade,capacity,fee)")
+    cpv.add_argument("--weekly-slots-json", default="",
+                     help="JSON list: modifications of EXISTING weekly slot ids only "
+                          "(id,weekday,startMinute,endMinute,teacherId,classroomId,"
+                          "sortOrder all required; no add/remove)")
+    cpv.add_argument("--lessons-json", default="",
+                     help="JSON list (<=50): per-date lessons "
+                          "{date,lessonId?,state:scheduled|cancelled|skipped|undecided,"
+                          "timing?,makeup?}; makeup only on cancelled")
+
+    cal = sub.add_parser("calendar", help="academic calendar reads")
+    calsub = cal.add_subparsers(dest="cal_cmd", required=True)
+    e = calsub.add_parser("events", help="GET /calendar/events (<=31 days)")
+    e.add_argument("--from", dest="from_date", required=True)
+    e.add_argument("--to", dest="to_date", required=True)
+
+    return p.parse_args(argv)
+
+
+def parse_allowed_hosts(raw: str) -> list[str]:
+    hosts = [h.strip().lower() for h in raw.split(",") if h.strip()]
+    if not hosts:
+        fail("credential host list not configured: pass --allowed-hosts or set "
+             "TIPS_API_ALLOWED_HOSTS to the fixed host list from connection time. "
+             "An arbitrary --base-url is never trusted on its own.")
+    return hosts
+
+
+def check_base_url(base_url: str, allowed_hosts: list[str]) -> str:
+    if not base_url:
+        fail("no base URL: pass --base-url or set TIPS_API_BASE_URL "
+             "(no calls are made until a test address is provided)")
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.scheme != "https" or not parsed.hostname:
+        fail(f"base URL must be https with a host, got: {base_url!r}")
+    host = parsed.hostname.lower()
+    if host not in allowed_hosts:
+        fail(f"base URL host {host!r} is not in the credential's fixed host list "
+             f"({', '.join(allowed_hosts)}); refusing to trust a new host")
+    canonical_origin_dir(base_url)  # Validate every command before authentication.
+    return base_url.rstrip("/")
+
+
+def check_uuid(value: str, label: str) -> str:
+    try:
+        uuid.UUID(value)
+    except ValueError:
+        fail(f"{label} must be a UUID, got: {value!r}")
+    return value
+
+
+# ---------------------------------------------------------------- journal
+
+def _write_all(fd: int, data: bytes) -> None:
+    """Write every byte; a single os.write may be partial."""
+    view = memoryview(data)
+    while view:
+        n = os.write(fd, view)
+        if n == 0:
+            raise OSError("short write: wrote 0 bytes")
+        view = view[n:]
+
+
+def journal_write(journal_path: str, record: dict) -> None:
+    """Append a record with an exclusive lock, 0600 perms, full-bytes write,
+    flush + fsync. A partial line must never be left behind."""
+    parent = os.path.dirname(journal_path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    record = {"ts": datetime.datetime.now(datetime.timezone.utc).isoformat(), **record}
+    line = (json.dumps(record, ensure_ascii=False) + "\n").encode("utf-8")
+    fd = os.open(journal_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        os.fchmod(fd, 0o600)  # enforce even if the file already existed
+        _write_all(fd, line)
+        os.fsync(fd)
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def _journal_read_all(journal_path: str) -> list:
+    """Read all journal records under a shared lock.
+
+    A corrupted line (bad JSON, non-dict record, undecodable bytes) halts as
+    UNCONFIRMED (exit 4): the prior commit state cannot be determined, so no
+    new key may be minted and no re-run may proceed. Corruption is never
+    silently skipped.
+    """
+    if not os.path.exists(journal_path):
+        return []
+    fd = os.open(journal_path, os.O_RDONLY)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH)
+        try:
+            with os.fdopen(os.dup(fd), "r", encoding="utf-8") as fh:
+                lines = fh.read().splitlines()
+        except (UnicodeDecodeError, OSError) as exc:
+            fail(f"tips-admin: UNCONFIRMED -- journal {journal_path} cannot be "
+                 f"decoded ({exc}); prior commit state is unknown. Refusing to "
+                 f"mint a new key or re-run; repair the journal manually.",
+                 code=4)
+        finally:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+    records = []
+    for lineno, line in enumerate(lines, 1):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            rec = json.loads(line)
+        except json.JSONDecodeError:
+            rec = None
+        if not isinstance(rec, dict):
+            fail(f"tips-admin: UNCONFIRMED -- journal {journal_path} line {lineno} "
+                 f"is corrupted; prior commit state cannot be determined. "
+                 f"Refusing to mint a new key or re-run; repair the journal "
+                 f"manually.", code=4)
+        records.append(rec)
+    return records
+
+
+def journal_find_by_preview_token(journal_path: str, preview_token: str) -> dict | None:
+    """Return the latest COMMIT journal record for a previewToken.
+
+    Preview-expectation records (kind="preview") are skipped here; use
+    journal_find_preview_expectation for those.
+    """
+    found = None
+    for rec in _journal_read_all(journal_path):
+        if rec.get("previewToken") == preview_token and \
+                rec.get("kind", "commit") == "commit" and rec.get("requestKey"):
+            found = rec
+    return found
+
+
+def journal_find_commit_by_request_key(journal_path: str, request_key: str) -> dict | None:
+    """Return the commit journal record for a requestKey."""
+    for rec in _journal_read_all(journal_path):
+        if rec.get("requestKey") == request_key and rec.get("kind", "commit") == "commit":
+            return rec
+    return None
+
+
+def journal_find_preview_expectation(journal_path: str, preview_token: str) -> dict | None:
+    """Return the latest preview-expectation record for a token."""
+    found = None
+    for rec in _journal_read_all(journal_path):
+        if rec.get("kind") == "preview" and rec.get("previewToken") == preview_token:
+            found = rec
+    return found
+
+
+# ---------------------------------------------------------------- http
+
+def _fail_transport_unconfirmed(idempotency_key: str | None, detail: str) -> typing.NoReturn:
+    """Socket timeout / mid-response disconnect. The request MAY have been
+    applied server-side: UNCONFIRMED (exit 4), never a confirmed failure.
+    Recovery is the same-key GET; never a new key, new preview, or browser."""
+    if idempotency_key:
+        fail(f"transport failure ({detail}): the request MAY have been applied "
+             f"server-side. Result is UNCONFIRMED. The journal already holds "
+             f"this requestKey -- query the SAME key: operations get "
+             f"--request-key {idempotency_key}. Do NOT mint a new key, take a "
+             f"new preview, or rewrite via the browser.", code=4)
+    fail(f"transport failure ({detail}): no state change was confirmed. The "
+         f"result is indeterminate -- retry the same read later. This is not a "
+         f"confirmed failure.", code=4)
+
+
+def _fail_malformed_200(idempotency_key: str | None, where: str) -> typing.NoReturn:
+    """HTTP 200 with an unusable body (HTML, broken JSON, non-UTF8, JSON
+    array/null). For operation requests the commit MAY have been applied:
+    UNCONFIRMED (exit 4) with same-key recovery. The raw body is never shown."""
+    if idempotency_key:
+        fail(f"HTTP 200 on {where} with an unusable body (not a JSON object): "
+             f"the operation MAY have been applied. Result is UNCONFIRMED. The "
+             f"journal already holds this requestKey -- query the SAME key: "
+             f"operations get --request-key {idempotency_key}. The raw body is "
+             f"not shown. Do NOT mint a new key, take a new preview, or rewrite "
+             f"via the browser.", code=4)
+    fail(f"HTTP 200 on {where} with an unusable body (not a JSON object): the "
+         f"result is indeterminate -- retry the same read later. This is not a "
+         f"confirmed failure.", code=4)
+
+
+def api_request(base_url: str, allowed_hosts: list[str], credential: str,
+                method: str, path: str,
+                query: dict | None = None,
+                body: dict | None = None,
+                extra_headers: dict | None = None,
+                preserve_receipt_on_error: bool = False,
+                idempotency_key: str | None = None,
+                applied_check=None) -> dict:
+    url = base_url + path
+    if query:
+        url += "?" + urllib.parse.urlencode({k: v for k, v in query.items() if v != "" and v is not None})
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    if extra_headers:
+        headers.update(extra_headers)
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    try:
+        add_surrogate_to_request(req, credential, allowed_hosts=allowed_hosts)
+    except DynamicCredentialError as exc:
+        fail(f"credential setup failed: {exc}", code=3)
+    opener = urllib.request.build_opener(NoRedirectHandler)
+    try:
+        with opener.open(req, timeout=REQUEST_TIMEOUT) as resp:
+            raw = resp.read()
+    except urllib.error.HTTPError as exc:
+        handle_http_error(exc, preserve_receipt_on_error, idempotency_key,
+                          applied_check)
+    except (urllib.error.URLError, TimeoutError, ConnectionError,
+            http.client.HTTPException) as exc:
+        # DNS/refused/timeout/mid-response disconnect. HTTPError is caught
+        # above (it subclasses URLError). The request MAY have been applied:
+        # UNCONFIRMED, never a confirmed failure.
+        reason = getattr(exc, "reason", None)
+        _fail_transport_unconfirmed(idempotency_key, str(reason or exc))
+    where = f"{method} {path}"
+    try:
+        text = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        _fail_malformed_200(idempotency_key, where)
+    try:
+        payload = json.loads(text)
+    except json.JSONDecodeError:
+        _fail_malformed_200(idempotency_key, where)
+    if not isinstance(payload, dict):
+        # JSON array / null / scalar: not an operation envelope.
+        _fail_malformed_200(idempotency_key, where)
+    if any(payload.get(field) is not None and not isinstance(payload[field], dict)
+           for field in ("data", "error")):
+        _fail_malformed_200(idempotency_key, where)
+    return payload
+
+
+def _error_payload(exc: urllib.error.HTTPError) -> dict:
+    try:
+        payload = json.loads(exc.read().decode("utf-8"))
+        if not isinstance(payload, dict):
+            return {}
+        if any(payload.get(field) is not None and not isinstance(payload[field], dict)
+               for field in ("data", "error")):
+            return {}
+        return payload
+    except Exception:
+        return {}
+
+
+def _failed_receipt_code(envelope: dict) -> tuple[str | None, str | None]:
+    """data.error.code (+ optional sqlstate) of a failed receipt. A failed
+    receipt without a valid error.code cannot be confirmed as a failure."""
+    data = envelope.get("data") or {}
+    err = data.get("error")
+    if isinstance(err, dict):
+        code = err.get("code")
+        if isinstance(code, str) and code:
+            sqlstate = err.get("sqlstate")
+            return code, sqlstate if isinstance(sqlstate, str) else None
+    return None, None
+
+
+def handle_http_error(exc: urllib.error.HTTPError,
+                      preserve_receipt_on_error: bool = False,
+                      idempotency_key: str | None = None,
+                      applied_check=None) -> typing.NoReturn:
+    """applied_check: optional callable(payload) run when an HTTP error
+    response still carries an applied receipt. It must exit non-zero on any
+    verification problem (e.g. v2 preview-hash mismatch) and return on a
+    match. When None, v1 behavior is kept: the receipt is shown with a
+    reminder to verify before reporting completion.
+
+    5xx WITHOUT a valid durable receipt is UNCONFIRMED (exit 4), never a
+    confirmed failure: the DB commit may have succeeded while the
+    response/proxy failed. The journal already holds the requestKey, so
+    recovery is GET /operations/{key} on the SAME key -- never a new key,
+    a new preview, or a browser rewrite.
+
+    Receipt state dispatch (real server shapes):
+      - applied: data.operationId + data.class.id are required; class.id and
+        the changed values are compared against the preview expectation
+        (applied_check). Only applied may exit 0.
+      - failed: {data.operationId, state:'failed', error:{code, sqlstate}},
+        no class. The request key AND a valid data.error.code are verified,
+        then exit 3 (confirmed failure).
+      - unknown: {operationId, state:'unknown', retryWithNewKey:false}
+        -> exit 4. Any other/arbitrary state -> exit 4.
+    exit 3 (confirmed failure) is reserved for a valid receipt with
+    data.state=failed (request key + error.code verified)."""
+    payload = _error_payload(exc)
+    err = payload.get("error") or {}
+    detail = err.get("message") or err.get("code") or f"HTTP {exc.code}"
+    code_hint = f" (error.code={err['code']})" if err.get("code") else ""
+    if err.get("code") == "agent_approval_workflow_required":
+        fail(f"HTTP {exc.code}: {detail}{code_hint} -- the change overlaps an "
+             f"approved item and needs the approval workflow. No automatic "
+             f"bypass is allowed. Stopping.", code=3)
+    if err.get("code") == "agent_missing_billing_period":
+        fail(f"HTTP {exc.code}: {detail}{code_hint} -- this class has no legacy "
+             f"monthly billing plan, so date-specific lesson editing is "
+             f"rejected. This is not a client bug; do not retry with a new "
+             f"preview or work around it via the browser.", code=3)
+    if err.get("code") == "agent_ambiguous_lesson":
+        fail(f"HTTP {exc.code}: {detail}{code_hint} -- legacy classes store "
+             f"multiple sessions on one date as a single date unit, so the "
+             f"target stays ambiguous even with a lessonId. Confirm the exact "
+             f"session with the requester; on normalized classes pick the "
+             f"session by exact lessonId. Do not retry blindly.", code=3)
+    if preserve_receipt_on_error:
+        data = payload.get("data")
+        if isinstance(data, dict) and data.get("operationId"):
+            # Receipt-shaped (or receipt-like) body: settle by state.
+            print(json.dumps(payload, ensure_ascii=False, indent=2))
+            report_public_cache(payload)
+            verified, reasons = verify_operation_id(payload, idempotency_key)
+            if not verified:
+                print("tips-admin: UNCONFIRMED -- receipt operationId verification "
+                      "failed:", "; ".join(reasons), file=sys.stderr)
+                print("tips-admin: do not retry with a new key and do not start a "
+                      "new preview to bypass this; query the same key again.",
+                      file=sys.stderr)
+                sys.exit(4)
+            state = data.get("state")
+            if state == "applied":
+                if not extract_class_id(payload):
+                    fail("tips-admin: UNCONFIRMED -- applied receipt has no "
+                         "data.class.id; query the same key again.", code=4)
+                if applied_check is not None:
+                    applied_check(payload)
+                print("tips-admin: receipt shows applied; verify data.class.id and the "
+                      "changed values against the preview's before/after before "
+                      "reporting completion.", file=sys.stderr)
+                sys.exit(0)
+            if state == "failed":
+                code, sqlstate = _failed_receipt_code(payload)
+                if code is None:
+                    fail("tips-admin: UNCONFIRMED -- failed receipt has no valid "
+                         "data.error.code; query the same key again.", code=4)
+                extra = f" (sqlstate={sqlstate})" if sqlstate else ""
+                fail(f"HTTP {exc.code}: confirmed failure: error.code={code}{extra} "
+                     f"(receipt above). No bypass via browser or UI is allowed.",
+                     code=3)
+            # unknown, or any other/arbitrary state: never a confirmed failure.
+            if state == "unknown":
+                note_unknown()
+            else:
+                print(f"tips-admin: UNCONFIRMED -- unexpected receipt state "
+                      f"{state!r}; query the same key again.", file=sys.stderr)
+            sys.exit(4)
+        if exc.code in (500, 502, 503, 504):
+            # No usable receipt, but the DB commit MAY have succeeded
+            # while the response/proxy failed. This is NOT a confirmed
+            # storage failure. The journal already holds this requestKey, so
+            # recover by querying the SAME key -- never mint a new key, take
+            # a new preview, or rewrite via the browser.
+            fail(f"HTTP {exc.code} on POST /operations with no usable receipt: "
+                 f"the DB commit MAY have succeeded and only the response/proxy "
+                 f"failed. Result is UNCONFIRMED. The journal already holds this "
+                 f"requestKey -- query it with the SAME key: operations get "
+                 f"--request-key {idempotency_key}. Do NOT mint a new key, take "
+                 f"a new preview, or rewrite via the browser.", code=4)
+        # No usable receipt and not a 5xx: the server definitively rejected
+        # the request -> fall through to the 4xx branches below.
+    if exc.code in (401, 403):
+        fail(f"HTTP {exc.code}: {detail}{code_hint} -- denied. "
+             f"No bypass via browser or UI is allowed. Stopping.", code=3)
+    if exc.code == 409:
+        fail(f"HTTP 409: {detail}{code_hint} -- conflict. "
+             f"No bypass via browser or UI is allowed. Stopping.", code=3)
+    if exc.code == 422:
+        fail(f"HTTP 422: {detail}{code_hint} -- validation failed. "
+             f"Fix the request; do not retry blindly and do not bypass via browser/UI.",
+             code=3)
+    if exc.code == 429:
+        retry_after = exc.headers.get("Retry-After", "unknown")
+        hint = ""
+        if idempotency_key:
+            hint = (f" This was a commit: do NOT mint a new key. Query the same key "
+                    f"first: operations get --request-key {idempotency_key}.")
+        fail(f"HTTP 429 rate limited: {detail}. Retry-After: {retry_after}. "
+             f"Not retrying automatically.{hint}", code=5)
+    if exc.code in (500, 502, 503, 504):
+        # No write was attempted on this path (or the commit path already
+        # handled it above), and there is no valid receipt proving failure.
+        # Indeterminate -- never a confirmed failure (exit 3 is reserved for
+        # a valid data.state=failed receipt).
+        if idempotency_key:
+            fail(f"HTTP {exc.code} on GET /operations/{idempotency_key}: the "
+                 f"result is still UNCONFIRMED. Query the SAME key again later; "
+                 f"do not mint a new key, take a new preview, or rewrite via "
+                 f"the browser.", code=4)
+        fail(f"HTTP {exc.code}: read failed and no state change was attempted. "
+             f"The result is indeterminate -- retry the same read later. "
+             f"This is not a confirmed failure.", code=4)
+    fail(f"HTTP {exc.code}: {detail}{code_hint}", code=3)
+
+
+def check_minutes(start: int, end: int) -> None:
+    if not (0 <= start < 1440 and 0 <= end <= 1440 and start < end):
+        fail(f"invalid slot minutes: start={start} end={end} "
+             f"(need 0 <= start < end <= 1440)")
+
+
+def check_date_range(from_date: str, to_date: str) -> None:
+    try:
+        d0 = datetime.date.fromisoformat(from_date)
+        d1 = datetime.date.fromisoformat(to_date)
+    except ValueError:
+        fail(f"dates must be YYYY-MM-DD, got from={from_date!r} to={to_date!r}")
+    if d1 < d0 or (d1 - d0).days > 31:
+        fail(f"calendar range must be 0..31 days, got {from_date}..{to_date}")
+
+
+def api_version_from_base(base_url: str) -> str:
+    """Derive the API version from the base URL path (/api/v1 or /api/v2).
+
+    The version is never guessed: anything else is a usage refusal."""
+    path = urllib.parse.urlparse(base_url).path.rstrip("/")
+    m = re.search(r"/api/v([12])$", path)
+    if not m:
+        fail(f"base URL path must end in /api/v1 or /api/v2, got: {base_url!r}")
+    return m.group(1)
+
+
+def require_api_version(version: str, want: str, what: str) -> None:
+    if version != want:
+        fail(f"{what} requires an /api/v{want} base URL; the current base URL "
+             f"is /api/v{version}. v1 and v2 endpoints are not interchangeable.")
+
+
+KST = datetime.timezone(datetime.timedelta(hours=9))
+
+
+def kst_today() -> datetime.date:
+    return datetime.datetime.now(KST).date()
+
+
+def check_window_93(from_date: str, to_date: str) -> None:
+    """workspace GET window: valid dates, from<=to, max 93 days difference."""
+    try:
+        d0 = datetime.date.fromisoformat(from_date)
+        d1 = datetime.date.fromisoformat(to_date)
+    except ValueError:
+        fail(f"dates must be YYYY-MM-DD, got from={from_date!r} to={to_date!r}")
+    if d1 < d0 or (d1 - d0).days > 93:
+        fail(f"workspace window must be 0..93 days, got {from_date}..{to_date}")
+
+
+def check_not_past(date_str: str, label: str) -> None:
+    """Lesson/makeup dates are today-or-later (Asia/Seoul). No guessing."""
+    try:
+        d = datetime.date.fromisoformat(date_str)
+    except ValueError:
+        fail(f"{label} must be YYYY-MM-DD, got {date_str!r}")
+    if d < kst_today():
+        fail(f"{label} must be today or later (Asia/Seoul); got {date_str}. "
+             f"Past dates are never modified.")
+
+
+BASIC_FIELDS = ("name", "classType", "subject", "subjectAreaKey",
+                "grade", "capacity", "fee")
+WEEKLY_SLOT_FIELDS = ("id", "weekday", "startMinute", "endMinute",
+                      "teacherId", "classroomId", "sortOrder")
+LESSON_STATES = ("scheduled", "cancelled", "skipped", "undecided")
+TIMING_FIELDS = ("startMinute", "endMinute", "teacherId", "classroomId")
+MAKEUP_FIELDS = ("date", "startMinute", "endMinute", "teacherId", "classroomId")
+MAX_LESSONS = 50
+
+
+def _load_json_arg(raw: str, label: str):
+    try:
+        return json.loads(raw)
+    except json.JSONDecodeError as exc:
+        fail(f"{label} is not valid JSON: {exc}")
+
+
+def _check_timing(timing, label: str) -> None:
+    if not isinstance(timing, dict):
+        fail(f"{label} must be an object with {TIMING_FIELDS}")
+    missing = [f for f in TIMING_FIELDS if timing.get(f) in (None, "")]
+    if missing:
+        fail(f"{label} is missing required fields: {', '.join(missing)}")
+    check_minutes(timing["startMinute"], timing["endMinute"])
+    for f in ("teacherId", "classroomId"):
+        if not isinstance(timing[f], str) or not timing[f]:
+            fail(f"{label}.{f} must be a non-empty ID string")
+
+
+def validate_basic_change(raw: str) -> dict:
+    """basic: only changed fields; keys must be known basic fields."""
+    if not raw:
+        return {}
+    basic = _load_json_arg(raw, "--basic-json")
+    if not isinstance(basic, dict) or not basic:
+        fail("--basic-json must be a non-empty JSON object")
+    unknown = [k for k in basic if k not in BASIC_FIELDS]
+    if unknown:
+        fail(f"--basic-json has unknown fields: {', '.join(unknown)} "
+             f"(allowed: {', '.join(BASIC_FIELDS)})")
+    return basic
+
+
+def validate_weekly_slots_change(raw: str) -> list:
+    """weeklySlots: modifications of EXISTING ids only (no add/remove).
+
+    Every item carries all of id, weekday, startMinute, endMinute,
+    teacherId, classroomId, sortOrder."""
+    if not raw:
+        return []
+    slots = _load_json_arg(raw, "--weekly-slots-json")
+    if not isinstance(slots, list) or not slots:
+        fail("--weekly-slots-json must be a non-empty JSON list")
+    for i, s in enumerate(slots):
+        label = f"--weekly-slots-json[{i}]"
+        if not isinstance(s, dict):
+            fail(f"{label} must be an object")
+        missing = [f for f in WEEKLY_SLOT_FIELDS if s.get(f) in (None, "")]
+        if missing:
+            fail(f"{label} is missing required fields: {', '.join(missing)} "
+                 f"(modifications of existing ids only; no add/remove)")
+        wd = s["weekday"]
+        if not isinstance(wd, int) or not 0 <= wd <= 6:
+            fail(f"{label}.weekday must be 0..6 (Asia/Seoul), got {wd!r}")
+        check_minutes(s["startMinute"], s["endMinute"])
+        if not isinstance(s["sortOrder"], int) or s["sortOrder"] < 0:
+            fail(f"{label}.sortOrder must be an int >= 0")
+        for f in ("id", "teacherId", "classroomId"):
+            if not isinstance(s[f], str) or not s[f]:
+                fail(f"{label}.{f} must be a non-empty ID string")
+    return slots
+
+
+def validate_lessons_change(raw: str,
+                            window_from: str | None = None,
+                            window_to: str | None = None) -> list:
+    """lessons: <=50 per-date entries; dates today-or-later (Asia/Seoul) AND
+    inside the preview window; makeup only on state=cancelled, otherwise
+    abort. One cancelled session links to exactly ONE makeup date: merging
+    different cancellations into the same makeup, or sending a makeup to an
+    already-occupied date, is not supported."""
+    if not raw:
+        return []
+    lessons = _load_json_arg(raw, "--lessons-json")
+    if not isinstance(lessons, list) or not lessons:
+        fail("--lessons-json must be a non-empty JSON list")
+    if len(lessons) > MAX_LESSONS:
+        fail(f"--lessons-json has {len(lessons)} entries; max is {MAX_LESSONS} "
+             f"per preview (atomic per class)")
+
+    def _in_window(date_str: str, label: str) -> None:
+        if window_from and window_to:
+            if not (window_from <= date_str <= window_to):
+                fail(f"{label} is {date_str}, outside the preview window "
+                     f"[{window_from}..{window_to}]. Date-specific lessons may "
+                     f"only be edited for dates today-or-later and within the "
+                     f"window -- adjust --from/--to or the lesson dates, "
+                     f"never guess a date.")
+
+    makeup_dates: dict[str, str] = {}
+    lesson_dates: set[str] = set()
+    for i, les in enumerate(lessons):
+        label = f"--lessons-json[{i}]"
+        if not isinstance(les, dict):
+            fail(f"{label} must be an object")
+        date = les.get("date")
+        if not isinstance(date, str) or not date:
+            fail(f"{label}.date is required (YYYY-MM-DD; relative dates and "
+                 f"guesses are forbidden)")
+        if date in lesson_dates:
+            fail(f"{label}.date {date!r} is ambiguous: the same date appears "
+                 f"more than once in --lessons-json. Confirm the lessonId and "
+                 f"the exact original date, then keep exactly one entry.")
+        lesson_dates.add(date)
+        check_not_past(date, f"{label}.date")
+        _in_window(date, f"{label}.date")
+        state = les.get("state")
+        if state not in LESSON_STATES:
+            fail(f"{label}.state must be one of {', '.join(LESSON_STATES)}, "
+                 f"got {state!r}")
+        if "lessonId" in les and les["lessonId"] not in (None, ""):
+            if not isinstance(les["lessonId"], str):
+                fail(f"{label}.lessonId must be a string ID")
+        if les.get("timing") is not None:
+            _check_timing(les["timing"], f"{label}.timing")
+        makeup = les.get("makeup")
+        if makeup is not None:
+            # A makeup links ONLY to a cancelled lesson; anything else is
+            # ambiguous -> abort, never guess the linkage.
+            if state != "cancelled":
+                fail(f"{label}.makeup is set but state is {state!r}: a makeup "
+                     f"links only to a cancelled lesson. Aborting instead of "
+                     f"guessing the linkage.")
+            if not isinstance(makeup, dict):
+                fail(f"{label}.makeup must be an object with {MAKEUP_FIELDS}")
+            missing = [f for f in MAKEUP_FIELDS if makeup.get(f) in (None, "")]
+            if missing:
+                fail(f"{label}.makeup is missing required fields: "
+                     f"{', '.join(missing)}")
+            mdate = makeup["date"]
+            check_not_past(mdate, f"{label}.makeup.date")
+            _in_window(mdate, f"{label}.makeup.date")
+            check_minutes(makeup["startMinute"], makeup["endMinute"])
+            for f in ("teacherId", "classroomId"):
+                if not isinstance(makeup[f], str) or not makeup[f]:
+                    fail(f"{label}.makeup.{f} must be a non-empty ID string")
+            # One makeup per cancelled session: different cancellations must
+            # not be merged into the same makeup date.
+            if mdate in makeup_dates:
+                fail(f"{label}.makeup.date {mdate!r} is already used as the "
+                     f"makeup for {makeup_dates[mdate][0]}. Merging different "
+                     f"cancellations into one makeup session is not "
+                     f"supported -- use separate dates or confirm with the "
+                     f"requester.")
+            makeup_dates[mdate] = (label, date)
+    # A makeup may not be sent to an already-occupied date known in this
+    # change set (cross-check the workspace for dates outside the set).
+    # Checked after all lesson dates are known, regardless of entry order.
+    for mdate, (label, _cdate) in makeup_dates.items():
+        if mdate in lesson_dates:
+            fail(f"{label}.makeup.date {mdate!r} is already occupied by "
+                 f"another lesson entry in this change set. Sending a "
+                 f"makeup to an occupied date is not supported -- pick a "
+                 f"free date (and cross-check the workspace first).")
+    return lessons
+
+
+def operation_state(envelope: dict) -> str | None:
+    data = envelope.get("data") or {}
+    return data.get("state") or envelope.get("state")
+
+
+def report_public_cache(envelope: dict) -> None:
+    """Display the auxiliary public-guide cache state SEPARATELY.
+
+    data.publicCache.state ('invalidated'|'pending') describes ONLY this HTTP
+    attempt's public class-guide cache refresh and is separate from the
+    DB-persisted business receipt. It never changes applied's meaning, the
+    exit code, or preview-match verification:
+      - pending: the business operation is still applied; pending does NOT
+        mean the operation failed.
+      - invalidated: the cache invalidation call completed; it does NOT
+        confirm the change is visible on the public page.
+    A stale cache is retried via the SAME operation GET
+    (operations get --request-key <key>); never mint a new preview/key/commit
+    for a cache refresh.
+    """
+    data = envelope.get("data") or {}
+    pc = data.get("publicCache")
+    if not isinstance(pc, dict):
+        return
+    state = pc.get("state")
+    if state == "pending":
+        print("tips-admin: publicCache=pending -- auxiliary state for THIS HTTP "
+              "attempt's public class-guide cache refresh ONLY. The business "
+              "receipt (state=applied) is unaffected: pending does not mean the "
+              "operation failed. To retry the cache refresh, query the SAME "
+              "operation key again; do not mint a new preview/key/commit.",
+              file=sys.stderr)
+    elif state == "invalidated":
+        print("tips-admin: publicCache=invalidated -- the cache invalidation call "
+              "for this HTTP attempt completed. This does NOT confirm the change "
+              "is visible on the public page. Business receipt semantics, exit "
+              "codes, and preview-match verification are unchanged.",
+              file=sys.stderr)
+    # Any other/absent value: say nothing; the receipt stands on its own.
+
+
+def extract_class_id(envelope: dict) -> str | None:
+    """Target class id lives strictly at data.class.id (no top-level field)."""
+    data = envelope.get("data") or {}
+    cls = data.get("class")
+    if isinstance(cls, dict):
+        cid = cls.get("id")
+        return cid if isinstance(cid, str) and cid else None
+    return None
+
+
+def extract_operation_id(envelope: dict) -> str | None:
+    """The request key lives strictly at data.operationId (no top-level field)."""
+    data = envelope.get("data") or {}
+    op = data.get("operationId")
+    return op if isinstance(op, str) and op else None
+
+
+def verify_operation_id(envelope: dict, idempotency_key: str | None
+                        ) -> tuple[bool, list[str]]:
+    """Check data.operationId matches the sent Idempotency-Key.
+
+    This is the key check shared by every receipt state. class.id and the
+    preview comparison are required ONLY for applied receipts; failed and
+    unknown receipts carry no class. Any mismatch -> UNCONFIRMED, never
+    exit 0."""
+    reasons: list[str] = []
+    op_id = extract_operation_id(envelope)
+    if idempotency_key:
+        if not op_id:
+            reasons.append("receipt has no data.operationId")
+        elif op_id != idempotency_key:
+            reasons.append(f"data.operationId ({op_id}) does not match the sent "
+                           f"Idempotency-Key ({idempotency_key})")
+    return (not reasons, reasons)
+
+
+def settle_receipt(envelope: dict, idempotency_key: str | None, *,
+                   journal_file: str | None = None,
+                   preview_token: str | None = None,
+                   api_version: str = "1",
+                   where: str = "commit") -> typing.NoReturn:
+    """Settle an operation receipt obtained via HTTP 200. Always exits.
+
+    Real server shapes:
+      applied -> data.operationId + data.class.id required, plus the
+                 preview-expectation match; only applied may exit 0.
+      failed  -> {data.operationId, state:'failed', error:{code, sqlstate}},
+                 no class. Request key AND a valid data.error.code are
+                 verified, then exit 3 (confirmed failure).
+      unknown -> {operationId, state:'unknown', retryWithNewKey:false}
+                 -> exit 4.
+    Arbitrary states and malformed envelopes -> exit 4. A failed or
+    unexpected state never ends in exit 0.
+    """
+    state = operation_state(envelope)
+    verified, reasons = verify_operation_id(envelope, idempotency_key)
+    if not verified:
+        fail("tips-admin: UNCONFIRMED -- receipt operationId could not be verified "
+             f"({'; '.join(reasons)}). Do not retry with a new key; query the "
+             f"same key again.", code=4)
+    if state == "applied":
+        if not extract_class_id(envelope):
+            fail("tips-admin: UNCONFIRMED -- applied receipt has no data.class.id; "
+                 "query the same key again.", code=4)
+        if journal_file is not None:
+            if api_version == "2":
+                require_v2_preview_match(journal_file, preview_token, envelope)
+            else:
+                require_preview_match(journal_file, preview_token, envelope)
+        print("tips-admin: applied and matches the recorded preview expectation. "
+              "Verify data.class.id and the changed values against the preview's "
+              "before/after before reporting completion.", file=sys.stderr)
+        sys.exit(0)
+    if state == "failed":
+        code, sqlstate = _failed_receipt_code(envelope)
+        if code is None:
+            fail("tips-admin: UNCONFIRMED -- failed receipt has no valid "
+                 "data.error.code; query the same key again.", code=4)
+        extra = f" (sqlstate={sqlstate})" if sqlstate else ""
+        fail(f"tips-admin: confirmed failure ({where}): error.code={code}{extra}. "
+             f"No bypass via browser or UI is allowed.", code=3)
+    if state == "unknown":
+        note_unknown()
+        sys.exit(4)
+    fail(f"tips-admin: UNCONFIRMED -- unexpected receipt state {state!r}; "
+         f"query the same key again.", code=4)
+
+
+# Fields that define a weekly slot's meaning. Slot ids may change when the
+# time string changes (legacy ids), so comparison is by these fields only,
+# sorted. version / timestamp are never compared.
+SLOT_COMPARE_FIELDS = ("weekday", "startMinute", "endMinute", "teacherId", "classroomId")
+
+
+def normalize_slots(slots) -> list | None:
+    if not isinstance(slots, list):
+        return None
+    return sorted(tuple(s.get(f) for f in SLOT_COMPARE_FIELDS)
+                  for s in slots if isinstance(s, dict))
+
+
+def extract_preview_expectation(envelope: dict) -> dict | None:
+    """Pull {previewToken, classId, afterSlots, expiresAt} from a preview
+    envelope. Returns None when a required field is missing."""
+    data = envelope.get("data") or {}
+    token = data.get("previewToken") or envelope.get("previewToken")
+    before = data.get("before") or {}
+    cls = data.get("class") or {}
+    class_id = before.get("id") or cls.get("id")
+    after = data.get("after") or {}
+    after_slots = after.get("weeklySlots")
+    if after_slots is None:
+        after_slots = after.get("slots")
+    expires_at = data.get("expiresAt") or envelope.get("expiresAt")
+    if not token or not class_id or not isinstance(after_slots, list):
+        return None
+    return {"previewToken": token, "classId": class_id,
+            "afterSlots": after_slots, "expiresAt": expires_at}
+
+
+def extract_receipt_slots(envelope: dict):
+    data = envelope.get("data") or {}
+    cls = data.get("class")
+    if not isinstance(cls, dict):
+        return None
+    slots = cls.get("weeklySlots")
+    if slots is None:
+        slots = cls.get("slots")
+    return slots if isinstance(slots, list) else None
+
+
+def verify_against_preview(envelope: dict, expectation: dict) -> list:
+    """Compare an applied receipt against the recorded preview expectation.
+    Returns a list of mismatch reasons (empty = match)."""
+    reasons: list = []
+    data = envelope.get("data") or {}
+    cls = data.get("class") or {}
+    if cls.get("id") != expectation.get("classId"):
+        reasons.append(f"data.class.id ({cls.get('id')!r}) != preview class id "
+                       f"({expectation.get('classId')!r})")
+    receipt_slots = extract_receipt_slots(envelope)
+    if receipt_slots is None:
+        reasons.append("receipt has no class weeklySlots to compare against preview.after")
+    elif normalize_slots(receipt_slots) != normalize_slots(expectation.get("afterSlots")):
+        reasons.append("weekly slots (weekday/startMinute/endMinute/teacherId/classroomId) "
+                       "differ from preview.after")
+    return reasons
+
+
+def require_preview_match(journal_file: str, preview_token: str | None,
+                          envelope: dict) -> None:
+    """An applied receipt is only success if it matches the recorded preview
+    expectation. Missing expectation or any mismatch -> UNCONFIRMED (exit 4)."""
+    if not preview_token:
+        fail("tips-admin: UNCONFIRMED -- no journal record links this request key "
+             "to a preview token; the change cannot be verified. "
+             "Do not treat as success.", code=4)
+    exp = journal_find_preview_expectation(journal_file, preview_token)
+    if exp is None:
+        fail(f"tips-admin: UNCONFIRMED -- no preview expectation recorded for token "
+             f"{preview_token} in this journal partition; the change cannot be "
+             f"verified. Do not treat an applied receipt as success.", code=4)
+    reasons = verify_against_preview(envelope, exp)
+    if reasons:
+        fail("tips-admin: UNCONFIRMED -- receipt does not match the preview "
+             "expectation: " + "; ".join(reasons) + ". Do not treat as success.",
+             code=4)
+
+
+def extract_v2_preview_expectation(envelope: dict) -> dict | None:
+    """v2 changes preview expectation: previewToken, before.id (class id),
+    after.verificationHash, expiresAt. verificationHash covers the semantic
+    state of basic/weeklySlots/lessons (version/timestamp excluded)."""
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        return None
+    token = data.get("previewToken")
+    before = data.get("before") or {}
+    after = data.get("after") or {}
+    class_id = before.get("id")
+    after_hash = after.get("verificationHash")
+    if not isinstance(token, str) or not token:
+        return None
+    if not isinstance(class_id, str) or not class_id:
+        return None
+    if not isinstance(after_hash, str) or not after_hash:
+        return None
+    return {"previewToken": token, "classId": class_id,
+            "afterHash": after_hash, "expiresAt": data.get("expiresAt")}
+
+
+def verify_against_v2_preview(envelope: dict, expectation: dict) -> list:
+    """Compare an applied v2 receipt against the recorded preview expectation:
+    data.class.id == preview.before.id and data.class.verificationHash ==
+    preview.after.verificationHash. operationId is checked by verify_operation_id."""
+    reasons: list[str] = []
+    data = envelope.get("data") or {}
+    cls = data.get("class") or {}
+    class_id = cls.get("id")
+    if not class_id:
+        reasons.append("receipt has no data.class.id")
+    elif class_id != expectation.get("classId"):
+        reasons.append(f"data.class.id ({class_id}) does not match the "
+                       f"preview's before.id ({expectation.get('classId')})")
+    receipt_hash = cls.get("verificationHash")
+    if not receipt_hash:
+        reasons.append("receipt has no data.class.verificationHash")
+    elif receipt_hash != expectation.get("afterHash"):
+        reasons.append("data.class.verificationHash does not match "
+                       "preview.after.verificationHash")
+    return reasons
+
+
+def require_v2_preview_match(journal_file: str, preview_token: str | None,
+                             envelope: dict) -> None:
+    """A v2 applied receipt is only success if its verificationHash matches
+    the recorded preview expectation. Missing expectation or any mismatch
+    -> UNCONFIRMED (exit 4)."""
+    if not preview_token:
+        fail("tips-admin: UNCONFIRMED -- no journal record links this request key "
+             "to a preview token; the change cannot be verified. "
+             "Do not treat as success.", code=4)
+    exp = journal_find_preview_expectation(journal_file, preview_token)
+    if exp is None or "afterHash" not in exp:
+        fail(f"tips-admin: UNCONFIRMED -- no v2 preview expectation recorded for token "
+             f"{preview_token} in this journal partition; the change cannot be "
+             f"verified. Do not treat an applied receipt as success.", code=4)
+    reasons = verify_against_v2_preview(envelope, exp)
+    if reasons:
+        fail("tips-admin: UNCONFIRMED -- receipt does not match the v2 preview "
+             "expectation: " + "; ".join(reasons) + ". Do not treat as success.",
+             code=4)
+
+
+def sanitize_segment(value: str) -> str:
+    cleaned = "".join(ch if (ch.isalnum() or ch in "-_") else "_"
+                      for ch in value.strip().lower())
+    return cleaned.strip("_") or "unknown"
+
+
+def canonical_origin_dir(base_url: str) -> str:
+    """Journal partition directory for a base URL's canonical origin.
+
+    Uses scheme + host + effective port (explicit default when absent), so
+    different ports never share a partition. userinfo / query / fragment are
+    refused. The directory is a readable host_port prefix plus a SHA256 hash
+    of the canonical origin, so no two distinct origins can collide even if
+    their sanitized prefixes match.
+
+    NOTE: this changed the on-disk layout (previously hostname only, port
+    ignored, plain sanitized host). Journals written by older client versions
+    are not read from the new location.
+    """
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.username or parsed.password:
+        fail(f"base URL must not contain userinfo, got: {base_url!r}")
+    if parsed.query or parsed.fragment:
+        fail(f"base URL must not contain query or fragment, got: {base_url!r}")
+    scheme = parsed.scheme
+    host = (parsed.hostname or "").lower()
+    if scheme != "https" or not host:
+        fail(f"base URL must be https with a host, got: {base_url!r}")
+    try:
+        port = parsed.port if parsed.port is not None else 443
+    except ValueError:
+        fail("base URL has an invalid port")
+    if not 1 <= port <= 65535:
+        fail("base URL has an invalid port")
+    canonical = f"{scheme}://{host}:{port}"
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    safe_host = re.sub(r"[^A-Za-z0-9.-]", "_", host).strip("._") or "host"
+    return f"{safe_host}_{port}_{digest}"
+
+
+def fetch_health_data(base_url: str, allowed_hosts: list[str],
+                      credential: str) -> dict:
+    """GET /health -> data dict (credentialId, apiVersion, scopes, ...)."""
+    envelope = api_request(base_url, allowed_hosts, credential, "GET", "/health")
+    data = envelope.get("data")
+    if not isinstance(data, dict):
+        fail("GET /health did not return a data object; "
+             "cannot partition the journal safely")
+    return data
+
+
+def get_credential_id(base_url: str, allowed_hosts: list[str], credential: str) -> str:
+    """Read the credentialId from GET /health (envelope: {data, error})."""
+    data = fetch_health_data(base_url, allowed_hosts, credential)
+    cid = data.get("credentialId")
+    if not isinstance(cid, str) or not cid.strip():
+        fail("GET /health did not return a credentialId; "
+             "cannot partition the journal safely")
+    return cid.strip()
+
+
+def require_scopes(health_data: dict, needed: list[str], what: str) -> None:
+    """v2 scope gate. Existing keys are NOT auto-expanded: a missing scope
+    is a refusal BEFORE any request is sent (exit 2)."""
+    scopes = health_data.get("scopes") or []
+    missing = [s for s in needed if s not in scopes]
+    if missing:
+        fail(f"{what} needs scopes {', '.join(needed)}; the key only has "
+             f"{', '.join(scopes) if scopes else '(none)'} "
+             f"(missing: {', '.join(missing)}). Existing keys are not "
+             f"auto-expanded -- no request was sent.")
+
+
+def resolve_journal_file(journal_base: str, api_version: str, origin_dir: str,
+                         credential_id: str) -> str:
+    """<base>/<canonical-origin-dir>/v<1|2>/<credentialId>/operations.jsonl.
+
+    apiVersion is part of the partition: v1 and v2 records never mix.
+    origin_dir must come from canonical_origin_dir()."""
+
+    return os.path.join(journal_base, origin_dir,
+                        f"v{api_version}", sanitize_segment(credential_id),
+                        "operations.jsonl")
+
+
+def note_unknown() -> None:
+    print("tips-admin: note: state=unknown -- this is NEITHER failure NOR success. "
+          "Do NOT retry with a new key and do NOT bypass via browser. "
+          "Report as unconfirmed.", file=sys.stderr)
+
+
+def commit_query_existing(base_url: str, allowed_hosts: list[str], credential: str,
+                          request_key: str, preview_token: str | None,
+                          journal_file: str,
+                          api_version: str = "1") -> typing.NoReturn:
+    print(f"tips-admin: journal already holds this previewToken; "
+          f"querying existing requestKey {request_key} first (no new UUID minted, "
+          f"no new POST sent)",
+          file=sys.stderr)
+    envelope = api_request(base_url, allowed_hosts, credential, "GET",
+                           f"/operations/{request_key}",
+                           idempotency_key=request_key)
+    print(json.dumps(envelope, ensure_ascii=False, indent=2))
+    report_public_cache(envelope)
+    settle_receipt(envelope, request_key, journal_file=journal_file,
+                   preview_token=preview_token, api_version=api_version,
+                   where="replay")
+
+
+def main(argv: list[str]) -> None:
+    args = parse_args(argv)
+    allowed_hosts = parse_allowed_hosts(args.allowed_hosts)
+    base_url = check_base_url(args.base_url, allowed_hosts)
+    api_version = api_version_from_base(base_url)
+
+    if args.command == "health":
+        out = api_request(base_url, allowed_hosts, args.credential, "GET", "/health")
+        data = out.get("data") or {}
+        if data.get("apiVersion"):
+            print(f"tips-admin: apiVersion={data.get('apiVersion')}, "
+                  f"credentialId={data.get('credentialId')}, "
+                  f"scopes={','.join(data.get('scopes') or [])}",
+                  file=sys.stderr)
+
+    elif args.command == "classes" and args.classes_cmd == "search":
+        require_api_version(api_version, "1", "classes search")
+        if args.page < 1:
+            fail("--page must be >= 1")
+        out = api_request(base_url, allowed_hosts, args.credential, "GET", "/classes",
+                          query={"search": args.search, "status": args.status, "page": args.page})
+
+    elif args.command == "classes" and args.classes_cmd == "get":
+        require_api_version(api_version, "1", "classes get")
+        check_uuid(args.id, "--id")
+        out = api_request(base_url, allowed_hosts, args.credential, "GET",
+                          f"/classes/{args.id}")
+
+    elif args.command == "classes" and args.wt_cmd == "preview":
+        require_api_version(api_version, "1", "classes weekly-time preview")
+        check_uuid(args.id, "--id")
+        check_minutes(args.start_minute, args.end_minute)
+        out = api_request(
+            base_url, allowed_hosts, args.credential, "POST",
+            f"/classes/{args.id}/weekly-time/preview",
+            body={"expectedVersion": args.expected_version,
+                  "slotId": args.slot_id,
+                  "startMinute": args.start_minute,
+                  "endMinute": args.end_minute,
+                  "reason": args.reason},
+        )
+        # Preview keys and commit Idempotency-Keys live in separate
+        # namespaces: never reuse a preview key as an Idempotency-Key.
+        # Record the expectation so commit can verify the applied receipt
+        # against it (class id + after slots, Asia/Seoul).
+        exp = extract_preview_expectation(out)
+        if exp is None:
+            fail("tips-admin: preview response is missing previewToken / before.id / "
+                 "after.weeklySlots -- the expectation cannot be recorded. "
+                 "Do not commit with this preview.", code=3)
+        origin_dir = canonical_origin_dir(base_url)
+        credential_id = get_credential_id(base_url, allowed_hosts, args.credential)
+        journal_file = resolve_journal_file(args.journal, api_version, origin_dir,
+                                            credential_id)
+        journal_write(journal_file, {"kind": "preview", "apiVersion": api_version,
+                                     **exp})
+        print(f"tips-admin: preview expectation recorded in journal partition "
+              f"{origin_dir}/v{api_version}/{credential_id} for token {exp['previewToken']}.",
+              file=sys.stderr)
+        # Preview is valid 10 minutes (Asia/Seoul); the server returns expiresAt.
+        if exp.get("expiresAt"):
+            print(f"tips-admin: preview valid 10 minutes (Asia/Seoul), "
+                  f"expiresAt={exp['expiresAt']}; commit before expiry or take a "
+                  f"new preview.", file=sys.stderr)
+
+    elif args.command == "operations" and args.ops_cmd == "commit":
+        if args.source_reference and not args.source_reference.startswith("https://"):
+            fail("--source-reference must be the original message link (https URL); "
+                 "never pass message content")
+        origin_dir = canonical_origin_dir(base_url)
+        credential_id = get_credential_id(base_url, allowed_hosts, args.credential)
+        journal_file = resolve_journal_file(args.journal, api_version, origin_dir,
+                                            credential_id)
+        existing = journal_find_by_preview_token(journal_file, args.preview_token)
+        if existing and existing.get("apiVersion", api_version) != api_version:
+            fail(f"journal record for this previewToken belongs to apiVersion "
+                 f"{existing.get('apiVersion')}; the base URL is /api/v{api_version}. "
+                 f"Use the matching base URL version.")
+        if args.idempotency_key:
+            check_uuid(args.idempotency_key, "--idempotency-key")
+            if existing and existing.get("requestKey") != args.idempotency_key:
+                fail("journal already holds a DIFFERENT requestKey for this previewToken "
+                     f"({existing.get('requestKey')}); refusing to fork the key lineage. "
+                     f"Resolve manually instead of minting a parallel key.")
+            if existing is not None:
+                # The same key was explicitly given and is already recorded:
+                # recover via GET first, zero POSTs -- the same rule as the
+                # implicit replay path.
+                commit_query_existing(base_url, allowed_hosts, args.credential,
+                                      existing["requestKey"],
+                                      existing.get("previewToken"), journal_file,
+                                      api_version)
+            request_key = args.idempotency_key
+        elif existing:
+            # Same previewToken seen before: query the existing key first.
+            commit_query_existing(base_url, allowed_hosts, args.credential,
+                                  existing["requestKey"],
+                                  existing.get("previewToken"), journal_file,
+                                  api_version)
+        else:
+            request_key = str(uuid.uuid4())
+
+        body = {"previewToken": args.preview_token}
+        if args.source_reference:
+            body["sourceReference"] = args.source_reference
+        # Journal BEFORE send (0600, locked, fsync, partitioned by
+        # origin+version+credentialId): a lost response is recovered via
+        # `operations get --request-key`, never by re-sending with a new
+        # key and never by starting a new preview to bypass an old record.
+        journal_write(journal_file, {"kind": "commit", "apiVersion": api_version,
+                                     "requestKey": request_key,
+                                     "previewToken": args.preview_token,
+                                     "body": body})
+
+        def _applied_check(payload: dict) -> None:
+            # Applied receipts preserved from HTTP error responses must pass
+            # the same preview-match verification as normal receipts.
+            if api_version == "2":
+                require_v2_preview_match(journal_file, args.preview_token, payload)
+            else:
+                require_preview_match(journal_file, args.preview_token, payload)
+
+        envelope = api_request(base_url, allowed_hosts, args.credential, "POST",
+                               "/operations", body=body,
+                               extra_headers={"Idempotency-Key": request_key},
+                               preserve_receipt_on_error=True,
+                               idempotency_key=request_key,
+                               applied_check=_applied_check)
+        print(json.dumps(envelope, ensure_ascii=False, indent=2))
+        report_public_cache(envelope)
+        settle_receipt(envelope, request_key, journal_file=journal_file,
+                       preview_token=args.preview_token, api_version=api_version,
+                       where="commit")
+        out = None  # unreachable: settle_receipt always exits
+
+    elif args.command == "operations" and args.ops_cmd == "get":
+        origin_dir = canonical_origin_dir(base_url)
+        credential_id = get_credential_id(base_url, allowed_hosts, args.credential)
+        # The key's commit record may live in either version partition;
+        # the base URL version must match the record's version.
+        journal_file_v2 = resolve_journal_file(args.journal, "2", origin_dir, credential_id)
+        journal_file_v1 = resolve_journal_file(args.journal, "1", origin_dir, credential_id)
+        commit_rec = journal_find_commit_by_request_key(journal_file_v2, args.request_key)
+        if commit_rec is not None:
+            rec_version = "2"
+        else:
+            commit_rec = journal_find_commit_by_request_key(journal_file_v1,
+                                                           args.request_key)
+            rec_version = "1" if commit_rec is not None else api_version
+        if commit_rec is not None and rec_version != api_version:
+            fail(f"this requestKey was committed under /api/v{rec_version}; "
+                 f"query it with an /api/v{rec_version} base URL, not "
+                 f"/api/v{api_version}.")
+        journal_file = journal_file_v2 if rec_version == "2" else journal_file_v1
+        preview_token = commit_rec.get("previewToken") if commit_rec else None
+        envelope = api_request(base_url, allowed_hosts, args.credential, "GET",
+                               f"/operations/{args.request_key}",
+                               idempotency_key=args.request_key)
+        print(json.dumps(envelope, ensure_ascii=False, indent=2))
+        report_public_cache(envelope)
+        settle_receipt(envelope, args.request_key, journal_file=journal_file,
+                       preview_token=preview_token, api_version=api_version,
+                       where="operations get")
+        out = None  # unreachable: settle_receipt always exits
+
+    elif args.command == "operations" and args.ops_cmd == "list":
+        if args.page < 1:
+            fail("--page must be >= 1")
+        out = api_request(base_url, allowed_hosts, args.credential, "GET",
+                          "/operations", query={"page": args.page})
+
+    elif args.command == "workspace" and args.ws_cmd == "get":
+        require_api_version(api_version, "2", "workspace get")
+        check_uuid(args.class_id, "--class-id")
+        check_window_93(args.from_date, args.to_date)
+        health_data = fetch_health_data(base_url, allowed_hosts, args.credential)
+        require_scopes(health_data, ["class-details:read"], "workspace get")
+        out = api_request(base_url, allowed_hosts, args.credential, "GET",
+                          f"/classes/{args.class_id}",
+                          query={"from": args.from_date, "to": args.to_date})
+        data = out.get("data") or {}
+        lessons = data.get("lessons") or []
+        print(f"tips-admin: workspace id={data.get('id')} "
+              f"name={(data.get('basic') or {}).get('name')} "
+              f"lessons={len(lessons) if isinstance(lessons, list) else '?'} "
+              f"verificationHash={data.get('verificationHash')}",
+              file=sys.stderr)
+
+    elif args.command == "catalogs" and args.cat_cmd == "get":
+        require_api_version(api_version, "2", "catalogs get")
+        check_uuid(args.class_id, "--class-id")
+        if args.page < 1:
+            fail("--page must be >= 1")
+        health_data = fetch_health_data(base_url, allowed_hosts, args.credential)
+        require_scopes(health_data, ["class-details:read"], "catalogs get")
+        out = api_request(base_url, allowed_hosts, args.credential, "GET",
+                          f"/classes/{args.class_id}/catalogs",
+                          query={"kind": args.kind, "search": args.search,
+                                 "page": args.page})
+        print("tips-admin: search by name, then use the EXACT id from items[]; "
+              "final subject suitability is verified at preview time.",
+              file=sys.stderr)
+
+    elif args.command == "changes" and args.ch_cmd == "preview":
+        require_api_version(api_version, "2", "changes preview")
+        check_uuid(args.class_id, "--class-id")
+        try:
+            d0 = datetime.date.fromisoformat(args.from_date)
+            d1 = datetime.date.fromisoformat(args.to_date)
+        except ValueError:
+            fail(f"window dates must be YYYY-MM-DD, got from={args.from_date!r} "
+                 f"to={args.to_date!r}")
+        if d1 < d0:
+            fail(f"window end {args.to_date} is before start {args.from_date}")
+        if not args.reason.strip():
+            fail("--reason is required")
+        basic = validate_basic_change(args.basic_json)
+        slots = validate_weekly_slots_change(args.weekly_slots_json)
+        lessons = validate_lessons_change(args.lessons_json,
+                                            window_from=args.from_date,
+                                            window_to=args.to_date)
+        if not basic and not slots and not lessons:
+            fail("nothing to change: provide at least one of --basic-json, "
+                 "--weekly-slots-json, --lessons-json")
+        # A weekly template change takes effect IMMEDIATELY: a "from <month>"
+        # style request with no end date must be written as per-date lessons
+        # inside the window instead. Flag the combination for the operator.
+        if slots and not lessons:
+            print("tips-admin: note: weeklySlots changes the weekly template "
+                  "IMMEDIATELY for all future dates. If the request was "
+                  "\"from <month>\" with no end date, prefer per-date lessons; "
+                  "confirm with the requester before committing a template change.",
+                  file=sys.stderr)
+        needed = []
+        if basic:
+            needed.append("class-info:write")
+        if slots:
+            needed.append("weekly-plan:write")
+        if lessons:
+            needed.append("lesson-plan:write")
+        health_data = fetch_health_data(base_url, allowed_hosts, args.credential)
+        require_scopes(health_data, needed, "changes preview")
+        body = {"expectedVersion": args.expected_version,
+                "window": {"from": args.from_date, "to": args.to_date},
+                "reason": args.reason}
+        if basic:
+            body["basic"] = basic
+        if slots:
+            body["weeklySlots"] = slots
+        if lessons:
+            body["lessons"] = lessons
+        out = api_request(base_url, allowed_hosts, args.credential, "POST",
+                          f"/classes/{args.class_id}/changes/preview",
+                          body=body)
+        exp = extract_v2_preview_expectation(out)
+        if exp is None:
+            fail("tips-admin: preview response is missing previewToken / before.id / "
+                 "after.verificationHash -- the expectation cannot be recorded. "
+                 "Do not commit with this preview.", code=4)
+        origin_dir = canonical_origin_dir(base_url)
+        cid = health_data.get("credentialId")
+        if not isinstance(cid, str) or not cid.strip():
+            fail("GET /health did not return a credentialId; "
+                 "cannot partition the journal safely")
+        credential_id = cid.strip()
+        journal_file = resolve_journal_file(args.journal, api_version, origin_dir,
+                                            credential_id)
+        journal_write(journal_file, {"kind": "preview", "apiVersion": "2",
+                                     **exp})
+        print(f"tips-admin: v2 preview expectation recorded in journal partition "
+              f"{origin_dir}/v2/{credential_id} for token {exp['previewToken']} "
+              f"(afterHash={exp['afterHash'][:16]}...).",
+              file=sys.stderr)
+        notif = ((out.get("data") or {}).get("notifications") or {}).get("state")
+        if notif != "not_requested":
+            print(f"tips-admin: note: preview notifications.state={notif!r} "
+                  f"(expected 'not_requested').", file=sys.stderr)
+        if exp.get("expiresAt"):
+            print(f"tips-admin: preview expiresAt={exp['expiresAt']}; commit "
+                  f"before expiry or take a new preview.", file=sys.stderr)
+
+    elif args.command == "calendar" and args.cal_cmd == "events":
+        require_api_version(api_version, "1", "calendar events")
+        check_date_range(args.from_date, args.to_date)
+        out = api_request(base_url, allowed_hosts, args.credential, "GET",
+                          "/calendar/events",
+                          query={"from": args.from_date, "to": args.to_date})
+    else:
+        fail(f"unsupported command path: {args.command}")
+
+    if out is not None:
+        print(json.dumps(out, ensure_ascii=False, indent=2))
+
+
+if __name__ == "__main__":
+    main(sys.argv[1:])

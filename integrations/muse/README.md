@@ -26,7 +26,7 @@ The following runtime capabilities were reported directly by Muse on 2026-09-29 
 - `/opt/hatch/skills/skill-creator/bin/scaffold-connector-skill --provider <provider>` generates the connector's auth instructions after connection.
 - Python `add_surrogate_to_request(request, credential_name, allowed_hosts=[...])` injects an `hsurr:*` surrogate. The actual key is substituted by Sentinel; never read or export it.
 - Use HTTPS, fixed connector hosts and a no-redirect urllib opener. Do not derive a new trusted host from arbitrary CLI input. Host restrictions are not API path restrictions; the server enforces scopes/actions.
-- Muse prepared `~/workspace/skills/tips-admin-api/SKILL.md` and `bin/tips-admin` in its own workspace. Its reported 47/47 v1 offline tests include receipt-to-preview comparisons (the later v2 compatibility run reconstructed the temporary v1 suite in a maintained test file, rather than rerunning the identical original file) and are Muse-side evidence, not independently executed tests in this repository.
+- Muse prepared `~/workspace/skills/tips-admin-api/SKILL.md` and `bin/tips-admin` in its workspace. The reviewed source is now [pinned here](client/README.md), with archive/source hashes and 59 v1 tests, 39 v2 checks, and 10 independent contract tests reproduced locally. The temporary v1 suite was reconstructed from the contract, not recovered byte-for-byte. Socket/DNS/subprocess attempts are blocked in the offline runner; this does not establish real credential injection.
 
 Conversation: https://muse.ai/thread/35b3ea22-938e-4c5e-be65-e1b77a457ac3
 
@@ -58,7 +58,7 @@ Important semantics:
 - Pending makeup approvals, or completed approval-owned dates in the window, return `agent_approval_workflow_required`. Use the existing approval workflow with appropriate authority; never bypass it via a direct edit or browser.
 - Server-only compiler contexts contain the plan required for preservation, but HTTP responses use allowlisted projections and never expose raw plans/private notes. v2 previews/receipts are separate private tables so v1 cannot expose those contexts. The DB rechecks scopes from the compiled fields, not a caller-provided scope list. Edited catalog resources are revalidated at execution, including legacy plans. Unique explicit regular legacy lessons replace the corresponding single weekly occurrence; forced/makeup/ambiguous rows do not gain this inference. The existing final resource-conflict guard remains active.
 
-Muse reported 25/25 v2 offline mocks for five request patterns and error/recovery branches. This is reported client evidence; the actual Vault/Sentinel/HTTPS transport still requires the separate synthetic-environment connection gate.
+The [pinned client](client/README.md) covers the five synthetic request patterns, failure receipts without class data, malformed responses, same-key recovery, origin isolation and damaged journals. Its 59 v1 tests + 39 v2 checks + 10 independent regressions pass locally and run in CI. Actual Vault/Sentinel/HTTPS transport still requires the separate synthetic-environment connection gate.
 
 ## v1 execution protocol
 
@@ -88,6 +88,7 @@ Audit actor/class IDs are retained as snapshots without foreign keys into operat
 ## Reproduce verification
 
 ```sh
+python3 integrations/muse/client/tests/run_offline.py
 node --test --experimental-strip-types tests/agent-api-http.test.mjs tests/agent-class-edit.test.mjs
 node scripts/run-isolated-supabase-db-tests.mjs --review-head --execute --authorized \
   --request-id agent-api-local-review \

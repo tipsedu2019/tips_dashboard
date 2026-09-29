@@ -29,7 +29,7 @@
 - 기존 timetable_operational_conflicts_test.sql 127개 통과.
 - 격리 DB lint 및 현재 배포 계약 검증 통과. 격리 런타임은 검사 후 정리됨.
 - TypeScript, 변경 파일 ESLint, Next production build 통과. 빌드 런타임에서 OpenAPI 200과 기본 비활성 health 503/no-store를 확인했습니다.
-- 실제 Vault → HTTPS 헤더 치환과 실제 운영 쓰기는 아직 검증되지 않았습니다. Muse의 41개 CLI 자체 테스트는 Muse 보고 결과입니다.
+- 실제 Vault → HTTPS 헤더 치환과 실제 운영 쓰기는 아직 검증되지 않았습니다. 아래 v2 항목에 클라이언트 소스 확보 후 독립 재현 결과를 기록했습니다.
 
 재현 명령 및 활성화 절차는 [Muse 연동 문서](../../../integrations/muse/README.md)에 있습니다.
 
@@ -43,4 +43,4 @@
 - 기존 legacy content preservation, scoped occupancy, lesson save performance pgTAP도 함께 통과했습니다. 격리 DB lint 및 postdeploy 계약을 확인하고 런타임을 정리했습니다.
 - 설정/탐색/공용 대화상자 회귀와 v2를 합한 81개 통과. 원문 key 발급은 합성 transport의 무권한 fake 값으로만 검사했습니다.
 - 새 발급 폼의 [데스크톱](class-edit-scopes-desktop.png)과 [390px 모바일](class-edit-scopes-mobile.png)을 확인했습니다. 기준 화면과 공용 디자인 구성은 위와 같습니다. 수정 권한 미선택 시 발급 비활성, 선택 범위의 정확한 RPC 전달, 읽기/1일 기본값을 확인했습니다.
-- Muse는 v2 CLI를 추가하고 자체 mock 25개 통과를 보고했습니다. 운영 배포, 실제 키 발급, Vault/Sentinel 인증, 실제 수업 수정은 아직 수행하지 않았습니다.
+- [버전을 고정한 Muse 클라이언트](../../../integrations/muse/client/README.md)를 받아 SHA256을 확인하고, v1 59개·v2 39개·독립 계약 검사 10개를 직접 실행해 통과했습니다. 실제 failed/unknown 응답, HTTP 200/5xx의 깨진 응답, 동일 키 복구, 손상 저널, origin 분리와 URL 사전 검증을 보완했습니다. 네트워크·authd socket·subprocess 시도는 차단하며 CI에도 추가했습니다. 운영 배포, 실제 키 발급, Vault/Sentinel 인증, 실제 수업 수정은 아직 수행하지 않았습니다.
