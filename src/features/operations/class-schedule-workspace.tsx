@@ -3662,10 +3662,12 @@ export function ClassScheduleWorkspace() {
         if (validationError) throw { code: "legacy_lesson_details_required", message: validationError };
         const body = JSON.stringify({ classId: selectedRow.id, schedulePlan, expectedPlan });
         if (legacyScheduleRequestRef.current?.body !== body) legacyScheduleRequestRef.current = { body, key: crypto.randomUUID() };
+        // Leave room for the database deadline plus commit/response delivery.
+        // Aborting at the same 8s boundary can report failure after a commit.
         const { error: updateError } = await client.rpc("update_class_operational_v1", {
           p_class_id: text(selectedRow.id), p_patch: { schedule_plan: schedulePlan },
           p_request_key: legacyScheduleRequestRef.current.key, p_expected_schedule_plan: expectedPlan,
-        }).abortSignal(AbortSignal.timeout(8_000)).retry(false);
+        }).abortSignal(AbortSignal.timeout(20_000)).retry(false);
         if (updateError) throw updateError;
         acceptSubmission();
         return null;
