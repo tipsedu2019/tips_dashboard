@@ -646,6 +646,11 @@
       "sha256": "50f8bcc39ec77dc8dea68aa87c2b908b96e0ca54829fb07ccad5c3a58ac9793e"
     },
     {
+      "fileName": "20260929112742_lesson_design_teacher_subject_aliases.sql",
+      "status": "final",
+      "sha256": "bbffd465a538dcb2fb2d8e105c0621576ebd26e0e98c53b35640bf621a13db43"
+    },
+    {
       "fileName": "20260929113744_agent_api_audit_history_decoupling.sql",
       "status": "final",
       "sha256": "2f29859963f8dfbda20860f5dd57f268c23f3fd06a4a625e6f9e168cb97db585"
