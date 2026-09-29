@@ -25,9 +25,10 @@
 ## API/DB 증거
 
 - HTTP 9개: 기본 비활성, 익명 차단, 토큰 해시 전달, 잘못된/추가 입력 차단, 요청 크기/타입 제한, 오류 정제, 실패 영수증/unknown 유지, OpenAPI.
-- 새 pgTAP 47개: 명시적 admin/issuer 재검사, 키 범위·만료·폐기·분당 제한, 개인 필드 제외, 미리보기 전체 rollback, 멱등 재실행, 다른 키/다른 본문 거부, 과거 기록 보존, 두 저장 방식 지원, 동시 충돌 재검사와 최종 SQLSTATE 23P01, 알림/이력 무변경, ACL.
+- 새 pgTAP 52개: 명시적 admin/issuer 재검사, 키 범위·만료·폐기·분당 제한, 개인 필드 제외, 미리보기 전체 rollback, 멱등 재실행, 다른 키/다른 본문 거부, 과거 기록 보존, 두 저장 방식 지원, 동시 충돌 재검사와 최종 SQLSTATE 23P01, 알림/이력 무변경, ACL, 기존 수업/계정 삭제 흐름과 감사 이력 유지.
 - 기존 timetable_operational_conflicts_test.sql 127개 통과.
 - 격리 DB lint 및 현재 배포 계약 검증 통과. 격리 런타임은 검사 후 정리됨.
+- TypeScript, 변경 파일 ESLint, Next production build 통과. 빌드 런타임에서 OpenAPI 200과 기본 비활성 health 503/no-store를 확인했습니다.
 - 실제 Vault → HTTPS 헤더 치환과 실제 운영 쓰기는 아직 검증되지 않았습니다. Muse의 19개 CLI 자체 테스트는 Muse 보고 결과입니다.
 
 재현 명령 및 활성화 절차는 [Muse 연동 문서](../../../integrations/muse/README.md)에 있습니다.

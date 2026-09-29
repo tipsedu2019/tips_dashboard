@@ -8,7 +8,7 @@ The maintained machine contract is `GET /api/v1/openapi`. All protected response
 
 ## Release and connection sequence
 
-1. Review the migration `20260929110109_agent_api_scoped_schedule.sql` and PR checks. Apply through the maintained migration pipeline. Verify the final gateway function ACL and isolated pgTAP suite. The code is fail-closed unless the server environment has `TIPS_AGENT_API_ENABLED=true`.
+1. Review the migrations `20260929110109_agent_api_scoped_schedule.sql` and `20260929113744_agent_api_audit_history_decoupling.sql` and PR checks. Apply through the maintained migration pipeline. Verify the final gateway function ACL and isolated pgTAP suite. The code is fail-closed unless the server environment has `TIPS_AGENT_API_ENABLED=true`.
 2. Deploy the application with that flag **unset**. `GET /api/v1/openapi` must return the schema; `GET /api/v1/health` must return 503 `agent_api_disabled`. The settings page shows that integration is disabled and cannot issue a key.
 3. For first authentication verification, use a separate Supabase/preview environment containing synthetic data only. Enable the flag there, with its own server-only `SUPABASE_SERVICE_ROLE_KEY` and public Supabase configuration. Never connect a synthetic test to production. A deployed app without the new migration is not ready.
 4. The administrator opens **환경 설정 → AI 연결**, selects one synthetic class, `수업 조회`, and `1일`, and issues a key. Copy the one-time masked value directly into Muse's hosted secure credential page. Do not paste the key into chat, source code, command history, a screenshot or a document. After an uncertain issuance response, refresh the list and revoke the newly created entry before issuing again.
@@ -51,7 +51,7 @@ Write/preview grants require explicit class IDs (max 50), classes:read, and writ
 
 Preview executes the final existing writer inside a deliberately rolled-back subtransaction, preserving only the preview record. Commit rechecks the schedule fingerprint and resource conflicts under the existing timetable lock, and atomically persists the operation receipt. Same key/body replays the receipt; another key cannot consume the same preview. Existing `23P01` domain conflict evidence is preserved; no domain condition is relabeled as a serialization `40001`.
 
-Preview/receipt retention is presently indefinite for audit/recovery. No background deletion or automatic rotation is introduced. Failed preconditions before a receipt exists (invalid key/scope/token) return a typed error; a transport timeout always requires status resolution.
+Audit actor/class IDs are retained as snapshots without foreign keys into operational classes/profiles, so existing deletion flows remain possible while receipts survive. Authority and target existence are rechecked at execution. Preview/receipt retention is presently indefinite for audit/recovery. No background deletion or automatic rotation is introduced. Failed preconditions before a receipt exists (invalid key/scope/token) return a typed error; a transport timeout always requires status resolution.
 
 ## Reproduce verification
 
