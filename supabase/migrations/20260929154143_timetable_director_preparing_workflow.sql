@@ -244,6 +244,9 @@ begin
 end $function$
 ;
 
+-- Keep the private, low-volume publication journal index in the atomic rollout.
+-- A five-second lock timeout aborts instead of waiting behind another writer.
+-- squawk-ignore require-concurrent-index-creation
 create index timetable_transfers_selected_mapping_idx on dashboard_private.timetable_plan_transfers using gin (selected_mapping jsonb_path_ops);
 
 -- CREATE OR REPLACE preserves existing owners and ACLs. Keep helpers private.
