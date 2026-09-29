@@ -1,4 +1,5 @@
 'use client';
+import { TIMETABLE_SUBJECTS, timetableTeacherMatchesSubject, timetableTeachers } from './timetable-subjects';
 import { useEffect, useRef, useState } from 'react';
 import { useForm } from 'react-hook-form';
 import { Button } from '@/components/ui/button';
@@ -110,10 +111,18 @@ export function TimetablePlacementEditor({ draft, snapshot, onSave, onClose, onD
                             {wholeChange('applyTime', '전체 시각 변경')}
                         </div> : null}
                         <div className="grid grid-cols-2 gap-3">
-                            {input('subject', '과목', true)}{input('grade', '학년')}
+                            {<FormField control={form.control} name="subject" render={({ field }) => <FormItem><FormLabel>과목</FormLabel><Select value={field.value} onValueChange={value => {
+                                field.onChange(value);
+                                const selected = snapshot.catalogs.teachers.find(teacher => teacher.id === form.getValues('teacher'));
+                                if (selected && !timetableTeacherMatchesSubject(selected, value)) {
+                                    form.setValue('teacher', '', { shouldDirty: true });
+                                    if (whole) form.setValue('applyTeacher', true, { shouldDirty: true });
+                                }
+                                setSuggestions(null);
+                            }}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent>{TIMETABLE_SUBJECTS.map(value => <SelectItem key={value} value={value}>{value}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} />}{input('grade', '학년')}
                             {science ? <FormField control={form.control} name="subjectAreaKey" render={({ field }) => <FormItem><FormLabel>과학 영역</FormLabel><Select value={field.value || 'none'} onValueChange={value => field.onChange(value === 'none' ? '' : value)}><FormControl><SelectTrigger><SelectValue /></SelectTrigger></FormControl><SelectContent><SelectItem value="none">미정</SelectItem>{field.value && !areas.some(area => area.key === field.value) ? <SelectItem value={field.value} disabled>사용 불가</SelectItem> : null}{areas.map(area => <SelectItem key={area.key} value={area.key}>{area.label}</SelectItem>)}</SelectContent></Select><FormMessage /></FormItem>} /> : null}
                             {science && areaError ? <p role="alert" className="text-sm text-destructive">{areaError}</p> : null}
-                            {resource('teacher', '선생님', snapshot.catalogs.teachers)}
+                            {resource('teacher', '선생님', timetableTeachers(snapshot.catalogs.teachers, form.watch('subject')))}
                             {resource('room', '강의실', snapshot.catalogs.classrooms)}
                             {input('capacity', '정원')}{input('tuition', '수업료')}
                         </div>

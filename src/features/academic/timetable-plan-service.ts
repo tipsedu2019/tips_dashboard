@@ -41,7 +41,7 @@ const shadowSlot = (value: unknown) => record(value) && string(value.id) && stri
   && integer(value.endMinute) && string(value.teacherId) && string(value.classroomId)
   && integer(value.classRevision);
 const shadowClass = (value: unknown) => record(value) && string(value.id) && string(value.name)
-  && nullableString(value.subject) && nullableString(value.grade) && value.status === '수강'
+  && nullableString(value.subject) && nullableString(value.grade) && (value.status === '수강' || value.status === '개강 준비')
   && integer(value.revision);
 const resourceOption = (value: unknown) => record(value) && string(value.id) && string(value.name)
   && typeof value.isVisible === 'boolean' && Array.isArray(value.subjects)
@@ -116,7 +116,7 @@ function requirePreview(value: unknown, request: TransferRequest): TransferPrevi
     || !record(value.request)
     || !Array.isArray(value.mappings) || !value.mappings.every(entry => record(entry)
       && string(entry.sourceId) && request.itemIds.includes(entry.sourceId)
-      && entry.action === (request.target.kind === 'operational' ? 'create_active_class' : 'create_plan_item'))
+      && entry.action === (request.target.kind === 'operational' ? request.target.status === '개강 준비' ? 'create_preparing_class' : 'create_active_class' : 'create_plan_item'))
     || value.mappings.length !== request.itemIds.length
     || new Set(value.mappings.map(entry => (entry as { sourceId: string }).sourceId)).size !== request.itemIds.length
     || !Array.isArray(value.blockers) || !value.blockers.every(issue)

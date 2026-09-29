@@ -54,6 +54,7 @@ import {
 import { getTimetablePanelLayout } from "./timetable-layout";
 import { useAcademicWorkspaceData } from "./use-academic-workspace-data";
 import { useDraftNavigation } from '@/hooks/use-draft-navigation';
+import { useAuth } from '@/providers/auth-provider';
 import { useTimetablePlan } from './use-timetable-plan';
 import { clearTimetablePlanRecovery } from './timetable-plan-recovery';
 import { TimetablePlanPicker } from './timetable-plan-picker';
@@ -145,13 +146,7 @@ function normalizeSelections(values: string[], options: string[]) {
   return nextValues.length === values.length ? values : nextValues;
 }
 
-function buildSubjectFilterOptions(subjectOptions: string[]) {
-  const primarySet = new Set(PRIMARY_SUBJECT_FILTERS);
-  const extras = subjectOptions.filter(
-    (option) => option && !primarySet.has(option),
-  );
-  return ["", ...PRIMARY_SUBJECT_FILTERS, ...extras];
-}
+const TIMETABLE_SUBJECT_FILTER_OPTIONS = ["", ...PRIMARY_SUBJECT_FILTERS];
 
 function sanitizeImageFileName(value: string) {
   return value
@@ -213,7 +208,8 @@ function getTimetablePanelSummary(blocks: TimetablePanelBlockSummary[] = []) {
 }
 
 export function AcademicTimetableWorkspace() {
-  const presetsEnabled = process.env.NEXT_PUBLIC_TIMETABLE_PRESETS_ENABLED !== "false";
+  const { isAdmin, loading: authLoading } = useAuth();
+  const presetsEnabled = isAdmin && !authLoading && process.env.NEXT_PUBLIC_TIMETABLE_PRESETS_ENABLED !== "false";
   const [view, setView] = useState<TimetableView>("teacher-weekly");
   const [planId, setPlanId] = useState<string | null>(null);
   const operationalRefresh = useRef<(() => Promise<void>) | null>(null);
@@ -221,7 +217,8 @@ export function AcademicTimetableWorkspace() {
   const [pickerDirty, setPickerDirty] = useState(false);
   const [editorDirty, setEditorDirty] = useState(false);
   const [transferDirty, setTransferDirty] = useState(false);
-  const plan = useTimetablePlan(planId);
+  const visiblePlanId = presetsEnabled ? planId : null;
+  const plan = useTimetablePlan(visiblePlanId);
   const handleTransferred = useCallback(async (_result: import('./timetable-plan-contract').TransferResult, request: import('./timetable-plan-contract').TransferRequest) => {
     setReloadNonce(value => value + 1);
     if (request.target.kind === 'operational') {
@@ -248,8 +245,8 @@ export function AcademicTimetableWorkspace() {
   });
   return <div className="space-y-4">
     {presetsEnabled ? <TimetablePlanPicker disabled={!!planId && plan.referenceStatus !== 'verified'} onCommitted={id => { setPlanId(id); }} onFormDirty={setPickerDirty} reloadNonce={reloadNonce} planId={planId} snapshot={plan.snapshot} onChange={changePlan} onRefresh={plan.refresh} requestAction={navigation.requestLocalAction}/> : null}
-    <div hidden={Boolean(planId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
-    {planId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onEditorDirty={setEditorDirty} onTransferDirty={setTransferDirty} requestAction={navigation.requestLocalAction}/> : null}
+    <div hidden={Boolean(visiblePlanId)}><OperationalTimetableWorkspace refreshRef={operationalRefresh} view={view} setView={setView}/></div>
+    {visiblePlanId ? <TimetablePlanWorkspace key={planId} state={plan} onTransferred={handleTransferred} view={view} onViewChange={setView} onEditorDirty={setEditorDirty} onTransferDirty={setTransferDirty} requestAction={navigation.requestLocalAction}/> : null}
     {navigation.confirmation}
   </div>;
 }
@@ -382,10 +379,7 @@ function OperationalTimetableWorkspace({view, setView, refreshRef}: {refreshRef:
     );
   }, [workspace.dayOptions]);
 
-  const subjectFilterOptions = useMemo(
-    () => buildSubjectFilterOptions(workspace.subjectOptions),
-    [workspace.subjectOptions],
-  );
+  const subjectFilterOptions = TIMETABLE_SUBJECT_FILTER_OPTIONS;
 
   const activeSubFilterLabel =
     view === "teacher-weekly"

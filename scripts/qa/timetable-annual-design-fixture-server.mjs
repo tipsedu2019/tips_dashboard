@@ -87,7 +87,7 @@ async function api(req, res) {
   const activeUser=fixtureSession(actor).user;
   calls.push({ path, args })
   const rpcName=path.startsWith('/rest/v1/rpc/')?path.slice('/rest/v1/rpc/'.length):'';
-  if(isPlanFixtureRpc(rpcName) && (rpcName !== 'get_academic_timetable_range_v1' || req.headers['x-timetable-fixture-db'] === '1')) {
+  if(isPlanFixtureRpc(rpcName) && (rpcName !== 'get_academic_timetable_range_v1' || req.headers['x-timetable-fixture-db'] === '1' || process.env.TIMETABLE_FIXTURE_DB_READS === '1')) {
     try { const result=await planFixtureRpc(rpcName,args,actor);return json(res,result.error||result.data,result.error?400:200); }
     catch { return json(res,{message:'fixture_database_unavailable'},503); }
   }
