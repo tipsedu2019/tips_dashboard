@@ -119,6 +119,7 @@ jobs:
       - name: Verify customer preview and observation safety contracts
         run: |
           node --test --experimental-strip-types \
+            tests/agent-api-http.test.mjs \
             tests/registration-alimtalk-preview-dialog.test.mjs \
             tests/registration-observation-customer-message-ui.test.mjs \
             tests/registration-observation-workspace.test.mjs \

@@ -1,0 +1,66 @@
+# TIPS ↔ Muse integration v1
+
+## Supported work
+
+`/api/v1` supports scoped class reads, school calendar metadata reads, and changing the start/end of **one existing weekly schedule slot**. Existing dated lessons, holiday/makeup sessions, teaching content, student/enrollment/payment records, external systems and outgoing messages are not changed. Do not translate a dated cancellation/makeup request into this weekly-template operation.
+
+The maintained machine contract is `GET /api/v1/openapi`. All protected responses use `{data,error}`, `Cache-Control: no-store`, and `Authorization: Bearer <opaque credential>`. No browser session export, service-role key sharing, arbitrary SQL, or generic table PATCH is supported.
+
+## Release and connection sequence
+
+1. Review the migration `20260929110109_agent_api_scoped_schedule.sql` and PR checks. Apply through the maintained migration pipeline. Verify the final gateway function ACL and isolated pgTAP suite. The code is fail-closed unless the server environment has `TIPS_AGENT_API_ENABLED=true`.
+2. Deploy the application with that flag **unset**. `GET /api/v1/openapi` must return the schema; `GET /api/v1/health` must return 503 `agent_api_disabled`. The settings page shows that integration is disabled and cannot issue a key.
+3. For first authentication verification, use a separate Supabase/preview environment containing synthetic data only. Enable the flag there, with its own server-only `SUPABASE_SERVICE_ROLE_KEY` and public Supabase configuration. Never connect a synthetic test to production. A deployed app without the new migration is not ready.
+4. The administrator opens **환경 설정 → AI 연결**, selects one synthetic class, `수업 조회`, and `1일`, and issues a key. Copy the one-time masked value directly into Muse's hosted secure credential page. Do not paste the key into chat, source code, command history, a screenshot or a document. After an uncertain issuance response, refresh the list and revoke the newly created entry before issuing again.
+5. Muse requests a connector with `provider=tips-admin-api-test`, `api_hosts=[exact-preview-host]`, `auth_scheme=api_key`, `placement=bearer_header`. The human completes secure key entry. Test and production connectors must have separate names/hosts/credentials; do not broaden the test connector to production.
+6. Muse runs authenticated `health` and class read using the official surrogate helper. Confirm the actual response's scope, class IDs and expiry. Also verify unauthenticated 401, denied class access, and immediate key revocation. This is the outstanding Vault → Sentinel → HTTPS authentication gate; local handler/DB tests do not establish it.
+7. Before writes, issue a separate synthetic-class write grant and run preview → commit → receipt readback → exact replay. Verify no second operation and no external messages. Only after these gates should an administrator enable production and grant the chosen production classes/work types/expiry.
+
+To stop access, revoke the credential in settings. Revocation and issuer role downgrade, suspension or soft deletion are checked on every request. Unset the feature flag and redeploy to disable the entire gateway. Keep tables and receipts; do not roll back history to disable access.
+
+## Muse runtime contract
+
+The following runtime capabilities were reported directly by Muse on 2026-09-29 after inspecting its installed official documentation; the Vault injection has not yet been exercised with this API:
+
+- `credentials.request_api_access` creates the secure human entry flow. The `placement` cannot be corrected in place.
+- `/opt/hatch/skills/skill-creator/bin/scaffold-connector-skill --provider <provider>` generates the connector's auth instructions after connection.
+- Python `add_surrogate_to_request(request, credential_name, allowed_hosts=[...])` injects an `hsurr:*` surrogate. The actual key is substituted by Sentinel; never read or export it.
+- Use HTTPS, fixed connector hosts and a no-redirect urllib opener. Do not derive a new trusted host from arbitrary CLI input. Host restrictions are not API path restrictions; the server enforces scopes/actions.
+- Muse prepared `~/workspace/skills/tips-admin-api/SKILL.md` and `bin/tips-admin` in its own workspace. Its reported 19/19 offline tests are Muse-side evidence, not independently executed tests in this repository.
+
+Conversation: https://muse.ai/thread/35b3ea22-938e-4c5e-be65-e1b77a457ac3
+
+## Execution protocol
+
+1. Read health and search classes. Resolve an exact UUID; ask if ambiguous. Read the selected class and its exact `weeklySlots[].id` and `version`. An incomplete schedule is not editable.
+2. POST `/classes/{classId}/weekly-time/preview` with `{expectedVersion,slotId,startMinute,endMinute,reason}`. Minutes are from midnight in Asia/Seoul; weekday uses Sunday=0. The version is a SHA256 fingerprint, not a numeric counter.
+3. Check the returned `before`, `after`, `effect=weekly_template_only`, and ten-minute expiry against the person's actual request. A preview itself is not human authorization. Work within the original approved scope; stop for ambiguity or scope changes.
+4. Before POST `/operations`, persist a UUID request key and the exact `{previewToken,sourceReference?}` in a local 0600 journal under an exclusive lock, flush and fsync. `sourceReference` should be a message URL/opaque reference, never a private message body or claimed authenticated identity. Journal records must be namespaced by API origin and credential ID to avoid cross-environment receipt lookups.
+5. Send the same UUID in `Idempotency-Key`. `data.operationId` is that UUID; the changed class ID is **`data.class.id`**, not a top-level `classId`. Persisted success is `data.state=applied`. Confirm operation ID, class ID and changed weekly slot match the intended preview. A later ordinary GET may differ because someone else edited afterward; the durable receipt is the original operation outcome.
+6. On lost response, a reused preview, or a prior journal record, GET `/operations/{requestKey}` first. `unknown` means no durable receipt is visible, not that the write failed. Do not issue a new key, a new preview, or a browser write to retry an uncertain operation. An exact explicit replay may only use the same credential/key/body after resolution; never automatically branch the key lineage.
+7. HTTP 403/409 are not permission to bypass the API. Keep the entire non-2xx receipt: a failed commit may return HTTP 409/422/503 with `data.state=failed` and `data.error`. GET receipt returns 200 even when the stored operation failed. 429 includes `Retry-After: 60`.
+8. Report `notifications`, `externalSync` and `reply` separately; all are `not_requested` in this API. No “completed in Google Chat/Makeedu” claim follows from a dashboard receipt.
+
+The credential issuer is the authenticated actor for the existing domain writers. `executor` labels the delegated integration; the API always reports `requesterVerified=false`. A chat link is not authentication. This release does not implement per-chat-sender authorization or automatic message ingestion.
+
+## Database design and limits
+
+Raw tokens are returned once and only SHA256 digests are stored. Private tables have RLS and no client table grants. The service-role-only gateway receives a digest, rechecks the explicit admin profile and current account status, then derives transaction-local actor claims from the credential issuer. Inputs cannot select an actor.
+
+Write/preview grants require explicit class IDs (max 50), classes:read, and write also requires preview. Keys expire within 30 days; max 20 active keys per issuer; valid requests are limited to 60 per minute per key. Class lists are paged at 20; credential settings at 10/15/20. Calendar windows are bounded to 31 days difference.
+
+Preview executes the final existing writer inside a deliberately rolled-back subtransaction, preserving only the preview record. Commit rechecks the schedule fingerprint and resource conflicts under the existing timetable lock, and atomically persists the operation receipt. Same key/body replays the receipt; another key cannot consume the same preview. Existing `23P01` domain conflict evidence is preserved; no domain condition is relabeled as a serialization `40001`.
+
+Preview/receipt retention is presently indefinite for audit/recovery. No background deletion or automatic rotation is introduced. Failed preconditions before a receipt exists (invalid key/scope/token) return a typed error; a transport timeout always requires status resolution.
+
+## Reproduce verification
+
+```sh
+node --test --experimental-strip-types tests/agent-api-http.test.mjs
+node scripts/run-isolated-supabase-db-tests.mjs --review-head --execute --authorized \
+  --request-id agent-api-local-review \
+  --test supabase/tests/agent_api_scoped_schedule_test.sql \
+  --test supabase/tests/timetable_operational_conflicts_test.sql
+```
+
+For UI only, `scripts/qa/agent-access-fixture-server.mjs` binds loopback ports 3260/3262. Run Next on 3261 with the synthetic public URL/key and enabled flag stated in that file, then open `http://127.0.0.1:3260/__fixture`. It returns a fake key with no authority, blocks unmocked API calls, and never forwards to production. This verifies presentation and RPC payloads, not live authentication.

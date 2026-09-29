@@ -639,6 +639,11 @@
       "fileName": "20260929100158_legacy_lesson_schedule_compatibility.sql",
       "status": "final",
       "sha256": "f575e0d687beb0e602eb9ca06eb07828cd56338a4306557985d80ac62f661309"
+    },
+    {
+      "fileName": "20260929110109_agent_api_scoped_schedule.sql",
+      "status": "final",
+      "sha256": "0363bb418bf0b1b8c17b95bf08077ce6ade556efae5fa58b2cadea52e69d7bee"
     }
   ]
 }
