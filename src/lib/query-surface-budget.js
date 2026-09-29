@@ -1254,29 +1254,29 @@ function lexicalLiteralValue(expression, seen = new Set()) {
   return UNKNOWN_LITERAL
 }
 
-function isProvablyBoundedAbortExpression(expression, seen = new Set()) {
+function isProvablyBoundedAbortExpression(expression, seen = new Set(), deadline = 8000) {
   const signal = unwrap(expression)
   if (ts.isIdentifier(signal)) {
     const alias = immutableLexicalInitializer(signal, seen)
-    return Boolean(alias && isProvablyBoundedAbortExpression(alias.initializer, alias.seen))
+    return Boolean(alias && isProvablyBoundedAbortExpression(alias.initializer, alias.seen, deadline))
   }
   if (ts.isConditionalExpression(signal)) {
-    return isProvablyBoundedAbortExpression(signal.whenTrue, seen)
-      && isProvablyBoundedAbortExpression(signal.whenFalse, seen)
+    return isProvablyBoundedAbortExpression(signal.whenTrue, seen, deadline)
+      && isProvablyBoundedAbortExpression(signal.whenFalse, seen, deadline)
   }
   if (!ts.isCallExpression(signal)) return false
   const access = accessParts(signal)
   if (!access || rootIdentifier(access.receiver) !== "AbortSignal" || lexicalBindingsAt(access.receiver).length > 0) return false
   if (access.method === "timeout") {
     return signal.arguments.length === 1
-      && lexicalLiteralValue(signal.arguments[0], seen) === 8000
+      && lexicalLiteralValue(signal.arguments[0], seen) === deadline
   }
   if (access.method !== "any" || signal.arguments.length !== 1) return false
   const signals = unwrap(signal.arguments[0])
   return ts.isArrayLiteralExpression(signals)
     && signals.elements.length === 2
     && !signals.elements.some(ts.isSpreadElement)
-    && signals.elements.some((candidate) => isProvablyBoundedAbortExpression(candidate, seen))
+    && signals.elements.some((candidate) => isProvablyBoundedAbortExpression(candidate, seen, deadline))
 }
 
 function numberedRpcLimitViolation(argument, contract) {
@@ -1291,10 +1291,10 @@ function numberedRpcLimitViolation(argument, contract) {
   return value !== UNKNOWN_LITERAL && !contract.sizes.includes(value) ? "rpc_page_limit_invalid" : null
 }
 
-function isExactTimeoutAbortSignal(call) {
+function isExactTimeoutAbortSignal(call, deadline = 8000) {
   return callMethod(call) === "abortSignal"
     && call.arguments.length === 1
-    && isProvablyBoundedAbortExpression(call.arguments[0])
+    && isProvablyBoundedAbortExpression(call.arguments[0], new Set(), deadline)
 }
 
 // This non-ID key is a database primary key, not a source-file allowance:
@@ -1627,7 +1627,15 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (value > 30) reasons.push("rpc_page_limit_exceeds_30")
     }
   }
-  if (query.directMethod && !legacyFullCompatibility && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
+  // This exact authorized, idempotent class mutation returns one receipt. Its
+  // 20s response budget avoids aborting a committed save at the DB's 8s boundary.
+  // Keep every read/other RPC at 8s and retain the retry(false) proof below.
+  const entryArguments = query.entryArguments ?? query.entry.arguments
+  const classMutationResponseBudget = query.directMethod === "rpc"
+    && entryArguments[0] && lexicalLiteralValue(entryArguments[0]) === "update_class_operational_v1"
+    && isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"), 20000)
+  if (query.directMethod && !legacyFullCompatibility && !classMutationResponseBudget
+    && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
   const retry = finalOperation(query.operations, "retry")
   if (query.directMethod && !legacyFullCompatibility && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")
   if (surface === "tasks" && query.directMethod === "from") {
