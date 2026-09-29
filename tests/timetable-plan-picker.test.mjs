@@ -72,14 +72,9 @@ for(const mode of ['create','clone'])for(const reopen of [false,true])test(`${mo
  await f.submit();assert.equal(f.calls[2].operation,'rename');assert.equal(f.calls[2].planId,original.planId);assert.equal(f.calls[2].name,'후속 입력');assert.notEqual(f.calls[2].requestKey,original.requestKey);
  }finally{await f.close();if(realDb)for(const id of persistedIds){const current=await rpc('get_timetable_plan_v1',{p_plan_id:id});await rpc('mutate_timetable_plan_v1',{p_command:{operation:'archive',planId:id,expectedMetaRevision:current.plan.metaRevision,requestKey:crypto.randomUUID()}});}}
 });
-for(const rejected of [false,true])test(`late share ${rejected?'failure':'success'} cannot populate another actor/dialog`,async()=>{
- const f=await harness();try{await f.click('공유');await f.actor('B');await f.click('공유');await act(async()=>rejected?f.reads[0].reject(Error('A private error')):f.reads[0].resolve([{userId:'secret-A',name:'A private candidate'}]));assert.ok(document.querySelector('[data-dialog]'));assert.doesNotMatch(document.body.textContent,/A private/);await act(async()=>f.reads[1].resolve([{userId:'B',name:'B candidate'}]));assert.match(document.body.textContent,/B candidate/);}finally{await f.close();}
-});
 for(const rejected of [false,true])test(`late create ${rejected?'failure':'success'} cannot change another actor's selection/dialog`,async()=>{
  const f=await harness();try{await f.click('프리셋 만들기');await f.input('A plan');await f.submit();await f.actor('B');await f.click('프리셋 만들기');await f.input('B plan');if(rejected)await f.reject(0);else await f.resolve(0,{plan:{id:'A-result',name:'A plan',metaRevision:1}});assert.ok(document.querySelector('[data-dialog]'));assert.equal(document.getElementById('plan-name').value,'B plan');assert.deepEqual(f.changes,[]);assert.doesNotMatch(document.body.textContent,/response lost/);await f.submit();assert.equal(f.pending[1]?.actor,'B','retired busy flag cannot block new actor');}finally{await f.close();}
 });
-test('late share response cannot fill a newer dialog in the same actor scope',async()=>{const f=await harness();try{await f.click('공유');await f.click('취소');await f.click('공유');await act(async()=>f.reads[0].resolve([{userId:'old',name:'retired dialog candidate'}]));assert.doesNotMatch(document.body.textContent,/retired dialog candidate/);await act(async()=>f.reads[1].resolve([{userId:'new',name:'current candidate'}]));assert.match(document.body.textContent,/current candidate/);}finally{await f.close();}});
-
 test('conclusive picker validation rejection permits corrected intent; unrelated code/message remains immutable',async()=>{
  for(const failure of [{code:'22023',message:'timetable_invalid'},{code:'22023',message:'unrelated_error'}]){
   const f=await harness();try{
@@ -91,33 +86,11 @@ test('conclusive picker validation rejection permits corrected intent; unrelated
  }
 });
 
-for(const access of ['editor','none'])test(`share receipt preserves later ${access==='editor'?'viewer-to-editor change':'revocation'} for a separate confirmed-revision command`,async()=>{
- const f=await harness();try{
-  await f.click('공유');
-  await act(async()=>f.reads[0].resolve([{userId:'teacher',name:'담당 선생님'},{userId:'other',name:'다른 선생님'}]));
-  await f.chooseMember('teacher','보기');await f.chooseMember('other','편집');await f.submit();
-  const original=structuredClone(f.calls[0]);assert.equal(original.operation,'share');
-  assert.deepEqual(original.members,[{userId:'teacher',access:'viewer'},{userId:'other',access:'editor'}]);
-  await f.reject(0);await f.chooseMember('teacher',access==='editor'?'편집':'공유 안 함');await f.submit();
-  assert.deepEqual(f.calls[1],original,'receipt retry must preserve exact original body/key');
-  await f.resolve(1,{plan:{id:'source',name:'원본',state:'draft',metaRevision:7,targetStartDate:null,targetEndDate:null}});
-  assert.ok(document.querySelector('[data-dialog]'),'later member input remains in the open dialog');
-  assert.equal(document.getElementById('member-teacher').closest('[data-select]').dataset.value,access);
-  assert.equal(f.calls.length,2,'later permission change requires a separate explicit save');
-  await f.submit();const follow=f.calls[2];
-  assert.equal(follow.operation,'share');assert.equal(follow.planId,original.planId);assert.equal(follow.expectedMetaRevision,7);
-  assert.notEqual(follow.requestKey,original.requestKey);
-  assert.deepEqual(follow.members,access==='editor'?[{userId:'teacher',access:'editor'},{userId:'other',access:'editor'}]:[{userId:'other',access:'editor'}]);
-  await f.resolve(2,{plan:{id:'source',name:'원본',state:'draft',metaRevision:8,targetStartDate:null,targetEndDate:null}});
-  assert.equal(document.querySelector('[data-dialog]'),null);assert.deepEqual(f.changes,[]);
- }finally{await f.close();}
-});
-
 for (const mode of ['create','clone','rename','share','archive','restore']) test(`${mode}: submitted immutable receipt survives full remount`,async()=>{
  const f=await harness();try{
-  const labels={create:'프리셋 만들기',clone:'복제',rename:'이름·기준 기간 변경',share:'공유',archive:'보관',restore:'복원'};
-  if(mode==='restore') { // A saved restore command has the same recovery shape as other metadata.
-   f.storage.setItem(recovery.timetableDraftStorageKey('A:admin','$metadata'),JSON.stringify({version:1,pending:{command:{operation:'restore',planId:'source',expectedMetaRevision:1,requestKey:'restore-original'},fields:{name:'원본',start:'',end:'',members:{}}},followup:{name:'원본',start:'',end:'',members:{}}}));
+  const labels={create:'프리셋 만들기',clone:'복제',rename:'이름 변경',share:'공유',archive:'보관',restore:'복원'};
+  if(['restore','archive','share'].includes(mode)) { // A saved restore command has the same recovery shape as other metadata.
+   f.storage.setItem(recovery.timetableDraftStorageKey('A:admin','$metadata'),JSON.stringify({version:1,pending:{command:{operation:mode,planId:'source',expectedMetaRevision:1,requestKey:'restore-original'},fields:{name:'원본',start:'',end:'',members:{}}},followup:{name:'원본',start:'',end:'',members:{}}}));
    await f.remount();await f.click('원래 요청 확인');await f.submit();assert.equal(f.calls[0].requestKey,'restore-original');return;
   }
   await f.click(labels[mode]);if(['create','clone','rename'].includes(mode))await f.input('original');
@@ -143,10 +116,18 @@ test('Storage SecurityError keeps the submitted immutable request in memory and 
 
 for (const related of [false,true]) test(`plan revocation ${related?'purges related':'preserves unrelated'} submitted metadata`,async()=>{
  const f=await harness();try {
-  await f.click(related?'이름·기준 기간 변경':'프리셋 만들기');await f.input('pending');await f.submit();await f.reject(0);
+  await f.click(related?'이름 변경':'프리셋 만들기');await f.input('pending');await f.submit();await f.reject(0);
   const key=recovery.timetableDraftStorageKey('A:admin','$metadata'),raw=f.storage.getItem(key);
   await act(async()=>recovery.clearTimetablePlanRecovery('A:admin','source'));
   if(related){assert.equal(f.storage.getItem(key),null);assert.equal(document.querySelector('[data-dialog]'),null);}
   else {assert.equal(f.storage.getItem(key),raw);await f.submit();assert.deepEqual(f.calls[1],f.calls[0]);}
+ }finally{await f.close();}
+});
+
+test('preset controls require only a name and omit retired archive, sharing and import flows',async()=>{
+ const f=await harness();try{
+  assert.doesNotMatch(document.body.textContent,/보관함|기존 초안 가져오기|공유|기준 기간/);
+  await f.click('프리셋 만들기');assert.equal(document.querySelectorAll('input').length,1);
+  await f.input('2027 여름');await f.submit();assert.equal(f.calls[0].targetStartDate,null);assert.equal(f.calls[0].targetEndDate,null);
  }finally{await f.close();}
 });

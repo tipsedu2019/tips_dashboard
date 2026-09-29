@@ -18,7 +18,7 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
   onTransferred: (result: TransferResult, request: TransferRequest) => Promise<void>;
 }) {
   const { service, controller, snapshot } = state;
-  const [target, setTarget] = useState('operational'), [mode, setMode] = useState<'copy' | 'move'>('copy');
+  const [target, setTarget] = useState('preparing'), [mode, setMode] = useState<'copy' | 'move'>('copy');
   const [keepPending, setKeepPending] = useState(false), [plans, setPlans] = useState<PlanMetadata[]>([]), [listError, setListError] = useState('');
   const planId = snapshot?.plan.id ?? '';
   const session = useMemo(() => service && controller && planId ? createTimetableTransferSession({
@@ -54,7 +54,8 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
     })().catch(error => { if (!abort.signal.aborted) setListError(planErrorLabel(error)); });
     return () => abort.abort();
   }, [open, service, planId]);
-  const request: TransferRequest = { source: { kind: 'plan', planId }, target: target === 'operational' ? { kind: 'operational' } : { kind: 'plan', planId: target }, mode, itemIds: selectedItemIds, onConflict: keepPending && target !== 'operational' && mode === 'copy' ? 'keep_pending' : 'reject' };
+  const operational = target === 'preparing' || target === 'operational';
+  const request: TransferRequest = { source: { kind: 'plan', planId }, target: operational ? { kind: 'operational', status: target === 'preparing' ? '개강 준비' : '수강' } : { kind: 'plan', planId: target }, mode, itemIds: selectedItemIds, onConflict: keepPending && !operational && mode === 'copy' ? 'keep_pending' : 'reject' };
   const signature = JSON.stringify(request);
   useEffect(() => { session?.reset(); }, [signature, session]);
   if (!snapshot || !session || !transfer) return null;
@@ -62,15 +63,16 @@ export function TimetableTransferDialog({ open, onOpenChange, state, selectedIte
   const displayedRequest = transfer.command?.request ?? (transfer.status === 'completed' ? transfer.preview?.request : null) ?? request;
   const busy = ['previewing','committing','refreshing'].includes(transfer.status);
   const canPreview = !locked && !busy && !state.dirty && state.referenceStatus === 'verified'
-    && snapshot.permissions.canEdit && selectedItemIds.length > 0 && (target !== 'operational' || snapshot.permissions.canTransfer);
+    && snapshot.permissions.canEdit && selectedItemIds.length > 0 && (!operational || snapshot.permissions.canTransfer);
   const rows = snapshot.items.filter(item => displayedRequest.itemIds.includes(item.id));
   const close = () => { if (busy) return; session.reset(); onOpenChange(false); };
   return <Dialog open={open} onOpenChange={value => { if (!value) close(); }}>
     <DialogContent restoreFocusToOpener className="max-h-[90dvh] overflow-y-auto sm:max-w-2xl">
-      <DialogHeader><DialogTitle>선택 수업 이동·복사</DialogTitle><DialogDescription>{transferEffect(displayedRequest)}</DialogDescription></DialogHeader>
+      <DialogHeader><DialogTitle>선택 수업 올리기·복사</DialogTitle><DialogDescription>{transferEffect(displayedRequest)}</DialogDescription></DialogHeader>
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="space-y-2"><Label htmlFor="transfer-target">목적지</Label><Select value={locked ? displayedRequest.target.kind === 'operational' ? 'operational' : displayedRequest.target.planId : target} disabled={locked || busy} onValueChange={setTarget}><SelectTrigger id="transfer-target"><SelectValue /></SelectTrigger><SelectContent>
-          <SelectItem value="operational" disabled={!snapshot.permissions.canTransfer}>수강 · 새 수업 생성</SelectItem>
+        <div className="space-y-2"><Label htmlFor="transfer-target">목적지</Label><Select value={locked ? displayedRequest.target.kind === 'operational' ? displayedRequest.target.status === '개강 준비' ? 'preparing' : 'operational' : displayedRequest.target.planId : target} disabled={locked || busy} onValueChange={setTarget}><SelectTrigger id="transfer-target"><SelectValue /></SelectTrigger><SelectContent>
+          <SelectItem value="preparing" disabled={!snapshot.permissions.canTransfer}>운영 시간표 · 개강 준비</SelectItem>
+          <SelectItem value="operational" disabled={!snapshot.permissions.canTransfer}>운영 시간표 · 수강</SelectItem>
           {plans.map(plan => <SelectItem key={plan.id} value={plan.id}>{plan.name}</SelectItem>)}
         </SelectContent></Select></div>
         <div className="space-y-2"><Label htmlFor="transfer-mode">방식</Label><Select value={displayedRequest.mode} disabled={locked || busy} onValueChange={value => setMode(value as 'copy' | 'move')}><SelectTrigger id="transfer-mode"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="copy">복사 · 원안 보관</SelectItem><SelectItem value="move">이동 · 원안 제거</SelectItem></SelectContent></Select></div>

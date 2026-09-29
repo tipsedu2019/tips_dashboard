@@ -649,6 +649,11 @@
       "fileName": "20260929121505_lesson_save_conflict_validation_performance.sql",
       "status": "final",
       "sha256": "184eb0ba449c75080f63d20d59049f428ab3014c9fbf8d5177b31ebfba590ed7"
+    },
+    {
+      "fileName": "20260929154143_timetable_director_preparing_workflow.sql",
+      "status": "final",
+      "sha256": "af41d39033e0a458b0009375112184a309f0ec4a410bada4b7574d360ae4315f"
     }
   ]
 }

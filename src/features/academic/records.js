@@ -1155,7 +1155,7 @@ function matchesSubjectCatalog(subjects = [], currentSubject = "") {
   ));
 }
 
-const TIMETABLE_ACADEMIC_TEACHER_TEAMS = new Set(["영어팀", "수학팀", "과학팀"]);
+const TIMETABLE_ACADEMIC_TEACHER_TEAMS = new Set(["영어팀", "수학팀"]);
 const TIMETABLE_KNOWN_TEACHER_TEAMS = new Set(["영어팀", "수학팀", "과학팀", "관리팀", "조교팀"]);
 const TIMETABLE_TEACHER_TEAM_ALIASES = new Map([
   ["english", "영어팀"],
@@ -1227,7 +1227,7 @@ function isTimetableTeacherCatalogVisible(item = {}, currentSubject = "") {
   }
 
   const targetTeam = getTimetableTeacherTeamForSubject(currentSubject);
-  return !targetTeam || academicTeams.includes(targetTeam);
+  return (!currentSubject || !!targetTeam) && (!targetTeam || academicTeams.includes(targetTeam));
 }
 
 function isTimetableTeacherFallbackVisible(name, teacherCatalogs = [], currentSubject = "") {
@@ -1291,7 +1291,7 @@ function buildTimetableOptions(classes, classTerms, rows, teacherCatalogs = [], 
       (left, right) => left.localeCompare(right, "ko"),
     ),
     classGroupOptions,
-    statusOptions: ["수강", "개강 준비", "종강"],
+    statusOptions: ["수강", "개강 준비"],
     gradeOptions: unique(classes.map((classItem) => text(classItem?.grade))).sort(
       (left, right) => left.localeCompare(right, "ko"),
     ),
