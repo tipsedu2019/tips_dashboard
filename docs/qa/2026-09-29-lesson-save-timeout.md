@@ -69,3 +69,10 @@ before and pass after: a response at virtual 9 seconds remains receivable, and a
 unknown timeout preserves the draft and replays identical arguments/request key.
 All 33 focused workspace/legacy/installed-transport tests pass; ESLint and
 migration-layout verification also pass. No additional database migration.
+
+The query-budget validator recognizes the exact `update_class_operational_v1`
+receipt mutation with either its existing 8-second budget or the new bounded
+20-second response budget. Read APIs, other mutations, absent deadlines, budgets
+above 20 seconds and automatic retries remain rejected. No file-wide exception or
+legacy-debt allowance is added. All 28 focused deadline/query-contract cases pass,
+and the changed-worktree free-tier query verifier passes.
