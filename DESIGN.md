@@ -136,6 +136,7 @@ TIPS는 학원 구성원이 학생, 수업, 일정, 교재, 등록, 알림 업�
 | 편집·확인·문서 창 | `src/components/ui/form-dialog.tsx`, `dialog.tsx`, `sheet.tsx` | 공통 반경·배경·그림자, 고정 머리/바닥, 본문 스크롤, 초안과 초점 복귀 |
 | 업무 탭 | `src/components/ui/workspace-tabs.tsx` | 지연 조회는 수동 활성화, 선택과 포커스 구분, 기존 패널 상태 유지 |
 | 로딩·처리 결과 | `src/components/ui/skeleton.tsx`, `action-feedback.tsx` | 중립적인 로딩, 레이아웃 유지, 기존 alert/status와 재시도 의미 |
+| AI 연결 | `src/features/agent-api/agent-access-workspace.tsx` | 설정 목록과 공용 발급·확인 대화상자, 읽기 권한·1일 만료 기본값, 원문 키는 발급 직후 한 번만 표시 |
 | 설정 목록 | `src/features/management/settings-master-layout.tsx` | 공통 표 토큰, 상단바 아래의 도구막대, 동일한 저장/오류 동작 |
 
 표 구성의 상세 사용법은 `src/components/data-table/README.md`를 따른다. 관리 목록의 기준 화면은 `/admin/students`, 복잡한 편집은 `/admin/classes`, 설정 목록은 `/admin/settings/schools`, 시간순 요약은 `/admin/dashboard`다. 기준 화면은 시각·상호작용의 비교 대상이며 다른 메뉴의 업무 데이터나 필드를 복사하는 템플릿은 아니다.

@@ -41,6 +41,7 @@ const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_po
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-agent-class-edit-dto.mjs": ["src/features/agent-api/server/class-edit-compiler.mjs", "src/lib/class-schedule-planner.js"],
   "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
   "tests/probe-dashboard-workload-dto.mjs": ["src/features/dashboard/workload-contract.ts"],
   "tests/probe-makeup-approval-collision-dto.mjs": [

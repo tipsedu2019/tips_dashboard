@@ -15,6 +15,16 @@ function validRequest(input) {
   return REASONS.has(input.reason) && UUID_PATTERN.test(input.requestId);
 }
 
+/** Shared cache effect; callers must establish mutation authority first.
+ * @param {{ revalidateTag: (tag: string, profile: string) => void, revalidatePath: (path: string, type?: "page" | "layout") => void }} dependencies
+ */
+export function invalidatePublicClassesCache({ revalidateTag, revalidatePath }) {
+  revalidateTag(PUBLIC_CLASSES_SUMMARY_CACHE_TAG, "max");
+  revalidateTag(PUBLIC_CLASSES_FULL_CACHE_TAG, "max");
+  revalidatePath("/api/public-classes");
+  revalidatePath("/api/public-classes", "layout");
+}
+
 /**
  * @param {{
  *   authenticate?: (request: Request) => Promise<{ role: string } | null>,
@@ -35,10 +45,7 @@ export function createPublicClassesCacheInvalidationResponder({
       return { status: 403, body: { ok: false, error: "public_classes_cache_forbidden" } };
     }
     try {
-      revalidateTag(PUBLIC_CLASSES_SUMMARY_CACHE_TAG, "max");
-      revalidateTag(PUBLIC_CLASSES_FULL_CACHE_TAG, "max");
-      revalidatePath("/api/public-classes");
-      revalidatePath("/api/public-classes", "layout");
+      invalidatePublicClassesCache({ revalidateTag, revalidatePath });
       return { status: 200, body: { ok: true, requestId: input.requestId } };
     } catch {
       return { status: 503, body: { ok: false, error: "public_classes_cache_refresh_pending", requestId: input.requestId } };

@@ -1,0 +1,22 @@
+{
+  "version": "2026-09-29.1",
+  "sourceConversation": "https://muse.ai/thread/35b3ea22-938e-4c5e-be65-e1b77a457ac3",
+  "upstreamArchiveSha256": "132d8435b0db1c1a20eb49c750936c7ecbb5f3bd5b21ef92c6b40a41b5857c4b",
+  "upstreamFiles": {
+    "bin/tips-admin": "c7ee9a62e12e6bd8359adbf69ca70269f9f9aaca3e839b666c19a1b79738ac25",
+    "bin/dynamic_credentials.py": "d26f92f1a9709f9c875b6e034e89433e3675a2a7593f75a94cde297f80802741",
+    "tests/test_v1_mock.py": "0bda68d209d1641d9181249cebbc6e254727f5ad413b60d636a67ad532c9ac3a",
+    "tests/test_v2_mock.py": "008057caa6883244a56190516d48421fcc34ccce6dca17365b5591fe7a562094"
+  },
+  "reviewedFiles": {
+    "bin/tips-admin": "7c9e9c9dee0c74fb7a07916e045bed308f19f8041fa01f189c0eb40cced0a571",
+    "bin/dynamic_credentials.py": "d26f92f1a9709f9c875b6e034e89433e3675a2a7593f75a94cde297f80802741",
+    "tests/test_v1_mock.py": "0bda68d209d1641d9181249cebbc6e254727f5ad413b60d636a67ad532c9ac3a",
+    "tests/test_v2_mock.py": "008057caa6883244a56190516d48421fcc34ccce6dca17365b5591fe7a562094"
+  },
+  "localCorrections": [
+    "Validate nested data/error envelopes on successful and failed HTTP responses.",
+    "Validate canonical origin before every command authenticates.",
+    "Reject invalid ports and retain full SHA256 for canonical-origin partition."
+  ]
+}

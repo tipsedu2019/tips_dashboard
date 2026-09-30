@@ -118,6 +118,10 @@ const workspaceMetaEntries: Array<{
     },
   },
   {
+    match: "/admin/settings/agent-access",
+    meta: { section: "설정", title: "AI 연결", summary: "AI에 허용할 수업과 작업 범위를 관리합니다." },
+  },
+  {
     match: "/admin/settings",
     meta: {
       section: "설정",
@@ -402,6 +406,7 @@ export function buildAdminNavGroups({
             { title: "강의실 설정", url: "/admin/settings/classrooms" },
             { title: "교재 설정", url: "/admin/settings/textbook-suppliers" },
             { title: "알림 설정", url: "/admin/settings/notifications" },
+            ...(isAdmin ? [{ title: "AI 연결", url: "/admin/settings/agent-access" }] : []),
           ],
         },
       ],

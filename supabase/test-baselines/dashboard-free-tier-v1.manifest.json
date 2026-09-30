@@ -641,14 +641,34 @@
       "sha256": "f575e0d687beb0e602eb9ca06eb07828cd56338a4306557985d80ac62f661309"
     },
     {
+      "fileName": "20260929110109_agent_api_scoped_schedule.sql",
+      "status": "final",
+      "sha256": "50f8bcc39ec77dc8dea68aa87c2b908b96e0ca54829fb07ccad5c3a58ac9793e"
+    },
+    {
       "fileName": "20260929112742_lesson_design_teacher_subject_aliases.sql",
       "status": "final",
       "sha256": "bbffd465a538dcb2fb2d8e105c0621576ebd26e0e98c53b35640bf621a13db43"
     },
     {
+      "fileName": "20260929113744_agent_api_audit_history_decoupling.sql",
+      "status": "final",
+      "sha256": "2f29859963f8dfbda20860f5dd57f268c23f3fd06a4a625e6f9e168cb97db585"
+    },
+    {
       "fileName": "20260929121505_lesson_save_conflict_validation_performance.sql",
       "status": "final",
       "sha256": "184eb0ba449c75080f63d20d59049f428ab3014c9fbf8d5177b31ebfba590ed7"
+    },
+    {
+      "fileName": "20260929130122_agent_api_class_changes.sql",
+      "status": "final",
+      "sha256": "797985bbb2c27410dc3b9ba4974d4e665f594514f94fdd7545c96f6447f35b2e"
+    },
+    {
+      "fileName": "20260929132914_agent_legacy_dated_override.sql",
+      "status": "final",
+      "sha256": "75856b015a854c0b597a1748147ab9e0664863a243771aa0a022b0f251b0ebf0"
     },
     {
       "fileName": "20260929154143_timetable_director_preparing_workflow.sql",
