@@ -16,6 +16,12 @@ const APPROVED_INTERLEAVED_PENDING_MIGRATIONS = Object.freeze([
   ["20260831101449_makeup_system_note_whitespace_parity.sql", "940613f164be35b25661750e8be5c0f15409409890308a5e046ef0fed31369ff"],
   ["20260831103631_makeup_source_precision_parity.sql", "47413b333331c9abfe4e771f52e9078b4edc8d88e8cf2b0125dc437a246328ba"],
   ["20260831123610_textbook_inventory_numbered_reads.sql", "f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5"],
+  // PR #81 was verified with the already-deployed #85 timetable workflow.
+  // Permit only these exact reviewed files, not arbitrary older migrations.
+  ["20260929110109_agent_api_scoped_schedule.sql", "50f8bcc39ec77dc8dea68aa87c2b908b96e0ca54829fb07ccad5c3a58ac9793e"],
+  ["20260929113744_agent_api_audit_history_decoupling.sql", "2f29859963f8dfbda20860f5dd57f268c23f3fd06a4a625e6f9e168cb97db585"],
+  ["20260929130122_agent_api_class_changes.sql", "797985bbb2c27410dc3b9ba4974d4e665f594514f94fdd7545c96f6447f35b2e"],
+  ["20260929132914_agent_legacy_dated_override.sql", "75856b015a854c0b597a1748147ab9e0664863a243771aa0a022b0f251b0ebf0"],
 ])
 
 function fail(code) {

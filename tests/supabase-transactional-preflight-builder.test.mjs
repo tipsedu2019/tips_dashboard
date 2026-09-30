@@ -456,6 +456,43 @@ test("현재 final manifest의 exact interleaved pending 집합만 운영 remote
   assert.match(result.sql.trimEnd(), /rollback;$/iu)
 })
 
+test("agent release permits exact reviewed migrations behind production, rejects drift, and skips applied files", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const { root } = await createFixture()
+  const files = [
+    "20260929110109_agent_api_scoped_schedule.sql",
+    "20260929113744_agent_api_audit_history_decoupling.sql",
+    "20260929130122_agent_api_class_changes.sql",
+    "20260929132914_agent_legacy_dated_override.sql",
+  ]
+  const sources = await Promise.all(files.map(file => readFile(join(repoRoot, "supabase/migrations", file), "utf8")))
+  for (const [index, file] of files.entries()) await writeFile(join(root, "supabase/migrations", file), sources[index])
+  const rows = ["20260820150057", "20260820152710", "20260820160000", "20260929154143"]
+    .map(version => ({ local: version, remote: version, time: "now" }))
+  rows.push(...files.map(file => ({ local: file.slice(0, 14), remote: "", time: "now" })))
+  const build = () => buildTransactionalPreflightSql({
+    repoRoot: root,
+    migrationLedger: JSON.stringify({ message: "Migrations listed", migrations: rows }),
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+  const result = await build()
+  assert.deepEqual(result.pendingFiles, files)
+  assert.deepEqual(result.interleavedPendingVersions, files.map(file => file.slice(0, 14)))
+  assert.equal((result.sql.match(/^begin;$/gim) ?? []).length, 1)
+  assert.equal((result.sql.match(/^commit;$/gim) ?? []).length, 0)
+  assert.match(result.sql.trimEnd(), /rollback;$/i)
+  for (const [index, file] of files.entries()) {
+    await writeFile(join(root, "supabase/migrations", file), sources[index] + "\n-- drift\n")
+    await assert.rejects(build(), { message: "transactional_preflight_interleaved_hash_mismatch" })
+    await writeFile(join(root, "supabase/migrations", file), sources[index])
+  }
+  for (const row of rows) row.remote = row.local
+  const applied = await build()
+  assert.deepEqual(applied.pendingFiles, [])
+  assert.doesNotMatch(applied.sql, /transactional preflight migration/)
+})
+
 test("forward migration 파일과 linked ledger의 pending 집합이 다르면 fail closed 한다", async () => {
   const { buildTransactionalPreflightSql } = await import(builderUrl)
   const { root } = await createFixture()
