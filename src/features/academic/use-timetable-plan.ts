@@ -10,7 +10,7 @@ import { useTimetablePlanSession } from './use-timetable-plan-session.ts';
 /** A scoped editor. Task 6 owns navigation confirmation via useDraftNavigation(state.dirty). */
 export function useTimetablePlan(planId: string | null) {
   const { user, role, loading } = useAuth();
-  const actorScope = !loading && user?.id && role ? `${user.id}:${role}` : null;
+  const actorScope = !loading && user?.id && role === 'admin' ? `${user.id}:${role}` : null;
   const service = useMemo(() => supabase && actorScope
     ? createTimetablePlanService({ client: supabase as unknown as TimetableRpcClient, actorScope }) : null, [actorScope]);
   const controller = useMemo(() => service && actorScope && planId

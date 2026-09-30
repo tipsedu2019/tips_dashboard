@@ -41,3 +41,12 @@ test('science choices come from the authenticated active catalog contract',async
 });
 
 function createTimetablePlanService(options) { return createService({ ...options, client: withRpcQueryControls(options.client) }); }
+
+test('preparing target round-trips exact status and rejects an active-action preview', async () => {
+ const preparing={...request,target:{kind:'operational',status:'개강 준비'}};
+ let response={...valid,request:preparing,mappings:[{sourceId:'one',action:'create_preparing_class'}]};
+ const service=createTimetablePlanService({actorScope:'admin',client:{rpc:()=>Promise.resolve({data:response,error:null})}});
+ assert.equal((await service.previewTransfer(preparing)).request.target.status,'개강 준비');
+ response={...response,mappings:[{sourceId:'one',action:'create_active_class'}]};
+ await assert.rejects(service.previewTransfer(preparing),/response_invalid/);
+});

@@ -93,7 +93,7 @@ export function createTimetableTransferSession({ service, planId, apply, refresh
 }
 export function transferEffect(request: TransferRequest) {
   const count = request.itemIds.length;
-  if (request.target.kind === 'operational') return `새 수업 ${count}개를 수강에 만들고 ${request.mode === 'copy' ? '원안은 반영 완료로 보관' : '프리셋에서 이동'}`;
+  if (request.target.kind === 'operational') return `새 수업 ${count}개를 ${request.target.status ?? '수강'}에 만들고 ${request.mode === 'copy' ? '원안은 반영 완료로 보관' : '프리셋에서 이동'}`;
   return `다른 프리셋에 새 초안 ${count}개를 만들고 ${request.mode === 'copy' ? '원안 유지' : '원안에서 이동'}`;
 }
 

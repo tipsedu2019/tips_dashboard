@@ -6,7 +6,7 @@ const item={id:'i',planId:'p',revision:1,name:'새 수업',subject:'영어',subj
 const mon={id:'mon',itemId:'i',planId:'p',weekday:1,startMinute:1033,endMinute:1093,teacherId:'t',classroomId:'r',sourceSlotId:null};
 const wed={...mon,id:'wed',weekday:3};
 const shadow={...mon,id:'shadow',classId:'c',weekday:2,classRevision:1};
-const snapshot={plan:{id:'p',state:'draft'},items:[item],slots:[mon,wed],shadowSlots:[shadow],shadowClasses:[{id:'c',name:'기존',subject:'영어'}],catalogs:{teachers:[{id:'t',name:'김',isVisible:true},{id:'t2',name:'김',isVisible:true}],classrooms:[{id:'r',name:'본1',isVisible:true},{id:'r2',name:'본2',isVisible:true}]}};
+const snapshot={plan:{id:'p',state:'draft'},items:[item],slots:[mon,wed],shadowSlots:[shadow],shadowClasses:[{id:'c',name:'기존',subject:'영어'}],catalogs:{teachers:[{id:'t',name:'김',isVisible:true,subjects:['영어팀']},{id:'t2',name:'김',isVisible:true,subjects:['영어팀']}],classrooms:[{id:'r',name:'본1',isVisible:true},{id:'r2',name:'본2',isVisible:true}]}};
 const target=(view,other=false)=>({view,panelKey:view.endsWith('weekly')?(view.startsWith('teacher')?(other?'t2':'t'):(other?'r2':'r')):'1',columnKey:view.endsWith('weekly')?'1':view==='daily-teacher'?(other?'t2':'t'):(other?'r2':'r'),visibleStartMinute:540,rowPosition:(1033-540)/30,slotMinutes:30});
 for(const view of views){
  test(`${view}: move Monday alone across resource panel/column at identical time, preserve offset and all projections`,()=>{const edit=placementEdit(snapshot,{kind:'move',slotId:'mon',origin:target(view),target:target(view,true)});assert.equal(edit.operation,'save');assert.equal(edit.slots[0].startMinute,1033);assert.equal(edit.slots[0].endMinute,1093);assert.deepEqual(edit.slots[1],wed);assert.equal(edit.slots[0][view.includes('teacher')?'teacherId':'classroomId'],view.includes('teacher')?'t2':'r2');for(const v of views){const panels=buildPlanPanels({...snapshot,slots:edit.slots},v);assert.deepEqual(panels.flatMap(p=>p.blocks.map(b=>b.id)).sort(),['mon','shadow','wed']);}});
@@ -94,4 +94,26 @@ test('single-slot form edit and add-placement preserve the complete differing We
 test('safe imported malformed placement is visible for repair without exposing unknown properties',()=>{
  const pending={id:'pending',sourceText:JSON.stringify({originalSchedule:'수 17:xx–18:43 (기존 교사)',studentIds:['PRIVATE'],unknown:'PRIVATE'}),reason:'invalid_time',weekday:3,startMinute:null,endMinute:null,teacherId:null,classroomId:null};
  const label=interaction.formatPendingSlot(pending,snapshot.catalogs);assert.ok(label.includes('수 17:xx–18:43 (기존 교사)'));assert.equal(label.includes('PRIVATE'),false);
+});
+
+test('both teacher views use subject teams and exclude assistants; conflict reference stays complete',()=>{
+ const teams={...snapshot,catalogs:{...snapshot.catalogs,teachers:[
+  {id:'t',name:'영어 담당',isVisible:true,subjects:['영어팀']},
+  {id:'t2',name:'수학 담당',isVisible:true,subjects:['math']},
+  {id:'assistant',name:'조교',isVisible:true,subjects:['조교팀']},
+  {id:'science',name:'과학 담당',isVisible:true,subjects:['과학팀']},
+ ]}};
+ const before=structuredClone(teams);
+ assert.deepEqual(buildPlanPanels(teams,'teacher-weekly').map(p=>p.id),['t','t2']);
+ assert.deepEqual(buildPlanPanels(teams,'teacher-weekly','영어').map(p=>p.id),['t']);
+ assert.deepEqual(buildPlanPanels(teams,'daily-teacher','수학')[0].columns.map(c=>c.id),['t2']);
+ assert.deepEqual(teams,before,'filter projection must not remove conflict shadows');
+});
+
+test('a new class on a math teacher cell defaults to math, while an explicit subject wins',async()=>{
+ const {newTimetableSubject}=await import('../src/features/academic/timetable-subjects.ts');
+ const teachers=[{id:'m',name:'수학',subjects:['수학팀'],isVisible:true}];
+ assert.equal(newTimetableSubject(teachers,'','m'),'수학');
+ assert.equal(newTimetableSubject(teachers,'영어','m'),'영어');
+ assert.equal(newTimetableSubject(teachers,''),'영어');
 });

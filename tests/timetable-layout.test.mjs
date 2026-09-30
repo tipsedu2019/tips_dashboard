@@ -113,10 +113,10 @@ test("teacher timetable filters only academic teams for the selected subject", (
     filters: { subject: "과학" },
   });
 
-  assert.deepEqual(allSubjects.teacherOptions, ["강부희", "김민경", "이과학"]);
+  assert.deepEqual(allSubjects.teacherOptions, ["강부희", "김민경"]);
   assert.deepEqual(englishOnly.teacherOptions, ["강부희"]);
   assert.deepEqual(mathOnly.teacherOptions, ["김민경"]);
-  assert.deepEqual(scienceOnly.teacherOptions, ["이과학"]);
+  assert.deepEqual(scienceOnly.teacherOptions, []);
 });
 
 test("precomputed timetable rows preserve the legacy workspace and grid model", () => {
@@ -186,11 +186,11 @@ test("daily timetable panels keep horizontal scrolling for wider axis sets", () 
 });
 
 // Memberships and a saved legacy group must not hide continuous classes.
-test("timetable ignores retired period scopes and keeps exactly three status choices", () => {
+test("timetable ignores retired period scopes and keeps exactly two status choices", () => {
   const classes = ["수강", "개강 준비", "종강"].map((status, i) => ({id:`class-${i}`,name:status,subject:"수학",teacher:"김선생",schedule:"월 18:00-19:00",status}));
   const all = buildTimetableWorkspaceModel({classes,filters:{classGroupId:"retired-period"}});
   assert.equal(all.rows.length, 3);
-  assert.deepEqual(all.statusOptions,["수강","개강 준비","종강"]);
+  assert.deepEqual(all.statusOptions,["수강","개강 준비"]);
   for (const status of all.statusOptions) {
     const filtered = buildTimetableWorkspaceModel({classes,filters:{classGroupId:"retired-period",status}});
     assert.deepEqual(filtered.rows.map(row=>row.statusFilter),[status]);

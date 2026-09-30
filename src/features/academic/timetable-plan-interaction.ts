@@ -1,3 +1,4 @@
+import { timetableTeachers } from './timetable-subjects.ts';
 import type { DropTarget, GridTarget, PendingSlot, PlanItemDraft, PlanSnapshot, PlanSlot, ShadowSlot, TimetableView } from './timetable-plan-contract.ts';
 import { assertInterval, moveSlot, type TimetableItemEdit } from './timetable-plan-model.ts';
 import { findConflicts, findOperatingConflicts } from './timetable-conflicts.ts';
@@ -97,7 +98,7 @@ export type PlanGridBlock = {
 };
 export function buildPlanPanels(snapshot: PlanSnapshot, view: TimetableView, subject = '', selectedTargets: string[] = []) {
     const weekly = view.endsWith('weekly'), teacher = view.includes('teacher');
-    const resources = teacher ? snapshot.catalogs.teachers : snapshot.catalogs.classrooms;
+    const resources = teacher ? timetableTeachers(snapshot.catalogs.teachers, subject) : snapshot.catalogs.classrooms;
     if (!resources.length) return [];
     const options = resources.map(r => ({ id: r.id, name: `${r.name}${!r.isVisible || r.isMissing ? ' (사용 불가)' : ''}` }));
     const days = PLAN_DAY_ORDER.map(i => ({ id: String(i), name: PLAN_DAYS[i] }));

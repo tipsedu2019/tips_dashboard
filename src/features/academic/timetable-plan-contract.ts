@@ -127,7 +127,7 @@ export type ShadowClass = {
   name: string;
   subject: string | null;
   grade: string | null;
-  status: "수강";
+  status: "수강" | "개강 준비";
   revision: number;
 };
 export type DatedTimetableSession = {
@@ -262,14 +262,14 @@ export type TimetablePlanRpcContract = {
 };
 
 /** Task 7 uses this same selection for preview and commit. */
-export type TimetableSpace = { kind: 'operational' } | { kind: 'plan'; planId: string };
+export type TimetableSpace = { kind: 'operational'; status?: '개강 준비' | '수강' } | { kind: 'plan'; planId: string };
 export type TransferRequest = {
   source: { kind: 'plan'; planId: string }; target: TimetableSpace;
   mode: 'copy' | 'move'; itemIds: string[]; onConflict: 'reject' | 'keep_pending';
 };
 export type TransferPreview = {
   fingerprint: string; shadowFingerprint: string; request: TransferRequest;
-  mappings: Array<{ sourceId: string; action: 'create_active_class' | 'create_plan_item' }>;
+  mappings: Array<{ sourceId: string; action: 'create_active_class' | 'create_preparing_class' | 'create_plan_item' }>;
   blockers: Array<{ sourceId: string; code: string; label: string; relatedIds: string[] }>;
   warnings?: Array<{ sourceId: string; code: string; label: string; relatedIds: string[] }>;
 };
