@@ -1,0 +1,14 @@
+{
+  "version": "2026-09-30.1",
+  "sourceConversation": "https://muse.ai/thread/35b3ea22-938e-4c5e-be65-e1b77a457ac3",
+  "upstreamArchiveSha256": "0557deb90dac858fd6e009012000429d06421fa88c9f48047fe630a88bcb06df",
+  "reviewedFiles": {
+    "README.md": "b04cd37057cceb259d96481348769da2cc22b956867cf083312f6dfb63324153",
+    "bin/dynamic_credentials.py": "d26f92f1a9709f9c875b6e034e89433e3675a2a7593f75a94cde297f80802741",
+    "bin/tips-cal": "cda7639a812bb1e8d88b3f0bfb86853a1a5522fe356551523dd0ed2a41a95fb7",
+    "tests/test_cal_mock.py": "a56cf55362358f8e2e2b1ab7c9f948725ac431fe8d90e833b3f44f73af0d1f9c"
+  },
+  "localCorrections": [
+    "Accept ISO UTC Z timestamps on Python 3.9/3.10 as well as the Muse runtime."
+  ]
+}

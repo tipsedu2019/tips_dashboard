@@ -20,7 +20,7 @@ async function api(req,res){
  if(path.endsWith('/user'))return json(res,user);
  if(path.endsWith('/profiles'))return json(res,{...user,role:mode==='viewer'?'viewer':'admin',name:'합성 관리자'});
  if(path.endsWith('/list_agent_credentials_v1')){if(mode==='error')return json(res,{message:'fixture failure'},500);if(mode==='loading')await new Promise(r=>setTimeout(r,2000));const offset=(args.p_page-1)*args.p_page_size;return json(res,{items:rows.slice(offset,offset+args.p_page_size),total:rows.length});}
- if(path.endsWith('/create_agent_credential_v1')){const row={id:randomUUID(),label:args.p_label,scopes:args.p_scopes,classIds:args.p_class_ids,expiresAt:args.p_expires_at,createdAt:new Date().toISOString(),revokedAt:null,lastUsedAt:null};rows.unshift(row);return json(res,{...row,token:'fixture-only-not-a-real-key'});}
+ if(path.endsWith('/create_agent_credential_v1') || path.endsWith('/create_agent_credential_v2')){const row={id:randomUUID(),label:args.p_label,scopes:args.p_scopes,classIds:args.p_class_ids,classAccess:{mode:args.p_all_classes?'all':'selected',includesFutureClasses:args.p_all_classes===true},expiresAt:args.p_expires_at,createdAt:new Date().toISOString(),revokedAt:null,lastUsedAt:null};rows.unshift(row);return json(res,{...row,token:'fixture-only-not-a-real-key'});}
  if(path.endsWith('/revoke_agent_credential_v1')){rows=rows.map(row=>row.id===args.p_id?{...row,revokedAt:new Date().toISOString()}:row);return json(res,null);}
  if(path.endsWith('/classes'))return json(res,classes);
  if(path.endsWith('/academic_schools'))return json(res,[{id:'aa290000-0000-4000-8000-000000000701',name:'합성 고등학교',category:'high',color:'#999999',sort_order:1}]);

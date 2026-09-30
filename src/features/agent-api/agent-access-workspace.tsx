@@ -17,7 +17,7 @@ import { NativeSelect } from "@/components/ui/native-select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { SettingsMasterHeader, SettingsTableFrame, SettingsWorkspaceShell, settingsTableCellClass, settingsTableHeadClass, settingsTableActionCellClass, settingsTableActionHeadClass } from "@/features/management/settings-master-layout";
 
-type Credential = { id: string; label: string; scopes: string[]; classIds: string[]; expiresAt: string; revokedAt: string | null; lastUsedAt: string | null };
+type Credential = { id: string; label: string; scopes: string[]; classIds: string[]; classAccess?: { mode: string; includesFutureClasses: boolean }; expiresAt: string; revokedAt: string | null; lastUsedAt: string | null };
 type ClassOption = { id: string; name: string; teacher: string | null; schedule: string | null };
 const dateLabel = (value: string | null) => value ? new Intl.DateTimeFormat("ko-KR", { dateStyle: "short", timeStyle: "short", timeZone: "Asia/Seoul" }).format(new Date(value)) : "—";
 
@@ -40,7 +40,8 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   const [mode, setMode] = useState("read");
   const [edits, setEdits] = useState<string[]>([]);
   const [days, setDays] = useState("1");
-  const [calendar, setCalendar] = useState(false);
+  const [calendar, setCalendar] = useState("none");
+  const [classAccess, setClassAccess] = useState("all");
   const [selected, setSelected] = useState<ClassOption[]>([]);
   const [query, setQuery] = useState("");
   const [options, setOptions] = useState<ClassOption[]>([]);
@@ -72,7 +73,7 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   }, [allowed, user?.id, ready, page, pageSize, revision]);
 
   useEffect(() => {
-    if (!allowed || !createOpen || !supabase) return;
+    if (!allowed || !createOpen || classAccess !== "selected" || !supabase) return;
     const controller = new AbortController();
     let active = true;
     const timer = setTimeout(async () => {
@@ -89,7 +90,7 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
       finally { if (active) setSearching(false); }
     }, 250);
     return () => { active = false; controller.abort(); clearTimeout(timer); };
-  }, [allowed, user?.id, createOpen, query]);
+  }, [allowed, user?.id, createOpen, query, classAccess]);
 
   // A role/account transition must also clear a one-time secret already in memory.
   useEffect(() => {
@@ -100,18 +101,18 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
 
   const closeCreate = useCallback(() => { if (!busyRef.current) { setCreateOpen(false); setError(""); } }, []);
   const beginCreate = () => {
-    setLabel("뮤즈AI"); setMode("read"); setEdits([]); setDays("1"); setCalendar(false); setSelected([]); setQuery(""); setOptions([]); setError(""); setMutationError(""); setCreateOpen(true);
+    setLabel("뮤즈AI"); setMode("read"); setEdits([]); setDays("1"); setCalendar("none"); setClassAccess("all"); setSelected([]); setQuery(""); setOptions([]); setError(""); setMutationError(""); setCreateOpen(true);
   };
   const create = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (busyRef.current || actorIdentity !== currentActor.current || !allowed || !supabase || !selected.length || !label.trim() || (mode === "write" && !edits.length)) return;
+    if (busyRef.current || actorIdentity !== currentActor.current || !allowed || !supabase || (classAccess === "selected" && !selected.length) || !label.trim() || (mode === "write" && !edits.length && calendar !== "write")) return;
     busyRef.current = true; setBusy(true); setError("");
     const current = generation.current;
     try {
-      const scopes = ["classes:read", "class-details:read", ...(calendar ? ["calendar:read"] : []), ...(mode === "write" ? edits : []), ...(mode === "write" && edits.includes("weekly-plan:write") ? ["schedule:preview", "schedule:write"] : [])];
+      const scopes = ["classes:read", "class-details:read", ...(calendar !== "none" ? ["calendar:read"] : []), ...(calendar === "write" ? ["calendar:write"] : []), ...(mode === "write" ? edits : []), ...(mode === "write" && edits.includes("weekly-plan:write") ? ["schedule:preview", "schedule:write"] : [])];
       // Allow minor browser clock skew without relaxing the server's 30-day cap.
       const expiresAt = new Date(Date.now() + Number(days) * 86400000 - 60_000).toISOString();
-      const { data, error: failure } = await supabase.rpc("create_agent_credential_v1", { p_label: label.trim(), p_scopes: scopes, p_class_ids: selected.map((item) => item.id), p_expires_at: expiresAt }).abortSignal(AbortSignal.timeout(15_000)).retry(false);
+      const { data, error: failure } = await supabase.rpc("create_agent_credential_v2", { p_label: label.trim(), p_scopes: scopes, p_class_ids: classAccess === "all" ? [] : selected.map((item) => item.id), p_expires_at: expiresAt, p_all_classes: classAccess === "all" }).abortSignal(AbortSignal.timeout(15_000)).retry(false);
       if (current !== generation.current) return;
       if (failure || typeof data?.token !== "string") throw new Error("create");
       setCreateOpen(false); setSecret(data.token); setPage(1); setRevision((value) => value + 1);
@@ -147,8 +148,8 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
         const status = row.revokedAt ? "폐기됨" : Date.parse(row.expiresAt) <= Date.now() ? "만료됨" : "사용 가능";
         return <TableRow key={row.id}>
           <TableCell className={settingsTableCellClass}>{row.label}<span className="block text-xs text-muted-foreground">{status}</span></TableCell>
-          <TableCell className={settingsTableCellClass}>{["조회", ...(row.scopes.includes("class-info:write") ? ["기본 정보"] : []), ...(row.scopes.includes("weekly-plan:write") ? ["주간 일정"] : row.scopes.includes("schedule:write") ? ["주간 시간 변경"] : []), ...(row.scopes.includes("lesson-plan:write") ? ["날짜별 일정·휴보강"] : [])].join(" · ")}{row.scopes.includes("calendar:read") ? " · 학사일정" : ""}</TableCell>
-          <TableCell className={settingsTableCellClass}>{row.classIds.length ? `${row.classIds.length}개 수업` : "전체 수업"}</TableCell>
+          <TableCell className={settingsTableCellClass}>{["조회", ...(row.scopes.includes("class-info:write") ? ["기본 정보"] : []), ...(row.scopes.includes("weekly-plan:write") ? ["주간 일정"] : row.scopes.includes("schedule:write") ? ["주간 시간 변경"] : []), ...(row.scopes.includes("lesson-plan:write") ? ["날짜별 일정·휴보강"] : [])].join(" · ")}{row.scopes.includes("calendar:write") ? " · 학사일정 수정" : row.scopes.includes("calendar:read") ? " · 학사일정 조회" : ""}</TableCell>
+          <TableCell className={settingsTableCellClass}>{row.classAccess?.mode === "all" ? "전체 수업 (신규 포함)" : row.classIds.length ? `${row.classIds.length}개 수업` : "전체 조회"}</TableCell>
           <TableCell className={settingsTableCellClass}>{dateLabel(row.expiresAt)}</TableCell><TableCell className={settingsTableCellClass}>{dateLabel(row.lastUsedAt)}</TableCell>
           <TableCell className={settingsTableActionCellClass}><Button variant="outline" size="sm" disabled={status !== "사용 가능" || busy} aria-label={`${row.label} 연결 키 폐기`} onClick={() => { setError(""); setRevokeTarget(row); }}>폐기</Button></TableCell>
         </TableRow>;
@@ -157,21 +158,26 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
     </TableBody></Table></SettingsTableFrame>
     <DataTablePagination page={page} pageSize={pageSize} totalCount={loadError ? null : total} loading={loading} onPageChange={setPage} onPageSizeChange={(size) => { setPreference(size); setPage(1); }} ariaLabel="AI 연결 페이지" />
     {message || mutationError ? <ActionFeedback message={mutationError || message} error={Boolean(mutationError)} onDismiss={() => { setMessage(""); setMutationError(""); }} /> : null}
-    <Dialog open={createOpen} onOpenChange={(open) => { if (!open) closeCreate(); }}><FormDialogContent title="연결 키 발급" description="선택한 수업에만 접근할 수 있는 키를 발급합니다." onSubmit={create} onCancel={closeCreate} cancelLabel="키 발급 취소" submitLabel="키 발급" busy={busy} submitDisabled={!selected.length || !label.trim() || selected.length > 50 || (mode === "write" && !edits.length)} error={error} returnFocusRef={createRef} height={650}>
+    <Dialog open={createOpen} onOpenChange={(open) => { if (!open) closeCreate(); }}><FormDialogContent title="연결 키 발급" description="수업 범위와 허용 작업을 지정해 연결 키를 발급합니다." onSubmit={create} onCancel={closeCreate} cancelLabel="키 발급 취소" submitLabel="키 발급" busy={busy} submitDisabled={(classAccess === "selected" && (!selected.length || selected.length > 50)) || !label.trim() || (mode === "write" && !edits.length && calendar !== "write")} error={error} returnFocusRef={createRef} height={650}>
       <div className="grid gap-2"><Label htmlFor="agent-label">연결 이름</Label><Input id="agent-label" value={label} onChange={(event) => setLabel(event.target.value)} maxLength={80} required disabled={busy} /></div>
-      <div className="grid grid-cols-2 gap-3"><div className="grid gap-2"><Label htmlFor="agent-mode">허용 작업</Label><NativeSelect id="agent-mode" value={mode} onChange={(event) => setMode(event.target.value)} disabled={busy}><option value="read">조회만</option><option value="write">조회 + 수정</option></NativeSelect></div><div className="grid gap-2"><Label htmlFor="agent-days">유효 기간</Label><NativeSelect id="agent-days" value={days} onChange={(event) => setDays(event.target.value)} disabled={busy}>{[1,7,30].map((day) => <option key={day} value={day}>{day}일</option>)}</NativeSelect></div></div>
+      <div className="grid grid-cols-2 gap-3"><div className="grid gap-2"><Label htmlFor="agent-mode">허용 작업</Label><NativeSelect id="agent-mode" value={mode} onChange={(event) => { setMode(event.target.value); if (event.target.value === "read" && calendar === "write") setCalendar("read"); }} disabled={busy}><option value="read">조회만</option><option value="write">조회 + 수정</option></NativeSelect></div><div className="grid gap-2"><Label htmlFor="agent-days">유효 기간</Label><NativeSelect id="agent-days" value={days} onChange={(event) => setDays(event.target.value)} disabled={busy}>{[1,7,30].map((day) => <option key={day} value={day}>{day}일</option>)}</NativeSelect></div></div>
       {mode === "write" ? <fieldset className="grid gap-2"><legend className="mb-2 text-sm font-medium">수정 허용 범위</legend>{[
         ["class-info:write", "기본 정보 (이름·정원·수강료 등)"],
         ["weekly-plan:write", "주간 요일·시간·선생님·강의실"],
         ["lesson-plan:write", "날짜별 일정·휴강·보강"],
       ].map(([scope, title]) => <div className="flex items-center gap-2" key={scope}><Checkbox id={`agent-${scope}`} checked={edits.includes(scope)} onCheckedChange={(checked) => setEdits((values) => checked ? [...values.filter(value => value !== scope), scope] : values.filter(value => value !== scope))} disabled={busy} /><Label htmlFor={`agent-${scope}`}>{title}</Label></div>)}</fieldset> : null}
-      <div className="flex items-center gap-2"><Checkbox id="agent-calendar" checked={calendar} onCheckedChange={(checked) => setCalendar(checked === true)} disabled={busy} /><Label htmlFor="agent-calendar">학사일정 조회 허용 (학교 일정 전체)</Label></div>
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+        <div className="grid gap-2"><Label htmlFor="agent-class-access">수업 범위</Label><NativeSelect id="agent-class-access" value={classAccess} onChange={(event) => setClassAccess(event.target.value)} disabled={busy}><option value="all">전체 수업 (앞으로 생길 수업 포함)</option><option value="selected">선택한 수업</option></NativeSelect></div>
+        <div className="grid gap-2"><Label htmlFor="agent-calendar">학사일정</Label><NativeSelect id="agent-calendar" value={calendar} onChange={(event) => setCalendar(event.target.value)} disabled={busy}><option value="none">허용 안 함</option><option value="read">조회</option>{mode === "write" ? <option value="write">조회 + 추가·수정</option> : null}</NativeSelect></div>
+      </div>
+      {classAccess === "selected" ? <>
       <div className="grid gap-2"><Label htmlFor="agent-classes">대상 수업 ({selected.length}/50)</Label><Input id="agent-classes" placeholder="수업 이름 검색" value={query} onChange={(event) => setQuery(event.target.value)} disabled={busy} maxLength={100} />
         <ul className="flex flex-wrap gap-2" aria-label="선택한 수업">{selected.map((item) => <li key={item.id}><Button type="button" variant="secondary" size="sm" disabled={busy} onClick={() => setSelected((items) => items.filter((entry) => entry.id !== item.id))} aria-label={`${item.name} 선택 해제`}>{item.name}<X /></Button></li>)}</ul>
         <p className="text-xs text-muted-foreground">수강 중인 수업 최대 20개 표시 · 찾는 수업이 없으면 이름을 입력하세요.</p>
         {searchError ? <p role="alert" className="text-sm text-destructive">{searchError}</p> : null}
         <ul className="max-h-44 overflow-y-auto divide-y divide-border" aria-label="수업 검색 결과" aria-busy={searching}>{options.map((item) => <li key={item.id} className="flex items-center gap-2 py-2"><Checkbox id={`agent-class-${item.id}`} checked={selected.some((entry) => entry.id === item.id)} disabled={busy || (selected.length >= 50 && !selected.some((entry) => entry.id === item.id))} onCheckedChange={(checked) => setSelected((items) => checked ? [...items.filter((entry) => entry.id !== item.id), item] : items.filter((entry) => entry.id !== item.id))} /><Label htmlFor={`agent-class-${item.id}`} className="flex flex-col items-start gap-1">{item.name}<span className="font-normal text-xs text-muted-foreground">{item.teacher} · {item.schedule}</span></Label></li>)}</ul>
       </div>
+      </> : null}
     </FormDialogContent></Dialog>
     <Dialog open={Boolean(secret)} onOpenChange={(open) => { if (!open) { setSecret(""); setError(""); } }}><DetailDialogContent title="연결 키가 발급되었습니다" description="이 키는 다시 표시되지 않습니다. 뮤즈의 보안 연결 페이지에 직접 입력하세요." onClose={() => { setSecret(""); setError(""); }}>
       <div className="grid gap-3"><p className="text-sm">키를 복사해 뮤즈의 보안 연결 페이지에 입력하세요. 닫으면 다시 볼 수 없습니다.</p><Label htmlFor="agent-secret">연결 키</Label><Input id="agent-secret" type="password" autoComplete="off" value={secret} readOnly />

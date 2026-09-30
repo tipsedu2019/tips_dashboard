@@ -28,7 +28,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "6114c76eb8eecc5f25c2f5bda457dd2f80ce9786b4fbbd7cbb24dc67513ac564"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -2646,4 +2646,16 @@ test("subject completion forward patch is allowed only at the reviewed path and 
   const prepareErrors = await validateSupabaseMigrationLayout({ repoRoot: prepareFixture })
   assertIncludesErrorCode(prepareErrors, "notification_subject_completion_migration_hash_mismatch")
   assert.ok(prepareErrors.some(error => error.includes("science_final_definition_mismatch") && error.endsWith("#public.prepare_notification_immediate_delivery_v1")))
+})
+
+
+test("calendar deployment preflight requires the exact rollback input and linked test", async () => {
+  const workflow = await readFile(requiredWorkflowPath, "utf8")
+  for (const source of [
+    workflow.replace("--focused-test supabase/tests/agent_management_calendar_test.sql --rollback", "--focused-test supabase/tests/agent_management_calendar_test.sql"),
+    workflow.replace('run: supabase test db --linked "${RUNNER_TEMP}/supabase-agent-calendar-preflight.sql"', 'run: echo skipped'),
+  ]) {
+    const errors = await validateWorkflowFixture(source)
+    assertIncludesErrorCode(errors, "db_push_workflow_calendar_preflight_missing")
+  }
 })

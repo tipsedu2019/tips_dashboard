@@ -1,0 +1,1014 @@
+#!/usr/bin/env python3
+"""tips-cal: DRAFT candidate client for the calendar v2 contract.
+
+Covers the draft calendar endpoints plus health.classAccess grant display.
+SEPARATE from the pinned tips-admin class client (bin/tips-admin), which
+remains frozen and untouched. This candidate is for offline contract review
+and mock tests only; it must not be used against production.
+
+Conventions mirror the pinned client:
+  exit 0 = success
+  exit 2 = client-side refusal (bad args, scope missing, validation failed)
+  exit 3 = server confirmed failure (4xx + fixed error.code)
+  exit 4 = indeterminate (5xx, transport, unknown, broken envelope)
+  exit 5 = unexpected internal error
+Journal: canonical-origin partition, fsync writes, 0600, separate
+calendar-operations.jsonl (never mixed with class operations).
+Transport: https only, no redirects, 30s timeout, surrogate auth only --
+the process never sees a real secret.
+"""
+
+from __future__ import annotations
+
+import argparse
+import fcntl
+import hashlib
+import json
+import os
+import re
+import sys
+import urllib.parse
+import urllib.request
+from datetime import datetime, timezone, timedelta, date
+
+sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+import dynamic_credentials as dc  # noqa: E402  (surrogate helpers only, no secrets)
+
+REQUEST_TIMEOUT = 30.0
+PREVIEW_TTL_HINT_SECONDS = 600
+
+CAL_TYPES = frozenset({
+    "시험기간", "영어시험일", "수학시험일", "과학시험일",
+    "체험학습", "방학·휴일·기타",
+})
+CAL_GRADES = frozenset({
+    "all", "초등", "중1", "중2", "중3", "고1", "고2", "고3",
+})
+CAL_AUTHORITIES = frozenset({"official_school", "education_authority"})
+CAL_EXAM_TERMS = frozenset({"1학기 중간", "1학기 기말", "2학기 중간", "2학기 기말"})
+HIGH_SCHOOL_GRADES = frozenset({"고1", "고2", "고3"})
+MAX_EVIDENCE_LEN = 500
+CHECKED_AT_FUTURE_SKEW = timedelta(minutes=5)
+CAL_WRITE_SCOPES = ["calendar:write"]
+CAL_READ_SCOPES = ["calendar:read"]
+MAX_EVENTS = 100
+SOURCE_MAX_AGE = timedelta(days=30)
+
+UUID_RE = re.compile(
+    r"^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-"
+    r"[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$"
+)
+
+# 4xx codes that confirm a rejection (exit 3) rather than indeterminate.
+CAL_REJECT_CODES = frozenset({
+    "invalid_request",
+    "agent_invalid",
+    "agent_invalid_range",
+    "agent_invalid_catalog",
+    "agent_not_found",
+    "agent_forbidden",
+    "agent_no_change",
+    "agent_approval_workflow_required",
+    "agent_preview_expired",
+    "agent_preview_consumed",
+    "agent_idempotency_key_reused",
+    "agent_rate_limited",
+    "agent_write_failed",
+    "agent_calendar_match_required",
+    "agent_calendar_duplicate",
+    "agent_calendar_source_conflict",
+    "agent_calendar_source_stale",
+    "agent_calendar_metadata_invalid",
+    "agent_stale",
+    "agent_unauthorized",
+    "agent_scope_forbidden",
+})
+
+# 4xx statuses that can carry a recognized rejection code (exit 3).
+# Anything else -- including 5xx carrying a recognized code -- is
+# indeterminate (exit 4) and must never report success.
+REJECT_STATUSES = (400, 401, 403, 404, 409, 422)
+
+
+class TransportError(RuntimeError):
+    """Indeterminate transport failure (timeout, reset, DNS)."""
+
+
+def fail(message: str, code: int = 2) -> "typing.NoReturn":
+    print(f"tips-cal: error: {message}", file=sys.stderr)
+    raise SystemExit(code)
+
+
+def note(message: str) -> None:
+    print(f"tips-cal: {message}", file=sys.stderr)
+
+
+def canonical_origin_dir(base_url: str) -> str:
+    """Journal partition dir for a base URL's canonical origin.
+
+    scheme + host + effective port; userinfo/query/fragment refused;
+    readable host_port prefix + full SHA256 of the canonical origin.
+    Mirrors the pinned client exactly.
+    """
+    parsed = urllib.parse.urlparse(base_url)
+    if parsed.username or parsed.password:
+        fail(f"base URL must not contain userinfo, got: {base_url!r}")
+    if parsed.query or parsed.fragment:
+        fail(f"base URL must not contain query or fragment, got: {base_url!r}")
+    scheme = parsed.scheme
+    host = (parsed.hostname or "").lower()
+    if scheme != "https" or not host:
+        fail(f"base URL must be https with a host, got: {base_url!r}")
+    try:
+        port = parsed.port if parsed.port is not None else 443
+    except ValueError:
+        fail("base URL has an invalid port")
+    if not 1 <= port <= 65535:
+        fail("base URL has an invalid port")
+    canonical = f"{scheme}://{host}:{port}"
+    digest = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
+    safe_host = re.sub(r"[^A-Za-z0-9.-]", "_", host).strip("._") or "host"
+    return f"{safe_host}_{port}_{digest}"
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        return None
+
+
+def api_request(base_url, allowed_hosts, credential, method, path, *,
+                body=None, idempotency_key=None, timeout=REQUEST_TIMEOUT):
+    """(status, envelope|None). Raises TransportError on indeterminate failure.
+
+    envelope must be a dict whose data/error are dict-or-None; anything else
+    (HTML, broken JSON, nested strings) yields envelope None -> caller exits 4.
+    """
+    canonical_origin_dir(base_url)  # validate before any auth
+    url = base_url.rstrip("/") + path
+    data = None
+    headers = {"Accept": "application/json"}
+    if body is not None:
+        data = json.dumps(body, ensure_ascii=False).encode("utf-8")
+        headers["Content-Type"] = "application/json; charset=utf-8"
+    req = urllib.request.Request(url, data=data, headers=headers, method=method)
+    if idempotency_key:
+        req.add_header("Idempotency-Key", idempotency_key)
+    try:
+        dc.add_surrogate_to_request(req, credential, allowed_hosts=allowed_hosts)
+    except dc.DynamicCredentialError as exc:
+        raise TransportError(f"credential surrogate unavailable: {exc}") from exc
+    opener = urllib.request.build_opener(_NoRedirect)
+    try:
+        with opener.open(req, timeout=timeout) as resp:
+            status = resp.status
+            raw = dc.read_response_body(resp)
+    except urllib.error.HTTPError as exc:
+        status = exc.code
+        try:
+            raw = exc.read()
+        except Exception:
+            raw = b""
+    except (urllib.error.URLError, TimeoutError, OSError) as exc:
+        raise TransportError(f"{method} {path}: {exc}") from exc
+    envelope = None
+    try:
+        text = raw.decode("utf-8")
+        parsed = json.loads(text)
+        if isinstance(parsed, dict):
+            data_v = parsed.get("data")
+            err_v = parsed.get("error")
+            if (data_v is None or isinstance(data_v, dict)) and \
+               (err_v is None or isinstance(err_v, dict)):
+                envelope = parsed
+    except (UnicodeDecodeError, json.JSONDecodeError, ValueError):
+        envelope = None
+    return status, envelope
+
+
+def health_base_url(base_url):
+    """v2 /health currently requires class-details:read; /api/v1/health at the
+    same origin accepts any valid calendar-only credential. Same canonical
+    origin, so the journal partition is unchanged."""
+    stripped = base_url.rstrip("/")
+    if stripped.endswith("/api/v2"):
+        return stripped[: -len("/api/v2")] + "/api/v1"
+    return stripped
+
+
+def get_health(base_url, allowed_hosts, credential):
+    hbase = health_base_url(base_url)
+    status, env = api_request(hbase, allowed_hosts, credential, "GET", "/health")
+    if env is None:
+        fail("GET /health returned no usable envelope (indeterminate)", 4)
+    if status in (401, 403, 404):
+        _denied_or_indeterminate(status, env, "GET /health")
+    return _require_ok_envelope(status, env, "GET /health")
+
+
+def require_scopes(health_data, needed, what):
+    scopes = health_data.get("scopes") or []
+    missing = [s for s in needed if s not in scopes]
+    if missing:
+        fail(f"{what} needs scopes {', '.join(needed)}; the key only has "
+             f"{', '.join(scopes) if scopes else '(none)'} "
+             f"(missing: {', '.join(missing)}). Existing keys are not "
+             f"auto-expanded -- no request was sent.")
+
+
+def journal_path(journal_base, origin_dir, credential_id):
+    d = os.path.join(journal_base, origin_dir, "v2", credential_id)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return os.path.join(d, "calendar-operations.jsonl")
+
+
+def journal_append(path, entry):
+    line = json.dumps(entry, ensure_ascii=False, sort_keys=True) + "\n"
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_APPEND, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_EX)
+        data = line.encode("utf-8")
+        written = 0
+        while written < len(data):
+            n = os.write(fd, data[written:])
+            if n == 0:
+                raise OSError("short write to journal")
+            written += n
+        os.fsync(fd)
+    finally:
+        try:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+        finally:
+            os.close(fd)
+
+
+def journal_read_all(path):
+    entries = []
+    if not os.path.exists(path):
+        return entries
+    with open(path, "r", encoding="utf-8") as fh:
+        for lineno, line in enumerate(fh, 1):
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                entries.append(json.loads(line))
+            except json.JSONDecodeError:
+                fail(f"journal is corrupt at line {lineno}; refusing to continue", 4)
+    return entries
+
+
+def find_preview(entries, token):
+    for e in reversed(entries):
+        if e.get("kind") == "cal_preview" and e.get("previewToken") == token:
+            return e
+    return None
+
+
+def find_commit_by_token(entries, token):
+    for e in reversed(entries):
+        if e.get("kind") == "cal_commit" and e.get("previewToken") == token:
+            return e
+    return None
+
+
+def find_commit_by_key(entries, key):
+    for e in reversed(entries):
+        if e.get("kind") == "cal_commit" and e.get("requestKey") == key:
+            return e
+    return None
+
+
+def body_hash(body):
+    return hashlib.sha256(
+        json.dumps(body, ensure_ascii=False, sort_keys=True).encode("utf-8")
+    ).hexdigest()
+
+
+def _denied_or_indeterminate(status, env, what):
+    """4xx with a recognized code -> exit 3; anything else -> exit 4."""
+    err = (env or {}).get("error") or {}
+    code = err.get("code")
+    if code in CAL_REJECT_CODES:
+        fail(f"{what}: HTTP {status}: {code} -- denied. "
+             f"No bypass via browser or UI is allowed.", 3)
+    fail(f"{what}: HTTP {status} with unexpected error code {code!r} "
+         f"(indeterminate)", 4)
+
+
+def _require_ok_envelope(status, env, what):
+    """Reads/receipts succeed only on HTTP 200 + error:null + data object.
+
+    A 5xx (or any non-200) carrying a plausible data object must NEVER
+    report success.
+    """
+    if env is None or status != 200 or env.get("error") is not None:
+        fail(f"{what}: expected HTTP 200 with error:null; got HTTP {status} "
+             f"(indeterminate)", 4)
+    data = env.get("data")
+    if not isinstance(data, dict):
+        fail(f"{what}: response has no data object (indeterminate)", 4)
+    return data
+
+
+def _check_uuid(value, what):
+    if not isinstance(value, str) or not UUID_RE.match(value):
+        fail(f"{what} must be a UUID, got: {value!r}", 4)
+    return value
+
+
+# ---------------------------------------------------------------- validation
+
+def _parse_date(s, what):
+    try:
+        return datetime.strptime(s, "%Y-%m-%d").date()
+    except (ValueError, TypeError):
+        fail(f"{what} must be YYYY-MM-DD, got: {s!r}")
+
+
+def _parse_ts(s, what, code=2):
+    try:
+        # Python 3.9/3.10 do not accept the standard UTC "Z" suffix.
+        ts = datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except (ValueError, TypeError):
+        fail(f"{what} must be an ISO-8601 timestamp, got: {s!r}", code)
+    if ts.tzinfo is None:
+        fail(f"{what} must carry a timezone, got: {s!r}", code)
+    return ts.astimezone(timezone.utc)
+
+
+def validate_grades(value):
+    if not isinstance(value, str) or not value.strip():
+        fail(f"grade must be a non-empty string, got: {value!r}")
+    parts = [p.strip() for p in value.split(",")]
+    if any(not p for p in parts):
+        fail(f"grade has an empty segment, got: {value!r}")
+    bad = [p for p in parts if p not in CAL_GRADES]
+    if bad:
+        fail(f"grade values must be in {sorted(CAL_GRADES)}, got: {bad}")
+    if "all" in parts and len(parts) > 1:
+        fail("grade 'all' must stand alone, not combined with other grades")
+    return value
+
+
+def validate_source(src, idx):
+    if not isinstance(src, dict):
+        fail(f"events[{idx}].source must be an object")
+    url = src.get("url")
+    if not isinstance(url, str) or not url.strip():
+        fail(f"events[{idx}].source.url is required")
+    parsed = urllib.parse.urlparse(url)
+    if parsed.scheme not in ("http", "https") or not parsed.hostname:
+        fail(f"events[{idx}].source.url must be http(s), got: {url!r}")
+    if parsed.username or parsed.password:
+        fail(f"events[{idx}].source.url must not contain embedded credentials")
+    if not isinstance(src.get("title"), str) or not src["title"].strip():
+        fail(f"events[{idx}].source.title is required")
+    if src.get("authority") not in CAL_AUTHORITIES:
+        fail(f"events[{idx}].source.authority must be one of "
+             f"{sorted(CAL_AUTHORITIES)}, got: {src.get('authority')!r}")
+    checked = src.get("checkedAt")
+    if not isinstance(checked, str):
+        fail(f"events[{idx}].source.checkedAt is required")
+    ts = _parse_ts(checked, f"events[{idx}].source.checkedAt")
+    now = datetime.now(timezone.utc)
+    if ts > now + CHECKED_AT_FUTURE_SKEW:
+        fail(f"events[{idx}].source.checkedAt is more than 5 minutes in the "
+             f"future: {checked!r}")
+    if now - ts > SOURCE_MAX_AGE:
+        fail(f"events[{idx}].source.checkedAt is older than 30 days: {checked!r} "
+             f"(server would return agent_calendar_source_stale)")
+    evidence = src.get("schoolIdentityEvidence")
+    if not isinstance(evidence, str) or not evidence.strip():
+        fail(f"events[{idx}].source.schoolIdentityEvidence is required "
+             f"(how the school identity was verified)")
+    if len(evidence.strip()) > MAX_EVIDENCE_LEN:
+        fail(f"events[{idx}].source.schoolIdentityEvidence exceeds "
+             f"{MAX_EVIDENCE_LEN} chars")
+    if "publishedOn" in src and src["publishedOn"] is not None:
+        _parse_date(src["publishedOn"], f"events[{idx}].source.publishedOn")
+
+
+def validate_event(ev, idx, year):
+    if not isinstance(ev, dict):
+        fail(f"events[{idx}] must be an object")
+    if "id" in ev and ev["id"] is not None:
+        if not isinstance(ev["id"], str) or not UUID_RE.match(ev["id"]):
+            fail(f"events[{idx}].id must be a UUID, got: {ev['id']!r}")
+    if not isinstance(ev.get("title"), str) or not ev["title"].strip():
+        fail(f"events[{idx}].title is required")
+    if ev.get("type") not in CAL_TYPES:
+        fail(f"events[{idx}].type must be one of {sorted(CAL_TYPES)}, "
+             f"got: {ev.get('type')!r}")
+    start = _parse_date(ev.get("start"), f"events[{idx}].start")
+    end = _parse_date(ev.get("end"), f"events[{idx}].end")
+    if start > end:
+        fail(f"events[{idx}]: start {start} is after end {end} (end is inclusive)")
+    lo = date(year, 3, 1)
+    hi = date(year + 1, 3, 1)
+    if not (lo <= start and end < hi):
+        fail(f"events[{idx}]: {start}..{end} is outside school year {year} "
+             f"({lo}..{hi}, end-exclusive)")
+    grade_value = validate_grades(ev.get("grade"))
+    grade_parts = {p.strip() for p in grade_value.split(",")}
+    exam_term = ev.get("examTerm")
+    if exam_term is not None and exam_term not in CAL_EXAM_TERMS:
+        fail(f"events[{idx}].examTerm must be one of {sorted(CAL_EXAM_TERMS)}, "
+             f"got: {exam_term!r}")
+    conflict = ev.get("conflictResolution")
+    if conflict is not None:
+        if not isinstance(conflict, str) or not conflict.strip():
+            fail(f"events[{idx}].conflictResolution must be non-empty text")
+        if len(conflict.strip()) > MAX_EVIDENCE_LEN:
+            fail(f"events[{idx}].conflictResolution exceeds "
+                 f"{MAX_EVIDENCE_LEN} chars")
+    science_key = ev.get("scienceAreaKey")
+    if ev.get("type") == "과학시험일":
+        if not isinstance(science_key, str) or not science_key.strip():
+            fail(f"events[{idx}].scienceAreaKey is required for 과학시험일")
+        if not grade_parts <= HIGH_SCHOOL_GRADES:
+            fail(f"events[{idx}]: every grade must be 고1/고2/고3 for "
+                 f"과학시험일 ('all' is not allowed), got: {grade_value!r}")
+    elif science_key is not None:
+        fail(f"events[{idx}].scienceAreaKey is only allowed for 과학시험일, "
+             f"got type {ev.get('type')!r}")
+    validate_source(ev.get("source"), idx)
+
+
+def validate_events(events, year):
+    if not isinstance(events, list):
+        fail("--events-json must be a JSON array")
+    if not events:
+        fail("at least one event is required")
+    if len(events) > MAX_EVENTS:
+        fail(f"max {MAX_EVENTS} events per preview, got {len(events)}")
+    for idx, ev in enumerate(events):
+        validate_event(ev, idx, year)
+
+
+def load_events(args):
+    if args.events_file:
+        with open(args.events_file, "r", encoding="utf-8") as fh:
+            try:
+                events = json.load(fh)
+            except json.JSONDecodeError as exc:
+                fail(f"--events-file is not valid JSON: {exc}")
+    elif args.events_json:
+        try:
+            events = json.loads(args.events_json)
+        except json.JSONDecodeError as exc:
+            fail(f"--events-json is not valid JSON: {exc}")
+    else:
+        fail("one of --events-json or --events-file is required")
+    return events
+
+
+# ---------------------------------------------------------------- commands
+
+class Ctx:
+    def __init__(self, base_url, credential, journal):
+        self.base_url = base_url
+        self.credential = credential
+        self.journal = journal
+        self.allowed_hosts = [(urllib.parse.urlparse(base_url).hostname or "").lower()]
+        self.origin_dir = canonical_origin_dir(base_url)  # before any auth
+
+
+def ctx_with_health(ctx):
+    health = get_health(ctx.base_url, ctx.allowed_hosts, ctx.credential)
+    cid = _check_uuid(health.get("credentialId"), "health credentialId")
+    ctx.health = health
+    ctx.credential_id = cid.strip()
+    ctx.journal_file = journal_path(ctx.journal, ctx.origin_dir, ctx.credential_id)
+    return health
+
+
+def describe_class_access(health):
+    ca = health.get("classAccess")
+    lines = []
+    if not isinstance(ca, dict):
+        lines.append("classAccess: (not reported by server)")
+    else:
+        mode = ca.get("mode")
+        future = ca.get("includesFutureClasses")
+        if mode == "all":
+            lines.append("classAccess.mode = all  -- EXPLICIT GRANT: all current "
+                         "classes" + (" AND all future classes" if future else ""))
+        elif mode == "selected":
+            ids = health.get("classIds") or []
+            lines.append(f"classAccess.mode = selected -- {len(ids)} class(es):")
+            for cid in ids:
+                lines.append(f"  - {cid}")
+            if future:
+                lines.append("  (includesFutureClasses=true is set; "
+                             "server-enforced)")
+        elif mode == "legacy_all_read":
+            lines.append("classAccess.mode = legacy_all_read -- legacy grant: "
+                         "all-class READ. Class writes are NEVER authorized by "
+                         "this grant; calendar permissions are independent.")
+        else:
+            lines.append(f"classAccess.mode = {mode!r} (unrecognized) -- "
+                         f"raw: {json.dumps(ca, ensure_ascii=False)}")
+        if future is not None and mode != "all":
+            lines.append(f"includesFutureClasses = {future}")
+    return "\n".join(lines)
+
+
+def cmd_health(ctx, args):
+    health = ctx_with_health(ctx)
+    out = {
+        "apiVersion": health.get("apiVersion"),
+        "credentialId": ctx.credential_id,
+        "scopes": health.get("scopes"),
+        "expiresAt": health.get("expiresAt"),
+        "timezone": health.get("timezone"),
+    }
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    print(describe_class_access(health))
+    return 0
+
+
+def _schools_path(search, page):
+    qs = urllib.parse.urlencode({"search": search or "", "page": page})
+    return f"/calendar/schools?{qs}"
+
+
+def cmd_calendar_schools(ctx, args):
+    health = ctx_with_health(ctx)
+    require_scopes(health, CAL_READ_SCOPES, "calendar schools")
+    if args.page < 1:
+        fail("--page must be >= 1")
+    status, env = api_request(ctx.base_url, ctx.allowed_hosts, ctx.credential,
+                              "GET", _schools_path(args.search, args.page))
+    if env is None:
+        fail("calendar schools: no usable envelope (indeterminate)", 4)
+    if status in (401, 403, 404):
+        _denied_or_indeterminate(status, env, "calendar schools")
+    data = _require_ok_envelope(status, env, "calendar schools")
+    items = data.get("items")
+    if not isinstance(items, list):
+        fail("calendar schools: items is not a list (indeterminate)", 4)
+    for item in items:
+        if not isinstance(item, dict) or not item.get("id") \
+                or not item.get("name"):
+            fail("calendar schools: item missing id/name (indeterminate)", 4)
+        cat = item.get("category")
+        if cat is not None and (not isinstance(cat, str) or not cat.strip()):
+            fail("calendar schools: item category must be null or a "
+                 "non-empty string (indeterminate)", 4)
+        print(f"{item['id']}  {item['name']}  [{item['category']}]")
+    return 0
+
+
+def cmd_calendar_school_get(ctx, args):
+    health = ctx_with_health(ctx)
+    require_scopes(health, CAL_READ_SCOPES, "calendar school get")
+    if not UUID_RE.match(args.school_id or ""):
+        fail("--school-id must be a UUID")
+    if not isinstance(args.school_year, int) or not 2000 <= args.school_year <= 2200:
+        fail("--school-year must be between 2000 and 2200")
+    path = f"/calendar/schools/{args.school_id}?schoolYear={args.school_year}"
+    status, env = api_request(ctx.base_url, ctx.allowed_hosts, ctx.credential,
+                              "GET", path)
+    if env is None:
+        fail("calendar school get: no usable envelope (indeterminate)", 4)
+    if status in (401, 403, 404):
+        _denied_or_indeterminate(status, env, "calendar school get")
+    data = _require_ok_envelope(status, env, "calendar school get")
+    _validate_workspace_shape(data, "calendar school get")
+    if data["school"]["id"] != args.school_id:
+        fail("calendar school get: response school.id does not match the "
+             "requested school (indeterminate)", 4)
+    if data["schoolYear"] != args.school_year:
+        fail("calendar school get: response schoolYear does not match the "
+             "requested year (indeterminate)", 4)
+    # Full workspace: events and scienceAreas are needed to reconcile IDs
+    # and inspect current provenance.
+    print(json.dumps(data, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _validate_workspace_shape(ws, what):
+    """Actual workspace shape: {school:{id,name,category}, schoolYear,
+    events, version, verificationHash, timezone, scienceAreas}."""
+    # Non-dict first: a null/missing workspace is exit 4, never an
+    # internal error.
+    if not isinstance(ws, dict):
+        fail(f"{what}: workspace is not an object (indeterminate)", 4)
+    school = ws.get("school")
+    if not isinstance(school, dict) or not school.get("id") \
+            or not isinstance(school.get("name"), str) \
+            or not school.get("name").strip():
+        fail(f"{what}: school must have non-empty id/name (indeterminate)", 4)
+    # Category may be null (server schema permits it): report unknown
+    # identity as-is, never invent it.
+    category = school.get("category")
+    if category is not None and \
+            (not isinstance(category, str) or not category.strip()):
+        fail(f"{what}: school category must be null or a non-empty string "
+             f"(indeterminate)", 4)
+    if not isinstance(ws.get("schoolYear"), int) or \
+            not 2000 <= ws["schoolYear"] <= 2200:
+        fail(f"{what}: schoolYear must be 2000..2200 (indeterminate)", 4)
+    if not isinstance(ws.get("events"), list):
+        fail(f"{what}: events is not a list (indeterminate)", 4)
+    for field in ("version", "verificationHash"):
+        if not isinstance(ws.get(field), str) or \
+                not re.fullmatch(r"[0-9a-f]{64}", ws[field]):
+            fail(f"{what}: {field} must be 64 lowercase hex chars "
+                 f"(indeterminate)", 4)
+    if ws.get("timezone") != "Asia/Seoul":
+        fail(f"{what}: timezone must be Asia/Seoul (indeterminate)", 4)
+    if not isinstance(ws.get("scienceAreas"), list):
+        fail(f"{what}: scienceAreas must be a list (indeterminate)", 4)
+
+
+def cmd_calendar_changes_preview(ctx, args):
+    health = ctx_with_health(ctx)
+    require_scopes(health, CAL_WRITE_SCOPES, "calendar changes preview")
+    if not UUID_RE.match(args.school_id or ""):
+        fail("--school-id must be a UUID")
+    if not isinstance(args.school_year, int) or not 2000 <= args.school_year <= 2200:
+        fail("--school-year must be between 2000 and 2200")
+    if not isinstance(args.expected_version, str) or \
+            not re.fullmatch(r"[0-9a-fA-F]{64}", args.expected_version):
+        fail("--expected-version must be 64 hex chars")
+    if not isinstance(args.reason, str) or not args.reason.strip():
+        fail("--reason is required")
+    events = load_events(args)
+    validate_events(events, args.school_year)
+    body = {
+        "schoolId": args.school_id,
+        "schoolYear": args.school_year,
+        "expectedVersion": args.expected_version,
+        "reason": args.reason,
+        "events": events,
+    }
+    status, env = api_request(ctx.base_url, ctx.allowed_hosts, ctx.credential,
+                              "POST", "/calendar/changes/preview", body=body)
+    if env is None:
+        fail("calendar preview: no usable envelope (indeterminate). "
+             "No preview recorded; retry the preview.", 4)
+    if status in REJECT_STATUSES:
+        _denied_or_indeterminate(status, env, "calendar preview")
+    if status == 429:
+        fail("calendar preview: HTTP 429 (rate limited) -- stopping. "
+             "Do not retry in a loop.", 4)
+    # SUCCESS is exactly HTTP 200 with error:null; a 5xx (even with a
+    # recognized code or a plausible data object) is NEVER success.
+    data = _require_ok_envelope(status, env, "calendar preview")
+    token = _check_uuid(data.get("previewToken"), "preview previewToken")
+    expires = data.get("expiresAt")
+    if not isinstance(expires, str):
+        fail("calendar preview: expiresAt missing (indeterminate)", 4)
+    _parse_ts(expires, "preview expiresAt", code=4)
+    before = data.get("before")
+    after = data.get("after")
+    _validate_workspace_shape(before, "preview before")
+    _validate_workspace_shape(after, "preview after")
+    # Binding: before AND after must target the requested school/year, and
+    # before.version must equal expectedVersion -- before journaling or
+    # permitting commit.
+    for section, ws in (("before", before), ("after", after)):
+        if ws["school"]["id"] != args.school_id:
+            fail(f"calendar preview: {section}.school.id does not match the "
+                 f"requested school (indeterminate)", 4)
+        if ws["schoolYear"] != args.school_year:
+            fail(f"calendar preview: {section}.schoolYear does not match the "
+                 f"requested school year (indeterminate)", 4)
+    if before["version"] != args.expected_version:
+        fail("calendar preview: before.version does not match "
+             "--expected-version (indeterminate)", 4)
+    diff = data.get("diff")
+    if not isinstance(diff, dict):
+        fail("calendar preview: diff is not an object (indeterminate)", 4)
+    for k in ("added", "changed", "unchanged"):
+        if not isinstance(diff.get(k), list):
+            fail(f"calendar preview: diff.{k} is not a list (indeterminate)", 4)
+    after_hash = after["verificationHash"]
+    journal_append(ctx.journal_file, {
+        "kind": "cal_preview",
+        "previewToken": token,
+        "schoolId": args.school_id,
+        "schoolYear": args.school_year,
+        "afterHash": after_hash,
+        "expiresAt": expires,
+        "recordedAt": datetime.now(timezone.utc).isoformat(),
+        "bodyHash": body_hash(body),
+    })
+    note(f"v2 calendar preview expectation recorded for token {token} "
+         f"(afterHash={after_hash[:16]}...).")
+    # Full before/after/diff so the proposed change is actually reviewable.
+    print(json.dumps({
+        "previewToken": token,
+        "expiresAt": expires,
+        "before": before,
+        "after": after,
+        "diff": diff,
+    }, ensure_ascii=False, indent=2))
+    note(f"preview expiresAt={expires}; commit within ~{PREVIEW_TTL_HINT_SECONDS}s "
+         f"or take a new preview.")
+    return 0
+
+
+def _receipt_error(data, env):
+    """Receipt error object: data.error primary, envelope error fallback."""
+    err = data.get("error")
+    if isinstance(err, dict):
+        return err
+    err = (env or {}).get("error")
+    return err if isinstance(err, dict) else {}
+
+
+def _check_calendar_receipt(data, env, key, expectation):
+    """Validate a calendar receipt of any state. operationId and kind are
+    checked BEFORE any state is interpreted. Returns normally only for
+    applied; failed/unknown fail inside. error:null is required for SUCCESS;
+    durable failed receipts legitimately carry an error object."""
+    if not isinstance(data, dict):
+        fail("receipt has no data object (indeterminate)", 4)
+    if data.get("operationId") != key:
+        fail("receipt operationId does not match the sent idempotency key "
+             "(indeterminate)", 4)
+    if data.get("kind") != "calendar":
+        fail(f"receipt kind is {data.get('kind')!r}, expected 'calendar' "
+             f"(indeterminate)", 4)
+    state = data.get("state")
+    if state == "failed":
+        err = _receipt_error(data, env)
+        code = err.get("code")
+        print(json.dumps({"data": data}, ensure_ascii=False, indent=2))
+        if code in CAL_REJECT_CODES:
+            fail(f"confirmed failure: error.code={code} "
+                 f"(sqlstate={err.get('sqlstate')}). "
+                 f"No bypass via browser or UI is allowed.", 3)
+        fail(f"failed receipt with unrecognized error.code={code!r} "
+             f"(indeterminate)", 4)
+    if state == "unknown":
+        print(json.dumps({"data": data}, ensure_ascii=False, indent=2))
+        fail("state=unknown -- this is NEITHER failure NOR success. Do NOT "
+             "retry with a new key and do NOT bypass via browser.", 4)
+    if state != "applied":
+        fail(f"unexpected receipt state {state!r} (indeterminate)", 4)
+    # SUCCESS requires error:null at both levels.
+    if env.get("error") is not None or data.get("error") is not None:
+        fail("applied state with a non-null error object (indeterminate)", 4)
+    cal = data.get("calendar")
+    if not isinstance(cal, dict):
+        fail("applied receipt has no calendar workspace (indeterminate)", 4)
+    school = cal.get("school")
+    if expectation is None:
+        fail("applied receipt has no recorded preview expectation in this "
+             "journal -- cannot confirm it matches intent", 4)
+    if not isinstance(school, dict) or school.get("id") != expectation.get("schoolId"):
+        fail("receipt calendar.school.id does not match the preview "
+             "expectation (indeterminate)", 4)
+    if cal.get("schoolYear") != expectation.get("schoolYear"):
+        fail("receipt schoolYear does not match the preview expectation "
+             "(indeterminate)", 4)
+    if not isinstance(cal.get("verificationHash"), str) or \
+            cal.get("verificationHash") != expectation.get("afterHash"):
+        fail("receipt verificationHash does not match the preview.after hash "
+             "-- the write may not be what was previewed (indeterminate)", 4)
+
+
+def cmd_calendar_operations_commit(ctx, args):
+    health = ctx_with_health(ctx)
+    require_scopes(health, CAL_WRITE_SCOPES, "calendar operations commit")
+    token = args.preview_token
+    if not isinstance(token, str) or not UUID_RE.match(token):
+        fail("--preview-token must be a UUID")
+    entries = journal_read_all(ctx.journal_file)
+    # Replay path: this token already committed -> GET existing key first.
+    existing = find_commit_by_token(entries, token)
+    if existing:
+        note("this previewToken already has a committed key in the journal; "
+             "re-reading it (0 new POSTs).")
+        return _calendar_operations_get(ctx, existing["requestKey"], entries)
+    key = args.idempotency_key or _new_uuid()
+    if not UUID_RE.match(key):
+        fail("--idempotency-key must be a UUID")
+    expectation = find_preview(entries, token)
+    if expectation is None:
+        fail("no preview expectation for this token in this journal; "
+             "take a preview first", 4)
+    body = {"previewToken": token}
+    if args.source_reference:
+        if not re.match(r"^https://", args.source_reference):
+            fail("--source-reference must be an https URL")
+        body["sourceReference"] = args.source_reference
+    # Same key, different body -> refuse before sending.
+    by_key = find_commit_by_key(entries, key)
+    if by_key and by_key.get("bodyHash") != body_hash(body):
+        fail("idempotency key was already used with different content; "
+             "refusing to send (retry with the original content or a new key "
+             "only if the server said retryWithNewKey=true)", 2)
+    journal_append(ctx.journal_file, {
+        "kind": "cal_commit",
+        "previewToken": token,
+        "requestKey": key,
+        "bodyHash": body_hash(body),
+        "recordedAt": datetime.now(timezone.utc).isoformat(),
+    })
+    note(f"committing calendar preview {token} with idempotency key {key}")
+    try:
+        status, env = api_request(ctx.base_url, ctx.allowed_hosts, ctx.credential,
+                                  "POST", "/calendar/operations", body=body,
+                                  idempotency_key=key)
+    except TransportError as exc:
+        fail(f"{exc}. Indeterminate: recover with operations-get on the same "
+             f"key {key}; do NOT take a new preview or key.", 4)
+    if env is None:
+        fail(f"POST /calendar/operations returned no usable envelope. "
+             f"Indeterminate: recover with operations-get on the same key {key}; "
+             f"do NOT take a new preview or key.", 4)
+    err = env.get("error") or {}
+    if status in REJECT_STATUSES:
+        code = err.get("code")
+        data_p = env.get("data")
+        if code == "agent_idempotency_key_reused":
+            print(json.dumps({"data": data_p, "error": err}, ensure_ascii=False,
+                             indent=2))
+            fail(f"HTTP {status}: idempotency key already used with different "
+                 f"content. GET the original key to learn its true state; do "
+                 f"NOT assume the operation failed.", 3)
+        if code in CAL_REJECT_CODES and isinstance(data_p, dict) \
+                and data_p.get("state") in ("failed", "unknown"):
+            # A 4xx failed receipt: validate the binding before confirming.
+            _check_calendar_receipt(data_p, env, key, expectation)
+        if code in CAL_REJECT_CODES:
+            print(json.dumps({"data": data_p, "error": err}, ensure_ascii=False,
+                             indent=2))
+            fail(f"HTTP {status}: confirmed rejection: error.code={code} "
+                 f"(sqlstate={err.get('sqlstate')}). "
+                 f"No bypass via browser or UI is allowed.", 3)
+        fail(f"HTTP {status}: unexpected error code {code!r} (indeterminate). "
+             f"Recover with operations-get on the same key {key}.", 4)
+    if status == 429:
+        fail(f"HTTP 429 (rate limited) on commit: stopping. Do not retry in a "
+             f"loop. The operation state is indeterminate; check the same key "
+             f"later with operations-get.", 4)
+    if status != 200:
+        # 5xx (even agent_write_failed or a plausible receipt body) is NEVER
+        # success. GET on the same key can later establish the durable state.
+        fail(f"HTTP {status} on commit (indeterminate). Recover with "
+             f"operations-get on the same key {key}; do NOT take a new preview "
+             f"or key.", 4)
+    data = env.get("data")
+    _check_calendar_receipt(data, env, key, expectation)
+    cal = data.get("calendar") or {}
+    school = cal.get("school") or {}
+    print(json.dumps({
+        "operationId": data.get("operationId"),
+        "kind": data.get("kind"),
+        "state": data.get("state"),
+        "school": school.get("id"),
+        "schoolYear": cal.get("schoolYear"),
+        "verificationHash": cal.get("verificationHash"),
+    }, ensure_ascii=False, indent=2))
+    note("calendar commit applied and hash-confirmed against the preview.")
+    return 0
+
+
+def _calendar_operations_get(ctx, key, entries=None):
+    if not isinstance(key, str) or not UUID_RE.match(key):
+        fail("--request-key must be a UUID")
+    if entries is None:
+        entries = journal_read_all(ctx.journal_file)
+    commit = find_commit_by_key(entries, key)
+    expectation = find_preview(entries, commit["previewToken"]) if commit else None
+    status, env = api_request(ctx.base_url, ctx.allowed_hosts, ctx.credential,
+                              "GET", f"/calendar/operations/{key}")
+    if env is None:
+        fail("calendar operations get: no usable envelope (indeterminate)", 4)
+    if status in (401, 403, 404):
+        _denied_or_indeterminate(status, env, "calendar operations get")
+    if status != 200:
+        # 5xx with a plausible receipt body is NEVER success.
+        fail(f"calendar operations get: expected HTTP 200, got {status} "
+             f"(indeterminate)", 4)
+    data = env.get("data")
+    # Durable failed receipts arrive here as HTTP 200 with data.state=failed
+    # and an error object; _check_calendar_receipt confirms them (exit 3 on
+    # recognized code) after validating operationId/kind.
+    _check_calendar_receipt(data, env, key, expectation)
+    # _check returns only for applied (error:null enforced there).
+    print(json.dumps({"data": data}, ensure_ascii=False, indent=2))
+    return 0
+
+
+def cmd_calendar_operations_get(ctx, args):
+    health = ctx_with_health(ctx)
+    require_scopes(health, CAL_WRITE_SCOPES, "calendar operations get")
+    return _calendar_operations_get(ctx, args.request_key)
+
+
+def cmd_calendar_operations_list(ctx, args):
+    health = ctx_with_health(ctx)
+    require_scopes(health, CAL_WRITE_SCOPES, "calendar operations list")
+    if args.page < 1:
+        fail("--page must be >= 1")
+    status, env = api_request(ctx.base_url, ctx.allowed_hosts, ctx.credential,
+                              "GET", f"/calendar/operations?page={args.page}")
+    if env is None:
+        fail("calendar operations list: no usable envelope (indeterminate)", 4)
+    if status in (401, 403, 404):
+        _denied_or_indeterminate(status, env, "calendar operations list")
+    data = _require_ok_envelope(status, env, "calendar operations list")
+    items = data.get("items")
+    if not isinstance(items, list):
+        fail("calendar operations list: items is not a list (indeterminate)", 4)
+    for item in items:
+        if not isinstance(item, dict) or not item.get("operationId") \
+                or not item.get("kind") or not item.get("state"):
+            fail("calendar operations list: item missing "
+                 "operationId/kind/state (indeterminate)", 4)
+        print(f"{item['operationId']}  {item['kind']}  {item['state']}")
+    return 0
+
+
+def _new_uuid():
+    import uuid as _uuid
+    return str(_uuid.uuid4())
+
+
+# ---------------------------------------------------------------- main
+
+def build_parser():
+    p = argparse.ArgumentParser(prog="tips-cal",
+                                description="DRAFT candidate: calendar v2 + "
+                                            "all-class grant display")
+    p.add_argument("--base-url",
+                   default=os.environ.get("TIPS_API_BASE_URL", ""),
+                   help="API base URL, e.g. https://tipsedu.co.kr/api/v2")
+    p.add_argument("--credential",
+                   default=os.environ.get("TIPS_API_CREDENTIAL",
+                                          "custom.tips-admin-api"),
+                   help="dynamic credential name")
+    p.add_argument("--journal", default=os.environ.get("TIPS_JOURNAL_DIR",
+                                                       "/tmp/tips-cal-journal"),
+                   help="journal base directory")
+    sub = p.add_subparsers(dest="command", required=True)
+
+    sub.add_parser("health", help="show health incl. classAccess grant mode")
+
+    s = sub.add_parser("calendar-schools", help="list calendar schools")
+    s.add_argument("--search", default="")
+    s.add_argument("--page", type=int, default=1)
+
+    s = sub.add_parser("calendar-school-get", help="get a school calendar")
+    s.add_argument("--school-id", required=True)
+    s.add_argument("--school-year", type=int, required=True)
+
+    s = sub.add_parser("calendar-changes-preview",
+                       help="preview a calendar import")
+    s.add_argument("--school-id", required=True)
+    s.add_argument("--school-year", type=int, required=True)
+    s.add_argument("--expected-version", required=True)
+    s.add_argument("--reason", required=True)
+    s.add_argument("--events-json", default="")
+    s.add_argument("--events-file", default="")
+
+    s = sub.add_parser("calendar-operations-commit",
+                       help="commit a calendar preview")
+    s.add_argument("--preview-token", required=True)
+    s.add_argument("--idempotency-key", default="")
+    s.add_argument("--source-reference", default="")
+
+    s = sub.add_parser("calendar-operations-get",
+                       help="read a calendar operation receipt")
+    s.add_argument("--request-key", required=True)
+
+    s = sub.add_parser("calendar-operations-list",
+                       help="list calendar operations")
+    s.add_argument("--page", type=int, default=1)
+    return p
+
+
+def main(argv=None):
+    args = build_parser().parse_args(argv)
+    if not args.base_url:
+        fail("--base-url (or TIPS_API_BASE_URL) is required; no request is "
+             "sent without an explicit base URL")
+    ctx = Ctx(args.base_url, args.credential, args.journal)
+    handlers = {
+        "health": cmd_health,
+        "calendar-schools": cmd_calendar_schools,
+        "calendar-school-get": cmd_calendar_school_get,
+        "calendar-changes-preview": cmd_calendar_changes_preview,
+        "calendar-operations-commit": cmd_calendar_operations_commit,
+        "calendar-operations-get": cmd_calendar_operations_get,
+        "calendar-operations-list": cmd_calendar_operations_list,
+    }
+    try:
+        return handlers[args.command](ctx, args)
+    except TransportError as exc:
+        fail(f"{exc} (indeterminate)", 4)
+    except SystemExit:
+        raise
+    except Exception as exc:  # never leak internals as success
+        fail(f"unexpected internal error: {type(exc).__name__}", 5)
+
+
+if __name__ == "__main__":
+    import typing  # noqa: E402  (deferred import keeps module import cheap)
+    sys.exit(main())

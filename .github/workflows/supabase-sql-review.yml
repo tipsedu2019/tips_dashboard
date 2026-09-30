@@ -124,7 +124,9 @@ jobs:
             --postdeploy-contract \
             --test supabase/tests/agent_api_scoped_schedule_test.sql \
             --test supabase/tests/agent_api_class_changes_test.sql \
+            --test supabase/tests/agent_management_calendar_test.sql \
             --probe tests/probe-agent-class-edit-dto.mjs \
+            --probe tests/probe-agent-calendar-dto.mjs \
             --test supabase/tests/student_enrollment_status_test.sql \
             --test supabase/tests/management_numbered_pages_test.sql \
             --test supabase/tests/management_page_reads_test.sql \

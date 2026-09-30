@@ -3,6 +3,7 @@ import { revalidatePath, revalidateTag } from "next/cache";
 import { invalidatePublicClassesCache } from "@/server/public-classes-cache-invalidation.js";
 import { createAgentEditApiHandler } from "./http-v2.ts";
 import { createAgentApiHandler } from "./http.ts";
+import { createAgentCalendarHandler } from "./http-calendar.ts";
 
 const dependencies = {
   enabled: () => process.env.TIPS_AGENT_API_ENABLED === "true",
@@ -17,4 +18,6 @@ const dependencies = {
 };
 
 export const handleAgentApiRequest = createAgentApiHandler(dependencies);
-export const handleAgentEditApiRequest = createAgentEditApiHandler(dependencies);
+const handleClassEdit = createAgentEditApiHandler(dependencies);
+const handleCalendar = createAgentCalendarHandler(dependencies);
+export const handleAgentEditApiRequest = (request: Request, path: string[]) => path[0] === "calendar" ? handleCalendar(request, path) : handleClassEdit(request, path);

@@ -23,6 +23,10 @@ const EXPECTED_TRANSACTIONAL_BUILDER_COMMAND =
   `node scripts/build-supabase-transactional-preflight.mjs --output ${TRANSACTIONAL_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test ${FOCUSED_TRANSACTIONAL_PGTAP} --rollback`
 const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
   `supabase test db --linked ${TRANSACTIONAL_PGTAP_OUTPUT}`
+const CALENDAR_PGTAP_OUTPUT = '"${RUNNER_TEMP}/supabase-agent-calendar-preflight.sql"'
+const EXPECTED_CALENDAR_BUILDER_COMMAND =
+  `node scripts/build-supabase-transactional-preflight.mjs --output ${CALENDAR_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test supabase/tests/agent_management_calendar_test.sql --rollback`
+const EXPECTED_CALENDAR_PGTAP_COMMAND = `supabase test db --linked ${CALENDAR_PGTAP_OUTPUT}`
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
@@ -38,13 +42,13 @@ const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
   `node ${POSTDEPLOY_VERIFIER} --migration-ledger ${POSTDEPLOY_LEDGER} --query-receipt ${POSTDEPLOY_RECEIPT}`
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "ee88cd343171debe3bd7ad5031ae588bf6570e4021276e7f569fa977634da96e"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "6114c76eb8eecc5f25c2f5bda457dd2f80ce9786b4fbbd7cbb24dc67513ac564"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "6f6242663d7f2be6f5aee9681e802bfe3234ff64297620acfb73993540c48a09"
+  "d72d12e94f812f5c58d39884979915d693589ac2707507a6263dd1a901760650"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "20c8e57d5e9cb21eb78beddee827154ca6a7b85441c9c3fa7fd4752e2a3ce077"],
+  ["free-tier-guardrails.yml", "8102aff17e018730f6e9138126a6379b69da5ca04835e4f04a115fbc4be0f710"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
 ])
@@ -1565,6 +1569,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
           "node scripts/verify-supabase-migration-layout.mjs",
           "node scripts/verify-domain-sqlstate-contract.mjs",
           EXPECTED_TRANSACTIONAL_BUILDER_COMMAND,
+          EXPECTED_CALENDAR_BUILDER_COMMAND,
           EXPECTED_POSTDEPLOY_VERIFIER_COMMAND,
         ].includes(command)
       })
@@ -1691,7 +1696,7 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
       .map((line) => line.trim().replace(/^run:\s*/, ""))
       .filter((command) => command.startsWith("node scripts/build-supabase-transactional-preflight.mjs"))
     const builderCommand = builderCommands[0] ?? ""
-    if (builderCommands.length !== 1) {
+    if (builderCommands.length !== 2) {
       addError(
         errors,
         "db_push_workflow_transactional_preflight_builder_missing",
@@ -1739,6 +1744,24 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         "db_push_workflow_transactional_preflight_pgtap_missing",
         workflowRelativePath,
       )
+    }
+
+    const calendarBuilderStep = workflowStepLines(transactionalPreflightLines, "Build agent calendar pgTAP input")
+    const calendarTestStep = workflowStepLines(transactionalPreflightLines, "Run agent calendar pgTAP")
+    if (!hasExactRun(calendarBuilderStep, EXPECTED_CALENDAR_BUILDER_COMMAND) ||
+        !hasExactRun(calendarTestStep, EXPECTED_CALENDAR_PGTAP_COMMAND) ||
+        builderCommands[1] !== EXPECTED_CALENDAR_BUILDER_COMMAND) {
+      addError(errors, "db_push_workflow_calendar_preflight_missing", workflowRelativePath)
+    }
+    if (exposesSupabaseSecret(calendarBuilderStep) || !exposesSupabaseSecret(calendarTestStep)) {
+      addError(errors, "db_push_workflow_calendar_secret_scope_mismatch", workflowRelativePath)
+    }
+    const calendarBuilderIndex = workflow.indexOf(`run: ${EXPECTED_CALENDAR_BUILDER_COMMAND}`)
+    const calendarTestIndex = workflow.indexOf(`run: ${EXPECTED_CALENDAR_PGTAP_COMMAND}`)
+    if (calendarBuilderIndex < workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_BUILDER_COMMAND}`) ||
+        calendarTestIndex < calendarBuilderIndex ||
+        calendarTestIndex < workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_PGTAP_COMMAND}`)) {
+      addError(errors, "db_push_workflow_calendar_preflight_order_mismatch", workflowRelativePath)
     }
 
     const linkIndex = workflow.indexOf("      - name: Link project", workflow.indexOf("  db-transactional-preflight:"))
