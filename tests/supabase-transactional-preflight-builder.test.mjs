@@ -676,3 +676,20 @@ test("opaque SQL 밖의 psql meta command와 prepared transaction 우회를 모�
   })
   assert.match(safePreparedResult.sql, /prepare transaction AS SELECT 1;/i)
 })
+
+
+test("the actual calendar suite is a deployment-compatible rollback envelope", async () => {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  const focusedSource = await readFile(join(repoRoot, "supabase/tests/agent_management_calendar_test.sql"), "utf8")
+  const { root, ledger } = await createFixture({ focusedSource })
+  const result = await buildTransactionalPreflightSql({
+    repoRoot: root, migrationLedger: ledger,
+    forwardMigrationsPath: "supabase/migrations", focusedTestPath: "supabase/tests/focused.sql",
+  })
+  assert.ok(result.sql.indexOf("set local role postgres;") < result.sql.indexOf("pending_first_marker"))
+  assert.ok(result.sql.indexOf("pending_second_marker") < result.sql.indexOf("select no_plan();"))
+  assert.match(result.sql, /v2 rejects nonexistent selected class/)
+  assert.equal((result.sql.match(/^begin;$/gim) ?? []).length, 1)
+  assert.equal((result.sql.match(/^commit;$/gim) ?? []).length, 0)
+  assert.equal((result.sql.match(/^rollback;$/gim) ?? []).length, 1)
+})
