@@ -109,7 +109,9 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
     const current = generation.current;
     try {
       const scopes = ["classes:read", "class-details:read", ...(calendar ? ["calendar:read"] : []), ...(mode === "write" ? edits : []), ...(mode === "write" && edits.includes("weekly-plan:write") ? ["schedule:preview", "schedule:write"] : [])];
-      const { data, error: failure } = await supabase.rpc("create_agent_credential_v1", { p_label: label.trim(), p_scopes: scopes, p_class_ids: selected.map((item) => item.id), p_expires_at: new Date(Date.now() + Number(days) * 86400000).toISOString() }).abortSignal(AbortSignal.timeout(15_000)).retry(false);
+      // Allow minor browser clock skew without relaxing the server's 30-day cap.
+      const expiresAt = new Date(Date.now() + Number(days) * 86400000 - 60_000).toISOString();
+      const { data, error: failure } = await supabase.rpc("create_agent_credential_v1", { p_label: label.trim(), p_scopes: scopes, p_class_ids: selected.map((item) => item.id), p_expires_at: expiresAt }).abortSignal(AbortSignal.timeout(15_000)).retry(false);
       if (current !== generation.current) return;
       if (failure || typeof data?.token !== "string") throw new Error("create");
       setCreateOpen(false); setSecret(data.token); setPage(1); setRevision((value) => value + 1);
