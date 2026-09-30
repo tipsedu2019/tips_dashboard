@@ -1,4 +1,10 @@
 begin;
+-- The deployment builder inserts pending migrations immediately after this role anchor.
+set local role postgres;
+set local search_path = extensions, public;
+create extension if not exists pgtap with schema extensions;
+grant usage on schema extensions to authenticated, service_role;
+grant execute on all functions in schema extensions to authenticated, service_role;
 select no_plan();
 create function pg_temp.cid(n int) returns uuid language sql immutable as $$select ('ac300000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.cid(10),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','management-agent@test.invalid');
