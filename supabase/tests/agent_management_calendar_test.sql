@@ -15,6 +15,8 @@ set local role authenticated;
 insert into ev values('all',public.create_agent_credential_v2('All management',array['classes:read','class-details:read','class-info:write','calendar:read','calendar:write'],'{}',now()+interval '1 day',true));
 insert into ev values('selected',public.create_agent_credential_v1('Existing selected',array['classes:read','class-details:read','class-info:write'],array[pg_temp.cid(20)],now()+interval '1 day'));
 insert into ev values('read',public.create_agent_credential_v2('Calendar reader',array['calendar:read'],'{}',now()+interval '1 day',false));
+select throws_ok($q$select public.create_agent_credential_v2('Unknown class',array['classes:read'],array[pg_temp.cid(999)],now()+interval '1 day',false)$q$,'22023','agent_invalid','v2 rejects nonexistent selected class even when other classes exist');
+select throws_ok($q$select public.create_agent_credential_v1('Unknown class',array['classes:read'],array[pg_temp.cid(999)],now()+interval '1 day')$q$,'22023','agent_invalid','legacy issuer also rejects nonexistent selected class');
 select is((select v#>>'{classAccess,mode}' from ev where k='all'),'all','explicit all-class mode issued');
 select throws_ok($q$select public.create_agent_credential_v2('ambiguous',array['classes:read','class-details:read'],'{}',now()+interval '1 day',false)$q$,'22023','agent_invalid','empty selected class grant is rejected');
 select throws_ok($q$select public.create_agent_credential_v2('invalid',array['calendar:write'],'{}',now()+interval '1 day',true)$q$,'22023','agent_invalid','calendar write requires read');

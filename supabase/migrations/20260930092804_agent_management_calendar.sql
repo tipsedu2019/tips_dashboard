@@ -46,6 +46,27 @@ alter table dashboard_private.agent_calendar_previews enable row level security;
 alter table dashboard_private.agent_calendar_operations enable row level security;
 revoke all on dashboard_private.agent_calendar_sources,dashboard_private.agent_calendar_previews,dashboard_private.agent_calendar_operations from public,anon,authenticated,service_role;
 
+-- Retain the legacy issuance contract, correcting its correlated ID check.
+create or replace function public.create_agent_credential_v1(p_label text,p_scopes text[],p_class_ids uuid[],p_expires_at timestamptz) returns jsonb
+language plpgsql security definer set search_path='' as $$
+declare actor uuid:=dashboard_private.agent_require_admin_v1(); raw text; row dashboard_private.agent_credentials;
+begin
+ if nullif(btrim(p_label),'') is null or length(p_label)>80 or p_scopes is null or cardinality(p_scopes)=0 or array_position(p_scopes,null) is not null
+ or not p_scopes <@ array['classes:read','calendar:read','schedule:preview','schedule:write','class-details:read','class-info:write','weekly-plan:write','lesson-plan:write']::text[]
+ or (p_scopes && array['class-details:read','class-info:write','weekly-plan:write','lesson-plan:write']::text[] and (cardinality(p_class_ids)=0 or not 'classes:read'=any(p_scopes) or not 'class-details:read'=any(p_scopes)))
+ or p_class_ids is null or cardinality(p_class_ids)>50 or array_position(p_class_ids,null) is not null
+ or p_expires_at is null or p_expires_at<=clock_timestamp() or p_expires_at>clock_timestamp()+interval '30 days'
+ or (p_scopes && array['schedule:preview','schedule:write']::text[] and (cardinality(p_class_ids)=0 or not 'classes:read'=any(p_scopes)))
+ or ('schedule:write'=any(p_scopes) and not 'schedule:preview'=any(p_scopes))
+ or exists(select 1 from unnest(p_class_ids) as requested(class_id) where not exists(select 1 from public.classes c where c.id=requested.class_id)) then
+ raise exception using errcode='22023',message='agent_invalid'; end if;
+ if (select count(*) from dashboard_private.agent_credentials where created_by=actor and revoked_at is null and expires_at>now())>=20 then raise exception using errcode='54000',message='agent_credential_limit';end if;
+ raw:='tips_agent_'||replace(gen_random_uuid()::text,'-','')||replace(gen_random_uuid()::text,'-','');
+ insert into dashboard_private.agent_credentials(created_by,label,token_hash,scopes,class_ids,expires_at)
+ values(actor,btrim(p_label),encode(sha256(convert_to(raw,'UTF8')),'hex'),p_scopes,p_class_ids,p_expires_at) returning * into row;
+ return jsonb_build_object('id',row.id,'label',row.label,'token',raw,'scopes',row.scopes,'classIds',row.class_ids,'expiresAt',row.expires_at);
+end$$;
+
 create or replace function public.create_agent_credential_v2(p_label text,p_scopes text[],p_class_ids uuid[],p_expires_at timestamptz,p_all_classes boolean) returns jsonb
 language plpgsql security definer set search_path='' as $$
 declare actor uuid:=dashboard_private.agent_require_admin_v1(); raw text; row dashboard_private.agent_credentials;
@@ -58,7 +79,7 @@ begin
  or p_expires_at is null or p_expires_at<=clock_timestamp() or p_expires_at>clock_timestamp()+interval '30 days'
  or (p_scopes && array['schedule:preview','schedule:write']::text[] and ((cardinality(p_class_ids)=0 and not p_all_classes) or not 'classes:read'=any(p_scopes)))
  or ('schedule:write'=any(p_scopes) and not 'schedule:preview'=any(p_scopes))
- or exists(select 1 from unnest(p_class_ids) id where not exists(select 1 from public.classes c where c.id=id)) then
+ or exists(select 1 from unnest(p_class_ids) as requested(class_id) where not exists(select 1 from public.classes c where c.id=requested.class_id)) then
  raise exception using errcode='22023',message='agent_invalid'; end if;
  if (select count(*) from dashboard_private.agent_credentials where created_by=actor and revoked_at is null and expires_at>now())>=20 then raise exception using errcode='54000',message='agent_credential_limit';end if;
  raw:='tips_agent_'||replace(gen_random_uuid()::text,'-','')||replace(gen_random_uuid()::text,'-','');
