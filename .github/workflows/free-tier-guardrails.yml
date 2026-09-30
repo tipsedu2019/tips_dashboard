@@ -121,12 +121,15 @@ jobs:
           node --test --experimental-strip-types \
             tests/agent-api-http.test.mjs \
             tests/agent-class-edit.test.mjs \
+            tests/agent-calendar.test.mjs \
             tests/registration-alimtalk-preview-dialog.test.mjs \
             tests/registration-observation-customer-message-ui.test.mjs \
             tests/registration-observation-workspace.test.mjs \
             tests/registration-customer-message-service.test.mjs
       - name: Verify pinned Muse client without network or credentials
-        run: python3 integrations/muse/client/tests/run_offline.py
+        run: |
+          python3 integrations/muse/client/tests/run_offline.py
+          python3 integrations/muse/calendar-client/tests/run_offline.py
       - shell: bash
         env:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}

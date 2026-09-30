@@ -1,5 +1,7 @@
 # TIPS ↔ Muse integration v1 / v2
 
+The current expansion contract is [all-class access and school calendars](CALENDAR.md). It supersedes the historical selected-class onboarding sequence below. PR #81 synthetic Vault/HTTPS acceptance passed with two fake classes; its keys and environment were revoked/removed. Calendar integration has separate verification evidence and must not inherit that end-to-end claim. Management-wide parity remains tracked in issue #86; these endpoints do not yet implement every management workflow.
+
 ## Supported work
 
 `/api/v1` supports scoped class reads, school calendar metadata reads, and changing the start/end of **one existing weekly schedule slot**. Existing dated lessons, holiday/makeup sessions, teaching content, student/enrollment/payment records, external systems and outgoing messages are not changed. Do not translate a dated cancellation/makeup request into this weekly-template operation.
@@ -41,7 +43,7 @@ Conversation: https://muse.ai/thread/35b3ea22-938e-4c5e-be65-e1b77a457ac3
 | `weekly-plan:write` | Weekday, time, teacher and room of existing weekly slots |
 | `lesson-plan:write` | Bounded future dated lessons, exclusions, cancellations and one linked makeup per original lesson |
 
-New grants also require `classes:read` and explicit class IDs. Existing v1 credentials are unchanged. Settings default to read only, one day, and no selected write scopes. The weekly checkbox additionally enables the compatible v1 weekly-time scopes.
+New grants also require `classes:read` and either explicit `all_classes=true` or selected class IDs (max 50). Existing v1 credentials are unchanged. Settings default to read only, one day, and no selected write scopes. The weekly checkbox additionally enables the compatible v1 weekly-time scopes.
 
 1. Read `/api/v2/health`, then `/classes/{id}?from=YYYY-MM-DD&to=YYYY-MM-DD` (date difference ≤93). Read exact teacher/room IDs from `/classes/{id}/catalogs?kind=teachers|classrooms&search=...&page=1` (20 per page). Subject compatibility is checked by the final domain resolver at preview/commit.
 2. POST `/classes/{id}/changes/preview` with `expectedVersion`, `window`, `reason`, and at least one of `basic`, `weeklySlots`, or `lessons`. Input allows only declared fields; no raw schedule-plan PATCH is exposed. Up to 14 existing weekly slot edits and 50 dated edits can be combined atomically for one class. Times are integer minutes; full timing includes teacher/room UUIDs.
@@ -79,7 +81,7 @@ The credential issuer is the authenticated actor for the existing domain writers
 
 Raw tokens are returned once and only SHA256 digests are stored. Private tables have RLS and no client table grants. The service-role-only gateway receives a digest, rechecks the explicit admin profile and current account status, then derives transaction-local actor claims from the credential issuer. Inputs cannot select an actor.
 
-Write/preview grants require explicit class IDs (max 50), classes:read, and write also requires preview. Keys expire within 30 days; max 20 active keys per issuer; valid requests are limited to 60 per minute per key. Class lists are paged at 20; credential settings at 10/15/20. Calendar windows are bounded to 31 days difference.
+Write/preview grants require explicit all-class access or selected class IDs (max 50), classes:read, and v1 schedule write also requires schedule preview. Keys expire within 30 days; max 20 active keys per issuer; valid requests are limited to 60 per minute per key. Class lists are paged at 20; credential settings at 10/15/20. Calendar windows are bounded to 31 days difference.
 
 Preview executes the final existing writer inside a deliberately rolled-back subtransaction, preserving only the preview record. Commit rechecks the schedule fingerprint and resource conflicts under the existing timetable lock, and atomically persists the operation receipt. Same key/body replays the receipt; another key cannot consume the same preview. Existing `23P01` domain conflict evidence is preserved; no domain condition is relabeled as a serialization `40001`.
 
