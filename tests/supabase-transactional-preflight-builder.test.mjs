@@ -686,6 +686,9 @@ test("the actual calendar suite is a deployment-compatible rollback envelope", a
     repoRoot: root, migrationLedger: ledger,
     forwardMigrationsPath: "supabase/migrations", focusedTestPath: "supabase/tests/focused.sql",
   })
+  for (const marker of ["set local role postgres;", "pending_first_marker", "pending_second_marker", "select no_plan();"]) {
+    assert.ok(result.sql.indexOf(marker) >= 0, `required marker: ${marker}`)
+  }
   assert.ok(result.sql.indexOf("set local role postgres;") < result.sql.indexOf("pending_first_marker"))
   assert.ok(result.sql.indexOf("pending_second_marker") < result.sql.indexOf("select no_plan();"))
   assert.match(result.sql, /v2 rejects nonexistent selected class/)
