@@ -1,3 +1,5 @@
+Current Muse routing guide: [MUSE_OPERATIONS_GUIDE.md](MUSE_OPERATIONS_GUIDE.md) (reviewed installation snapshot; production credentials remain a separate human step).
+
 # TIPS ↔ Muse integration v1 / v2
 
 The current expansion contract is [all-class access and school calendars](CALENDAR.md). It supersedes the historical selected-class onboarding sequence below. PR #81 synthetic Vault/HTTPS acceptance passed with two fake classes; its keys and environment were revoked/removed. Calendar integration has separate verification evidence and must not inherit that end-to-end claim. Management-wide parity remains tracked in issue #86; these endpoints do not yet implement every management workflow.
