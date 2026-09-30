@@ -30,6 +30,18 @@ select throws_ok($q$select * from dashboard_private.agent_calendar_sources$q$,'4
 select throws_ok($q$select public.agent_calendar_api_v1(repeat('a',64),'schools')$q$,'42501',null,'calendar gateway service-only');
 reset role;
 insert into public.classes(id,name,class_type,subject,status,schedule_storage_mode,student_ids,teacher,room,schedule) values(pg_temp.cid(21),'Future class','regular','영어','수강','legacy','[]','Calendar test teacher','Calendar test room','화 10:00-11:00');
+-- Existing unresolved occupancy must not prevent a capacity-only agent edit.
+insert into public.classes(id,name,class_type,subject,status,schedule_storage_mode,student_ids,teacher,room,schedule) values(pg_temp.cid(22),'Existing unresolved class','regular','영어','수강','legacy','[]','미정','미정','화 10:00-11:00');
+-- Fixture inserts share this rollback transaction with API calls. Anchor the
+-- completed historical fixture, then flush its deferred checks before testing
+-- writes. Production guards stay active; no other transaction's baseline moves.
+update dashboard_private.timetable_operating_write_baselines
+set reference=dashboard_private.read_timetable_operating_reference_v1()
+where transaction_id=txid_current();
+set constraints all immediate;
+set constraints all deferred;
+create temp table unresolved_original as select to_jsonb(c) row from public.classes c where id=pg_temp.cid(22);
+select ok(exists(select 1 from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'unresolvedOccupancies') b where b->>'classId'=pg_temp.cid(22)::text),'fixture includes an existing unresolved occupancy');
 create function pg_temp.api(a text,i jsonb default '{}',label text default 'all') returns jsonb language sql as $$select public.agent_calendar_api_v1(encode(sha256(convert_to((select v->>'token' from ev where k=label),'UTF8')),'hex'),a,i)$$;
 create function pg_temp.classes(a text,i jsonb default '{}',label text default 'all') returns jsonb language sql as $$select public.agent_api_v2(encode(sha256(convert_to((select v->>'token' from ev where k=label),'UTF8')),'hex'),a,i)$$;
 create function pg_temp.command() returns jsonb language sql as $$select jsonb_build_object('schoolId',pg_temp.cid(1),'schoolYear',2099,'reason','Synthetic official update','diff','{}'::jsonb,'events',jsonb_build_array(
@@ -43,6 +55,14 @@ select is(pg_temp.classes('context',jsonb_build_object('classId',pg_temp.cid(21)
 select throws_ok($q$select pg_temp.classes('context',jsonb_build_object('classId',pg_temp.cid(21)),'selected')$q$,'42501','agent_scope_forbidden','old selected key is never expanded');
 insert into ev values('class_preview',pg_temp.classes('preview',jsonb_build_object('classId',pg_temp.cid(21),'expectedVersion',pg_temp.classes('context',jsonb_build_object('classId',pg_temp.cid(21)))#>>'{data,version}','command',jsonb_build_object('patch',jsonb_build_object('capacity',15),'reason','All-class write','window',jsonb_build_object('from','2099-10-01','to','2099-10-31')))));
 select is(pg_temp.classes('commit',pg_temp.commit_input('class_preview',101))#>>'{data,state}','applied','all-class key can commit later-created class edit');
+reset role;
+select is((select capacity from public.classes where id=pg_temp.cid(21)),15,'capacity-only API edit persists despite existing unresolved occupancy');
+select is((select to_jsonb(c) from public.classes c where id=pg_temp.cid(22)),(select row from unresolved_original),'API edit preserves the unresolved class');
+set local role authenticated;
+select throws_ok($q$select public.update_class_operational_v1(pg_temp.cid(20),'{"schedule":"화 10:00-11:00"}',pg_temp.cid(105),null)$q$,'23P01','timetable_resource_conflict','new overlapping occupancy is still rejected by the real writer');
+reset role;
+select is((select schedule from public.classes where id=pg_temp.cid(20)),'월 10:00-11:00','rejected occupancy change leaves the original schedule intact');
+set local role service_role;
 select ok(jsonb_array_length(pg_temp.api('schools')->'data'->'items')>=2,'school lookup returns stable identities');
 select throws_ok($q$select pg_temp.api('context',jsonb_build_object('schoolId',pg_temp.cid(1),'schoolYear',1999))$q$,'22023','agent_invalid_range','school year bounded');
 select throws_ok($q$select pg_temp.api('preview',pg_temp.preview_input(),'read')$q$,'42501','agent_scope_forbidden','calendar read cannot write');
