@@ -317,10 +317,10 @@ function legacyRecoveryDetail({ firstState = 'skipped', blankDates = [] } = {}) 
   return payload;
 }
 
-async function recoveryEditor(t, payload) {
+async function recoveryEditor(t, payload, initial = {}) {
   const page = await setup(t, 'operations', { workspace: true,
-    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`, route: 'curriculum/lesson-design' });
-  await act(async () => page.requests.find(request => request.name === 'get_operations_class_lesson_design_detail_v1')
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`, route: 'curriculum/lesson-design', ...initial });
+  await act(async () => page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1)
     .resolve({ error: null, data: payload }));
   if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
   return page;
@@ -775,4 +775,286 @@ test('normalized generation previews dates without mutating saved sessions and d
  assert.equal(button?.disabled,true);
  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(session => session.id),original);
  assert.equal(page.requests.some(request => request.name === 'generate_class_lesson_sessions_v1'), false);
+});
+
+function freezePastCorrectionClock(t) {
+  const OriginalDate = globalThis.Date;
+  globalThis.Date = class extends OriginalDate {
+    constructor(...args) { super(...(args.length ? args : ['2026-10-10T12:00:00Z'])); }
+    static now() { return OriginalDate.parse('2026-10-10T12:00:00Z'); }
+  };
+  t.after(() => { globalThis.Date = OriginalDate; });
+}
+
+function pastCorrectionDetail() {
+  const payload = legacyRecoveryDetail();
+  payload.classItem.status = '수강';
+  const plan = payload.classItem.schedulePlan;
+  plan.rawPlanMarker = { preserved: ['synthetic', 'original'] };
+  plan.billingPeriods[0].rawPeriodMarker = 'preserve this raw period';
+  const first = plan.sessions.find(row => row.date === '2026-10-01');
+  Object.assign(first, { startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201), rawLessonMarker: 'preserve target wire fields' });
+  plan.sessionSchedules['2026-10-01'] = { startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201) };
+  const sixth = plan.sessions.find(row => row.date === '2026-10-06');
+  Object.assign(sixth, { state: 'exception', scheduleState: 'exception', startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201) });
+  plan.sessionStates['2026-10-06'] = { state: 'exception', memo: '' };
+  plan.sessions.find(row => row.date === '2026-09-29').unknownOccupancy = { syntheticHistoricalFlag: true };
+  return payload;
+}
+
+const pastPreviews = page => page.requests.filter(request => request.name === 'preview_past_lesson_state_correction_v1');
+const pastCommits = page => page.requests.filter(request => request.name === 'save_past_lesson_state_correction_v1');
+const correctionDialog = date => [...document.querySelectorAll('[role="dialog"]')]
+  .find(node => node.querySelector(`[aria-label="${date} 정정 사유"]`));
+function correctionButton(date, label) {
+  const button = [...(correctionDialog(date)?.querySelectorAll('button') || [])].find(node => node.textContent.trim() === label);
+  assert.ok(button, `rendered ${label}`);
+  return button;
+}
+async function changeCorrectionField(date, label, value) {
+  const control = correctionDialog(date)?.querySelector(`[aria-label="${date} ${label}"]`);
+  assert.ok(control, `rendered correction ${label}`);
+  await act(async () => {
+    control.focus();
+    const prototype = control.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype
+      : control.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(control, value);
+    control.dispatchEvent(new window.Event('input', { bubbles: true }));
+    control.dispatchEvent(new window.Event('change', { bubbles: true }));
+    control.dispatchEvent(new window.KeyboardEvent('keyup', { key: '1', bubbles: true }));
+  });
+  assert.equal(control.value, value);
+}
+async function openPastCorrection(page, date = '2026-10-01') {
+  await selectLegacyRecoveryRow(page, date);
+  const trigger = document.querySelector(`[aria-label="${date} 과거 상태 정정"]`);
+  assert.ok(trigger, `eligible raw ${date} has an independent correction action`);
+  assert.equal(trigger.disabled, false);
+  await act(async () => trigger.click());
+  assert.ok(correctionDialog(date), 'the real correction dialog opened');
+  return correctionDialog(date);
+}
+function pastSummary(request, unknownCount = 0, committed = false) {
+  return {
+    kind: 'past_lesson_state_correction', classId: request.args.p_class_id,
+    lessonId: request.args.p_lesson_id, date: request.args.p_session_date,
+    expectedState: request.args.p_expected_state, state: request.args.p_schedule_state,
+    planHash: 'a'.repeat(64), reviewRequired: !committed && unknownCount > 0,
+    unknownOccupancyReviewHash: 'b'.repeat(64), unknownOccupancyCount: unknownCount,
+    warnings: unknownCount ? [{ code: 'unknown_occupancy', count: unknownCount }] : [],
+    ...(committed ? { requestKey: request.args.p_request_key, outcome: 'applied', notifications: { state: 'not_requested' } } : {}),
+  };
+}
+async function previewPastCorrection(page, date = '2026-10-01', unknownCount = 0) {
+  await changeCorrectionField(date, '정정 사유', '  합성 기록의 상태 정정  ');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  const preview = pastPreviews(page).at(-1);
+  assert.ok(preview, 'explicit preview issued one read-only RPC');
+  await act(async () => preview.resolve({ error: null, data: pastSummary(preview, unknownCount) }));
+  return preview;
+}
+
+test('past correction: exact raw plan, required reason and explicit unknown acknowledgement gate one independent commit', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), raw = structuredClone(payload.classItem.schedulePlan);
+  const page = await recoveryEditor(t, payload), date = '2026-10-01';
+  const original = raw.sessions.find(row => row.date === date);
+  await openPastCorrection(page, date);
+  const emptyReasonPreview = correctionButton(date, '정정 내용 확인');
+  assert.equal(emptyReasonPreview.disabled, true);
+  await act(async () => emptyReasonPreview.click());
+  assert.equal(pastPreviews(page).length, 0);
+  const preview = await previewPastCorrection(page, date, 3);
+  assert.deepEqual(preview.args, {
+    p_class_id: id(999), p_expected_schedule_plan: raw, p_lesson_id: original.id,
+    p_session_date: date, p_expected_state: 'skipped', p_schedule_state: 'active',
+    p_reason: '합성 기록의 상태 정정', p_unknown_occupancy_review_hash: null,
+    p_acknowledge_unknown_occupancy: false,
+  });
+  assert.equal(pastCommits(page).length, 0, 'preview and warnings never write');
+  assert.equal(correctionButton(date, '상태 정정 저장').disabled, true);
+  const warning = correctionDialog(date).querySelector('[role="checkbox"]');
+  assert.ok(warning, 'unknown occupancy requires a real explicit checkbox');
+  assert.match(correctionDialog(date).textContent, /확인이 필요한 일정 경고를 확인했습니다/);
+  await act(async () => warning.click());
+  assert.equal(correctionButton(date, '상태 정정 저장').disabled, false);
+  const saveButton = correctionButton(date, '상태 정정 저장');
+  await act(async () => { saveButton.click(); saveButton.click(); });
+  assert.equal(pastCommits(page).length, 1);
+  const commit = pastCommits(page)[0];
+  assert.deepEqual(commit.args.p_expected_schedule_plan, raw, 'no planner projection is used as the expected version');
+  assert.equal(commit.args.p_unknown_occupancy_review_hash, 'b'.repeat(64));
+  assert.equal(commit.args.p_acknowledge_unknown_occupancy, true);
+  assert.match(commit.args.p_request_key, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  assert.equal(commit.retryEnabled, false);
+  assert.equal(saveRequests(page).filter(request => request.name !== 'save_past_lesson_state_correction_v1').length, 0);
+  assert.deepEqual(payload.classItem.schedulePlan, raw, 'all unrelated raw rows, fields and learning data stay immutable');
+  await act(async () => commit.resolve({ error: null, data: pastSummary(commit, 3, true) }));
+  const refreshed = structuredClone(payload);
+  const accepted = refreshed.classItem.schedulePlan.sessions.find(row => row.id === original.id);
+  Object.assign(accepted, { state: 'active', scheduleState: 'active' });
+  delete refreshed.classItem.schedulePlan.sessionStates[date];
+  const read = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.notEqual(read, page.requests.find(request => request.name === 'get_operations_class_lesson_design_detail_v1'), 'accepted commit performs an exact detail reread');
+  await act(async () => read.resolve({ error: null, data: refreshed }));
+  assert.equal(correctionDialog(date), undefined);
+  assert.equal(pastCommits(page).length, 1);
+  assert.equal(dirty(), false);
+});
+
+test('past correction: known collision blocks commit and keeps the entered reason', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), raw = structuredClone(payload.classItem.schedulePlan);
+  const page = await recoveryEditor(t, payload), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await changeCorrectionField(date, '정정 사유', '합성 충돌 확인');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  await act(async () => pastPreviews(page)[0].resolve({ data: null, error: { code: '23P01', message: 'synthetic private collision detail' } }));
+  assert.match(correctionDialog(date).textContent, /겹치는 일정이 확인되어 정정할 수 없습니다/);
+  assert.equal(document.activeElement, correctionDialog(date).querySelector('[role="alert"]'), 'the visible local error receives standard keyboard focus');
+  assert.equal(correctionDialog(date).textContent.includes('synthetic private'), false);
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).value, '합성 충돌 확인');
+  const commit = [...correctionDialog(date).querySelectorAll('button')].find(button => button.textContent.trim() === '상태 정정 저장');
+  assert.ok(!commit || commit.disabled, 'a rejected preview cannot authorize commit');
+  assert.equal(pastCommits(page).length, 0);
+  assert.deepEqual(payload.classItem.schedulePlan, raw);
+});
+
+test('past correction: uncertain save retains the draft and only explicit retry reuses the reviewed version and key', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  await act(async () => correctionButton(date, '상태 정정 저장').click());
+  const first = pastCommits(page)[0];
+  assert.equal(first.args.p_acknowledge_unknown_occupancy, true, 'explicit commit acknowledges the reviewed snapshot even when it has zero warnings');
+  await act(async () => first.resolve({ data: null, error: { code: '', message: 'TimeoutError: synthetic result unavailable' } }));
+  assert.match(correctionDialog(date).textContent, /정정 결과를 확인하지 못했습니다/);
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).value.trim(), '합성 기록의 상태 정정');
+  assert.equal(dirty(), true, 'the correction input participates in the existing draft-navigation guard');
+  assert.equal(pastCommits(page).length, 1, 'there is no automatic retry after an unknown outcome');
+  await act(async () => correctionButton(date, '상태 정정 저장').click());
+  assert.equal(pastCommits(page).length, 2);
+  assert.deepEqual(pastCommits(page)[1].args, first.args, 'explicit identical retry preserves raw version, review hash, reason and idempotency key');
+  assert.equal(saveRequests(page).filter(request => request.name !== 'save_past_lesson_state_correction_v1').length, 0);
+});
+
+test('past correction: changed reason invalidates pending preview and stale warning cannot authorize commit', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await changeCorrectionField(date, '정정 사유', '첫 합성 사유');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  const oldPreview = pastPreviews(page)[0];
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).disabled, false);
+  await changeCorrectionField(date, '정정 사유', '변경한 합성 사유');
+  await act(async () => oldPreview.resolve({ data: pastSummary(oldPreview, 2), error: null }));
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).value, '변경한 합성 사유');
+  const commit = [...correctionDialog(date).querySelectorAll('button')].find(button => button.textContent.trim() === '상태 정정 저장');
+  assert.ok(!commit || commit.disabled, 'the former reason review is stale');
+  assert.equal(pastCommits(page).length, 0);
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  assert.equal(pastPreviews(page).length, 2);
+  assert.equal(pastPreviews(page)[1].args.p_reason, '변경한 합성 사유');
+});
+
+test('past correction: StrictMode lifecycle replay still allows an explicit current-session preview', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail(), { strict: true }), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  assert.equal(pastPreviews(page).length, 1);
+  assert.equal(correctionButton(date, '상태 정정 저장').disabled, false);
+  assert.equal(pastCommits(page).length, 0);
+});
+
+test('past correction: exact selected-row state-only draft is eligible but unrelated authored input stays outside this path', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), page = await recoveryEditor(t, payload), date = '2026-10-06';
+  const selected = await selectLegacyRecoveryRow(page, date);
+  const normal = [...selected.querySelectorAll('button')].find(button => button.textContent.trim() === '정상');
+  assert.ok(normal);
+  await act(async () => normal.click());
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 0);
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  assert.equal(pastPreviews(page)[0].args.p_expected_state, 'exception');
+  assert.equal(pastPreviews(page)[0].args.p_schedule_state, 'active');
+  assert.deepEqual(pastPreviews(page)[0].args.p_expected_schedule_plan, payload.classItem.schedulePlan);
+});
+
+test('past correction: unrelated dirty plan cannot enter the narrow correction route', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await editPlan(page, 'UNRELATED AUTHORED PERIOD');
+  await selectLegacyRecoveryRow(page, date);
+  const trigger = document.querySelector(`[aria-label="${date} 과거 상태 정정"]`);
+  assert.ok(!trigger || trigger.disabled);
+  assert.equal(pastPreviews(page).length, 0);
+  assert.equal(pastCommits(page).length, 0);
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'UNRELATED AUTHORED PERIOD');
+  assert.equal(dirty(), true);
+});
+
+test('past correction: refreshed raw version invalidates review instead of submitting an old expected plan', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), page = await recoveryEditor(t, payload), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  const updated = structuredClone(payload);
+  updated.classItem.schedulePlan.sessions.find(row => row.date === '2026-09-29').unknownOccupancy.syntheticHistoricalFlag = false;
+  await refreshDetail(page, updated);
+  const dialog = correctionDialog(date);
+  const commit = [...(dialog?.querySelectorAll('button') || [])].find(button => button.textContent.trim() === '상태 정정 저장');
+  assert.ok(!commit || commit.disabled, 'a changed authoritative raw plan revokes the accepted review');
+  assert.equal(pastCommits(page).length, 0);
+  assert.deepEqual(payload.classItem.schedulePlan.rawPlanMarker, { preserved: ['synthetic', 'original'] });
+});
+
+test('past correction: late preview from another class cannot populate or authorize the current editor', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await changeCorrectionField(date, '정정 사유', '이전 수업의 합성 사유');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  const old = pastPreviews(page)[0];
+  window.history.replaceState(null, '', `?lessonDesign=1&classId=${id(998)}&section=lesson-design-periods`);
+  await page.render();
+  const next = pastCorrectionDetail(); next.classItem.id = id(998);
+  const nextRead = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.equal(nextRead.args.p_class_id, id(998));
+  await act(async () => nextRead.resolve({ data: next, error: null }));
+  await act(async () => old.resolve({ data: pastSummary(old, 3), error: null }));
+  assert.equal(correctionDialog(date), undefined);
+  assert.equal(pastCommits(page).length, 0);
+  assert.equal(dirty(), false);
+});
+
+test('past correction: late accepted save after actor revocation cannot refresh or announce success for the new actor', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  await act(async () => correctionButton(date, '상태 정정 저장').click());
+  const old = pastCommits(page)[0];
+  const readsBefore = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').length;
+  await page.auth({ user: null, role: null });
+  await act(async () => old.resolve({ data: pastSummary(old, 0, true), error: null }));
+  assert.equal(correctionDialog(date), undefined);
+  assert.equal(dirty(), false);
+  assert.equal(page.observed.lessonDesignSaveNotice, '');
+  assert.equal(page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').length, readsBefore);
+});
+
+test('past correction: teacher actor cannot expose the administrator correction action or issue its RPCs', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), page = await recoveryEditor(t, payload), date = '2026-10-01';
+  await page.auth({ role: 'teacher' });
+  const read = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  await act(async () => read.resolve({ data: payload, error: null }));
+  await selectLegacyRecoveryRow(page, date);
+  assert.equal(document.querySelector(`[aria-label="${date} 과거 상태 정정"]`), null);
+  assert.equal(pastPreviews(page).length, 0);
+  assert.equal(pastCommits(page).length, 0);
 });

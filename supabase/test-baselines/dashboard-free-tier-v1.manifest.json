@@ -679,6 +679,11 @@
       "fileName": "20260930092804_agent_management_calendar.sql",
       "status": "final",
       "sha256": "99d388f89a05d66fe17cbd41cf2a171114541dfab11e6d79b57f7f4b6f59dab7"
+    },
+    {
+      "fileName": "20261002083000_narrow_past_lesson_state_correction.sql",
+      "status": "final",
+      "sha256": "8456b73483c15448e5a017234578cca5e6797a192641e94197b522a84d52f9dc"
     }
   ]
 }

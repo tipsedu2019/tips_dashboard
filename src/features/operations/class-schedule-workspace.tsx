@@ -3,6 +3,9 @@
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
 import Link from "next/link";
 import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
+import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
+  type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
+import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
 import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
 import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails, snapshotRestoredLegacyLessonDetails } from "./legacy-lesson-defaults";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
@@ -2266,6 +2269,14 @@ export function ClassScheduleWorkspace() {
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
   const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
   const [legacyLessonValidationDate, setLegacyLessonValidationDate] = useState("");
+  const [pastCorrectionOpen, setPastCorrectionOpen] = useState(false);
+  const [pastCorrectionDirty, setPastCorrectionDirty] = useState(false);
+  const [pastCorrectionContext, setPastCorrectionContext] = useState<{
+    token: { revision: number; classId: string }; scopeKey: string;
+    target: LegacyPastStateCorrectionTarget; expectedPlan: Record<string, unknown>;
+    state: "active" | "exception"; stateLocked: boolean; submittedDraft: Record<string, unknown> | null;
+  } | null>(null);
+  const pastCorrectionScopeRef = useRef("");
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
   const [generationPreview, setGenerationPreview] = useState<Record<string, unknown> | null>(null);
   const [generationSaving, setGenerationSaving] = useState(false);
@@ -2319,7 +2330,7 @@ export function ClassScheduleWorkspace() {
     !lessonDraftEqual(draft, normalizedLessonSessionBaselines[id]));
 
   const { requestNavigation, confirmation: draftNavigationConfirmation } = useDraftNavigation({
-    dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty)),
+    dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty || pastCorrectionDirty)),
   });
   const handlePageChange = (page: number) => {
     if (totalCount === null || displayRequest.mode !== "class_schedule") return;
@@ -2352,6 +2363,7 @@ export function ClassScheduleWorkspace() {
 
     setGenerationPreview(null); setGenerationSaving(false); setIsLessonDesignSaving(false);
     setIsNormalizedLessonSessionSaving(false); setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
+    setPastCorrectionOpen(false); setPastCorrectionDirty(false); setPastCorrectionContext(null);
   }
   const data = useMemo(() => {
     const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
@@ -4380,6 +4392,60 @@ export function ClassScheduleWorkspace() {
   } : null;
   const legacySelectedDefaults = legacyRegularLesson && selectedLessonSession && !legacyRegularDateAmbiguous
     ? resolveLegacyLessonDetails(selectedLessonSession.dateValue, legacyLessonSnapshotDefaults) : null;
+  const pastCorrectionSavedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
+  const pastCorrectionTarget = lessonScheduleReadReady && !isNormalizedLessonSchedule && actorScope?.endsWith(":admin")
+    && selectedRowClassItem?.status === "수강" && selectedLessonSession
+    ? resolveLegacyPastStateCorrectionTarget(pastCorrectionSavedPlan, selectedLessonSession.id) : null;
+  const pastCorrectionDraft = pastCorrectionTarget
+    ? resolveLegacyPastStateCorrectionDraft(lessonPlanBaseline, normalizedLessonPlan, pastCorrectionTarget) : null;
+  const pastCorrectionScope = `${actorScope || ""}:${lessonPlanSourceKey}:${selectedLessonSession?.id || ""}`;
+  pastCorrectionScopeRef.current = pastCorrectionScope;
+  const pastCorrectionRpc = useCallback(async (name: string, parameters: Record<string, unknown>) => {
+    if (!supabase) throw new Error("past_correction_unavailable");
+    // The reviewed correction is a separate narrow operation, never a plan save.
+    return await supabase.rpc(name, parameters).abortSignal(AbortSignal.timeout(20_000)).retry(false);
+  }, []);
+  useEffect(() => {
+    if (!pastCorrectionOpen || !pastCorrectionContext || pastCorrectionContext.scopeKey === pastCorrectionScope) return;
+    setPastCorrectionOpen(false); setPastCorrectionDirty(false);
+    setLessonDesignSaveNotice("일정 정보가 바뀌었습니다. 정정 내용을 다시 확인해 주세요.");
+  }, [pastCorrectionContext, pastCorrectionOpen, pastCorrectionScope]);
+  const openPastCorrection = () => {
+    if (!pastCorrectionTarget || !pastCorrectionDraft || !selectedRow || isLessonDesignSaving) return;
+    const token = lessonMutationLifecycleRef.current?.capture(selectedRow.id);
+    if (!token) return;
+    setPastCorrectionContext({ token, scopeKey: pastCorrectionScope, target: pastCorrectionTarget,
+      expectedPlan: structuredClone(pastCorrectionSavedPlan), state: pastCorrectionDraft.state,
+      stateLocked: pastCorrectionDraft.dirty, submittedDraft: lessonPlanDraftRef.current });
+    setPastCorrectionOpen(true);
+  };
+  const acceptPastCorrection = async (input: LegacyPastStateCorrectionInput) => {
+    const context = pastCorrectionContext;
+    if (!context || pastCorrectionScopeRef.current !== context.scopeKey
+      || !lessonMutationLifecycleRef.current?.isCurrent(context.token)) return;
+    const current = lessonPlanDraftRef.current;
+    const proof = resolveLegacyPastStateCorrectionDraft(lessonPlanBaselineRef.current,
+      current ? normalizeLessonDraft(current) : null, context.target);
+    if (proof?.dirty && proof.state === input.state && current
+      && lessonDraftEqual(current, context.submittedDraft)) {
+      lessonPlanBaselineRef.current = current; setLessonPlanBaseline(current);
+    }
+    setPastCorrectionOpen(false); setPastCorrectionDirty(false);
+    setLessonDesignSaveError(""); setLessonDesignSaveNotice("과거 상태를 정정했습니다.");
+    try {
+      await invalidatePublicClassesCacheAfterMutation(supabase!, "schedule");
+    } catch {
+      if (lessonMutationLifecycleRef.current?.isCurrent(context.token)) setLessonDesignSaveNotice("과거 상태를 정정했습니다. 공개 수업 캐시 갱신 대기 중입니다.");
+    }
+    if (!lessonMutationLifecycleRef.current?.isCurrent(context.token)) return;
+    try { await refreshSelectedLessonDetail(context.token); }
+    catch {
+      if (lessonMutationLifecycleRef.current?.isCurrent(context.token)) {
+        setLessonReadRetryNeeded(true);
+        setLessonDesignSaveError("정정한 내용을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
+      }
+    }
+  };
   useEffect(() => {
     if (!legacyLessonValidationDate || !lessonMonthDetailsOpen) return;
     const frame = window.requestAnimationFrame(() => {
@@ -4555,6 +4621,12 @@ export function ClassScheduleWorkspace() {
                         </div>
                       ) : (
                       <>
+                        {pastCorrectionTarget ? <div className="mb-3 grid gap-2">
+                          <Button type="button" size="form" variant="outline"
+                            aria-label={`${pastCorrectionTarget.date} 과거 상태 정정`}
+                            disabled={!pastCorrectionDraft || isLessonDesignSaving} onClick={openPastCorrection}>과거 상태 정정</Button>
+                          {!pastCorrectionDraft ? <p className="text-sm text-muted-foreground">다른 일정 수정이 있습니다. 초안을 저장하거나 되돌린 뒤 정정해 주세요.</p> : null}
+                        </div> : null}
                         <div className="grid grid-cols-4 gap-1.5">
                           <Button
                             type="button"
@@ -5682,6 +5754,17 @@ export function ClassScheduleWorkspace() {
         </Dialog>
       )}
 
+      {pastCorrectionContext ? <LegacyPastStateCorrectionDialog
+        key={pastCorrectionContext.scopeKey}
+        open={pastCorrectionOpen && pastCorrectionContext.scopeKey === pastCorrectionScope}
+        onOpenChange={setPastCorrectionOpen} classId={pastCorrectionContext.token.classId}
+        expectedPlan={pastCorrectionContext.expectedPlan} target={pastCorrectionContext.target}
+        initialState={pastCorrectionContext.state} stateLocked={pastCorrectionContext.stateLocked}
+        scopeKey={pastCorrectionContext.scopeKey} rpc={pastCorrectionRpc}
+        isCurrent={() => pastCorrectionScopeRef.current === pastCorrectionContext.scopeKey
+          && lessonMutationLifecycleRef.current?.isCurrent(pastCorrectionContext.token) === true}
+        onApplied={acceptPastCorrection} onDirtyChange={setPastCorrectionDirty} onReload={retryLessonDesignRead}
+      /> : null}
     </>
   );
 }
