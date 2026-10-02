@@ -114,7 +114,7 @@ export function LegacyPastStateCorrectionDialog({ open, onOpenChange, classId, e
         {preview ? <div className="grid min-w-0 gap-3">
           <p className="text-sm">{target.date} · {currentLabel} → {state === "active" ? "정상" : "휴강"}</p>
           {preview.unknownOccupancyCount > 0 ? <>
-            <Alert><AlertDescription className="min-w-0 break-words">확인이 필요한 일정 {preview.unknownOccupancyCount}건이 있습니다.</AlertDescription></Alert>
+            <Alert><AlertDescription className="min-w-0 break-words">시간·강사·강의실 정보가 부족한 일정 {preview.unknownOccupancyCount}건이 있습니다.</AlertDescription></Alert>
             <label className="flex min-w-0 items-start gap-2 text-sm">
               <Checkbox aria-label="확인이 필요한 일정 경고를 확인했습니다." checked={acknowledge} disabled={Boolean(busy)}
                 onCheckedChange={checked => setAcknowledge(checked === true)} />

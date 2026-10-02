@@ -873,6 +873,8 @@ test('past correction: exact raw plan, required reason and explicit unknown ackn
   });
   assert.equal(pastCommits(page).length, 0, 'preview and warnings never write');
   assert.equal(correctionButton(date, '상태 정정 저장').disabled, true);
+  assert.equal(correctionDialog(date).querySelector('[role="alert"]').textContent,
+    '시간·강사·강의실 정보가 부족한 일정 3건이 있습니다.');
   const warning = correctionDialog(date).querySelector('[role="checkbox"]');
   assert.ok(warning, 'unknown occupancy requires a real explicit checkbox');
   assert.match(correctionDialog(date).textContent, /확인이 필요한 일정 경고를 확인했습니다/);
