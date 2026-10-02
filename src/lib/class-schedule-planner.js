@@ -1330,6 +1330,11 @@ export function calculateSchedulePlan(planInput) {
 
     let countedSessions = 0;
     const editorEntries = [];
+    // Reserve existing dates before sequence fallback can claim their identity.
+    // Removed dates may still be reused when an operator reschedules a lesson.
+    const retainedSourceDates = new Set(
+      baseEntries.map((entry) => entry.originalDate || entry.date),
+    );
 
     baseEntries.forEach((entry) => {
       const countsTowardTotal = isCountedScheduleState(entry.state);
@@ -1358,7 +1363,10 @@ export function calculateSchedulePlan(planInput) {
         existing = takeSessionFromQueue(
           existingMaps.countedByBillingAndNumber,
           `${entry.billingId}:${countedSessions}`,
-          { claimedSessionIds: claimedExistingSessionIds },
+          {
+            claimedSessionIds: claimedExistingSessionIds,
+            predicate: (session) => !retainedSourceDates.has(getSourceDateForSession(session)),
+          },
         );
       }
 

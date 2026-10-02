@@ -4,6 +4,7 @@ import { timetableOperationalErrorMessage } from "../academic/timetable-operatio
 import Link from "next/link";
 import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
 import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
+import { snapshotNewLegacyLessonDetails } from "./legacy-lesson-defaults";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -2813,6 +2814,18 @@ export function ClassScheduleWorkspace() {
     () => (lessonPlanDraft ? normalizeLessonDraft(lessonPlanDraft) : null),
     [lessonPlanDraft, normalizeLessonDraft],
   );
+  const legacyLessonSnapshotDefaults = useMemo(() => ({
+    schedule: text(selectedRowClassItem?.schedule || selectedRow?.scheduleLabel),
+    teacher: text(selectedRowClassItem?.teacher || selectedRow?.teacher),
+    room: text(selectedRowClassItem?.classroom || selectedRowClassItem?.classroomName || selectedRowClassItem?.room || selectedRowClassItem?.roomName),
+    teacherCatalogs: lessonDesignTeacherCatalogs,
+    classroomCatalogs: lessonDesignClassroomCatalogs,
+  }), [lessonDesignClassroomCatalogs, lessonDesignTeacherCatalogs, selectedRow, selectedRowClassItem]);
+  // Capture defaults only when an operator generates new dates, never on read.
+  const buildEditedLessonDraft = useCallback((plan: Record<string, unknown>, previous: Record<string, unknown>) => {
+    const normalized = normalizeLessonDraft(plan);
+    return isNormalizedLessonSchedule ? normalized : snapshotNewLegacyLessonDetails(normalized, previous, legacyLessonSnapshotDefaults);
+  }, [isNormalizedLessonSchedule, legacyLessonSnapshotDefaults, normalizeLessonDraft]);
   const lessonPlanForSave = useMemo(
     () => {
       if (!normalizedLessonPlan) return null;
@@ -3142,21 +3155,21 @@ export function ClassScheduleWorkspace() {
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       setLessonPlanDraft((current) => {
         const nextBase = (current || {}) as Record<string, unknown>;
-        const nextDraft = normalizeLessonDraft(updater(nextBase));
+        const nextDraft = buildEditedLessonDraft(updater(nextBase), nextBase);
         lessonPlanDraftRef.current = nextDraft;
         return nextDraft;
       });
       setLessonDesignSaveError("");
       setLessonDesignSaveNotice("");
     },
-    [normalizeLessonDraft],
+    [buildEditedLessonDraft],
   );
   const buildNextLessonPlanDraft = useCallback(
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       const nextBase = (lessonPlanDraftRef.current || {}) as Record<string, unknown>;
-      return normalizeLessonDraft(updater(nextBase));
+      return buildEditedLessonDraft(updater(nextBase), nextBase);
     },
-    [normalizeLessonDraft],
+    [buildEditedLessonDraft],
   );
 
   const syncLessonDesignDraftSnapshot = useCallback(
@@ -4331,11 +4344,16 @@ export function ClassScheduleWorkspace() {
     { key: "teacher", label: `선생님 ${lessonDesignTeacherName || "미정"}` },
     { key: "classroom", label: `강의실 ${lessonDesignClassroomName || "미정"}` },
   ];
+  const legacyRegularLesson = selectedLessonSessionEditableState === "active" && !selectedLessonSession?.originalDate;
+  const legacyRegularDateAmbiguous = legacyRegularLesson && Boolean(selectedLessonSession)
+    && (lessonDesignSnapshot?.sessions.filter(session => session.dateValue === selectedLessonSession?.dateValue).length || 0) > 1;
+  const legacyTeacherName = legacyRegularLesson ? text(selectedLessonSession?.teacherNameSnapshot) : lessonDesignTeacherName;
+  const legacyClassroomName = legacyRegularLesson ? text(selectedLessonSession?.classroomNameSnapshot) : lessonDesignClassroomName;
   const legacyLessonDetails = selectedLessonSession ? {
     startTime: selectedLessonSession.startTime,
     endTime: selectedLessonSession.endTime,
-    teacherCatalogId: selectedLessonSession.teacherCatalogId || (teacherCatalogOptions.filter(option => option.name === lessonDesignTeacherName).length === 1 ? teacherCatalogOptions.find(option => option.name === lessonDesignTeacherName)?.id || "" : ""),
-    classroomCatalogId: selectedLessonSession.classroomCatalogId || (classroomCatalogOptions.filter(option => option.name === lessonDesignClassroomName).length === 1 ? classroomCatalogOptions.find(option => option.name === lessonDesignClassroomName)?.id || "" : ""),
+    teacherCatalogId: selectedLessonSession.teacherCatalogId || (teacherCatalogOptions.filter(option => option.name === legacyTeacherName).length === 1 ? teacherCatalogOptions.find(option => option.name === legacyTeacherName)?.id || "" : ""),
+    classroomCatalogId: selectedLessonSession.classroomCatalogId || (classroomCatalogOptions.filter(option => option.name === legacyClassroomName).length === 1 ? classroomCatalogOptions.find(option => option.name === legacyClassroomName)?.id || "" : ""),
   } : null;
   const lessonDesignReturnLabel = getLessonDesignReturnLabel(requestedLessonReturnPath);
   const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel(lessonDesignReturnLabel);
@@ -4543,12 +4561,13 @@ export function ClassScheduleWorkspace() {
                         </div>
 
                         <div className="mt-3 grid gap-2">
-                          {legacyLessonDetails && (selectedLessonSessionEditableState === "makeup" || selectedLessonSessionEditableState === "force_active" || legacyLessonDetails.startTime || legacyLessonDetails.endTime) ? (
-                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions}
-                              onChange={value => updateLessonPlanDraft(current => ({ ...current,
+                          {legacyLessonDetails && (legacyRegularLesson || selectedLessonSessionEditableState === "makeup" || selectedLessonSessionEditableState === "force_active" || legacyLessonDetails.startTime || legacyLessonDetails.endTime) ? (
+                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions} disabled={legacyRegularDateAmbiguous}
+                              onChange={value => { if (legacyRegularDateAmbiguous) return; updateLessonPlanDraft(current => ({ ...current,
                                 sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}), [selectedLessonSession.dateValue]: value },
-                              }))} />
+                              })); }} />
                           ) : null}
+                          {legacyRegularDateAmbiguous ? <p role="alert" className="text-sm text-destructive">같은 날짜에 여러 회차가 있어 개별 시간·선생님·강의실을 수정할 수 없습니다.</p> : null}
                           <Textarea
                             value={selectedLessonSessionEditableMemo}
                             onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}

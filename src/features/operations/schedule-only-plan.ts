@@ -79,23 +79,66 @@ export function scheduleOnlyDraft(plan: Plan): Plan {
   };
 }
 
-// Validate only newly introduced/changed non-regular occupancy. Older incomplete
-// records remain readable and metadata-only saves must not rewrite their history.
-export function legacyLessonScheduleValidationError(plan: Plan, savedPlan: Plan): string {
+const occupancyFields = ['startTime', 'endTime', 'teacherCatalogId', 'classroomCatalogId', 'teacherName', 'classroomName'];
+// Match the final legacy SQL producer's occupancy fingerprint. In particular,
+// identity, unknown wire fields and absent/false forced status are significant.
+const occupancyIgnoredFields = new Set([
+  'memo', 'publicNote', 'teacherNote', 'textbook', 'textbooks', 'homework', 'content',
+  'lessonContent', 'learningContent', 'textbookEntries', 'progressStatus',
+  'sessionKey', 'session_key', 'billingId', 'billingLabel', 'billingColor', 'sessionNumber', 'state',
+]);
+const nonemptyJsonText = (value: unknown) => value === undefined || value === null || value === '' ? null : String(value);
+const legacyState = (row: Session) => nonemptyJsonText(row.scheduleState) ?? nonemptyJsonText(row.state) ?? 'active';
+function orderedJson(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(orderedJson);
+  if (value !== null && typeof value === 'object') {
+    const object = value as Record<string, unknown>;
+    return Object.fromEntries(Object.keys(object).sort().map(key => [key, orderedJson(object[key])]));
+  }
+  return value;
+}
+function legacyOccupancyKey(row: Session): string {
+  // Compare what is actually sent to SQL; undefined properties disappear.
+  const wire = JSON.parse(JSON.stringify(row)) as Session;
+  const occupancy = Object.fromEntries(Object.entries(wire).filter(([key]) => !occupancyIgnoredFields.has(key)));
+  occupancy.identity = nonemptyJsonText(wire.id) ?? nonemptyJsonText(wire.sessionKey);
+  occupancy.scheduleState = legacyState(wire);
+  return JSON.stringify(orderedJson(occupancy));
+}
+
+// Existing incomplete occupancy stays readable. New past regular lessons and
+// every explicit override need complete details; SQL remains the final guard.
+export function legacyLessonScheduleValidationError(
+  plan: Plan,
+  savedPlan: Plan,
+  today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date()),
+): string {
   const saved = Array.isArray(savedPlan.sessions) ? savedPlan.sessions as Session[] : [];
-  const fields = ['date', 'originalDate', 'makeupDate', 'isForced', 'startTime', 'endTime', 'teacherCatalogId', 'classroomCatalogId', 'teacherName', 'classroomName'];
-  const key = (row: Session) => JSON.stringify([String(row.scheduleState || row.state || 'active'), ...fields.map(field => row[field] ?? '')]);
+  const sessions = Array.isArray(plan.sessions) ? plan.sessions as Session[] : [];
   const existing = new Map<string, number>();
-  saved.forEach(row => existing.set(key(row), (existing.get(key(row)) || 0) + 1));
-  for (const row of Array.isArray(plan.sessions) ? plan.sessions as Session[] : []) {
-    const identity = key(row), count = existing.get(identity) || 0;
+  saved.forEach(row => {
+    const identity = legacyOccupancyKey(row);
+    existing.set(identity, (existing.get(identity) || 0) + 1);
+  });
+  const dateCounts = new Map<string, number>();
+  sessions.forEach(row => {
+    const date = String(row.date || '');
+    dateCounts.set(date, (dateCounts.get(date) || 0) + 1);
+  });
+  for (const row of sessions) {
+    const identity = legacyOccupancyKey(row), count = existing.get(identity) || 0;
     if (count) { existing.set(identity, count - 1); continue; }
-    const state = String(row.scheduleState || row.state || 'active');
-    if (['exception', 'skipped', 'tbd'].includes(state) || (state === 'active' && !row.isForced && !row.originalDate)) continue;
+    const state = legacyState(row);
+    if (['exception', 'skipped', 'tbd'].includes(state)) continue;
     const date = String(row.date || '선택한 날짜');
-    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.startTime || '')) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.endTime || ''))) return `${date} 보강의 시작·종료 시간을 입력해 주세요.`;
+    const regular = state === 'active' && !row.isForced && !row.originalDate;
+    const hasOverride = occupancyFields.some(field => Object.prototype.hasOwnProperty.call(row, field) && row[field] !== undefined);
+    if (regular && !hasOverride && date >= today) continue;
+    if (regular && hasOverride && (dateCounts.get(date) || 0) > 1) return `${date} 같은 날짜에 여러 회차가 있어 개별 시간·선생님·강의실을 수정할 수 없습니다. 입력을 확인해 주세요.`;
+    const kind = regular ? '수업' : '보강';
+    if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.startTime || '')) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.endTime || ''))) return `${date} ${kind}의 시작·종료 시간을 입력해 주세요.`;
     if (String(row.startTime) >= String(row.endTime)) return `${date} 종료 시간을 시작 시간 이후로 입력해 주세요.`;
-    if (!(row.teacherCatalogId || row.teacherName) || !(row.classroomCatalogId || row.classroomName)) return `${date} 보강의 선생님·강의실을 선택해 주세요.`;
+    if (!(row.teacherCatalogId || row.teacherName) || !(row.classroomCatalogId || row.classroomName)) return `${date} ${kind}의 선생님·강의실을 선택해 주세요.`;
   }
   return '';
 }

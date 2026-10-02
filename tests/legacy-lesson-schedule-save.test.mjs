@@ -74,3 +74,65 @@ test('save validation identifies new makeup without times while accepting unchan
   assert.match(validate({sessions:[{date:'2026-10-09',scheduleState:'makeup',...occupancy,endTime:'18:00'}]},old), /종료/);
   assert.match(validate({sessions:[{date:'2026-10-09',scheduleState:'makeup',...occupancy,startTime:'19:75'}]},old), /시작·종료/);
 });
+
+const regularLesson = (date, patch = {}) => ({ id: 'synthetic:' + date, date, scheduleState: 'active', isForced: false, ...patch });
+const validateLessons = (sessions, saved = [], today = '2026-10-02') => legacyValidation.legacyLessonScheduleValidationError({ sessions }, { sessions: saved }, today);
+
+test('regular lesson preflight distinguishes past, Seoul today and future, with explicit snapshots accepted', () => {
+  assert.match(validateLessons([regularLesson('2026-10-01')]), /2026-10-01.*수업.*시작·종료/);
+  assert.equal(validateLessons([regularLesson('2026-10-02')]), '');
+  assert.equal(validateLessons([regularLesson('2026-10-06')]), '');
+  assert.equal(validateLessons([regularLesson('2026-10-01', occupancy)]), '');
+  assert.equal(validateLessons([regularLesson('2026-10-06', occupancy)]), '');
+  for (const state of ['exception', 'skipped', 'tbd']) {
+    assert.equal(validateLessons([regularLesson('2026-10-01', { scheduleState: state })]), '');
+  }
+});
+
+test('preflight defaults to Seoul business date at UTC evening instead of UTC date', () => {
+  const RealDate = globalThis.Date;
+  globalThis.Date = class extends RealDate {
+    constructor(...args) { super(...(args.length ? args : ['2026-10-01T15:00:00.000Z'])); }
+    static now() { return RealDate.parse('2026-10-01T15:00:00.000Z'); }
+  };
+  try {
+    assert.match(legacyValidation.legacyLessonScheduleValidationError({ sessions: [regularLesson('2026-10-01')] }, { sessions: [] }), /2026-10-01.*수업/);
+    assert.equal(legacyValidation.legacyLessonScheduleValidationError({ sessions: [regularLesson('2026-10-02')] }, { sessions: [] }), '');
+  } finally { globalThis.Date = RealDate; }
+});
+
+test('every explicit regular occupancy key, including empty and null, requires complete details even in the future', () => {
+  for (const field of ['startTime', 'endTime', 'teacherCatalogId', 'classroomCatalogId', 'teacherName', 'classroomName']) {
+    for (const value of ['', null]) {
+      assert.match(validateLessons([regularLesson('2026-10-06', { [field]: value })]), /2026-10-06.*수업.*시작·종료/, field + ':' + value);
+    }
+  }
+  assert.equal(validateLessons([regularLesson('2026-10-06', { startTime: undefined })]), '', 'undefined does not become an override key on the JSON wire');
+  assert.match(validateLessons([regularLesson('2026-10-06', { ...occupancy, endTime: '18:00' })]), /종료.*시작/);
+  assert.match(validateLessons([regularLesson('2026-10-06', { ...occupancy, classroomCatalogId: '' })]), /수업.*선생님·강의실/);
+  assert.equal(validateLessons([regularLesson('2026-10-06', { startTime: '17:00', endTime: '19:00', teacherName: 'Synthetic teacher', classroomName: 'Synthetic room' })]), '');
+});
+
+test('unchanged historical occupancy and content-only edits are preserved without hiding identity or wire-field changes', () => {
+  const historical = regularLesson('2026-09-29', { teacherNote: 'retained synthetic content' });
+  const plan = { sessions: [{ ...historical, teacherNote: 'edited synthetic content', billingLabel: 'Display label', sessionNumber: 9 }] };
+  const saved = { sessions: [historical] };
+  const before = structuredClone({ plan, saved });
+  assert.equal(legacyValidation.legacyLessonScheduleValidationError(plan, saved, '2026-10-02'), '');
+  assert.deepEqual({ plan, saved }, before, 'preflight must not mutate caller objects');
+  assert.match(validateLessons([{ ...historical, id: 'new identity' }], [historical]), /2026-09-29.*수업/);
+  assert.match(validateLessons([{ ...historical, occupancyExtension: 'new synthetic metadata' }], [historical]), /2026-09-29.*수업/, 'unknown wire fields remain in SQL occupancy fingerprints');
+  const absentForced = { ...historical }; delete absentForced.isForced;
+  assert.match(validateLessons([historical], [absentForced]), /2026-09-29.*수업/, 'absent and false differ in the actual SQL fingerprint');
+  const aliasedState = { ...historical, state: 'active' }; delete aliasedState.scheduleState;
+  assert.equal(validateLessons([historical], [aliasedState]), '', 'SQL canonicalizes the state alias');
+});
+
+test('date-keyed regular overrides reject ambiguous dates while unchanged duplicate history remains readable', () => {
+  const first = regularLesson('2026-10-06', { id: 'synthetic:first' });
+  const second = regularLesson('2026-10-06', { id: 'synthetic:second' });
+  assert.match(validateLessons([{ ...first, ...occupancy }, { ...second, ...occupancy }], [first, second]), /2026-10-06.*(같은 날짜|여러 회차)/);
+  const historical = [regularLesson('2026-09-29', { id: 'old:first' }), regularLesson('2026-09-29', { id: 'old:second' })];
+  assert.equal(validateLessons(historical.map(row => ({ ...row })), historical), '');
+  assert.match(validateLessons([historical[0], { ...historical[0] }], [historical[0]]), /2026-09-29.*수업/, 'a duplicate may not consume the same historical exemption twice');
+});
