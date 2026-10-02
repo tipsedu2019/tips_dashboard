@@ -78,6 +78,33 @@ function weekdayDefaults(defaults: LegacyLessonDefaults): Map<string, Details | 
   return result;
 }
 
+export function resolveLegacyLessonDetails(date: string, defaults: LegacyLessonDefaults): Details | null {
+  const day = weekday(date);
+  return day ? weekdayDefaults(defaults).get(day) || null : null;
+}
+
+// Only an explicit operator edit that restores this existing regular date may
+// capture today's defaults. Reading a cancelled or historical row never does.
+export function snapshotRestoredLegacyLessonDetails(
+  plan: Plan, previousPlan: Plan, defaults: LegacyLessonDefaults, date: string,
+): Plan {
+  const sessions = rows(plan.sessions), previous = rows(previousPlan.sessions);
+  const currentRows = sessions.filter(row => rowDate(row) === date);
+  const previousRows = previous.filter(row => rowDate(row) === date);
+  if (currentRows.length !== 1 || previousRows.length !== 1) return plan;
+  const row = currentRows[0], old = previousRows[0];
+  if (identity(row) !== identity(old) || !identity(row)
+    || !['skipped', 'exception', 'tbd'].includes(text(old.scheduleState) || text(old.state))
+    || (text(row.scheduleState) || text(row.state) || 'active') !== 'active'
+    || row.isForced || row.originalDate) return plan;
+  const schedules = record(plan.sessionSchedules);
+  if (hasWireOverride(row) || hasWireOverride(record(schedules[date]))) return plan;
+  const details = resolveLegacyLessonDetails(date, defaults);
+  if (!details) return plan;
+  return { ...plan, sessions: sessions.map(item => item === row ? { ...item, ...details } : item),
+    sessionSchedules: { ...schedules, [date]: { ...record(schedules[date]), ...details } } };
+}
+
 // Called only after an operator generates a draft. This is a creation-time
 // snapshot, never a reader that infers historical resources from today's class.
 export function snapshotNewLegacyLessonDetails(

@@ -293,6 +293,191 @@ test('legacy October date edits snapshot only two new lessons, preserve stored h
   assert.deepEqual(saveRequests(page)[1].args,first.args,'identical retry retains payload, expected plan and request key');
 });
 
+function legacyRecoveryDetail({ firstState = 'skipped', blankDates = [] } = {}) {
+  const payload = septemberOctoberDetail();
+  payload.classItem.schedule = '화 17:00-19:00\n목 17:00-19:00';
+  payload.classItem.schedulePlan = buildSchedulePlanForSave({
+    className: 'SAFE CURRICULUM', subject: '영어', selectedDays: [2, 4],
+    billingPeriods: [
+      { id: 'september', month: 9, label: '9월', startDate: '2026-09-01', endDate: '2026-09-29' },
+      { id: 'october', month: 10, label: '10월', startDate: '2026-10-01', endDate: '2026-10-29' },
+    ],
+    sessionStates: { '2026-09-24': { state: 'exception' }, '2026-10-01': { state: firstState } },
+    sessionSchedules: Object.fromEntries(blankDates.map(date => [date, {
+      startTime: '', endTime: '', teacherCatalogId: '', classroomCatalogId: '',
+    }])),
+    sessions: [],
+  });
+  for (const row of payload.classItem.schedulePlan.sessions) {
+    row.teacherNote = `합성 보존 메모 ${row.date}`;
+    row.textbookEntries = [{ id: `saved-${row.date}`, textbookId: id(700), plan: {
+      start: row.date, end: row.date, label: `합성 보존 범위 ${row.date}`,
+    } }];
+  }
+  return payload;
+}
+
+async function recoveryEditor(t, payload) {
+  const page = await setup(t, 'operations', { workspace: true,
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`, route: 'curriculum/lesson-design' });
+  await act(async () => page.requests.find(request => request.name === 'get_operations_class_lesson_design_detail_v1')
+    .resolve({ error: null, data: payload }));
+  if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
+  return page;
+}
+
+async function selectLegacyRecoveryRow(page, date) {
+  const month = Number(date.slice(5, 7));
+  const details = document.querySelector(`button[aria-label^="${month}월 상세 "]`);
+  assert.ok(details, `${month}월 details toggle`);
+  if (details.getAttribute('aria-expanded') !== 'true') await act(async () => details.click());
+  const row = page.observed.lessonPlanForSave.sessions.find(item => item.date === date);
+  assert.ok(row, `stored ${date} row`);
+  const element = [...document.querySelectorAll('[data-lesson-period-session-id]')]
+    .find(item => item.dataset.lessonPeriodSessionId === row.id);
+  assert.ok(element, `visible selectable ${date} row`);
+  await act(async () => element.querySelector('button').click());
+  assert.equal(document.querySelector('[data-lesson-selected-editor="true"]')?.dataset.lessonPeriodSessionId, row.id);
+  return document.querySelector('[data-lesson-selected-editor="true"]');
+}
+
+function assertLegacyRecoveryFields(date, values) {
+  for (const [index, label] of ['시작', '종료', '선생님', '강의실'].entries()) {
+    const control = document.querySelector(`[aria-label="${date} ${label}"]`);
+    assert.ok(control, `rendered ${date} ${label}`);
+    assert.equal(control.disabled, false);
+    assert.equal(control.value, values[index]);
+  }
+}
+
+async function clickLessonSave() {
+  const button = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === '일정 저장');
+  assert.ok(button, 'explicit schedule save');
+  await act(async () => button.click());
+}
+
+test('legacy recovery restores a visible skipped row and cancels another row without rewriting stored history', async t => {
+  const payload = legacyRecoveryDetail(), savedPlan = structuredClone(payload.classItem.schedulePlan);
+  const savedFirst = savedPlan.sessions.find(row => row.date === '2026-10-01');
+  const page = await recoveryEditor(t, payload);
+  assert.equal(dirty(), false);
+  assert.equal(saveRequests(page).length, 0, 'opening the editor never saves or fills historical dates');
+  assert.equal(page.observed.lessonPlanForSave.sessions.find(row => row.date === '2026-10-01').startTime, undefined);
+  assert.equal(savedPlan.sessions.filter(row => row.billingId === 'october' && row.scheduleState === 'active').length, 8);
+
+  let selected = await selectLegacyRecoveryRow(page, '2026-10-01');
+  assert.match(selected.querySelector('[data-slot="badge"]').textContent, /해제/);
+  const normal = [...selected.querySelectorAll('button')].find(button => button.textContent.trim() === '정상');
+  assert.ok(normal, 'the stored skipped date has an explicit normal-state action');
+  await act(async () => normal.click());
+  const restored = page.observed.lessonPlanForSave.sessions.find(row => row.date === '2026-10-01');
+  assert.equal(restored.id, savedFirst.id);
+  assert.equal(restored.scheduleState, 'active');
+  assert.equal(restored.isForced, false);
+  assert.equal(restored.originalDate, '');
+  assertLegacyRecoveryFields('2026-10-01', ['17:00', '19:00', id(101), id(201)]);
+  assert.equal(saveRequests(page).length, 0, 'restoration only authors the draft');
+
+  selected = await selectLegacyRecoveryRow(page, '2026-10-06');
+  const cancel = [...selected.querySelectorAll('button')].find(button => button.textContent.trim() === '휴강');
+  assert.ok(cancel);
+  await act(async () => cancel.click());
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const request = saveRequests(page)[0], sent = request.args.p_patch.schedule_plan;
+  assert.equal(request.retryEnabled, false);
+  assert.deepEqual(request.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(sent.billingPeriods, savedPlan.billingPeriods);
+  assert.deepEqual(sent.sessions.map(row => row.date), savedPlan.sessions.map(row => row.date));
+  assert.deepEqual(sent.sessions.filter(row => row.billingId === 'september'), savedPlan.sessions.filter(row => row.billingId === 'september'));
+  assert.equal(sent.sessions.find(row => row.date === '2026-09-24').scheduleState, 'exception');
+  assert.equal(sent.sessions.find(row => row.date === '2026-09-29').scheduleState, 'active');
+  for (const stored of savedPlan.sessions.filter(row => row.billingId === 'october')) {
+    const actual = sent.sessions.find(row => row.date === stored.date);
+    const withoutNumber = row => Object.fromEntries(Object.entries(row).filter(([field]) => field !== 'sessionNumber'));
+    const expected = { ...stored };
+    if (stored.date === '2026-10-01') Object.assign(expected, {
+      state: 'active', scheduleState: 'active', startTime: '17:00', endTime: '19:00',
+      teacherCatalogId: id(101), classroomCatalogId: id(201),
+    });
+    if (stored.date === '2026-10-06') Object.assign(expected, { state: 'exception', scheduleState: 'exception' });
+    assert.deepEqual(withoutNumber(actual), withoutNumber(expected), `${stored.date} retains identity, resources and learning content except the two authored changes`);
+  }
+  assert.deepEqual(sent.sessions.filter(row => row.billingId === 'october' && row.scheduleState === 'active').map(row => row.sessionNumber), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan, 'the read payload remains immutable');
+});
+
+test('legacy selected defaults repairs only the selected stored blank lesson through its explicit button', async t => {
+  const payload = legacyRecoveryDetail({ blankDates: ['2026-10-22', '2026-10-29'] });
+  const savedPlan = structuredClone(payload.classItem.schedulePlan), page = await recoveryEditor(t, payload);
+  assert.equal(dirty(), false);
+  assert.equal(saveRequests(page).length, 0);
+  await selectLegacyRecoveryRow(page, '2026-10-29');
+  assertLegacyRecoveryFields('2026-10-29', ['', '', '', '']);
+  const apply = document.querySelector('button[aria-label="2026-10-29 기본 정보 적용"]');
+  assert.ok(apply, 'the blank stored row exposes explicit recovery');
+  await act(async () => apply.click());
+  assertLegacyRecoveryFields('2026-10-29', ['17:00', '19:00', id(101), id(201)]);
+  assert.equal(saveRequests(page).length, 0, 'applying defaults requires a separate save');
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const request = saveRequests(page)[0], sent = request.args.p_patch.schedule_plan;
+  assert.deepEqual(request.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(sent.billingPeriods, savedPlan.billingPeriods);
+  assert.deepEqual(sent.sessions, savedPlan.sessions.map(stored => stored.date === '2026-10-29' ? { ...stored,
+      startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201),
+    } : stored), 'only the selected stored row changes, with no extra or duplicate sessions');
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan);
+});
+
+test('legacy selected defaults preserves a typed time while filling missing fields and hides recovery once complete', async t => {
+  const payload = legacyRecoveryDetail({ blankDates: ['2026-10-22', '2026-10-29'] });
+  const savedPlan = structuredClone(payload.classItem.schedulePlan), page = await recoveryEditor(t, payload);
+  await selectLegacyRecoveryRow(page, '2026-10-29');
+  assertLegacyRecoveryFields('2026-10-29', ['', '', '', '']);
+  await changeInput('2026-10-29 시작', '18:00');
+  assertLegacyRecoveryFields('2026-10-29', ['18:00', '', '', '']);
+  const apply = document.querySelector('button[aria-label="2026-10-29 기본 정보 적용"]');
+  assert.ok(apply, 'partial input still allows explicit completion');
+  await act(async () => apply.click());
+  assertLegacyRecoveryFields('2026-10-29', ['18:00', '19:00', id(101), id(201)]);
+  assert.equal(document.querySelector('button[aria-label="2026-10-29 기본 정보 적용"]'), null,
+    'complete manually edited details cannot be reapplied with a defaults button');
+  assert.equal(saveRequests(page).length, 0, 'completion does not submit a mutation');
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const request = saveRequests(page)[0], sent = request.args.p_patch.schedule_plan;
+  assert.deepEqual(request.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(sent.billingPeriods, savedPlan.billingPeriods);
+  assert.deepEqual(sent.sessions, savedPlan.sessions.map(stored => stored.date === '2026-10-29' ? { ...stored,
+    startTime: '18:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201),
+  } : stored), 'the typed time is saved only on the selected date; every other stored row remains unchanged');
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan);
+});
+
+test('legacy preflight recovery opens and focuses the changed past lesson without filling or submitting its incomplete details', async t => {
+  const payload = legacyRecoveryDetail({ firstState: 'active' });
+  const savedPlan = structuredClone(payload.classItem.schedulePlan), page = await recoveryEditor(t, payload);
+  await selectLegacyRecoveryRow(page, '2026-10-01');
+  assertLegacyRecoveryFields('2026-10-01', ['', '', '', '']);
+  await changeInput('2026-10-01 시작', '17:00');
+  await act(async () => document.querySelector('button[aria-label^="10월 상세 "]').click());
+  await selectLegacyRecoveryRow(page, '2026-09-29');
+  assert.notEqual(document.querySelector('[data-lesson-selected-editor="true"]')?.dataset.lessonPeriodSessionId,
+    savedPlan.sessions.find(row => row.date === '2026-10-01').id);
+  await clickLessonSave();
+  await act(async () => new Promise(resolve => window.setTimeout(resolve, 20)));
+  assert.equal(saveRequests(page).length, 0, 'preflight rejects the incomplete past-date change before any mutation');
+  assert.match(page.observed.lessonDesignSaveError, /^2026-10-01 수업의 시작·종료 시간을 입력해 주세요\./);
+  assert.equal(document.querySelector('button[aria-label^="10월 상세 "]').getAttribute('aria-expanded'), 'true');
+  assert.equal(document.querySelector('[data-lesson-selected-editor="true"]')?.dataset.lessonPeriodSessionId,
+    savedPlan.sessions.find(row => row.date === '2026-10-01').id);
+  assertLegacyRecoveryFields('2026-10-01', ['17:00', '', '', '']);
+  assert.equal(document.activeElement, document.querySelector('input[aria-label="2026-10-01 시작"]'));
+  assert.equal(dirty(), true, 'the operator can finish the retained draft');
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan);
+});
+
 test('lesson-detail team catalog populates the makeup selector and selection preserves entered times on save', async t => {
   const page = await setup(t, 'operations', { workspace: true, search: `?lessonDesign=1&classId=${id(999)}`, route:'curriculum/lesson-design' });
   const payload = detail();
