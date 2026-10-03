@@ -19,6 +19,7 @@ select throws_ok($q$select public.ai_agent_user_api_v1('create',jsonb_build_obje
 select throws_ok($q$select public.ai_agent_user_api_v1('list','{"scope":null}')$q$,'22023','ai_agent_invalid','null query fields denied');
 select throws_ok($q$select public.ai_agent_user_api_v1('get','{"id":"bad"}')$q$,'22023','ai_agent_invalid','malformed UUID denied');
 select throws_ok($q$select public.ai_agent_user_api_v1('create',jsonb_build_object('title','x','body','x','notifyOnDone',false,'requester',pg_temp.ai_id(1),'idempotencyKey',pg_temp.ai_id(199)))$q$,'22023','ai_agent_invalid','caller-selected actor rejected');
+select throws_ok($q$select dashboard_private.ai_agent_lock_user_v1(false)$q$,'42501',null,'private decisive lock helper cannot be called by authenticated clients');
 select throws_ok($q$select public.ai_agent_user_api_v1('list','{"scope":"all"}')$q$,'42501','ai_agent_forbidden','staff cannot read all');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.ai_id(3)::text,true);

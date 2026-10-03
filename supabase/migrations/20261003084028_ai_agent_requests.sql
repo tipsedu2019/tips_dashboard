@@ -93,6 +93,21 @@ begin
  if not exists(select 1 from public.profiles where id=actor and role='admin') then raise exception using errcode='42501',message='ai_agent_forbidden';end if;
  return actor;
 end$$;
+-- Writers decide authority from the row returned AFTER any profile lock wait.
+-- LockRows rechecks the current tuple, so a committed downgrade cannot be hidden
+-- by the statement's earlier authorization snapshot. Keep the active auth row
+-- shared-locked too, preventing deletion/ban between validation and the write.
+create function dashboard_private.ai_agent_lock_user_v1(p_admin boolean default false) returns uuid
+language plpgsql security definer set search_path='' as $$
+declare actor uuid:=auth.uid(); ai_actor_role text;
+begin
+ if actor is null then raise exception using errcode='42501',message='ai_agent_forbidden';end if;
+ select p.role into ai_actor_role from public.profiles p where p.id=actor for update;
+ if not found or ai_actor_role is null or ai_actor_role not in('admin','staff','teacher','assistant') or (p_admin and ai_actor_role<>'admin') then raise exception using errcode='42501',message='ai_agent_forbidden';end if;
+ perform 1 from auth.users u where u.id=actor and u.deleted_at is null and (u.banned_until is null or u.banned_until<=clock_timestamp()) for share;
+ if not found then raise exception using errcode='42501',message='ai_agent_forbidden';end if;
+ return actor;
+end$$;
 create function dashboard_private.ai_agent_can_read_v1(p_requester uuid) returns boolean
 language sql stable security definer set search_path='' as $$
  select exists(select 1 from public.profiles p join auth.users u on u.id=p.id where p.id=auth.uid() and p.role in('admin','staff','teacher','assistant') and (p.id=p_requester or p.role='admin') and u.deleted_at is null and (u.banned_until is null or u.banned_until<=now()))
@@ -121,11 +136,11 @@ create policy ai_agent_requests_owner on dashboard_private.ai_agent_requests for
 create policy ai_agent_messages_owner on dashboard_private.ai_agent_request_messages for select to authenticated using(exists(select 1 from dashboard_private.ai_agent_requests r where r.id=request_id and dashboard_private.ai_agent_can_read_v1(r.requester_id)));
 create policy ai_agent_events_owner on dashboard_private.ai_agent_request_events for select to authenticated using(dashboard_private.ai_agent_can_read_v1(requester_id));
 revoke all on dashboard_private.ai_agent_requests,dashboard_private.ai_agent_request_messages,dashboard_private.ai_agent_request_events,dashboard_private.ai_agent_request_claims,dashboard_private.ai_agent_request_receipts from public,anon,authenticated,service_role;
-revoke all on function dashboard_private.ai_agent_require_user_v1(),dashboard_private.ai_agent_require_admin_v1(),dashboard_private.ai_agent_can_read_v1(uuid),dashboard_private.ai_agent_assert_input_v1(jsonb,text[]),dashboard_private.ai_agent_request_json_v1(dashboard_private.ai_agent_requests),dashboard_private.ai_agent_immutable_v1() from public,anon,authenticated,service_role;
+revoke all on function dashboard_private.ai_agent_require_user_v1(),dashboard_private.ai_agent_require_admin_v1(),dashboard_private.ai_agent_lock_user_v1(boolean),dashboard_private.ai_agent_can_read_v1(uuid),dashboard_private.ai_agent_assert_input_v1(jsonb,text[]),dashboard_private.ai_agent_request_json_v1(dashboard_private.ai_agent_requests),dashboard_private.ai_agent_immutable_v1() from public,anon,authenticated,service_role;
 
 create function public.ai_agent_user_api_v1(p_action text,p_input jsonb default '{}') returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare actor uuid:=dashboard_private.ai_agent_require_user_v1(); is_admin boolean; r dashboard_private.ai_agent_requests; rec dashboard_private.ai_agent_request_receipts; key uuid; fingerprint text; resource uuid:='00000000-0000-0000-0000-000000000000'::uuid; page integer; size integer; scope text; status_filter text; search_filter text; result jsonb;
+declare actor uuid:=case when p_action='create' then dashboard_private.ai_agent_lock_user_v1(false) else dashboard_private.ai_agent_require_user_v1() end; is_admin boolean; r dashboard_private.ai_agent_requests; rec dashboard_private.ai_agent_request_receipts; key uuid; fingerprint text; resource uuid:='00000000-0000-0000-0000-000000000000'::uuid; page integer; size integer; scope text; status_filter text; search_filter text; result jsonb;
 begin
  select role='admin' into is_admin from public.profiles where id=actor;
  if p_action='create' then
@@ -138,8 +153,8 @@ begin
   if not p_input ? 'idempotencyKey' then raise exception using errcode='22023',message='ai_agent_idempotency_required';end if;
   key:=(p_input->>'idempotencyKey')::uuid;
   if key is null then raise exception using errcode='22023',message='ai_agent_invalid';end if;
-  -- This actor lock serializes receipt replay and the rolling create budget.
-  perform 1 from public.profiles where id=actor for update;
+  -- ai_agent_lock_user_v1 already holds the actor lock, serializing current
+  -- authority, receipt replay and the rolling create budget in this transaction.
   fingerprint:=encode(sha256(convert_to(jsonb_build_object('title',p_input->>'title','body',p_input->>'body','notifyOnDone',false)::text,'UTF8')),'hex');
   select * into rec from dashboard_private.ai_agent_request_receipts where principal_kind='user' and principal_id=actor and operation='create' and resource_id=resource and idempotency_key=key;
   if found then

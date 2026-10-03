@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { aiCreateRequestSchema, aiRequestListQuerySchema, aiRequestSchema, aiRequestListSchema, aiMessageInputSchema, aiCredentialGrantSchema } from '../src/features/ai-agent/ai-agent-request-contract.ts';
+import { aiCreateRequestSchema, aiRequestListQuerySchema, aiRequestSchema, aiRequestListSchema, aiMessageInputSchema, aiCredentialGrantSchema, aiRequestMessageSchema } from '../src/features/ai-agent/ai-agent-request-contract.ts';
 
 const id='aa030000-0000-4000-8000-000000000001';
 const create={title:'수신 확인',body:'합성 테스트',notifyOnDone:false};
@@ -26,10 +26,22 @@ test('strict DTO accepts nullable identity metadata and refuses secret/internal 
   assert.equal(aiRequestSchema.safeParse({...request,version:0}).success,false);
   assert.equal(aiRequestSchema.safeParse({...request,version:'9007199254740993'}).success,true);
   assert.equal(aiRequestSchema.safeParse({...request,version:'9223372036854775808'}).success,false);
+  for(const version of ['invalid','','0','-1','1.5','01','9223372036854775808']) {
+    assert.doesNotThrow(()=>aiRequestSchema.safeParse({...request,version}));
+    assert.equal(aiRequestSchema.safeParse({...request,version}).success,false);
+  }
 });
 test('message inputs enforce answer linkage and bounded strict comments',()=>{
   assert.equal(aiMessageInputSchema.safeParse({kind:'answer',questionId:id,text:'답변'}).success,true);
   for(const input of [{kind:'answer',text:'답변'},{kind:'comment',text:' '},{kind:'comment',text:'가'.repeat(5001)},{kind:'comment',questionId:id,text:'a'},{kind:'progress',text:'a'},{kind:'comment',text:'a',actor:id}]) assert.equal(aiMessageInputSchema.safeParse(input).success,false);
+});
+test('malformed message sequence returns validation failure without throwing',()=>{
+  const message={id,requestId:id,seq:'1',kind:'comment',text:'합성',authorKind:'user',authorId:id,questionId:null,createdAt:request.createdAt};
+  assert.equal(aiRequestMessageSchema.safeParse(message).success,true);
+  for(const seq of ['invalid','','0','-1','1.5','01','9223372036854775808']) {
+    assert.doesNotThrow(()=>aiRequestMessageSchema.safeParse({...message,seq}));
+    assert.equal(aiRequestMessageSchema.safeParse({...message,seq}).success,false);
+  }
 });
 test('purpose grants are explicit and class authority is never accepted',()=>{
   const grant={queues:['employee_requests'],actions:['read']};

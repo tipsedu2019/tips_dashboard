@@ -8,7 +8,7 @@ const uuid = z.uuid();
 const content = (max: number) => z.string().refine(value => [...value].length <= max && value.trim().length > 0, '내용의 길이를 확인해 주세요');
 const space = z.enum(AI_NOTIFICATION_SPACE_KEYS);
 const pageSize = z.union([z.literal(10), z.literal(15), z.literal(20)]);
-const version = z.string().regex(/^[1-9][0-9]*$/).refine(value => BigInt(value) <= 9223372036854775807n);
+const version = z.string().refine(value => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= 9223372036854775807n);
 export const aiCreateRequestSchema = z.strictObject({
   title: content(200), body: content(20_000), notifyOnDone: z.boolean().default(false), notificationSpace: space.optional(),
 }).refine(input => input.notifyOnDone ? input.notificationSpace !== undefined : input.notificationSpace === undefined, '알림 공간을 확인해 주세요');

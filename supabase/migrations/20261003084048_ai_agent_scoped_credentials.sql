@@ -45,7 +45,7 @@ revoke all on dashboard_private.ai_agent_credentials,dashboard_private.ai_agent_
 
 create function public.create_ai_agent_credential_v1(p_label text,p_scopes text[],p_grant jsonb,p_expires_at timestamptz default null) returns jsonb
 language plpgsql security definer set search_path='' as $$
-declare actor uuid:=dashboard_private.ai_agent_require_admin_v1(); expires timestamptz:=coalesce(p_expires_at,clock_timestamp()+interval '1 day'); raw text; cred dashboard_private.ai_agent_credentials; queues text[]; actions text[]; spaces text[]; purposes text[]; bridge uuid; has_ai boolean; has_chat boolean;
+declare actor uuid:=dashboard_private.ai_agent_lock_user_v1(true); expires timestamptz:=coalesce(p_expires_at,clock_timestamp()+interval '1 day'); raw text; cred dashboard_private.ai_agent_credentials; queues text[]; actions text[]; spaces text[]; purposes text[]; bridge uuid; has_ai boolean; has_chat boolean;
 begin
  perform dashboard_private.ai_agent_assert_input_v1(p_grant,array['queues','actions','spaceKeys','purposes','bridgeSourceId']);
  has_ai:=p_scopes && array['ai-agent:requests:read','ai-agent:requests:claim','ai-agent:requests:update']::text[];
@@ -65,8 +65,8 @@ begin
   bridge:=(p_grant->>'bridgeSourceId')::uuid;
   if spaces is null or purposes is null or array_position(spaces,null) is not null or array_position(purposes,null) is not null or not spaces <@ array['space_1','space_2','space_3','space_4','space_5','space_6','space_7']::text[] or not purposes <@ array['ai_completion','bridge_reply']::text[] or cardinality(spaces)<>(select count(distinct s) from unnest(spaces) s) or cardinality(purposes)<>(select count(distinct p) from unnest(purposes) p) or ('bridge_reply'=any(purposes)) is distinct from (bridge is not null) then raise exception using errcode='22023',message='ai_agent_invalid';end if;
  elsif p_grant ?| array['spaceKeys','purposes','bridgeSourceId'] then raise exception using errcode='22023',message='ai_agent_invalid';end if;
- -- Issuer row lock makes the twenty-active-key limit atomic across concurrent issuance.
- perform 1 from public.profiles where id=actor for update;
+ -- The decisive admin check and issuer lock precede all issuance validation;
+ -- that same held lock makes the twenty-active-key limit atomic.
  if (select count(*) from dashboard_private.ai_agent_credentials where created_by=actor and revoked_at is null and expires_at>clock_timestamp())>=20 then raise exception using errcode='54000',message='ai_agent_credential_limit';end if;
  raw:='tips_agent_'||replace(gen_random_uuid()::text,'-','')||replace(gen_random_uuid()::text,'-','');
  insert into dashboard_private.ai_agent_credentials(created_by,label,token_hash,scopes,expires_at) values(actor,btrim(p_label),encode(sha256(convert_to(raw,'UTF8')),'hex'),p_scopes,expires) returning * into cred;
