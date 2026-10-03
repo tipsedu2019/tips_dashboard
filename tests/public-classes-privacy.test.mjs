@@ -128,5 +128,15 @@ test("large public plan retains every session and shrinks serialized data", () =
 test("tracked public snapshot contains only normalized public data", async () => {
   const snapshot = JSON.parse(await readFile(new URL("../public/data/public-classes.json", import.meta.url), "utf8"));
   assertPrivateFieldsAbsent(snapshot);
-  assert.ok(JSON.stringify(normalizePublicClassesFullPayload(snapshot)) === JSON.stringify(snapshot), "tracked snapshot must already be normalized");
+  const normalized = normalizePublicClassesFullPayload(snapshot);
+  assertPrivateFieldsAbsent(normalized);
+  assert.deepEqual(normalizePublicClassesFullPayload(normalized), normalized, "new public projection is idempotent");
+  const compatible = structuredClone(normalized);
+  compatible.classes.forEach((row, classIndex) => row.schedulePlan?.sessions.forEach((session, sessionIndex) => {
+    assert.ok(session.displaySessionNumber === null || (Number.isInteger(session.displaySessionNumber) && session.displaySessionNumber > 0));
+    const source = snapshot.classes[classIndex].schedulePlan.sessions[sessionIndex];
+    // A tracked pre-field public snapshot may omit only this additive metadata.
+    if (!Object.hasOwn(source, "displaySessionNumber")) delete session.displaySessionNumber;
+  }));
+  assert.equal(JSON.stringify(compatible), JSON.stringify(snapshot), "tracked snapshot must be normalized except for the optional new display field");
 });

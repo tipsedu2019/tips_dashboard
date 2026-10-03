@@ -5,6 +5,7 @@ import { parseTimetableOperationalConflictDetails, type TimetableOperationalConf
 import { LessonSaveConflictDetails } from "./lesson-save-conflict-details";
 import Link from "next/link";
 import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
+import { projectMaterializedLessonOrdinals } from "@/lib/materialized-lesson-ordinals";
 import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
   type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
 import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
@@ -2881,8 +2882,31 @@ export function ClassScheduleWorkspace() {
     },
     [isNormalizedLessonSchedule, lessonPlanDefaults, normalizedLessonPlan, lessonPlanBaseline, selectedRowClassItem],
   );
+  // Saved ordinals still identify booking/history records. Only the display
+  // copy supplies labels; it never becomes a save or record-matching payload.
+  const lessonDisplayOrdinals = useMemo(() => {
+    const ordinals = new Map<string, number | null>();
+    if (lessonPlanForSave && !isNormalizedLessonSchedule) {
+      projectMaterializedLessonOrdinals(lessonPlanForSave, { onDerived: (index: number, ordinal: number | null) => {
+        const session = (lessonPlanForSave.sessions as Record<string, unknown>[])[index];
+        ordinals.set(`${text(session.id || session.session_id)}\u0000${text(session.date || session.session_date)}`, ordinal);
+      } });
+    }
+    return ordinals;
+  }, [isNormalizedLessonSchedule, lessonPlanForSave]);
   const lessonDesignSnapshot = useMemo(() => {
-    if (!normalizedScheduleData || !lessonPlanForSave) return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, lessonPlanForSave);
+    if (!normalizedScheduleData || !lessonPlanForSave) {
+      const snapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, lessonPlanForSave);
+      if (!snapshot || isNormalizedLessonSchedule) return snapshot;
+      return { ...snapshot, sessions: snapshot.sessions.map(session => {
+        const key = `${session.id}\u0000${session.dateValue}`;
+        if (!lessonDisplayOrdinals.has(key)) return session;
+        const displaySessionNumber = lessonDisplayOrdinals.get(key) ?? null;
+        return { ...session, displaySessionNumber,
+          label: (displaySessionNumber || 0) > 0 ? `${displaySessionNumber}회차`
+            : session.scheduleStateLabel !== "정상" ? session.scheduleStateLabel : session.label };
+      }) };
+    }
     // The normalized calendar displays real rows, never the legacy planner's predicted dates.
     const saved = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
     const sessionsByKey = new Map<string, Record<string, unknown>>();
@@ -2903,7 +2927,7 @@ export function ClassScheduleWorkspace() {
     return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, { ...displayPlan, billingPeriods: periods.map((period) => ({ ...period,
       totalSessions: (displayPlan.sessions as Record<string, unknown>[] || []).filter((session) => isDateWithinRange(text(session.date), text(period.startDate), text(period.endDate))).length,
     })) });
-  }, [lessonDesignEditorTextbooks, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem]);
+  }, [isNormalizedLessonSchedule, lessonDesignEditorTextbooks, lessonDisplayOrdinals, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem]);
   useEffect(() => {
     const owner = isLessonDesignRouteActive ? requestedClassId : text(selectedRow?.id);
     const ownerChanged = lessonPlanOwnerRef.current !== owner;

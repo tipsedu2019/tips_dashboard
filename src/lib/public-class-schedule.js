@@ -1,3 +1,5 @@
+import { projectMaterializedLessonOrdinals } from "./materialized-lesson-ordinals.js";
+
 // Public schedules are materialized sessions, never inputs for the internal
 // planner. Every nested object is projected explicitly so new staff-only fields
 // cannot become public through a spread, a saved snapshot, or a cache hit.
@@ -51,9 +53,13 @@ export function publicLessons(value, depth = 0) {
   });
 }
 
-export function publicClassSchedule(value) {
+export function publicClassSchedule(value, { projected = false } = {}) {
   if (!record(value)) return null;
-  const sessions = rows(value.sessions).map((session) => {
+  const displayNumbers = new Map();
+  projectMaterializedLessonOrdinals(value, { onDerived: (index, number) => displayNumbers.set(index, number) });
+  const sourceSessions = Array.isArray(value.sessions) ? value.sessions : [];
+  const sessions = sourceSessions.flatMap((session, index) => {
+    if (!record(session)) return [];
     const result = fields(session, [
       "id", "date", "scheduleState", "makeupDate", "originalDate",
       "startTime", "endTime", "classroomName", "teacherName", "progressStatus", "publicNote",
@@ -63,6 +69,13 @@ export function publicClassSchedule(value) {
     if (!result.billingId && typeof session.billing_id === "string") result.billingId = session.billing_id;
     if (!result.billingLabel && typeof session.billing_label === "string") result.billingLabel = session.billing_label;
     if (typeof session.sessionKey === "string" && session.sessionKey !== session.id) result.sessionKey = session.sessionKey;
+    const derived = displayNumbers.get(index);
+    // Raw booking/log ordinals above remain unchanged. A public cache can have
+    // lost private ambiguity guards, so its own explicit unknown stays unknown.
+    const cached = projected && Object.hasOwn(session, "displaySessionNumber");
+    result.displaySessionNumber = (result.scheduleState === "active" || result.scheduleState === "makeup") &&
+      Number.isInteger(derived) && derived > 0 &&
+      (!cached || session.displaySessionNumber === derived) ? derived : null;
     const entries = rows(session.textbookEntries).map((entry) => {
       const mapped = textbook(entry);
       const plan = range(entry.plan);
@@ -72,7 +85,7 @@ export function publicClassSchedule(value) {
       return mapped;
     });
     if (entries.length) result.textbookEntries = entries;
-    return result;
+    return [result];
   });
   const recordedSessionCounts = new Map();
   sessions.forEach((session) => {

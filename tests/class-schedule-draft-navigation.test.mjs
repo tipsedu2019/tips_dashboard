@@ -20,6 +20,7 @@ function modules(supabase, overrides, sourceOverrides = {}) {
     let inputSource = sourceOverrides[path.relative(rootPath, file)] ?? readFileSync(file, 'utf8');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource = inputSource.replace('  const classScheduleWorkspaceContent = (',
       '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+    if (file.endsWith('/class-schedule-workspace.tsx')) inputSource += '\nexport { buildLessonDesignSnapshot as __testBuildLessonDesignSnapshot };\n';
     const source = ts.transpileModule(inputSource, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -326,6 +327,144 @@ async function recoveryEditor(t, payload, initial = {}) {
   return page;
 }
 
+function restoredOctoberReadDetail() {
+  const payload = legacyRecoveryDetail();
+  const plan = buildSchedulePlanForSave({ ...payload.classItem.schedulePlan,
+    sessionStates: { '2026-09-24': { state: 'exception' },
+      '2026-10-01': { state: 'skipped' }, '2026-10-06': { state: 'exception' } },
+  });
+  // The correction producer restores state while retaining the materialized
+  // identity and old ordinals. Reproduce its fresh read, rather than editing a
+  // boundary and letting the planner create a new October 1 session.
+  const restored = plan.sessions.find(row => row.date === '2026-10-01');
+  restored.id = 'session:2026-10-01:october:skipped';
+  restored.sessionKey = restored.id;
+  Object.assign(restored, { state: 'active', scheduleState: 'active', sessionNumber: null, isForced: false });
+  plan.sessionStates['2026-10-01'] = { state: 'active' };
+  plan.history = [{ id: 'saved-history', savedAt: '2026-10-02T00:00:00Z', summary: '합성 저장 이력' }];
+  for (const row of plan.sessions) {
+    Object.assign(row, { startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201),
+      publicNote: `합성 공지 ${row.date}`, teacherNote: `합성 보존 메모 ${row.date}`,
+      textbookEntries: [{ id: `saved-${row.date}`, textbookId: id(700), plan: {
+        start: row.date, end: row.date, label: `합성 보존 범위 ${row.date}`,
+      } }],
+    });
+  }
+  payload.classItem.schedulePlan = plan;
+  return payload;
+}
+
+test('fresh persisted restored October lesson displays materialized ordinals without changing save or history identities', async t => {
+  const payload = restoredOctoberReadDetail(), savedPlan = structuredClone(payload.classItem.schedulePlan);
+  const rawOrdinals = [null, null, 1, 2, 3, 4, 5, 6, 7];
+  const displayOrdinals = [1, null, 2, 3, 4, 5, 6, 7, 8];
+  const octoberRows = savedPlan.sessions.filter(row => row.billingId === 'october');
+  assert.equal(savedPlan.billingPeriods.find(period => period.id === 'october').startDate, '2026-10-01');
+  assert.deepEqual(octoberRows.map(row => row.sessionNumber), rawOrdinals);
+  const page = await recoveryEditor(t, payload, { route: 'curriculum',
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-periods&returnTo=%2Fadmin%2Fcurriculum`,
+  });
+  const initialSavePlan = structuredClone(page.observed.lessonPlanForSave);
+  const readOnlyState = ({ expectedSaves = 0, savePlan = initialSavePlan } = {}) => {
+    assert.equal(dirty(), false, 'a fresh read or detail selection does not author a schedule edit');
+    assert.equal(saveRequests(page).length, expectedSaves, 'display recovery never submits another save');
+    assert.deepEqual(page.observed.lessonPlanForSave.sessions, savedPlan.sessions, 'raw save rows retain every stored identity, ordinal and content field');
+    assert.deepEqual(page.observed.lessonPlanForSave, savePlan, 'read-only display and selection leave the entire candidate save payload unchanged');
+    assert.deepEqual(payload.classItem.schedulePlan, savedPlan, 'RPC detail remains immutable');
+    assert.deepEqual(page.observed.lessonPlanDraft.history, savedPlan.history, 'accepted saved history is unchanged');
+    assert.ok([...document.querySelectorAll('button')].find(button => button.textContent.trim() === '일정 저장'));
+  };
+  readOnlyState();
+  for (const [index, stored] of octoberRows.entries()) {
+    const view = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === stored.id);
+    assert.ok(view, `materialized ${stored.date} retains its canonical ID`);
+    assert.equal(view.sessionNumber, Number(stored.sessionNumber || 0), 'history matching keeps the canonical stored ordinal');
+    assert.equal(view.label, index === 1 ? '휴강' : `${displayOrdinals[index]}회차`);
+    assert.equal(view.displaySessionNumber, displayOrdinals[index]);
+    assert.equal(view.scheduleStateLabel, index === 1 ? '휴강' : '정상');
+    assert.equal(view.teacherNote, stored.teacherNote);
+    const cell = document.querySelector(`[data-lesson-calendar-month="2026-10"] [data-lesson-calendar-date="${stored.date}"]`);
+    assert.ok(cell);
+    assert.equal(cell.dataset.lessonCalendarSessionId, stored.id);
+    assert.equal(cell.dataset.lessonCalendarState, stored.scheduleState);
+    assert.match(cell.textContent, new RegExp(`${view.label}.*${view.scheduleStateLabel}`));
+    assert.equal(cell.textContent.includes(stored.id), false, 'the calendar does not expose a raw identity as a lesson label');
+    const mobile = [...document.querySelectorAll('[data-lesson-calendar-month="2026-10"] [data-testid="lesson-mobile-session-list"] button')]
+      .find(button => button.textContent.includes(view.dateLabel));
+    assert.ok(mobile, `mobile ${stored.date} entry`);
+    assert.match(mobile.textContent, new RegExp(`${view.label}.*${view.scheduleStateLabel}`));
+  }
+  const selected = await selectLegacyRecoveryRow(page, '2026-10-01');
+  assert.match(selected.querySelector('button').textContent, /1회차.*정상/);
+  assert.equal(selected.dataset.lessonPeriodSessionId, octoberRows[0].id);
+  for (const [index, stored] of octoberRows.entries()) {
+    const element = [...document.querySelectorAll('[data-lesson-period-session-id]')]
+      .find(row => row.dataset.lessonPeriodSessionId === stored.id);
+    assert.ok(element, `month details retains ${stored.date}`);
+    const label = index === 1 ? '휴강' : `${displayOrdinals[index]}회차`;
+    const state = index === 1 ? '휴강' : '정상';
+    assert.match(element.querySelector('button').textContent, new RegExp(`${label}.*${state}`));
+  }
+  selected.querySelector('button').focus();
+  assert.equal(document.activeElement, selected.querySelector('button'), 'standard focus reaches the retained-identity detail header');
+  readOnlyState();
+  // The real history producer can use an old ordinal when a legacy log has no
+  // session ID. Keep that match on October 8 (stored 1), not October 1 (display 1).
+  const records = page.load('src/features/operations/records.js');
+  const model = records.buildClassScheduleRouteModel({ classes: [payload.classItem], progressLogs: [
+    { id: id(801), class_id: id(999), session_order: 1, teacher_note: '합성 raw 1회차 기록', content: '합성 10월 8일 기록', updated_at: '2026-10-08T10:00:00Z' },
+    { id: id(802), class_id: id(999), session_order: 2, teacher_note: '합성 raw 2회차 기록', content: '합성 10월 13일 기록', updated_at: '2026-10-13T10:00:00Z' },
+  ] });
+  const buildSnapshot = page.load('src/features/operations/class-schedule-workspace.tsx').__testBuildLessonDesignSnapshot;
+  const historySnapshot = buildSnapshot(model.rows[0], payload.textbooks, page.observed.lessonPlanForSave);
+  assert.equal(historySnapshot.sessions.find(row => row.id === octoberRows[0].id).content, '수업 기록 없음');
+  assert.equal(historySnapshot.sessions.find(row => row.dateValue === '2026-10-08').content, '합성 10월 8일 기록');
+  assert.equal(historySnapshot.sessions.find(row => row.dateValue === '2026-10-13').content, '합성 10월 13일 기록');
+  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.filter(row => row.monthKey === '2026-09').map(row => row.id),
+    savedPlan.sessions.filter(row => row.billingId === 'september').map(row => row.id), 'September materialized history keeps all identities');
+  readOnlyState();
+
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const save = saveRequests(page)[0], submitted = save.args.p_patch.schedule_plan;
+  assert.deepEqual(submitted, initialSavePlan, 'explicit mock save receives the pre-existing canonical payload, not display projections');
+  assert.deepEqual(save.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(submitted.sessions.filter(row => row.billingId === 'october').map(row => row.sessionNumber), rawOrdinals);
+  assert.deepEqual(submitted.sessions.filter(row => row.billingId === 'september'), savedPlan.sessions.filter(row => row.billingId === 'september'));
+  assert.deepEqual(submitted.history.slice(0, savedPlan.history.length), savedPlan.history, 'normal save appends history without rewriting existing entries');
+  assert.equal(submitted.sessions.some(row => Object.hasOwn(row, 'displaySessionNumber') || Object.hasOwn(row, 'label')), false);
+  await act(async () => save.resolve({ error: null, data: null }));
+  const reread = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.notEqual(reread, page.requests.find(request => request.name === 'get_operations_class_lesson_design_detail_v1'));
+  const freshPayload = structuredClone(payload);
+  await act(async () => reread.resolve({ error: null, data: freshPayload }));
+  assert.match(page.observed.lessonDesignSaveNotice, /저장했습니다/);
+  assert.equal(page.observed.lessonDesignSnapshot.sessions.find(row => row.id === octoberRows[0].id).label, '1회차');
+  assert.equal(page.observed.lessonDesignSnapshot.sessions.find(row => row.id === octoberRows[0].id).sessionNumber, 0);
+  await page.remount();
+  const reload = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.notEqual(reload, reread, 'a new mount performs a fresh detail read');
+  await act(async () => reload.resolve({ error: null, data: structuredClone(freshPayload) }));
+  const reloadedSavePlan = structuredClone(page.observed.lessonPlanForSave);
+  readOnlyState({ expectedSaves: 1, savePlan: reloadedSavePlan });
+  await selectLegacyRecoveryRow(page, '2026-10-01');
+  const toggle = () => document.querySelector('button[aria-label^="10월 상세 "]');
+  await act(async () => toggle().click());
+  assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+  await act(async () => toggle().click());
+  assert.equal(toggle().getAttribute('aria-expanded'), 'true');
+  for (const [index, stored] of octoberRows.entries()) {
+    const view = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === stored.id);
+    assert.equal(view.label, index === 1 ? '휴강' : `${displayOrdinals[index]}회차`, `reloaded ${stored.date} display`);
+    assert.equal(view.sessionNumber, Number(stored.sessionNumber || 0));
+    const element = [...document.querySelectorAll('[data-lesson-period-session-id]')].find(row => row.dataset.lessonPeriodSessionId === stored.id);
+    assert.ok(element);
+    assert.match(element.querySelector('button').textContent, new RegExp(view.label));
+  }
+  readOnlyState({ expectedSaves: 1, savePlan: reloadedSavePlan });
+  assert.deepEqual(freshPayload.classItem.schedulePlan, savedPlan);
+});
+
 async function selectLegacyRecoveryRow(page, date) {
   const month = Number(date.slice(5, 7));
   const details = document.querySelector(`button[aria-label^="${month}월 상세 "]`);
@@ -375,6 +514,12 @@ test('legacy recovery restores a visible skipped row and cancels another row wit
   assert.equal(restored.scheduleState, 'active');
   assert.equal(restored.isForced, false);
   assert.equal(restored.originalDate, '');
+  const restoredView = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === restored.id);
+  assert.equal(restoredView.label, '1회차');
+  assert.equal(restoredView.scheduleStateLabel, '정상');
+  const restoredCell = document.querySelector('[data-lesson-calendar-month="2026-10"] [data-lesson-calendar-date="2026-10-01"]');
+  assert.equal(restoredCell.dataset.lessonCalendarState, 'active');
+  assert.match(restoredCell.textContent, /1회차.*정상/);
   assertLegacyRecoveryFields('2026-10-01', ['17:00', '19:00', id(101), id(201)]);
   assert.equal(saveRequests(page).length, 0, 'restoration only authors the draft');
 
