@@ -480,6 +480,19 @@ test("child process output decodes UTF-8 only after split byte chunks are reasse
   assert.throws(() => decodeUtf8ProcessChunks(["not-a-buffer"]), /isolated_supabase_db_child_output_invalid/u);
 });
 
+test("pgTAP completion metrics retain only bounded counts from one successful summary", async () => {
+  const { parsePgTapSummary } = await import(runnerUrl.href);
+  const output = "private row payload must not be retained\nFiles=2, Tests=1937, 1 wallclock secs\nResult: PASS\n";
+  assert.deepEqual(parsePgTapSummary(output), { files: 2, tests: 1937, result: "PASS" });
+  assert.deepEqual(parsePgTapSummary(output.replaceAll("\n", "\r\n")), { files: 2, tests: 1937, result: "PASS" });
+  for (const invalid of [null, "", output.replace("PASS", "FAIL"), output + output,
+    output.replace("Files=2", "Files=0"), output.replace("Tests=1937", "Tests=0"),
+    output.replace("Files=2", "Files=1001"), output.replace("Tests=1937", "Tests=250001"),
+    output.replace("1937", "9999999"), output.replace("Result:", "untrusted Result:")]) {
+    assert.equal(parsePgTapSummary(invalid), null);
+  }
+});
+
 test("review boundary rejects edits, deletions, renames, and reordering of base-final migrations", async (t) => {
   const { validateImmutableFinalMigrationHistory, sha256 } = await import(runnerUrl.href);
   const cases = [
@@ -3203,6 +3216,8 @@ test("isolated CI runs baseline, both builder preflights and full suite on the o
           assert.equal(invocation.args.includes("--local"), true);
           testCalls.push(invocation);
           if (testCalls.length - 1 === failureTestIndex) return { code: 1, stdout: "", stderr: "synthetic_pgtap_container_failed" };
+          const files = invocation.args.filter((arg) => arg.startsWith("supabase/tests/")).length;
+          return { code: 0, stdout: `Files=${files}, Tests=${100 + testCalls.length}, 1 wallclock secs\nResult: PASS\n`, stderr: "" };
         }
         if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:56202/postgres" }), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
@@ -3230,6 +3245,13 @@ test("isolated CI runs baseline, both builder preflights and full suite on the o
       focused.map((file) => `supabase/tests/${file}`),
     ];
     assert.deepEqual(testCalls.map((call) => call.args.filter((arg) => arg.startsWith("supabase/tests/"))), expectedStages.slice(0, testCalls.length));
+    const completed = logs.filter((entry) => entry.event === "isolated_supabase_db_test_completed");
+    const successfulCalls = failureTestIndex >= 0 ? testCalls.slice(0, -1) : testCalls;
+    assert.deepEqual(completed, successfulCalls.map((call, index) => ({
+      event: "isolated_supabase_db_test_completed",
+      testFiles: call.args.filter((arg) => arg.startsWith("supabase/tests/")),
+      summary: { files: expectedStages[index].length, tests: 101 + index, result: "PASS" },
+    })));
     assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
     assert.equal(calls.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
     assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });

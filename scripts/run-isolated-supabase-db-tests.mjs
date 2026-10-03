@@ -131,6 +131,15 @@ export function summarizeLintErrors(value) {
     return errors.length ? JSON.stringify(errors) : value;
   } catch { return value; }
 }
+export function parsePgTapSummary(value) {
+  if (typeof value !== "string") return null;
+  const counts = [...value.matchAll(/^Files=(\d{1,6}), Tests=(\d{1,6}),[^\r\n]*$/gmu)];
+  const outcomes = [...value.matchAll(/^Result: (PASS|FAIL)\s*$/gmu)];
+  if (counts.length !== 1 || outcomes.length !== 1 || outcomes[0][1] !== "PASS") return null;
+  const files = Number(counts[0][1]); const tests = Number(counts[0][2]);
+  if (files < 1 || files > 1000 || tests < 1 || tests > 250_000) return null;
+  return { files, tests, result: "PASS" };
+}
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
   if (value && typeof value === "object") return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonical(value[key])}`).join(",")}}`;
@@ -756,7 +765,8 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let networkId;
   const invoke = async (argsForCli, { env = cleanEnvironment, signal } = {}) => {
     let scopedArgs = argsForCli;
-    if (argsForCli[0] === "test" && argsForCli[1] === "db") {
+    const isDbTest = argsForCli[0] === "test" && argsForCli[1] === "db";
+    if (isDbTest) {
       if (!/^[a-f0-9]{64}$/u.test(networkId ?? "")) fail("isolated_supabase_db_network_invalid");
       // pg_prove runs in its own container and must share the verified DB network.
       scopedArgs = [...argsForCli.slice(0, 2), "--network-id", networkId, ...argsForCli.slice(2)];
@@ -773,6 +783,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       }));
       fail("isolated_supabase_db_child_failed");
     }
+    if (isDbTest) log(JSON.stringify({ event: "isolated_supabase_db_test_completed",
+      testFiles: argsForCli.filter((path) => SQL_TEST.test(path)),
+      summary: parsePgTapSummary(result.stdout) }));
     return result;
   };
   const invokeNetwork = async (networkArgs, { signal } = {}) => {
