@@ -2933,6 +2933,58 @@ test("isolated CI pending publication still reaches the existing startup deadlin
   assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
 });
 
+test("isolated CI retains only bounded safe first and last pending maps on the original CLI error", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const secret = "synthetic-pending-map-private-value-DO-NOT-LOG";
+  const commands = []; const logs = []; let inspectCount = 0; let finishStart;
+  await assert.rejects(runIsolatedSupabaseDbTests({ root,
+    argv: ["--execute", "--authorized", "--request-id", "pending-map-diagnostic-error"],
+    tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56180; return () => ++port; })(),
+    executeNetwork: async (invocation) => {
+      commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
+      if (invocation.args[0] === "inspect") {
+        inspectCount += 1;
+        const containers = JSON.parse(result.stdout); const container = containers[0];
+        container.Config = { Env: [`PRIVATE_KEY=${secret}`] };
+        container.HostConfig.PortBindings["5432/tcp"][0].privateField = secret;
+        container.NetworkSettings.Ports = inspectCount === 1 ? {} : Object.fromEntries(Array.from({ length: 40 }, (_, index) => [
+          `${secret}_${index}/tcp`, [{ HostIp: secret, HostPort: secret }],
+        ]));
+        if (inspectCount >= 3) finishStart();
+        result.stdout = JSON.stringify(containers);
+      }
+      return result;
+    },
+    executeProcess: async (invocation) => {
+      commands.push(invocation);
+      if (invocation.args[0] === "db" && invocation.args[1] === "start") return new Promise((resolveStart) => {
+        finishStart = () => resolveStart({ code: 1, stdout: "", stderr: "synthetic_start_failed" });
+        invocation.signal.addEventListener("abort", finishStart, { once: true });
+      });
+      if (invocation.args[0] === "stop") assert.deepEqual(await readdir(join(invocation.cwd, "supabase/migrations")), []);
+      return { code: 0, stdout: "", stderr: "" };
+    }, createRelay: async () => { throw new Error("pending_map_must_not_create_relay"); }, log: (entry) => logs.push(JSON.parse(entry)),
+  }), /isolated_supabase_db_child_failed/u);
+  const pending = logs.filter((entry) => entry.event === "isolated_supabase_db_port_publication_pending");
+  assert.equal(pending.length, 2, "first pending logs once; only the final pending snapshot repeats on CLI failure");
+  assert.equal(pending[0].snapshot, "first_pending"); assert.equal(pending[1].snapshot, "last_pending");
+  assert.equal(pending[1].reason, "start_error");
+  assert.deepEqual(pending[0].publicationMap, { shape: "object", entryCount: 0, entryCountCapped: false, has5432: false });
+  assert.deepEqual(pending[1].publicationMap, { shape: "object", entryCount: 32, entryCountCapped: true, has5432: false });
+  for (const entry of pending) {
+    assert.deepEqual(entry.published5432, { shape: "undefined" });
+    assert.equal(entry.requested5432.values[0].HostIp, ""); assert.equal(entry.requested5432.values[0].HostPort, "56182");
+  }
+  assert.doesNotMatch(JSON.stringify(logs), new RegExp(secret, "u"));
+  assert.doesNotMatch(JSON.stringify(pending), /PRIVATE_KEY|Env|Config|privateField/u);
+  assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0])), false);
+  assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), false);
+  assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
+  assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
+  assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+});
+
 test("isolated CI runs both real builder preflights before migration-up and checks rollback", async (t) => {
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);

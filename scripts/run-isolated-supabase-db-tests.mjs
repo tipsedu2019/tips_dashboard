@@ -617,8 +617,12 @@ function describeOwnedPortBindingFailure(value, runtime, phase) {
         || (Number.isInteger(entry?.HostPort) && entry.HostPort >= 0 && entry.HostPort <= 65535) ? entry.HostPort : "[invalid]",
     })) };
   };
+  const publicationMap = container.NetworkSettings?.Ports;
+  const mapKeys = publicationMap && typeof publicationMap === "object" && !Array.isArray(publicationMap) ? Object.keys(publicationMap) : null;
   return { event: "isolated_supabase_db_port_binding_rejected", phase,
     container: `supabase_db_${runtime.projectId}`, running: container.State?.Running === true,
+    publicationMap: { shape: shape(publicationMap), entryCount: mapKeys ? Math.min(mapKeys.length, 32) : null,
+      entryCountCapped: Boolean(mapKeys && mapKeys.length > 32), has5432: Boolean(mapKeys && Object.hasOwn(publicationMap, "5432/tcp")) },
     requested5432: bindings(container.HostConfig?.PortBindings?.["5432/tcp"]),
     published5432: bindings(container.NetworkSettings?.Ports?.["5432/tcp"]) };
 }
@@ -774,6 +778,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let ledgerVerification = null;
   const preflightVerification = [];
   let primaryError = null;
+  let lastPendingPublication = null;
   const validateContainerBoundary = (value, phase, options) => {
     try { return validateInternalContainer(value, runtime, networkId, options); }
     catch (error) {
@@ -827,6 +832,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
               }
               break;
             }
+            const pending = describeOwnedPortBindingFailure(inspected.stdout, runtime, "startup");
+            if (pending && !lastPendingPublication) log(JSON.stringify({ ...pending, event: "isolated_supabase_db_port_publication_pending", snapshot: "first_pending" }));
+            lastPendingPublication = pending;
           }
         }
         if (startFinished) break;
@@ -838,6 +846,8 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     } catch (error) {
       startController.abort();
       await starting;
+      if (lastPendingPublication && error === startError) log(JSON.stringify({ ...lastPendingPublication,
+        event: "isolated_supabase_db_port_publication_pending", snapshot: "last_pending", reason: "start_error" }));
       throw error;
     } finally { clearTimeout(startTimeout); }
     validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName])).stdout, runtime, networkId);
