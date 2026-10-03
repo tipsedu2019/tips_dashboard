@@ -13,7 +13,7 @@ insert into dashboard_private.ai_agent_credentials(id,created_by,label,token_has
 insert into dashboard_private.ai_agent_credential_grants(credential_id,queues,actions,expires_at) values(pg_temp.ai_id(3),array['employee_requests'],array['read','claim','renew','progress','question','done'],clock_timestamp()+interval '1 day');
 insert into dashboard_private.chat_credential_space_grants(credential_id,space_keys,purposes,bridge_source_id,expires_at) values(pg_temp.ai_id(3),array['space_1'],array['ai_completion','bridge_reply'],pg_temp.ai_id(5),clock_timestamp()+interval '1 day'),(pg_temp.ai_id(4),array['space_1'],array['ai_completion','bridge_reply'],pg_temp.ai_id(5),clock_timestamp()+interval '1 day');
 -- Synthetic transport configuration exists only within this rolled-back fixture.
-update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/fixture_space' where space_key='space_1';
+update dashboard_private.chat_space_configuration set configured=true,public_origin='https://dashboard.test.invalid',resource_name='spaces/fixture_space' where space_key='space_1';
 insert into dashboard_private.chat_user_space_permissions(user_id,space_keys,configured_by) values(pg_temp.ai_id(2),array['space_1'],pg_temp.ai_id(1));
 insert into dashboard_private.ai_agent_requests(id,requester_id,title,body,notify_on_done,notification_space) select pg_temp.ai_id(n),pg_temp.ai_id(2),'Synthetic completion','private body must stay private',true,'space_1' from generate_series(10,15)n;
 create function pg_temp.claim_it(n integer) returns jsonb language sql as $$select public.ai_agent_bot_api_v1(repeat('e',64),'claim',jsonb_build_object('id',pg_temp.ai_id(n),'version','1','idempotencyKey',pg_temp.ai_id(100+n),'claimTokenHash',repeat('a',64)))$$;
@@ -31,7 +31,7 @@ select is(pg_temp.done_it(10)->>'status','done','completion transaction commits 
 reset role;
 insert into ev select 'completion',dashboard_private.chat_outbox_json_v1(o) from dashboard_private.chat_delivery_outbox o where request_id=pg_temp.ai_id(10);
 select is((select count(*) from dashboard_private.chat_delivery_outbox where request_id=pg_temp.ai_id(10)),1::bigint,'done commit creates exactly one fixed completion intent');
-select is((select v->'payload'->>'text' from ev where k='completion'),'Synthetic completion'||E' · 완료\n/admin/ai-agent/'||pg_temp.ai_id(10)::text,'completion payload contains only title/status/authenticated detail link');
+select is((select v->'payload'->>'text' from ev where k='completion'),'Synthetic completion'||E' · 완료\nhttps://dashboard.test.invalid/admin/ai-agent/'||pg_temp.ai_id(10)::text,'completion payload contains only title/status/authenticated detail link');
 select ok((select v::text not like '%private body%' and v::text not like '%private full result%' from ev where k='completion'),'private body and full result not copied into team notification');
 select throws_ok($q$update dashboard_private.chat_delivery_outbox set payload='{}'$q$,'55000','ai_agent_immutable','intent payload immutable');
 update dashboard_private.chat_space_configuration set configured=false,resource_name=null where space_key='space_1';
@@ -39,7 +39,7 @@ set local role service_role;
 select is(pg_temp.done_it(11)->>'status','done','configuration removal cannot undo completion');
 reset role;
 select is((select reason from dashboard_private.chat_delivery_outbox where request_id=pg_temp.ai_id(11)),'space_unconfigured','completion records unconfigured unsent reason');
-update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/fixture_space' where space_key='space_1';
+update dashboard_private.chat_space_configuration set configured=true,public_origin='https://dashboard.test.invalid',resource_name='spaces/fixture_space' where space_key='space_1';
 set local role service_role;
 select lives_ok($q$select pg_temp.done_it(12)$q$,'policy-revocation fixture completed');
 reset role;
@@ -108,7 +108,7 @@ select is(pg_temp.record('expired_sending',326,'sent','200','{"messageName":"spa
 select throws_ok($q$select pg_temp.bridge(repeat('e',64),'event-denied',327)$q$,'42501','ai_agent_grant_forbidden','revoked grant cannot create a new intent');
 reset role;
 update dashboard_private.chat_credential_space_grants set revoked_at=null where credential_id=pg_temp.ai_id(3);
-update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/fixture_space' where space_key='space_1';
+update dashboard_private.chat_space_configuration set configured=true,public_origin='https://dashboard.test.invalid',resource_name='spaces/fixture_space' where space_key='space_1';
 set local role service_role;
 insert into ev values('incident',pg_temp.bridge(repeat('e',64),'event-incident',330));
 insert into ev values('retry',pg_temp.bridge(repeat('e',64),'event-retry',331));

@@ -43,7 +43,7 @@ select is((select count(*)::integer from dashboard_private.ai_agent_space_policy
 select is((select before_revision::text||':'||after_revision::text from dashboard_private.ai_agent_space_policy_events where user_id=pg_temp.sp_id(2)),'0:1','audit before/after revision');
 select ok((select actor_id=pg_temp.sp_id(1) and before_space_keys='{}' and after_space_keys=array['space_1','space_2'] from dashboard_private.ai_agent_space_policy_events where user_id=pg_temp.sp_id(2)),'audit preserves authenticated actor and before/after keys');
 -- Synthetic configuration only, rolled back with every fixture in this test.
-update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/POLICY_FIXTURE',revision=2 where space_key in('space_1','space_3');
+update dashboard_private.chat_space_configuration set configured=true,public_origin='https://dashboard.test.invalid',resource_name='spaces/POLICY_FIXTURE',revision=2 where space_key in('space_1','space_3');
 select set_config('request.jwt.claim.sub',pg_temp.sp_id(2)::text,true);
 set local role authenticated;
 insert into policy_evidence values('staff',public.ai_agent_space_policy_api_v1('catalog','{}'));

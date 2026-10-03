@@ -3,7 +3,7 @@ import { runIsolatedSupabaseDbTests } from './run-isolated-supabase-db-tests.mjs
 
 const SUITES = Object.freeze({
   auth: Object.freeze({tests: ['supabase/tests/ai_agent_requests_authz_test.sql','supabase/tests/ai_agent_credentials_test.sql'], probes: ['tests/probe-ai-agent-auth-concurrency.mjs']}),
-  all: Object.freeze({tests: ['supabase/tests/ai_agent_requests_authz_test.sql','supabase/tests/ai_agent_credentials_test.sql','supabase/tests/ai_agent_requests_transition_test.sql','supabase/tests/ai_agent_chat_outbox_test.sql'], probes: ['tests/probe-ai-agent-auth-concurrency.mjs','tests/probe-ai-agent-claim-concurrency.mjs']}),
+  all: Object.freeze({tests: ['supabase/tests/ai_agent_requests_authz_test.sql','supabase/tests/ai_agent_credentials_test.sql','supabase/tests/ai_agent_requests_transition_test.sql','supabase/tests/ai_agent_chat_outbox_test.sql','supabase/tests/ai_agent_space_policy_test.sql','supabase/tests/ai_agent_chat_runtime_test.sql'], probes: ['tests/probe-ai-agent-auth-concurrency.mjs','tests/probe-ai-agent-claim-concurrency.mjs','tests/probe-ai-agent-space-policy-concurrency.mjs','tests/probe-ai-agent-chat-runtime-concurrency.mjs']}),
 });
 const invalid = () => { throw new Error('ai_agent_local_db_arguments_invalid'); };
 export function parseAiAgentDbArguments(argv) {

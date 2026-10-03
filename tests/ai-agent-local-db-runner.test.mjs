@@ -11,8 +11,8 @@ test('auth suite delegates exactly two tests to the shared guarded runner',async
 test('all is fixed and contains Task 2 lifecycle and concurrency evidence',async()=>{
   let call;
   await runAiAgentLocalDbQa({argv:[],runIsolated:async options=>{call=options;return {status:'plan'};}});
-  assert.deepEqual(call.argv.filter((_,i,a)=>a[i-1]==='--test'),['supabase/tests/ai_agent_requests_authz_test.sql','supabase/tests/ai_agent_credentials_test.sql','supabase/tests/ai_agent_requests_transition_test.sql','supabase/tests/ai_agent_chat_outbox_test.sql']);
-  assert.deepEqual(call.argv.filter((_,i,a)=>a[i-1]==='--probe'),['tests/probe-ai-agent-auth-concurrency.mjs','tests/probe-ai-agent-claim-concurrency.mjs']);
+  assert.deepEqual(call.argv.filter((_,i,a)=>a[i-1]==='--test'),['supabase/tests/ai_agent_requests_authz_test.sql','supabase/tests/ai_agent_credentials_test.sql','supabase/tests/ai_agent_requests_transition_test.sql','supabase/tests/ai_agent_chat_outbox_test.sql','supabase/tests/ai_agent_space_policy_test.sql','supabase/tests/ai_agent_chat_runtime_test.sql']);
+  assert.deepEqual(call.argv.filter((_,i,a)=>a[i-1]==='--probe'),['tests/probe-ai-agent-auth-concurrency.mjs','tests/probe-ai-agent-claim-concurrency.mjs','tests/probe-ai-agent-space-policy-concurrency.mjs','tests/probe-ai-agent-chat-runtime-concurrency.mjs']);
 });
 test('execute requires request identity and rejects external/custom targets',()=>{
   assert.equal(parseAiAgentDbArguments(['--execute','--suite','auth','--request-id','ai-agent-local-auth-01']).execute,true);
