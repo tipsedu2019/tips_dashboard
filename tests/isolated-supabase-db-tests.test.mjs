@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { createHash, randomBytes } from "node:crypto";
-import { lstat, mkdir, mkdtemp, readFile, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -2766,6 +2766,56 @@ test("isolated CI stops unsafe containers before staging repository SQL", async 
   assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
   assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+});
+
+test("isolated CI port rejection diagnoses startup and ready bindings without exposing inspect secrets or staging SQL", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const secret = "synthetic-inspect-private-value-DO-NOT-LOG";
+  for (const [phase, publishedShape] of [["startup", "null"], ["startup", "broad"], ["ready", "broad"], ["startup", "invalid-scalars"]]) {
+    const commands = []; const logs = []; let inspectCount = 0;
+    await assert.rejects(runIsolatedSupabaseDbTests({ root,
+      argv: ["--execute", "--authorized", "--request-id", `port-diagnostic-${phase}-${publishedShape}`],
+      tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56120; return () => ++port; })(),
+      executeNetwork: async (invocation) => {
+        commands.push(invocation);
+        const result = await isolatedNetworkFixture(invocation);
+        if (invocation.args[0] === "inspect" && (++inspectCount === 1 ? phase === "startup" : true)) {
+          const containers = JSON.parse(result.stdout); const container = containers[0];
+          container.Config = { Env: [`SUPABASE_ACCESS_TOKEN=${secret}`, `PRIVATE_KEY=${secret}`], Other: secret };
+          container.HostConfig.Binds = [`${secret}:/private`];
+          container.NetworkSettings.Ports["other/tcp"] = [{ HostIp: secret, HostPort: secret }];
+          container.NetworkSettings.Ports["5432/tcp"] = publishedShape === "null" ? null
+            : [{ HostIp: publishedShape === "invalid-scalars" ? secret : "0.0.0.0", HostPort: "56122", privateField: secret }];
+          if (publishedShape === "invalid-scalars") container.HostConfig.PortBindings["5432/tcp"][0].HostPort = secret;
+          result.stdout = JSON.stringify(containers);
+        }
+        return result;
+      },
+      executeProcess: async (invocation) => {
+        commands.push(invocation);
+        if (invocation.args[0] === "stop") assert.deepEqual(await readdir(join(invocation.cwd, "supabase/migrations")), [], "rejected boundary cannot stage repository SQL");
+        return { code: 0, stdout: "", stderr: "" };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    }), /isolated_supabase_db_port_binding_invalid/u);
+    const diagnostic = logs.find((entry) => entry.event === "isolated_supabase_db_port_binding_rejected");
+    assert.equal(diagnostic.phase, phase); assert.equal(diagnostic.running, true);
+    assert.match(diagnostic.container, /^supabase_db_tips_supabase_db_qa_[a-f0-9]{12}$/u);
+    assert.equal(diagnostic.requested5432.shape, "array");
+    if (publishedShape === "null") assert.deepEqual(diagnostic.published5432, { shape: "null" });
+    else {
+      assert.equal(diagnostic.published5432.values[0].HostIp, publishedShape === "invalid-scalars" ? "[invalid]" : "0.0.0.0");
+      assert.equal(diagnostic.published5432.values[0].HostPort, "56122");
+    }
+    if (publishedShape === "invalid-scalars") assert.equal(diagnostic.requested5432.values[0].HostPort, "[invalid]");
+    assert.doesNotMatch(JSON.stringify(logs), new RegExp(secret, "u"));
+    assert.doesNotMatch(JSON.stringify(diagnostic), /Config|Env|PRIVATE_KEY|SUPABASE_ACCESS_TOKEN|Binds|other\/tcp|privateField/u);
+    assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0]) || call.args[1] === "lint"), false);
+    assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
+    assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
+    assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), false);
+    assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+  }
 });
 
 test("isolated CI runs both real builder preflights before migration-up and checks rollback", async (t) => {

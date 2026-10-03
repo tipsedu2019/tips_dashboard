@@ -4,7 +4,7 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promise
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { createServer } from "node:net";
+import { createServer, isIP } from "node:net";
 import { buildTransactionalPreflightSql } from "./build-supabase-transactional-preflight.mjs";
 import { createOwnedLoopbackRelay } from "./isolated-db-loopback-relay.mjs";
 
@@ -598,6 +598,27 @@ export function validateInternalRoutes(value) {
   return true;
 }
 
+function describeOwnedPortBindingFailure(value, runtime, phase) {
+  const container = JSON.parse(value)?.[0];
+  if (container?.Name !== `/supabase_db_${runtime.projectId}`) return null;
+  const shape = (entry) => Array.isArray(entry) ? "array" : entry === null ? "null" : typeof entry;
+  const bindings = (entries) => {
+    if (!Array.isArray(entries)) return { shape: shape(entries) };
+    return { shape: "array", count: entries.length, values: entries.slice(0, 8).map((entry) => ({
+      shape: shape(entry),
+      HostIp: typeof entry?.HostIp === "string" && (entry.HostIp === ""
+        || (/^[a-f0-9:.]+$/iu.test(entry.HostIp) && isIP(entry.HostIp))) ? entry.HostIp : "[invalid]",
+      HostPort: (typeof entry?.HostPort === "string" && (entry.HostPort === ""
+        || (/^\d{1,5}$/u.test(entry.HostPort) && Number(entry.HostPort) <= 65535)))
+        || (Number.isInteger(entry?.HostPort) && entry.HostPort >= 0 && entry.HostPort <= 65535) ? entry.HostPort : "[invalid]",
+    })) };
+  };
+  return { event: "isolated_supabase_db_port_binding_rejected", phase,
+    container: `supabase_db_${runtime.projectId}`, running: container.State?.Running === true,
+    requested5432: bindings(container.HostConfig?.PortBindings?.["5432/tcp"]),
+    published5432: bindings(container.NetworkSettings?.Ports?.["5432/tcp"]) };
+}
+
 export function parseIsolatedMigrationLedger(value) {
   const source = String(value).trim();
   let rows;
@@ -749,6 +770,18 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let ledgerVerification = null;
   const preflightVerification = [];
   let primaryError = null;
+  const validateContainerBoundary = (value, phase, options) => {
+    try { return validateInternalContainer(value, runtime, networkId, options); }
+    catch (error) {
+      if (error.message === "isolated_supabase_db_port_binding_invalid") {
+        // Only allowlisted address/port scalars from the expected owned DB.
+        // Never print the inspect payload, environment, mounts, or other ports.
+        const diagnostic = describeOwnedPortBindingFailure(value, runtime, phase);
+        if (diagnostic) log(JSON.stringify(diagnostic));
+      }
+      throw error;
+    }
+  };
   try {
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
     await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
@@ -782,7 +815,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
           let container;
           try { container = JSON.parse(inspected.stdout)?.[0]; } catch { fail("isolated_supabase_db_container_network_invalid"); }
           if (container?.State?.Running) {
-            validateInternalContainer(inspected.stdout, runtime, networkId, { allowUnpublished: true });
+            validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true });
             if (!container.NetworkSettings.Ports["5432/tcp"].length) {
               relay = await createRelay({ containerName: `supabase_db_${runtime.projectId}`, port: runtime.ports.db, env: cleanEnvironment });
               relay.assertBoundary();
@@ -802,7 +835,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       throw error;
     } finally { clearTimeout(startTimeout); }
     validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName])).stdout, runtime, networkId);
-    validateInternalContainer((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, runtime, networkId, { relay });
+    validateContainerBoundary((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, "ready", { relay });
     validateInternalRoutes((await invokeNetwork(["exec", `supabase_db_${runtime.projectId}`, "cat", "/proc/net/route"])).stdout);
     log(JSON.stringify({ event: "isolated_supabase_db_network_verified", internal: true, exclusive: true,
       connection: relay ? "owned_docker_exec_loopback" : "native_loopback", loopbackPublication: true,
