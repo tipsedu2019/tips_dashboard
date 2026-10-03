@@ -135,13 +135,15 @@ function createSearchItems({
   canEditCurriculumPlanning,
   canUseAssistantOperations,
   isAdmin,
+  canUseAiAgentRequests = false,
 }: {
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
   canUseAssistantOperations: boolean
   isAdmin: boolean
+  canUseAiAgentRequests?: boolean
 }): SearchItem[] {
-  const navGroups = buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin })
+  const navGroups = buildAdminNavGroups({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests })
   const seen = new Set<string>()
   const navigationItems: SearchItem[] = []
 
@@ -203,7 +205,7 @@ interface CommandSearchProps {
 export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSearchProps) {
   const router = useRouter()
   const pathname = usePathname()
-  const { canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin } = useAuth()
+  const { canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests } = useAuth()
   const currentPath = React.useMemo(() => normalizeCommandPath(pathname), [pathname])
   const prefetchedCommandRoutesRef = React.useRef(new Set<string>())
   const pendingTargetRef = React.useRef<string | null>(null)
@@ -223,8 +225,8 @@ export function CommandSearch({ open, onOpenChange, returnFocusRef }: CommandSea
 
   const groupedItems = React.useMemo(() => {
     if (!open) return EMPTY_GROUPED_SEARCH_ITEMS
-    return groupSearchItems(createSearchItems({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin }))
-  }, [canEditCurriculumPlanning, canManageAll, canUseAssistantOperations, isAdmin, open])
+    return groupSearchItems(createSearchItems({ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests }))
+  }, [canEditCurriculumPlanning, canManageAll, canUseAssistantOperations, isAdmin, canUseAiAgentRequests, open])
 
   const groupedEntries = React.useMemo(
     () => (open ? Object.entries(groupedItems) : EMPTY_GROUPED_SEARCH_ENTRIES),
