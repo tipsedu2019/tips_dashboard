@@ -17,12 +17,14 @@ export class HttpError extends Error {
 export function record(v: unknown): Record<string, unknown> | null { return v && typeof v === "object" && !Array.isArray(v) ? v as Record<string, unknown> : null; }
 export function response(body: unknown, status = 200) { return Response.json(body, { status, headers: { ...headers, ...(status === 429 ? { "Retry-After": "60" } : {}), ...(status === 401 ? { "WWW-Authenticate": 'Bearer realm="tips-agent"' } : {}) } }); }
 export const knownCodes = new Set(["agent_unauthorized", "agent_forbidden", "agent_scope_forbidden", "agent_class_not_active", "agent_not_found", "agent_invalid", "agent_invalid_range", "agent_no_change", "agent_unsupported_catalog_label", "agent_stale", "agent_preview_expired", "agent_idempotency_key_reused", "agent_preview_consumed", "agent_rate_limited", "timetable_resource_conflict", "class_schedule_stale", "class_schedule_closed", "class_schedule_forbidden", "continuous_class_schedule_runtime_not_ready", "agent_write_failed", "agent_approval_workflow_required", "agent_past_change", "agent_invalid_catalog", "agent_ambiguous_lesson", "agent_edit_makeup_source", "agent_incomplete_schedule", "agent_missing_billing_period", "agent_timing_required", "agent_makeup_date_occupied", "agent_calendar_duplicate", "agent_calendar_match_required", "agent_calendar_source_conflict", "agent_calendar_source_stale", "agent_calendar_metadata_invalid"]);
+knownCodes.add("agent_review_stale");
+knownCodes.add("agent_unknown_occupancy_ack_required");
 export function errorStatus(code: string): number {
   if (code === "agent_unauthorized") return 401;
   if (["agent_forbidden", "agent_scope_forbidden", "agent_class_not_active", "class_schedule_closed", "class_schedule_forbidden"].includes(code)) return 403;
   if (code === "agent_not_found") return 404;
   if (code === "agent_rate_limited") return 429;
-  if (["agent_stale", "agent_preview_expired", "agent_idempotency_key_reused", "agent_preview_consumed", "timetable_resource_conflict", "class_schedule_stale", "agent_calendar_duplicate", "agent_calendar_match_required", "agent_calendar_source_conflict"].includes(code)) return 409;
+  if (["agent_stale", "agent_review_stale", "agent_preview_expired", "agent_idempotency_key_reused", "agent_preview_consumed", "timetable_resource_conflict", "class_schedule_stale", "agent_calendar_duplicate", "agent_calendar_match_required", "agent_calendar_source_conflict"].includes(code)) return 409;
   if (["agent_write_failed", "continuous_class_schedule_runtime_not_ready"].includes(code)) return 503;
   return 422;
 }

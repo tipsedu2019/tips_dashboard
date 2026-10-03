@@ -4,7 +4,7 @@ import { normalizeSchedulePlan, buildSchedulePlanForSave } from '../../../lib/cl
 export class EditError extends Error {}
 const fail = code => { throw new EditError(code); };
 const rows = value => Array.isArray(value) ? value : [];
-const minutes = value => /^\d{2}:\d{2}/.test(value || '') ? Number(value.slice(0, 2)) * 60 + Number(value.slice(3, 5)) : null;
+const minutes = value => { const match=/^(\d{1,2}):(\d{2})/.exec(value || ''); return match ? Number(match[1]) * 60 + Number(match[2]) : null; };
 export const clockTime = n => `${String(Math.floor(n / 60)).padStart(2, '0')}:${String(n % 60).padStart(2, '0')}`;
 const weekday = date => new Date(`${date}T00:00:00Z`).getUTCDay();
 const inWindow = (date, window) => date >= window.from && date <= window.to;
@@ -72,6 +72,55 @@ function selectLesson(workspace, change) {
   return candidates[0] || null;
 }
 const basicNames = { name:'name', classType:'class_type', subject:'subject', subjectAreaKey:'subject_area_key', grade:'grade', capacity:'capacity', fee:'fee' };
+export function compilePastLessonStateCorrection(context, request, { today = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(new Date()) } = {}) {
+  if (context.version !== request.expectedVersion) fail('agent_stale');
+  if (context.storageMode !== 'legacy') fail('agent_invalid');
+  if (request.date >= today) fail('agent_invalid_range');
+  // Read the exact stored row, never the workspace's inherited weekly values or
+  // the planner's virtual dates. IDs and every raw occupancy/content byte stay
+  // server-owned; the command contains only the selected state transition.
+  const saved = rows(context.plan?.sessions).filter(row => row && typeof row === 'object' && !Array.isArray(row));
+  const identity = row => String(row.id ?? row.sessionKey ?? '');
+  const matches = saved.filter(row => identity(row) === request.lessonId);
+  if (matches.length > 1) fail('agent_ambiguous_lesson');
+  const row = matches[0];
+  if (!row || row.date !== request.date || !Object.prototype.hasOwnProperty.call(row,'id') || row.id !== request.lessonId) fail('agent_stale');
+  if (typeof row.id !== 'string' || !row.id.trim() || row.id !== row.id.trim() || row.id.length > 240) fail('agent_ambiguous_lesson');
+  if (saved.filter(item => item.date === request.date).length !== 1) fail('agent_ambiguous_lesson');
+  const state = row.scheduleState || row.state || 'active';
+  if ((Object.prototype.hasOwnProperty.call(row,'isForced') && row.isForced !== false)
+    || state === 'force_active' || state === 'makeup' || row.originalDate || row.makeupDate
+    || row.makeupOf || row.makeupOfSessionId || row.makeup_of_session_id
+    || saved.some(item => item.originalDate === request.date || item.makeupDate === request.date)) fail('agent_edit_makeup_source');
+  const expectedState = {scheduled:'active',cancelled:'exception',skipped:'skipped'}[request.expectedState];
+  if (!['active','exception','skipped'].includes(state)) fail('agent_invalid');
+  if (state !== expectedState) fail('agent_stale');
+  const nextState = {scheduled:'active',cancelled:'exception'}[request.nextState];
+  if (state === nextState) fail('agent_no_change');
+  const stateMap=context.plan?.sessionStates?.[request.date],detailMap=context.plan?.sessionSchedules?.[request.date];
+  for (const value of [stateMap,detailMap]) if (value !== undefined && (!value || typeof value !== 'object' || Array.isArray(value))) fail('agent_invalid');
+  if (stateMap?.originalDate || stateMap?.makeupDate || (stateMap?.state != null && stateMap.state !== state)) fail('agent_edit_makeup_source');
+  const storedMinute = value => {
+    if (typeof value !== 'string' || !/^\d{1,2}:[0-5]\d(?::00(?:\.0+)?)?$/.test(value)) return null;
+    const [hour,minute] = value.split(':').map(Number);
+    return hour * 60 + minute;
+  };
+  if (['startTime','endTime','teacherCatalogId','classroomCatalogId'].some(field => !Object.prototype.hasOwnProperty.call(row,field)
+    || typeof row[field] !== 'string' || !row[field].trim())) fail('agent_timing_required');
+  const start = storedMinute(row.startTime), end = storedMinute(row.endTime);
+  if (start === null || end === null || start < 0 || end > 1440 || start >= end) fail('agent_timing_required');
+  if (Object.keys(detailMap || {}).some(field => ['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'].includes(field)
+    && (!Object.prototype.hasOwnProperty.call(row,field) || detailMap[field] !== row[field]))) fail('agent_timing_required');
+  for (const [kind,idField] of [['teachers','teacherCatalogId'],['classrooms','classroomCatalogId']]) {
+    const catalogRows = rows(context.catalogs?.[kind]);
+    const resourceId = row[idField];
+    if (!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(resourceId)
+      || catalogRows.filter(item => String(item.id).toLowerCase() === resourceId.toLowerCase()).length !== 1) fail('agent_invalid_catalog');
+  }
+  return { kind:'past_lesson_state_correction',lessonId:request.lessonId,date:request.date,expectedState,state:nextState,reason:request.reason,
+    window:{from:request.date,to:request.date},
+    ...(request.acknowledgeUnknownOccupancy ? {unknownOccupancyReviewHash:request.blockerReviewHash,acknowledgeUnknownOccupancy:true} : {}) };
+}
 export function compileClassEdit(context, request, { today = new Intl.DateTimeFormat('sv-SE', {timeZone:'Asia/Seoul'}).format(new Date()), uuid = randomUUID } = {}) {
   if (context.version !== request.expectedVersion) fail('agent_stale');
   const workspace = classWorkspace(context, request.window);

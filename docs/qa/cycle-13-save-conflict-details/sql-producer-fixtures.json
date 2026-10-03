@@ -1,0 +1,22 @@
+{
+  "both": {
+    "code": "23P01",
+    "details": "{\"version\": 1, \"confirmed\": [{\"date\": \"2026-09-28\", \"className\": \"Synthetic both collision\", \"endMinute\": 600, \"startMinute\": 540, \"teacherName\": \"Synthetic shared teacher\", \"classroomName\": \"Synthetic shared room\", \"overlapEndMinute\": 600, \"overlapStartMinute\": 570}], \"truncated\": false, \"unresolved\": [], \"confirmedCount\": 1, \"unresolvedCount\": 0}",
+    "message": "timetable_resource_conflict"
+  },
+  "teacher": {
+    "code": "23P01",
+    "details": "{\"version\": 1, \"confirmed\": [{\"date\": \"2026-09-30\", \"className\": \"Synthetic teacher collision\", \"endMinute\": 600, \"startMinute\": 540, \"teacherName\": \"Synthetic shared teacher\", \"overlapEndMinute\": 600, \"overlapStartMinute\": 570}], \"truncated\": false, \"unresolved\": [], \"confirmedCount\": 1, \"unresolvedCount\": 0}",
+    "message": "timetable_resource_conflict"
+  },
+  "same-class": {
+    "code": "23P01",
+    "details": "{\"version\": 1, \"confirmed\": [{\"date\": \"2026-09-27\", \"className\": \"Synthetic draft target\", \"endMinute\": 600, \"sameClass\": true, \"startMinute\": 540, \"overlapEndMinute\": 600, \"overlapStartMinute\": 570}], \"truncated\": false, \"unresolved\": [], \"confirmedCount\": 1, \"unresolvedCount\": 0}",
+    "message": "timetable_resource_conflict"
+  },
+  "unknown-past": {
+    "code": "23P01",
+    "details": "{\"version\": 1, \"confirmed\": [], \"truncated\": false, \"unresolved\": [{\"date\": \"2026-10-01\", \"className\": \"Synthetic past missing snapshots\", \"missingFields\": [\"time\", \"teacher\", \"classroom\"]}], \"confirmedCount\": 0, \"unresolvedCount\": 1}",
+    "message": "timetable_resource_conflict"
+  }
+}

@@ -33,6 +33,17 @@ export const classEditRequest = z.object({
   return new Set(dates).size === dates.length && (v.lessons || []).every(x => x.date >= v.window.from && x.date <= v.window.to && (!x.makeup || (x.makeup.date >= v.window.from && x.makeup.date <= v.window.to)));
 });
 export type ClassEditRequest = z.infer<typeof classEditRequest>;
+// This operation is deliberately separate from ordinary dated edits. It cannot
+// assign occupancy, generate a lesson, or grant a general past-date exception.
+export const pastLessonStateCorrectionRequest = z.object({
+  expectedVersion: z.string().regex(/^[a-f0-9]{64}$/),
+  lessonId: z.string().min(1).max(240), date: z.iso.date(),
+  expectedState: z.enum(["scheduled", "cancelled", "skipped"]),
+  nextState: z.enum(["scheduled", "cancelled"]),
+  reason: z.string().trim().min(1).max(300),
+  blockerReviewHash: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  acknowledgeUnknownOccupancy: z.literal(true).optional(),
+}).strict().refine(value => Boolean(value.blockerReviewHash) === Boolean(value.acknowledgeUnknownOccupancy));
 export const EDIT_SCOPES = ["class-details:read", "class-info:write", "weekly-plan:write", "lesson-plan:write"] as const;
 export function requiredEditScopes(request: ClassEditRequest): string[] {
   return ["class-details:read", ...(request.basic ? ["class-info:write"] : []), ...(request.weeklySlots ? ["weekly-plan:write"] : []), ...(request.lessons ? ["lesson-plan:write"] : [])];

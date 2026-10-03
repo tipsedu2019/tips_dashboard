@@ -169,6 +169,21 @@ async function readEnrollment(enrollment) {
   row.registrationTracks[0].enrollmentDetailRows = [enrollment];
   return readTyped('registration', row);
 }
+for (const [kind, base] of [['canonical', canonicalEnrollment], ['normalized', correctionEnrollment]]) {
+  for (const textbookIds of [[], [id(920)], [id(920), id(921)]]) test(`registration preserves ${kind} textbookIds with ${textbookIds.length} books`, async () => {
+    const enrollment = { ...base, textbookId: textbookIds[0] ?? null, textbookIds };
+    const result = await readEnrollment(enrollment);
+    assert.deepEqual(JSON.parse(JSON.stringify(result.rows[0].registrationTracks[0].enrollmentDetailRows)), [enrollment]);
+  });
+  for (const textbookIds of [null, id(920), {}, 1, false, [null], [1], [false], [{}], ['bad'], [id(920), 'bad']]) {
+    test(`registration rejects ${kind} malformed textbookIds ${JSON.stringify(textbookIds)}`, async () => {
+      await assert.rejects(() => readEnrollment({ ...base, textbookIds }), /response_invalid/);
+    });
+  }
+  test(`registration still rejects unsupported ${kind} enrollment fields with textbookIds`, async () => {
+    await assert.rejects(() => readEnrollment({ ...base, textbookIds: [], unexpected: true }), /response_invalid/);
+  });
+}
 for (const [label, enrollment] of [
   ['canonical planned response', canonicalEnrollment],
   ['canonical populated class-close response', {

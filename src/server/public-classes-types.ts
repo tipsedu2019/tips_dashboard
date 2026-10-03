@@ -59,7 +59,10 @@ export interface PublicClassSession {
   publicNote?: string;
   billingId?: string;
   billingLabel?: string;
+  // Stored identity for registration keys and progress-log ordering.
   sessionNumber?: number;
+  // DOM display only; explicit null is uncounted or cannot be derived safely.
+  displaySessionNumber?: number | null;
   textbookEntries?: PublicScheduleTextbookEntry[];
 }
 

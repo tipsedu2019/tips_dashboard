@@ -186,12 +186,16 @@ function mapPublicClassSummary(row) {
   };
 }
 
-function mapPublicClass(row) {
+function mapPublicClass(row, { projected = false } = {}) {
   return {
     ...mapPublicClassSummary(row),
     textbookIds: strings(row.textbook_ids ?? row.textbookIds),
     lessons: publicLessons(row.lessons),
-    schedulePlan: publicClassSchedule(row.schedule_plan ?? row.schedulePlan),
+    // Snake-case DB plans derive afresh; camel-case public DTOs preserve their
+    // explicit unknown display ordinals after private guard fields are stripped.
+    schedulePlan: publicClassSchedule(row.schedule_plan ?? row.schedulePlan, {
+      projected: projected && !Object.hasOwn(row, "schedule_plan"),
+    }),
     startDate: text(row.start_date ?? row.startDate),
     endDate: text(row.end_date ?? row.endDate),
   };
@@ -233,7 +237,7 @@ export function normalizePublicClassesFullPayload(payload) {
       ? payload.generatedAt
       : new Date().toISOString(),
     source: "supabase",
-    classes: records(payload.classes).map(mapPublicClass).filter((row) => row.status === ACTIVE_CLASS_STATUS),
+    classes: records(payload.classes).map((row) => mapPublicClass(row, { projected: true })).filter((row) => row.status === ACTIVE_CLASS_STATUS),
     textbooks: records(payload.textbooks).map(mapPublicTextbook),
     progressLogs: records(payload.progressLogs).map(mapPublicProgressLog),
   };

@@ -6,6 +6,15 @@ import { pathToFileURL } from "node:url"
 const MIGRATION_VERSION_PATTERN = /^(\d{14})_.+\.sql$/
 const LEDGER_VERSION_PATTERN = /^\d{14}$/
 const TRANSACTION_CONTROL_PATTERN = /^(?:begin\b|start\s+transaction\b|commit\b|end\b|rollback\b|abort\b|prepare\s+transaction\b(?!.*\bas\b))/i
+const NOTIFICATION_RETIREMENT_PREFLIGHT_FILE = "20260909084130_retire_tasks_and_word_retest_notifications.sql"
+const NOTIFICATION_RETIREMENT_PREFLIGHT_SHA256 = "69290e004a62fde1a7e1230a49513a45be76cb60c9af572d432fc62cf82feee3"
+const NOTIFICATION_RETIREMENT_ALTER = [
+  "alter table dashboard_private.notification_rules",
+  "  add constraint notification_rules_unused_workflows_retired_check",
+  "  check (not enabled or workflow_key not in ('tasks','word_retests')) not valid;",
+].join("\n")
+const NOTIFICATION_RETIREMENT_CHECKPOINT = "set constraints dashboard_private.notification_rules_active_template_fkey immediate;"
+const NOTIFICATION_RETIREMENT_RESTORE = "set constraints dashboard_private.notification_rules_active_template_fkey deferred;"
 const APPROVED_INTERLEAVED_PENDING_MIGRATIONS = Object.freeze([
   ["20260831013310_management_numbered_pages.sql", "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667"],
   ["20260831031913_ops_task_numbered_pages.sql", "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"],
@@ -258,6 +267,28 @@ function stripMigrationTransaction(source) {
   return sql.trim()
 }
 
+export function addNotificationRetirementPreflightCheckpoint(body) {
+  const anchorIndex = body.indexOf(NOTIFICATION_RETIREMENT_ALTER)
+  const matchingStatements = sqlStatements(body).filter(({ start, end }) =>
+    body.slice(start, end).trim() === NOTIFICATION_RETIREMENT_ALTER,
+  )
+  if (
+    anchorIndex < 0 ||
+    body.indexOf(NOTIFICATION_RETIREMENT_ALTER, anchorIndex + 1) >= 0 ||
+    matchingStatements.length !== 1 ||
+    body.slice(matchingStatements[0].start, matchingStatements[0].end).trim() !== NOTIFICATION_RETIREMENT_ALTER
+  ) {
+    fail("transactional_preflight_notification_retirement_anchor_invalid")
+  }
+  const anchorEnd = anchorIndex + NOTIFICATION_RETIREMENT_ALTER.length
+  // Earlier migrations inserted these rows in the same rollback transaction.
+  // Updating them queues the deferred FK again even when its keys are unchanged.
+  // Flush only that FK around the exact ALTER; keep every original SQL byte.
+  return body.slice(0, anchorIndex) + NOTIFICATION_RETIREMENT_CHECKPOINT + "\n"
+    + body.slice(anchorIndex, anchorEnd) + "\n" + NOTIFICATION_RETIREMENT_RESTORE
+    + body.slice(anchorEnd)
+}
+
 function validateFocusedTest(source) {
   const statements = sqlStatements(source)
   const controls = transactionStatements(statements)
@@ -337,7 +368,13 @@ export async function buildTransactionalPreflightSql({
   const migrationSections = []
   for (const { file, version } of pendingFiles) {
     const source = await readFile(resolveInsideRepo(repoRoot, `${forwardMigrationsPath}/${file}`), "utf8")
-    const body = stripMigrationTransaction(source)
+    let body = stripMigrationTransaction(source)
+    if (file === NOTIFICATION_RETIREMENT_PREFLIGHT_FILE) {
+      if (sha256(source) !== NOTIFICATION_RETIREMENT_PREFLIGHT_SHA256) {
+        fail("transactional_preflight_notification_retirement_hash_mismatch")
+      }
+      body = addNotificationRetirementPreflightCheckpoint(body)
+    }
     migrationSections.push(
       [
         `-- transactional preflight migration ${version}: ${file}`,

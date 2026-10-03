@@ -4,6 +4,8 @@ import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import test from "node:test"
+import vm from "node:vm"
+import ts from "typescript"
 import { createClient } from "@supabase/supabase-js"
 
 import {
@@ -3025,3 +3027,185 @@ test("timetable purpose-complete contexts do not exempt unknown names or missing
     assert.ok(inspectReleaseQuery(`client.rpc("${name}_unreviewed", {}).abortSignal(AbortSignal.timeout(8_000)).retry(false)`).length > 0, name);
   }
 });
+
+
+test("past correction exact single-result operations retain all transport controls", () => {
+  const names = ["preview_past_lesson_state_correction_v1", "save_past_lesson_state_correction_v1"]
+  const inspect = (name, suffix = ".abortSignal(AbortSignal.timeout(20_000)).retry(false)") => inspectReleaseQuery(
+    `client.rpc(${JSON.stringify(name)}, options)${suffix}`,
+  ).map(({ reason }) => reason)
+  for (const name of names) {
+    assert.deepEqual(inspect(name), [])
+    assert.deepEqual(inspect(name, ".abortSignal(AbortSignal.timeout(8_000)).retry(false)"), [])
+    for (const unknown of [`${name}_other`, name.replace("_v1", "_v2"), "list_past_lesson_states_v1", "agent_api_v2"])
+      assert.ok(inspect(unknown).includes("rpc_page_limit_missing"), unknown)
+    assert.ok(inspect(name, ".retry(false)").includes("list_abort_signal_missing"))
+    assert.ok(inspect(name, ".abortSignal(AbortSignal.timeout(8_000))").includes("list_retry_false_missing"))
+    assert.ok(inspect(name, ".abortSignal(AbortSignal.timeout(8_000)).retry(true)").includes("list_retry_false_missing"))
+    for (const budget of [9000, 21000, 30000])
+      assert.ok(inspect(name, `.abortSignal(AbortSignal.timeout(${budget})).retry(false)`).includes("list_abort_signal_missing"))
+  }
+  for (const budget of [8000, 9000, 20000]) {
+    const dynamic = inspectReleaseQuery(`client.rpc(name, options).abortSignal(AbortSignal.timeout(${budget})).retry(false)`)
+    assert.ok(dynamic.some(({ reason }) => reason === "rpc_page_limit_missing"))
+    if (budget !== 8000) assert.ok(dynamic.some(({ reason }) => reason === "list_abort_signal_missing"))
+  }
+  assert.deepEqual(inspectReleaseQuery('client.rpc("update_class_operational_v1", options).abortSignal(AbortSignal.timeout(20_000)).retry(false)'), [])
+  for (const name of ["save_class_schedule_defaults_v1", "get_class_schedule_v1", "unknown_operation_v1"])
+    assert.ok(inspectReleaseQuery(`client.rpc("${name}", {p_limit:10}).abortSignal(AbortSignal.timeout(20_000)).retry(false)`)
+      .some(({ reason }) => reason === "list_abort_signal_missing"))
+  for (const name of names) {
+    assert.ok(inspectReleaseQuery(`client.rpc("${name}", options).abortSignal(AbortSignal.timeout(20_000)).abortSignal(signal).retry(false)`)
+      .some(({ reason }) => reason === "list_abort_signal_missing"))
+    assert.deepEqual(inspectQuerySurfaceSource({ surface: "operations", file: "fixture.ts", source:
+      `function request(client, input) { const name = "${name}"; return client.rpc(name, input).abortSignal(AbortSignal.timeout(20_000)).retry(false) }` })
+      , [])
+    for (const declaration of [`let name = "${name}"`, 'const name = input.name',
+      `const name = input.flag ? "${name}" : "unknown_operation_v1"`,
+      `let name = "${name}"; name = input.name`]) {
+      assert.ok(inspectQuerySurfaceSource({ surface: "operations", file: "fixture.ts", source:
+        `function request(client, input) { ${declaration}; return client.rpc(name, input).abortSignal(AbortSignal.timeout(20_000)).retry(false) }` })
+        .some(({ reason }) => reason === "list_abort_signal_missing"), declaration)
+    }
+  }
+  assert.ok(inspectQuerySurfaceSource({ surface: "operations", file: "src/features/operations/injected-query-fixture.ts",
+    source: 'async function request(input, name, args) { return await input.rpc(name, args) }' })
+    .some(({ reason }) => reason === "list_query_receiver_unresolved"))
+})
+
+test("actual past correction transport is finite, bounded and has no source-wide exemption", async () => {
+  const workspace = "src/features/operations/class-schedule-workspace.tsx"
+  const source = await readFile(workspace, "utf8")
+  const helper = "src/features/operations/legacy-past-state-correction.ts"
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "operations", file: workspace, source }), [])
+  assert.deepEqual(inspectQuerySurfaceSource({ surface: "operations", file: helper, source: await readFile(helper, "utf8") }), [])
+  for (const name of ["preview_past_lesson_state_correction_v1", "save_past_lesson_state_correction_v1"]) {
+    const literalCall = `supabase.rpc("${name}", parameters)`
+    assert.equal(source.split(literalCall).length - 1, 1, name)
+    const unknownName = source.replace(literalCall, `supabase.rpc("${name}_other", parameters)`)
+    assert.ok(inspectQuerySurfaceSource({ surface: "operations", file: workspace, source: unknownName })
+      .some(({ reason }) => reason === "rpc_page_limit_missing"), name)
+  }
+})
+
+async function actualPastCorrectionTransport(client, timeout = ms => ({ budgetMs: ms })) {
+  const file = "src/features/operations/class-schedule-workspace.tsx"
+  const source = await readFile(file, "utf8")
+  const parsed = ts.createSourceFile(file, source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX)
+  const callbacks = []
+  const visit = node => {
+    if (ts.isVariableDeclaration(node) && ts.isIdentifier(node.name) && node.name.text === "pastCorrectionRpc") {
+      assert.ok(ts.isCallExpression(node.initializer))
+      assert.equal(node.initializer.expression.getText(parsed), "useCallback")
+      assert.ok(ts.isArrowFunction(node.initializer.arguments[0]))
+      callbacks.push(node.initializer.arguments[0])
+    }
+    ts.forEachChild(node, visit)
+  }
+  visit(parsed)
+  assert.equal(callbacks.length, 1)
+  const compiled = ts.transpileModule(`module.exports = ${callbacks[0].getText(parsed)};`, {
+    fileName: "past-correction-transport.ts", compilerOptions: {
+      module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022,
+    },
+  }).outputText
+  const runtime = { exports: null }
+  vm.runInNewContext(compiled, { module: runtime, supabase: client, AbortSignal: { timeout } })
+  return runtime.exports
+}
+
+function pastCorrectionTransportFixture(response) {
+  const calls = []
+  const client = { rpc(name, parameters) {
+    const request = { name, parameters }
+    calls.push(request)
+    return {
+      abortSignal(signal) { request.budgetMs = signal.budgetMs; return this },
+      retry(enabled) { request.retryEnabled = enabled; return Promise.resolve(response) },
+    }
+  } }
+  return { calls, client }
+}
+
+test("actual preview/save calls preserve parameters and response envelopes with 20s and no SDK retries", async () => {
+  const parameters = { p_class_id: "synthetic", p_request_key: "synthetic-key" }
+  for (const response of [{ data: { outcome: "synthetic receipt" }, error: null },
+    { data: null, error: { code: "P0001", message: "synthetic response failure" } }]) {
+    const { calls, client } = pastCorrectionTransportFixture(response), invoke = await actualPastCorrectionTransport(client)
+    for (const name of ["preview_past_lesson_state_correction_v1", "save_past_lesson_state_correction_v1"]) {
+      assert.equal(await invoke(name, parameters), response)
+      assert.deepEqual(calls.at(-1), { name, parameters, budgetMs: 20000, retryEnabled: false })
+      assert.equal(calls.at(-1).parameters, parameters)
+    }
+    assert.equal(calls.length, 2)
+  }
+})
+
+test("actual transport rejects unknown/broader RPCs before any request", async () => {
+  const { calls, client } = pastCorrectionTransportFixture({ data: null, error: null }), invoke = await actualPastCorrectionTransport(client)
+  for (const name of ["preview_past_lesson_state_correction_v2", "save_past_lesson_state_correction_v1_other",
+    "list_past_lesson_states_v1", "agent_api_v2", "update_class_operational_v1", null, undefined]) {
+    await assert.rejects(invoke(name, {}), { message: "past_correction_unsupported_rpc" })
+  }
+  assert.equal(calls.length, 0)
+})
+
+
+function deferredPastCorrectionFixture() {
+  let now = 0
+  const pending = Promise.withResolvers(), deadlines = [], calls = []
+  const timeout = ms => {
+    const controller = new AbortController()
+    deadlines.push({ at: now + ms, budgetMs: ms, controller })
+    return controller.signal
+  }
+  const client = { rpc(name, parameters) {
+    const request = { name, parameters }
+    calls.push(request)
+    return {
+      abortSignal(signal) {
+        request.signal = signal
+        signal.addEventListener("abort", () => pending.reject(signal.reason), { once: true })
+        return this
+      },
+      retry(enabled) { request.retryEnabled = enabled; return pending.promise },
+    }
+  } }
+  const advance = value => {
+    now = value
+    for (const deadline of deadlines) if (deadline.at <= now && !deadline.controller.signal.aborted)
+      deadline.controller.abort(new DOMException("synthetic response deadline", "TimeoutError"))
+  }
+  return { pending, deadlines, calls, timeout, client, advance }
+}
+
+test("actual past-correction transport accepts a reply after 8s while retaining the existing 20s budget", async () => {
+  for (const name of ["preview_past_lesson_state_correction_v1", "save_past_lesson_state_correction_v1"]) {
+    const fixture = deferredPastCorrectionFixture(), invoke = await actualPastCorrectionTransport(fixture.client, fixture.timeout)
+    const parameters = { p_class_id: "synthetic", p_request_key: "same-synthetic-key" }
+    const response = { data: { outcome: "late synthetic receipt" }, error: null }
+    const operation = invoke(name, parameters)
+    fixture.advance(9000)
+    assert.equal(fixture.deadlines[0].budgetMs, 20000)
+    assert.equal(fixture.calls[0].signal.aborted, false)
+    assert.equal(fixture.calls[0].retryEnabled, false)
+    assert.equal(fixture.calls.length, 1)
+    fixture.pending.resolve(response)
+    assert.equal(await operation, response)
+    assert.equal(fixture.calls[0].parameters, parameters)
+    assert.equal(fixture.calls[0].parameters.p_request_key, "same-synthetic-key")
+  }
+})
+
+test("actual past-correction transport aborts at 20s and never automatically duplicates a request", async () => {
+  const fixture = deferredPastCorrectionFixture(), invoke = await actualPastCorrectionTransport(fixture.client, fixture.timeout)
+  const parameters = { p_request_key: "same-synthetic-key" }
+  const operation = invoke("save_past_lesson_state_correction_v1", parameters)
+  fixture.advance(19999)
+  assert.equal(fixture.calls[0].signal.aborted, false)
+  fixture.advance(20000)
+  await assert.rejects(operation, { name: "TimeoutError" })
+  assert.equal(fixture.calls.length, 1)
+  assert.equal(fixture.calls[0].retryEnabled, false)
+  assert.equal(fixture.calls[0].parameters, parameters)
+})

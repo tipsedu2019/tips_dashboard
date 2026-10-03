@@ -1,9 +1,16 @@
 "use client";
 
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
+import { parseTimetableOperationalConflictDetails, type TimetableOperationalConflictDetails } from "../academic/timetable-operational-conflict-details";
+import { LessonSaveConflictDetails } from "./lesson-save-conflict-details";
 import Link from "next/link";
 import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
+import { projectMaterializedLessonOrdinals } from "@/lib/materialized-lesson-ordinals";
+import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
+  type LegacyPastStateCorrectionInput, type LegacyPastStateCorrectionTarget } from "./legacy-past-state-correction";
+import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
 import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
+import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails, snapshotRestoredLegacyLessonDetails } from "./legacy-lesson-defaults";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -2254,6 +2261,8 @@ export function ClassScheduleWorkspace() {
   const lessonPlanBaselineRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanOwnerRef = useRef("");
   const lessonPlanSaveRef = useRef<symbol | null>(null);
+  const lessonPlanSaveButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lessonPlanSaveFocusRef = useRef<{ button: HTMLButtonElement; actor: string | null; classId: string } | null>(null);
   const legacyScheduleRequestRef = useRef<{ body: string; key: string } | null>(null);
   const lessonSessionSaveRef = useRef<symbol | null>(null);
   const normalizedScheduleRequestKeys = useRef(new Map<string, string>());
@@ -2263,7 +2272,26 @@ export function ClassScheduleWorkspace() {
   const normalizedLessonSessionDraftsRef = useRef<Record<string, Partial<SaveClassLessonSessionInput>>>({});
 
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
-  const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
+  const [lessonDesignSaveFeedback, setLessonDesignSaveFeedback] = useState<{
+    message: string; conflicts: TimetableOperationalConflictDetails | null;
+  }>({ message: "", conflicts: null });
+  const lessonDesignSaveError = lessonDesignSaveFeedback.message;
+  const setLessonDesignSaveError = useCallback((message: string) => {
+    setLessonDesignSaveFeedback({ message, conflicts: null });
+  }, []);
+  const setLessonDesignSaveFailure = useCallback((error: unknown, fallback: string) => {
+    setLessonDesignSaveFeedback({ message: timetableOperationalErrorMessage(error, fallback),
+      conflicts: parseTimetableOperationalConflictDetails(error) });
+  }, []);
+  const [legacyLessonValidationDate, setLegacyLessonValidationDate] = useState("");
+  const [pastCorrectionOpen, setPastCorrectionOpen] = useState(false);
+  const [pastCorrectionDirty, setPastCorrectionDirty] = useState(false);
+  const [pastCorrectionContext, setPastCorrectionContext] = useState<{
+    token: { revision: number; classId: string }; scopeKey: string;
+    target: LegacyPastStateCorrectionTarget; expectedPlan: Record<string, unknown>;
+    state: "active" | "exception"; stateLocked: boolean; submittedDraft: Record<string, unknown> | null;
+  } | null>(null);
+  const pastCorrectionScopeRef = useRef("");
   const [lessonDesignSaveNotice, setLessonDesignSaveNotice] = useState("");
   const [generationPreview, setGenerationPreview] = useState<Record<string, unknown> | null>(null);
   const [generationSaving, setGenerationSaving] = useState(false);
@@ -2312,12 +2340,21 @@ export function ClassScheduleWorkspace() {
     loadClassScheduleDetail,
     loadClassLessonDesignDetail,
   } = useOperationsWorkspaceData(operationsRequest, { enabled: !isLessonDesignRouteActive });
+  useEffect(() => {
+    if (isLessonDesignSaving) return;
+    const origin = lessonPlanSaveFocusRef.current;
+    lessonPlanSaveFocusRef.current = null;
+    if (origin && origin.actor === actorScope && origin.classId === selectedClassIdRef.current
+      && origin.button.isConnected && !origin.button.disabled && document.activeElement === document.body) {
+      origin.button.focus({ preventScroll: true });
+    }
+  }, [actorScope, isLessonDesignSaving]);
   const lessonPlanDirty = Boolean(lessonPlanBaseline && lessonPlanDraft && !lessonDraftEqual(lessonPlanDraft, lessonPlanBaseline));
   const lessonSessionDirty = Object.entries(normalizedLessonSessionDrafts).some(([id, draft]) =>
     !lessonDraftEqual(draft, normalizedLessonSessionBaselines[id]));
 
   const { requestNavigation, confirmation: draftNavigationConfirmation } = useDraftNavigation({
-    dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty)),
+    dirty: Boolean(actorScope && isLessonDesignRouteActive && (lessonPlanDirty || lessonSessionDirty || pastCorrectionDirty)),
   });
   const handlePageChange = (page: number) => {
     if (totalCount === null || displayRequest.mode !== "class_schedule") return;
@@ -2350,6 +2387,7 @@ export function ClassScheduleWorkspace() {
 
     setGenerationPreview(null); setGenerationSaving(false); setIsLessonDesignSaving(false);
     setIsNormalizedLessonSessionSaving(false); setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
+    setPastCorrectionOpen(false); setPastCorrectionDirty(false); setPastCorrectionContext(null);
   }
   const data = useMemo(() => {
     const page = (scopedData?.page || {}) as { rows?: Record<string, unknown>[]; hasMore?: boolean };
@@ -2440,7 +2478,7 @@ export function ClassScheduleWorkspace() {
     return () => {
       mutationLifecycle?.revoke();
     };
-  }, [actorScope, isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId]);
+  }, [actorScope, isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId, setLessonDesignSaveError]);
 
   useLayoutEffect(() => {
     const scrollTop = pendingLessonDesignDialogScrollTopRef.current;
@@ -2813,6 +2851,26 @@ export function ClassScheduleWorkspace() {
     () => (lessonPlanDraft ? normalizeLessonDraft(lessonPlanDraft) : null),
     [lessonPlanDraft, normalizeLessonDraft],
   );
+  const legacyLessonSnapshotDefaults = useMemo(() => ({
+    schedule: text(selectedRowClassItem?.schedule || selectedRow?.scheduleLabel),
+    teacher: text(selectedRowClassItem?.teacher || selectedRow?.teacher),
+    room: text(selectedRowClassItem?.classroom || selectedRowClassItem?.classroomName || selectedRowClassItem?.room || selectedRowClassItem?.roomName),
+    teacherCatalogs: lessonDesignTeacherCatalogs,
+    classroomCatalogs: lessonDesignClassroomCatalogs,
+  }), [lessonDesignClassroomCatalogs, lessonDesignTeacherCatalogs, selectedRow, selectedRowClassItem]);
+  // Capture defaults only when an operator generates new dates, never on read.
+  const buildEditedLessonDraft = useCallback((plan: Record<string, unknown>, previous: Record<string, unknown>) => {
+    const normalized = normalizeLessonDraft(plan);
+    if (isNormalizedLessonSchedule) return normalized;
+    // The accepted baseline, rather than the previous in-memory edit, identifies
+    // new dates even if an earlier draft was generated before defaults arrived.
+    let draft = snapshotNewLegacyLessonDetails(normalized, lessonPlanBaselineRef.current || previous, legacyLessonSnapshotDefaults);
+    for (const row of (previous.sessions as Record<string, unknown>[] || [])) {
+      if (!["skipped", "exception", "tbd"].includes(text(row.scheduleState) || text(row.state))) continue;
+      draft = snapshotRestoredLegacyLessonDetails(draft, previous, legacyLessonSnapshotDefaults, text(row.date));
+    }
+    return draft;
+  }, [isNormalizedLessonSchedule, legacyLessonSnapshotDefaults, normalizeLessonDraft]);
   const lessonPlanForSave = useMemo(
     () => {
       if (!normalizedLessonPlan) return null;
@@ -2824,8 +2882,31 @@ export function ClassScheduleWorkspace() {
     },
     [isNormalizedLessonSchedule, lessonPlanDefaults, normalizedLessonPlan, lessonPlanBaseline, selectedRowClassItem],
   );
+  // Saved ordinals still identify booking/history records. Only the display
+  // copy supplies labels; it never becomes a save or record-matching payload.
+  const lessonDisplayOrdinals = useMemo(() => {
+    const ordinals = new Map<string, number | null>();
+    if (lessonPlanForSave && !isNormalizedLessonSchedule) {
+      projectMaterializedLessonOrdinals(lessonPlanForSave, { onDerived: (index: number, ordinal: number | null) => {
+        const session = (lessonPlanForSave.sessions as Record<string, unknown>[])[index];
+        ordinals.set(`${text(session.id || session.session_id)}\u0000${text(session.date || session.session_date)}`, ordinal);
+      } });
+    }
+    return ordinals;
+  }, [isNormalizedLessonSchedule, lessonPlanForSave]);
   const lessonDesignSnapshot = useMemo(() => {
-    if (!normalizedScheduleData || !lessonPlanForSave) return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, lessonPlanForSave);
+    if (!normalizedScheduleData || !lessonPlanForSave) {
+      const snapshot = buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, lessonPlanForSave);
+      if (!snapshot || isNormalizedLessonSchedule) return snapshot;
+      return { ...snapshot, sessions: snapshot.sessions.map(session => {
+        const key = `${session.id}\u0000${session.dateValue}`;
+        if (!lessonDisplayOrdinals.has(key)) return session;
+        const displaySessionNumber = lessonDisplayOrdinals.get(key) ?? null;
+        return { ...session, displaySessionNumber,
+          label: (displaySessionNumber || 0) > 0 ? `${displaySessionNumber}회차`
+            : session.scheduleStateLabel !== "정상" ? session.scheduleStateLabel : session.label };
+      }) };
+    }
     // The normalized calendar displays real rows, never the legacy planner's predicted dates.
     const saved = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
     const sessionsByKey = new Map<string, Record<string, unknown>>();
@@ -2846,7 +2927,7 @@ export function ClassScheduleWorkspace() {
     return buildLessonDesignSnapshot(selectedRow, lessonDesignEditorTextbooks, { ...displayPlan, billingPeriods: periods.map((period) => ({ ...period,
       totalSessions: (displayPlan.sessions as Record<string, unknown>[] || []).filter((session) => isDateWithinRange(text(session.date), text(period.startDate), text(period.endDate))).length,
     })) });
-  }, [lessonDesignEditorTextbooks, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem]);
+  }, [isNormalizedLessonSchedule, lessonDesignEditorTextbooks, lessonDisplayOrdinals, lessonPlanForSave, normalizedReadMonthKey, normalizedScheduleData, selectedRow, selectedRowClassItem]);
   useEffect(() => {
     const owner = isLessonDesignRouteActive ? requestedClassId : text(selectedRow?.id);
     const ownerChanged = lessonPlanOwnerRef.current !== owner;
@@ -2892,9 +2973,10 @@ export function ClassScheduleWorkspace() {
 
       lessonPlanSaveRef.current = null; lessonSessionSaveRef.current = null; lessonGenerationRequestRef.current = null;
       setLessonReadRetryNeeded(false); setIsLessonReadRetrying(false);
+      setLegacyLessonValidationDate("");
       setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
     }
-  }, [isLessonDesignRouteActive, isNormalizedLessonSchedule, lessonPlanDefaults, lessonPlanSourceKey, normalizeLessonDraft, requestedClassId, selectedRow, selectedRowClassItem]);
+  }, [isLessonDesignRouteActive, isNormalizedLessonSchedule, lessonPlanDefaults, lessonPlanSourceKey, normalizeLessonDraft, requestedClassId, selectedRow, selectedRowClassItem, setLessonDesignSaveError]);
 
   useEffect(() => {
     lessonPlanDraftRef.current = lessonPlanDraft;
@@ -2946,7 +3028,7 @@ export function ClassScheduleWorkspace() {
     const sessions = uniqueLessonSessionsByIdentity(lessonDesignSnapshot?.sessions || []);
 
     return sessions.filter((session) => {
-      if (session.scheduleState === "skipped") {
+      if (isNormalizedLessonSchedule && session.scheduleState === "skipped") {
         return false;
       }
       const matchesPeriod = selectedLessonPeriodId === "all" || session.periodId === selectedLessonPeriodId;
@@ -2956,6 +3038,7 @@ export function ClassScheduleWorkspace() {
       return matchesPeriod && matchesScheduleState;
     });
   }, [
+    isNormalizedLessonSchedule,
     lessonDesignSnapshot,
     selectedLessonPeriodId,
     selectedLessonScheduleState,
@@ -3142,21 +3225,22 @@ export function ClassScheduleWorkspace() {
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       setLessonPlanDraft((current) => {
         const nextBase = (current || {}) as Record<string, unknown>;
-        const nextDraft = normalizeLessonDraft(updater(nextBase));
+        const nextDraft = buildEditedLessonDraft(updater(nextBase), nextBase);
         lessonPlanDraftRef.current = nextDraft;
         return nextDraft;
       });
       setLessonDesignSaveError("");
+      setLegacyLessonValidationDate("");
       setLessonDesignSaveNotice("");
     },
-    [normalizeLessonDraft],
+    [buildEditedLessonDraft, setLessonDesignSaveError],
   );
   const buildNextLessonPlanDraft = useCallback(
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
       const nextBase = (lessonPlanDraftRef.current || {}) as Record<string, unknown>;
-      return normalizeLessonDraft(updater(nextBase));
+      return buildEditedLessonDraft(updater(nextBase), nextBase);
     },
-    [normalizeLessonDraft],
+    [buildEditedLessonDraft],
   );
 
   const syncLessonDesignDraftSnapshot = useCallback(
@@ -3202,7 +3286,7 @@ export function ClassScheduleWorkspace() {
 
       return text(nextFocusedSession?.id);
     },
-    [lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
+    [lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow, setLessonDesignSaveError],
   );
   const selectedLessonSessionDraftDate = resolveLessonSessionDraftDate(selectedLessonSession);
   const selectedLessonSessionDraftStateEntry = useMemo(() => {
@@ -3284,7 +3368,7 @@ export function ClassScheduleWorkspace() {
       setNormalizedLessonSessionDrafts(next);
       setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
     },
-    [normalizedLessonSessionDraft],
+    [normalizedLessonSessionDraft, setLessonDesignSaveError],
   );
   const saveNormalizedLessonSession = useCallback(async () => {
     if (!supabase || !normalizedLessonSessionDraft || lessonSessionSaveRef.current) return;
@@ -3326,13 +3410,13 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("저장한 일정을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async (error: unknown) => setLessonDesignSaveError(timetableOperationalErrorMessage(error, "일정을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
+      onError: async (error: unknown) => setLessonDesignSaveFailure(error, "일정 저장 중 오류가 발생했습니다. 입력은 유지되었습니다. 다시 저장해 주세요."),
       onSettled: async () => {
         if (lessonSessionSaveRef.current === submission) lessonSessionSaveRef.current = null;
         setIsNormalizedLessonSessionSaving(false);
       },
     });
-  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id]);
+  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError, setLessonDesignSaveFailure]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
       const sessionDate = resolveLessonSessionDraftDate(session);
@@ -3641,6 +3725,10 @@ export function ClassScheduleWorkspace() {
     if (!mutationToken) return;
 
     const submittedDraft = lessonPlanDraftRef.current;
+    const saveButton = lessonPlanSaveButtonRef.current;
+    if (saveButton && document.activeElement === saveButton) {
+      lessonPlanSaveFocusRef.current = { button: saveButton, actor: actorScope, classId: text(selectedRow.id) };
+    }
     const submission = Symbol(); lessonPlanSaveRef.current = submission;
     const acceptSubmission = () => {
       if (!submittedDraft || !lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) return;
@@ -3659,7 +3747,8 @@ export function ClassScheduleWorkspace() {
         const schedulePlan = preserveScheduleLearningContent(lessonPlanForSave, (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>);
         const expectedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
         const validationError = legacyLessonScheduleValidationError(schedulePlan, expectedPlan);
-        if (validationError) throw { code: "legacy_lesson_details_required", message: validationError };
+        if (validationError) throw { code: "legacy_lesson_details_required", message: validationError,
+          date: validationError.match(/^(\d{4}-\d{2}-\d{2})/)?.[1] || "" };
         const body = JSON.stringify({ classId: selectedRow.id, schedulePlan, expectedPlan });
         if (legacyScheduleRequestRef.current?.body !== body) legacyScheduleRequestRef.current = { body, key: crypto.randomUUID() };
         // Leave room for the database deadline plus commit/response delivery.
@@ -3682,15 +3771,25 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("저장한 내용을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async (error: unknown) => setLessonDesignSaveError((error as { code?: string })?.code === "legacy_lesson_details_required"
-        ? String((error as { message: string }).message)
-        : timetableOperationalErrorMessage(error, "수업계획을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
+      onError: async (error: unknown) => {
+        if ((error as { code?: string })?.code === "legacy_lesson_details_required") {
+          const date = text((error as { date?: string }).date);
+          const session = lessonDesignSnapshot?.sessions.find(row => row.dateValue === date);
+          if (session) {
+            setSelectedLessonPeriodId("all"); setSelectedLessonScheduleState("all");
+            setSelectedLessonMonthKeys(getAllLessonMonthKeys(lessonDesignSnapshot?.monthSummaries || []));
+            setFocusedLessonMonthKey(session.monthKey); markPendingLessonSessionSelection(session.id);
+            setLessonMonthDetailsOpen(true); setLegacyLessonValidationDate(date);
+          }
+          setLessonDesignSaveError(String((error as { message: string }).message));
+        } else setLessonDesignSaveFailure(error, "수업계획 저장 중 오류가 발생했습니다. 입력은 유지되었습니다. 다시 저장해 주세요.");
+      },
       onSettled: async () => {
         if (lessonPlanSaveRef.current === submission) lessonPlanSaveRef.current = null;
         setIsLessonDesignSaving(false);
       },
     });
-  }, [lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow]);
+  }, [actorScope, lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow, setLessonDesignSaveError, setLessonDesignSaveFailure]);
 
   const retryLessonDesignRead = useCallback(async () => {
     const token = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
@@ -3705,7 +3804,7 @@ export function ClassScheduleWorkspace() {
     } finally {
       if (lessonMutationLifecycleRef.current?.isCurrent(token)) setIsLessonReadRetrying(false);
     }
-  }, [isLessonReadRetrying, refreshSelectedLessonDetail, selectedRow?.id]);
+  }, [isLessonReadRetrying, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError]);
 
   const previewLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext || lessonGenerationRequestRef.current) return;
@@ -3731,7 +3830,7 @@ export function ClassScheduleWorkspace() {
         if (lessonGenerationRequestRef.current === submission) { lessonGenerationRequestRef.current = null; setGenerationSaving(false); }
       },
     });
-  }, [normalizedGenerationContext]);
+  }, [normalizedGenerationContext, setLessonDesignSaveError]);
 
   const confirmLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext || !generationPreview || lessonGenerationRequestRef.current) return;
@@ -3767,14 +3866,14 @@ export function ClassScheduleWorkspace() {
       },
       onError: async (error: unknown) => {
         if (generationScopeRef.current !== submittedScope) return;
-        setLessonDesignSaveError(timetableOperationalErrorMessage(error, "일정을 생성하지 못했습니다. 미리보기를 다시 확인해 주세요."));
+        setLessonDesignSaveFailure(error, "일정을 생성하지 못했습니다. 미리보기를 다시 확인해 주세요.");
         setGenerationPreview(null);
       },
       onSettled: async () => {
         if (lessonGenerationRequestRef.current === submission) { lessonGenerationRequestRef.current = null; setGenerationSaving(false); }
       },
     });
-  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail, selectedRow?.id]);
+  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError, setLessonDesignSaveFailure]);
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,
@@ -4331,12 +4430,92 @@ export function ClassScheduleWorkspace() {
     { key: "teacher", label: `선생님 ${lessonDesignTeacherName || "미정"}` },
     { key: "classroom", label: `강의실 ${lessonDesignClassroomName || "미정"}` },
   ];
+  const legacyRegularLesson = selectedLessonSessionEditableState === "active" && !selectedLessonSession?.originalDate;
+  const legacyRegularDateAmbiguous = legacyRegularLesson && Boolean(selectedLessonSession)
+    && (lessonDesignSnapshot?.sessions.filter(session => session.dateValue === selectedLessonSession?.dateValue).length || 0) > 1;
+  const legacyTeacherName = legacyRegularLesson ? text(selectedLessonSession?.teacherNameSnapshot) : lessonDesignTeacherName;
+  const legacyClassroomName = legacyRegularLesson ? text(selectedLessonSession?.classroomNameSnapshot) : lessonDesignClassroomName;
   const legacyLessonDetails = selectedLessonSession ? {
     startTime: selectedLessonSession.startTime,
     endTime: selectedLessonSession.endTime,
-    teacherCatalogId: selectedLessonSession.teacherCatalogId || (teacherCatalogOptions.filter(option => option.name === lessonDesignTeacherName).length === 1 ? teacherCatalogOptions.find(option => option.name === lessonDesignTeacherName)?.id || "" : ""),
-    classroomCatalogId: selectedLessonSession.classroomCatalogId || (classroomCatalogOptions.filter(option => option.name === lessonDesignClassroomName).length === 1 ? classroomCatalogOptions.find(option => option.name === lessonDesignClassroomName)?.id || "" : ""),
+    teacherCatalogId: selectedLessonSession.teacherCatalogId || (teacherCatalogOptions.filter(option => option.name === legacyTeacherName).length === 1 ? teacherCatalogOptions.find(option => option.name === legacyTeacherName)?.id || "" : ""),
+    classroomCatalogId: selectedLessonSession.classroomCatalogId || (classroomCatalogOptions.filter(option => option.name === legacyClassroomName).length === 1 ? classroomCatalogOptions.find(option => option.name === legacyClassroomName)?.id || "" : ""),
   } : null;
+  const legacySelectedDefaults = legacyRegularLesson && selectedLessonSession && !legacyRegularDateAmbiguous
+    ? resolveLegacyLessonDetails(selectedLessonSession.dateValue, legacyLessonSnapshotDefaults) : null;
+  const pastCorrectionSavedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
+  const pastCorrectionTarget = lessonScheduleReadReady && !isNormalizedLessonSchedule && actorScope?.endsWith(":admin")
+    && selectedRowClassItem?.status === "수강" && selectedLessonSession
+    ? resolveLegacyPastStateCorrectionTarget(pastCorrectionSavedPlan, selectedLessonSession.id) : null;
+  const pastCorrectionDraft = pastCorrectionTarget
+    ? resolveLegacyPastStateCorrectionDraft(lessonPlanBaseline, normalizedLessonPlan, pastCorrectionTarget) : null;
+  const pastCorrectionScope = `${actorScope || ""}:${lessonPlanSourceKey}:${selectedLessonSession?.id || ""}`;
+  pastCorrectionScopeRef.current = pastCorrectionScope;
+  const pastCorrectionRpc = useCallback(async (name: string, parameters: Record<string, unknown>) => {
+    if (!supabase) throw new Error("past_correction_unavailable");
+    // The reviewed correction is a separate narrow operation, never a plan save.
+    switch (name) {
+      case "preview_past_lesson_state_correction_v1":
+        return await supabase.rpc("preview_past_lesson_state_correction_v1", parameters)
+          .abortSignal(AbortSignal.timeout(20_000)).retry(false);
+      case "save_past_lesson_state_correction_v1":
+        return await supabase.rpc("save_past_lesson_state_correction_v1", parameters)
+          .abortSignal(AbortSignal.timeout(20_000)).retry(false);
+      default:
+        throw new Error("past_correction_unsupported_rpc");
+    }
+  }, []);
+  useEffect(() => {
+    if (!pastCorrectionOpen || !pastCorrectionContext || pastCorrectionContext.scopeKey === pastCorrectionScope) return;
+    setPastCorrectionOpen(false); setPastCorrectionDirty(false);
+    setLessonDesignSaveNotice("일정 정보가 바뀌었습니다. 정정 내용을 다시 확인해 주세요.");
+  }, [pastCorrectionContext, pastCorrectionOpen, pastCorrectionScope]);
+  const openPastCorrection = () => {
+    if (!pastCorrectionTarget || !pastCorrectionDraft || !selectedRow || isLessonDesignSaving) return;
+    const token = lessonMutationLifecycleRef.current?.capture(selectedRow.id);
+    if (!token) return;
+    setPastCorrectionContext({ token, scopeKey: pastCorrectionScope, target: pastCorrectionTarget,
+      expectedPlan: structuredClone(pastCorrectionSavedPlan), state: pastCorrectionDraft.state,
+      stateLocked: pastCorrectionDraft.dirty, submittedDraft: lessonPlanDraftRef.current });
+    setPastCorrectionOpen(true);
+  };
+  const acceptPastCorrection = async (input: LegacyPastStateCorrectionInput) => {
+    const context = pastCorrectionContext;
+    if (!context || pastCorrectionScopeRef.current !== context.scopeKey
+      || !lessonMutationLifecycleRef.current?.isCurrent(context.token)) return;
+    const current = lessonPlanDraftRef.current;
+    const proof = resolveLegacyPastStateCorrectionDraft(lessonPlanBaselineRef.current,
+      current ? normalizeLessonDraft(current) : null, context.target);
+    if (proof?.dirty && proof.state === input.state && current
+      && lessonDraftEqual(current, context.submittedDraft)) {
+      lessonPlanBaselineRef.current = current; setLessonPlanBaseline(current);
+    }
+    setPastCorrectionOpen(false); setPastCorrectionDirty(false);
+    setLessonDesignSaveError(""); setLessonDesignSaveNotice("과거 상태를 정정했습니다.");
+    try {
+      await invalidatePublicClassesCacheAfterMutation(supabase!, "schedule");
+    } catch {
+      if (lessonMutationLifecycleRef.current?.isCurrent(context.token)) setLessonDesignSaveNotice("과거 상태를 정정했습니다. 공개 수업 캐시 갱신 대기 중입니다.");
+    }
+    if (!lessonMutationLifecycleRef.current?.isCurrent(context.token)) return;
+    try { await refreshSelectedLessonDetail(context.token); }
+    catch {
+      if (lessonMutationLifecycleRef.current?.isCurrent(context.token)) {
+        setLessonReadRetryNeeded(true);
+        setLessonDesignSaveError("정정한 내용을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
+      }
+    }
+  };
+  useEffect(() => {
+    if (!legacyLessonValidationDate || !lessonMonthDetailsOpen) return;
+    const frame = window.requestAnimationFrame(() => {
+      const editor = document.getElementById(LESSON_DESIGN_SELECTED_SESSION_EDITOR_ID);
+      const input = editor?.querySelector<HTMLInputElement>('input[type="time"]');
+      if (input?.getAttribute("aria-label") !== `${legacyLessonValidationDate} 시작`) return;
+      input.scrollIntoView({ block: "center" }); input.focus({ preventScroll: true });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [legacyLessonValidationDate, lessonMonthDetailsOpen, selectedLessonSession?.id]);
   const lessonDesignReturnLabel = getLessonDesignReturnLabel(requestedLessonReturnPath);
   const lessonDesignReturnActionLabel = getLessonDesignReturnActionLabel(lessonDesignReturnLabel);
 
@@ -4360,7 +4539,7 @@ export function ClassScheduleWorkspace() {
             const isNormalizedSessionDetailsOpen =
               Boolean(normalizedLessonSessionDraft) && normalizedLessonSessionDetailsOpenSessionId === session.id;
             const isSessionReleasable =
-              showScheduleControls && !normalizedLessonSessionDraft && session.scheduleState !== "makeup";
+              showScheduleControls && !normalizedLessonSessionDraft && !["makeup", "skipped"].includes(session.scheduleState);
             return (
                 <div
                   key={`month-session-edit-${session.id}`}
@@ -4502,6 +4681,12 @@ export function ClassScheduleWorkspace() {
                         </div>
                       ) : (
                       <>
+                        {pastCorrectionTarget ? <div className="mb-3 grid gap-2">
+                          <Button type="button" size="form" variant="outline"
+                            aria-label={`${pastCorrectionTarget.date} 과거 상태 정정`}
+                            disabled={!pastCorrectionDraft || isLessonDesignSaving} onClick={openPastCorrection}>과거 상태 정정</Button>
+                          {!pastCorrectionDraft ? <p className="text-sm text-muted-foreground">다른 일정 수정이 있습니다. 초안을 저장하거나 되돌린 뒤 정정해 주세요.</p> : null}
+                        </div> : null}
                         <div className="grid grid-cols-4 gap-1.5">
                           <Button
                             type="button"
@@ -4543,12 +4728,23 @@ export function ClassScheduleWorkspace() {
                         </div>
 
                         <div className="mt-3 grid gap-2">
-                          {legacyLessonDetails && (selectedLessonSessionEditableState === "makeup" || selectedLessonSessionEditableState === "force_active" || legacyLessonDetails.startTime || legacyLessonDetails.endTime) ? (
-                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions}
-                              onChange={value => updateLessonPlanDraft(current => ({ ...current,
+                          {legacyLessonDetails && (legacyRegularLesson || selectedLessonSessionEditableState === "makeup" || selectedLessonSessionEditableState === "force_active" || legacyLessonDetails.startTime || legacyLessonDetails.endTime) ? (
+                            <LegacyLessonScheduleFields date={selectedLessonSession.dateValue} value={legacyLessonDetails} teachers={teacherCatalogOptions} classrooms={classroomCatalogOptions} disabled={legacyRegularDateAmbiguous}
+                              onChange={value => { if (legacyRegularDateAmbiguous) return; updateLessonPlanDraft(current => ({ ...current,
                                 sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}), [selectedLessonSession.dateValue]: value },
-                              }))} />
+                              })); }} />
                           ) : null}
+                          {legacyRegularDateAmbiguous ? <p role="alert" className="text-sm text-destructive">같은 날짜에 여러 회차가 있어 개별 시간·선생님·강의실을 수정할 수 없습니다.</p> : null}
+                          {legacySelectedDefaults && legacyLessonDetails && Object.values(legacyLessonDetails).some(value => !value) ? <Button type="button" size="sm" variant="outline"
+                            aria-label={`${selectedLessonSession.dateValue} 기본 정보 적용`}
+                            onClick={() => updateLessonPlanDraft(current => ({ ...current,
+                              sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}),
+                                [selectedLessonSession.dateValue]: { ...((current.sessionSchedules as Record<string, Record<string, unknown>> || {})[selectedLessonSession.dateValue] || {}),
+                                  startTime: legacyLessonDetails.startTime || legacySelectedDefaults.startTime,
+                                  endTime: legacyLessonDetails.endTime || legacySelectedDefaults.endTime,
+                                  teacherCatalogId: legacyLessonDetails.teacherCatalogId || legacySelectedDefaults.teacherCatalogId,
+                                  classroomCatalogId: legacyLessonDetails.classroomCatalogId || legacySelectedDefaults.classroomCatalogId } },
+                            }))}>기본 정보 적용</Button> : null}
                           <Textarea
                             value={selectedLessonSessionEditableMemo}
                             onChange={(event) => handleLessonSessionMemoChange(selectedLessonSession, event.target.value)}
@@ -4621,8 +4817,17 @@ export function ClassScheduleWorkspace() {
     </li>)}</ul> : <p className="text-sm text-muted-foreground">추가할 일정 없음</p>}
   </div> : null;
   const lessonDesignActions = (
-    <div className="min-w-0">
+    <div className="min-w-0 max-w-full">
       {generationPreviewList}
+      {lessonDesignSaveError ? (
+        <Alert id="lesson-design-save-error" data-testid="lesson-design-save-error" variant="destructive" className="mb-3 min-w-0">
+          <AlertDescription tabIndex={0} aria-label="저장 오류 상세" className="max-h-[min(24rem,45dvh)] min-w-0 overflow-y-auto break-words rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+            <p>{lessonDesignSaveError}</p>
+            {lessonDesignSaveFeedback.conflicts ? <LessonSaveConflictDetails details={lessonDesignSaveFeedback.conflicts} /> : null}
+            {lessonReadRetryNeeded ? <Button type="button" variant="outline" size="form" disabled={isLessonReadRetrying} onClick={() => void retryLessonDesignRead()}>{isLessonReadRetrying ? "불러오는 중" : "다시 불러오기"}</Button> : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
           <div
             data-testid="lesson-design-bottom-action-bar"
             className="flex flex-wrap items-center justify-end gap-2"
@@ -4653,9 +4858,12 @@ export function ClassScheduleWorkspace() {
             ) : null}
             {!isNormalizedLessonSchedule ? (
             <Button
+              ref={lessonPlanSaveButtonRef}
               type="button"
-              className="h-9 rounded-md px-5 shadow-none"
+              size="form"
+              className="px-5"
               onClick={handleSaveLessonPlan}
+              aria-describedby={lessonDesignSaveError ? "lesson-design-save-error" : undefined}
               disabled={
                 isLessonDesignSaving ||
                 !lessonScheduleReadReady ||
@@ -4680,14 +4888,6 @@ export function ClassScheduleWorkspace() {
         >
           {lessonPlanDirty && !lessonDesignSnapshot.saveReadiness.ready ? (
             <p role="alert" className="col-span-full text-sm text-destructive">{lessonDesignSnapshot.saveReadiness.blockers[0]}</p>
-          ) : null}
-          {lessonDesignSaveError ? (
-            <Alert variant="destructive" className="xl:col-span-2 2xl:col-span-full">
-              <AlertDescription>
-                {lessonDesignSaveError}
-                {lessonReadRetryNeeded ? <Button type="button" variant="outline" size="sm" className="ml-2" disabled={isLessonReadRetrying} onClick={() => void retryLessonDesignRead()}>{isLessonReadRetrying ? "불러오는 중" : "다시 불러오기"}</Button> : null}
-              </AlertDescription>
-            </Alert>
           ) : null}
           {lessonDesignSaveNotice ? (
             <Alert className="xl:col-span-2 2xl:col-span-full">
@@ -5618,6 +5818,17 @@ export function ClassScheduleWorkspace() {
         </Dialog>
       )}
 
+      {pastCorrectionContext ? <LegacyPastStateCorrectionDialog
+        key={pastCorrectionContext.scopeKey}
+        open={pastCorrectionOpen && pastCorrectionContext.scopeKey === pastCorrectionScope}
+        onOpenChange={setPastCorrectionOpen} classId={pastCorrectionContext.token.classId}
+        expectedPlan={pastCorrectionContext.expectedPlan} target={pastCorrectionContext.target}
+        initialState={pastCorrectionContext.state} stateLocked={pastCorrectionContext.stateLocked}
+        scopeKey={pastCorrectionContext.scopeKey} rpc={pastCorrectionRpc}
+        isCurrent={() => pastCorrectionScopeRef.current === pastCorrectionContext.scopeKey
+          && lessonMutationLifecycleRef.current?.isCurrent(pastCorrectionContext.token) === true}
+        onApplied={acceptPastCorrection} onDirtyChange={setPastCorrectionDirty} onReload={retryLessonDesignRead}
+      /> : null}
     </>
   );
 }

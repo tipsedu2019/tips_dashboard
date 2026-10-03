@@ -8,17 +8,19 @@ import ts from 'typescript';
 import { JSDOM } from 'jsdom';
 import { act, createElement, useEffect, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { buildSchedulePlanForSave } from '../src/lib/class-schedule-planner.js';
 
 const require = createRequire(import.meta.url), rootPath = path.resolve(import.meta.dirname, '..');
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
-function modules(supabase, overrides) {
+function modules(supabase, overrides, sourceOverrides = {}) {
   const cache = new Map();
   function load(file) {
     if (cache.has(file)) return cache.get(file).exports;
     const runtime = { exports: {} }; cache.set(file, runtime);
-    let inputSource = readFileSync(file, 'utf8');
+    let inputSource = sourceOverrides[path.relative(rootPath, file)] ?? readFileSync(file, 'utf8');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource = inputSource.replace('  const classScheduleWorkspaceContent = (',
-      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+    if (file.endsWith('/class-schedule-workspace.tsx')) inputSource += '\nexport { buildLessonDesignSnapshot as __testBuildLessonDesignSnapshot };\n';
     const source = ts.transpileModule(inputSource, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -82,7 +84,7 @@ async function setup(t, domain, initial = {}) {
   let auth = { user: { id: id(800), app_metadata: { role: 'teacher' } }, role: 'admin', loading: false, session: null, ...initial.auth };
   const requests = [], supabase = { from(table) { return { update(payload) { const pending = Promise.withResolvers(), request = { name: 'update:' + table, args: payload, ...pending }; requests.push(request); const chain = { select() { return chain; }, eq() { return chain; }, order() { return chain; }, limit() { return chain; }, abortSignal() { return chain; }, retry() { return pending.promise; } }; return chain; } }; }, rpc(name, args) {
     const pending = Promise.withResolvers(), request = { name, args, ...pending }; requests.push(request);
-    return { then: pending.promise.then.bind(pending.promise), abortSignal(signal) { request.signal = signal; return this; }, retry() { return pending.promise; } };
+    return { then: pending.promise.then.bind(pending.promise), abortSignal(signal) { request.signal = signal; return this; }, retry(enabled) { request.retryEnabled = enabled; return pending.promise; } };
   } };
   let normalized = { status: 'ready', value: {source: 'legacy', sessions: []} }; // Explicit read-only synthetic backend state; no network.
 
@@ -96,7 +98,7 @@ async function setup(t, domain, initial = {}) {
     'next/navigation': { useRouter: () => router, usePathname: () => window.location.pathname, useSearchParams: () => {
       if (previousSearch !== window.location.search) { previousSearch = window.location.search; params = new URLSearchParams(previousSearch); } return params;
     } },
-  });
+  }, initial.sourceOverrides || globalThis.__classScheduleTestSourceOverrides || {});
   const writes = [];
   const router = { replace(url) { writes.push(url); window.history.replaceState(null, '', url); }, push(url) { window.history.pushState(null, '', url); } };
   const useHook = load(`src/features/${domain}/use-${domain}-workspace-data.ts`)[domain === 'academic' ? 'useAcademicWorkspaceData' : 'useOperationsWorkspaceData'];
@@ -123,11 +125,20 @@ async function setup(t, domain, initial = {}) {
   };
 }
 
-const detail = () => ({ classItem: { id: id(999), name: 'SAFE CURRICULUM', subject: '수학', textbookIds: [id(700)],
-  schedulePlan: { className: 'SAFE CURRICULUM', subject: '수학', selectedDays: [1], startDate: '2026-08-03', endDate: '2026-08-31',
+const detail = () => {
+  // A saved legacy period is materialized in full, with canonical billing/occupancy
+  // fields. A sparse single-row mock would fabricate unsaved historical lessons.
+  const schedulePlan = buildSchedulePlanForSave({ className: 'SAFE CURRICULUM', subject: '수학', selectedDays: [1],
     billingPeriods: [{ id: 'period-one', month: 8, label: '8월', startDate: '2026-08-03', endDate: '2026-08-31' }],
-    sessions: [{ id: 'session-one', sessionNumber: 1, date: '2026-08-03', billingLabel: '8월', textbookEntries: [{ id: 'entry-one', textbookId: id(700), plan: { start: '1', end: '2', label: '저장 범위' } }] }] } },
-  textbooks: [{ id: id(700), title: '정확한 교재', subject: '수학' }], teacherCatalogs: [], classroomCatalogs: [] });
+    sessions: [] });
+  Object.assign(schedulePlan.sessions[0], { id: 'session-one', sessionKey: 'session-one',
+    textbookEntries: [{ id: 'entry-one', textbookId: id(700), plan: { start: '1', end: '2', label: '저장 범위' } }] });
+  return { classItem: { id: id(999), name: 'SAFE CURRICULUM', subject: '수학', textbookIds: [id(700)],
+    schedule: '월화일 17:00-19:00', teacher: '합성 담당', room: '합성 강의실', schedulePlan },
+    textbooks: [{ id: id(700), title: '정확한 교재', subject: '수학' }],
+    teacherCatalogs: [{id:id(101),name:'합성 담당',subjects:['수학'],isVisible:true}],
+    classroomCatalogs: [{id:id(201),name:'합성 강의실',subjects:['수학'],isVisible:true}] };
+};
 async function editor(t, route = 'class-schedule') {
   const page = await setup(t, 'operations', { workspace: true, search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`, route });
   await act(async () => page.requests.find(r => r.name === 'get_operations_class_lesson_design_detail_v1').resolve({error: null, data: detail()}));
@@ -155,6 +166,462 @@ test('legacy month count includes makeup and excludes cancelled lessons, and sav
 });
 async function refreshDetail(page, next = detail()) { await act(async () => page.observed.setLessonDesignDetail(next)); }
 const saveRequests = page => page.requests.filter(r => r.name.startsWith('update:') || r.name.startsWith('save_') || r.name === 'update_class_operational_v1');
+
+function septemberOctoberDetail() {
+  const payload = detail();
+  Object.assign(payload.classItem, { subject: '영어', schedule: '화목 17:00-19:00' });
+  payload.teacherCatalogs = [
+    {id:id(101),name:'합성 담당',subjects:['영어'],isVisible:true},
+    {id:id(102),name:'다른 합성 담당',subjects:['영어'],isVisible:true},
+  ];
+  payload.classroomCatalogs = [
+    {id:id(201),name:'합성 강의실',subjects:['영어'],isVisible:true},
+    {id:id(202),name:'다른 합성 강의실',subjects:['영어'],isVisible:true},
+  ];
+  payload.classItem.schedulePlan = buildSchedulePlanForSave({ className: 'SAFE CURRICULUM', subject: '영어', selectedDays:[2,4],
+    billingPeriods:[
+      {id:'september',month:9,label:'9월',startDate:'2026-09-01',endDate:'2026-09-29'},
+      {id:'october',month:10,label:'10월',startDate:'2026-10-02',endDate:'2026-10-27'},
+    ],
+    sessionStates:{'2026-09-24':{state:'exception'}},
+    sessionSchedules:{'2026-10-08':{startTime:'16:00',endTime:'18:00',teacherCatalogId:id(102),classroomCatalogId:id(202)}},
+    sessions:[],
+  });
+  for (const row of payload.classItem.schedulePlan.sessions) {
+    row.teacherNote = `합성 저장 메모 ${row.date}`;
+    row.textbookEntries = [{id:`entry-${row.date}`,textbookId:id(700),plan:{start:row.date,end:row.date,label:`합성 범위 ${row.date}`}}];
+  }
+  return payload;
+}
+
+async function changeInput(label, value) {
+  const input = document.querySelector(`input[aria-label="${label}"]`);
+  assert.ok(input, `rendered input ${label}`);
+  assert.equal(input.disabled, false);
+  await act(async () => {
+    input.focus();
+    Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set.call(input,value);
+    input.dispatchEvent(new window.Event('input',{bubbles:true}));
+    input.dispatchEvent(new window.Event('change',{bubbles:true}));
+    // React's input plugin was initialized before JSDOM. Exercise its native
+    // keyboard fallback too, rather than invoking the component callback.
+    input.dispatchEvent(new window.KeyboardEvent('keyup',{key:'1',bubbles:true}));
+  });
+  assert.equal(input.value,value);
+}
+
+test('legacy October date edits snapshot only two new lessons, preserve stored history and retain a conflicted save for explicit retry', async t => {
+  const payload = septemberOctoberDetail(), savedPlan = structuredClone(payload.classItem.schedulePlan);
+  const octoberDates = ['2026-10-06','2026-10-08','2026-10-13','2026-10-15','2026-10-20','2026-10-22','2026-10-27'];
+  assert.deepEqual(savedPlan.sessions.filter(row=>row.billingId==='october').map(row=>row.date),octoberDates);
+  assert.equal(savedPlan.sessions.filter(row=>row.billingId==='september' && row.scheduleState==='active').length,8);
+  const page = await setup(t,'operations',{workspace:true,search:`?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`,route:'curriculum/lesson-design'});
+  await act(async () => page.requests.find(r=>r.name==='get_operations_class_lesson_design_detail_v1').resolve({error:null,data:payload}));
+  if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
+  assert.equal(dirty(),false);
+  assert.equal(saveRequests(page).length,0);
+
+  await changeInput('10월 시작일','2026-10-01');
+  await changeInput('10월 종료일','2026-10-29');
+  const draftRows = page.observed.lessonPlanForSave.sessions;
+  for (const date of ['2026-10-01','2026-10-29']) {
+    const row = draftRows.find(row=>row.date===date);
+    assert.ok(row,`new ${date} lesson`);
+    assert.deepEqual([row.startTime,row.endTime,row.teacherCatalogId,row.classroomCatalogId],['17:00','19:00',id(101),id(201)],`new ${date} gets a creation-time snapshot`);
+    assert.equal(row.scheduleState,'active');
+    assert.equal(row.isForced,false);
+    assert.equal(row.originalDate,'');
+  }
+
+  const openDetails = document.querySelector('button[aria-label="10월 상세 보기"]');
+  assert.ok(openDetails);
+  await act(async () => openDetails.click());
+  const newRow = draftRows.find(row=>row.date==='2026-10-01');
+  const rowElement = [...document.querySelectorAll('[data-lesson-period-session-id]')].find(element=>element.dataset.lessonPeriodSessionId===newRow.id);
+  assert.ok(rowElement);
+  await act(async () => rowElement.querySelector('button').click());
+  for (const label of ['시작','종료','선생님','강의실']) {
+    const control = document.querySelector(`[aria-label="2026-10-01 ${label}"]`);
+    assert.ok(control,`ordinary lesson exposes ${label}`);
+    assert.equal(control.disabled,false);
+  }
+  await changeInput('2026-10-01 종료','19:30');
+  assert.equal(page.observed.lessonPlanForSave.sessions.find(row=>row.date==='2026-10-01').endTime,'19:30');
+  await changeInput('2026-10-01 종료','19:00');
+  await changeInput('2026-10-01 시작','16:30');
+  assert.equal(page.observed.lessonPlanForSave.sessions.find(row=>row.date==='2026-10-01').startTime,'16:30');
+  await changeInput('2026-10-01 시작','17:00');
+  const teacher = document.querySelector('select[aria-label="2026-10-01 선생님"]');
+  await act(async () => { teacher.value=id(102); teacher.dispatchEvent(new window.Event('change',{bubbles:true})); });
+  assert.equal(page.observed.lessonPlanForSave.sessions.find(row=>row.date==='2026-10-01').teacherCatalogId,id(102));
+  await act(async () => { teacher.value=id(101); teacher.dispatchEvent(new window.Event('change',{bubbles:true})); });
+  const classroom = document.querySelector('select[aria-label="2026-10-01 강의실"]');
+  await act(async () => { classroom.value=id(202); classroom.dispatchEvent(new window.Event('change',{bubbles:true})); });
+  assert.equal(page.observed.lessonPlanForSave.sessions.find(row=>row.date==='2026-10-01').classroomCatalogId,id(202));
+  await act(async () => { classroom.value=id(201); classroom.dispatchEvent(new window.Event('change',{bubbles:true})); });
+
+  const save = () => [...document.querySelectorAll('button')].find(button=>button.textContent.trim()==='일정 저장');
+  assert.ok(save());
+  await act(async () => save().click());
+  assert.equal(saveRequests(page).length,1,page.observed.lessonDesignSaveError);
+  const first = saveRequests(page)[0], sent = first.args.p_patch.schedule_plan;
+  assert.equal(first.retryEnabled,false,'the real service explicitly disables SDK mutation retries');
+  assert.deepEqual(first.args.p_expected_schedule_plan,savedPlan);
+  assert.deepEqual(sent.sessions.filter(row=>row.billingId==='september'),savedPlan.sessions.filter(row=>row.billingId==='september'));
+  assert.equal(sent.sessions.find(row=>row.date==='2026-09-24').scheduleState,'exception');
+  assert.equal(sent.sessions.find(row=>row.date==='2026-09-29').scheduleState,'active');
+  assert.deepEqual(sent.sessions.filter(row=>row.billingId==='october').map(row=>row.date),['2026-10-01',...octoberDates,'2026-10-29']);
+  assert.deepEqual(sent.billingPeriods.map(period=>period.id),['september','october']);
+  for (const stored of savedPlan.sessions.filter(row=>row.billingId==='october')) {
+    const retained = sent.sessions.find(row=>row.date===stored.date);
+    const withoutNumber = row => Object.fromEntries(Object.entries(row).filter(([field])=>field!=='sessionNumber'));
+    assert.deepEqual(withoutNumber(retained),withoutNumber(stored),`stored ${stored.date} retains identity, occupancy and learning content`);
+  }
+  for (const date of ['2026-10-01','2026-10-29']) {
+    const row = sent.sessions.find(row=>row.date===date);
+    assert.deepEqual([row.startTime,row.endTime,row.teacherCatalogId,row.classroomCatalogId],['17:00','19:00',id(101),id(201)]);
+    assert.equal(row.scheduleState,'active'); assert.equal(row.isForced,false);
+    assert.equal(row.teacherNote,undefined); assert.equal(row.textbookEntries,undefined);
+  }
+  assert.deepEqual(payload.classItem.schedulePlan,savedPlan,'read payload stays immutable');
+  await act(async () => first.resolve({data:null,error:{code:'23P01',message:'timetable_resource_conflict'}}));
+  assert.equal(page.observed.lessonDesignSaveError,'일정 확인을 통과하지 못해 저장하지 못했습니다. 입력은 유지되었습니다. 일정 정보를 확인해 주세요.');
+  assert.equal(dirty(),true);
+  assert.equal(saveRequests(page).length,1,'a conflict must not trigger an automatic write');
+  assert.equal(page.observed.lessonPlanForSave.sessions.filter(row=>row.billingId==='october').length,9);
+  await act(async () => save().click());
+  assert.equal(saveRequests(page).length,2,'only the explicit retry issues another write');
+  assert.deepEqual(saveRequests(page)[1].args,first.args,'identical retry retains payload, expected plan and request key');
+});
+
+function legacyRecoveryDetail({ firstState = 'skipped', blankDates = [] } = {}) {
+  const payload = septemberOctoberDetail();
+  payload.classItem.schedule = '화 17:00-19:00\n목 17:00-19:00';
+  payload.classItem.schedulePlan = buildSchedulePlanForSave({
+    className: 'SAFE CURRICULUM', subject: '영어', selectedDays: [2, 4],
+    billingPeriods: [
+      { id: 'september', month: 9, label: '9월', startDate: '2026-09-01', endDate: '2026-09-29' },
+      { id: 'october', month: 10, label: '10월', startDate: '2026-10-01', endDate: '2026-10-29' },
+    ],
+    sessionStates: { '2026-09-24': { state: 'exception' }, '2026-10-01': { state: firstState } },
+    sessionSchedules: Object.fromEntries(blankDates.map(date => [date, {
+      startTime: '', endTime: '', teacherCatalogId: '', classroomCatalogId: '',
+    }])),
+    sessions: [],
+  });
+  for (const row of payload.classItem.schedulePlan.sessions) {
+    row.teacherNote = `합성 보존 메모 ${row.date}`;
+    row.textbookEntries = [{ id: `saved-${row.date}`, textbookId: id(700), plan: {
+      start: row.date, end: row.date, label: `합성 보존 범위 ${row.date}`,
+    } }];
+  }
+  return payload;
+}
+
+async function recoveryEditor(t, payload, initial = {}) {
+  const page = await setup(t, 'operations', { workspace: true,
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-board`, route: 'curriculum/lesson-design', ...initial });
+  await act(async () => page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1)
+    .resolve({ error: null, data: payload }));
+  if (page.numbered()[0]) await act(async () => page.finish(page.numbered()[0]));
+  return page;
+}
+
+function restoredOctoberReadDetail() {
+  const payload = legacyRecoveryDetail();
+  const plan = buildSchedulePlanForSave({ ...payload.classItem.schedulePlan,
+    sessionStates: { '2026-09-24': { state: 'exception' },
+      '2026-10-01': { state: 'skipped' }, '2026-10-06': { state: 'exception' } },
+  });
+  // The correction producer restores state while retaining the materialized
+  // identity and old ordinals. Reproduce its fresh read, rather than editing a
+  // boundary and letting the planner create a new October 1 session.
+  const restored = plan.sessions.find(row => row.date === '2026-10-01');
+  restored.id = 'session:2026-10-01:october:skipped';
+  restored.sessionKey = restored.id;
+  Object.assign(restored, { state: 'active', scheduleState: 'active', sessionNumber: null, isForced: false });
+  plan.sessionStates['2026-10-01'] = { state: 'active' };
+  plan.history = [{ id: 'saved-history', savedAt: '2026-10-02T00:00:00Z', summary: '합성 저장 이력' }];
+  for (const row of plan.sessions) {
+    Object.assign(row, { startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201),
+      publicNote: `합성 공지 ${row.date}`, teacherNote: `합성 보존 메모 ${row.date}`,
+      textbookEntries: [{ id: `saved-${row.date}`, textbookId: id(700), plan: {
+        start: row.date, end: row.date, label: `합성 보존 범위 ${row.date}`,
+      } }],
+    });
+  }
+  payload.classItem.schedulePlan = plan;
+  return payload;
+}
+
+test('fresh persisted restored October lesson displays materialized ordinals without changing save or history identities', async t => {
+  const payload = restoredOctoberReadDetail(), savedPlan = structuredClone(payload.classItem.schedulePlan);
+  const rawOrdinals = [null, null, 1, 2, 3, 4, 5, 6, 7];
+  const displayOrdinals = [1, null, 2, 3, 4, 5, 6, 7, 8];
+  const octoberRows = savedPlan.sessions.filter(row => row.billingId === 'october');
+  assert.equal(savedPlan.billingPeriods.find(period => period.id === 'october').startDate, '2026-10-01');
+  assert.deepEqual(octoberRows.map(row => row.sessionNumber), rawOrdinals);
+  const page = await recoveryEditor(t, payload, { route: 'curriculum',
+    search: `?lessonDesign=1&classId=${id(999)}&section=lesson-design-periods&returnTo=%2Fadmin%2Fcurriculum`,
+  });
+  const initialSavePlan = structuredClone(page.observed.lessonPlanForSave);
+  const readOnlyState = ({ expectedSaves = 0, savePlan = initialSavePlan } = {}) => {
+    assert.equal(dirty(), false, 'a fresh read or detail selection does not author a schedule edit');
+    assert.equal(saveRequests(page).length, expectedSaves, 'display recovery never submits another save');
+    assert.deepEqual(page.observed.lessonPlanForSave.sessions, savedPlan.sessions, 'raw save rows retain every stored identity, ordinal and content field');
+    assert.deepEqual(page.observed.lessonPlanForSave, savePlan, 'read-only display and selection leave the entire candidate save payload unchanged');
+    assert.deepEqual(payload.classItem.schedulePlan, savedPlan, 'RPC detail remains immutable');
+    assert.deepEqual(page.observed.lessonPlanDraft.history, savedPlan.history, 'accepted saved history is unchanged');
+    assert.ok([...document.querySelectorAll('button')].find(button => button.textContent.trim() === '일정 저장'));
+  };
+  readOnlyState();
+  for (const [index, stored] of octoberRows.entries()) {
+    const view = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === stored.id);
+    assert.ok(view, `materialized ${stored.date} retains its canonical ID`);
+    assert.equal(view.sessionNumber, Number(stored.sessionNumber || 0), 'history matching keeps the canonical stored ordinal');
+    assert.equal(view.label, index === 1 ? '휴강' : `${displayOrdinals[index]}회차`);
+    assert.equal(view.displaySessionNumber, displayOrdinals[index]);
+    assert.equal(view.scheduleStateLabel, index === 1 ? '휴강' : '정상');
+    assert.equal(view.teacherNote, stored.teacherNote);
+    const cell = document.querySelector(`[data-lesson-calendar-month="2026-10"] [data-lesson-calendar-date="${stored.date}"]`);
+    assert.ok(cell);
+    assert.equal(cell.dataset.lessonCalendarSessionId, stored.id);
+    assert.equal(cell.dataset.lessonCalendarState, stored.scheduleState);
+    assert.match(cell.textContent, new RegExp(`${view.label}.*${view.scheduleStateLabel}`));
+    assert.equal(cell.textContent.includes(stored.id), false, 'the calendar does not expose a raw identity as a lesson label');
+    const mobile = [...document.querySelectorAll('[data-lesson-calendar-month="2026-10"] [data-testid="lesson-mobile-session-list"] button')]
+      .find(button => button.textContent.includes(view.dateLabel));
+    assert.ok(mobile, `mobile ${stored.date} entry`);
+    assert.match(mobile.textContent, new RegExp(`${view.label}.*${view.scheduleStateLabel}`));
+  }
+  const selected = await selectLegacyRecoveryRow(page, '2026-10-01');
+  assert.match(selected.querySelector('button').textContent, /1회차.*정상/);
+  assert.equal(selected.dataset.lessonPeriodSessionId, octoberRows[0].id);
+  for (const [index, stored] of octoberRows.entries()) {
+    const element = [...document.querySelectorAll('[data-lesson-period-session-id]')]
+      .find(row => row.dataset.lessonPeriodSessionId === stored.id);
+    assert.ok(element, `month details retains ${stored.date}`);
+    const label = index === 1 ? '휴강' : `${displayOrdinals[index]}회차`;
+    const state = index === 1 ? '휴강' : '정상';
+    assert.match(element.querySelector('button').textContent, new RegExp(`${label}.*${state}`));
+  }
+  selected.querySelector('button').focus();
+  assert.equal(document.activeElement, selected.querySelector('button'), 'standard focus reaches the retained-identity detail header');
+  readOnlyState();
+  // The real history producer can use an old ordinal when a legacy log has no
+  // session ID. Keep that match on October 8 (stored 1), not October 1 (display 1).
+  const records = page.load('src/features/operations/records.js');
+  const model = records.buildClassScheduleRouteModel({ classes: [payload.classItem], progressLogs: [
+    { id: id(801), class_id: id(999), session_order: 1, teacher_note: '합성 raw 1회차 기록', content: '합성 10월 8일 기록', updated_at: '2026-10-08T10:00:00Z' },
+    { id: id(802), class_id: id(999), session_order: 2, teacher_note: '합성 raw 2회차 기록', content: '합성 10월 13일 기록', updated_at: '2026-10-13T10:00:00Z' },
+  ] });
+  const buildSnapshot = page.load('src/features/operations/class-schedule-workspace.tsx').__testBuildLessonDesignSnapshot;
+  const historySnapshot = buildSnapshot(model.rows[0], payload.textbooks, page.observed.lessonPlanForSave);
+  assert.equal(historySnapshot.sessions.find(row => row.id === octoberRows[0].id).content, '수업 기록 없음');
+  assert.equal(historySnapshot.sessions.find(row => row.dateValue === '2026-10-08').content, '합성 10월 8일 기록');
+  assert.equal(historySnapshot.sessions.find(row => row.dateValue === '2026-10-13').content, '합성 10월 13일 기록');
+  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.filter(row => row.monthKey === '2026-09').map(row => row.id),
+    savedPlan.sessions.filter(row => row.billingId === 'september').map(row => row.id), 'September materialized history keeps all identities');
+  readOnlyState();
+
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const save = saveRequests(page)[0], submitted = save.args.p_patch.schedule_plan;
+  assert.deepEqual(submitted, initialSavePlan, 'explicit mock save receives the pre-existing canonical payload, not display projections');
+  assert.deepEqual(save.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(submitted.sessions.filter(row => row.billingId === 'october').map(row => row.sessionNumber), rawOrdinals);
+  assert.deepEqual(submitted.sessions.filter(row => row.billingId === 'september'), savedPlan.sessions.filter(row => row.billingId === 'september'));
+  assert.deepEqual(submitted.history.slice(0, savedPlan.history.length), savedPlan.history, 'normal save appends history without rewriting existing entries');
+  assert.equal(submitted.sessions.some(row => Object.hasOwn(row, 'displaySessionNumber') || Object.hasOwn(row, 'label')), false);
+  await act(async () => save.resolve({ error: null, data: null }));
+  const reread = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.notEqual(reread, page.requests.find(request => request.name === 'get_operations_class_lesson_design_detail_v1'));
+  const freshPayload = structuredClone(payload);
+  await act(async () => reread.resolve({ error: null, data: freshPayload }));
+  assert.match(page.observed.lessonDesignSaveNotice, /저장했습니다/);
+  assert.equal(page.observed.lessonDesignSnapshot.sessions.find(row => row.id === octoberRows[0].id).label, '1회차');
+  assert.equal(page.observed.lessonDesignSnapshot.sessions.find(row => row.id === octoberRows[0].id).sessionNumber, 0);
+  await page.remount();
+  const reload = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.notEqual(reload, reread, 'a new mount performs a fresh detail read');
+  await act(async () => reload.resolve({ error: null, data: structuredClone(freshPayload) }));
+  const reloadedSavePlan = structuredClone(page.observed.lessonPlanForSave);
+  readOnlyState({ expectedSaves: 1, savePlan: reloadedSavePlan });
+  await selectLegacyRecoveryRow(page, '2026-10-01');
+  const toggle = () => document.querySelector('button[aria-label^="10월 상세 "]');
+  await act(async () => toggle().click());
+  assert.equal(toggle().getAttribute('aria-expanded'), 'false');
+  await act(async () => toggle().click());
+  assert.equal(toggle().getAttribute('aria-expanded'), 'true');
+  for (const [index, stored] of octoberRows.entries()) {
+    const view = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === stored.id);
+    assert.equal(view.label, index === 1 ? '휴강' : `${displayOrdinals[index]}회차`, `reloaded ${stored.date} display`);
+    assert.equal(view.sessionNumber, Number(stored.sessionNumber || 0));
+    const element = [...document.querySelectorAll('[data-lesson-period-session-id]')].find(row => row.dataset.lessonPeriodSessionId === stored.id);
+    assert.ok(element);
+    assert.match(element.querySelector('button').textContent, new RegExp(view.label));
+  }
+  readOnlyState({ expectedSaves: 1, savePlan: reloadedSavePlan });
+  assert.deepEqual(freshPayload.classItem.schedulePlan, savedPlan);
+});
+
+async function selectLegacyRecoveryRow(page, date) {
+  const month = Number(date.slice(5, 7));
+  const details = document.querySelector(`button[aria-label^="${month}월 상세 "]`);
+  assert.ok(details, `${month}월 details toggle`);
+  if (details.getAttribute('aria-expanded') !== 'true') await act(async () => details.click());
+  const row = page.observed.lessonPlanForSave.sessions.find(item => item.date === date);
+  assert.ok(row, `stored ${date} row`);
+  const element = [...document.querySelectorAll('[data-lesson-period-session-id]')]
+    .find(item => item.dataset.lessonPeriodSessionId === row.id);
+  assert.ok(element, `visible selectable ${date} row`);
+  await act(async () => element.querySelector('button').click());
+  assert.equal(document.querySelector('[data-lesson-selected-editor="true"]')?.dataset.lessonPeriodSessionId, row.id);
+  return document.querySelector('[data-lesson-selected-editor="true"]');
+}
+
+function assertLegacyRecoveryFields(date, values) {
+  for (const [index, label] of ['시작', '종료', '선생님', '강의실'].entries()) {
+    const control = document.querySelector(`[aria-label="${date} ${label}"]`);
+    assert.ok(control, `rendered ${date} ${label}`);
+    assert.equal(control.disabled, false);
+    assert.equal(control.value, values[index]);
+  }
+}
+
+async function clickLessonSave() {
+  const button = [...document.querySelectorAll('button')].find(item => item.textContent.trim() === '일정 저장');
+  assert.ok(button, 'explicit schedule save');
+  await act(async () => button.click());
+}
+
+test('legacy recovery restores a visible skipped row and cancels another row without rewriting stored history', async t => {
+  const payload = legacyRecoveryDetail(), savedPlan = structuredClone(payload.classItem.schedulePlan);
+  const savedFirst = savedPlan.sessions.find(row => row.date === '2026-10-01');
+  const page = await recoveryEditor(t, payload);
+  assert.equal(dirty(), false);
+  assert.equal(saveRequests(page).length, 0, 'opening the editor never saves or fills historical dates');
+  assert.equal(page.observed.lessonPlanForSave.sessions.find(row => row.date === '2026-10-01').startTime, undefined);
+  assert.equal(savedPlan.sessions.filter(row => row.billingId === 'october' && row.scheduleState === 'active').length, 8);
+
+  let selected = await selectLegacyRecoveryRow(page, '2026-10-01');
+  assert.match(selected.querySelector('[data-slot="badge"]').textContent, /해제/);
+  const normal = [...selected.querySelectorAll('button')].find(button => button.textContent.trim() === '정상');
+  assert.ok(normal, 'the stored skipped date has an explicit normal-state action');
+  await act(async () => normal.click());
+  const restored = page.observed.lessonPlanForSave.sessions.find(row => row.date === '2026-10-01');
+  assert.equal(restored.id, savedFirst.id);
+  assert.equal(restored.scheduleState, 'active');
+  assert.equal(restored.isForced, false);
+  assert.equal(restored.originalDate, '');
+  const restoredView = page.observed.lessonDesignSnapshot.sessions.find(row => row.id === restored.id);
+  assert.equal(restoredView.label, '1회차');
+  assert.equal(restoredView.scheduleStateLabel, '정상');
+  const restoredCell = document.querySelector('[data-lesson-calendar-month="2026-10"] [data-lesson-calendar-date="2026-10-01"]');
+  assert.equal(restoredCell.dataset.lessonCalendarState, 'active');
+  assert.match(restoredCell.textContent, /1회차.*정상/);
+  assertLegacyRecoveryFields('2026-10-01', ['17:00', '19:00', id(101), id(201)]);
+  assert.equal(saveRequests(page).length, 0, 'restoration only authors the draft');
+
+  selected = await selectLegacyRecoveryRow(page, '2026-10-06');
+  const cancel = [...selected.querySelectorAll('button')].find(button => button.textContent.trim() === '휴강');
+  assert.ok(cancel);
+  await act(async () => cancel.click());
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const request = saveRequests(page)[0], sent = request.args.p_patch.schedule_plan;
+  assert.equal(request.retryEnabled, false);
+  assert.deepEqual(request.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(sent.billingPeriods, savedPlan.billingPeriods);
+  assert.deepEqual(sent.sessions.map(row => row.date), savedPlan.sessions.map(row => row.date));
+  assert.deepEqual(sent.sessions.filter(row => row.billingId === 'september'), savedPlan.sessions.filter(row => row.billingId === 'september'));
+  assert.equal(sent.sessions.find(row => row.date === '2026-09-24').scheduleState, 'exception');
+  assert.equal(sent.sessions.find(row => row.date === '2026-09-29').scheduleState, 'active');
+  for (const stored of savedPlan.sessions.filter(row => row.billingId === 'october')) {
+    const actual = sent.sessions.find(row => row.date === stored.date);
+    const withoutNumber = row => Object.fromEntries(Object.entries(row).filter(([field]) => field !== 'sessionNumber'));
+    const expected = { ...stored };
+    if (stored.date === '2026-10-01') Object.assign(expected, {
+      state: 'active', scheduleState: 'active', startTime: '17:00', endTime: '19:00',
+      teacherCatalogId: id(101), classroomCatalogId: id(201),
+    });
+    if (stored.date === '2026-10-06') Object.assign(expected, { state: 'exception', scheduleState: 'exception' });
+    assert.deepEqual(withoutNumber(actual), withoutNumber(expected), `${stored.date} retains identity, resources and learning content except the two authored changes`);
+  }
+  assert.deepEqual(sent.sessions.filter(row => row.billingId === 'october' && row.scheduleState === 'active').map(row => row.sessionNumber), [1, 2, 3, 4, 5, 6, 7, 8]);
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan, 'the read payload remains immutable');
+});
+
+test('legacy selected defaults repairs only the selected stored blank lesson through its explicit button', async t => {
+  const payload = legacyRecoveryDetail({ blankDates: ['2026-10-22', '2026-10-29'] });
+  const savedPlan = structuredClone(payload.classItem.schedulePlan), page = await recoveryEditor(t, payload);
+  assert.equal(dirty(), false);
+  assert.equal(saveRequests(page).length, 0);
+  await selectLegacyRecoveryRow(page, '2026-10-29');
+  assertLegacyRecoveryFields('2026-10-29', ['', '', '', '']);
+  const apply = document.querySelector('button[aria-label="2026-10-29 기본 정보 적용"]');
+  assert.ok(apply, 'the blank stored row exposes explicit recovery');
+  await act(async () => apply.click());
+  assertLegacyRecoveryFields('2026-10-29', ['17:00', '19:00', id(101), id(201)]);
+  assert.equal(saveRequests(page).length, 0, 'applying defaults requires a separate save');
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const request = saveRequests(page)[0], sent = request.args.p_patch.schedule_plan;
+  assert.deepEqual(request.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(sent.billingPeriods, savedPlan.billingPeriods);
+  assert.deepEqual(sent.sessions, savedPlan.sessions.map(stored => stored.date === '2026-10-29' ? { ...stored,
+      startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201),
+    } : stored), 'only the selected stored row changes, with no extra or duplicate sessions');
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan);
+});
+
+test('legacy selected defaults preserves a typed time while filling missing fields and hides recovery once complete', async t => {
+  const payload = legacyRecoveryDetail({ blankDates: ['2026-10-22', '2026-10-29'] });
+  const savedPlan = structuredClone(payload.classItem.schedulePlan), page = await recoveryEditor(t, payload);
+  await selectLegacyRecoveryRow(page, '2026-10-29');
+  assertLegacyRecoveryFields('2026-10-29', ['', '', '', '']);
+  await changeInput('2026-10-29 시작', '18:00');
+  assertLegacyRecoveryFields('2026-10-29', ['18:00', '', '', '']);
+  const apply = document.querySelector('button[aria-label="2026-10-29 기본 정보 적용"]');
+  assert.ok(apply, 'partial input still allows explicit completion');
+  await act(async () => apply.click());
+  assertLegacyRecoveryFields('2026-10-29', ['18:00', '19:00', id(101), id(201)]);
+  assert.equal(document.querySelector('button[aria-label="2026-10-29 기본 정보 적용"]'), null,
+    'complete manually edited details cannot be reapplied with a defaults button');
+  assert.equal(saveRequests(page).length, 0, 'completion does not submit a mutation');
+  await clickLessonSave();
+  assert.equal(saveRequests(page).length, 1, page.observed.lessonDesignSaveError);
+  const request = saveRequests(page)[0], sent = request.args.p_patch.schedule_plan;
+  assert.deepEqual(request.args.p_expected_schedule_plan, savedPlan);
+  assert.deepEqual(sent.billingPeriods, savedPlan.billingPeriods);
+  assert.deepEqual(sent.sessions, savedPlan.sessions.map(stored => stored.date === '2026-10-29' ? { ...stored,
+    startTime: '18:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201),
+  } : stored), 'the typed time is saved only on the selected date; every other stored row remains unchanged');
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan);
+});
+
+test('legacy preflight recovery opens and focuses the changed past lesson without filling or submitting its incomplete details', async t => {
+  const payload = legacyRecoveryDetail({ firstState: 'active' });
+  const savedPlan = structuredClone(payload.classItem.schedulePlan), page = await recoveryEditor(t, payload);
+  await selectLegacyRecoveryRow(page, '2026-10-01');
+  assertLegacyRecoveryFields('2026-10-01', ['', '', '', '']);
+  await changeInput('2026-10-01 시작', '17:00');
+  await act(async () => document.querySelector('button[aria-label^="10월 상세 "]').click());
+  await selectLegacyRecoveryRow(page, '2026-09-29');
+  assert.notEqual(document.querySelector('[data-lesson-selected-editor="true"]')?.dataset.lessonPeriodSessionId,
+    savedPlan.sessions.find(row => row.date === '2026-10-01').id);
+  await clickLessonSave();
+  await act(async () => new Promise(resolve => window.setTimeout(resolve, 20)));
+  assert.equal(saveRequests(page).length, 0, 'preflight rejects the incomplete past-date change before any mutation');
+  assert.match(page.observed.lessonDesignSaveError, /^2026-10-01 수업의 시작·종료 시간을 입력해 주세요\./);
+  assert.equal(document.querySelector('button[aria-label^="10월 상세 "]').getAttribute('aria-expanded'), 'true');
+  assert.equal(document.querySelector('[data-lesson-selected-editor="true"]')?.dataset.lessonPeriodSessionId,
+    savedPlan.sessions.find(row => row.date === '2026-10-01').id);
+  assertLegacyRecoveryFields('2026-10-01', ['17:00', '', '', '']);
+  assert.equal(document.activeElement, document.querySelector('input[aria-label="2026-10-01 시작"]'));
+  assert.equal(dirty(), true, 'the operator can finish the retained draft');
+  assert.deepEqual(payload.classItem.schedulePlan, savedPlan);
+});
 
 test('lesson-detail team catalog populates the makeup selector and selection preserves entered times on save', async t => {
   const page = await setup(t, 'operations', { workspace: true, search: `?lessonDesign=1&classId=${id(999)}`, route:'curriculum/lesson-design' });
@@ -454,3 +921,415 @@ test('normalized generation previews dates without mutating saved sessions and d
  assert.deepEqual(page.observed.lessonDesignSnapshot.sessions.map(session => session.id),original);
  assert.equal(page.requests.some(request => request.name === 'generate_class_lesson_sessions_v1'), false);
 });
+
+function freezePastCorrectionClock(t) {
+  const OriginalDate = globalThis.Date;
+  globalThis.Date = class extends OriginalDate {
+    constructor(...args) { super(...(args.length ? args : ['2026-10-10T12:00:00Z'])); }
+    static now() { return OriginalDate.parse('2026-10-10T12:00:00Z'); }
+  };
+  t.after(() => { globalThis.Date = OriginalDate; });
+}
+
+function pastCorrectionDetail() {
+  const payload = legacyRecoveryDetail();
+  payload.classItem.status = '수강';
+  const plan = payload.classItem.schedulePlan;
+  plan.rawPlanMarker = { preserved: ['synthetic', 'original'] };
+  plan.billingPeriods[0].rawPeriodMarker = 'preserve this raw period';
+  const first = plan.sessions.find(row => row.date === '2026-10-01');
+  Object.assign(first, { startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201), rawLessonMarker: 'preserve target wire fields' });
+  plan.sessionSchedules['2026-10-01'] = { startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201) };
+  const sixth = plan.sessions.find(row => row.date === '2026-10-06');
+  Object.assign(sixth, { state: 'exception', scheduleState: 'exception', startTime: '17:00', endTime: '19:00', teacherCatalogId: id(101), classroomCatalogId: id(201) });
+  plan.sessionStates['2026-10-06'] = { state: 'exception', memo: '' };
+  plan.sessions.find(row => row.date === '2026-09-29').unknownOccupancy = { syntheticHistoricalFlag: true };
+  return payload;
+}
+
+const pastPreviews = page => page.requests.filter(request => request.name === 'preview_past_lesson_state_correction_v1');
+const pastCommits = page => page.requests.filter(request => request.name === 'save_past_lesson_state_correction_v1');
+const correctionDialog = date => [...document.querySelectorAll('[role="dialog"]')]
+  .find(node => node.querySelector(`[aria-label="${date} 정정 사유"]`));
+function correctionButton(date, label) {
+  const button = [...(correctionDialog(date)?.querySelectorAll('button') || [])].find(node => node.textContent.trim() === label);
+  assert.ok(button, `rendered ${label}`);
+  return button;
+}
+async function changeCorrectionField(date, label, value) {
+  const control = correctionDialog(date)?.querySelector(`[aria-label="${date} ${label}"]`);
+  assert.ok(control, `rendered correction ${label}`);
+  await act(async () => {
+    control.focus();
+    const prototype = control.tagName === 'TEXTAREA' ? window.HTMLTextAreaElement.prototype
+      : control.tagName === 'SELECT' ? window.HTMLSelectElement.prototype : window.HTMLInputElement.prototype;
+    Object.getOwnPropertyDescriptor(prototype, 'value').set.call(control, value);
+    control.dispatchEvent(new window.Event('input', { bubbles: true }));
+    control.dispatchEvent(new window.Event('change', { bubbles: true }));
+    control.dispatchEvent(new window.KeyboardEvent('keyup', { key: '1', bubbles: true }));
+  });
+  assert.equal(control.value, value);
+}
+async function openPastCorrection(page, date = '2026-10-01') {
+  await selectLegacyRecoveryRow(page, date);
+  const trigger = document.querySelector(`[aria-label="${date} 과거 상태 정정"]`);
+  assert.ok(trigger, `eligible raw ${date} has an independent correction action`);
+  assert.equal(trigger.disabled, false);
+  await act(async () => trigger.click());
+  assert.ok(correctionDialog(date), 'the real correction dialog opened');
+  return correctionDialog(date);
+}
+function pastSummary(request, unknownCount = 0, committed = false) {
+  return {
+    kind: 'past_lesson_state_correction', classId: request.args.p_class_id,
+    lessonId: request.args.p_lesson_id, date: request.args.p_session_date,
+    expectedState: request.args.p_expected_state, state: request.args.p_schedule_state,
+    planHash: 'a'.repeat(64), reviewRequired: !committed && unknownCount > 0,
+    unknownOccupancyReviewHash: 'b'.repeat(64), unknownOccupancyCount: unknownCount,
+    warnings: unknownCount ? [{ code: 'unknown_occupancy', count: unknownCount }] : [],
+    ...(committed ? { requestKey: request.args.p_request_key, outcome: 'applied', notifications: { state: 'not_requested' } } : {}),
+  };
+}
+async function previewPastCorrection(page, date = '2026-10-01', unknownCount = 0) {
+  await changeCorrectionField(date, '정정 사유', '  합성 기록의 상태 정정  ');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  const preview = pastPreviews(page).at(-1);
+  assert.ok(preview, 'explicit preview issued one read-only RPC');
+  await act(async () => preview.resolve({ error: null, data: pastSummary(preview, unknownCount) }));
+  return preview;
+}
+
+test('past correction: exact raw plan, required reason and explicit unknown acknowledgement gate one independent commit', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), raw = structuredClone(payload.classItem.schedulePlan);
+  const page = await recoveryEditor(t, payload), date = '2026-10-01';
+  const original = raw.sessions.find(row => row.date === date);
+  await openPastCorrection(page, date);
+  const emptyReasonPreview = correctionButton(date, '정정 내용 확인');
+  assert.equal(emptyReasonPreview.disabled, true);
+  await act(async () => emptyReasonPreview.click());
+  assert.equal(pastPreviews(page).length, 0);
+  const preview = await previewPastCorrection(page, date, 3);
+  assert.deepEqual(preview.args, {
+    p_class_id: id(999), p_expected_schedule_plan: raw, p_lesson_id: original.id,
+    p_session_date: date, p_expected_state: 'skipped', p_schedule_state: 'active',
+    p_reason: '합성 기록의 상태 정정', p_unknown_occupancy_review_hash: null,
+    p_acknowledge_unknown_occupancy: false,
+  });
+  assert.equal(pastCommits(page).length, 0, 'preview and warnings never write');
+  assert.equal(correctionButton(date, '상태 정정 저장').disabled, true);
+  assert.equal(correctionDialog(date).querySelector('[role="alert"]').textContent,
+    '시간·강사·강의실 정보가 부족한 일정 3건이 있습니다.');
+  const warning = correctionDialog(date).querySelector('[role="checkbox"]');
+  assert.ok(warning, 'unknown occupancy requires a real explicit checkbox');
+  assert.match(correctionDialog(date).textContent, /확인이 필요한 일정 경고를 확인했습니다/);
+  await act(async () => warning.click());
+  assert.equal(correctionButton(date, '상태 정정 저장').disabled, false);
+  const saveButton = correctionButton(date, '상태 정정 저장');
+  await act(async () => { saveButton.click(); saveButton.click(); });
+  assert.equal(pastCommits(page).length, 1);
+  const commit = pastCommits(page)[0];
+  assert.deepEqual(commit.args.p_expected_schedule_plan, raw, 'no planner projection is used as the expected version');
+  assert.equal(commit.args.p_unknown_occupancy_review_hash, 'b'.repeat(64));
+  assert.equal(commit.args.p_acknowledge_unknown_occupancy, true);
+  assert.match(commit.args.p_request_key, /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i);
+  assert.equal(commit.retryEnabled, false);
+  assert.equal(saveRequests(page).filter(request => request.name !== 'save_past_lesson_state_correction_v1').length, 0);
+  assert.deepEqual(payload.classItem.schedulePlan, raw, 'all unrelated raw rows, fields and learning data stay immutable');
+  await act(async () => commit.resolve({ error: null, data: pastSummary(commit, 3, true) }));
+  const refreshed = structuredClone(payload);
+  const accepted = refreshed.classItem.schedulePlan.sessions.find(row => row.id === original.id);
+  Object.assign(accepted, { state: 'active', scheduleState: 'active' });
+  delete refreshed.classItem.schedulePlan.sessionStates[date];
+  const read = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.notEqual(read, page.requests.find(request => request.name === 'get_operations_class_lesson_design_detail_v1'), 'accepted commit performs an exact detail reread');
+  await act(async () => read.resolve({ error: null, data: refreshed }));
+  assert.equal(correctionDialog(date), undefined);
+  assert.equal(pastCommits(page).length, 1);
+  assert.equal(dirty(), false);
+});
+
+test('past correction: known collision blocks commit and keeps the entered reason', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), raw = structuredClone(payload.classItem.schedulePlan);
+  const page = await recoveryEditor(t, payload), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await changeCorrectionField(date, '정정 사유', '합성 충돌 확인');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  await act(async () => pastPreviews(page)[0].resolve({ data: null, error: { code: '23P01', message: 'synthetic private collision detail' } }));
+  assert.match(correctionDialog(date).textContent, /겹치는 일정이 확인되어 정정할 수 없습니다/);
+  assert.equal(document.activeElement, correctionDialog(date).querySelector('[role="alert"]'), 'the visible local error receives standard keyboard focus');
+  assert.equal(correctionDialog(date).textContent.includes('synthetic private'), false);
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).value, '합성 충돌 확인');
+  const commit = [...correctionDialog(date).querySelectorAll('button')].find(button => button.textContent.trim() === '상태 정정 저장');
+  assert.ok(!commit || commit.disabled, 'a rejected preview cannot authorize commit');
+  assert.equal(pastCommits(page).length, 0);
+  assert.deepEqual(payload.classItem.schedulePlan, raw);
+});
+
+test('past correction: uncertain save retains the draft and only explicit retry reuses the reviewed version and key', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  await act(async () => correctionButton(date, '상태 정정 저장').click());
+  const first = pastCommits(page)[0];
+  assert.equal(first.args.p_acknowledge_unknown_occupancy, true, 'explicit commit acknowledges the reviewed snapshot even when it has zero warnings');
+  await act(async () => first.resolve({ data: null, error: { code: '', message: 'TimeoutError: synthetic result unavailable' } }));
+  assert.match(correctionDialog(date).textContent, /정정 결과를 확인하지 못했습니다/);
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).value.trim(), '합성 기록의 상태 정정');
+  assert.equal(dirty(), true, 'the correction input participates in the existing draft-navigation guard');
+  assert.equal(pastCommits(page).length, 1, 'there is no automatic retry after an unknown outcome');
+  await act(async () => correctionButton(date, '상태 정정 저장').click());
+  assert.equal(pastCommits(page).length, 2);
+  assert.deepEqual(pastCommits(page)[1].args, first.args, 'explicit identical retry preserves raw version, review hash, reason and idempotency key');
+  assert.equal(saveRequests(page).filter(request => request.name !== 'save_past_lesson_state_correction_v1').length, 0);
+});
+
+test('past correction: changed reason invalidates pending preview and stale warning cannot authorize commit', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await changeCorrectionField(date, '정정 사유', '첫 합성 사유');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  const oldPreview = pastPreviews(page)[0];
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).disabled, false);
+  await changeCorrectionField(date, '정정 사유', '변경한 합성 사유');
+  await act(async () => oldPreview.resolve({ data: pastSummary(oldPreview, 2), error: null }));
+  assert.equal(correctionDialog(date).querySelector(`[aria-label="${date} 정정 사유"]`).value, '변경한 합성 사유');
+  const commit = [...correctionDialog(date).querySelectorAll('button')].find(button => button.textContent.trim() === '상태 정정 저장');
+  assert.ok(!commit || commit.disabled, 'the former reason review is stale');
+  assert.equal(pastCommits(page).length, 0);
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  assert.equal(pastPreviews(page).length, 2);
+  assert.equal(pastPreviews(page)[1].args.p_reason, '변경한 합성 사유');
+});
+
+test('past correction: StrictMode lifecycle replay still allows an explicit current-session preview', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail(), { strict: true }), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  assert.equal(pastPreviews(page).length, 1);
+  assert.equal(correctionButton(date, '상태 정정 저장').disabled, false);
+  assert.equal(pastCommits(page).length, 0);
+});
+
+test('past correction: exact selected-row state-only draft is eligible but unrelated authored input stays outside this path', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), page = await recoveryEditor(t, payload), date = '2026-10-06';
+  const selected = await selectLegacyRecoveryRow(page, date);
+  const normal = [...selected.querySelectorAll('button')].find(button => button.textContent.trim() === '정상');
+  assert.ok(normal);
+  await act(async () => normal.click());
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 0);
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  assert.equal(pastPreviews(page)[0].args.p_expected_state, 'exception');
+  assert.equal(pastPreviews(page)[0].args.p_schedule_state, 'active');
+  assert.deepEqual(pastPreviews(page)[0].args.p_expected_schedule_plan, payload.classItem.schedulePlan);
+});
+
+test('past correction: unrelated dirty plan cannot enter the narrow correction route', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await editPlan(page, 'UNRELATED AUTHORED PERIOD');
+  await selectLegacyRecoveryRow(page, date);
+  const trigger = document.querySelector(`[aria-label="${date} 과거 상태 정정"]`);
+  assert.ok(!trigger || trigger.disabled);
+  assert.equal(pastPreviews(page).length, 0);
+  assert.equal(pastCommits(page).length, 0);
+  assert.equal(page.observed.lessonPlanDraft.billingPeriods[0].color, 'UNRELATED AUTHORED PERIOD');
+  assert.equal(dirty(), true);
+});
+
+test('past correction: refreshed raw version invalidates review instead of submitting an old expected plan', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), page = await recoveryEditor(t, payload), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  const updated = structuredClone(payload);
+  updated.classItem.schedulePlan.sessions.find(row => row.date === '2026-09-29').unknownOccupancy.syntheticHistoricalFlag = false;
+  await refreshDetail(page, updated);
+  const dialog = correctionDialog(date);
+  const commit = [...(dialog?.querySelectorAll('button') || [])].find(button => button.textContent.trim() === '상태 정정 저장');
+  assert.ok(!commit || commit.disabled, 'a changed authoritative raw plan revokes the accepted review');
+  assert.equal(pastCommits(page).length, 0);
+  assert.deepEqual(payload.classItem.schedulePlan.rawPlanMarker, { preserved: ['synthetic', 'original'] });
+});
+
+test('past correction: late preview from another class cannot populate or authorize the current editor', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await changeCorrectionField(date, '정정 사유', '이전 수업의 합성 사유');
+  await act(async () => correctionButton(date, '정정 내용 확인').click());
+  const old = pastPreviews(page)[0];
+  window.history.replaceState(null, '', `?lessonDesign=1&classId=${id(998)}&section=lesson-design-periods`);
+  await page.render();
+  const next = pastCorrectionDetail(); next.classItem.id = id(998);
+  const nextRead = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  assert.equal(nextRead.args.p_class_id, id(998));
+  await act(async () => nextRead.resolve({ data: next, error: null }));
+  await act(async () => old.resolve({ data: pastSummary(old, 3), error: null }));
+  assert.equal(correctionDialog(date), undefined);
+  assert.equal(pastCommits(page).length, 0);
+  assert.equal(dirty(), false);
+});
+
+test('past correction: late accepted save after actor revocation cannot refresh or announce success for the new actor', async t => {
+  freezePastCorrectionClock(t);
+  const page = await recoveryEditor(t, pastCorrectionDetail()), date = '2026-10-01';
+  await openPastCorrection(page, date);
+  await previewPastCorrection(page, date);
+  await act(async () => correctionButton(date, '상태 정정 저장').click());
+  const old = pastCommits(page)[0];
+  const readsBefore = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').length;
+  await page.auth({ user: null, role: null });
+  await act(async () => old.resolve({ data: pastSummary(old, 0, true), error: null }));
+  assert.equal(correctionDialog(date), undefined);
+  assert.equal(dirty(), false);
+  assert.equal(page.observed.lessonDesignSaveNotice, '');
+  assert.equal(page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').length, readsBefore);
+});
+
+test('past correction: teacher actor cannot expose the administrator correction action or issue its RPCs', async t => {
+  freezePastCorrectionClock(t);
+  const payload = pastCorrectionDetail(), page = await recoveryEditor(t, payload), date = '2026-10-01';
+  await page.auth({ role: 'teacher' });
+  const read = page.requests.filter(request => request.name === 'get_operations_class_lesson_design_detail_v1').at(-1);
+  await act(async () => read.resolve({ data: payload, error: null }));
+  await selectLegacyRecoveryRow(page, date);
+  assert.equal(document.querySelector(`[aria-label="${date} 과거 상태 정정"]`), null);
+  assert.equal(pastPreviews(page).length, 0);
+  assert.equal(pastCommits(page).length, 0);
+});
+
+const saveDiagnostic = () => ({ version: 1,
+  confirmed: [{ className: '합성 충돌 수업', date: '2026-10-01', startMinute: 1020, endMinute: 1140,
+    overlapStartMinute: 1080, overlapEndMinute: 1140, teacherName: '합성 선생님' }],
+  unresolved: [{ className: '합성 과거 수업', date: '2026-09-24', missingFields: ['teacher', 'classroom'] }],
+  confirmedCount: 1, unresolvedCount: 1, truncated: false });
+const diagnosticError = payload => ({ code: '23P01', message: 'timetable_resource_conflict', details: JSON.stringify(payload) });
+const scheduleSaveButton = () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '일정 저장');
+
+test('actual schedule Save shows confirmed and unresolved details beside its action, preserves scope and draft, and retries only explicitly', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, '합성 수정');
+  const before = structuredClone({ draft: page.observed.lessonPlanDraft, baseline: page.observed.lessonPlanBaseline,
+    month: page.observed.focusedLessonMonthKey, months: page.observed.selectedLessonMonthKeys, session: page.observed.selectedLessonSessionId });
+  const button = scheduleSaveButton(); button.focus();
+  await act(async () => button.click());
+  assert.equal(saveRequests(page).length, 1);
+  assert.equal(button.disabled, true);
+  // Chromium drops a newly disabled button to body; emulate that browser result.
+  button.blur();
+  await act(async () => saveRequests(page)[0].resolve({ data: null, error: diagnosticError(saveDiagnostic()) }));
+  const panel = document.querySelector('[data-testid="lesson-design-save-error"]');
+  assert.ok(panel);
+  assert.equal(panel.closest('[data-testid="lesson-design-page-scroll"]') !== null, true);
+  assert.equal(panel.parentElement.querySelector('[data-testid="lesson-design-bottom-action-bar"]')?.contains(button), true);
+  assert.equal(button.getAttribute('aria-describedby'), panel.id);
+  assert.equal(document.activeElement, button);
+  assert.match(panel.querySelector('[aria-label="확인된 일정 충돌"]').textContent, /합성 충돌 수업.*2026-10-01.*17:00–19:00.*겹친 시간 18:00–19:00.*같은 선생님 합성 선생님/s);
+  const unknown = panel.querySelector('[aria-label="정보 확인 필요"]').textContent;
+  assert.match(unknown, /합성 과거 수업.*2026-09-24.*선생님·강의실 정보 확인 필요/s);
+  assert.doesNotMatch(unknown, /겹친 시간|같은 선생님|같은 강의실/);
+  assert.deepEqual({ draft: page.observed.lessonPlanDraft, baseline: page.observed.lessonPlanBaseline,
+    month: page.observed.focusedLessonMonthKey, months: page.observed.selectedLessonMonthKeys, session: page.observed.selectedLessonSessionId }, before);
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 1);
+  await act(async () => button.click());
+  assert.equal(saveRequests(page).length, 2);
+  assert.deepEqual(saveRequests(page)[1].args, saveRequests(page)[0].args);
+  await act(async () => saveRequests(page)[1].resolve({ data: null, error: diagnosticError(saveDiagnostic()) }));
+  await editPlan(page, '합성 다음 수정');
+  assert.equal(document.querySelector('[data-testid="lesson-design-save-error"]'), null, 'edited input clears outdated feedback');
+  assert.equal(dirty(), true);
+});
+
+test('unknown schedule information and a technical timeout cannot be presented as confirmed collisions', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, '합성 수정');
+  const payload = saveDiagnostic(); payload.confirmed = []; payload.confirmedCount = 0;
+  await clickLessonSave();
+  await act(async () => saveRequests(page)[0].resolve({ data: null, error: diagnosticError(payload) }));
+  const panel = document.querySelector('[data-testid="lesson-design-save-error"]');
+  assert.equal(panel.querySelector('[aria-label="확인된 일정 충돌"]'), null);
+  assert.match(page.observed.lessonDesignSaveError, /충돌 여부를 확인하지 못했습니다/);
+  assert.ok(panel.querySelector('[aria-label="정보 확인 필요"]'));
+  const draft = structuredClone(page.observed.lessonPlanDraft);
+  await clickLessonSave();
+  const input = document.querySelector('input'); input.focus();
+  await act(async () => saveRequests(page)[1].resolve({ data: null, error: {
+    code: '57014', message: 'canceling statement due to statement timeout', details: JSON.stringify(saveDiagnostic()),
+  } }));
+  assert.equal(document.activeElement, input, 'failure must not steal operator-moved focus');
+  const timeout = document.querySelector('[data-testid="lesson-design-save-error"]');
+  assert.match(timeout.textContent, /시간이 오래 걸려 저장이 중단/);
+  assert.equal(timeout.querySelector('[aria-label="확인된 일정 충돌"]'), null);
+  assert.equal(timeout.querySelector('[aria-label="정보 확인 필요"]'), null);
+  assert.doesNotMatch(timeout.textContent, /합성 충돌 수업|canceling statement/);
+  assert.deepEqual(page.observed.lessonPlanDraft, draft);
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 2);
+});
+
+test('a late conflict reply after actor revocation cannot disclose old authorized schedule details', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, '합성 수정');
+  await clickLessonSave();
+  const old = saveRequests(page)[0];
+  await page.auth({ user: null, role: null });
+  await act(async () => old.resolve({ data: null, error: diagnosticError(saveDiagnostic()) }));
+  assert.equal(page.observed.lessonPlanDraft, null);
+  assert.equal(page.observed.lessonDesignSaveError, '');
+  assert.equal(document.querySelector('[data-testid="lesson-design-save-error"]'), null);
+  assert.doesNotMatch(document.body.textContent, /합성 충돌 수업|합성 과거 수업/);
+  assert.equal(saveRequests(page).length, 1);
+});
+
+const sqlProducerFailures = JSON.parse(readFileSync(path.join(rootPath,
+  'docs/qa/cycle-13-save-conflict-details/sql-producer-fixtures.json'), 'utf8'));
+for (const kind of ['teacher', 'both', 'same-class', 'unknown-past']) {
+  test(`actual SQL ${kind} DETAIL reaches the real schedule Save consumer`, async t => {
+    const page = await editor(t, 'curriculum/lesson-design');
+    await editPlan(page, '합성 계약 검증');
+    const before = structuredClone(page.observed.lessonPlanDraft);
+    const failure = sqlProducerFailures[kind], producer = JSON.parse(failure.details);
+    assert.equal(failure.code, '23P01');
+    assert.equal(failure.message, 'timetable_resource_conflict');
+    await clickLessonSave();
+    await act(async () => saveRequests(page)[0].resolve({ data: null, error: failure }));
+    const panel = document.querySelector('[data-testid="lesson-design-save-error"]');
+    assert.ok(panel);
+    const confirmed = panel.querySelector('[aria-label="확인된 일정 충돌"]');
+    const unknown = panel.querySelector('[aria-label="정보 확인 필요"]');
+    if (kind === 'unknown-past') {
+      assert.equal(confirmed, null);
+      assert.ok(unknown);
+      assert.match(unknown.textContent, new RegExp(producer.unresolved[0].className));
+      assert.ok(unknown.textContent.includes(producer.unresolved[0].date));
+      assert.match(unknown.textContent, /시간·선생님·강의실 정보 확인 필요/);
+      assert.doesNotMatch(unknown.textContent, /겹친 시간|같은 선생님|같은 강의실/);
+      assert.match(page.observed.lessonDesignSaveError, /충돌 여부를 확인하지 못했습니다/);
+    } else {
+      assert.ok(confirmed);
+      assert.equal(unknown, null);
+      const row = producer.confirmed[0];
+      assert.ok(confirmed.textContent.includes(row.className));
+      assert.ok(confirmed.textContent.includes(row.date));
+      assert.match(confirmed.textContent, /09:00–10:00.*겹친 시간 09:30–10:00/s);
+      if (row.teacherName) assert.ok(confirmed.textContent.includes(`같은 선생님 ${row.teacherName}`));
+      else assert.doesNotMatch(confirmed.textContent, /같은 선생님/);
+      if (row.classroomName) assert.ok(confirmed.textContent.includes(`같은 강의실 ${row.classroomName}`));
+      else assert.doesNotMatch(confirmed.textContent, /같은 강의실/);
+      if (row.sameClass) assert.match(confirmed.textContent, /같은 수업/);
+    }
+    assert.deepEqual(page.observed.lessonPlanDraft, before);
+    assert.equal(dirty(), true);
+    assert.equal(saveRequests(page).length, 1);
+    assert.doesNotMatch(panel.textContent, /23P01|timetable_resource_conflict|dashboard_private|[0-9a-f]{8}-[0-9a-f]{4}-/i);
+  });
+}

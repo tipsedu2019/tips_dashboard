@@ -679,6 +679,31 @@
       "fileName": "20260930092804_agent_management_calendar.sql",
       "status": "final",
       "sha256": "99d388f89a05d66fe17cbd41cf2a171114541dfab11e6d79b57f7f4b6f59dab7"
+    },
+    {
+      "fileName": "20261002114145_narrow_past_lesson_state_correction.sql",
+      "status": "final",
+      "sha256": "8456b73483c15448e5a017234578cca5e6797a192641e94197b522a84d52f9dc"
+    },
+    {
+      "fileName": "20261002130443_past_state_correction_reference_reuse.sql",
+      "status": "final",
+      "sha256": "b53f3101aab765bfebde15ccb6b14733c335e546c91f29e05a5764ace6dd75ee"
+    },
+    {
+      "fileName": "20261002134521_timetable_save_conflict_details.sql",
+      "status": "final",
+      "sha256": "6e8f39b0caf642c55f4b71326cdf7fa7cf275ee19ec05ae701982eb4cc9f414c"
+    },
+    {
+      "fileName": "20261002143852_past_state_unknown_snapshot_reader_fast_path.sql",
+      "status": "final",
+      "sha256": "2aedc62ea8b7b8a6a72dcbe2d7737bedcca04a435240bf4f4d2516b67ab37f3f"
+    },
+    {
+      "fileName": "20261002170849_timetable_legacy_default_projection.sql",
+      "status": "final",
+      "sha256": "ce52cc855ae3f7ec7816123272690386c2606480fbaec94d6ad131249332ee95"
     }
   ]
 }

@@ -62,11 +62,15 @@ const ENROLLMENT_CANONICAL: Shape = {
 }
 const enrollment: Check = (value) => {
   if (!object(value)) return false
+  // Multiple-book producers include this array; older saved rows omit it.
+  const optional: Shape = Object.prototype.hasOwnProperty.call(value, "textbookIds")
+    ? { ...ENROLLMENT_OPTIONAL, textbookIds: (ids) => Array.isArray(ids) && ids.every(uuid) }
+    : ENROLLMENT_OPTIONAL
   // Ordinary saves persist canonical metadata; external corrections persist normalized request rows.
   if (Object.keys(ENROLLMENT_CANONICAL).some((key) => Object.prototype.hasOwnProperty.call(value, key))) {
-    return matches(value, { ...ENROLLMENT_REQUIRED, ...ENROLLMENT_OPTIONAL, ...ENROLLMENT_CANONICAL, id: uuid })
+    return matches(value, { ...ENROLLMENT_REQUIRED, ...optional, ...ENROLLMENT_CANONICAL, id: uuid })
   }
-  const supported = { ...ENROLLMENT_REQUIRED, ...ENROLLMENT_OPTIONAL }
+  const supported = { ...ENROLLMENT_REQUIRED, ...optional }
   return Object.entries(ENROLLMENT_REQUIRED).every(([key, check]) => Object.prototype.hasOwnProperty.call(value, key) && check(value[key]))
     && Object.entries(value).every(([key, item]) => Object.prototype.hasOwnProperty.call(supported, key) && supported[key](item))
 }

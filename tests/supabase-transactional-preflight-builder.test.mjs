@@ -1,4 +1,6 @@
 import assert from "node:assert/strict"
+import { spawnSync } from "node:child_process"
+import { randomBytes } from "node:crypto"
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
@@ -11,6 +13,15 @@ const builderUrl = new URL(
   import.meta.url,
 )
 const repoRoot = fileURLToPath(new URL("..", import.meta.url))
+const retirementFile = "20260909084130_retire_tasks_and_word_retest_notifications.sql"
+const retirementAlter = [
+  "alter table dashboard_private.notification_rules",
+  "  add constraint notification_rules_unused_workflows_retired_check",
+  "  check (not enabled or workflow_key not in ('tasks','word_retests')) not valid;",
+].join("\n")
+const retirementCheckpoint = "set constraints dashboard_private.notification_rules_active_template_fkey immediate;"
+const retirementRestore = "set constraints dashboard_private.notification_rules_active_template_fkey deferred;"
+const postgresFixtureOwnerLabel = "tips.transactional-preflight-fixture-owner"
 const dashboardPendingVersions = Object.freeze([
   "20260831013310",
   "20260831031913",
@@ -97,6 +108,38 @@ async function createFixture({
   )
   await writeFile(join(root, "supabase", "tests", "focused.sql"), focusedSource)
   return { root, ledger }
+}
+
+async function createRetirementFixture({ source, file = retirementFile } = {}) {
+  const fixture = await createFixture()
+  const contents = source ?? await readFile(join(repoRoot, "supabase/migrations", retirementFile), "utf8")
+  await writeFile(join(fixture.root, "supabase/migrations", file), contents)
+  fixture.ledger += "\n   20260909084130 |                | 2026-09-09 08:41:30"
+  return { ...fixture, contents }
+}
+
+async function buildFixturePreflight(fixture) {
+  const { buildTransactionalPreflightSql } = await import(builderUrl)
+  return buildTransactionalPreflightSql({
+    repoRoot: fixture.root,
+    migrationLedger: fixture.ledger,
+    forwardMigrationsPath: "supabase/migrations",
+    focusedTestPath: "supabase/tests/focused.sql",
+  })
+}
+
+function cleanupOwnedPostgres17Fixture(invoke, name, ownerNonce) {
+  const inspected = invoke([
+    "container", "inspect", "--format", `{{ index .Config.Labels "${postgresFixtureOwnerLabel}" }}`, name,
+  ])
+  if (inspected.status === 1 && [
+    `Error: No such container: ${name}`,
+    `Error: No such object: ${name}`,
+  ].includes(inspected.stderr.trim())) return
+  assert.equal(inspected.status, 0, inspected.stderr || inspected.error?.message)
+  assert.equal(inspected.stdout.trim(), ownerNonce, "refusing to remove a container without the exact fixture owner label")
+  const removed = invoke(["rm", "--force", name])
+  assert.equal(removed.status, 0, removed.stderr)
 }
 
 after(async () => {
@@ -221,6 +264,242 @@ test("각 forward migration 경계에서 deferred constraint events를 commit처
     (result.sql.match(/^set constraints all deferred;$/gimu) ?? []).length,
     result.pendingVersions.length,
   )
+})
+
+test("the exact notification retirement adds only a named checkpoint around its original ALTER", async () => {
+  const fixture = await createRetirementFixture()
+  const result = await buildFixturePreflight(fixture)
+  const originalBody = fixture.contents.slice(fixture.contents.indexOf("begin;") + 6, fixture.contents.lastIndexOf("commit;")).trim()
+  const marker = `-- transactional preflight migration 20260909084130: ${retirementFile}\n`
+  const sectionStart = result.sql.indexOf(marker) + marker.length
+  assert.ok(sectionStart >= marker.length)
+  const sectionEnd = result.sql.indexOf("\n-- enforce the deferred-constraint checks", sectionStart)
+  const adaptedBody = result.sql.slice(sectionStart, sectionEnd)
+  assert.equal(adaptedBody.split(retirementCheckpoint).length - 1, 1)
+  assert.equal(adaptedBody.split(retirementRestore).length - 1, 1)
+  assert.ok(adaptedBody.includes(`${retirementCheckpoint}\n${retirementAlter}\n${retirementRestore}`))
+  assert.equal(adaptedBody.replace(`${retirementCheckpoint}\n`, "").replace(`\n${retirementRestore}`, ""), originalBody)
+  assert.ok(adaptedBody.indexOf("where workflow_key in ('tasks','word_retests') and enabled;") < adaptedBody.indexOf(retirementCheckpoint))
+  assert.ok(adaptedBody.indexOf(retirementRestore) < adaptedBody.indexOf("update dashboard_private.notification_deliveries"))
+  assert.equal((result.sql.match(/^set constraints all immediate;$/gimu) ?? []).length, 3)
+  assert.equal((result.sql.match(/^set constraints all deferred;$/gimu) ?? []).length, 3)
+  assert.equal((result.sql.match(/^begin;$/gimu) ?? []).length, 1)
+  assert.equal((result.sql.match(/^commit;$/gimu) ?? []).length, 0)
+  assert.match(result.sql.trimEnd(), /select \* from finish\(\);\nrollback;$/u)
+})
+
+test("notification retirement refuses any source hash drift before adapting generated SQL", async () => {
+  const source = await readFile(join(repoRoot, "supabase/migrations", retirementFile), "utf8")
+  for (const changed of [
+    source + "\n",
+    source.replace("not valid;", "not valid;\n-- changed source"),
+    source.replace(retirementAlter, retirementAlter + "\n" + retirementAlter),
+    source.replace(retirementAlter, "select 1;"),
+  ]) {
+    const fixture = await createRetirementFixture({ source: changed })
+    await assert.rejects(buildFixturePreflight(fixture), {
+      message: "transactional_preflight_notification_retirement_hash_mismatch",
+    })
+  }
+})
+
+test("the same SQL in an unrelated filename receives no notification-specific checkpoint", async () => {
+  const fixture = await createRetirementFixture({ file: "20260909084130_unrelated_retirement.sql" })
+  const result = await buildFixturePreflight(fixture)
+  assert.ok(result.sql.includes(retirementAlter))
+  assert.ok(result.sql.includes(fixture.contents.slice(6, fixture.contents.lastIndexOf("commit;")).trim()))
+  assert.equal(result.sql.includes(retirementCheckpoint), false)
+  assert.equal(result.sql.includes(retirementRestore), false)
+})
+
+test("the notification checkpoint requires one complete executable ALTER anchor", async () => {
+  const { addNotificationRetirementPreflightCheckpoint } = await import(builderUrl)
+  const original = `select 'prefix';\n\n${retirementAlter}\n\nselect 'suffix';`
+  const adapted = addNotificationRetirementPreflightCheckpoint(original)
+  assert.equal(adapted.replace(`${retirementCheckpoint}\n`, "").replace(`\n${retirementRestore}`, ""), original)
+  for (const body of [
+    "select 1;",
+    retirementAlter.replace("not valid;", "not valid"),
+    retirementAlter + "\n" + retirementAlter,
+    `/* ${retirementAlter} */\nselect 1;`,
+    `do $opaque$ begin perform 1; /* ${retirementAlter} */ end; $opaque$;`,
+  ]) {
+    assert.throws(() => addNotificationRetirementPreflightCheckpoint(body), {
+      message: body.endsWith("not valid")
+        ? "transactional_preflight_sql_statement_unterminated"
+        : "transactional_preflight_notification_retirement_anchor_invalid",
+    })
+  }
+})
+
+test("owned PostgreSQL fixture cleanup verifies labels and fails closed on uncertain inspection", () => {
+  const name = "tips-preflight-postgres17-owned-fixture"
+  const owner = "synthetic-owner-nonce"
+  const calls = []
+  cleanupOwnedPostgres17Fixture((args) => {
+    calls.push(args)
+    return args[0] === "container"
+      ? { status: 0, stdout: `${owner}\n`, stderr: "" }
+      : { status: 0, stdout: name, stderr: "" }
+  }, name, owner)
+  assert.deepEqual(calls[0], [
+    "container", "inspect", "--format", `{{ index .Config.Labels "${postgresFixtureOwnerLabel}" }}`, name,
+  ])
+  assert.deepEqual(calls[1], ["rm", "--force", name])
+  for (const stderr of [`Error: No such container: ${name}`, `Error: No such object: ${name}`]) {
+    let count = 0
+    cleanupOwnedPostgres17Fixture(() => {
+      count += 1
+      return { status: 1, stdout: "", stderr }
+    }, name, owner)
+    assert.equal(count, 1)
+  }
+  for (const inspection of [
+    { status: 0, stdout: "different-owner", stderr: "" },
+    { status: 0, stdout: "<no value>", stderr: "" },
+    { status: 1, stdout: "", stderr: "daemon unavailable" },
+    { status: 1, stdout: "", stderr: `Error: No such container: ${name}-other` },
+    { status: null, stdout: "", stderr: "", error: new Error("client timeout") },
+  ]) {
+    const attempted = []
+    assert.throws(() => cleanupOwnedPostgres17Fixture((args) => {
+      attempted.push(args)
+      return inspection
+    }, name, owner), assert.AssertionError)
+    assert.equal(attempted.length, 1)
+    assert.equal(attempted[0][0], "container")
+  }
+})
+
+test("PostgreSQL 17 transactional preflight named checkpoint preserves FK errors and rollback", {
+  skip: process.platform !== "linux",
+}, async (t) => {
+  const { addNotificationRetirementPreflightCheckpoint } = await import(builderUrl)
+  const ownerNonce = randomBytes(12).toString("hex")
+  const name = `tips-preflight-postgres17-${process.pid}-${ownerNonce}`
+  const invoke = (args, options = {}) => spawnSync("docker", args, {
+    encoding: "utf8", timeout: 60_000,
+    env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+    ...options,
+  })
+  t.after(() => cleanupOwnedPostgres17Fixture(invoke, name, ownerNonce))
+  const started = invoke([
+    "run", "--pull=never", "--rm", "--detach", "--network", "none", "--name", name,
+    "--label", `${postgresFixtureOwnerLabel}=${ownerNonce}`,
+    "--env", "POSTGRES_PASSWORD=task-local-only", "public.ecr.aws/supabase/postgres:17.6.1.159",
+  ])
+  assert.equal(started.status, 0, started.stderr)
+  const psql = (sql) => invoke([
+    "exec", "--interactive", name, "psql", "--quiet", "--tuples-only", "--no-align",
+    "--set", "ON_ERROR_STOP=1", "--set", "VERBOSITY=verbose",
+    "--username", "supabase_admin", "--dbname", "postgres",
+  ], { input: sql })
+  let consecutiveReadyChecks = 0
+  for (let attempt = 0; attempt < 80; attempt += 1) {
+    const pid1 = invoke(["exec", name, "sh", "-c", "tr '\\000' ' ' < /proc/1/cmdline"])
+    const isFinalPostgres = pid1.stdout.trim().split(/\s+/u, 1)[0]?.split("/").at(-1) === "postgres"
+    const ready = isFinalPostgres ? psql("select 1;") : null
+    consecutiveReadyChecks = ready?.status === 0 ? consecutiveReadyChecks + 1 : 0
+    if (consecutiveReadyChecks === 3) break
+    await new Promise((resolve) => setTimeout(resolve, 250))
+  }
+  assert.equal(consecutiveReadyChecks, 3, "isolated PostgreSQL 17 did not become stably ready")
+  const version = psql("select current_setting('server_version_num')::integer / 10000;")
+  assert.equal(version.status, 0, version.stderr)
+  assert.equal(version.stdout.trim(), "17")
+  const setup = psql(`
+    create schema if not exists dashboard_private;
+    create schema if not exists supabase_migrations;
+    create table if not exists supabase_migrations.schema_migrations(version text primary key);
+    create table dashboard_private.notification_rules(
+      id integer primary key, active_template_id integer not null,
+      workflow_key text not null, enabled boolean not null
+    );
+    create table dashboard_private.notification_templates(
+      id integer primary key, rule_id integer not null,
+      unique(rule_id,id),
+      constraint notification_templates_rule_fkey foreign key(rule_id)
+        references dashboard_private.notification_rules(id) deferrable initially deferred
+    );
+    alter table dashboard_private.notification_rules
+      add constraint notification_rules_active_template_fkey foreign key(id,active_template_id)
+      references dashboard_private.notification_templates(rule_id,id) deferrable initially deferred;
+    begin;
+    insert into dashboard_private.notification_rules values(1,1,'word_retests',true);
+    insert into dashboard_private.notification_templates values(1,1);
+    insert into supabase_migrations.schema_migrations(version) values('baseline');
+    commit;
+  `)
+  assert.equal(setup.status, 0, setup.stderr)
+  const snapshotSql = `
+    select jsonb_build_object(
+      'schema', (select jsonb_agg(row_to_json(objects) order by kind,identity) from (
+        select 'table' kind, c.oid::regclass::text identity,
+          jsonb_build_array(c.relowner,c.relacl,c.relrowsecurity,c.relforcerowsecurity) definition
+        from pg_class c join pg_namespace n on n.oid=c.relnamespace
+        where n.nspname in ('dashboard_private','supabase_migrations') and c.relkind='r'
+        union all select 'column', a.attrelid::regclass::text||'.'||a.attname,
+          jsonb_build_array(a.atttypid,a.attnotnull)
+        from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace
+        where n.nspname in ('dashboard_private','supabase_migrations') and a.attnum>0 and not a.attisdropped
+        union all select 'constraint', c.conrelid::regclass::text||'.'||c.conname,
+          to_jsonb(pg_get_constraintdef(c.oid))
+        from pg_constraint c join pg_namespace n on n.oid=c.connamespace
+        where n.nspname in ('dashboard_private','supabase_migrations')
+        union all select 'trigger', t.tgrelid::regclass::text||'.'||t.tgname,
+          to_jsonb(pg_get_triggerdef(t.oid))
+        from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace
+        where n.nspname in ('dashboard_private','supabase_migrations')
+      ) objects),
+      'ledger', (select jsonb_agg(version order by version) from supabase_migrations.schema_migrations),
+      'rules', (select jsonb_agg(row_to_json(r) order by id) from dashboard_private.notification_rules r),
+      'templates', (select jsonb_agg(row_to_json(r) order by id) from dashboard_private.notification_templates r)
+    );
+  `
+  const snapshot = () => {
+    const result = psql(snapshotSql)
+    assert.equal(result.status, 0, result.stderr)
+    return result.stdout.trim()
+  }
+  const before = snapshot()
+  const update = "update dashboard_private.notification_rules set enabled=false where workflow_key in ('tasks','word_retests') and enabled;"
+  const retirementBody = `${update}\n\n${retirementAlter}`
+  const currentTransactionRows = `
+    begin;
+    insert into dashboard_private.notification_rules values(2,2,'word_retests',true);
+    insert into dashboard_private.notification_templates values(2,2);
+    insert into supabase_migrations.schema_migrations(version) values('candidate');
+    set constraints all immediate;
+    set constraints all deferred;
+  `
+
+  const committedControl = psql(`begin;\n${retirementBody}\nselect 'committed_control_passed';\nrollback;`)
+  assert.equal(committedControl.status, 0, committedControl.stderr)
+  assert.match(committedControl.stdout, /committed_control_passed/u)
+  assert.equal(snapshot(), before)
+
+  const sameTransactionFailure = psql(`${currentTransactionRows}\n${retirementBody}\nselect 'unexpected_ddl_pass';\nrollback;`)
+  assert.notEqual(sameTransactionFailure.status, 0)
+  assert.match(sameTransactionFailure.stderr, /55006:.*cannot ALTER TABLE "notification_rules" because it has pending trigger events/u)
+  assert.doesNotMatch(sameTransactionFailure.stdout, /unexpected_ddl_pass/u)
+  assert.equal(snapshot(), before)
+
+  const adaptedBody = addNotificationRetirementPreflightCheckpoint(retirementBody)
+  const corrected = psql(`${currentTransactionRows}\n${adaptedBody}\nselect 'named_checkpoint_passed';\nrollback;`)
+  assert.equal(corrected.status, 0, corrected.stderr)
+  assert.match(corrected.stdout, /named_checkpoint_passed/u)
+  assert.equal(snapshot(), before)
+
+  const invalidTemplate = psql(`${currentTransactionRows}
+    update dashboard_private.notification_rules set active_template_id=999 where id=2;
+    ${adaptedBody}
+    select 'unexpected_invalid_fk_pass';
+    rollback;
+  `)
+  assert.notEqual(invalidTemplate.status, 0)
+  assert.match(invalidTemplate.stderr, /23503:.*violates foreign key constraint "notification_rules_active_template_fkey"/u)
+  assert.doesNotMatch(invalidTemplate.stdout, /unexpected_invalid_fk_pass/u)
+  assert.equal(snapshot(), before)
 })
 
 test("Supabase CLI 2.115 JSON ledger에서 forward migrations만 정확히 고른다", async () => {

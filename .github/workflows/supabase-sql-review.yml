@@ -37,7 +37,10 @@ jobs:
         run: node --test tests/supabase-migration-layout.test.mjs
 
       - name: Test SQLSTATE and transaction contracts
-        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+        run: node --test --test-skip-pattern='^PostgreSQL 17 transactional preflight named checkpoint preserves FK errors and rollback$' tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+
+      - name: Test cached PostgreSQL fixture guards
+        run: node --test tests/isolated-postgres-fixture-tests.test.mjs
 
       - name: Test resource evidence comparisons
         run: node --test tests/supabase-resource-evidence-comparator.test.mjs
@@ -99,6 +102,8 @@ jobs:
           node-version: 22.18.0
 
       - name: Setup Supabase CLI
+        env:
+          SUPABASE_TELEMETRY_DISABLED: '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -121,7 +126,7 @@ jobs:
           TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-pr-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --postdeploy-contract \
+            --postdeploy-contract --transactional-preflight --verify-local-ledger \
             --test supabase/tests/agent_api_scoped_schedule_test.sql \
             --test supabase/tests/agent_api_class_changes_test.sql \
             --test supabase/tests/agent_management_calendar_test.sql \
@@ -210,4 +215,11 @@ jobs:
             --test supabase/tests/operations_subject_completion_chat_test.sql \
             --test supabase/tests/word_retest_google_chat_retirement_test.sql \
             --test supabase/tests/standalone_approvals_retirement_test.sql \
-            --test supabase/tests/legacy_notification_retry_storm_test.sql
+            --test supabase/tests/legacy_notification_retry_storm_test.sql \
+            --test supabase/tests/agent_past_lesson_state_correction_test.sql \
+            --test supabase/tests/timetable_default_projection_performance_test.sql \
+            --test supabase/tests/timetable_save_conflict_details_test.sql \
+            --test supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql
+
+      - name: Test cached PostgreSQL fixture contracts
+        run: node scripts/run-isolated-postgres-fixture-tests.mjs
