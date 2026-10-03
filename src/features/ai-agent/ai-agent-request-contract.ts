@@ -8,7 +8,7 @@ const uuid = z.uuid();
 const content = (max: number) => z.string().refine(value => [...value].length <= max && value.trim().length > 0, '내용의 길이를 확인해 주세요');
 const space = z.enum(AI_NOTIFICATION_SPACE_KEYS);
 const pageSize = z.union([z.literal(10), z.literal(15), z.literal(20)]);
-const version = z.string().refine(value => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= 9223372036854775807n);
+const version = z.string().refine(value => /^[1-9][0-9]{0,18}$/.test(value) && BigInt(value) <= BigInt('9223372036854775807'));
 export const aiCreateRequestSchema = z.strictObject({
   title: content(200), body: content(20_000), notifyOnDone: z.boolean().default(false), notificationSpace: space.optional(),
 }).refine(input => input.notifyOnDone ? input.notificationSpace !== undefined : input.notificationSpace === undefined, '알림 공간을 확인해 주세요');
@@ -48,3 +48,37 @@ export type AiCreateRequest = z.infer<typeof aiCreateRequestSchema>;
 export type AiRequestListQuery = z.infer<typeof aiRequestListQuerySchema>;
 export type AiMessageInput = z.infer<typeof aiMessageInputSchema>;
 export type AiCredentialGrant = z.infer<typeof aiCredentialGrantSchema>;
+
+// Producer contracts for the scoped lifecycle gateway. Bigints stay decimal strings.
+export const aiDecimalSchema = version;
+const timestamp = z.iso.datetime({offset: true});
+const hash = z.string().regex(/^[a-f0-9]{64}$/);
+const jsonObject = z.record(z.string(), z.json()).refine(value => !/"(?:claimTokenHash|claimToken|tokenHash|token|nonce|authorization|secret)"\s*:/i.test(JSON.stringify(value)), '비밀값은 DTO에 포함할 수 없습니다');
+export const aiMutationRequestSchema = z.union([aiRequestSchema, z.strictObject({id:uuid,status:z.enum(AI_REQUEST_STATUSES),version})]);
+export const aiClaimSchema = z.strictObject({generation:version,leaseExpiresAt:timestamp});
+export const aiClaimMutationSchema = z.strictObject({request:aiMutationRequestSchema,claim:aiClaimSchema});
+export const aiMessageMutationSchema = z.strictObject({request:aiMutationRequestSchema,message:aiRequestMessageSchema});
+export const aiDoneMutationSchema = z.strictObject({request:aiMutationRequestSchema});
+export const aiActionSchema = z.strictObject({
+  id:uuid,requestId:uuid,credentialId:uuid,actionKey:uuid,stepKey:content(100),kind:z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),target:content(500),payload:jsonObject,payloadHash:hash,
+  generation:version,revision:version,state:z.enum(['prepared','started','succeeded','failed','unknown','cancelled']),createdAt:timestamp,updatedAt:timestamp,
+});
+export const aiActionEventSchema = z.strictObject({id:uuid,actionId:uuid,seq:version,kind:z.enum(['prepared','started','cancelled','result','incident','reconciled_manual_observation','reconciled_domain_receipt']),actorKind:z.enum(['user','bot']),actorId:uuid,evidence:jsonObject,createdAt:timestamp});
+export const aiRequestEventSchema = z.strictObject({
+  id:uuid,requestId:uuid,seq:version,kind:z.enum(['created','claimed','renewed','progress','question','answer','comment','done','cancelled','resumed']),actorKind:z.enum(['user','bot']),actorId:uuid,
+  requesterId:uuid,credentialId:uuid.nullable(),issuerId:uuid.nullable(),previousStatus:z.enum(AI_REQUEST_STATUSES).nullable(),nextStatus:z.enum(AI_REQUEST_STATUSES),version,
+  metadata:z.strictObject({messageId:uuid.optional(),generation:version.optional(),reviewReason:content(2000).optional(),confirmed:z.literal(true).optional()}),createdAt:timestamp,
+});
+export const aiNotificationSchema = z.strictObject({intentId:uuid,state:z.enum(['pending','sending','sent','retry_wait','delivery_unknown','failed','cancelled','incident']),reason:z.enum(['space_unconfigured','space_permission_revoked','requester_inactive','request_cancelled','space_configuration_changed','dispatch_lease_expired','success_evidence_missing','provider_resource_mismatch','contradictory_or_old_result','provider_rate_limited','provider_rejected','delivery_unresolved']).nullable(),updatedAt:timestamp});
+export const aiActivitySchema = z.strictObject({
+  request:aiRequestSchema,claim:aiClaimSchema.extend({leaseState:z.enum(['live','expired'])}).nullable(),messages:z.array(aiRequestMessageSchema).max(50),events:z.array(aiRequestEventSchema).max(50),actions:z.array(aiActionSchema).max(50),notification:aiNotificationSchema.nullable(),nextMessageSeq:version.nullable(),nextEventSeq:version.nullable(),
+});
+const cursor = z.string().min(1).max(2048);
+export const aiBotListSchema = z.strictObject({items:z.array(aiRequestSchema).max(50),nextCursor:cursor.nullable()});
+export const aiActionsSchema = z.strictObject({items:z.array(aiActionSchema).max(50),nextCursor:cursor.nullable()});
+export const aiActionJournalSchema = z.strictObject({action:aiActionSchema,events:z.array(aiActionEventSchema).max(50),nextCursor:cursor.nullable()});
+
+export const aiPolicyRevisionSchema = z.string().refine(value => /^(0|[1-9][0-9]{0,18})$/.test(value) && BigInt(value) <= BigInt('9223372036854775807'));
+export const aiPolicySpaceKeysSchema = z.array(space).max(7).refine(values => new Set(values).size === values.length);
+export const aiSpacePermissionSchema = z.strictObject({userId:uuid,spaceKeys:aiPolicySpaceKeysSchema,revision:aiPolicyRevisionSchema,updatedAt:timestamp.nullable()});
+export const aiSpaceCatalogSchema = z.strictObject({items:z.array(z.strictObject({key:space,label:content(200),configured:z.boolean(),selectable:z.boolean(),reason:z.enum(['space_not_configured','space_not_allowed']).nullable(),revision:version})).length(7)}).refine(value => new Set(value.items.map(item => item.key)).size === 7);
