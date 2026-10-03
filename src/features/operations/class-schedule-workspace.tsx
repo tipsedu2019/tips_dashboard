@@ -1,6 +1,8 @@
 "use client";
 
 import { timetableOperationalErrorMessage } from "../academic/timetable-operational-service";
+import { parseTimetableOperationalConflictDetails, type TimetableOperationalConflictDetails } from "../academic/timetable-operational-conflict-details";
+import { LessonSaveConflictDetails } from "./lesson-save-conflict-details";
 import Link from "next/link";
 import { preserveScheduleLearningContent, preserveUneditedLegacyPeriods, scheduleOnlyDraft, legacyLessonScheduleValidationError } from "./schedule-only-plan";
 import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectionDraft,
@@ -2258,6 +2260,8 @@ export function ClassScheduleWorkspace() {
   const lessonPlanBaselineRef = useRef<Record<string, unknown> | null>(null);
   const lessonPlanOwnerRef = useRef("");
   const lessonPlanSaveRef = useRef<symbol | null>(null);
+  const lessonPlanSaveButtonRef = useRef<HTMLButtonElement | null>(null);
+  const lessonPlanSaveFocusRef = useRef<{ button: HTMLButtonElement; actor: string | null; classId: string } | null>(null);
   const legacyScheduleRequestRef = useRef<{ body: string; key: string } | null>(null);
   const lessonSessionSaveRef = useRef<symbol | null>(null);
   const normalizedScheduleRequestKeys = useRef(new Map<string, string>());
@@ -2267,7 +2271,17 @@ export function ClassScheduleWorkspace() {
   const normalizedLessonSessionDraftsRef = useRef<Record<string, Partial<SaveClassLessonSessionInput>>>({});
 
   const [isLessonDesignSaving, setIsLessonDesignSaving] = useState(false);
-  const [lessonDesignSaveError, setLessonDesignSaveError] = useState("");
+  const [lessonDesignSaveFeedback, setLessonDesignSaveFeedback] = useState<{
+    message: string; conflicts: TimetableOperationalConflictDetails | null;
+  }>({ message: "", conflicts: null });
+  const lessonDesignSaveError = lessonDesignSaveFeedback.message;
+  const setLessonDesignSaveError = useCallback((message: string) => {
+    setLessonDesignSaveFeedback({ message, conflicts: null });
+  }, []);
+  const setLessonDesignSaveFailure = useCallback((error: unknown, fallback: string) => {
+    setLessonDesignSaveFeedback({ message: timetableOperationalErrorMessage(error, fallback),
+      conflicts: parseTimetableOperationalConflictDetails(error) });
+  }, []);
   const [legacyLessonValidationDate, setLegacyLessonValidationDate] = useState("");
   const [pastCorrectionOpen, setPastCorrectionOpen] = useState(false);
   const [pastCorrectionDirty, setPastCorrectionDirty] = useState(false);
@@ -2325,6 +2339,15 @@ export function ClassScheduleWorkspace() {
     loadClassScheduleDetail,
     loadClassLessonDesignDetail,
   } = useOperationsWorkspaceData(operationsRequest, { enabled: !isLessonDesignRouteActive });
+  useEffect(() => {
+    if (isLessonDesignSaving) return;
+    const origin = lessonPlanSaveFocusRef.current;
+    lessonPlanSaveFocusRef.current = null;
+    if (origin && origin.actor === actorScope && origin.classId === selectedClassIdRef.current
+      && origin.button.isConnected && !origin.button.disabled && document.activeElement === document.body) {
+      origin.button.focus({ preventScroll: true });
+    }
+  }, [actorScope, isLessonDesignSaving]);
   const lessonPlanDirty = Boolean(lessonPlanBaseline && lessonPlanDraft && !lessonDraftEqual(lessonPlanDraft, lessonPlanBaseline));
   const lessonSessionDirty = Object.entries(normalizedLessonSessionDrafts).some(([id, draft]) =>
     !lessonDraftEqual(draft, normalizedLessonSessionBaselines[id]));
@@ -2454,7 +2477,7 @@ export function ClassScheduleWorkspace() {
     return () => {
       mutationLifecycle?.revoke();
     };
-  }, [actorScope, isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId]);
+  }, [actorScope, isLessonDesignRouteActive, loadClassLessonDesignDetail, requestedClassId, setLessonDesignSaveError]);
 
   useLayoutEffect(() => {
     const scrollTop = pendingLessonDesignDialogScrollTopRef.current;
@@ -2929,7 +2952,7 @@ export function ClassScheduleWorkspace() {
       setLegacyLessonValidationDate("");
       setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
     }
-  }, [isLessonDesignRouteActive, isNormalizedLessonSchedule, lessonPlanDefaults, lessonPlanSourceKey, normalizeLessonDraft, requestedClassId, selectedRow, selectedRowClassItem]);
+  }, [isLessonDesignRouteActive, isNormalizedLessonSchedule, lessonPlanDefaults, lessonPlanSourceKey, normalizeLessonDraft, requestedClassId, selectedRow, selectedRowClassItem, setLessonDesignSaveError]);
 
   useEffect(() => {
     lessonPlanDraftRef.current = lessonPlanDraft;
@@ -3186,7 +3209,7 @@ export function ClassScheduleWorkspace() {
       setLegacyLessonValidationDate("");
       setLessonDesignSaveNotice("");
     },
-    [buildEditedLessonDraft],
+    [buildEditedLessonDraft, setLessonDesignSaveError],
   );
   const buildNextLessonPlanDraft = useCallback(
     (updater: (current: Record<string, unknown>) => Record<string, unknown>) => {
@@ -3239,7 +3262,7 @@ export function ClassScheduleWorkspace() {
 
       return text(nextFocusedSession?.id);
     },
-    [lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow],
+    [lessonDesignEditorTextbooks, lessonPlanDefaults, markPendingLessonSessionSelection, selectedRow, setLessonDesignSaveError],
   );
   const selectedLessonSessionDraftDate = resolveLessonSessionDraftDate(selectedLessonSession);
   const selectedLessonSessionDraftStateEntry = useMemo(() => {
@@ -3321,7 +3344,7 @@ export function ClassScheduleWorkspace() {
       setNormalizedLessonSessionDrafts(next);
       setLessonDesignSaveError(""); setLessonDesignSaveNotice("");
     },
-    [normalizedLessonSessionDraft],
+    [normalizedLessonSessionDraft, setLessonDesignSaveError],
   );
   const saveNormalizedLessonSession = useCallback(async () => {
     if (!supabase || !normalizedLessonSessionDraft || lessonSessionSaveRef.current) return;
@@ -3363,13 +3386,13 @@ export function ClassScheduleWorkspace() {
           setLessonReadRetryNeeded(true); setLessonDesignSaveError("저장한 일정을 다시 불러오지 못했습니다. 다시 불러오기를 눌러 주세요.");
         }
       },
-      onError: async (error: unknown) => setLessonDesignSaveError(timetableOperationalErrorMessage(error, "일정을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요.")),
+      onError: async (error: unknown) => setLessonDesignSaveFailure(error, "일정 저장 중 오류가 발생했습니다. 입력은 유지되었습니다. 다시 저장해 주세요."),
       onSettled: async () => {
         if (lessonSessionSaveRef.current === submission) lessonSessionSaveRef.current = null;
         setIsNormalizedLessonSessionSaving(false);
       },
     });
-  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id]);
+  }, [normalizedLessonSessionDraft, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError, setLessonDesignSaveFailure]);
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
       const sessionDate = resolveLessonSessionDraftDate(session);
@@ -3678,6 +3701,10 @@ export function ClassScheduleWorkspace() {
     if (!mutationToken) return;
 
     const submittedDraft = lessonPlanDraftRef.current;
+    const saveButton = lessonPlanSaveButtonRef.current;
+    if (saveButton && document.activeElement === saveButton) {
+      lessonPlanSaveFocusRef.current = { button: saveButton, actor: actorScope, classId: text(selectedRow.id) };
+    }
     const submission = Symbol(); lessonPlanSaveRef.current = submission;
     const acceptSubmission = () => {
       if (!submittedDraft || !lessonMutationLifecycleRef.current?.isCurrent(mutationToken)) return;
@@ -3731,14 +3758,14 @@ export function ClassScheduleWorkspace() {
             setLessonMonthDetailsOpen(true); setLegacyLessonValidationDate(date);
           }
           setLessonDesignSaveError(String((error as { message: string }).message));
-        } else setLessonDesignSaveError(timetableOperationalErrorMessage(error, "수업계획을 저장하지 못했습니다. 입력을 확인하고 다시 저장해 주세요."));
+        } else setLessonDesignSaveFailure(error, "수업계획 저장 중 오류가 발생했습니다. 입력은 유지되었습니다. 다시 저장해 주세요.");
       },
       onSettled: async () => {
         if (lessonPlanSaveRef.current === submission) lessonPlanSaveRef.current = null;
         setIsLessonDesignSaving(false);
       },
     });
-  }, [lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow]);
+  }, [actorScope, lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow, setLessonDesignSaveError, setLessonDesignSaveFailure]);
 
   const retryLessonDesignRead = useCallback(async () => {
     const token = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
@@ -3753,7 +3780,7 @@ export function ClassScheduleWorkspace() {
     } finally {
       if (lessonMutationLifecycleRef.current?.isCurrent(token)) setIsLessonReadRetrying(false);
     }
-  }, [isLessonReadRetrying, refreshSelectedLessonDetail, selectedRow?.id]);
+  }, [isLessonReadRetrying, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError]);
 
   const previewLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext || lessonGenerationRequestRef.current) return;
@@ -3779,7 +3806,7 @@ export function ClassScheduleWorkspace() {
         if (lessonGenerationRequestRef.current === submission) { lessonGenerationRequestRef.current = null; setGenerationSaving(false); }
       },
     });
-  }, [normalizedGenerationContext]);
+  }, [normalizedGenerationContext, setLessonDesignSaveError]);
 
   const confirmLessonSessionGeneration = useCallback(async () => {
     if (!supabase || !normalizedGenerationContext || !generationPreview || lessonGenerationRequestRef.current) return;
@@ -3815,14 +3842,14 @@ export function ClassScheduleWorkspace() {
       },
       onError: async (error: unknown) => {
         if (generationScopeRef.current !== submittedScope) return;
-        setLessonDesignSaveError(timetableOperationalErrorMessage(error, "일정을 생성하지 못했습니다. 미리보기를 다시 확인해 주세요."));
+        setLessonDesignSaveFailure(error, "일정을 생성하지 못했습니다. 미리보기를 다시 확인해 주세요.");
         setGenerationPreview(null);
       },
       onSettled: async () => {
         if (lessonGenerationRequestRef.current === submission) { lessonGenerationRequestRef.current = null; setGenerationSaving(false); }
       },
     });
-  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail, selectedRow?.id]);
+  }, [generationPreview, normalizedGenerationContext, refreshSelectedLessonDetail, selectedRow?.id, setLessonDesignSaveError, setLessonDesignSaveFailure]);
   const openLessonDesignForRow = useCallback(
     (
       row: Record<string, unknown> | null,
@@ -4757,8 +4784,17 @@ export function ClassScheduleWorkspace() {
     </li>)}</ul> : <p className="text-sm text-muted-foreground">추가할 일정 없음</p>}
   </div> : null;
   const lessonDesignActions = (
-    <div className="min-w-0">
+    <div className="min-w-0 max-w-full">
       {generationPreviewList}
+      {lessonDesignSaveError ? (
+        <Alert id="lesson-design-save-error" data-testid="lesson-design-save-error" variant="destructive" className="mb-3 min-w-0">
+          <AlertDescription tabIndex={0} aria-label="저장 오류 상세" className="max-h-[min(24rem,45dvh)] min-w-0 overflow-y-auto break-words rounded-sm focus-visible:outline-2 focus-visible:outline-ring">
+            <p>{lessonDesignSaveError}</p>
+            {lessonDesignSaveFeedback.conflicts ? <LessonSaveConflictDetails details={lessonDesignSaveFeedback.conflicts} /> : null}
+            {lessonReadRetryNeeded ? <Button type="button" variant="outline" size="form" disabled={isLessonReadRetrying} onClick={() => void retryLessonDesignRead()}>{isLessonReadRetrying ? "불러오는 중" : "다시 불러오기"}</Button> : null}
+          </AlertDescription>
+        </Alert>
+      ) : null}
           <div
             data-testid="lesson-design-bottom-action-bar"
             className="flex flex-wrap items-center justify-end gap-2"
@@ -4789,9 +4825,12 @@ export function ClassScheduleWorkspace() {
             ) : null}
             {!isNormalizedLessonSchedule ? (
             <Button
+              ref={lessonPlanSaveButtonRef}
               type="button"
-              className="h-9 rounded-md px-5 shadow-none"
+              size="form"
+              className="px-5"
               onClick={handleSaveLessonPlan}
+              aria-describedby={lessonDesignSaveError ? "lesson-design-save-error" : undefined}
               disabled={
                 isLessonDesignSaving ||
                 !lessonScheduleReadReady ||
@@ -4816,14 +4855,6 @@ export function ClassScheduleWorkspace() {
         >
           {lessonPlanDirty && !lessonDesignSnapshot.saveReadiness.ready ? (
             <p role="alert" className="col-span-full text-sm text-destructive">{lessonDesignSnapshot.saveReadiness.blockers[0]}</p>
-          ) : null}
-          {lessonDesignSaveError ? (
-            <Alert variant="destructive" className="xl:col-span-2 2xl:col-span-full">
-              <AlertDescription>
-                {lessonDesignSaveError}
-                {lessonReadRetryNeeded ? <Button type="button" variant="outline" size="sm" className="ml-2" disabled={isLessonReadRetrying} onClick={() => void retryLessonDesignRead()}>{isLessonReadRetrying ? "불러오는 중" : "다시 불러오기"}</Button> : null}
-              </AlertDescription>
-            </Alert>
           ) : null}
           {lessonDesignSaveNotice ? (
             <Alert className="xl:col-span-2 2xl:col-span-full">

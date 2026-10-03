@@ -220,6 +220,83 @@ select is((select v#>'{data,previewToken}' from ev where k='agent-review'),'null
 select is((select count(*) from dashboard_private.agent_edit_previews),0::bigint,'review only creates no consumable preview');
 select is((select schedule_plan from public.classes where id=pg_temp.pid(301)),(select plan from before_class),'agent review leaves the full legacy plan unchanged');
 
+-- Count the real full-reference reader, including calls in the rollback-only
+-- preview subtransaction. Sequence advances survive rollback; a table counter
+-- would silently lose the very preparation/guard calls that this protects.
+-- Function replacement and restoration are fixture-owner operations.
+reset role;
+create temp table original_reference_reader as select
+ pg_get_functiondef('dashboard_private.read_timetable_operating_reference_v1()'::regprocedure) definition;
+create sequence pg_temp.reference_reader_calls;
+create temp table reference_reader_counts(stage text primary key,total bigint);
+do $count_reader$
+declare definition text;
+begin
+ select r.definition into definition from original_reference_reader r;
+ execute replace(definition,'dashboard_private.read_timetable_operating_reference_v1()',
+                            'pg_temp.original_operating_reference_reader()');
+ execute $wrapper$create or replace function dashboard_private.read_timetable_operating_reference_v1()
+ returns jsonb language plpgsql volatile security definer set search_path='' as $body$
+ begin
+  perform nextval('pg_temp.reference_reader_calls'::regclass);
+  return pg_temp.original_operating_reference_reader();
+ end $body$$wrapper$;
+end $count_reader$;
+select setval('pg_temp.reference_reader_calls'::regclass,1,false);
+set local role service_role;
+insert into ev values('counted-agent-review',pg_temp.api2('preview',pg_temp.preview_input(pg_temp.command())));
+reset role;
+insert into reference_reader_counts select 'stage1',case when is_called then last_value else 0 end
+ from pg_temp.reference_reader_calls;
+select setval('pg_temp.reference_reader_calls'::regclass,1,false);
+set local role service_role;
+insert into ev values('counted-agent-preview',pg_temp.api2('preview',pg_temp.preview_input(pg_temp.command(true,
+ (select v#>>'{data,unknownOccupancyReviewHash}' from ev where k='counted-agent-review')))));
+reset role;
+insert into reference_reader_counts select 'stage2',case when is_called then last_value else 0 end
+ from pg_temp.reference_reader_calls;
+-- Restore the exact original body/volatility before the existing drift,
+-- concurrency, authorization, commit and deferred-trigger assertions below.
+do $restore_reader$
+declare definition text;
+begin
+ select r.definition into definition from original_reference_reader r;
+ execute definition;
+end $restore_reader$;
+select is((select total from reference_reader_counts where stage='stage1'),1::bigint,
+ 'unacknowledged agent review builds one complete operating reference');
+select is((select total from reference_reader_counts where stage='stage2'),2::bigint,
+ 'acknowledged agent preview builds one pre-write and one post-write complete reference');
+select diag('C12_REFERENCE_COUNTS '||(select jsonb_object_agg(stage,total order by stage)::text from reference_reader_counts));
+select is(pg_get_functiondef('dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),
+ (select definition from original_reference_reader),'reader instrumentation restores its exact original function definition');
+select is((select v#>>'{data,afterContext,plan,sessions,0,scheduleState}' from ev where k='counted-agent-preview'),
+ 'active','acknowledged preview afterContext contains the selected corrected raw scheduleState');
+select is((select v#>>'{data,afterContext,plan,sessions,0,state}' from ev where k='counted-agent-preview'),
+ 'active','acknowledged preview afterContext contains the selected corrected raw state');
+select ok((select v#>>'{data,afterContext,version}' is distinct from v#>>'{data,beforeContext,version}'
+ from ev where k='counted-agent-preview'),'acknowledged preview afterContext has a changed class version');
+select is((select v#>'{data,afterContext,plan}' from ev where k='counted-agent-preview'),pg_temp.next_plan(),
+ 'acknowledged preview changes only selected raw states and the matching date-state entry');
+select is((select jsonb_array_length(v#>'{data,afterContext,plan,sessions}') from ev where k='counted-agent-preview'),60,
+ 'acknowledged preview retains every one of the sixty stored lesson identities');
+select is((select jsonb_agg(s order by ord) from ev,jsonb_array_elements(v#>'{data,afterContext,plan,sessions}')
+ with ordinality entries(s,ord) where k='counted-agent-preview' and ord>1),
+ (select jsonb_agg(s order by ord) from before_class,jsonb_array_elements(plan->'sessions')
+ with ordinality entries(s,ord) where ord>1),'acknowledged preview preserves all fifty-nine unrelated raw rows');
+select ok((select bool_and(v::text !~ '"(operatingReference|beforeReference)"[[:space:]]*:') from ev
+ where k in('browser-review','browser-preview','agent-review','counted-agent-review','counted-agent-preview')),
+ 'private operating references never appear in browser or agent RPC results');
+select is((select v#>>'{data,planHash}' from ev where k='counted-agent-preview'),
+ (select v#>>'{data,planHash}' from ev where k='counted-agent-review'),
+ 'acknowledged preview retains the review producer before-plan hash');
+select ok((select not ((v->'data') ?| array['requestKey','outcome','operatingReference']) from ev where k='counted-agent-preview'),
+ 'acknowledged preview omits writer-only receipt and reference fields');
+select is((select schedule_plan from public.classes where id=pg_temp.pid(301)),(select plan from before_class),
+ 'counted acknowledged preview still rolls back every raw state and content change');
+select is((select count(*) from dashboard_private.past_lesson_state_correction_attestations),0::bigint,
+ 'counted acknowledged preview still rolls back historical-state attestations');
+
 set local role service_role;
 select throws_ok($q$select pg_temp.api2('preview',pg_temp.preview_input(pg_temp.command()||jsonb_build_object('startTime','18:00')))$q$,
  '22023',null,'state correction cannot smuggle a time change');

@@ -789,6 +789,38 @@ test('registration tab pending and failure retain the accepted parent and matchi
   assert.equal(list()?.textContent, accepted, 'failed tab must retain accepted tracks');
   assert.ok(document.body.textContent.includes('1건 · 1–1번째'));
 });
+for (const kind of ['normalized', 'canonical']) test(`registration enrollment tab accepts ${kind} textbookIds and retains its page after refresh failure`, async (t) => {
+  const page = await workspace(t, { workspace: 'registration', search: '?flow=enrollment' });
+  const numbered = () => page.requests.filter((request) => request.name === 'list_ops_task_numbered_page_v1');
+  assert.deepEqual(numbered()[0].args.p_filters, { taskType: 'registration', search: '', statuses: [], view: 'enrollment', consultationOwnerId: null });
+  const enrollment = {
+    id: kind === 'canonical' ? id(920) : null, classId: id(921), sortOrder: 0,
+    textbookId: id(922), textbookIds: [id(922), id(923)], classStartDate: null, classStartSessionKey: null,
+    classStartLessonSessionId: null, classStartSession: null, classStartSourceObservationId: null,
+    ...(kind === 'canonical' ? { trackId: id(1002), studentId: null, admissionBatchId: null, status: 'planned',
+      makeeduRegistered: false, rosterActive: false, rosterReleasedAt: null, rosterReleaseReason: null,
+      rosterReleaseSourceTaskId: null, rosterReleaseKind: null } : {}),
+  };
+  const patch = registrationPatch(1, '합성 등록 목록');
+  patch.registrationTracks = [{ ...patch.registrationTracks[0], status: 'enrollment_decided', workflowStatus: 'enrollment_requested', enrollmentDetailRows: [enrollment] }];
+  await act(async () => page.finish(page.requests.indexOf(numbered()[0]), 1, [patch]));
+  const item = currentComponentProps('RegistrationCaseList').items[0];
+  assert.equal(item.viewKey, 'enrollment');
+  assert.equal(item.matchingTracks[0].directorProfileId, null);
+  assert.deepEqual(item.matchingTracks[0].enrollmentDetailRows, [enrollment]);
+  for (const mirror of ['desktop', 'mobile']) {
+    const list = document.querySelector(`[data-testid="registration-case-${mirror}-list"]`);
+    assert.equal(list.querySelectorAll('[data-registration-case-row]').length, 1);
+    assert.ok(list.textContent.includes('합성 등록 목록'));
+  }
+  assert.ok(document.body.textContent.includes('1건 · 1–1번째'));
+  assert.equal(document.body.textContent.includes('목록을 불러오지 못했습니다.'), false);
+  const accepted = document.querySelector('[data-testid="registration-case-desktop-list"]').textContent;
+  await act(async () => currentComponentProps('DataTablePagination').onPageChange(1));
+  await act(async () => numbered().at(-1).reject(new Error('synthetic refresh failure')));
+  assert.equal(document.querySelector('[data-testid="registration-case-desktop-list"]').textContent, accepted);
+  assert.ok(document.body.textContent.includes('이전 조회 결과: 검색어 없음 · 1페이지'));
+});
 for (const view of ['consultation_requested', 'consultation_completed']) for (const transition of ['mine', 'pending', 'failed', 'all']) test(`registration ${view} ${transition} presents accepted owners and opens its representative`, async (t) => {
   const page = await workspace(t, { workspace: 'registration', viewerId: id(800), search: `?flow=${view}&owner=mine`,
     historyState: { tipsOpsTaskList: { version: 1, actorScope: JSON.stringify([id(800), 'staff']), pathname: '/admin/registration',

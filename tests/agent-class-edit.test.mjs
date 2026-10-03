@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { z } from 'zod';
@@ -99,6 +100,9 @@ function correctionContext() {
 const correctionInput = context => ({expectedVersion:context.version,lessonId:context.plan.sessions[0].id,date:correctionDate,expectedState:'skipped',nextState:'scheduled',reason:'synthetic approved state correction'});
 function correctionHarness(context=correctionContext(), previewError=null, transformPreview=value=>value) {
  const calls=[],after=structuredClone(context), receipts=new Map();
+ // A real acknowledged preview hashes the temporarily corrected raw plan.
+ // The version is opaque; this synthetic value only models its changed identity.
+ after.version='b'.repeat(64);
  if(after.plan.sessions[0]){after.plan.sessions[0].state='active';after.plan.sessions[0].scheduleState='active';}
  after.plan.sessionStates[correctionDate].state='active';
  const run=createAgentEditApiHandler({enabled:()=>true,rpc:async(_name,args)=>{
@@ -129,12 +133,24 @@ test('past correction HTTP reviews unknown counts without a token, then previews
  const first=await review.json();
  assert.equal(first.data.reviewOnly,true);assert.equal(first.data.unknownOccupancyCount,23);assert.equal(first.data.blockerReviewHash,correctionHash);
  assert.equal(first.data.previewToken,null);assert.equal(first.data.reviewRequired,true);assert.ok(!Object.hasOwn(first.data,'after'));
+ assert.equal(first.data.before.version,input.expectedVersion,'review-only preview retains the unchanged baseline version');
+ assert.deepEqual(first.data.before,classWorkspace(original,{from:correctionDate,to:correctionDate}));
  assert.equal(first.data.before.capabilities.pastChanges,false);
  assert.deepEqual([first.data.before.lessons[0].startMinute,first.data.before.lessons[0].endMinute],[600,660],'raw historical times take precedence over current weekly defaults');
  const acknowledged={...input,blockerReviewHash:correctionHash,acknowledgeUnknownOccupancy:true};
  const preview=await h.preview(acknowledged);assert.equal(preview.status,200);
  const second=await preview.json();assert.equal(second.data.reviewOnly,false);assert.equal(second.data.previewToken,id(20));
  assert.equal(second.data.after.lessons[0].state,'scheduled');assert.equal(second.data.before.lessons[0].id,second.data.after.lessons[0].id);
+ assert.deepEqual(second.data.before,first.data.before,'acknowledgment does not change the before projection');
+ assert.equal(second.data.after.version,h.after.version);assert.notEqual(second.data.after.version,second.data.before.version);
+ const expectedLessons=second.data.before.lessons.map(row=>row.id===input.lessonId&&row.date===input.date?{...row,state:input.nextState}:row);
+ const expectedHash=createHash('sha256').update(JSON.stringify({basic:second.data.before.basic,weeklySlots:second.data.before.weeklySlots,lessons:expectedLessons}),'utf8').digest('hex');
+ assert.notEqual(expectedHash,second.data.before.verificationHash);
+ assert.deepEqual(second.data.after,{...second.data.before,version:h.after.version,verificationHash:expectedHash,lessons:expectedLessons},
+  'only the opaque version, derived hash and selected lesson state differ');
+ assert.deepEqual(Object.keys(second.data.after).filter(key=>JSON.stringify(second.data.after[key])!==JSON.stringify(second.data.before[key])),
+  ['version','lessons','verificationHash']);
+ assert.deepEqual(Object.keys(second.data.after.lessons[0]).filter(key=>second.data.after.lessons[0][key]!==second.data.before.lessons[0][key]),['state']);
  assert.deepEqual(h.calls.map(call=>call.p_action),['context','preview','context','preview']);
  const command=h.calls[3].p_input.command;
  assert.deepEqual(command,{kind:'past_lesson_state_correction',lessonId:input.lessonId,date:correctionDate,expectedState:'skipped',state:'active',reason:input.reason,window:{from:correctionDate,to:correctionDate},unknownOccupancyReviewHash:correctionHash,acknowledgeUnknownOccupancy:true});
@@ -201,6 +217,7 @@ test('past correction preview uses existing operation keys and receipt recovery 
   const res=await h.run(req('operations',body,{'Idempotency-Key':key}),['operations']);assert.equal(res.status,200);
   const receipt=await res.json();assert.equal(receipt.data.operationId,key);assert.equal(receipt.data.state,'applied');
   assert.equal(receipt.data.class.id,expected.data.before.id);assert.equal(receipt.data.class.verificationHash,expected.data.after.verificationHash);
+  assert.equal(receipt.data.class.version,expected.data.after.version,'synthetic applied receipt uses the corrected context');
  }
  const read=await h.run(req('operations/'+key),['operations',key]);assert.equal(read.status,200);
  assert.equal((await read.json()).data.state,'applied');assert.equal(h.receipts.size,1);
@@ -226,6 +243,14 @@ test('past correction rejects malformed or mismatched producer target, acknowled
   ['wrong phase',data=>({...data,reviewOnly:true,reviewRequired:true,previewToken:null})],['wrong phase flag',data=>({...data,reviewRequired:true})],
   ['no after',data=>({...data,afterContext:undefined})],['unchanged after',data=>({...data,afterContext:data.beforeContext})],
   ['changed occupancy',data=>{const next=structuredClone(data);next.afterContext.plan.sessions[0].startTime='10:30';return next;}],
+  ['changed teacher',data=>{const next=structuredClone(data);next.afterContext.plan.sessions[0].teacherCatalogId=id(99);return next;}],
+  ['changed room',data=>{const next=structuredClone(data);next.afterContext.plan.sessions[0].classroomCatalogId=id(99);return next;}],
+  ['changed lesson identity',data=>{const next=structuredClone(data);next.afterContext.plan.sessions[0].id='different-lesson';return next;}],
+  ['added lesson',data=>{const next=structuredClone(data);next.afterContext.plan.sessions.push({...next.afterContext.plan.sessions[0],id:'extra-lesson'});return next;}],
+  ['changed basic fields',data=>{const next=structuredClone(data);next.afterContext.basic.name='Unrequested';return next;}],
+  ['changed weekly slot',data=>{const next=structuredClone(data);next.afterContext.weeklySlots[0].startMinute=900;return next;}],
+  ['changed weekly completeness',data=>{const next=structuredClone(data);next.afterContext.weeklyScheduleComplete=false;return next;}],
+  ['changed class identity',data=>{const next=structuredClone(data);next.afterContext.id=id(99);return next;}],
   ['changed before',data=>{const next=structuredClone(data);next.beforeContext.plan.sessions[0].startTime='10:30';return next;}],
   ['missing notifications',data=>({...data,notifications:undefined})],['notification requested',data=>({...data,notifications:{state:'sent'}})],
   ['negative warning count',data=>({...data,unknownOccupancyCount:-1})],

@@ -1,3 +1,5 @@
+import { parseTimetableOperationalConflictDetails, timetableConflictSummary } from "./timetable-operational-conflict-details.ts";
+
 type Input = { classId: string; patch: Record<string, unknown>; expectedSchedulePlan?: Record<string, unknown> | null };
 type Dependencies = {
   requestKey: string;
@@ -29,7 +31,7 @@ export function createTimetableOperationalMutation({ requestKey, rpc, refresh }:
 export function timetableOperationalErrorMessage(error: unknown, fallback: string): string {
   const value = error as { code?: string; message?: string; name?: string } | null;
   if (value?.code === "23P01" && value.message === "timetable_resource_conflict") {
-    return "같은 선생님 또는 강의실의 일정이 겹치거나 확인이 필요한 일정이 있습니다. 입력을 확인해 주세요.";
+    return timetableConflictSummary(parseTimetableOperationalConflictDetails(error));
   }
   if (value?.message === "class_schedule_stale" || value?.message === "timetable_stale") {
     return "운영 일정이 변경되었습니다. 입력을 유지한 채 최신 일정을 다시 불러와 주세요.";

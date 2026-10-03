@@ -19,7 +19,7 @@ function modules(supabase, overrides, sourceOverrides = {}) {
     const runtime = { exports: {} }; cache.set(file, runtime);
     let inputSource = sourceOverrides[path.relative(rootPath, file)] ?? readFileSync(file, 'utf8');
     if (file.endsWith('/class-schedule-workspace.tsx')) inputSource = inputSource.replace('  const classScheduleWorkspaceContent = (',
-      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
+      '  require("@test/observer").observe({ generationPreview, previewLessonSessionGeneration, confirmLessonSessionGeneration, focusedLessonMonthKey, selectedLessonMonthKeys, selectedLessonSessionId, setFocusedLessonMonthKey, lessonPlanBaseline, lessonPlanDraft, lessonPlanForSave, lessonDesignSnapshot, normalizedLessonSessionDraft, normalizedLessonSessionDrafts, lessonDesignSaveError, lessonDesignSaveNotice, updateLessonPlanDraft, setLessonDesignDetail, updateNormalizedLessonSessionDraft, saveNormalizedLessonSession, handleSaveLessonPlan, requestLessonDesignClose, refreshSelectedLessonDetail, setSelectedLessonSessionId, mutationToken: lessonMutationLifecycleRef.current?.capture(selectedRow?.id) });\n  const classScheduleWorkspaceContent = (');
     const source = ts.transpileModule(inputSource, { fileName: file, compilerOptions: {
       module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, jsx: ts.JsxEmit.ReactJSX, esModuleInterop: true,
     } }).outputText;
@@ -284,7 +284,7 @@ test('legacy October date edits snapshot only two new lessons, preserve stored h
   }
   assert.deepEqual(payload.classItem.schedulePlan,savedPlan,'read payload stays immutable');
   await act(async () => first.resolve({data:null,error:{code:'23P01',message:'timetable_resource_conflict'}}));
-  assert.equal(page.observed.lessonDesignSaveError,'같은 선생님 또는 강의실의 일정이 겹치거나 확인이 필요한 일정이 있습니다. 입력을 확인해 주세요.');
+  assert.equal(page.observed.lessonDesignSaveError,'일정 확인을 통과하지 못해 저장하지 못했습니다. 입력은 유지되었습니다. 일정 정보를 확인해 주세요.');
   assert.equal(dirty(),true);
   assert.equal(saveRequests(page).length,1,'a conflict must not trigger an automatic write');
   assert.equal(page.observed.lessonPlanForSave.sessions.filter(row=>row.billingId==='october').length,9);
@@ -1060,3 +1060,131 @@ test('past correction: teacher actor cannot expose the administrator correction 
   assert.equal(pastPreviews(page).length, 0);
   assert.equal(pastCommits(page).length, 0);
 });
+
+const saveDiagnostic = () => ({ version: 1,
+  confirmed: [{ className: '합성 충돌 수업', date: '2026-10-01', startMinute: 1020, endMinute: 1140,
+    overlapStartMinute: 1080, overlapEndMinute: 1140, teacherName: '합성 선생님' }],
+  unresolved: [{ className: '합성 과거 수업', date: '2026-09-24', missingFields: ['teacher', 'classroom'] }],
+  confirmedCount: 1, unresolvedCount: 1, truncated: false });
+const diagnosticError = payload => ({ code: '23P01', message: 'timetable_resource_conflict', details: JSON.stringify(payload) });
+const scheduleSaveButton = () => [...document.querySelectorAll('button')].find(button => button.textContent.trim() === '일정 저장');
+
+test('actual schedule Save shows confirmed and unresolved details beside its action, preserves scope and draft, and retries only explicitly', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, '합성 수정');
+  const before = structuredClone({ draft: page.observed.lessonPlanDraft, baseline: page.observed.lessonPlanBaseline,
+    month: page.observed.focusedLessonMonthKey, months: page.observed.selectedLessonMonthKeys, session: page.observed.selectedLessonSessionId });
+  const button = scheduleSaveButton(); button.focus();
+  await act(async () => button.click());
+  assert.equal(saveRequests(page).length, 1);
+  assert.equal(button.disabled, true);
+  // Chromium drops a newly disabled button to body; emulate that browser result.
+  button.blur();
+  await act(async () => saveRequests(page)[0].resolve({ data: null, error: diagnosticError(saveDiagnostic()) }));
+  const panel = document.querySelector('[data-testid="lesson-design-save-error"]');
+  assert.ok(panel);
+  assert.equal(panel.closest('[data-testid="lesson-design-page-scroll"]') !== null, true);
+  assert.equal(panel.parentElement.querySelector('[data-testid="lesson-design-bottom-action-bar"]')?.contains(button), true);
+  assert.equal(button.getAttribute('aria-describedby'), panel.id);
+  assert.equal(document.activeElement, button);
+  assert.match(panel.querySelector('[aria-label="확인된 일정 충돌"]').textContent, /합성 충돌 수업.*2026-10-01.*17:00–19:00.*겹친 시간 18:00–19:00.*같은 선생님 합성 선생님/s);
+  const unknown = panel.querySelector('[aria-label="정보 확인 필요"]').textContent;
+  assert.match(unknown, /합성 과거 수업.*2026-09-24.*선생님·강의실 정보 확인 필요/s);
+  assert.doesNotMatch(unknown, /겹친 시간|같은 선생님|같은 강의실/);
+  assert.deepEqual({ draft: page.observed.lessonPlanDraft, baseline: page.observed.lessonPlanBaseline,
+    month: page.observed.focusedLessonMonthKey, months: page.observed.selectedLessonMonthKeys, session: page.observed.selectedLessonSessionId }, before);
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 1);
+  await act(async () => button.click());
+  assert.equal(saveRequests(page).length, 2);
+  assert.deepEqual(saveRequests(page)[1].args, saveRequests(page)[0].args);
+  await act(async () => saveRequests(page)[1].resolve({ data: null, error: diagnosticError(saveDiagnostic()) }));
+  await editPlan(page, '합성 다음 수정');
+  assert.equal(document.querySelector('[data-testid="lesson-design-save-error"]'), null, 'edited input clears outdated feedback');
+  assert.equal(dirty(), true);
+});
+
+test('unknown schedule information and a technical timeout cannot be presented as confirmed collisions', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, '합성 수정');
+  const payload = saveDiagnostic(); payload.confirmed = []; payload.confirmedCount = 0;
+  await clickLessonSave();
+  await act(async () => saveRequests(page)[0].resolve({ data: null, error: diagnosticError(payload) }));
+  const panel = document.querySelector('[data-testid="lesson-design-save-error"]');
+  assert.equal(panel.querySelector('[aria-label="확인된 일정 충돌"]'), null);
+  assert.match(page.observed.lessonDesignSaveError, /충돌 여부를 확인하지 못했습니다/);
+  assert.ok(panel.querySelector('[aria-label="정보 확인 필요"]'));
+  const draft = structuredClone(page.observed.lessonPlanDraft);
+  await clickLessonSave();
+  const input = document.querySelector('input'); input.focus();
+  await act(async () => saveRequests(page)[1].resolve({ data: null, error: {
+    code: '57014', message: 'canceling statement due to statement timeout', details: JSON.stringify(saveDiagnostic()),
+  } }));
+  assert.equal(document.activeElement, input, 'failure must not steal operator-moved focus');
+  const timeout = document.querySelector('[data-testid="lesson-design-save-error"]');
+  assert.match(timeout.textContent, /시간이 오래 걸려 저장이 중단/);
+  assert.equal(timeout.querySelector('[aria-label="확인된 일정 충돌"]'), null);
+  assert.equal(timeout.querySelector('[aria-label="정보 확인 필요"]'), null);
+  assert.doesNotMatch(timeout.textContent, /합성 충돌 수업|canceling statement/);
+  assert.deepEqual(page.observed.lessonPlanDraft, draft);
+  assert.equal(dirty(), true);
+  assert.equal(saveRequests(page).length, 2);
+});
+
+test('a late conflict reply after actor revocation cannot disclose old authorized schedule details', async t => {
+  const page = await editor(t, 'curriculum/lesson-design');
+  await editPlan(page, '합성 수정');
+  await clickLessonSave();
+  const old = saveRequests(page)[0];
+  await page.auth({ user: null, role: null });
+  await act(async () => old.resolve({ data: null, error: diagnosticError(saveDiagnostic()) }));
+  assert.equal(page.observed.lessonPlanDraft, null);
+  assert.equal(page.observed.lessonDesignSaveError, '');
+  assert.equal(document.querySelector('[data-testid="lesson-design-save-error"]'), null);
+  assert.doesNotMatch(document.body.textContent, /합성 충돌 수업|합성 과거 수업/);
+  assert.equal(saveRequests(page).length, 1);
+});
+
+const sqlProducerFailures = JSON.parse(readFileSync(path.join(rootPath,
+  'docs/qa/cycle-13-save-conflict-details/sql-producer-fixtures.json'), 'utf8'));
+for (const kind of ['teacher', 'both', 'same-class', 'unknown-past']) {
+  test(`actual SQL ${kind} DETAIL reaches the real schedule Save consumer`, async t => {
+    const page = await editor(t, 'curriculum/lesson-design');
+    await editPlan(page, '합성 계약 검증');
+    const before = structuredClone(page.observed.lessonPlanDraft);
+    const failure = sqlProducerFailures[kind], producer = JSON.parse(failure.details);
+    assert.equal(failure.code, '23P01');
+    assert.equal(failure.message, 'timetable_resource_conflict');
+    await clickLessonSave();
+    await act(async () => saveRequests(page)[0].resolve({ data: null, error: failure }));
+    const panel = document.querySelector('[data-testid="lesson-design-save-error"]');
+    assert.ok(panel);
+    const confirmed = panel.querySelector('[aria-label="확인된 일정 충돌"]');
+    const unknown = panel.querySelector('[aria-label="정보 확인 필요"]');
+    if (kind === 'unknown-past') {
+      assert.equal(confirmed, null);
+      assert.ok(unknown);
+      assert.match(unknown.textContent, new RegExp(producer.unresolved[0].className));
+      assert.ok(unknown.textContent.includes(producer.unresolved[0].date));
+      assert.match(unknown.textContent, /시간·선생님·강의실 정보 확인 필요/);
+      assert.doesNotMatch(unknown.textContent, /겹친 시간|같은 선생님|같은 강의실/);
+      assert.match(page.observed.lessonDesignSaveError, /충돌 여부를 확인하지 못했습니다/);
+    } else {
+      assert.ok(confirmed);
+      assert.equal(unknown, null);
+      const row = producer.confirmed[0];
+      assert.ok(confirmed.textContent.includes(row.className));
+      assert.ok(confirmed.textContent.includes(row.date));
+      assert.match(confirmed.textContent, /09:00–10:00.*겹친 시간 09:30–10:00/s);
+      if (row.teacherName) assert.ok(confirmed.textContent.includes(`같은 선생님 ${row.teacherName}`));
+      else assert.doesNotMatch(confirmed.textContent, /같은 선생님/);
+      if (row.classroomName) assert.ok(confirmed.textContent.includes(`같은 강의실 ${row.classroomName}`));
+      else assert.doesNotMatch(confirmed.textContent, /같은 강의실/);
+      if (row.sameClass) assert.match(confirmed.textContent, /같은 수업/);
+    }
+    assert.deepEqual(page.observed.lessonPlanDraft, before);
+    assert.equal(dirty(), true);
+    assert.equal(saveRequests(page).length, 1);
+    assert.doesNotMatch(panel.textContent, /23P01|timetable_resource_conflict|dashboard_private|[0-9a-f]{8}-[0-9a-f]{4}-/i);
+  });
+}
