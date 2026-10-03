@@ -32,9 +32,13 @@ Migration counts describe different evidence:
 
 The database starts without repository SQL on a uniquely owned Docker internal
 bridge. Ownership, exclusive attachment, disabled IPv6, localhost access and
-absence of a default route are checked before staging the baseline. Docker
-Desktop may leave internal-network ports unpublished; an owned localhost relay
-can reach only the owned container's localhost through Docker exec. The DB
+absence of a default route are checked before staging the baseline. Internal
+networks may expose an empty publication array or a concrete empty publication
+object. Only these verified forms can use an owned localhost relay, after fresh
+network/route checks and localhost database readiness. Missing or invalid maps
+do not authorize a relay. Startup probes share the existing deadline and abort
+signal; final boundary checks run again before repository SQL. The relay can
+reach only the owned container's localhost through Docker exec. The DB
 receives no Docker socket mount. Child processes inherit only PATH, locale and
 disabled telemetry; probes receive only the checked local URL and a test nonce.
 Cleanup stops the exact project without backups, closes owned relay sessions,

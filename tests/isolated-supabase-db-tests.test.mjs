@@ -2733,6 +2733,16 @@ test("isolated CI rejects external networks, wrong ownership, IPv6 and broad por
   }
   const pendingDual = structuredClone(pending); pendingDual.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
   assert.throws(() => validateInternalContainer(JSON.stringify([pendingDual]), runtime, networkId, { allowPendingPublication: true }), /container_network_invalid/u);
+  assert.equal(validateInternalContainer(JSON.stringify([pending]), runtime, networkId, { allowEmptyPublicationMap: true, allowUnpublished: true }), true);
+  assert.throws(() => validateInternalContainer(JSON.stringify([pending]), runtime, networkId, { allowEmptyPublicationMap: true }), /port_binding_invalid/u);
+  let relayChecks = 0; const ownedRelay = { assertBoundary: () => { relayChecks += 1; return true; } };
+  assert.equal(validateInternalContainer(JSON.stringify([pending]), runtime, networkId, { allowEmptyPublicationMap: true, relay: ownedRelay }), true);
+  assert.equal(relayChecks, 1);
+  for (const ports of [undefined, null, [], "malformed", { "other/tcp": [] }, { "5432/tcp": null }]) {
+    const invalid = structuredClone(pending); invalid.NetworkSettings.Ports = ports;
+    assert.throws(() => validateInternalContainer(JSON.stringify([invalid]), runtime, networkId, { allowEmptyPublicationMap: true, relay: ownedRelay }), /port_binding_invalid/u);
+  }
+  assert.equal(relayChecks, 1, "unknown publication shapes cannot reach the relay assertion");
   const route = "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\neth0 000011AC 00000000 0001 0 0 0 0000FFFF 0 0 0\n";
   assert.equal(validateInternalRoutes(route), true);
   assert.throws(() => validateInternalRoutes(`${route}eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n`), /default_route_forbidden/u);
@@ -2849,7 +2859,7 @@ test("isolated CI waits only for startup publication metadata and preserves term
         if (invocation.args[0] === "inspect") {
           inspectCount += 1;
           const containers = JSON.parse(result.stdout); const container = containers[0];
-          if (inspectCount === 1 || !["becomes-ready", "becomes-unpublished", "becomes-broad"].includes(scenario)) delete container.NetworkSettings.Ports["5432/tcp"];
+          if (inspectCount === 1 || !["becomes-ready", "becomes-unpublished", "becomes-broad"].includes(scenario)) delete container.NetworkSettings.Ports;
           else if (scenario === "becomes-unpublished") container.NetworkSettings.Ports["5432/tcp"] = [];
           else if (scenario === "becomes-broad") container.NetworkSettings.Ports["5432/tcp"][0].HostIp = "0.0.0.0";
           if (scenario === "invalid-requested") container.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0";
@@ -2912,7 +2922,7 @@ test("isolated CI pending publication still reaches the existing startup deadlin
       executeNetwork: async (invocation) => {
         commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
         if (invocation.args[0] === "inspect") {
-          const containers = JSON.parse(result.stdout); delete containers[0].NetworkSettings.Ports["5432/tcp"];
+          const containers = JSON.parse(result.stdout); delete containers[0].NetworkSettings.Ports;
           result.stdout = JSON.stringify(containers);
         }
         return result;
@@ -2943,6 +2953,7 @@ test("isolated CI retains only bounded safe first and last pending maps on the o
     tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56180; return () => ++port; })(),
     executeNetwork: async (invocation) => {
       commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
+      if (invocation.args[0] === "exec" && invocation.args[2] === "pg_isready") return { code: 1, stdout: "", stderr: "" };
       if (invocation.args[0] === "inspect") {
         inspectCount += 1;
         const containers = JSON.parse(result.stdout); const container = containers[0];
@@ -2983,6 +2994,159 @@ test("isolated CI retains only bounded safe first and last pending maps on the o
   assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
   assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+});
+
+test("isolated CI empty-map relay requires fresh internal routes and healthy owned loopback before SQL", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const scenarios = ["empty-ready", "health-waits", "array-unpublished", "default-route", "unsafe-internal", "unsafe-requested", "unsafe-exclusive",
+    "undefined-map", "null-map", "partial-map", "malformed-map", "own-null", "ready-broad", "ready-unknown", "relay-failed", "health-cli-error", "health-ready-cli-error", "health-cli-finished"];
+  for (const scenario of scenarios) {
+    const commands = []; const logs = []; const order = [];
+    let startSignal; let finishStart; let inspectCount = 0; let networkInspectCount = 0; let routeCount = 0; let healthCount = 0; let relayOpened = false; let relayClosed = false;
+    const success = ["empty-ready", "health-waits", "array-unpublished"].includes(scenario);
+    const terminalUnknown = ["undefined-map", "null-map", "partial-map", "malformed-map"].includes(scenario);
+    const run = runIsolatedSupabaseDbTests({ root,
+      argv: ["--execute", "--authorized", "--request-id", `empty-map-relay-${scenario}`],
+      tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56400; return () => ++port; })(),
+      executeNetwork: async (invocation) => {
+        commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
+        if (invocation.args[0] === "network" && invocation.args[1] === "inspect") {
+          networkInspectCount += 1;
+          if (networkInspectCount > 1 && !relayOpened) {
+            if (invocation.signal === undefined) assert.ok(terminalUnknown || scenario === "health-cli-finished", "only terminal final-ready checks omit the startup signal");
+            else { assert.equal(invocation.signal, startSignal); order.push("network-proof"); }
+          }
+          if (scenario === "unsafe-internal" && networkInspectCount > 1) {
+            const rows = JSON.parse(result.stdout); rows[0].Internal = false; result.stdout = JSON.stringify(rows);
+          }
+        }
+        if (invocation.args[0] === "inspect") {
+          inspectCount += 1;
+          const rows = JSON.parse(result.stdout); const container = rows[0]; container.NetworkSettings.Ports = {};
+          if (scenario === "array-unpublished") container.NetworkSettings.Ports["5432/tcp"] = [];
+          if (scenario === "undefined-map") delete container.NetworkSettings.Ports;
+          if (scenario === "null-map") container.NetworkSettings.Ports = null;
+          if (scenario === "partial-map") container.NetworkSettings.Ports = { "other/tcp": [] };
+          if (scenario === "malformed-map") container.NetworkSettings.Ports = [];
+          if (scenario === "own-null") container.NetworkSettings.Ports = { "5432/tcp": null };
+          if (scenario === "unsafe-requested") container.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0";
+          if (scenario === "unsafe-exclusive") container.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
+          if (relayOpened && scenario === "ready-broad") container.NetworkSettings.Ports = { "5432/tcp": [{ HostIp: "0.0.0.0", HostPort: "56402" }] };
+          if (relayOpened && scenario === "ready-unknown") delete container.NetworkSettings.Ports;
+          result.stdout = JSON.stringify(rows);
+        }
+        if (invocation.args[0] === "exec" && invocation.args[2] === "cat") {
+          routeCount += 1; order.push("routes");
+          if (!relayOpened) assert.equal(invocation.signal, startSignal);
+          if (scenario === "default-route") result.stdout += "eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n";
+        }
+        if (invocation.args[0] === "exec" && invocation.args[2] === "pg_isready") {
+          healthCount += 1; assert.equal(invocation.signal, startSignal);
+          assert.deepEqual(invocation.args.slice(2), ["pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "postgres"]);
+          assert.match(invocation.args[1], /^supabase_db_tips_supabase_db_qa_[a-f0-9]{12}$/u);
+          assert.deepEqual(Object.keys(invocation.env).sort(), ["PATH", "LANG", "LC_ALL", "SUPABASE_TELEMETRY_DISABLED"].sort());
+          await assert.rejects(readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql")), { code: "ENOENT" });
+          const notReady = (scenario === "health-waits" && healthCount === 1) || ["health-cli-error", "health-cli-finished"].includes(scenario);
+          order.push(notReady ? "health-not-ready" : "health-ready");
+          if (["health-cli-error", "health-ready-cli-error"].includes(scenario)) finishStart(1);
+          if (scenario === "health-cli-finished") finishStart(0);
+          return { code: notReady ? 1 : 0, stdout: "", stderr: "" };
+        }
+        return result;
+      },
+      executeProcess: async (invocation) => {
+        commands.push(invocation);
+        if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+          startSignal = invocation.signal;
+          if (terminalUnknown) return { code: 0, stdout: "", stderr: "" };
+          return new Promise((resolveStart) => {
+            finishStart = (code = 0) => resolveStart({ code, stdout: "", stderr: code ? "synthetic_start_failed" : "" });
+            invocation.signal.addEventListener("abort", () => finishStart(), { once: true });
+          });
+        }
+        if (invocation.args[0] === "migration") {
+          assert.equal(relayOpened, true); assert.ok(inspectCount >= 2); assert.ok(routeCount >= 2, "ready route recheck precedes repository SQL");
+          assert.ok(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified")); order.push("SQL");
+        }
+        if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:56402/postgres" }), stderr: "" };
+        if (invocation.args[0] === "stop") {
+          if (!success) assert.deepEqual(await readdir(join(invocation.cwd, "supabase/migrations")), []);
+          if (relayOpened) assert.equal(relayClosed, true);
+        }
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      createRelay: async () => {
+        assert.deepEqual(order.slice(-3), ["network-proof", "routes", "health-ready"], "owned relay follows current network/routes and successful health proof");
+        if (scenario === "relay-failed") throw new Error("synthetic_relay_bind_failed");
+        relayOpened = true; order.push("open-relay"); finishStart();
+        return { assertBoundary: () => { assert.equal(relayOpened && !relayClosed, true); return true; }, close: async () => { relayClosed = true; } };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    });
+    if (success) {
+      assert.equal((await run).status, "passed"); assert.equal(relayClosed, true);
+      if (scenario === "health-waits") assert.equal(healthCount, 2);
+    } else {
+      const expected = scenario === "default-route" ? /default_route_forbidden/u : scenario === "unsafe-internal" ? /network_invalid/u
+        : scenario === "unsafe-exclusive" ? /container_network_invalid/u : scenario === "relay-failed" ? /synthetic_relay_bind_failed/u
+          : ["health-cli-error", "health-ready-cli-error"].includes(scenario) ? /child_failed/u : /port_binding_invalid/u;
+      await assert.rejects(run, expected);
+      assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0])), false);
+      assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), false);
+      if (!["ready-broad", "ready-unknown"].includes(scenario)) assert.equal(relayOpened, false);
+      if (relayOpened) assert.equal(relayClosed, true);
+    }
+    assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
+    assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
+    assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+  }
+});
+
+test("isolated CI unhealthy or late-ready empty-map DB reaches the same startup deadline without relay or SQL", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  for (const readiness of ["unhealthy", "late-ready", "aborted-ready"]) {
+    const commands = []; const logs = []; let startInvoked = false; let startAborted = false; let clockCalls = 0; let startSignal; let abortStartup;
+    const originalNow = Date.now; const originalSetTimeout = globalThis.setTimeout;
+    const clock = t.mock.method(Date, "now", () => startInvoked && readiness !== "aborted-ready" ? ++clockCalls * 120001 : originalNow());
+    const timer = t.mock.method(globalThis, "setTimeout", (callback, delay, ...args) => {
+      if (delay === 120000) abortStartup = callback;
+      return originalSetTimeout(callback, delay, ...args);
+    });
+    try {
+      await assert.rejects(runIsolatedSupabaseDbTests({ root,
+        argv: ["--execute", "--authorized", "--request-id", `${readiness}-empty-map-deadline`],
+        tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56420; return () => ++port; })(),
+        executeNetwork: async (invocation) => {
+          commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
+          if (invocation.args[0] === "inspect") { const rows = JSON.parse(result.stdout); rows[0].NetworkSettings.Ports = {}; result.stdout = JSON.stringify(rows); }
+          if (invocation.args[0] === "exec" && invocation.args[2] === "pg_isready") {
+            assert.equal(invocation.signal, startSignal);
+            if (readiness === "aborted-ready") setImmediate(abortStartup);
+            return { code: readiness === "unhealthy" ? 2 : 0, stdout: "", stderr: "" };
+          }
+          return result;
+        },
+        executeProcess: async (invocation) => {
+          commands.push(invocation);
+          if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+            startInvoked = true; startSignal = invocation.signal;
+            return new Promise((resolveStart) => invocation.signal.addEventListener("abort", () => {
+              startAborted = true;
+              // Keep the owned CLI awaiting close through the health checkpoint.
+              setImmediate(() => resolveStart({ code: 0, stdout: "", stderr: "" }));
+            }, { once: true }));
+          }
+          if (invocation.args[0] === "stop") assert.deepEqual(await readdir(join(invocation.cwd, "supabase/migrations")), []);
+          return { code: 0, stdout: "", stderr: "" };
+        }, createRelay: async () => { throw new Error("expired_startup_cannot_create_relay"); }, log: (entry) => logs.push(JSON.parse(entry)),
+      }), /isolated_supabase_db_start_timeout/u);
+    } finally { clock.mock.restore(); timer.mock.restore(); }
+    assert.equal(startAborted, true);
+    if (readiness !== "aborted-ready") assert.ok(clockCalls >= 2);
+    assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0])), false);
+    assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+  }
 });
 
 test("isolated CI runs both real builder preflights before migration-up and checks rollback", async (t) => {

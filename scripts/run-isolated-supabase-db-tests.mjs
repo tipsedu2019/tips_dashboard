@@ -561,7 +561,11 @@ export function validateInternalNetwork(value, runtime, networkId) {
   return true;
 }
 
-export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false, allowPendingPublication = false } = {}) {
+function isConcreteEmptyPublicationMap(value) {
+  return Boolean(value && typeof value === "object" && Object.getPrototypeOf(value) === Object.prototype && Object.keys(value).length === 0);
+}
+
+export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false, allowPendingPublication = false, allowEmptyPublicationMap = false } = {}) {
   let rows;
   try { rows = JSON.parse(value); } catch { fail("isolated_supabase_db_container_network_invalid"); }
   const container = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
@@ -577,6 +581,16 @@ export function validateInternalContainer(value, runtime, networkId, { relay = n
   if (!Array.isArray(requestedBindings) || !requestedBindings.length
     || requestedBindings.some((binding) => !["", "127.0.0.1", "::1"].includes(binding.HostIp)
       || Number(binding.HostPort) !== runtime.ports.db)) fail("isolated_supabase_db_port_binding_invalid");
+  // Linux internal bridges can report a concrete empty publication object.
+  // Treat only this exact shape as unpublished; final acceptance needs the
+  // owned relay. Missing/null/partial/malformed maps are never normalized.
+  if (bindings === undefined && allowEmptyPublicationMap && isConcreteEmptyPublicationMap(container.NetworkSettings.Ports)) {
+    if (!allowUnpublished) {
+      if (!relay) fail("isolated_supabase_db_port_binding_invalid");
+      relay.assertBoundary();
+    }
+    return true;
+  }
   // A running container can precede Docker's publication metadata. Wait only
   // during startup, after the owned network and requested bindings pass. This
   // does not authorize a relay or SQL; every concrete/ready binding stays strict.
@@ -754,8 +768,8 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
     return result;
   };
-  const invokeNetwork = async (networkArgs) => {
-    const result = await executeNetwork({ command: "docker", args: networkArgs, cwd: runtime.tempRoot, env: cleanEnvironment });
+  const invokeNetwork = async (networkArgs, { signal } = {}) => {
+    const result = await executeNetwork({ command: "docker", args: networkArgs, cwd: runtime.tempRoot, env: cleanEnvironment, signal });
     if (result.code !== 0) {
       log(JSON.stringify({ event: "isolated_supabase_db_network_failed", step: networkArgs.slice(0, 2).join(" "),
         stdout: sanitizeChildDiagnostic(result.stdout), stderr: sanitizeChildDiagnostic(result.stderr) }));
@@ -824,13 +838,29 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
           let container;
           try { container = JSON.parse(inspected.stdout)?.[0]; } catch { fail("isolated_supabase_db_container_network_invalid"); }
           if (container?.State?.Running) {
-            const publicationReady = validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true, allowPendingPublication: true });
+            const publicationReady = validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true, allowPendingPublication: true, allowEmptyPublicationMap: true });
             if (publicationReady) {
-              if (!container.NetworkSettings.Ports["5432/tcp"].length) {
+              const unpublished = isConcreteEmptyPublicationMap(container.NetworkSettings.Ports)
+                || container.NetworkSettings.Ports["5432/tcp"].length === 0;
+              if (!unpublished) break;
+              if (startFinished && startError) break;
+              // Prove the current network/routes before exposing even the
+              // owned loopback IPC relay. Every new startup probe is bounded
+              // by the same AbortSignal and reaped by processResult.
+              validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName], { signal: startController.signal })).stdout, runtime, networkId);
+              validateInternalRoutes((await invokeNetwork(["exec", `supabase_db_${runtime.projectId}`, "cat", "/proc/net/route"], { signal: startController.signal })).stdout);
+              if (startFinished && startError) break;
+              const health = await executeNetwork({ command: "docker", args: ["exec", `supabase_db_${runtime.projectId}`, "pg_isready", "-h", "127.0.0.1", "-p", "5432", "-U", "postgres", "-d", "postgres"],
+                cwd: runtime.tempRoot, env: cleanEnvironment, signal: startController.signal });
+              // Flush an already-settled CLI failure before opening the relay.
+              await new Promise((resolve) => setImmediate(resolve));
+              if (startFinished && startError) break;
+              if (health.code === 0) {
+                if (startController.signal.aborted || Date.now() >= deadline) fail("isolated_supabase_db_start_timeout");
                 relay = await createRelay({ containerName: `supabase_db_${runtime.projectId}`, port: runtime.ports.db, env: cleanEnvironment });
                 relay.assertBoundary();
+                break;
               }
-              break;
             }
             const pending = describeOwnedPortBindingFailure(inspected.stdout, runtime, "startup");
             if (pending && !lastPendingPublication) log(JSON.stringify({ ...pending, event: "isolated_supabase_db_port_publication_pending", snapshot: "first_pending" }));
@@ -851,7 +881,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       throw error;
     } finally { clearTimeout(startTimeout); }
     validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName])).stdout, runtime, networkId);
-    validateContainerBoundary((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, "ready", { relay });
+    validateContainerBoundary((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, "ready", { relay, allowEmptyPublicationMap: true });
     validateInternalRoutes((await invokeNetwork(["exec", `supabase_db_${runtime.projectId}`, "cat", "/proc/net/route"])).stdout);
     log(JSON.stringify({ event: "isolated_supabase_db_network_verified", internal: true, exclusive: true,
       connection: relay ? "owned_docker_exec_loopback" : "native_loopback", loopbackPublication: true,
