@@ -4454,7 +4454,16 @@ export function ClassScheduleWorkspace() {
   const pastCorrectionRpc = useCallback(async (name: string, parameters: Record<string, unknown>) => {
     if (!supabase) throw new Error("past_correction_unavailable");
     // The reviewed correction is a separate narrow operation, never a plan save.
-    return await supabase.rpc(name, parameters).abortSignal(AbortSignal.timeout(20_000)).retry(false);
+    switch (name) {
+      case "preview_past_lesson_state_correction_v1":
+        return await supabase.rpc("preview_past_lesson_state_correction_v1", parameters)
+          .abortSignal(AbortSignal.timeout(20_000)).retry(false);
+      case "save_past_lesson_state_correction_v1":
+        return await supabase.rpc("save_past_lesson_state_correction_v1", parameters)
+          .abortSignal(AbortSignal.timeout(20_000)).retry(false);
+      default:
+        throw new Error("past_correction_unsupported_rpc");
+    }
   }, []);
   useEffect(() => {
     if (!pastCorrectionOpen || !pastCorrectionContext || pastCorrectionContext.scopeKey === pastCorrectionScope) return;

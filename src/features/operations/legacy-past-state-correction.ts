@@ -99,13 +99,13 @@ function parsePreview(data: unknown, value: LegacyPastStateCorrectionInput, comm
 }
 
 export function createLegacyPastStateCorrectionAction(input: {
-  rpc: (name: string, parameters: Row) => Promise<{ data: unknown; error: unknown }>;
+  invoke: (name: string, parameters: Row) => Promise<{ data: unknown; error: unknown }>;
   createRequestKey?: () => string;
 }) {
   const reviewed = new WeakMap<LegacyPastStateCorrectionPreview, string>();
   const requestKeys = new Map<string, string>();
   const request = async (name: string, args: Row) => {
-    const result = await input.rpc(name, args);
+    const result = await input.invoke(name, args);
     if (result.error) throw result.error;
     return result.data;
   };
