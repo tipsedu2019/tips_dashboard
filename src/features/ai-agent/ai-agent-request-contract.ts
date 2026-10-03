@@ -53,17 +53,17 @@ export type AiCredentialGrant = z.infer<typeof aiCredentialGrantSchema>;
 export const aiDecimalSchema = version;
 const timestamp = z.iso.datetime({offset: true});
 const hash = z.string().regex(/^[a-f0-9]{64}$/);
-const jsonObject = z.record(z.string(), z.json()).refine(value => !/"(?:claimTokenHash|claimToken|tokenHash|token|nonce|authorization|secret)"\s*:/i.test(JSON.stringify(value)), '비밀값은 DTO에 포함할 수 없습니다');
+export const aiSafeJsonObjectSchema = z.record(z.string(), z.json()).refine(value => !/"(?:claimTokenHash|claimToken|tokenHash|token|nonce|authorization|secret)"\s*:/i.test(JSON.stringify(value)), '비밀값은 DTO에 포함할 수 없습니다');
 export const aiMutationRequestSchema = z.union([aiRequestSchema, z.strictObject({id:uuid,status:z.enum(AI_REQUEST_STATUSES),version})]);
 export const aiClaimSchema = z.strictObject({generation:version,leaseExpiresAt:timestamp});
 export const aiClaimMutationSchema = z.strictObject({request:aiMutationRequestSchema,claim:aiClaimSchema});
 export const aiMessageMutationSchema = z.strictObject({request:aiMutationRequestSchema,message:aiRequestMessageSchema});
 export const aiDoneMutationSchema = z.strictObject({request:aiMutationRequestSchema});
 export const aiActionSchema = z.strictObject({
-  id:uuid,requestId:uuid,credentialId:uuid,actionKey:uuid,stepKey:content(100),kind:z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),target:content(500),payload:jsonObject,payloadHash:hash,
+  id:uuid,requestId:uuid,credentialId:uuid,actionKey:uuid,stepKey:content(100),kind:z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),target:content(500),payload:aiSafeJsonObjectSchema,payloadHash:hash,
   generation:version,revision:version,state:z.enum(['prepared','started','succeeded','failed','unknown','cancelled']),createdAt:timestamp,updatedAt:timestamp,
 });
-export const aiActionEventSchema = z.strictObject({id:uuid,actionId:uuid,seq:version,kind:z.enum(['prepared','started','cancelled','result','incident','reconciled_manual_observation','reconciled_domain_receipt']),actorKind:z.enum(['user','bot']),actorId:uuid,evidence:jsonObject,createdAt:timestamp});
+export const aiActionEventSchema = z.strictObject({id:uuid,actionId:uuid,seq:version,kind:z.enum(['prepared','started','cancelled','result','incident','reconciled_manual_observation','reconciled_domain_receipt']),actorKind:z.enum(['user','bot']),actorId:uuid,evidence:aiSafeJsonObjectSchema,createdAt:timestamp});
 export const aiRequestEventSchema = z.strictObject({
   id:uuid,requestId:uuid,seq:version,kind:z.enum(['created','claimed','renewed','progress','question','answer','comment','done','cancelled','resumed']),actorKind:z.enum(['user','bot']),actorId:uuid,
   requesterId:uuid,credentialId:uuid.nullable(),issuerId:uuid.nullable(),previousStatus:z.enum(AI_REQUEST_STATUSES).nullable(),nextStatus:z.enum(AI_REQUEST_STATUSES),version,

@@ -1,6 +1,6 @@
 import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { AI_REQUEST_STATUSES, aiCreateRequestSchema, aiRequestListQuerySchema, aiMessageInputSchema, aiDecimalSchema } from '../ai-agent-request-contract.ts';
+import { AI_REQUEST_STATUSES, aiCreateRequestSchema, aiRequestListQuerySchema, aiMessageInputSchema, aiDecimalSchema, aiSafeJsonObjectSchema } from '../ai-agent-request-contract.ts';
 import { AiHttpError, authenticateAiAgent, type AiDependencies, type AiPrincipal } from './ai-agent-auth.ts';
 import { executeAiOperation, type AiOperation } from './ai-agent-repository.ts';
 export type AiRoute = {kind:'requests'}|{kind:'request'|'messages'|'resume'|'actions';id:string}|{kind:'action'|'reconcile';id:string;actionId:string};
@@ -14,7 +14,7 @@ const activityQuery=z.strictObject({afterMessageSeq:aiDecimalSchema.optional(),a
 const actionQuery=z.strictObject({limit:integer.optional(),cursor:cursor.optional()});
 const botQuery=z.strictObject({status:z.literal('pending').optional(),limit:integer.optional(),cursor:z.string().min(1).max(512).optional()});
 const employeeQuery=z.strictObject({page:page.optional(),pageSize:z.enum(['10','15','20']).transform(Number).optional(),scope:z.enum(['own','all']).optional(),status:z.enum(AI_REQUEST_STATUSES).optional(),search:z.string().max(200).optional()});
-const registration=z.strictObject({actionKey:uuid,stepKey:text(100),kind:z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),target:text(500),payload:z.record(z.string(),z.json()),payloadHash:hash});
+const registration=z.strictObject({actionKey:uuid,stepKey:text(100),kind:z.string().regex(/^[a-z][a-z0-9_]{0,79}$/),target:text(500),payload:aiSafeJsonObjectSchema,payloadHash:hash});
 const identity={revision:aiDecimalSchema,target:text(500),payloadHash:hash};
 const effectEvidence=z.strictObject({resourceName:text(500).optional(),code:text(100).optional(),observation:text(5000).optional()});
 const actionPatch=z.discriminatedUnion('state',[

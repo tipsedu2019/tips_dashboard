@@ -47,3 +47,24 @@ test('policy admin guard, duplicates, catalog unknown keys and missing revision 
 test('unconfigured catalog is safe read and permission no-row is revision zero',async()=>{const catalog={items:Array.from({length:7},(_,index)=>({key:`space_${index+1}`,label:`synthetic ${index+1}`,configured:false,selectable:false,reason:'space_not_configured',revision:'1'}))};const h=policyHarness(catalog,'staff');assert.equal((await h.handle(request(),{kind:'spaces'})).status,200);assert.equal(h.calls[0].input.p_action,'catalog');const permission=policyHarness({userId:id,spaceKeys:[],revision:'0',updatedAt:null});assert.equal((await permission.handle(request(),{kind:'space-permissions',userId:id})).status,200);});
 test('only allowlisted domain faults get public HTTP meanings',async()=>{for(const [code,status] of [['ai_agent_unauthorized',401],['ai_agent_scope_forbidden',403],['ai_agent_grant_forbidden',403],['ai_agent_action_forbidden',403],['ai_agent_space_forbidden',403],['ai_agent_rate_limited',429],['ai_agent_invalid',422],['ai_agent_evidence_required',422],['ai_agent_review_required',422],['ai_agent_cursor_invalid',422],['ai_agent_precondition_required',428]]){const h=harness(null,{code:'ignored',message:code});await expectError(h,request(),{kind:'request',id},status,code);assert.equal(h.calls.length,1);}const h=harness(null,{code:'22023',message:'untrusted details'});await expectError(h,request(),{kind:'request',id},422,'ai_agent_invalid');});
 test('answer linkage and pagination reject null, leading zeros, mixed query and unknown keys',async()=>{for(const query of ['?afterMessageSeq=0','?afterMessageSeq=01','?afterMessageSeq=50&page=1','?limit=0','?limit=1.5','?afterEventSeq=9223372036854775808']){const h=harness();await expectError(h,request('GET',undefined,{},query),{kind:'request',id},400,'invalid_request');assert.equal(h.calls.length,0);}for(const body of [{kind:'answer',text:'answer'},{kind:'answer',questionId:id,text:'answer',actor:id},{kind:'comment',text:'comment',status:'done'}]){const h=harness();await expectError(h,request('POST',body,writes),{kind:'messages',id},400,'invalid_request');assert.equal(h.calls.length,0);}});
+for(const forbiddenKey of ['claimTokenHash','claimToken','tokenHash','token','nonce','authorization','secret']) {
+ for(const [location,payload] of [['root',{[forbiddenKey]:'synthetic marker'}],['nested',{details:{children:[{[forbiddenKey]:'synthetic marker'}]}}],['mixed-case',{details:{[forbiddenKey.toUpperCase()]:'synthetic marker'}}]]) {
+  test(`registration rejects ${location} ${forbiddenKey} before durable action writer`,async()=>{
+   const h=harness({...action,payload});
+   const body={actionKey:action.actionKey,stepKey:action.stepKey,kind:action.kind,target:action.target,payload,payloadHash:action.payloadHash};
+   const response=await h.handle(request('POST',body,botHeaders),{kind:'actions',id});
+   assert.deepEqual({status:response.status,domainCalls:h.calls.length,envelope:await response.json()},{status:400,domainCalls:0,envelope:{data:null,error:{code:'invalid_request'}}});
+  });
+ }
+}
+test('registration accepts bounded safe JSON with nested arrays and scalar values',async()=>{
+ const payload={details:{children:[{value:'synthetic'},null,true,4.5],label:'가'.repeat(1000)},note:'x'.repeat(60000)};
+ const h=harness({...action,payload});
+ const body={actionKey:action.actionKey,stepKey:action.stepKey,kind:action.kind,target:action.target,payload,payloadHash:action.payloadHash};
+ const response=await h.handle(request('POST',body,botHeaders),{kind:'actions',id});
+ assert.equal(response.status,200);assert.equal(h.calls.length,1);assert.equal(h.calls[0].input.p_action,'register_action');assert.deepEqual(h.calls[0].input.p_input.payload,payload);assert.deepEqual((await response.json()).data.payload,payload);
+});
+test('registration safe JSON remains subject to the streaming byte limit',async()=>{
+ const h=harness(action);const payload={note:'x'.repeat(131072)};
+ await expectError(h,request('POST',{actionKey:action.actionKey,stepKey:action.stepKey,kind:action.kind,target:action.target,payload,payloadHash:action.payloadHash},botHeaders),{kind:'actions',id},413,'request_too_large');assert.equal(h.calls.length,0);
+});
