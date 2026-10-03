@@ -69,7 +69,7 @@ select is((select count(*) from dashboard_private.chat_delivery_attempts where o
 select throws_ok($q$update dashboard_private.chat_delivery_attempts set seq=100$q$,'55000','ai_agent_immutable','attempt sequence cannot be changed');
 select throws_ok($q$delete from dashboard_private.chat_delivery_attempts$q$,'55000','ai_agent_immutable','attempt journal cannot be deleted');
 -- Bridge source/event namespace is independent of credential identity.
-create function pg_temp.bridge(token text,event text,key_n integer,extra jsonb default '{}') returns jsonb language sql as $$select public.ai_agent_chat_api_v1(token,'chat_outbox',jsonb_build_object('bridgeSourceId',pg_temp.ai_id(5),'sourceEventId',event,'spaceKey','space_1','threadName','spaces/fixture_space/threads/human_fixture','text','Synthetic reply','idempotencyKey',pg_temp.ai_id(key_n))||extra)->'outbox'$$;
+create function pg_temp.bridge(token text,event text,key_n integer,extra jsonb default '{}') returns jsonb language sql as $$select public.ai_agent_chat_api_v1(token,'chat_outbox',jsonb_build_object('bridgeSourceId',pg_temp.ai_id(5),'sourceEventId','spaces/fixture_space/messages/'||event,'spaceKey','space_1','threadName','spaces/fixture_space/threads/human_fixture','text','Synthetic reply','idempotencyKey',pg_temp.ai_id(key_n))||extra)->'outbox'$$;
 set local role service_role;
 insert into ev values('bridge',pg_temp.bridge(repeat('e',64),'event-1',310));
 select is(pg_temp.bridge(repeat('f',64),'event-1',311)->>'id',(select v->>'id' from ev where k='bridge'),'credential rotation retains stable bridge event dedupe');
@@ -162,5 +162,62 @@ select throws_ok($q$select public.ai_agent_chat_api_v1(repeat('e',64),'list','{}
 reset role;
 select ok(not exists(select 1 from unnest(array['anon','authenticated','service_role']) rr cross join unnest(array['chat_space_configuration','chat_delivery_outbox','chat_delivery_attempts','chat_send_global_budget','chat_space_send_budgets']) tt where has_table_privilege(rr,'dashboard_private.'||tt,'SELECT,INSERT,UPDATE,DELETE')),'all private outbox/config/budget stores deny direct API access');
 select is(jsonb_build_object('events',(select count(*) from dashboard_private.notification_events),'deliveries',(select count(*) from dashboard_private.notification_deliveries)),(select v from ev where k='old_counts'),'old notification event/delivery counts stay exactly unchanged');
+set local role service_role;
+select is(public.ai_agent_chat_api_v1(repeat('f',64),'list','{}')->'nextCursor','null'::jsonb,'Chat list supplies continuation metadata even on terminal page');
+select throws_ok($q$select public.ai_agent_chat_api_v1(repeat('f',64),'chat_outbox',jsonb_build_object('bridgeSourceId',pg_temp.ai_id(5),'sourceEventId','arbitrary-event-id','spaceKey','space_1','threadName','spaces/fixture_space/threads/human_fixture','text','synthetic','idempotencyKey',pg_temp.ai_id(450)))$q$,'22023','chat_source_event_invalid','bridge requires canonical original Google message.name');
+reset role;
+
+set local role service_role;
+select throws_ok($q$select pg_temp.bridge(repeat('f',64),'wrong',451,'{"sourceEventId":"spaces/other/messages/original.1"}')$q$,'22023','chat_source_event_invalid','canonical source cannot come from another space');
+select throws_ok($q$select pg_temp.bridge(repeat('f',64),'wrong',452,'{"sourceEventId":"spaces/fixture_space/messages/a/extra"}')$q$,'22023','chat_source_event_invalid','source resource cannot contain extra path segments');
+insert into ev values('canonical_source',pg_temp.bridge(repeat('f',64),'system.original',453));
+select is(pg_temp.bridge(repeat('f',64),'system.original',454)->>'id',(select v->>'id' from ev where k='canonical_source'),'canonical dotted system message dedupes with new key');
+select lives_ok($q$select pg_temp.bridge(repeat('f',64),'client-custom-name',455)$q$,'canonical custom message name accepted');
+reset role;
+-- Intents stay eligible while the continuation advances by ready_at/id.
+insert into dashboard_private.chat_delivery_outbox(id,bridge_source_id,source_event_id,purpose,space_key,expected_space,thread_name,payload,payload_hash,ready_at)
+select pg_temp.ai_id(1000+n),pg_temp.ai_id(5),'spaces/fixture_space/messages/page-'||n,'bridge_reply','space_1','spaces/fixture_space','spaces/fixture_space/threads/human_fixture','{}',repeat('a',64),'2026-10-03 00:00:00+00'::timestamptz from generate_series(1,60)n;
+insert into ev values('eligible_expected',jsonb_build_object('ids',(select jsonb_agg(id::text order by ready_at,id) from dashboard_private.chat_delivery_outbox where state in('pending','retry_wait') and ready_at<=clock_timestamp())));
+update dashboard_private.ai_agent_credentials set rate_count=0 where id=pg_temp.ai_id(4);
+set local role service_role;
+insert into ev values('outbox_page1',public.ai_agent_chat_api_v1(repeat('f',64),'list','{}'));
+insert into ev values('outbox_page2',public.ai_agent_chat_api_v1(repeat('f',64),'list',jsonb_build_object('cursor',(select v->>'nextCursor' from ev where k='outbox_page1'))));
+select is(jsonb_array_length((select v->'items' from ev where k='outbox_page1')),50,'outbox first page bounded to50');
+select is((select jsonb_agg(x->>'id' order by page,ordinality) from ev cross join lateral jsonb_array_elements(v->'items')with ordinality as e(x,ordinality) cross join lateral(select case k when 'outbox_page1' then 1 else 2 end page)p where k in('outbox_page1','outbox_page2')),(select v->'ids' from ev where k='eligible_expected'),'outbox traversal has exact expected order without gaps or repeats while first page unchanged');
+select is((select v->'nextCursor' from ev where k='outbox_page2'),'null'::jsonb,'outbox terminal page terminates cursor');
+select is(public.ai_agent_chat_api_v1(repeat('f',64),'list','{}')->'items',(select v->'items' from ev where k='outbox_page1'),'fresh no-cursor poll still starts at oldest currently due intent');
+select throws_ok($q$select public.ai_agent_chat_api_v1(repeat('f',64),'list','{"cursor":"bad!"}')$q$,'22023','ai_agent_cursor_invalid','malformed outbox cursor fails closed');
+select throws_ok($q$select public.ai_agent_chat_api_v1(repeat('f',64),'list',jsonb_build_object('state','pending','cursor',(select v->>'nextCursor' from ev where k='outbox_page1')))$q$,'22023','ai_agent_cursor_invalid','outbox cursor bound to state query');
+select throws_ok($q$select public.ai_agent_chat_api_v1(repeat('f',64),'list',jsonb_build_object('limit',10,'cursor',(select v->>'nextCursor' from ev where k='outbox_page1')))$q$,'22023','ai_agent_cursor_invalid','outbox cursor bound to limit query');
+reset role;
+update dashboard_private.chat_credential_space_grants set bridge_source_id=pg_temp.ai_id(6) where credential_id=pg_temp.ai_id(4);
+set local role service_role;
+select throws_ok($q$select public.ai_agent_chat_api_v1(repeat('f',64),'list',jsonb_build_object('cursor',(select v->>'nextCursor' from ev where k='outbox_page1')))$q$,'22023','ai_agent_cursor_invalid','outbox cursor bound to current source grant');
+select is(jsonb_array_length(public.ai_agent_chat_api_v1(repeat('f',64),'list','{}')->'items'),0,'fresh poll cannot see another source bridge intents');
+reset role;
+-- Request read authority alone exposes the small safe notification status.
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(2)::text,true);
+set local role authenticated;
+insert into ev values('owner_notification',public.ai_agent_user_api_v1('activity',jsonb_build_object('id',pg_temp.ai_id(11)))->'notification');
+select is((select v->>'reason' from ev where k='owner_notification'),'space_unconfigured','owner detail exposes unsent domain reason without Chat scope');
+select is((select v->>'state' from ev where k='owner_notification'),'cancelled','owner sees durable unsent delivery status');
+select is((select v-array['intentId','state','reason','updatedAt'] from ev where k='owner_notification'),'{}'::jsonb,'notification DTO excludes payload/attempt/resource/settings');
+reset role;
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(1)::text,true);
+set local role authenticated;
+select is(public.ai_agent_user_api_v1('activity',jsonb_build_object('id',pg_temp.ai_id(11)))->'notification',(select v from ev where k='owner_notification'),'admin receives same safe notification projection');
+reset role;
+insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.ai_id(7),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','ai-outbox-nonowner@test.invalid');
+insert into public.profiles(id,role,name) values(pg_temp.ai_id(7),'teacher','synthetic nonowner') on conflict(id) do update set role=excluded.role;
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(7)::text,true);
+set local role authenticated;
+select throws_ok($q$select public.ai_agent_user_api_v1('activity',jsonb_build_object('id',pg_temp.ai_id(11)))$q$,'P0002','ai_agent_not_found','nonowner cannot read request notification');
+reset role;
+update dashboard_private.chat_delivery_outbox set state='failed',reason='untrusted_provider_code' where request_id=pg_temp.ai_id(11);
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(2)::text,true);
+set local role authenticated;
+select is(public.ai_agent_user_api_v1('activity',jsonb_build_object('id',pg_temp.ai_id(11)))->'notification'->>'reason','provider_rejected','notification maps arbitrary provider code to stable domain reason');
+reset role;
+
 select * from finish();
 rollback;

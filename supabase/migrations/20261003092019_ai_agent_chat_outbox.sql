@@ -97,23 +97,48 @@ begin
  if not o.space_key=any(g.space_keys) or not o.purpose=any(g.purposes) or (o.purpose='bridge_reply' and g.bridge_source_id is distinct from o.bridge_source_id) then raise exception using errcode='42501',message='ai_agent_grant_forbidden';end if;
 end$$;
 
+
+-- Owner/admin request detail gets only stable domain status, never delivery payload,
+-- attempt evidence, resource names, settings, or arbitrary provider result codes.
+create function dashboard_private.ai_agent_notification_v1(p_id uuid) returns jsonb language sql volatile set search_path='' as $$
+select jsonb_build_object('intentId',o.id,'state',case when o.state='sending' and o.lease_expires_at<=clock_timestamp() then 'delivery_unknown' else o.state end,
+ 'reason',case when o.state='sending' and o.lease_expires_at<=clock_timestamp() then 'dispatch_lease_expired'
+ when o.reason in('space_unconfigured','space_permission_revoked','requester_inactive','request_cancelled','space_configuration_changed','dispatch_lease_expired','success_evidence_missing','provider_resource_mismatch','contradictory_or_old_result') then o.reason
+ when o.state='retry_wait' then 'provider_rate_limited' when o.state='failed' then 'provider_rejected' when o.state in('delivery_unknown','incident') then 'delivery_unresolved' else null end,'updatedAt',o.updated_at)
+from dashboard_private.chat_delivery_outbox o where o.request_id=p_id and o.purpose='ai_completion' order by o.created_at desc,o.id desc limit 1
+$$;
+
 create function public.ai_agent_chat_api_v1(p_token_hash text,p_action text,p_input jsonb default '{}') returns jsonb language plpgsql security definer set search_path='' as $$
 declare c dashboard_private.ai_agent_credentials; g dashboard_private.chat_credential_space_grants; o dashboard_private.chat_delivery_outbox; a dashboard_private.chat_delivery_attempts; cfg dashboard_private.chat_space_configuration; r dashboard_private.ai_agent_requests; requester_role text; requester uuid; perm dashboard_private.chat_user_space_permissions;
- rec dashboard_private.ai_agent_request_receipts; key uuid; fingerprint text; resource uuid; result jsonb; payload jsonb; attempt uuid; size integer; ai_reason text; global_budget dashboard_private.chat_send_global_budget; space_budget dashboard_private.chat_space_send_budgets; ai_minute timestamptz:=date_trunc('minute',clock_timestamp()); outcome text; provider_code text; message_name text; thread_name text;
+ rec dashboard_private.ai_agent_request_receipts; key uuid; fingerprint text; resource uuid; result jsonb; payload jsonb; attempt uuid; size integer; ai_reason text; global_budget dashboard_private.chat_send_global_budget; space_budget dashboard_private.chat_space_send_budgets; ai_minute timestamptz:=date_trunc('minute',clock_timestamp()); binding text; pos jsonb; stamp timestamptz; last_id uuid; rows jsonb; next_cursor text; outcome text; provider_code text; message_name text; thread_name text;
 begin
  if p_action not in('list','get','chat_outbox','prepare_attempt','record_attempt') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
  c:=dashboard_private.ai_agent_authenticate_v1(p_token_hash,case when p_action in('get','list') then 'chat:outbox:read' else 'chat:send' end,null,p_action<>'record_attempt');
  select * into g from dashboard_private.chat_credential_space_grants where credential_id=c.id;
  perform dashboard_private.ai_agent_assert_input_v1(p_input,case p_action
- when 'list' then array['limit','state'] when 'get' then array['id']
+ when 'list' then array['limit','state','cursor'] when 'get' then array['id']
  when 'chat_outbox' then array['idempotencyKey','bridgeSourceId','sourceEventId','spaceKey','threadName','text']
  when 'prepare_attempt' then array['id','revision','idempotencyKey']
  else array['id','attemptId','idempotencyKey','outcome','code','messageName','threadName'] end);
  if p_action='list' then
   size:=coalesce((p_input->>'limit')::integer,50);
   if size not between 1 and 50 or (p_input ? 'limit' and jsonb_typeof(p_input->'limit') is distinct from 'number') or (p_input ? 'state' and (jsonb_typeof(p_input->'state') is distinct from 'string' or p_input->>'state' not in('pending','sending','sent','retry_wait','failed','delivery_unknown','cancelled','incident'))) then raise exception using errcode='22023',message='ai_agent_invalid';end if;
+  binding:=encode(sha256(convert_to(jsonb_build_object('operation','chat_list','credentialId',c.id,'spaceKeys',g.space_keys,'purposes',g.purposes,'sourceId',g.bridge_source_id,'state',p_input->>'state','limit',size)::text,'UTF8')),'hex');
+  pos:=dashboard_private.ai_agent_cursor_decode_v1(p_input,binding);
+  if pos is not null then
+   begin
+    if pos-'readyAt'-'id'<>'{}'::jsonb or (jsonb_typeof(pos->'readyAt') is distinct from 'string' or pos->>'readyAt' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?[+-][0-9]{2}:[0-9]{2}$') or jsonb_typeof(pos->'id') is distinct from 'string' then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+    stamp:=(pos->>'readyAt')::timestamptz;last_id:=dashboard_private.ai_agent_required_uuid_v1(pos,'id');
+    if stamp is null or not isfinite(stamp) then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+   exception when others then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end;
+  end if;
   perform dashboard_private.ai_agent_consume_rate_v1(c.id);
-  return jsonb_build_object('items',(select coalesce(jsonb_agg(dashboard_private.chat_outbox_json_v1(x) order by x.ready_at,x.id),'[]') from(select * from dashboard_private.chat_delivery_outbox x where x.space_key=any(g.space_keys) and x.purpose=any(g.purposes) and (x.purpose<>'bridge_reply' or x.bridge_source_id=g.bridge_source_id) and (case when p_input ? 'state' then (case when x.state='sending' and x.lease_expires_at<=clock_timestamp() then 'delivery_unknown' else x.state end)=p_input->>'state' else x.state in('pending','retry_wait') and x.ready_at<=clock_timestamp() end) order by x.ready_at,x.id limit size)x));
+  select coalesce(jsonb_agg(dashboard_private.chat_outbox_json_v1(x) order by x.ready_at,x.id),'[]') into rows from(select * from dashboard_private.chat_delivery_outbox x where x.space_key=any(g.space_keys) and x.purpose=any(g.purposes) and (x.purpose<>'bridge_reply' or x.bridge_source_id=g.bridge_source_id) and (pos is null or (x.ready_at,x.id)>(stamp,last_id)) and (case when p_input ? 'state' then (case when x.state='sending' and x.lease_expires_at<=clock_timestamp() then 'delivery_unknown' else x.state end)=p_input->>'state' else x.state in('pending','retry_wait') and x.ready_at<=clock_timestamp() end) order by x.ready_at,x.id limit size+1)x;
+  if jsonb_array_length(rows)>size then
+   rows:=rows-size;
+   next_cursor:=dashboard_private.ai_agent_cursor_encode_v1(binding,jsonb_build_object('readyAt',rows->-1->>'readyAt','id',rows->-1->>'id'));
+  end if;
+  return jsonb_build_object('items',rows,'nextCursor',next_cursor);
  end if;
  if p_action='chat_outbox' then
   resource:=dashboard_private.ai_agent_required_uuid_v1(p_input,'bridgeSourceId');
@@ -122,6 +147,7 @@ begin
   select * into cfg from dashboard_private.chat_space_configuration where space_key=o.space_key for share;
   if not found or not cfg.configured then raise exception using errcode='42501',message='ai_agent_space_forbidden';end if;
   o.thread_name:=dashboard_private.ai_agent_text_v1(p_input,'threadName',500);o.source_event_id:=dashboard_private.ai_agent_text_v1(p_input,'sourceEventId',200);
+  if o.source_event_id !~ '^spaces/[A-Za-z0-9_-]+/messages/[A-Za-z0-9_.-]+$' or split_part(o.source_event_id,'/messages/',1)<>cfg.resource_name then raise exception using errcode='22023',message='chat_source_event_invalid';end if;
   if o.thread_name !~ '^spaces/[A-Za-z0-9_-]+/threads/[A-Za-z0-9_-]+$' or split_part(o.thread_name,'/threads/',1)<>cfg.resource_name then raise exception using errcode='22023',message='chat_thread_invalid';end if;
   payload:=jsonb_build_object('text',dashboard_private.ai_agent_text_v1(p_input,'text',20000),'thread',jsonb_build_object('name',o.thread_name));
   if octet_length(payload::text)>32000 then raise exception using errcode='22023',message='chat_payload_too_large';end if;
@@ -228,7 +254,7 @@ begin
  return result;
 exception when invalid_text_representation or numeric_value_out_of_range then raise exception using errcode='22023',message='ai_agent_invalid';
 end$$;
-revoke all on function dashboard_private.chat_outbox_identity_v1(),dashboard_private.ai_agent_completion_outbox_v1(dashboard_private.ai_agent_requests,uuid),dashboard_private.ai_agent_cancel_outbox_v1(uuid),dashboard_private.chat_outbox_json_v1(dashboard_private.chat_delivery_outbox),dashboard_private.chat_attempt_json_v1(dashboard_private.chat_delivery_attempts),dashboard_private.chat_authorize_intent_v1(uuid,dashboard_private.chat_delivery_outbox) from public,anon,authenticated,service_role;
+revoke all on function dashboard_private.ai_agent_notification_v1(uuid),dashboard_private.chat_outbox_identity_v1(),dashboard_private.ai_agent_completion_outbox_v1(dashboard_private.ai_agent_requests,uuid),dashboard_private.ai_agent_cancel_outbox_v1(uuid),dashboard_private.chat_outbox_json_v1(dashboard_private.chat_delivery_outbox),dashboard_private.chat_attempt_json_v1(dashboard_private.chat_delivery_attempts),dashboard_private.chat_authorize_intent_v1(uuid,dashboard_private.chat_delivery_outbox) from public,anon,authenticated,service_role;
 revoke all on function public.ai_agent_chat_api_v1(text,text,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.ai_agent_chat_api_v1(text,text,jsonb) to service_role;
 commit;

@@ -40,6 +40,7 @@ create table dashboard_private.ai_agent_action_events (
  evidence jsonb not null default '{}' check(jsonb_typeof(evidence)='object' and octet_length(evidence::text)<=131072),
  created_at timestamptz not null default clock_timestamp(), unique(action_id,seq)
 );
+create index ai_agent_actions_page on dashboard_private.ai_agent_request_actions(request_id,created_at,id);
 create index ai_agent_actions_unresolved on dashboard_private.ai_agent_request_actions(request_id,state);
 create index ai_agent_actions_credential on dashboard_private.ai_agent_request_actions(credential_id);
 create trigger ai_agent_action_events_immutable before update or delete on dashboard_private.ai_agent_action_events for each row execute function dashboard_private.ai_agent_immutable_v1();
@@ -179,23 +180,77 @@ alter function public.ai_agent_bot_api_v1(text,text,jsonb) set schema dashboard_
 alter function dashboard_private.ai_agent_bot_api_v1(text,text,jsonb) rename to ai_agent_bot_read_v1;
 revoke all on function dashboard_private.ai_agent_bot_read_v1(text,text,jsonb) from public,anon,authenticated,service_role;
 
+
+create function dashboard_private.ai_agent_cursor_encode_v1(binding text,p_position jsonb) returns text language sql stable set search_path='' as $$
+select replace(encode(convert_to(jsonb_build_object('binding',binding,'position',p_position)::text,'UTF8'),'base64'),E'\n','')
+$$;
+create function dashboard_private.ai_agent_cursor_decode_v1(i jsonb,binding text) returns jsonb language plpgsql stable set search_path='' as $$
+declare c jsonb; raw text;
+begin
+ if not i ? 'cursor' then return null;end if;
+ raw:=i->>'cursor';
+ if jsonb_typeof(i->'cursor') is distinct from 'string' or length(raw) not between 1 and 2048 or raw !~ '^[A-Za-z0-9+/]+={0,2}$' then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+ c:=convert_from(decode(raw,'base64'),'UTF8')::jsonb;
+ if jsonb_typeof(c) is distinct from 'object' or c-'binding'-'position'<>'{}'::jsonb or c->>'binding' is distinct from binding or jsonb_typeof(c->'position') is distinct from 'object' or dashboard_private.ai_agent_cursor_encode_v1(binding,c->'position')<>raw then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+ return c->'position';
+exception when others then raise exception using errcode='22023',message='ai_agent_cursor_invalid';
+end$$;
+create function dashboard_private.ai_agent_actions_read_v1(r dashboard_private.ai_agent_requests,i jsonb,principal text,operation text) returns jsonb language plpgsql volatile set search_path='' as $$
+declare size integer:=coalesce((i->>'limit')::integer,50); binding text; pos jsonb; rows jsonb; next_cursor text; stamp timestamptz; last_id uuid; last_seq bigint:=0; a dashboard_private.ai_agent_request_actions;
+begin
+ if size not between 1 and 50 or (i ? 'limit' and jsonb_typeof(i->'limit') is distinct from 'number') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
+ binding:=encode(sha256(convert_to(jsonb_build_object('operation',operation,'principal',principal,'requestId',r.id,'actionId',i->>'actionId','limit',size)::text,'UTF8')),'hex');
+ pos:=dashboard_private.ai_agent_cursor_decode_v1(i,binding);
+ if operation='actions' then
+  if pos is not null then
+   if pos-'createdAt'-'id'<>'{}'::jsonb or (jsonb_typeof(pos->'createdAt') is distinct from 'string' or pos->>'createdAt' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]+)?[+-][0-9]{2}:[0-9]{2}$') or jsonb_typeof(pos->'id') is distinct from 'string' then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+   stamp:=(pos->>'createdAt')::timestamptz;last_id:=dashboard_private.ai_agent_required_uuid_v1(pos,'id');
+   if stamp is null or not isfinite(stamp) or not exists(select 1 from dashboard_private.ai_agent_request_actions where request_id=r.id and id=last_id and created_at=stamp) then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+  end if;
+  select coalesce(jsonb_agg(dashboard_private.ai_agent_action_json_v1(x) order by x.created_at,x.id),'[]') into rows from(select * from dashboard_private.ai_agent_request_actions where request_id=r.id and (pos is null or (created_at,id)>(stamp,last_id)) order by created_at,id limit size+1)x;
+  if jsonb_array_length(rows)>size then
+   rows:=rows- size;
+   next_cursor:=dashboard_private.ai_agent_cursor_encode_v1(binding,jsonb_build_object('createdAt',rows->-1->>'createdAt','id',rows->-1->>'id'));
+  end if;
+  return jsonb_build_object('items',rows,'nextCursor',next_cursor);
+ end if;
+ select * into a from dashboard_private.ai_agent_request_actions where request_id=r.id and id=dashboard_private.ai_agent_required_uuid_v1(i,'actionId');
+ if not found then raise exception using errcode='P0002',message='ai_agent_not_found';end if;
+ if pos is not null then
+  if pos-'seq'<>'{}'::jsonb then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+  last_seq:=dashboard_private.ai_agent_decimal_v1(pos,'seq');
+  if not exists(select 1 from dashboard_private.ai_agent_action_events where action_id=a.id and seq=last_seq) then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+ end if;
+ select coalesce(jsonb_agg(jsonb_build_object('id',x.id,'actionId',x.action_id,'seq',x.seq::text,'kind',x.kind,'actorKind',x.actor_kind,'actorId',x.actor_id,'evidence',x.evidence,'createdAt',x.created_at) order by x.seq),'[]') into rows from(select * from dashboard_private.ai_agent_action_events where action_id=a.id and seq>last_seq order by seq limit size+1)x;
+ if jsonb_array_length(rows)>size then
+  rows:=rows-size;
+  next_cursor:=dashboard_private.ai_agent_cursor_encode_v1(binding,jsonb_build_object('seq',rows->-1->>'seq'));
+ end if;
+ return jsonb_build_object('action',dashboard_private.ai_agent_action_json_v1(a),'events',rows,'nextCursor',next_cursor);
+exception when invalid_text_representation or invalid_datetime_format or datetime_field_overflow or numeric_value_out_of_range then
+ if i ? 'cursor' then raise exception using errcode='22023',message='ai_agent_cursor_invalid';end if;
+ raise exception using errcode='22023',message='ai_agent_invalid';
+end$$;
+
 create function public.ai_agent_user_api_v1(p_action text,p_input jsonb default '{}') returns jsonb language plpgsql security definer set search_path='' as $$
 declare actor uuid; admin boolean; r dashboard_private.ai_agent_requests; old_status text; rec dashboard_private.ai_agent_request_receipts; key uuid; fingerprint text; expected bigint; m dashboard_private.ai_agent_request_messages; a dashboard_private.ai_agent_request_actions; result jsonb; e jsonb; evidence_type text; registry dashboard_private.ai_agent_action_registry; fn text; receipt_ok boolean;
 begin
  if p_action in('create','get','list') then return dashboard_private.ai_agent_user_read_create_v1(p_action,p_input);end if;
- if p_action not in('append_message','cancel','resume','reconcile_action','activity') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
- if p_action='activity' then
+ if p_action not in('append_message','cancel','resume','reconcile_action','activity','actions','action_events') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
+ if p_action in('activity','actions','action_events') then
   actor:=dashboard_private.ai_agent_require_user_v1();
-  perform dashboard_private.ai_agent_assert_input_v1(p_input,array['id','afterMessageSeq','afterEventSeq','limit']);
+  perform dashboard_private.ai_agent_assert_input_v1(p_input,case p_action when 'activity' then array['id','afterMessageSeq','afterEventSeq','limit'] when 'actions' then array['id','limit','cursor'] else array['id','actionId','limit','cursor'] end);
  else
   actor:=dashboard_private.ai_agent_lock_user_v1(p_action in('resume','reconcile_action'));
-  perform dashboard_private.ai_agent_assert_input_v1(p_input,case p_action when 'append_message' then array['id','version','idempotencyKey','kind','text','questionId'] when 'reconcile_action' then array['id','revision','idempotencyKey','actionId','state','evidence'] else array['id','version','idempotencyKey'] end);
+  perform dashboard_private.ai_agent_assert_input_v1(p_input,case p_action when 'append_message' then array['id','version','idempotencyKey','kind','text','questionId'] when 'reconcile_action' then array['id','revision','idempotencyKey','actionId','state','evidence','reason','confirmed'] when 'resume' then array['id','version','idempotencyKey','reason','confirmed'] else array['id','version','idempotencyKey'] end);
  end if;
  select role='admin' into admin from public.profiles where id=actor;
- if p_action='activity' then select * into r from dashboard_private.ai_agent_requests where id=dashboard_private.ai_agent_required_uuid_v1(p_input,'id') and (requester_id=actor or admin);
+ if p_action in('activity','actions','action_events') then select * into r from dashboard_private.ai_agent_requests where id=dashboard_private.ai_agent_required_uuid_v1(p_input,'id') and (requester_id=actor or admin);
  else select * into r from dashboard_private.ai_agent_requests where id=dashboard_private.ai_agent_required_uuid_v1(p_input,'id') and (requester_id=actor or admin) for update;end if;
  if not found then raise exception using errcode='P0002',message='ai_agent_not_found';end if;
  if p_action='activity' then return dashboard_private.ai_agent_activity_v1(r,p_input);end if;
+ if p_action in('actions','action_events') then return dashboard_private.ai_agent_actions_read_v1(r,p_input,'user:'||actor::text,p_action);end if;
+ if p_action in('resume','reconcile_action') and (p_input->'confirmed' is distinct from 'true'::jsonb or jsonb_typeof(p_input->'reason') is distinct from 'string' or p_input->>'reason' !~ '[^[:space:]]' or length(p_input->>'reason')>2000) then raise exception using errcode='22023',message='ai_agent_review_required';end if;
  key:=dashboard_private.ai_agent_required_uuid_v1(p_input,'idempotencyKey');fingerprint:=encode(sha256(convert_to((p_input-'idempotencyKey')::text,'UTF8')),'hex');
  select * into rec from dashboard_private.ai_agent_request_receipts where principal_kind='user' and principal_id=actor and operation=p_action and resource_id=r.id and idempotency_key=key;
  if found then
@@ -224,7 +279,7 @@ begin
    if receipt_ok is distinct from true then raise exception using errcode='22023',message='ai_agent_evidence_required';end if;
   else raise exception using errcode='22023',message='ai_agent_evidence_required';end if;
   update dashboard_private.ai_agent_request_actions set state=p_input->>'state',revision=revision+1,updated_at=clock_timestamp() where id=a.id returning * into a;
-  perform dashboard_private.ai_agent_action_event_v1(a,'reconciled_'||evidence_type,'user',actor,e||jsonb_build_object('outcome',a.state));
+  perform dashboard_private.ai_agent_action_event_v1(a,'reconciled_'||evidence_type,'user',actor,e||jsonb_build_object('outcome',a.state,'reviewReason',p_input->>'reason','confirmed',true));
   result:=dashboard_private.ai_agent_action_json_v1(a);
  else
   expected:=dashboard_private.ai_agent_decimal_v1(p_input,'version');
@@ -253,7 +308,7 @@ begin
    if exists(select 1 from dashboard_private.ai_agent_request_actions where request_id=r.id and state in('prepared','started','unknown')) then raise exception using errcode='55000',message='ai_agent_effect_unresolved';end if;
    update dashboard_private.ai_agent_requests set status='pending',version=version+1,claim_generation=claim_generation+1,ready_at=clock_timestamp(),updated_at=clock_timestamp() where id=r.id returning * into r;
    delete from dashboard_private.ai_agent_request_claims where request_id=r.id;
-   perform dashboard_private.ai_agent_event_v1(r,'resumed','user',actor,null,old_status);
+   perform dashboard_private.ai_agent_event_v1(r,'resumed','user',actor,null,old_status,jsonb_build_object('reviewReason',p_input->>'reason','confirmed',true));
    result:=dashboard_private.ai_agent_request_json_v1(r);
   end if;
  end if;
@@ -266,12 +321,13 @@ create function public.ai_agent_bot_api_v1(p_token_hash text,p_action text,p_inp
 declare c dashboard_private.ai_agent_credentials; g dashboard_private.ai_agent_credential_grants; r dashboard_private.ai_agent_requests; cl dashboard_private.ai_agent_request_claims; rec dashboard_private.ai_agent_request_receipts; a dashboard_private.ai_agent_request_actions; m dashboard_private.ai_agent_request_messages; key uuid; fingerprint text; result jsonb; event_id uuid; old_status text; requester uuid; requester_role text; e jsonb;
 begin
  if p_action in('get','list') then return dashboard_private.ai_agent_bot_read_v1(p_token_hash,p_action,p_input);end if;
- if p_action not in('claim','renew','progress','question','done','register_action','start_action','record_action','activity') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
- c:=dashboard_private.ai_agent_authenticate_v1(p_token_hash,case when p_action='claim' then 'ai-agent:requests:claim' when p_action='activity' then 'ai-agent:requests:read' else 'ai-agent:requests:update' end,case when p_action in('register_action','start_action') then 'done' when p_action='record_action' then null when p_action='activity' then 'read' else p_action end);
+ if p_action not in('claim','renew','progress','question','done','register_action','start_action','record_action','activity','actions','action_events') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
+ c:=dashboard_private.ai_agent_authenticate_v1(p_token_hash,case when p_action='claim' then 'ai-agent:requests:claim' when p_action in('activity','actions','action_events') then 'ai-agent:requests:read' else 'ai-agent:requests:update' end,case when p_action in('register_action','start_action') then 'done' when p_action='record_action' then null when p_action in('activity','actions','action_events') then 'read' else p_action end);
  select * into g from dashboard_private.ai_agent_credential_grants where credential_id=c.id;
  perform dashboard_private.ai_agent_assert_input_v1(p_input,case p_action
  when 'claim' then array['id','version','idempotencyKey','claimTokenHash']
  when 'activity' then array['id','afterMessageSeq','afterEventSeq','limit']
+ when 'actions' then array['id','limit','cursor'] when 'action_events' then array['id','actionId','limit','cursor']
  when 'register_action' then array['id','claimTokenHash','claimGeneration','idempotencyKey','actionKey','stepKey','kind','target','payload','payloadHash']
  when 'start_action' then array['id','claimTokenHash','claimGeneration','idempotencyKey','actionId','revision','target','payloadHash']
  when 'record_action' then array['id','idempotencyKey','actionId','revision','state','target','payloadHash','evidence','claimTokenHash','claimGeneration']
@@ -298,10 +354,14 @@ begin
   perform 1 from auth.users where id=requester and deleted_at is null and (banned_until is null or banned_until<=clock_timestamp()) for share;
   if not found then raise exception using errcode='42501',message='ai_agent_action_forbidden';end if;
  end if;
- if p_action='activity' then select * into r from dashboard_private.ai_agent_requests where id=dashboard_private.ai_agent_required_uuid_v1(p_input,'id') and queue_key=any(g.queues);
+ if p_action in('activity','actions','action_events') then select * into r from dashboard_private.ai_agent_requests where id=dashboard_private.ai_agent_required_uuid_v1(p_input,'id') and queue_key=any(g.queues);
  else select * into r from dashboard_private.ai_agent_requests where id=dashboard_private.ai_agent_required_uuid_v1(p_input,'id') and (p_action='record_action' or queue_key=any(g.queues)) for update;end if;
  if not found then raise exception using errcode='P0002',message='ai_agent_not_found';end if;
- if p_action='activity' then perform dashboard_private.ai_agent_consume_rate_v1(c.id);return dashboard_private.ai_agent_activity_v1(r,p_input);end if;
+ if p_action in('activity','actions','action_events') then
+  perform dashboard_private.ai_agent_consume_rate_v1(c.id);
+  if p_action='activity' then return dashboard_private.ai_agent_activity_v1(r,p_input);end if;
+  return dashboard_private.ai_agent_actions_read_v1(r,p_input,'bot:'||c.id::text,p_action);
+ end if;
  key:=dashboard_private.ai_agent_required_uuid_v1(p_input,'idempotencyKey');fingerprint:=encode(sha256(convert_to((p_input-'idempotencyKey')::text,'UTF8')),'hex');
  select * into rec from dashboard_private.ai_agent_request_receipts where principal_kind='bot' and principal_id=c.id and operation=p_action and resource_id=r.id and idempotency_key=key;
  if rec.principal_id is not null and rec.payload_hash<>fingerprint then raise exception using errcode='23514',message='ai_agent_idempotency_conflict';end if;
@@ -420,8 +480,9 @@ begin
  'messages',(select coalesce(jsonb_agg(dashboard_private.ai_agent_message_json_v1(m) order by m.message_seq),'[]') from(select * from dashboard_private.ai_agent_request_messages where request_id=r.id and message_seq>ms order by message_seq limit size)m),
  'events',(select coalesce(jsonb_agg(jsonb_build_object('id',v.id,'requestId',v.request_id,'seq',v.event_seq::text,'kind',v.kind,'actorKind',v.actor_kind,'actorId',v.actor_id,'requesterId',v.requester_id,'credentialId',v.credential_id,'issuerId',v.issuer_id,'previousStatus',v.previous_status,'nextStatus',v.next_status,'version',v.version::text,'metadata',v.metadata,'createdAt',v.created_at) order by v.event_seq),'[]') from(select * from dashboard_private.ai_agent_request_events where request_id=r.id and event_seq>es order by event_seq limit size)v),
  'actions',(select coalesce(jsonb_agg(dashboard_private.ai_agent_action_json_v1(a) order by a.created_at,a.id),'[]') from(select * from dashboard_private.ai_agent_request_actions where request_id=r.id order by created_at,id limit 50)a));
- return result||jsonb_build_object('nextMessageSeq',case when jsonb_array_length(result->'messages')=size then result->'messages'->-1->>'seq' end,'nextEventSeq',case when jsonb_array_length(result->'events')=size then result->'events'->-1->>'seq' end);
+ return result||jsonb_build_object('notification',dashboard_private.ai_agent_notification_v1(r.id),'nextMessageSeq',case when jsonb_array_length(result->'messages')=size then result->'messages'->-1->>'seq' end,'nextEventSeq',case when jsonb_array_length(result->'events')=size then result->'events'->-1->>'seq' end);
 end$$;
+revoke all on function dashboard_private.ai_agent_cursor_encode_v1(text,jsonb),dashboard_private.ai_agent_cursor_decode_v1(jsonb,text),dashboard_private.ai_agent_actions_read_v1(dashboard_private.ai_agent_requests,jsonb,text,text) from public,anon,authenticated,service_role;
 -- No private helper or adapter is directly callable by an API role.
 revoke all on function dashboard_private.ai_agent_action_identity_v1(),dashboard_private.ai_agent_authenticate_v1(text,text,text,boolean),dashboard_private.ai_agent_consume_rate_v1(uuid),dashboard_private.ai_agent_required_uuid_v1(jsonb,text),dashboard_private.ai_agent_decimal_v1(jsonb,text),dashboard_private.ai_agent_text_v1(jsonb,text,integer),dashboard_private.ai_agent_live_claim_v1(dashboard_private.ai_agent_requests,uuid,jsonb),dashboard_private.ai_agent_event_v1(dashboard_private.ai_agent_requests,text,text,uuid,uuid,text,jsonb),dashboard_private.ai_agent_message_json_v1(dashboard_private.ai_agent_request_messages),dashboard_private.ai_agent_project_mutation_v1(jsonb,dashboard_private.ai_agent_credentials),dashboard_private.ai_agent_action_json_v1(dashboard_private.ai_agent_request_actions),dashboard_private.ai_agent_action_event_v1(dashboard_private.ai_agent_request_actions,text,text,uuid,jsonb),dashboard_private.ai_agent_authorize_action_v1(uuid,dashboard_private.ai_agent_requests,dashboard_private.ai_agent_request_actions),dashboard_private.ai_agent_activity_v1(dashboard_private.ai_agent_requests,jsonb) from public,anon,authenticated,service_role;
 revoke all on function public.ai_agent_user_api_v1(text,jsonb),public.ai_agent_bot_api_v1(text,text,jsonb) from public,anon,authenticated,service_role;
