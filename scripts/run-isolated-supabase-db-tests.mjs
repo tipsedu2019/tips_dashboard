@@ -561,7 +561,7 @@ export function validateInternalNetwork(value, runtime, networkId) {
   return true;
 }
 
-export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false } = {}) {
+export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false, allowPendingPublication = false } = {}) {
   let rows;
   try { rows = JSON.parse(value); } catch { fail("isolated_supabase_db_container_network_invalid"); }
   const container = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
@@ -574,11 +574,15 @@ export function validateInternalContainer(value, runtime, networkId, { relay = n
   }
   const bindings = container.NetworkSettings.Ports?.["5432/tcp"];
   const requestedBindings = container.HostConfig.PortBindings?.["5432/tcp"];
-  if (!Array.isArray(bindings) || !Array.isArray(requestedBindings)
-    || !requestedBindings.length || bindings.some((binding) => !["127.0.0.1", "::1"].includes(binding.HostIp)
-      || Number(binding.HostPort) !== runtime.ports.db)
+  if (!Array.isArray(requestedBindings) || !requestedBindings.length
     || requestedBindings.some((binding) => !["", "127.0.0.1", "::1"].includes(binding.HostIp)
       || Number(binding.HostPort) !== runtime.ports.db)) fail("isolated_supabase_db_port_binding_invalid");
+  // A running container can precede Docker's publication metadata. Wait only
+  // during startup, after the owned network and requested bindings pass. This
+  // does not authorize a relay or SQL; every concrete/ready binding stays strict.
+  if (bindings === undefined && allowPendingPublication) return false;
+  if (!Array.isArray(bindings) || bindings.some((binding) => !["127.0.0.1", "::1"].includes(binding.HostIp)
+    || Number(binding.HostPort) !== runtime.ports.db)) fail("isolated_supabase_db_port_binding_invalid");
   if (!bindings.length && !allowUnpublished) {
     if (!relay) fail("isolated_supabase_db_port_binding_invalid");
     relay.assertBoundary();
@@ -815,12 +819,14 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
           let container;
           try { container = JSON.parse(inspected.stdout)?.[0]; } catch { fail("isolated_supabase_db_container_network_invalid"); }
           if (container?.State?.Running) {
-            validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true });
-            if (!container.NetworkSettings.Ports["5432/tcp"].length) {
-              relay = await createRelay({ containerName: `supabase_db_${runtime.projectId}`, port: runtime.ports.db, env: cleanEnvironment });
-              relay.assertBoundary();
+            const publicationReady = validateContainerBoundary(inspected.stdout, "startup", { allowUnpublished: true, allowPendingPublication: true });
+            if (publicationReady) {
+              if (!container.NetworkSettings.Ports["5432/tcp"].length) {
+                relay = await createRelay({ containerName: `supabase_db_${runtime.projectId}`, port: runtime.ports.db, env: cleanEnvironment });
+                relay.assertBoundary();
+              }
+              break;
             }
-            break;
           }
         }
         if (startFinished) break;

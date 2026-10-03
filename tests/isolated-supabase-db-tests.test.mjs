@@ -2717,6 +2717,22 @@ test("isolated CI rejects external networks, wrong ownership, IPv6 and broad por
   assert.throws(() => validateInternalContainer(JSON.stringify([dual]), runtime, networkId), /container_network_invalid/u);
   const exposed = structuredClone(container); exposed.NetworkSettings.Ports["5432/tcp"][0].HostIp = "0.0.0.0";
   assert.throws(() => validateInternalContainer(JSON.stringify([exposed]), runtime, networkId), /port_binding_invalid/u);
+  const pending = structuredClone(container); delete pending.NetworkSettings.Ports["5432/tcp"];
+  assert.equal(validateInternalContainer(JSON.stringify([pending]), runtime, networkId, { allowPendingPublication: true }), false);
+  assert.throws(() => validateInternalContainer(JSON.stringify([pending]), runtime, networkId), /port_binding_invalid/u);
+  for (const published of [null, {}, "malformed", [{ HostIp: "0.0.0.0", HostPort: "55500" }]]) {
+    const invalid = structuredClone(pending); invalid.NetworkSettings.Ports["5432/tcp"] = published;
+    assert.throws(() => validateInternalContainer(JSON.stringify([invalid]), runtime, networkId, { allowPendingPublication: true }), /port_binding_invalid/u);
+  }
+  for (const requested of [null, [], [{}], [{ HostIp: "0.0.0.0", HostPort: "55500" }], [{ HostIp: "", HostPort: "55501" }]]) {
+    const invalid = structuredClone(pending); invalid.HostConfig.PortBindings["5432/tcp"] = requested;
+    assert.throws(() => validateInternalContainer(JSON.stringify([invalid]), runtime, networkId, { allowPendingPublication: true }), /port_binding_invalid/u);
+  }
+  for (const changed of [{ Name: "/supabase_db_other" }, { State: { Running: false } }, { HostConfig: { NetworkMode: "bridge" } }]) {
+    assert.throws(() => validateInternalContainer(JSON.stringify([{ ...pending, ...changed }]), runtime, networkId, { allowPendingPublication: true }), /container_network_invalid/u);
+  }
+  const pendingDual = structuredClone(pending); pendingDual.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
+  assert.throws(() => validateInternalContainer(JSON.stringify([pendingDual]), runtime, networkId, { allowPendingPublication: true }), /container_network_invalid/u);
   const route = "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\neth0 000011AC 00000000 0001 0 0 0 0000FFFF 0 0 0\n";
   assert.equal(validateInternalRoutes(route), true);
   assert.throws(() => validateInternalRoutes(`${route}eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n`), /default_route_forbidden/u);
@@ -2772,7 +2788,7 @@ test("isolated CI port rejection diagnoses startup and ready bindings without ex
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
   const secret = "synthetic-inspect-private-value-DO-NOT-LOG";
-  for (const [phase, publishedShape] of [["startup", "null"], ["startup", "broad"], ["ready", "broad"], ["startup", "invalid-scalars"]]) {
+  for (const [phase, publishedShape] of [["startup", "null"], ["startup", "broad"], ["ready", "broad"], ["ready", "undefined"], ["startup", "invalid-scalars"]]) {
     const commands = []; const logs = []; let inspectCount = 0;
     await assert.rejects(runIsolatedSupabaseDbTests({ root,
       argv: ["--execute", "--authorized", "--request-id", `port-diagnostic-${phase}-${publishedShape}`],
@@ -2785,7 +2801,7 @@ test("isolated CI port rejection diagnoses startup and ready bindings without ex
           container.Config = { Env: [`SUPABASE_ACCESS_TOKEN=${secret}`, `PRIVATE_KEY=${secret}`], Other: secret };
           container.HostConfig.Binds = [`${secret}:/private`];
           container.NetworkSettings.Ports["other/tcp"] = [{ HostIp: secret, HostPort: secret }];
-          container.NetworkSettings.Ports["5432/tcp"] = publishedShape === "null" ? null
+          container.NetworkSettings.Ports["5432/tcp"] = publishedShape === "undefined" ? undefined : publishedShape === "null" ? null
             : [{ HostIp: publishedShape === "invalid-scalars" ? secret : "0.0.0.0", HostPort: "56122", privateField: secret }];
           if (publishedShape === "invalid-scalars") container.HostConfig.PortBindings["5432/tcp"][0].HostPort = secret;
           result.stdout = JSON.stringify(containers);
@@ -2802,7 +2818,7 @@ test("isolated CI port rejection diagnoses startup and ready bindings without ex
     assert.equal(diagnostic.phase, phase); assert.equal(diagnostic.running, true);
     assert.match(diagnostic.container, /^supabase_db_tips_supabase_db_qa_[a-f0-9]{12}$/u);
     assert.equal(diagnostic.requested5432.shape, "array");
-    if (publishedShape === "null") assert.deepEqual(diagnostic.published5432, { shape: "null" });
+    if (["null", "undefined"].includes(publishedShape)) assert.deepEqual(diagnostic.published5432, { shape: publishedShape });
     else {
       assert.equal(diagnostic.published5432.values[0].HostIp, publishedShape === "invalid-scalars" ? "[invalid]" : "0.0.0.0");
       assert.equal(diagnostic.published5432.values[0].HostPort, "56122");
@@ -2816,6 +2832,105 @@ test("isolated CI port rejection diagnoses startup and ready bindings without ex
     assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), false);
     assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
   }
+});
+
+test("isolated CI waits only for startup publication metadata and preserves terminal failure and cleanup", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  for (const scenario of ["becomes-ready", "becomes-unpublished", "becomes-broad", "invalid-requested", "invalid-network", "start-finished", "start-failed"]) {
+    const commands = []; const logs = []; let inspectCount = 0; let finishStart; let relayOpened = false; let relayClosed = false;
+    const success = scenario === "becomes-ready" || scenario === "becomes-unpublished";
+    const run = runIsolatedSupabaseDbTests({ root,
+      argv: ["--execute", "--authorized", "--request-id", `pending-publication-${scenario}`],
+      tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56140; return () => ++port; })(),
+      executeNetwork: async (invocation) => {
+        commands.push(invocation);
+        const result = await isolatedNetworkFixture(invocation);
+        if (invocation.args[0] === "inspect") {
+          inspectCount += 1;
+          const containers = JSON.parse(result.stdout); const container = containers[0];
+          if (inspectCount === 1 || !["becomes-ready", "becomes-unpublished", "becomes-broad"].includes(scenario)) delete container.NetworkSettings.Ports["5432/tcp"];
+          else if (scenario === "becomes-unpublished") container.NetworkSettings.Ports["5432/tcp"] = [];
+          else if (scenario === "becomes-broad") container.NetworkSettings.Ports["5432/tcp"][0].HostIp = "0.0.0.0";
+          if (scenario === "invalid-requested") container.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0";
+          if (scenario === "invalid-network") container.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
+          if (success && inspectCount === 2) finishStart();
+          result.stdout = JSON.stringify(containers);
+        }
+        return result;
+      },
+      executeProcess: async (invocation) => {
+        commands.push(invocation);
+        if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+          if (scenario === "start-finished") return { code: 0, stdout: "", stderr: "" };
+          if (scenario === "start-failed") return { code: 1, stdout: "", stderr: "synthetic_start_failed" };
+          return new Promise((resolveStart) => {
+            finishStart = () => resolveStart({ code: 0, stdout: "", stderr: "" });
+            invocation.signal.addEventListener("abort", finishStart, { once: true });
+          });
+        }
+        if (invocation.args[0] === "migration") assert.ok(inspectCount >= 3, "SQL waits for publication and strict ready recheck");
+        if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:56142/postgres" }), stderr: "" };
+        if (invocation.args[0] === "stop" && !success) assert.deepEqual(await readdir(join(invocation.cwd, "supabase/migrations")), []);
+        return { code: 0, stdout: "", stderr: "" };
+      },
+      createRelay: async () => {
+        assert.equal(scenario, "becomes-unpublished"); assert.ok(inspectCount >= 2, "missing metadata never creates a relay");
+        relayOpened = true;
+        return { assertBoundary: () => { assert.equal(relayClosed, false); return true; }, close: async () => { relayClosed = true; } };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    });
+    if (success) {
+      assert.equal((await run).status, "passed");
+      assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), true);
+      assert.equal(relayOpened, scenario === "becomes-unpublished"); assert.equal(relayClosed, relayOpened);
+    } else {
+      const error = scenario === "invalid-network" ? /container_network_invalid/u : scenario === "start-failed" ? /child_failed/u : /port_binding_invalid/u;
+      await assert.rejects(run, error);
+      assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0])), false);
+      assert.equal(relayOpened, false);
+      assert.equal(logs.some((entry) => entry.event === "isolated_supabase_db_network_verified"), false);
+      if (scenario === "start-finished") assert.equal(logs.find((entry) => entry.event === "isolated_supabase_db_port_binding_rejected").phase, "ready");
+      if (["invalid-requested", "invalid-network", "start-failed"].includes(scenario)) assert.equal(inspectCount, 1, "invalid boundary or failed CLI cannot keep polling");
+    }
+    assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
+    assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
+    assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+  }
+});
+
+test("isolated CI pending publication still reaches the existing startup deadline without SQL", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const commands = []; const logs = []; let startInvoked = false; let startAborted = false; let clockCalls = 0;
+  const originalNow = Date.now;
+  const clock = t.mock.method(Date, "now", () => startInvoked ? ++clockCalls * 120001 : originalNow());
+  try {
+    await assert.rejects(runIsolatedSupabaseDbTests({ root,
+      argv: ["--execute", "--authorized", "--request-id", "pending-publication-deadline"],
+      tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56160; return () => ++port; })(),
+      executeNetwork: async (invocation) => {
+        commands.push(invocation); const result = await isolatedNetworkFixture(invocation);
+        if (invocation.args[0] === "inspect") {
+          const containers = JSON.parse(result.stdout); delete containers[0].NetworkSettings.Ports["5432/tcp"];
+          result.stdout = JSON.stringify(containers);
+        }
+        return result;
+      },
+      executeProcess: async (invocation) => {
+        commands.push(invocation);
+        if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+          startInvoked = true;
+          return new Promise((resolveStart) => invocation.signal.addEventListener("abort", () => { startAborted = true; resolveStart({ code: 0, stdout: "", stderr: "" }); }, { once: true }));
+        }
+        if (invocation.args[0] === "stop") assert.deepEqual(await readdir(join(invocation.cwd, "supabase/migrations")), []);
+        return { code: 0, stdout: "", stderr: "" };
+      }, createRelay: async () => { throw new Error("missing_publication_cannot_create_relay"); }, log: (entry) => logs.push(JSON.parse(entry)),
+    }), /isolated_supabase_db_start_timeout/u);
+  } finally { clock.mock.restore(); }
+  assert.equal(startAborted, true); assert.ok(clockCalls >= 2);
+  assert.equal(commands.some((call) => ["migration", "test", "status"].includes(call.args[0])), false);
+  assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
 });
 
 test("isolated CI runs both real builder preflights before migration-up and checks rollback", async (t) => {
