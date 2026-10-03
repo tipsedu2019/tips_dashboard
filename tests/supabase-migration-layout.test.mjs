@@ -20,7 +20,7 @@ import test, { after } from "node:test"
 
 import * as migrationLayoutVerifier from "../scripts/verify-supabase-migration-layout.mjs"
 
-const { validateSupabaseMigrationLayout, hasForbiddenPostdeploySqlExecution } = migrationLayoutVerifier
+const { validateSupabaseMigrationLayout, hasForbiddenPostdeploySqlExecution, validateIsolatedCiWorkflow } = migrationLayoutVerifier
 
 const repoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const isolatedRunnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", import.meta.url)
@@ -28,7 +28,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "6114c76eb8eecc5f25c2f5bda457dd2f80ce9786b4fbbd7cbb24dc67513ac564"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "4a9a0032d17a1eb586ea9c8762ae9482cb691c425d121aa623556e5f60da2891"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -39,7 +39,103 @@ const ADMISSION_ORDER_INDEPENDENCE_PGTAP =
   "supabase/tests/registration_admission_order_independence_test.sql"
 const FOCUSED_PGTAP_PATH =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
-const LINKED_MIGRATION_LEDGER_PATH = "\${RUNNER_TEMP}/supabase-migration-list.txt"
+const EXPECTED_CI_SQL_TESTS = Object.freeze([
+  "supabase/tests/agent_api_scoped_schedule_test.sql",
+  "supabase/tests/agent_api_class_changes_test.sql",
+  "supabase/tests/agent_management_calendar_test.sql",
+  "supabase/tests/student_enrollment_status_test.sql",
+  "supabase/tests/management_numbered_pages_test.sql",
+  "supabase/tests/management_page_reads_test.sql",
+  "supabase/tests/class_detail_roster_counts_test.sql",
+  "supabase/tests/class_period_membership_optional_test.sql",
+  "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
+  "supabase/tests/academic_curriculum_unscoped_period_test.sql",
+  "supabase/tests/academic_scoped_reads_test.sql",
+  "supabase/tests/timetable_continuous_class_scope_test.sql",
+  "supabase/tests/timetable_guard_aggregation_test.sql",
+  "supabase/tests/timetable_legacy_content_preservation_test.sql",
+  "supabase/tests/timetable_lesson_save_performance_test.sql",
+  "supabase/tests/timetable_makeup_domain_sqlstate_test.sql",
+  "supabase/tests/timetable_normalized_time_matching_test.sql",
+  "supabase/tests/timetable_operational_conflicts_test.sql",
+  "supabase/tests/timetable_repeatable_read_guard_test.sql",
+  "supabase/tests/timetable_serializable_guard_test.sql",
+  "supabase/tests/timetable_plan_import_test.sql",
+  "supabase/tests/timetable_plan_no_send_test.sql",
+  "supabase/tests/timetable_plan_permissions_test.sql",
+  "supabase/tests/timetable_plan_storage_test.sql",
+  "supabase/tests/timetable_plan_transfers_test.sql",
+  "supabase/tests/timetable_schedule_mutation_safety_test.sql",
+  "supabase/tests/timetable_scoped_occupancy_test.sql",
+  "supabase/tests/academic_operations_numbered_pages_test.sql",
+  "supabase/tests/performance_catalog_taxonomy_test.sql",
+  "supabase/tests/makeup_approval_collision_candidates_test.sql",
+  "supabase/tests/textbook_stock_count_atomic_test.sql",
+  "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
+  "supabase/tests/textbook_workflow_numbered_reads_test.sql",
+  "supabase/tests/textbook_workflow_purchase_cost_whitespace_test.sql",
+  "supabase/tests/signup_identity_isolation_test.sql",
+  "supabase/tests/textbook_sale_transition_atomic_test.sql",
+  "supabase/tests/dashboard_statistics_sources_test.sql",
+  "supabase/tests/dashboard_workload_test.sql",
+  "supabase/tests/dashboard_conflict_task_producer_test.sql",
+  "supabase/tests/ops_task_page_reads_test.sql",
+  "supabase/tests/ops_task_numbered_pages_test.sql",
+  "supabase/tests/ops_task_source_plan_budget_test.sql",
+  "supabase/tests/active_registration_workflow_sqlstate_contract_test.sql",
+  "supabase/tests/registration_teacher_feedback_request_retirement_test.sql",
+  "supabase/tests/registration_observation_status_independence_test.sql",
+  "supabase/tests/registration_observation_booking_test.sql",
+  "supabase/tests/registration_observation_class_lifecycle_test.sql",
+  "supabase/tests/registration_notification_readiness_decoupling_test.sql",
+  "supabase/tests/registration_flat_common_input_decoupling_test.sql",
+  "supabase/tests/registration_subject_soft_archive_test.sql",
+  "supabase/tests/registration_subject_snapshot_test.sql",
+  "supabase/tests/registration_flat_case_creation_test.sql",
+  "supabase/tests/registration_collaboration_write_role_test.sql",
+  "supabase/tests/registration_archived_subject_delivery_fence_test.sql",
+  "supabase/tests/registration_manager_write_and_integrity_fence_test.sql",
+  "supabase/tests/registration_management_notification_explicit_v2_test.sql",
+  "supabase/tests/registration_flat_fact_runtime_finalization_test.sql",
+  "supabase/tests/registration_admission_order_independence_test.sql",
+  "supabase/tests/registration_multiple_textbooks_test.sql",
+  "supabase/tests/registration_admission_checklist_roster_consistency_test.sql",
+  "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql",
+  "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
+  "supabase/tests/registration_customer_reminder_claim_final_gate_test.sql",
+  "supabase/tests/registration_customer_delivery_lookup_test.sql",
+  "supabase/tests/registration_notification_settings_atomic_policy_test.sql",
+  "supabase/tests/registration_visit_cancellation_explicit_test.sql",
+  "supabase/tests/registration_case_customer_message_history_test.sql",
+  "supabase/tests/registration_observation_explicit_chat_test.sql",
+  "supabase/tests/registration_management_notification_preview_test.sql",
+  "supabase/tests/registration_management_notification_owner_test.sql",
+  "supabase/tests/registration_management_notification_source_recovery_test.sql",
+  "supabase/tests/dashboard_google_chat_profile_mentions_test.sql",
+  "supabase/tests/registration_manual_workflow_status_test.sql",
+  "supabase/tests/operations_subject_completion_chat_test.sql",
+  "supabase/tests/word_retest_google_chat_retirement_test.sql",
+  "supabase/tests/standalone_approvals_retirement_test.sql",
+  "supabase/tests/legacy_notification_retry_storm_test.sql",
+  "supabase/tests/agent_past_lesson_state_correction_test.sql",
+  "supabase/tests/timetable_default_projection_performance_test.sql",
+  "supabase/tests/timetable_save_conflict_details_test.sql",
+  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql"
+])
+const EXPECTED_CI_PROBES = Object.freeze([
+  "tests/probe-agent-class-edit-dto.mjs",
+  "tests/probe-agent-calendar-dto.mjs",
+  "tests/probe-curriculum-scheduling-dto.mjs",
+  "tests/probe-makeup-approval-collision-dto.mjs",
+  "tests/probe-textbook-stock-count-concurrency.mjs",
+  "tests/probe-signup-identity-concurrency.mjs",
+  "tests/probe-textbook-purchase-concurrency.mjs",
+  "tests/probe-textbook-sale-transition-concurrency.mjs",
+  "tests/probe-dashboard-workload-dto.mjs",
+  "tests/probe-registration-subject-snapshot-concurrency.mjs",
+  "tests/probe-registration-management-recovery-concurrency.mjs",
+  "tests/probe-registration-visit-cancellation-dto.mjs"
+])
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
@@ -205,162 +301,6 @@ function semanticOnlyMutation(source, index) {
   }
 
   return `${mutated}\n-- trailing semantic-only comment\n`
-}
-
-function workflowWithEarlySecretScope({
-  workflowEnvLines = [],
-  jobEnvLines = [],
-  preflightEnvLines = [],
-  verifierEnvLines = [],
-  beforeVerifierLines = [],
-} = {}) {
-  return [
-    "name: Secret Scope Regression",
-    "",
-    "on: workflow_dispatch",
-    ...workflowEnvLines,
-    "",
-    "jobs:",
-    "  db-push:",
-    "    runs-on: ubuntu-latest",
-    ...jobEnvLines,
-    "    steps:",
-    "      - name: Checkout",
-    "        uses: actions/checkout@v4",
-    "",
-    ...beforeVerifierLines,
-    ...(beforeVerifierLines.length > 0 ? [""] : []),
-    "      - name: Test Supabase migration boundary",
-    ...preflightEnvLines,
-    "        run: node --test tests/supabase-migration-layout.test.mjs",
-    "",
-    "      - name: Verify Supabase migration layout",
-    ...verifierEnvLines,
-    "        run: node scripts/verify-supabase-migration-layout.mjs",
-    "",
-    "      - name: Push migrations",
-    "        env:",
-    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-    "        run: supabase db push --linked --include-all",
-    "",
-  ].join("\n")
-}
-
-function workflowWithTransactionalPreflight({
-  staticJobEnvLines = [],
-  transactionalNeeds = "db-preflight",
-  transactionalSecretEnvLines = [
-    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-  ],
-  linkSecretEnvLines = [
-    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-  ],
-  builderCommand = `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test ${FOCUSED_PGTAP_PATH} --rollback`,
-  pgTapCommand = 'supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"',
-  pushNeeds = "db-transactional-preflight",
-} = {}) {
-  const secretValidation = [
-    "      - name: Validate required secrets",
-    "        env:",
-    ...transactionalSecretEnvLines,
-    "        shell: bash",
-    "        run: test -n \"${SUPABASE_ACCESS_TOKEN}\" && test -n \"${SUPABASE_DB_PASSWORD}\"",
-    "",
-  ]
-
-  return [
-    "name: Supabase migration preflight",
-    "",
-    "on: workflow_dispatch",
-    "",
-    "jobs:",
-    "  db-preflight:",
-    "    runs-on: ubuntu-latest",
-    ...staticJobEnvLines,
-    "    steps:",
-    "      - name: Checkout",
-    "        uses: actions/checkout@v4",
-    "",
-    "      - name: Test Supabase migration boundary",
-    "        run: node --test tests/supabase-migration-layout.test.mjs",
-    "",
-    "      - name: Verify Supabase migration layout",
-    "        run: node scripts/verify-supabase-migration-layout.mjs",
-    "",
-    "      - name: Verify domain SQLSTATE contract",
-    "        run: node scripts/verify-domain-sqlstate-contract.mjs",
-    "",
-    "  db-transactional-preflight:",
-    "    runs-on: ubuntu-latest",
-    ...(transactionalNeeds ? [`    needs: ${transactionalNeeds}`] : []),
-    "    steps:",
-    "      - name: Checkout",
-    "        uses: actions/checkout@v4",
-    "",
-    "      - name: Setup Supabase CLI",
-    "        shell: bash",
-    "        run: |",
-    "          set -euo pipefail",
-    `          version="${PINNED_SUPABASE_CLI_VERSION}"`,
-    "          archive=\"supabase_${version}_linux_amd64.tar.gz\"",
-    "          archive_path=\"${RUNNER_TEMP}/${archive}\"",
-    "          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --output \"${archive_path}\" \"https://github.com/supabase/cli/releases/download/v${version}/${archive}\"",
-    `          echo "${PINNED_SUPABASE_CLI_ARCHIVE_SHA256}  \${archive_path}" | sha256sum --check --strict`,
-    "          mkdir -p \"${RUNNER_TEMP}/supabase-cli\"",
-    "          tar -xzf \"${archive_path}\" -C \"${RUNNER_TEMP}/supabase-cli\"",
-    "          echo \"${RUNNER_TEMP}/supabase-cli\" >> \"${GITHUB_PATH}\"",
-    "",
-    ...secretValidation,
-    "      - name: Resolve Supabase project ref",
-    "        run: project_ref=\"$(sed -n 's/^project_id = \\\"(.*)\\\"$/\\1/p' supabase/config.toml | head -n 1)\" && test -n \"${project_ref}\" && echo \"SUPABASE_PROJECT_REF=${project_ref}\" >> \"${GITHUB_ENV}\"",
-    "",
-    "      - name: Link project",
-    "        env:",
-    ...linkSecretEnvLines,
-    '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
-    "",
-    "      - name: Capture linked migration ledger",
-    `        run: supabase migration list --linked --output-format json > "${LINKED_MIGRATION_LEDGER_PATH}"`,
-    "",
-    "      - name: Build transactional pgTAP input",
-    `        run: ${builderCommand}`,
-    "",
-    "      - name: Run transactional focused pgTAP",
-    `        run: ${pgTapCommand}`,
-    "",
-    "  db-push:",
-    "    runs-on: ubuntu-latest",
-    ...(pushNeeds ? [`    needs: ${pushNeeds}`] : []),
-    "    steps:",
-    "      - name: Checkout",
-    "        uses: actions/checkout@v4",
-    "",
-    "      - name: Validate required secrets",
-    "        env:",
-    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-    "        shell: bash",
-    "        run: test -n \"${SUPABASE_ACCESS_TOKEN}\" && test -n \"${SUPABASE_DB_PASSWORD}\"",
-    "",
-    "      - name: Resolve Supabase project ref",
-    "        run: project_ref=\"$(sed -n 's/^project_id = \\\"(.*)\\\"$/\\1/p' supabase/config.toml | head -n 1)\" && test -n \"${project_ref}\" && echo \"SUPABASE_PROJECT_REF=${project_ref}\" >> \"${GITHUB_ENV}\"",
-    "",
-    "      - name: Link project",
-    "        env:",
-    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-    '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
-    "",
-    "      - name: Push migrations",
-    "        env:",
-    "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-    "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-    "        run: supabase db push --linked --include-all",
-    "",
-  ].join("\n")
 }
 
 async function validateWorkflowFixture(source) {
@@ -621,39 +561,9 @@ test("cutover SQL은 active lane 밖의 immutable quarantine에만 존재한다"
   const errors = await validateSupabaseMigrationLayout({ repoRoot })
   assert.deepEqual(errors, [])
   const requiredWorkflow = await readFile(requiredWorkflowPath, "utf8")
-  assert.ok(
-    requiredWorkflow.includes(
-      [
-        "      - name: Test Supabase migration boundary",
-        "        run: node --test tests/supabase-migration-layout.test.mjs",
-        "",
-        "      - name: Test transactional safety contracts",
-        "        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs",
-        "",
-        "      - name: Test Supabase post-push receipt",
-        "        run: node --test tests/supabase-postdeploy-contract.test.mjs",
-        "",
-        "      - name: Verify Supabase migration layout",
-        "        run: node scripts/verify-supabase-migration-layout.mjs",
-        "",
-        "      - name: Verify domain SQLSTATE contract",
-        "        run: node scripts/verify-domain-sqlstate-contract.mjs",
-      ].join("\n"),
-    ),
-    "static migration safety contracts must run secret-free before linked DB work",
-  )
-  assert.ok(
-    requiredWorkflow.includes(
-      [
-        "      - name: Link project",
-        "        env:",
-        "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-        "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-        '        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"',
-      ].join("\n"),
-    ),
-    "non-interactive link must receive both required secrets only at the link step",
-  )
+  assert.deepEqual(validateIsolatedCiWorkflow(requiredWorkflow), [])
+  assert.match(requiredWorkflow, /^  db-isolated-validation:\n    needs: db-preflight$/m)
+  assert.doesNotMatch(requiredWorkflow, /secrets\s*(?:\.|\[)|--linked|supabase link|supabase db push/u)
   assert.equal(await sha256(requiredWorkflowPath), REQUIRED_DB_PUSH_WORKFLOW_SHA256)
   assert.equal(
     await sha256(join(activeDir, PREPARE_ACL_MIGRATION_FILE)),
@@ -673,9 +583,8 @@ test("required DB push workflow pins the reviewed Supabase CLI release", async (
     /^\s+echo "([0-9a-f]{64})  \$\{archive_path\}" \| sha256sum --check --strict$/gm,
   )].map((match) => match[1])
 
-  assert.deepEqual(pinnedVersions, [PINNED_SUPABASE_CLI_VERSION, PINNED_SUPABASE_CLI_VERSION])
+  assert.deepEqual(pinnedVersions, [PINNED_SUPABASE_CLI_VERSION])
   assert.deepEqual(pinnedChecksums, [
-    PINNED_SUPABASE_CLI_ARCHIVE_SHA256,
     PINNED_SUPABASE_CLI_ARCHIVE_SHA256,
   ])
 })
@@ -1570,149 +1479,29 @@ test("required DB push workflow의 실파일, exact command, 순서를 강제한
     "nested-link",
   )
 
-  const workflowFixture = await createRepoFixture()
-  const workflowPath = join(workflowFixture, ".github", "workflows", "supabase-db-push.yml")
-  const workflow = await readFile(workflowPath, "utf8")
-  const verifierLine = /^.*node scripts\/verify-supabase-migration-layout\.mjs.*(?:\n|$)/m
-  assert.match(workflow, verifierLine)
-  await writeFile(workflowPath, workflow.replace(verifierLine, ""))
-  assertIncludesErrorCode(
-    await validateSupabaseMigrationLayout({ repoRoot: workflowFixture }),
-    "layout_verifier_command_count_mismatch",
-  )
-
-  const ignoredVerifierFixture = await createRepoFixture()
-  const ignoredVerifierPath = join(
-    ignoredVerifierFixture,
-    ".github",
-    "workflows",
-    "supabase-db-push.yml",
-  )
-  const ignoredVerifierWorkflow = await readFile(ignoredVerifierPath, "utf8")
-  await writeFile(
-    ignoredVerifierPath,
-    ignoredVerifierWorkflow.replace(
-      "run: node scripts/verify-supabase-migration-layout.mjs",
-      "run: node scripts/verify-supabase-migration-layout.mjs || true",
-    ),
-  )
-  assertIncludesErrorCode(
-    await validateSupabaseMigrationLayout({ repoRoot: ignoredVerifierFixture }),
-    "layout_verifier_command_count_mismatch",
-  )
-
-  const wrapperPushFixture = await createRepoFixture()
-  const wrapperPushPath = join(wrapperPushFixture, ".github", "workflows", "supabase-db-push.yml")
-  const wrapperPushWorkflow = await readFile(wrapperPushPath, "utf8")
-  await writeFile(
-    wrapperPushPath,
-    wrapperPushWorkflow.replace(
-      "run: supabase db push --linked --include-all",
-      "run: node ./scripts/db-wrapper.mjs",
-    ),
-  )
-  const wrapperPushErrors = await validateSupabaseMigrationLayout({ repoRoot: wrapperPushFixture })
-  assertIncludesErrorCode(wrapperPushErrors, "required_db_push_workflow_hash_mismatch")
-  assertIncludesErrorCode(wrapperPushErrors, "db_push_workflow_wrapper_invocation_present")
-  assertIncludesErrorCode(wrapperPushErrors, "db_push_command_count_mismatch")
-
-  const continuedPushFixture = await createRepoFixture()
-  const continuedPushPath = join(
-    continuedPushFixture,
-    ".github",
-    "workflows",
-    "supabase-db-push.yml",
-  )
-  const continuedPushWorkflow = await readFile(continuedPushPath, "utf8")
-  await writeFile(
-    continuedPushPath,
-    continuedPushWorkflow.replace(
-      "run: supabase db push --linked --include-all",
-      "run: |\n          supabase db \\\n            push --linked --include-all",
-    ),
-  )
-  const continuedPushErrors = await validateSupabaseMigrationLayout({
-    repoRoot: continuedPushFixture,
-  })
-  assertIncludesErrorCode(continuedPushErrors, "required_db_push_workflow_hash_mismatch")
-  assertIncludesErrorCode(continuedPushErrors, "db_push_line_continuation_present")
-  assertIncludesErrorCode(continuedPushErrors, "db_push_command_count_mismatch")
-
-  const verifierIfFixture = await createRepoFixture()
-  const verifierIfPath = join(verifierIfFixture, ".github", "workflows", "supabase-db-push.yml")
-  const verifierIfWorkflow = await readFile(verifierIfPath, "utf8")
-  await writeFile(
-    verifierIfPath,
-    verifierIfWorkflow.replace(
-      "      - name: Verify Supabase migration layout\n",
-      "      - name: Verify Supabase migration layout\n        if: false\n",
-    ),
-  )
-  const verifierIfErrors = await validateSupabaseMigrationLayout({ repoRoot: verifierIfFixture })
-  assertIncludesErrorCode(verifierIfErrors, "required_db_push_workflow_hash_mismatch")
-  assertIncludesErrorCode(verifierIfErrors, "db_push_workflow_layout_bypass")
-
-  const continueFixture = await createRepoFixture()
-  const continuePath = join(continueFixture, ".github", "workflows", "supabase-db-push.yml")
-  const continueWorkflow = await readFile(continuePath, "utf8")
-  await writeFile(
-    continuePath,
-    continueWorkflow.replace(
-      "      - name: Verify Supabase migration layout\n",
-      "      - name: Verify Supabase migration layout\n        continue-on-error: true\n",
-    ),
-  )
-  const continueErrors = await validateSupabaseMigrationLayout({ repoRoot: continueFixture })
-  assertIncludesErrorCode(continueErrors, "required_db_push_workflow_hash_mismatch")
-  assertIncludesErrorCode(continueErrors, "db_push_workflow_layout_bypass")
-
-  const workingDirectoryFixture = await createRepoFixture()
-  const workingDirectoryPath = join(
-    workingDirectoryFixture,
-    ".github",
-    "workflows",
-    "supabase-db-push.yml",
-  )
-  const workingDirectoryWorkflow = await readFile(workingDirectoryPath, "utf8")
-  await writeFile(
-    workingDirectoryPath,
-    workingDirectoryWorkflow.replace(
-      "      - name: Push migrations\n",
-      "      - name: Push migrations\n        working-directory: supabase/pending-migrations/notification-cutover\n",
-    ),
-  )
-  const workingDirectoryErrors = await validateSupabaseMigrationLayout({
-    repoRoot: workingDirectoryFixture,
-  })
-  assertIncludesErrorCode(workingDirectoryErrors, "required_db_push_workflow_hash_mismatch")
-  assertIncludesErrorCode(workingDirectoryErrors, "db_push_workflow_layout_bypass")
-
-  const otherJobFixture = await createRepoFixture()
-  const otherJobPath = join(otherJobFixture, ".github", "workflows", "supabase-db-push.yml")
-  const otherJobWorkflow = await readFile(otherJobPath, "utf8")
-  await writeFile(
-    otherJobPath,
-    otherJobWorkflow
-      .replace(/^.*node scripts\/verify-supabase-migration-layout\.mjs.*(?:\n|$)/m, "")
-      .replace(
-        "jobs:\n",
-        "jobs:\n  \"layout-only\":\n    runs-on: ubuntu-latest\n    steps:\n      - name: Verify layout\n        run: node scripts/verify-supabase-migration-layout.mjs\n",
-      ),
-  )
-  const otherJobErrors = await validateSupabaseMigrationLayout({ repoRoot: otherJobFixture })
-  assertIncludesErrorCode(otherJobErrors, "required_db_push_workflow_hash_mismatch")
-  assertIncludesErrorCode(otherJobErrors, "db_push_without_prior_layout_verifier")
-
+  const workflow = await readFile(requiredWorkflowPath, "utf8")
+  const cases = [
+    [workflow.replace("run: node scripts/verify-supabase-migration-layout.mjs", "run: echo skipped"), "layout_verifier_command_count_mismatch"],
+    [workflow.replace("run: node scripts/verify-supabase-migration-layout.mjs", "run: node scripts/verify-supabase-migration-layout.mjs || true"), "db_push_workflow_layout_bypass"],
+    [workflow.replace("node scripts/run-isolated-supabase-db-tests.mjs", "node ./scripts/db-wrapper.mjs"), "isolated_ci_runner_command_count_mismatch"],
+    [workflow + "\n      - run: supabase db \\\n          push --linked --include-all\n", "isolated_ci_production_connection_forbidden"],
+    [workflow.replace("      - name: Verify Supabase migration layout\n", "      - name: Verify Supabase migration layout\n        if: false\n"), "db_push_workflow_layout_bypass"],
+    [workflow.replace("      - name: Verify Supabase migration layout\n", "      - name: Verify Supabase migration layout\n        continue-on-error: true\n"), "db_push_workflow_layout_bypass"],
+    [workflow.replace("      - name: Run isolated migration and schema contracts\n", "      - name: Run isolated migration and schema contracts\n        working-directory: other\n"), "db_push_workflow_layout_bypass"],
+    [workflow.replace("    needs: db-preflight\n", ""), "isolated_ci_static_dependency_missing"],
+  ]
+  for (const [source, code] of cases) {
+    assertIncludesErrorCode(await validateWorkflowFixture(source), code)
+  }
+  const movedVerifier = workflow.replace("        run: node scripts/verify-supabase-migration-layout.mjs", "        run: echo moved")
+    + "\n  layout-only:\n    runs-on: ubuntu-latest\n    steps:\n      - run: node scripts/verify-supabase-migration-layout.mjs\n"
+  assertIncludesErrorCode(await validateWorkflowFixture(movedVerifier), "db_push_workflow_static_preflight_layout_verifier_missing")
   const externalPushFixture = await createRepoFixture()
-  await writeFile(
-    join(externalPushFixture, ".github", "workflows", "other.yml"),
-    "name: Other\non: workflow_dispatch\njobs:\n  push:\n    runs-on: ubuntu-latest\n    steps:\n      - run: supabase db push --linked --include-all\n",
-  )
-  assertIncludesErrorCode(
-    await validateSupabaseMigrationLayout({ repoRoot: externalPushFixture }),
-    "db_push_outside_required_workflow",
-  )
+  await writeFile(join(externalPushFixture, ".github", "workflows", "other.yml"),
+    "name: Other\non: workflow_dispatch\njobs:\n  writer:\n    runs-on: ubuntu-latest\n    steps:\n      - run: supabase db push --linked --include-all\n")
+  assertIncludesErrorCode(await validateSupabaseMigrationLayout({ repoRoot: externalPushFixture }), "isolated_ci_production_connection_forbidden")
 })
+
 
 test("required SQL review workflow의 실파일과 바이트를 fail-closed로 고정한다", async () => {
   const missingWorkflowFixture = await createRepoFixture()
@@ -1933,305 +1722,77 @@ test("SQL review workflow는 migration rename destination을 Squawk에 전달한
   assert.deepEqual(args, ["--no-error-on-unmatched-pattern", "--pg-version", "17", renamed])
 })
 
-test("required DB push workflow는 verifier 성공 전 Supabase secret scope를 fail-closed로 거부한다", async () => {
-  const secretNames = ["SUPABASE_ACCESS_TOKEN", "SUPABASE_DB_PASSWORD"]
-  const cases = []
-
-  for (const secretName of secretNames) {
-    const secretExpression = `\${{ secrets.${secretName} }}`
-    cases.push(
-      {
-        name: `workflow-level ${secretName}`,
-        source: workflowWithEarlySecretScope({
-          workflowEnvLines: ["env:", `  ${secretName}: ${secretExpression}`],
-        }),
-      },
-      {
-        name: `job-level ${secretName}`,
-        source: workflowWithEarlySecretScope({
-          jobEnvLines: ["    env:", `      ${secretName}: ${secretExpression}`],
-        }),
-      },
-      {
-        name: `preflight-step ${secretName}`,
-        source: workflowWithEarlySecretScope({
-          preflightEnvLines: ["        env:", `          ${secretName}: ${secretExpression}`],
-        }),
-      },
-      {
-        name: `verifier-step ${secretName}`,
-        source: workflowWithEarlySecretScope({
-          verifierEnvLines: ["        env:", `          ${secretName}: ${secretExpression}`],
-        }),
-      },
-    )
+test("isolated CI는 workflow·job·step·alias·간접 참조의 모든 production secret을 거부한다", async () => {
+  const source = await readFile(requiredWorkflowPath, "utf8")
+  for (const name of ["SUPABASE_ACCESS_TOKEN", "SUPABASE_DB_PASSWORD", "SUPABASE_DATABASE_READ_TOKEN", "SUPABASE_SERVICE_ROLE_KEY", "OTHER_SECRET"]) {
+    for (const expression of [`\${{ secrets.${name} }}`, `\${{ secrets['${name}'] }}`]) {
+      for (const placement of [
+        source.replace("jobs:\n", `env:\n  TOKEN: ${expression}\njobs:\n`),
+        source.replace("    steps:\n", `    env: &secret-env\n      TOKEN: ${expression}\n    steps:\n`),
+        source + `\n      - name: Indirect export\n        env:\n          TOKEN: >-\n            ${expression}\n        run: echo TOKEN >> \"\${GITHUB_ENV}\"\n`,
+      ]) {
+        assertIncludesErrorCode(validateIsolatedCiWorkflow(placement), "isolated_ci_production_secret_forbidden")
+      }
+    }
   }
+  assert.deepEqual(validateIsolatedCiWorkflow(source), [])
+})
 
-  cases.push(
-    {
-      name: "multiline verifier expression",
-      source: workflowWithEarlySecretScope({
-        verifierEnvLines: [
-          "        env:",
-          "          SUPABASE_ACCESS_TOKEN: >-",
-          "            ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-        ],
-      }),
-    },
-    {
-      name: "YAML alias with bracket secret expression",
-      source: workflowWithEarlySecretScope({
-        jobEnvLines: [
-          "    env: &supabase-secret-env",
-          "      SUPABASE_DB_PASSWORD: ${{ secrets['SUPABASE_DB_PASSWORD'] }}",
-        ],
-        verifierEnvLines: ["        env: *supabase-secret-env"],
-      }),
-    },
-    {
-      name: "GITHUB_ENV indirection before verifier",
-      source: workflowWithEarlySecretScope({
-        beforeVerifierLines: [
-          "      - name: Export secret before verifier",
-          "        env:",
-          "          EARLY_TOKEN: ${{ secrets['SUPABASE_ACCESS_TOKEN'] }}",
-          "        shell: bash",
-          "        run: |",
-          '          echo "SUPABASE_ACCESS_TOKEN=${EARLY_TOKEN}" >> "${GITHUB_ENV}"',
-        ],
-      }),
-    },
-    {
-      name: "secret validation step reordered before verifier",
-      source: workflowWithEarlySecretScope({
-        beforeVerifierLines: [
-          "      - name: Validate required secrets",
-          "        env:",
-          "          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-          "          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}",
-          "        run: test -n \"${SUPABASE_ACCESS_TOKEN}\" && test -n \"${SUPABASE_DB_PASSWORD}\"",
-        ],
-      }),
-    },
-  )
 
-  const fixtureRoot = await createRepoFixture()
-  const workflowPath = join(fixtureRoot, ".github", "workflows", "supabase-db-push.yml")
-  for (const { name, source } of cases) {
-    await writeFile(workflowPath, source)
-    const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
-    assertIncludesErrorCode(errors, "db_push_workflow_secret_scope_mismatch")
-    assert.ok(errors.length > 0, `${name} must be rejected`)
+test("isolated main static preflight는 layout·SQLSTATE·builder·receipt·격리 runner 검증을 유지한다", async () => {
+  const source = await readFile(requiredWorkflowPath, "utf8")
+  for (const [command, code] of [
+    ["node --test tests/supabase-migration-layout.test.mjs", "db_push_workflow_static_preflight_layout_test_missing"],
+    ["node scripts/verify-supabase-migration-layout.mjs", "db_push_workflow_static_preflight_layout_verifier_missing"],
+    ["node scripts/verify-domain-sqlstate-contract.mjs", "db_push_workflow_static_preflight_domain_sqlstate_contract_missing"],
+    ["node --test tests/supabase-postdeploy-contract.test.mjs", "db_push_workflow_static_preflight_postdeploy_receipt_test_missing"],
+    ["node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs", "isolated_ci_transaction_builder_tests_missing"],
+    ["node --test tests/isolated-supabase-db-tests.test.mjs", "isolated_ci_runner_tests_missing"],
+  ]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(command, "echo skipped")), code)
+  }
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace("  contents: read", "  contents: write")), "isolated_ci_permissions_mismatch")
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace("persist-credentials: false", "persist-credentials: true")), "isolated_ci_checkout_credentials_mismatch")
+})
+
+
+test("isolated transactional preflight는 검사 선행·CLI·local ledger·두 rollback 검증을 강제한다", async () => {
+  const source = await readFile(requiredWorkflowPath, "utf8")
+  assert.deepEqual(validateIsolatedCiWorkflow(source), [])
+  for (const [mutation, code] of [
+    [source.replace("    needs: db-preflight\n", ""), "isolated_ci_static_dependency_missing"],
+    [source.replace(`version="${PINNED_SUPABASE_CLI_VERSION}"`, 'version="latest"'), "isolated_ci_cli_pin_mismatch"],
+    [source.replace(PINNED_SUPABASE_CLI_ARCHIVE_SHA256, "0".repeat(64)), "isolated_ci_cli_pin_mismatch"],
+    [source.replace("SUPABASE_TELEMETRY_DISABLED: '1'", "SUPABASE_TELEMETRY_DISABLED: '0'"), "isolated_ci_cli_telemetry_not_disabled"],
+    [source.replace('TASK_SUPABASE_CLI="\${RUNNER_TEMP}/supabase-cli/supabase"', 'TASK_SUPABASE_CLI="other"'), "isolated_ci_runner_command_mismatch"],
+    [source.replace("github-main-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}", "fixed-id"), "isolated_ci_runner_command_mismatch"],
+    [source.replace("--execute", "--plan"), "isolated_ci_runner_command_count_mismatch"],
+  ]) assertIncludesErrorCode(validateIsolatedCiWorkflow(mutation), code)
+  for (const flag of ["--review-head", "--lint", "--require-final", "--authorized", "--postdeploy-contract", "--transactional-preflight", "--verify-local-ledger"]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(flag, "")), `isolated_ci_required_flag_missing:${flag}`)
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(flag, `${flag} ${flag}`)), `isolated_ci_required_flag_missing:${flag}`)
+  }
+  for (const command of ["supabase link --project-ref fixture", "supabase test db --linked", "supabase db push --local", "supabase db query --db-url postgres://fixture"]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source + `\n      - run: ${command}\n`), "isolated_ci_production_connection_forbidden")
   }
 })
 
-test("required DB push workflow의 static preflight는 layout·verifier·SQLSTATE contract를 secret 없이 실행한다", async () => {
-  const cases = [
-    {
-      name: "layout test is missing",
-      source: workflowWithTransactionalPreflight().replace(
-        "        run: node --test tests/supabase-migration-layout.test.mjs",
-        "        run: node --test tests/other-layout.test.mjs",
-      ),
-      code: "db_push_workflow_static_preflight_layout_test_missing",
-    },
-    {
-      name: "layout verifier is missing",
-      source: workflowWithTransactionalPreflight().replace(
-        "        run: node scripts/verify-supabase-migration-layout.mjs",
-        "        run: node scripts/verify-other-layout.mjs",
-      ),
-      code: "db_push_workflow_static_preflight_layout_verifier_missing",
-    },
-    {
-      name: "domain SQLSTATE verifier is missing",
-      source: workflowWithTransactionalPreflight().replace(
-        "        run: node scripts/verify-domain-sqlstate-contract.mjs",
-        "        run: node scripts/verify-other-contract.mjs",
-      ),
-      code: "db_push_workflow_static_preflight_domain_sqlstate_contract_missing",
-    },
-    {
-      name: "static job exposes a Supabase secret",
-      source: workflowWithTransactionalPreflight({
-        staticJobEnvLines: [
-          "    env:",
-          "      SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}",
-        ],
-      }),
-      code: "db_push_workflow_static_preflight_secret_scope_mismatch",
-    },
-  ]
 
-  for (const { name, source, code } of cases) {
-    const errors = await validateWorkflowFixture(source)
-    assertIncludesErrorCode(errors, code)
-    assert.ok(errors.length > 0, `${name} must be rejected`)
-  }
-})
-
-test("required DB push workflow의 transactional preflight는 static preflight 뒤에 pinned CLI·link·단일 SQL builder·focused pgTAP을 실행한다", async () => {
-  const defaultWorkflow = workflowWithTransactionalPreflight()
-  const defaultBuilderCommand = defaultWorkflow.match(
-    /^        run: (node scripts\/build-supabase-transactional-preflight[^\n]+)$/m,
-  )[1]
-  const cases = [
-    {
-      name: "transactional preflight does not depend on static preflight",
-      source: workflowWithTransactionalPreflight({ transactionalNeeds: null }),
-      code: "db_push_workflow_transactional_preflight_dependency_missing",
-    },
-    {
-      name: "Supabase CLI version is not pinned",
-      source: defaultWorkflow.replace(`version="${PINNED_SUPABASE_CLI_VERSION}"`, 'version="latest"'),
-      code: "db_push_workflow_transactional_preflight_cli_pin_mismatch",
-    },
-    {
-      name: "Supabase CLI archive checksum is not pinned",
-      source: defaultWorkflow.replace(PINNED_SUPABASE_CLI_ARCHIVE_SHA256, "0".repeat(64)),
-      code: "db_push_workflow_transactional_preflight_cli_pin_mismatch",
-    },
-    {
-      name: "transactional preflight validates without Supabase secrets",
-      source: workflowWithTransactionalPreflight({ transactionalSecretEnvLines: [] }),
-      code: "db_push_workflow_transactional_preflight_secret_scope_mismatch",
-    },
-    {
-      name: "transactional link does not receive Supabase secrets",
-      source: workflowWithTransactionalPreflight({ linkSecretEnvLines: [] }),
-      code: "db_push_workflow_transactional_preflight_link_secret_scope_mismatch",
-    },
-    {
-      name: "forward migration input marker drifts",
-      source: workflowWithTransactionalPreflight({
-        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/pending-migrations --focused-test ${FOCUSED_PGTAP_PATH} --rollback`,
-      }),
-      code: "db_push_workflow_transactional_preflight_forward_migrations_mismatch",
-    },
-    {
-      name: "linked migration ledger capture is skipped",
-      source: workflowWithTransactionalPreflight().replace(
-        `        run: supabase migration list --linked --output-format json > "${LINKED_MIGRATION_LEDGER_PATH}"`,
-        "        run: echo migration ledger skipped",
-      ),
-      code: "db_push_workflow_transactional_preflight_migration_ledger_missing",
-    },
-    {
-      name: "linked migration ledger falls back to display-dependent output",
-      source: workflowWithTransactionalPreflight().replace(
-        `        run: supabase migration list --linked --output-format json > "${LINKED_MIGRATION_LEDGER_PATH}"`,
-        `        run: supabase migration list --linked > "${LINKED_MIGRATION_LEDGER_PATH}"`,
-      ),
-      code: "db_push_workflow_transactional_preflight_migration_ledger_missing",
-    },
-    {
-      name: "builder does not consume linked migration ledger",
-      source: workflowWithTransactionalPreflight({
-        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "\${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test ${FOCUSED_PGTAP_PATH} --rollback`,
-      }),
-      code: "db_push_workflow_transactional_preflight_migration_ledger_marker_mismatch",
-    },
-    {
-      name: "builder does not require rollback envelope",
-      source: workflowWithTransactionalPreflight({
-        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test ${FOCUSED_PGTAP_PATH}`,
-      }),
-      code: "db_push_workflow_transactional_preflight_rollback_marker_missing",
-    },
-    {
-      name: "builder script is skipped",
-      source: workflowWithTransactionalPreflight({ builderCommand: "echo builder skipped" }),
-      code: "db_push_workflow_transactional_preflight_builder_missing",
-    },
-    {
-      name: "focused pgTAP path drifts in builder",
-      source: workflowWithTransactionalPreflight({
-        builderCommand: `node scripts/build-supabase-transactional-preflight.mjs --output "\${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${LINKED_MIGRATION_LEDGER_PATH}" --forward-migrations supabase/migrations --focused-test supabase/tests/other_test.sql --rollback`,
-      }),
-      code: "db_push_workflow_transactional_preflight_focus_path_mismatch",
-    },
-    {
-      name: "focused pgTAP command is skipped",
-      source: workflowWithTransactionalPreflight({ pgTapCommand: "echo pgTAP skipped" }),
-      code: "db_push_workflow_transactional_preflight_pgtap_missing",
-    },
-    {
-      name: "linked writer does not depend on transactional preflight",
-      source: workflowWithTransactionalPreflight({ pushNeeds: null }),
-      code: "db_push_workflow_push_dependency_missing",
-    },
-  ]
-
-  for (const { name, source, code } of cases) {
-    const errors = await validateWorkflowFixture(source)
-    assertIncludesErrorCode(errors, code)
-    assert.ok(errors.length > 0, `${name} must be rejected`)
-  }
-
-  const reordered = defaultWorkflow
-    .replace(
-      [
-        "      - name: Build transactional pgTAP input",
-        `        run: ${defaultBuilderCommand}`,
-        "",
-        "      - name: Run transactional focused pgTAP",
-        '        run: supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"',
-      ].join("\n"),
-      [
-        "      - name: Run transactional focused pgTAP",
-        '        run: supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"',
-        "",
-        "      - name: Build transactional pgTAP input",
-        `        run: ${defaultBuilderCommand}`,
-      ].join("\n"),
-    )
-  const reorderedErrors = await validateWorkflowFixture(reordered)
-  assertIncludesErrorCode(
-    reorderedErrors,
-    "db_push_workflow_transactional_preflight_order_mismatch",
-  )
-})
-
-test("post-push receipt는 고정 read-only SQL과 fresh ledger·query·verifier 순서를 요구한다", async () => {
-  const postdeploySqlPath = join(
-    repoRoot,
-    "supabase",
-    "tests",
-    "active_registration_workflow_postdeploy_readonly.sql",
-  )
-  const postdeployVerifierPath = join(
-    repoRoot,
-    "scripts",
-    "verify-supabase-postdeploy-contract.mjs",
-  )
-  const [sqlExists, verifierExists] = await Promise.all([
-    readFile(postdeploySqlPath, "utf8").then(() => true, () => false),
-    readFile(postdeployVerifierPath, "utf8").then(() => true, () => false),
-  ])
-  assert.equal(sqlExists, true, "post-push catalog receipt SQL must exist")
-  assert.equal(verifierExists, true, "post-push receipt verifier must exist")
-
+test("isolated receipt는 기존 read-only SQL·실제 local ledger·transactional preflight를 유지한다", async () => {
   const [workflow, sql] = await Promise.all([
     readFile(requiredWorkflowPath, "utf8"),
-    readFile(postdeploySqlPath, "utf8"),
+    readFile(join(repoRoot, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"), "utf8"),
   ])
-  const pushIndex = workflow.indexOf("run: supabase db push --linked --include-all")
-  const ledgerIndex = workflow.indexOf(
-    'run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
-  )
-  const queryIndex = workflow.indexOf(
-    "run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > \"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json\"",
-  )
-  const verifierIndex = workflow.indexOf(
-    'run: node scripts/verify-supabase-postdeploy-contract.mjs --migration-ledger "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt" --query-receipt "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
-  )
-  assert.ok(pushIndex < ledgerIndex && ledgerIndex < queryIndex && queryIndex < verifierIndex)
+  assert.equal(await sha256(join(repoRoot, "supabase/tests/active_registration_workflow_postdeploy_readonly.sql")), POSTDEPLOY_READONLY_SQL_SHA256)
+  await readFile(join(repoRoot, "scripts/verify-supabase-postdeploy-contract.mjs"))
+  assert.match(workflow, /--postdeploy-contract --transactional-preflight --verify-local-ledger/u)
   assert.match(sql, /^begin transaction read only;$/imu)
   assert.match(sql, /^set local statement_timeout = '5s';$/imu)
   assert.match(sql, /^set local lock_timeout = '1s';$/imu)
   assert.match(sql, /\) as contract_ok;\s*rollback;\s*$/isu)
   assert.equal(hasForbiddenPostdeploySqlExecution(sql), false)
 })
+
 
 test("read-only execution guard treats quoted predicates and comments as data", () => {
   for (const sql of [
@@ -2549,83 +2110,35 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   }
 })
 
-test("layout verifier는 post-push 영수증 누락·순서·시크릿 scope·미승인 artifact를 fail-closed한다", async () => {
-  const cases = [
-    {
-      name: "ledger capture is missing",
-      mutate: (workflow) => workflow.replace(
-        'run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
-        "run: echo ledger skipped",
-      ),
-      code: "db_push_workflow_postdeploy_ledger_missing",
-    },
-    {
-      name: "ledger capture falls back to display-dependent output",
-      mutate: (workflow) => workflow.replace(
-        'run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
-        'run: supabase migration list --linked > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
-      ),
-      code: "db_push_workflow_postdeploy_ledger_missing",
-    },
-    {
-      name: "query capture uses the legacy output flag",
-      mutate: (workflow) => workflow.replace(
-        "supabase db query --linked --output-format json --file",
-        "supabase db query --linked --output json --file",
-      ),
-      code: "db_push_workflow_postdeploy_query_missing",
-    },
-    {
-      name: "query runs before fresh ledger capture",
-      mutate: (workflow) => workflow
-        .replace(
-          "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Capture active registration workflow contract",
-          "      - name: Capture active registration workflow contract",
-        )
-        .replace(
-          '        run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"',
-          '        run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"',
-        ),
-      code: "db_push_workflow_postdeploy_order_mismatch",
-    },
-    {
-      name: "ledger capture runs before migration push",
-      mutate: (workflow) => workflow.replace(
-        "      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all\n\n      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"",
-        "      - name: Capture post-push linked migration ledger\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase migration list --linked --output-format json > \"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt\"\n\n      - name: Push migrations\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}\n        run: supabase db push --linked --include-all",
-      ),
-      code: "db_push_workflow_postdeploy_order_mismatch",
-    },
-    {
-      name: "verifier receives a Supabase secret",
-      mutate: (workflow) => workflow.replace(
-        "      - name: Verify post-push receipt\n",
-        "      - name: Verify post-push receipt\n        env:\n          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}\n",
-      ),
-      code: "db_push_workflow_postdeploy_verifier_secret_scope_mismatch",
-    },
-  ]
-
-  for (const { name, mutate, code } of cases) {
-    const fixtureRoot = await createRepoFixture()
-    const workflowPath = join(fixtureRoot, ".github", "workflows", "supabase-db-push.yml")
-    await writeFile(workflowPath, mutate(await readFile(workflowPath, "utf8")))
-    const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
-    assertIncludesErrorCode(errors, code)
-    assert.ok(errors.length > 0, `${name} must be rejected`)
+test("isolated main·PR는 동일한 SQL 81개·probe 12개와 필수 PR 검사 이름을 보존한다", async () => {
+  const main = await readFile(requiredWorkflowPath, "utf8")
+  const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
+  for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
+    const sqlTests = [...workflow.matchAll(/--test (supabase\/tests\/\S+\.sql)/g)].map((match) => match[1])
+    const probes = [...workflow.matchAll(/--probe (tests\/\S+\.mjs)/g)].map((match) => match[1])
+    assert.deepEqual(sqlTests, EXPECTED_CI_SQL_TESTS)
+    assert.deepEqual(probes, EXPECTED_CI_PROBES)
+    assert.deepEqual(validateIsolatedCiWorkflow(workflow, kind), [])
+    for (const path of EXPECTED_CI_SQL_TESTS) {
+      for (const target of ["", `--test ${path} --test ${path}`, "--test supabase/tests/unreviewed_test.sql"]) {
+        assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--test ${path}`, target), kind), "isolated_ci_sql_inventory_mismatch")
+      }
+    }
+    for (const path of EXPECTED_CI_PROBES) {
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace(`--probe ${path}`, ""), kind), "isolated_ci_probe_inventory_mismatch")
+    }
   }
-
+  assert.match(pr, /^  supabase-sql-review:/m)
+  assert.match(pr, /^  supabase-schema-contract:/m)
+  const guardrails = await readFile(join(repoRoot, ".github/workflows/free-tier-guardrails.yml"), "utf8")
+  assert.match(guardrails, /^  free-tier-guardrails:/m)
+  assert.deepEqual(validateIsolatedCiWorkflow(guardrails, "guardrails"), [])
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(guardrails + "\n    env:\n      TOKEN: ${{ secrets.PRODUCTION }}\n", "guardrails"), "isolated_ci_production_secret_forbidden")
   const artifactFixture = await createRepoFixture()
-  await mkdir(join(artifactFixture, "scripts"), { recursive: true })
-  await writeFile(
-    join(artifactFixture, "scripts", "verify-supabase-postdeploy-unapproved.mjs"),
-    "export {}\n",
-  )
-  assertIncludesErrorCode(
-    await validateSupabaseMigrationLayout({ repoRoot: artifactFixture }),
-    "postdeploy_contract_artifact_unapproved",
-  )
+  await writeFile(join(artifactFixture, "scripts/verify-supabase-postdeploy-unapproved.mjs"), "export {}\n")
+  assertIncludesErrorCode(await validateSupabaseMigrationLayout({ repoRoot: artifactFixture }), "postdeploy_contract_artifact_unapproved")
 })
+
 
 test("subject completion forward patch is allowed only at the reviewed path and exact bytes", async () => {
   assert.equal(await sha256(join(activeDir, SUBJECT_COMPLETION_MIGRATION_FILE)), SUBJECT_COMPLETION_MIGRATION_SHA256)
@@ -2649,13 +2162,11 @@ test("subject completion forward patch is allowed only at the reviewed path and 
 })
 
 
-test("calendar deployment preflight requires the exact rollback input and linked test", async () => {
+test("calendar와 registration rollback preflight 및 동일 focused SQL을 모두 강제한다", async () => {
   const workflow = await readFile(requiredWorkflowPath, "utf8")
   for (const source of [
-    workflow.replace("--focused-test supabase/tests/agent_management_calendar_test.sql --rollback", "--focused-test supabase/tests/agent_management_calendar_test.sql"),
-    workflow.replace('run: supabase test db --linked "${RUNNER_TEMP}/supabase-agent-calendar-preflight.sql"', 'run: echo skipped'),
-  ]) {
-    const errors = await validateWorkflowFixture(source)
-    assertIncludesErrorCode(errors, "db_push_workflow_calendar_preflight_missing")
-  }
+    workflow.replace("--test supabase/tests/agent_management_calendar_test.sql", ""),
+    workflow.replace(`--test ${FOCUSED_PGTAP_PATH}`, ""),
+  ]) assertIncludesErrorCode(validateIsolatedCiWorkflow(source), "isolated_ci_focused_preflight_missing")
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace("--transactional-preflight", "")), "isolated_ci_required_flag_missing:--transactional-preflight")
 })

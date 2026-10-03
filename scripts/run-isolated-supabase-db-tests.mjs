@@ -5,6 +5,8 @@ import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { createServer } from "node:net";
+import { buildTransactionalPreflightSql } from "./build-supabase-transactional-preflight.mjs";
+import { createOwnedLoopbackRelay } from "./isolated-db-loopback-relay.mjs";
 
 const ROOT = resolve(fileURLToPath(new URL("..", import.meta.url)));
 const SHA40 = /^[a-f0-9]{40}$/u;
@@ -38,6 +40,38 @@ const ISOLATED_MIGRATION_PREREQUISITE_SHA256 = "051f9a7f82ab02abfb3437c606478265
 const NOTIFICATION_SETTINGS_PREREQUISITE_PATH = "scripts/fixtures/dashboard-free-tier-notification-settings-prerequisites.sql";
 const NOTIFICATION_SETTINGS_PREREQUISITE_SHA256 = "41277cc9025e33e8ade8b134ee5f7b4836fb2fb828ecca9f28eb910d8a5edf48";
 const POSTDEPLOY_CONTRACT_PATH = "supabase/tests/active_registration_workflow_postdeploy_readonly.sql";
+const TRANSACTIONAL_PREFLIGHT_TESTS = Object.freeze([
+  "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql",
+  "supabase/tests/agent_management_calendar_test.sql",
+]);
+const FIXTURE_VERSIONS = Object.freeze(Array.from({ length: 7 }, (_, index) => String(index).padStart(14, "0")));
+// Compare transactional schema state, excluding statistics and nontransactional
+// sequence values. The tests may advance sequences, exactly as before.
+const SCHEMA_FINGERPRINT_SQL = `select md5(coalesce(jsonb_agg(to_jsonb(objects) order by kind, identity)::text, '[]')) from (
+  select 'function' kind, p.oid::regprocedure::text identity,
+    jsonb_build_array(pg_get_functiondef(p.oid), p.proacl, p.proowner) definition
+  from pg_proc p join pg_namespace n on n.oid=p.pronamespace
+  where n.nspname in ('public','dashboard_private') and p.prokind in ('f','p')
+  union all select 'relation', c.oid::regclass::text,
+    jsonb_build_array(c.relkind,c.relowner,c.relacl,c.relrowsecurity,c.relforcerowsecurity,c.reloptions)
+  from pg_class c join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname in ('public','dashboard_private')
+  union all select 'column', a.attrelid::regclass::text||'.'||a.attname,
+    jsonb_build_array(a.attnum,format_type(a.atttypid,a.atttypmod),a.attnotnull,a.attidentity,a.attgenerated,
+      (select pg_get_expr(d.adbin,d.adrelid) from pg_attrdef d where d.adrelid=a.attrelid and d.adnum=a.attnum))
+  from pg_attribute a join pg_class c on c.oid=a.attrelid join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname in ('public','dashboard_private') and a.attnum>0 and not a.attisdropped
+  union all select 'constraint', conrelid::regclass::text||'.'||conname, to_jsonb(pg_get_constraintdef(c.oid))
+  from pg_constraint c join pg_namespace n on n.oid=c.connamespace
+  where n.nspname in ('public','dashboard_private')
+  union all select 'policy', polrelid::regclass::text||'.'||polname,
+    jsonb_build_array(polcmd,polpermissive,polroles,pg_get_expr(polqual,polrelid),pg_get_expr(polwithcheck,polrelid))
+  from pg_policy p join pg_class c on c.oid=p.polrelid join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname in ('public','dashboard_private')
+  union all select 'trigger', tgrelid::regclass::text||'.'||tgname, to_jsonb(pg_get_triggerdef(t.oid))
+  from pg_trigger t join pg_class c on c.oid=t.tgrelid join pg_namespace n on n.oid=c.relnamespace
+  where n.nspname in ('public','dashboard_private') and not t.tgisinternal
+) objects;`;
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
@@ -114,23 +148,30 @@ export function buildIsolatedSupabaseConfig(projectId, ports, databaseMajorVersi
   if (![15, 17].includes(databaseMajorVersion)) fail("isolated_supabase_db_major_version_invalid");
   return `project_id = "${projectId}"\n[api]\nenabled = true\nport = ${ports.api}\n[db]\nport = ${ports.db}\nmajor_version = ${databaseMajorVersion}\n[studio]\nenabled = false\n[inbucket]\nenabled = false\n[analytics]\nenabled = false\n`;
 }
-function processResult(command, args, options = {}) {
+export function processResult(command, args, options = {}) {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(command, args, { cwd: options.cwd, env: options.env, stdio: ["ignore", "pipe", "pipe"] });
+    const child = spawn(command, args, { cwd: options.cwd, env: options.env, signal: options.signal, stdio: ["ignore", "pipe", "pipe"] });
     const stdoutChunks = []; const stderrChunks = [];
+    let processError;
+    let killTimer;
     child.stdout.on("data", (chunk) => { stdoutChunks.push(chunk); });
     child.stderr.on("data", (chunk) => { stderrChunks.push(chunk); });
-    child.on("error", rejectPromise);
-    child.on("close", (code) => resolvePromise({
-      code,
-      stdout: decodeUtf8ProcessChunks(stdoutChunks),
-      stderr: decodeUtf8ProcessChunks(stderrChunks),
-    }));
+    // AbortError can arrive before the process exits. Reap this owned child
+    // before returning to resource cleanup; escalate only that child if needed.
+    child.on("error", (error) => {
+      processError = error;
+      killTimer ||= setTimeout(() => child.kill("SIGKILL"), 2000);
+    });
+    child.on("close", (code) => {
+      clearTimeout(killTimer);
+      if (processError) rejectPromise(processError);
+      else resolvePromise({ code, stdout: decodeUtf8ProcessChunks(stdoutChunks), stderr: decodeUtf8ProcessChunks(stderrChunks) });
+    });
   });
 }
 
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, transactionalPreflight: false, verifyLocalLedger: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
@@ -141,6 +182,8 @@ export function parseIsolatedDbArguments(argv) {
     else if (value === "--review-head-sha") result.reviewHeadSha = argv[++index] || null;
     else if (value === "--lint") result.lint = true;
     else if (value === "--postdeploy-contract") result.postdeployContract = true;
+    else if (value === "--transactional-preflight") result.transactionalPreflight = true;
+    else if (value === "--verify-local-ledger") result.verifyLocalLedger = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
@@ -505,6 +548,92 @@ export async function allocateLoopbackPorts(count) {
   }
 }
 
+export function validateInternalNetwork(value, runtime, networkId) {
+  let rows;
+  try { rows = JSON.parse(value); } catch { fail("isolated_supabase_db_network_invalid"); }
+  const network = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+  if (!network || network.Id !== networkId || network.Name !== runtime.networkName
+    || network.Internal !== true || network.Driver !== "bridge" || network.EnableIPv6 !== false
+    || network.Options?.["com.docker.network.bridge.host_binding_ipv4"] !== "127.0.0.1"
+    || network.Labels?.["tips.isolated-db-qa"] !== runtime.projectId) {
+    fail("isolated_supabase_db_network_invalid");
+  }
+  return true;
+}
+
+export function validateInternalContainer(value, runtime, networkId, { relay = null, allowUnpublished = false } = {}) {
+  let rows;
+  try { rows = JSON.parse(value); } catch { fail("isolated_supabase_db_container_network_invalid"); }
+  const container = Array.isArray(rows) && rows.length === 1 ? rows[0] : null;
+  const networks = container?.NetworkSettings?.Networks;
+  if (container?.Name !== `/supabase_db_${runtime.projectId}` || container.State?.Running !== true
+    || !networks || Object.keys(networks).join("|") !== runtime.networkName
+    || networks[runtime.networkName]?.NetworkID !== networkId
+    || ![networkId, runtime.networkName].includes(container.HostConfig?.NetworkMode)) {
+    fail("isolated_supabase_db_container_network_invalid");
+  }
+  const bindings = container.NetworkSettings.Ports?.["5432/tcp"];
+  const requestedBindings = container.HostConfig.PortBindings?.["5432/tcp"];
+  if (!Array.isArray(bindings) || !Array.isArray(requestedBindings)
+    || !requestedBindings.length || bindings.some((binding) => !["127.0.0.1", "::1"].includes(binding.HostIp)
+      || Number(binding.HostPort) !== runtime.ports.db)
+    || requestedBindings.some((binding) => !["", "127.0.0.1", "::1"].includes(binding.HostIp)
+      || Number(binding.HostPort) !== runtime.ports.db)) fail("isolated_supabase_db_port_binding_invalid");
+  if (!bindings.length && !allowUnpublished) {
+    if (!relay) fail("isolated_supabase_db_port_binding_invalid");
+    relay.assertBoundary();
+  }
+  return true;
+}
+
+export function validateInternalRoutes(value) {
+  const lines = String(value).trim().split(/\r?\n/u);
+  if (!/^Iface\s+Destination\s+Gateway\s+Flags\b/u.test(lines[0] || "") || lines.length < 2) fail("isolated_supabase_db_route_invalid");
+  for (const line of lines.slice(1)) {
+    const [iface, destination, gateway, flags] = line.trim().split(/\s+/u);
+    if (!iface || !/^[a-f0-9]{8}$/iu.test(destination || "") || !/^[a-f0-9]{8}$/iu.test(gateway || "")
+      || !/^[a-f0-9]{4}$/iu.test(flags || "")) fail("isolated_supabase_db_route_invalid");
+    if (destination === "00000000" && (parseInt(flags, 16) & 1)) fail("isolated_supabase_db_default_route_forbidden");
+  }
+  return true;
+}
+
+export function parseIsolatedMigrationLedger(value) {
+  const source = String(value).trim();
+  let rows;
+  if (source.startsWith("{")) {
+    let receipt;
+    try { receipt = JSON.parse(source); } catch { fail("isolated_supabase_db_ledger_invalid"); }
+    if (!receipt || receipt.message !== "Migrations listed" || !Array.isArray(receipt.migrations)) fail("isolated_supabase_db_ledger_invalid");
+    rows = receipt.migrations.map((row) => ({ local: row.local || null, remote: row.remote || null }));
+  } else {
+    rows = [];
+    for (const line of source.split(/\r?\n/u)) {
+      if (!line.trim()) continue;
+      const columns = line.split("|").map((column) => column.trim());
+      if (columns[0] === "Local" || /^-+$/u.test(columns[0]) || /^[-\s|]+$/u.test(line)) continue;
+      if (columns.length < 2) fail("isolated_supabase_db_ledger_invalid");
+      rows.push({ local: columns[0] || null, remote: columns[1] || null });
+    }
+  }
+  if (!rows.length || rows.some(({ local, remote }) => (!local && !remote)
+    || (local && !/^\d{14}$/u.test(local)) || (remote && !/^\d{14}$/u.test(remote)))
+    || new Set(rows.filter((row) => row.local).map((row) => row.local)).size !== rows.filter((row) => row.local).length
+    || new Set(rows.filter((row) => row.remote).map((row) => row.remote)).size !== rows.filter((row) => row.remote).length) {
+    fail("isolated_supabase_db_ledger_invalid");
+  }
+  return rows.sort((left, right) => (left.local || left.remote).localeCompare(right.local || right.remote));
+}
+
+export function validateIsolatedMigrationLedger(value, { forwardVersions = [], applied = true } = {}) {
+  const rows = parseIsolatedMigrationLedger(value);
+  const expected = [...FIXTURE_VERSIONS.map((version) => ({ local: version, remote: version })),
+    ...forwardVersions.map((version) => ({ local: version, remote: applied ? version : null }))]
+    .sort((left, right) => left.local.localeCompare(right.local));
+  if (canonical(rows) !== canonical(expected)) fail("isolated_supabase_db_ledger_drift");
+  return { fixtureMigrations: FIXTURE_VERSIONS.length, forwardMigrations: forwardVersions.length, applied };
+}
+
 async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allocatePort, log, tempDirectory }) {
   const suffix = randomBytes(6).toString("hex");
   const projectId = `tips_supabase_db_qa_${suffix}`;
@@ -518,11 +647,11 @@ async function prepareRuntime({ requestId, randomBytes = secureRandomBytes, allo
     const ports = { api: values[0], db: values[1], studio: values[2], inbucket: values[3] };
     if (new Set(Object.values(ports)).size !== 4 || !Object.values(ports).every((port) => Number.isInteger(port) && port >= 1024 && port <= 65535)) fail("isolated_supabase_db_port_invalid");
     const configPath = join(tempRoot, "supabase/config.toml");
-    return { tempRoot, projectId, ports, configPath };
+    return { tempRoot, projectId, networkName: `${projectId}_internal`, ports, configPath };
   } catch (error) {
     let tempRootState = "removed";
     try { await rm(tempRoot, { recursive: true, force: true }); } catch { tempRootState = "failed"; }
-    log(JSON.stringify({ cleanup: tempRootState === "removed" ? "succeeded" : "failed", stop: "not_required", tempRoot: tempRootState }));
+    log(JSON.stringify({ cleanup: tempRootState === "removed" ? "succeeded" : "failed", stop: "not_required", network: "not_required", tempRoot: tempRootState }));
     throw error;
   }
 }
@@ -536,7 +665,7 @@ async function snapshotRequestedFiles(root, paths) {
   return snapshots;
 }
 
-export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, tempDirectory = process.env.RUNNER_TEMP || tmpdir(), supabasePath: injectedSupabasePath, executeGit = (invocation) => processResult(invocation.command, invocation.args, invocation), executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation) } = {}) {
+export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2), root = ROOT, log = () => {}, randomBytes, allocatePort, retainTempRoot = false, tempDirectory = process.env.RUNNER_TEMP || tmpdir(), supabasePath: injectedSupabasePath, executeGit = (invocation) => processResult(invocation.command, invocation.args, invocation), executeProcess = (invocation) => processResult(invocation.command, invocation.args, invocation), executeNetwork = executeProcess, createRelay = createOwnedLoopbackRelay } = {}) {
   const args = parseIsolatedDbArguments(argv);
   const artifactPaths = await loadBaselineState(root, { reviewHead: args.reviewHead });
   const captureManifest = validateBaselineManifest(JSON.parse(await readFile(artifactPaths.captureManifestPath, "utf8")));
@@ -571,6 +700,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     notificationContentPrerequisites.push({ fileName, contents });
   }
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
+  const preflightTests = args.transactionalPreflight ? await snapshotRequestedFiles(root, TRANSACTIONAL_PREFLIGHT_TESTS) : [];
   const postdeployContract = args.postdeployContract
     ? (await snapshotRequestedFiles(root, [POSTDEPLOY_CONTRACT_PATH]))[0]
     : null;
@@ -578,10 +708,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const probeDependencies = await snapshotRequestedFiles(root,
     [...new Set(args.probes.flatMap((path) => PROBE_DEPENDENCIES[path] ?? []))]);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
-  const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" };
+  const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C", SUPABASE_TELEMETRY_DISABLED: "1" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
-  const invoke = async (argsForCli, { env = cleanEnvironment } = {}) => {
-    const result = await executeProcess({ command: supabasePath, args: argsForCli, cwd: runtime.tempRoot, env });
+  const invoke = async (argsForCli, { env = cleanEnvironment, signal } = {}) => {
+    const result = await executeProcess({ command: supabasePath, args: argsForCli, cwd: runtime.tempRoot, env, signal });
     if (result.code !== 0) {
       const step = ["db", "migration", "test"].includes(argsForCli[0]) ? argsForCli.slice(0, 2).join(" ") : argsForCli[0];
       log(JSON.stringify({
@@ -595,7 +725,29 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
     return result;
   };
+  const invokeNetwork = async (networkArgs) => {
+    const result = await executeNetwork({ command: "docker", args: networkArgs, cwd: runtime.tempRoot, env: cleanEnvironment });
+    if (result.code !== 0) {
+      log(JSON.stringify({ event: "isolated_supabase_db_network_failed", step: networkArgs.slice(0, 2).join(" "),
+        stdout: sanitizeChildDiagnostic(result.stdout), stderr: sanitizeChildDiagnostic(result.stderr) }));
+      fail("isolated_supabase_db_network_failed");
+    }
+    return result;
+  };
+  const localLedger = async () => (await invoke(["migration", "list", "--local", "--workdir", runtime.tempRoot, "--output-format", "json"])).stdout;
+  const schemaFingerprint = async () => {
+    const result = await executeProcess({ command: "docker", args: ["exec", `supabase_db_${runtime.projectId}`,
+      "psql", "-XqAt", "--set", "ON_ERROR_STOP=1", "--username", "postgres", "--dbname", "postgres", "--command", SCHEMA_FINGERPRINT_SQL],
+    cwd: runtime.tempRoot, env: cleanEnvironment });
+    if (result.code !== 0 || !/^[a-f0-9]{32}$/u.test(result.stdout.trim())) fail("isolated_supabase_db_schema_fingerprint_invalid");
+    return result.stdout.trim();
+  };
   let startAttempted = false;
+  let networkCreated = false;
+  let networkId;
+  let relay = null;
+  let ledgerVerification = null;
+  const preflightVerification = [];
   let primaryError = null;
   try {
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
@@ -603,6 +755,58 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     const temporaryConfig = `${runtime.configPath}.tmp-${process.pid}`;
     await writeFile(temporaryConfig, buildIsolatedSupabaseConfig(runtime.projectId, runtime.ports, catalog.serverMajor), { mode: 0o600 });
     await rename(temporaryConfig, runtime.configPath);
+    // Scoped bridge option documented by Docker; do not change daemon policy:
+    // https://docs.docker.com/engine/network/drivers/bridge/#default-host-binding-address
+    const createdNetwork = await invokeNetwork(["network", "create", "--internal", "--driver", "bridge",
+      "--opt", "com.docker.network.bridge.host_binding_ipv4=127.0.0.1", "--label", `tips.isolated-db-qa=${runtime.projectId}`, runtime.networkName]);
+    networkCreated = true;
+    networkId = createdNetwork.stdout.trim();
+    if (!/^[a-f0-9]{64}$/u.test(networkId)) fail("isolated_supabase_db_network_invalid");
+    validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName])).stdout, runtime, networkId);
+    // Start with no repository SQL. Verify the actual container boundary before
+    // applying the baseline, fixture repairs, or any test/migration payload.
+    await mkdir(join(runtime.tempRoot, "supabase/migrations"), { recursive: true, mode: 0o700 });
+    startAttempted = true;
+    const startController = new AbortController();
+    const startTimeout = setTimeout(() => startController.abort(), 120_000);
+    let startFinished = false;
+    let startError;
+    const starting = invoke(["db", "start", "--workdir", runtime.tempRoot, "--network-id", networkId, "--yes"], { signal: startController.signal })
+      .then(() => { startFinished = true; }, (error) => { startFinished = true; startError = error; });
+    try {
+      const deadline = Date.now() + 120_000;
+      while (true) {
+        const inspected = await executeNetwork({ command: "docker", args: ["inspect", `supabase_db_${runtime.projectId}`],
+          cwd: runtime.tempRoot, env: cleanEnvironment, signal: startController.signal });
+        if (inspected.code === 0) {
+          let container;
+          try { container = JSON.parse(inspected.stdout)?.[0]; } catch { fail("isolated_supabase_db_container_network_invalid"); }
+          if (container?.State?.Running) {
+            validateInternalContainer(inspected.stdout, runtime, networkId, { allowUnpublished: true });
+            if (!container.NetworkSettings.Ports["5432/tcp"].length) {
+              relay = await createRelay({ containerName: `supabase_db_${runtime.projectId}`, port: runtime.ports.db, env: cleanEnvironment });
+              relay.assertBoundary();
+            }
+            break;
+          }
+        }
+        if (startFinished) break;
+        if (Date.now() >= deadline) fail("isolated_supabase_db_start_timeout");
+        await new Promise((resolve) => setTimeout(resolve, 50));
+      }
+      await starting;
+      if (startError) throw startError;
+    } catch (error) {
+      startController.abort();
+      await starting;
+      throw error;
+    } finally { clearTimeout(startTimeout); }
+    validateInternalNetwork((await invokeNetwork(["network", "inspect", runtime.networkName])).stdout, runtime, networkId);
+    validateInternalContainer((await invokeNetwork(["inspect", `supabase_db_${runtime.projectId}`])).stdout, runtime, networkId, { relay });
+    validateInternalRoutes((await invokeNetwork(["exec", `supabase_db_${runtime.projectId}`, "cat", "/proc/net/route"])).stdout);
+    log(JSON.stringify({ event: "isolated_supabase_db_network_verified", internal: true, exclusive: true,
+      connection: relay ? "owned_docker_exec_loopback" : "native_loopback", loopbackPublication: true,
+      noDefaultRoute: true, ipv6Disabled: true, beforeRepositorySql: true }));
     await stageContents(artifacts.baseline, join(runtime.tempRoot, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"));
     await stageContents(schemaRepair, join(runtime.tempRoot, "supabase/migrations/00000000000001_dashboard_free_tier_test_schema_repair.sql"));
     await stageContents(migrationPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000002_dashboard_free_tier_test_prerequisites.sql"));
@@ -611,16 +815,49 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (postdeployContract) {
       await stageContents(postdeployContract.contents, join(runtime.tempRoot, postdeployContract.path));
     }
-    startAttempted = true;
-    await invoke(["db", "start", "--workdir", runtime.tempRoot, "--yes"]);
+    await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
     await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"]);
     await stageContents(notificationSettingsPrerequisite, join(runtime.tempRoot, "supabase/migrations/00000000000003_dashboard_free_tier_notification_settings_prerequisites.sql"));
     for (const [index, prerequisite] of notificationContentPrerequisites.entries()) {
       const stagedVersion = String(index + 4).padStart(14, "0");
       await stageContents(prerequisite.contents, join(runtime.tempRoot, "supabase/migrations", `${stagedVersion}_${prerequisite.fileName.slice(15)}`));
     }
+    if (args.transactionalPreflight || args.verifyLocalLedger) {
+      await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
+    }
     for (const migration of migrations) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
+    const forwardVersions = migrations.map((migration) => migration.fileName.slice(0, 14));
+    if (args.transactionalPreflight) {
+      const beforeLedger = await localLedger();
+      validateIsolatedMigrationLedger(beforeLedger, { forwardVersions, applied: false });
+      // The builder sees only the verified forward SQL; native local ledger
+      // retains the seven real fixture entries. No production ledger is copied
+      // or fabricated, and the seven history-only mirrors remain excluded.
+      const forwardPath = "supabase/preflight-forward-migrations";
+      await mkdir(join(runtime.tempRoot, forwardPath), { recursive: true, mode: 0o700 });
+      for (const migration of migrations) await stageContents(migration.contents, join(runtime.tempRoot, forwardPath, migration.fileName));
+      for (const [index, test] of preflightTests.entries()) {
+        await stageContents(test.contents, join(runtime.tempRoot, test.path));
+        const preflight = await buildTransactionalPreflightSql({ repoRoot: runtime.tempRoot,
+          migrationLedger: beforeLedger, forwardMigrationsPath: forwardPath, focusedTestPath: test.path });
+        const stagedPath = `supabase/tests/isolated_transactional_preflight_${index}.sql`;
+        await stageContents(preflight.sql, join(runtime.tempRoot, stagedPath));
+        const beforeSchema = await schemaFingerprint();
+        await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, stagedPath]);
+        const afterLedger = await localLedger();
+        validateIsolatedMigrationLedger(afterLedger, { forwardVersions, applied: false });
+        if (canonical(parseIsolatedMigrationLedger(beforeLedger)) !== canonical(parseIsolatedMigrationLedger(afterLedger))
+          || beforeSchema !== await schemaFingerprint()) fail("isolated_supabase_db_preflight_rollback_drift");
+        preflightVerification.push({ test: test.path, forwardMigrations: preflight.pendingFiles.length, rollbackVerified: true });
+        log(JSON.stringify({ event: "isolated_supabase_db_transactional_preflight_passed", ...preflightVerification.at(-1) }));
+      }
+    }
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
+    if (args.verifyLocalLedger) {
+      ledgerVerification = validateIsolatedMigrationLedger(await localLedger(), { forwardVersions });
+      log(JSON.stringify({ event: "isolated_supabase_db_local_ledger_verified", ...ledgerVerification,
+        representedBaselineHistory: catalog.migrationLedger.length, historyOnlyMirrors: EXTERNALLY_APPLIED_REMOTE_HISTORY_MIGRATIONS.length }));
+    }
     if (args.lint) await invoke(["db", "lint", "--local", "--workdir", runtime.tempRoot, "--fail-on", "error"]);
     for (const test of requestedTests) await stageContents(test.contents, join(runtime.tempRoot, test.path));
     if (args.tests.length) await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, ...args.tests]);
@@ -663,16 +900,26 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       }
       log(JSON.stringify({ event: "isolated_supabase_db_probe_passed", probe: probe.path, stdout: sanitizeChildDiagnostic(probeResult.stdout) }));
     }
-    return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath } };
+    return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath },
+      verification: { internalNetwork: true, sqlTests: args.tests.length, probes: args.probes.length,
+        transactionalPreflights: preflightVerification, localLedger: ledgerVerification } };
   } catch (error) {
     primaryError = error;
+    if (relay?.getDiagnostics) log(JSON.stringify({ event: "isolated_supabase_db_relay_diagnostics", ...relay.getDiagnostics() }));
     throw error;
   } finally {
     let stopState = "not_required";
+    let networkState = "not_required";
+    let relayState = "not_required";
     let tempRootState = retainTempRoot ? "retained" : "removed";
     let cleanupFailed = false;
     let stopAttempted = false;
     let tempRootCleanupAttempted = false;
+    if (relay) {
+      try { await relay.close(); relayState = "succeeded"; } catch { relayState = "failed"; }
+      cleanupFailed = relayState === "failed";
+      log(JSON.stringify({ event: "isolated_supabase_db_relay_cleanup", status: relayState }));
+    }
     if (startAttempted) {
       stopAttempted = true;
       try {
@@ -681,7 +928,14 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       } catch {
         stopState = "failed";
       }
-      cleanupFailed = stopState === "failed";
+      cleanupFailed ||= stopState === "failed";
+    }
+    if (networkCreated) {
+      try {
+        const result = await executeNetwork({ command: "docker", args: ["network", "rm", runtime.networkName], cwd: runtime.tempRoot, env: cleanEnvironment });
+        networkState = result?.code === 0 ? "succeeded" : "failed";
+      } catch { networkState = "failed"; }
+      cleanupFailed ||= networkState === "failed";
     }
     if (!retainTempRoot) {
       tempRootCleanupAttempted = true;
@@ -690,8 +944,8 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         cleanupFailed = true;
       }
     }
-    const cleanupAttempted = stopAttempted || tempRootCleanupAttempted;
-    log(JSON.stringify({ cleanup: cleanupFailed ? "failed" : cleanupAttempted ? "succeeded" : "not_required", stop: stopState, tempRoot: tempRootState }));
+    const cleanupAttempted = stopAttempted || networkCreated || tempRootCleanupAttempted;
+    log(JSON.stringify({ cleanup: cleanupFailed ? "failed" : cleanupAttempted ? "succeeded" : "not_required", stop: stopState, network: networkState, tempRoot: tempRootState }));
     if (cleanupFailed && !primaryError) fail("isolated_supabase_db_cleanup_failed");
   }
 }

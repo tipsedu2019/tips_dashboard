@@ -12,39 +12,118 @@ const REQUIRED_SQL_REVIEW_WORKFLOW = "supabase-sql-review.yml"
 const REQUIRED_SQUAWK_CONFIG = ".squawk.toml"
 const FOCUSED_TRANSACTIONAL_PGTAP =
   "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql"
-const LINKED_MIGRATION_LEDGER = '"${RUNNER_TEMP}/supabase-migration-list.txt"'
-const TRANSACTIONAL_PGTAP_OUTPUT = '"${RUNNER_TEMP}/supabase-transactional-preflight.sql"'
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
   "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
-const EXPECTED_LEDGER_COMMAND =
-  `supabase migration list --linked --output-format json > ${LINKED_MIGRATION_LEDGER}`
-const EXPECTED_TRANSACTIONAL_BUILDER_COMMAND =
-  `node scripts/build-supabase-transactional-preflight.mjs --output ${TRANSACTIONAL_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test ${FOCUSED_TRANSACTIONAL_PGTAP} --rollback`
-const EXPECTED_TRANSACTIONAL_PGTAP_COMMAND =
-  `supabase test db --linked ${TRANSACTIONAL_PGTAP_OUTPUT}`
-const CALENDAR_PGTAP_OUTPUT = '"${RUNNER_TEMP}/supabase-agent-calendar-preflight.sql"'
-const EXPECTED_CALENDAR_BUILDER_COMMAND =
-  `node scripts/build-supabase-transactional-preflight.mjs --output ${CALENDAR_PGTAP_OUTPUT} --migration-ledger ${LINKED_MIGRATION_LEDGER} --forward-migrations supabase/migrations --focused-test supabase/tests/agent_management_calendar_test.sql --rollback`
-const EXPECTED_CALENDAR_PGTAP_COMMAND = `supabase test db --linked ${CALENDAR_PGTAP_OUTPUT}`
 const POSTDEPLOY_READONLY_SQL =
   "supabase/tests/active_registration_workflow_postdeploy_readonly.sql"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const POSTDEPLOY_VERIFIER = "scripts/verify-supabase-postdeploy-contract.mjs"
-const POSTDEPLOY_LEDGER = '"${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"'
-const POSTDEPLOY_RECEIPT = '"${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"'
-const EXPECTED_POSTDEPLOY_LEDGER_COMMAND =
-  `supabase migration list --linked --output-format json > ${POSTDEPLOY_LEDGER}`
-const EXPECTED_POSTDEPLOY_QUERY_COMMAND =
-  `supabase db query --linked --output-format json --file ${POSTDEPLOY_READONLY_SQL} > ${POSTDEPLOY_RECEIPT}`
-const EXPECTED_POSTDEPLOY_VERIFIER_COMMAND =
-  `node ${POSTDEPLOY_VERIFIER} --migration-ledger ${POSTDEPLOY_LEDGER} --query-receipt ${POSTDEPLOY_RECEIPT}`
+// Independent fixed inventories preserve every SQL/probe from the reviewed PR
+// schema job; main must execute the same permission, mutation and DTO contracts.
+const ISOLATED_SQL_TESTS = Object.freeze([
+  "supabase/tests/agent_api_scoped_schedule_test.sql",
+  "supabase/tests/agent_api_class_changes_test.sql",
+  "supabase/tests/agent_management_calendar_test.sql",
+  "supabase/tests/student_enrollment_status_test.sql",
+  "supabase/tests/management_numbered_pages_test.sql",
+  "supabase/tests/management_page_reads_test.sql",
+  "supabase/tests/class_detail_roster_counts_test.sql",
+  "supabase/tests/class_period_membership_optional_test.sql",
+  "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
+  "supabase/tests/academic_curriculum_unscoped_period_test.sql",
+  "supabase/tests/academic_scoped_reads_test.sql",
+  "supabase/tests/timetable_continuous_class_scope_test.sql",
+  "supabase/tests/timetable_guard_aggregation_test.sql",
+  "supabase/tests/timetable_legacy_content_preservation_test.sql",
+  "supabase/tests/timetable_lesson_save_performance_test.sql",
+  "supabase/tests/timetable_makeup_domain_sqlstate_test.sql",
+  "supabase/tests/timetable_normalized_time_matching_test.sql",
+  "supabase/tests/timetable_operational_conflicts_test.sql",
+  "supabase/tests/timetable_repeatable_read_guard_test.sql",
+  "supabase/tests/timetable_serializable_guard_test.sql",
+  "supabase/tests/timetable_plan_import_test.sql",
+  "supabase/tests/timetable_plan_no_send_test.sql",
+  "supabase/tests/timetable_plan_permissions_test.sql",
+  "supabase/tests/timetable_plan_storage_test.sql",
+  "supabase/tests/timetable_plan_transfers_test.sql",
+  "supabase/tests/timetable_schedule_mutation_safety_test.sql",
+  "supabase/tests/timetable_scoped_occupancy_test.sql",
+  "supabase/tests/academic_operations_numbered_pages_test.sql",
+  "supabase/tests/performance_catalog_taxonomy_test.sql",
+  "supabase/tests/makeup_approval_collision_candidates_test.sql",
+  "supabase/tests/textbook_stock_count_atomic_test.sql",
+  "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
+  "supabase/tests/textbook_workflow_numbered_reads_test.sql",
+  "supabase/tests/textbook_workflow_purchase_cost_whitespace_test.sql",
+  "supabase/tests/signup_identity_isolation_test.sql",
+  "supabase/tests/textbook_sale_transition_atomic_test.sql",
+  "supabase/tests/dashboard_statistics_sources_test.sql",
+  "supabase/tests/dashboard_workload_test.sql",
+  "supabase/tests/dashboard_conflict_task_producer_test.sql",
+  "supabase/tests/ops_task_page_reads_test.sql",
+  "supabase/tests/ops_task_numbered_pages_test.sql",
+  "supabase/tests/ops_task_source_plan_budget_test.sql",
+  "supabase/tests/active_registration_workflow_sqlstate_contract_test.sql",
+  "supabase/tests/registration_teacher_feedback_request_retirement_test.sql",
+  "supabase/tests/registration_observation_status_independence_test.sql",
+  "supabase/tests/registration_observation_booking_test.sql",
+  "supabase/tests/registration_observation_class_lifecycle_test.sql",
+  "supabase/tests/registration_notification_readiness_decoupling_test.sql",
+  "supabase/tests/registration_flat_common_input_decoupling_test.sql",
+  "supabase/tests/registration_subject_soft_archive_test.sql",
+  "supabase/tests/registration_subject_snapshot_test.sql",
+  "supabase/tests/registration_flat_case_creation_test.sql",
+  "supabase/tests/registration_collaboration_write_role_test.sql",
+  "supabase/tests/registration_archived_subject_delivery_fence_test.sql",
+  "supabase/tests/registration_manager_write_and_integrity_fence_test.sql",
+  "supabase/tests/registration_management_notification_explicit_v2_test.sql",
+  "supabase/tests/registration_flat_fact_runtime_finalization_test.sql",
+  "supabase/tests/registration_admission_order_independence_test.sql",
+  "supabase/tests/registration_multiple_textbooks_test.sql",
+  "supabase/tests/registration_admission_checklist_roster_consistency_test.sql",
+  "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql",
+  "supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql",
+  "supabase/tests/registration_customer_reminder_claim_final_gate_test.sql",
+  "supabase/tests/registration_customer_delivery_lookup_test.sql",
+  "supabase/tests/registration_notification_settings_atomic_policy_test.sql",
+  "supabase/tests/registration_visit_cancellation_explicit_test.sql",
+  "supabase/tests/registration_case_customer_message_history_test.sql",
+  "supabase/tests/registration_observation_explicit_chat_test.sql",
+  "supabase/tests/registration_management_notification_preview_test.sql",
+  "supabase/tests/registration_management_notification_owner_test.sql",
+  "supabase/tests/registration_management_notification_source_recovery_test.sql",
+  "supabase/tests/dashboard_google_chat_profile_mentions_test.sql",
+  "supabase/tests/registration_manual_workflow_status_test.sql",
+  "supabase/tests/operations_subject_completion_chat_test.sql",
+  "supabase/tests/word_retest_google_chat_retirement_test.sql",
+  "supabase/tests/standalone_approvals_retirement_test.sql",
+  "supabase/tests/legacy_notification_retry_storm_test.sql",
+  "supabase/tests/agent_past_lesson_state_correction_test.sql",
+  "supabase/tests/timetable_default_projection_performance_test.sql",
+  "supabase/tests/timetable_save_conflict_details_test.sql",
+  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql"
+])
+const ISOLATED_PROBES = Object.freeze([
+  "tests/probe-agent-class-edit-dto.mjs",
+  "tests/probe-agent-calendar-dto.mjs",
+  "tests/probe-curriculum-scheduling-dto.mjs",
+  "tests/probe-makeup-approval-collision-dto.mjs",
+  "tests/probe-textbook-stock-count-concurrency.mjs",
+  "tests/probe-signup-identity-concurrency.mjs",
+  "tests/probe-textbook-purchase-concurrency.mjs",
+  "tests/probe-textbook-sale-transition-concurrency.mjs",
+  "tests/probe-dashboard-workload-dto.mjs",
+  "tests/probe-registration-subject-snapshot-concurrency.mjs",
+  "tests/probe-registration-management-recovery-concurrency.mjs",
+  "tests/probe-registration-visit-cancellation-dto.mjs",
+])
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
-// step reordering cannot expand Supabase secret scope before the verifier exits.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "6114c76eb8eecc5f25c2f5bda457dd2f80ce9786b4fbbd7cbb24dc67513ac564"
+// step reordering cannot expand the isolated CI execution boundary.
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "4a9a0032d17a1eb586ea9c8762ae9482cb691c425d121aa623556e5f60da2891"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "d72d12e94f812f5c58d39884979915d693589ac2707507a6263dd1a901760650"
+  "b3bef8e1445f9721d9f57b8dfb67ae79ac5d12a3cbf0c1af5df08160b82dbb40"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
@@ -1002,12 +1081,6 @@ function processingReadinessProbeContractValid(source) {
     && !/\b(?:activate_notification_dispatch_cutover_v1|manage_notification_worker_schedule_v1|cron\.|net\.)\b/i.test(source)
 }
 
-function hasJobBoundary(lines, startIndex, endIndex) {
-  return lines
-    .slice(startIndex + 1, endIndex)
-    .some((line) => /^ {2}(?:[A-Za-z0-9_-]+|"[^"]+"|'[^']+'):\s*(?:#.*)?$/.test(line))
-}
-
 function workflowJobLines(lines, jobName) {
   const start = lines.findIndex((line) => line === `  ${jobName}:`)
   if (start < 0) return []
@@ -1017,22 +1090,85 @@ function workflowJobLines(lines, jobName) {
   return lines.slice(start, next < 0 ? lines.length : next)
 }
 
-function workflowStepLines(jobLines, stepName) {
-  const start = jobLines.findIndex((line) => line === `      - name: ${stepName}`)
-  if (start < 0) return []
-  const next = jobLines.findIndex(
-    (line, index) => index > start && /^ {6}-\s+(?:name|uses|run):/.test(line),
-  )
-  return jobLines.slice(start, next < 0 ? jobLines.length : next)
-}
-
 function hasExactRun(lines, command) {
   return lines.some((line) => line.trim() === `run: ${command}`)
 }
 
-function exposesSupabaseSecret(lines) {
-  const source = lines.join("\n")
-  return /secrets(?:\.|\[['"])(?:SUPABASE_ACCESS_TOKEN|SUPABASE_DB_PASSWORD)/.test(source)
+export function validateIsolatedCiWorkflow(workflow, kind = "main") {
+  const errors = []
+  const lines = workflow.split(/\r?\n/)
+  const unfolded = workflow.replace(/\\\r?\n\s*/g, " ")
+  const reject = (condition, code) => { if (condition) errors.push(code) }
+  // Whole-file hashes additionally reject aliases and unreviewed indirection.
+  // These semantic checks keep a hash update from weakening the DB boundary.
+  reject(/\bsecrets\s*(?:\.|\[)|\bSUPABASE_(?:ACCESS_TOKEN|DB_PASSWORD|DATABASE_READ_TOKEN|SERVICE_ROLE_KEY|PROJECT_REF)\b/.test(workflow),
+    "isolated_ci_production_secret_forbidden")
+  reject(/\bsupabase\s+(?:link\b|db\s+push\b)|--(?:linked|db-url|project-ref)\b/.test(unfolded),
+    "isolated_ci_production_connection_forbidden")
+  reject(workflow.includes("supabase/pending-migrations/notification-cutover"),
+    "db_push_workflow_references_quarantine")
+  reject(workflow.includes("--workdir") || lines.some((line) =>
+    /^\s*working-directory\s*:/.test(line)
+    || /^\s*continue-on-error\s*:\s*true\s*(?:#.*)?$/i.test(line)
+    || /^\s*if\s*:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:#.*)?$/i.test(line)
+    || /^(?:cp|mv|rsync)\b/.test(line.trim().replace(/^run:\s*/, "")))
+    || /\|\|\s*(?:true|echo)\b/.test(unfolded), "db_push_workflow_layout_bypass")
+  if (!["main", "pr"].includes(kind)) {
+    reject(kind !== "guardrails" && /(?:node|bun|deno|bash|sh|zsh)\s+(?:\.\/)?scripts\//.test(workflow),
+      "db_push_workflow_wrapper_invocation_present")
+    return errors
+  }
+  const staticJob = workflowJobLines(lines, kind === "main" ? "db-preflight" : "supabase-sql-review")
+  const isolatedJob = workflowJobLines(lines, kind === "main" ? "db-isolated-validation" : "supabase-schema-contract")
+  reject(!/^permissions:\n  contents: read\n/m.test(workflow), "isolated_ci_permissions_mismatch")
+  reject(!staticJob.length || !isolatedJob.length, "isolated_ci_required_job_missing")
+  reject(!hasExactRun(staticJob, "node --test tests/supabase-migration-layout.test.mjs"),
+    "db_push_workflow_static_preflight_layout_test_missing")
+  reject(!hasExactRun(staticJob, "node scripts/verify-supabase-migration-layout.mjs"),
+    "db_push_workflow_static_preflight_layout_verifier_missing")
+  reject(!hasExactRun(staticJob, "node scripts/verify-domain-sqlstate-contract.mjs"),
+    "db_push_workflow_static_preflight_domain_sqlstate_contract_missing")
+  reject(!hasExactRun(staticJob, "node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs"),
+    "isolated_ci_transaction_builder_tests_missing")
+  if (kind === "main") {
+    reject(!isolatedJob.some((line) => /^ {4}needs:\s*db-preflight\s*$/.test(line)),
+      "isolated_ci_static_dependency_missing")
+    reject(!hasExactRun(staticJob, "node --test tests/supabase-postdeploy-contract.test.mjs"),
+      "db_push_workflow_static_preflight_postdeploy_receipt_test_missing")
+    reject(!hasExactRun(staticJob, "node --test tests/isolated-supabase-db-tests.test.mjs"),
+      "isolated_ci_runner_tests_missing")
+    const verifierCount = lines.filter((line) => /^\s*run:\s*node scripts\/verify-supabase-migration-layout\.mjs\s*$/.test(line)).length
+    reject(verifierCount !== 1, "layout_verifier_command_count_mismatch")
+  }
+  reject(!isolatedJob.some((line) => line.trim() === `version="${PINNED_SUPABASE_CLI_VERSION}"`)
+    || !isolatedJob.some((line) => line.includes(`${PINNED_SUPABASE_CLI_ARCHIVE_SHA256}  \${archive_path}`)
+      && line.includes("sha256sum --check --strict")), "isolated_ci_cli_pin_mismatch")
+  reject(!isolatedJob.join("\n").includes("      - name: Setup Supabase CLI\n        env:\n          SUPABASE_TELEMETRY_DISABLED: '1'\n        shell: bash"),
+    "isolated_ci_cli_telemetry_not_disabled")
+  reject(lines.filter((line) => /^\s*persist-credentials: false\s*$/.test(line)).length !== 2,
+    "isolated_ci_checkout_credentials_mismatch")
+  const runnerLines = unfolded.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " "))
+    .filter((line) => line.includes("node scripts/run-isolated-supabase-db-tests.mjs")
+      && line.includes("--execute"))
+  reject(runnerLines.length !== 1, "isolated_ci_runner_command_count_mismatch")
+  const command = runnerLines[0] || ""
+  const sqlTests = [...command.matchAll(/--test\s+(\S+)/g)].map((match) => match[1])
+  const probes = [...command.matchAll(/--probe\s+(\S+)/g)].map((match) => match[1])
+  reject(!equalJson(sqlTests, ISOLATED_SQL_TESTS), "isolated_ci_sql_inventory_mismatch")
+  reject(!equalJson(probes, ISOLATED_PROBES), "isolated_ci_probe_inventory_mismatch")
+  for (const flag of ["--review-head", "--lint", "--require-final", "--execute", "--authorized",
+    "--postdeploy-contract", "--transactional-preflight", "--verify-local-ledger"]) {
+    reject(command.split(/\s+/).filter((part) => part === flag).length !== 1,
+      `isolated_ci_required_flag_missing:${flag}`)
+  }
+  reject(!command.includes(FOCUSED_TRANSACTIONAL_PGTAP)
+    || !command.includes("supabase/tests/agent_management_calendar_test.sql"), "isolated_ci_focused_preflight_missing")
+  const requestId = `github-${kind === "main" ? "main" : "pr"}-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}`
+  const expectedPrefix = `TASK_SUPABASE_CLI="\${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs --review-head --lint --require-final --execute --authorized --request-id "${requestId}" --postdeploy-contract --transactional-preflight --verify-local-ledger`
+  // Tests and probes are intentionally interleaved in the reviewed command.
+  const actualWithoutTargets = command.replace(/ --(?:test|probe) \S+/g, "")
+  reject(actualWithoutTargets !== expectedPrefix, "isolated_ci_runner_command_mismatch")
+  return errors
 }
 
 async function statKind(path) {
@@ -1543,318 +1679,11 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         reportedActions.add(actionName)
       }
     }
-    if (workflowRelativeToDirectory === REQUIRED_SQL_REVIEW_WORKFLOW) continue
-    if (
-      workflow.includes("supabase/pending-migrations/notification-cutover") ||
-      EXPECTED_SQL.some(([file]) => workflow.includes(file))
-    ) {
-      addError(errors, "db_push_workflow_references_quarantine", workflowRelativePath)
-    }
-
-    const lines = workflow.split(/\r?\n/)
-    const unfoldedLineContinuations = workflow.replace(/\\\r?\n\s*/g, " ")
-    if (
-      unfoldedLineContinuations !== workflow &&
-      /\bsupabase\s+db\s+push\b/i.test(unfoldedLineContinuations)
-    ) {
-      addError(errors, "db_push_line_continuation_present", workflowRelativePath)
-    }
-    if (
-      (workflowPath === requiredWorkflowPath || !allowedWorkflowHashes.has(workflowRelativeToDirectory)) &&
-      lines.some((line) => {
-        const command = line.trim().replace(/^run:\s*/, "")
-        return /(?:^|\s)(?:node|bun|deno|bash|sh|zsh)?\s*(?:\.\/)?scripts\/[A-Za-z0-9_./-]+/.test(
-          command,
-        ) && ![
-          "node scripts/verify-supabase-migration-layout.mjs",
-          "node scripts/verify-domain-sqlstate-contract.mjs",
-          EXPECTED_TRANSACTIONAL_BUILDER_COMMAND,
-          EXPECTED_CALENDAR_BUILDER_COMMAND,
-          EXPECTED_POSTDEPLOY_VERIFIER_COMMAND,
-        ].includes(command)
-      })
-    ) {
-      addError(errors, "db_push_workflow_wrapper_invocation_present", workflowRelativePath)
-    }
-    if (
-      workflow.includes("--workdir") ||
-      lines.some((line) => /^\s*working-directory\s*:/.test(line)) ||
-      lines.some((line) => /^\s*continue-on-error\s*:\s*true\s*(?:#.*)?$/i.test(line)) ||
-      lines.some((line) => /^\s*if\s*:\s*(?:false|\$\{\{\s*false\s*\}\})\s*(?:#.*)?$/i.test(line)) ||
-      lines.some((line) => /^(?:cp|mv|rsync)\b/.test(line.trim().replace(/^run:\s*/, "")))
-    ) {
-      addError(errors, "db_push_workflow_layout_bypass", workflowRelativePath)
-    }
-
-    const exactVerifierLines = lines
-      .map((line, index) => ({ line, index }))
-      .filter(({ line }) => /^\s*run:\s*node scripts\/verify-supabase-migration-layout\.mjs\s*$/.test(line))
-      .map(({ index }) => index)
-    const exactPushLines = lines
-      .map((line, index) => ({ line, index }))
-      .filter(({ line }) => /^\s*run:\s*supabase db push --linked --include-all\s*$/.test(line))
-      .map(({ index }) => index)
-
-    if (workflowPath !== requiredWorkflowPath) {
-      if (/\bsupabase\s+db\s+push\b/i.test(unfoldedLineContinuations)) {
-        addError(errors, "db_push_outside_required_workflow", workflowRelativePath)
-      }
-      continue
-    }
-
-    const staticPreflightLines = workflowJobLines(lines, "db-preflight")
-    const transactionalPreflightLines = workflowJobLines(lines, "db-transactional-preflight")
-    const pushJobLines = workflowJobLines(lines, "db-push")
-
-    if (!hasExactRun(staticPreflightLines, "node --test tests/supabase-migration-layout.test.mjs")) {
-      addError(
-        errors,
-        "db_push_workflow_static_preflight_layout_test_missing",
-        workflowRelativePath,
-      )
-    }
-    if (!hasExactRun(staticPreflightLines, "node scripts/verify-supabase-migration-layout.mjs")) {
-      addError(
-        errors,
-        "db_push_workflow_static_preflight_layout_verifier_missing",
-        workflowRelativePath,
-      )
-    }
-    if (!hasExactRun(staticPreflightLines, "node scripts/verify-domain-sqlstate-contract.mjs")) {
-      addError(
-        errors,
-        "db_push_workflow_static_preflight_domain_sqlstate_contract_missing",
-        workflowRelativePath,
-      )
-    }
-    if (!hasExactRun(staticPreflightLines, "node --test tests/supabase-postdeploy-contract.test.mjs")) {
-      addError(
-        errors,
-        "db_push_workflow_static_preflight_postdeploy_receipt_test_missing",
-        workflowRelativePath,
-      )
-    }
-    if (exposesSupabaseSecret(staticPreflightLines)) {
-      addError(
-        errors,
-        "db_push_workflow_static_preflight_secret_scope_mismatch",
-        workflowRelativePath,
-      )
-    }
-
-    if (!transactionalPreflightLines.some((line) => /^ {4}needs:\s*db-preflight\s*$/.test(line))) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_dependency_missing",
-        workflowRelativePath,
-      )
-    }
-    if (
-      !transactionalPreflightLines.some(
-        (line) => line.trim() === `version="${PINNED_SUPABASE_CLI_VERSION}"`,
-      ) ||
-      !transactionalPreflightLines.some((line) =>
-        line.includes(`${PINNED_SUPABASE_CLI_ARCHIVE_SHA256}  \${archive_path}`),
-      )
-    ) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_cli_pin_mismatch",
-        workflowRelativePath,
-      )
-    }
-
-    const transactionalSecretValidation = workflowStepLines(
-      transactionalPreflightLines,
-      "Validate required secrets",
-    )
-    if (
-      !exposesSupabaseSecret(transactionalSecretValidation) ||
-      !transactionalSecretValidation.some((line) => line.includes("SUPABASE_ACCESS_TOKEN")) ||
-      !transactionalSecretValidation.some((line) => line.includes("SUPABASE_DB_PASSWORD"))
-    ) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_secret_scope_mismatch",
-        workflowRelativePath,
-      )
-    }
-    const transactionalLinkStep = workflowStepLines(transactionalPreflightLines, "Link project")
-    if (
-      !exposesSupabaseSecret(transactionalLinkStep) ||
-      !transactionalLinkStep.some((line) => line.includes("SUPABASE_ACCESS_TOKEN")) ||
-      !transactionalLinkStep.some((line) => line.includes("SUPABASE_DB_PASSWORD"))
-    ) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_link_secret_scope_mismatch",
-        workflowRelativePath,
-      )
-    }
-
-    const builderCommands = transactionalPreflightLines
-      .map((line) => line.trim().replace(/^run:\s*/, ""))
-      .filter((command) => command.startsWith("node scripts/build-supabase-transactional-preflight.mjs"))
-    const builderCommand = builderCommands[0] ?? ""
-    if (builderCommands.length !== 2) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_builder_missing",
-        workflowRelativePath,
-      )
-    }
-    if (!builderCommand.includes("--forward-migrations supabase/migrations")) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_forward_migrations_mismatch",
-        workflowRelativePath,
-      )
-    }
-    if (!builderCommand.includes(`--migration-ledger ${LINKED_MIGRATION_LEDGER}`)) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_migration_ledger_marker_mismatch",
-        workflowRelativePath,
-      )
-    }
-    if (!builderCommand.includes("--rollback")) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_rollback_marker_missing",
-        workflowRelativePath,
-      )
-    }
-    if (!builderCommand.includes(`--focused-test ${FOCUSED_TRANSACTIONAL_PGTAP}`)) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_focus_path_mismatch",
-        workflowRelativePath,
-      )
-    }
-    if (!hasExactRun(transactionalPreflightLines, EXPECTED_LEDGER_COMMAND)) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_migration_ledger_missing",
-        workflowRelativePath,
-      )
-    }
-    if (!hasExactRun(transactionalPreflightLines, EXPECTED_TRANSACTIONAL_PGTAP_COMMAND)) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_pgtap_missing",
-        workflowRelativePath,
-      )
-    }
-
-    const calendarBuilderStep = workflowStepLines(transactionalPreflightLines, "Build agent calendar pgTAP input")
-    const calendarTestStep = workflowStepLines(transactionalPreflightLines, "Run agent calendar pgTAP")
-    if (!hasExactRun(calendarBuilderStep, EXPECTED_CALENDAR_BUILDER_COMMAND) ||
-        !hasExactRun(calendarTestStep, EXPECTED_CALENDAR_PGTAP_COMMAND) ||
-        builderCommands[1] !== EXPECTED_CALENDAR_BUILDER_COMMAND) {
-      addError(errors, "db_push_workflow_calendar_preflight_missing", workflowRelativePath)
-    }
-    if (exposesSupabaseSecret(calendarBuilderStep) || !exposesSupabaseSecret(calendarTestStep)) {
-      addError(errors, "db_push_workflow_calendar_secret_scope_mismatch", workflowRelativePath)
-    }
-    const calendarBuilderIndex = workflow.indexOf(`run: ${EXPECTED_CALENDAR_BUILDER_COMMAND}`)
-    const calendarTestIndex = workflow.indexOf(`run: ${EXPECTED_CALENDAR_PGTAP_COMMAND}`)
-    if (calendarBuilderIndex < workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_BUILDER_COMMAND}`) ||
-        calendarTestIndex < calendarBuilderIndex ||
-        calendarTestIndex < workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_PGTAP_COMMAND}`)) {
-      addError(errors, "db_push_workflow_calendar_preflight_order_mismatch", workflowRelativePath)
-    }
-
-    const linkIndex = workflow.indexOf("      - name: Link project", workflow.indexOf("  db-transactional-preflight:"))
-    const ledgerIndex = workflow.indexOf(`run: ${EXPECTED_LEDGER_COMMAND}`)
-    const builderIndex = workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_BUILDER_COMMAND}`)
-    const pgTapIndex = workflow.indexOf(`run: ${EXPECTED_TRANSACTIONAL_PGTAP_COMMAND}`)
-    if (
-      linkIndex < 0 ||
-      ledgerIndex < 0 ||
-      builderIndex < 0 ||
-      pgTapIndex < 0 ||
-      !(linkIndex < ledgerIndex && ledgerIndex < builderIndex && builderIndex < pgTapIndex)
-    ) {
-      addError(
-        errors,
-        "db_push_workflow_transactional_preflight_order_mismatch",
-        workflowRelativePath,
-      )
-    }
-
-    if (!pushJobLines.some((line) => /^ {4}needs:\s*db-transactional-preflight\s*$/.test(line))) {
-      addError(errors, "db_push_workflow_push_dependency_missing", workflowRelativePath)
-    }
-
-    const postdeployLedgerStep = workflowStepLines(pushJobLines, "Capture post-push linked migration ledger")
-    const postdeployQueryStep = workflowStepLines(pushJobLines, "Capture active registration workflow contract")
-    const postdeployVerifierStep = workflowStepLines(pushJobLines, "Verify post-push receipt")
-    for (const [step, command, code] of [
-      [postdeployLedgerStep, EXPECTED_POSTDEPLOY_LEDGER_COMMAND, "db_push_workflow_postdeploy_ledger_missing"],
-      [postdeployQueryStep, EXPECTED_POSTDEPLOY_QUERY_COMMAND, "db_push_workflow_postdeploy_query_missing"],
-      [postdeployVerifierStep, EXPECTED_POSTDEPLOY_VERIFIER_COMMAND, "db_push_workflow_postdeploy_verifier_missing"],
-    ]) {
-      if (!hasExactRun(step, command)) addError(errors, code, workflowRelativePath)
-    }
-    for (const [step, code] of [
-      [postdeployLedgerStep, "db_push_workflow_postdeploy_ledger_secret_scope_mismatch"],
-      [postdeployQueryStep, "db_push_workflow_postdeploy_query_secret_scope_mismatch"],
-    ]) {
-      if (
-        !exposesSupabaseSecret(step) ||
-        !step.some((line) => line.includes("SUPABASE_ACCESS_TOKEN")) ||
-        !step.some((line) => line.includes("SUPABASE_DB_PASSWORD"))
-      ) {
-        addError(errors, code, workflowRelativePath)
-      }
-    }
-    if (exposesSupabaseSecret(postdeployVerifierStep)) {
-      addError(errors, "db_push_workflow_postdeploy_verifier_secret_scope_mismatch", workflowRelativePath)
-    }
-
-    const postdeployPushIndex = workflow.indexOf("run: supabase db push --linked --include-all")
-    const postdeployLedgerIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_LEDGER_COMMAND}`)
-    const postdeployQueryIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_QUERY_COMMAND}`)
-    const postdeployVerifierIndex = workflow.indexOf(`run: ${EXPECTED_POSTDEPLOY_VERIFIER_COMMAND}`)
-    if (
-      postdeployPushIndex < 0 ||
-      postdeployLedgerIndex < 0 ||
-      postdeployQueryIndex < 0 ||
-      postdeployVerifierIndex < 0 ||
-      !(postdeployPushIndex < postdeployLedgerIndex && postdeployLedgerIndex < postdeployQueryIndex && postdeployQueryIndex < postdeployVerifierIndex)
-    ) {
-      addError(errors, "db_push_workflow_postdeploy_order_mismatch", workflowRelativePath)
-    }
-
-    for (const line of lines) {
-      if (!line.includes("supabase db push")) continue
-      const command = line.trim().replace(/^run:\s*/, "")
-      if (command !== "supabase db push --linked --include-all") {
-        addError(errors, "db_push_command_not_exact", workflowRelativePath)
-      }
-    }
-    if (exactVerifierLines.length !== 1) {
-      addError(errors, "layout_verifier_command_count_mismatch", workflowRelativePath)
-    }
-    if (exactPushLines.length !== 1) {
-      addError(errors, "db_push_command_count_mismatch", workflowRelativePath)
-    }
-    if (
-      exactVerifierLines.length === 1 &&
-      exactPushLines.length === 1 &&
-      (
-        exactVerifierLines[0] >= exactPushLines[0] ||
-        (
-          hasJobBoundary(lines, exactVerifierLines[0], exactPushLines[0]) &&
-          !(
-            hasExactRun(staticPreflightLines, "node scripts/verify-supabase-migration-layout.mjs") &&
-            transactionalPreflightLines.some((line) => /^ {4}needs:\s*db-preflight\s*$/.test(line)) &&
-            pushJobLines.some((line) => /^ {4}needs:\s*db-transactional-preflight\s*$/.test(line))
-          )
-        )
-      )
-    ) {
-      addError(errors, "db_push_without_prior_layout_verifier", workflowRelativePath)
+    const kind = workflowRelativeToDirectory === REQUIRED_DB_PUSH_WORKFLOW ? "main"
+      : workflowRelativeToDirectory === REQUIRED_SQL_REVIEW_WORKFLOW ? "pr"
+        : workflowRelativeToDirectory === "free-tier-guardrails.yml" ? "guardrails" : "other"
+    for (const code of validateIsolatedCiWorkflow(workflow, kind)) {
+      addError(errors, code, workflowRelativePath)
     }
   }
 

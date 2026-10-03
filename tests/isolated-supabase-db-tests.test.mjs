@@ -9,7 +9,7 @@ import test from "node:test";
 
 const captureUrl = new URL("../scripts/capture-dashboard-free-tier-catalog.mjs", import.meta.url);
 const runnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", import.meta.url);
-const docker = "/usr/local/bin/docker";
+const docker = "docker";
 const postgres17Image = "public.ecr.aws/supabase/postgres:17.6.1.156";
 
 function canonical(value) {
@@ -29,7 +29,7 @@ function captureScopeFixture(functions = ["public.get_dashboard_summary_sources_
 async function withPostgres17(t, run) {
   const name = `tips-task1-postgres17-${process.pid}-${randomBytes(4).toString("hex")}`;
   const invoke = (args, options = {}) => spawnSync(docker, args, { encoding: "utf8", timeout: 60_000, ...options });
-  const started = invoke(["run", "--rm", "--detach", "--name", name, "--env", "POSTGRES_PASSWORD=task-local-only", postgres17Image]);
+  const started = invoke(["run", "--rm", "--detach", "--network", "none", "--name", name, "--env", "POSTGRES_PASSWORD=task-local-only", postgres17Image]);
   assert.equal(started.status, 0, started.stderr);
   t.after(() => invoke(["rm", "--force", name]));
   let consecutiveReadyChecks = 0;
@@ -98,6 +98,30 @@ async function makeRunnerTempDirectory(t) {
   const directory = await mkdtemp(join(tmpdir(), "tips-isolated-runner-temp-"));
   t.after(() => rm(directory, { recursive: true, force: true }));
   return directory;
+}
+
+// Existing process fixtures model Supabase/probe commands. Docker networking is
+// independently modelled here; dedicated cases below reject unsafe boundaries.
+async function isolatedNetworkFixture(invocation) {
+  const config = await readFile(join(invocation.cwd, "supabase/config.toml"), "utf8");
+  const projectId = config.match(/^project_id = "([a-z0-9_]+)"/mu)[1];
+  const dbPort = config.match(/\[db\]\nport = (\d+)/u)[1];
+  const networkName = `${projectId}_internal`;
+  const networkId = "a".repeat(64);
+  let stdout = "";
+  if (invocation.args[0] === "network" && invocation.args[1] === "create") stdout = `${networkId}\n`;
+  if (invocation.args[0] === "network" && invocation.args[1] === "inspect") stdout = JSON.stringify([{
+    Id: networkId, Name: networkName, Internal: true, Driver: "bridge", EnableIPv6: false,
+    Options: { "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1" }, Labels: { "tips.isolated-db-qa": projectId },
+  }]);
+  if (invocation.args[0] === "inspect") stdout = JSON.stringify([{
+    Name: `/supabase_db_${projectId}`, State: { Running: true }, HostConfig: { NetworkMode: networkId,
+      PortBindings: { "5432/tcp": [{ HostIp: "", HostPort: dbPort }] } },
+    NetworkSettings: { Networks: { [networkName]: { NetworkID: networkId } },
+      Ports: { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: dbPort }] } },
+  }]);
+  if (invocation.args[0] === "exec") stdout = "Iface\tDestination\tGateway\tFlags\tRefCnt\tUse\tMetric\tMask\tMTU\tWindow\tIRTT\neth0\t000011AC\t00000000\t0001\t0\t0\t0\t0000FFFF\t0\t0\t0\n";
+  return { code: 0, stdout, stderr: "" };
 }
 
 async function writeCaptureScope(root) {
@@ -924,7 +948,7 @@ test("isolated DB config keeps project_id at the top level", async () => {
 test("isolated DB runner refuses canonical files when no active capture-set pointer exists", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t);
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: [] }), /isolated_supabase_db_baseline_review_required/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: [] }), /isolated_supabase_db_baseline_review_required/);
 });
 
 test("isolated DB runner rejects parity drift inside the active immutable capture", async (t) => {
@@ -935,7 +959,7 @@ test("isolated DB runner rejects parity drift inside the active immutable captur
   const parity = join(root, "supabase/test-baselines/dashboard-free-tier-v1-captures", pointer.captureId, "parity.sql");
   await writeFile(parity, "-- drift\n");
   await assert.rejects(
-    runIsolatedSupabaseDbTests({ root, argv: [] }),
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: [] }),
     /isolated_supabase_db_capture_identity_drift/,
   );
 });
@@ -963,12 +987,12 @@ test("isolated DB final gate rejects candidate lifecycle and accepts the same ex
   manifest.orderedNewMigrations = [{ fileName: "20260814000000_fixture.sql", status: "candidate", sha256: sha256("select 1;\n") }];
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await activateCanonicalBaseline(root);
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--require-final"] }), /isolated_supabase_db_final_manifest_required/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--require-final"] }), /isolated_supabase_db_final_manifest_required/);
 
   manifest.orderedNewMigrations[0].status = "final";
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await activateCanonicalBaseline(root);
-  const plan = await runIsolatedSupabaseDbTests({ root, argv: ["--require-final"] });
+  const plan = await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--require-final"] });
   assert.equal(plan.status, "plan");
   assert.equal(plan.manifest.orderedNewMigrations[0].status, "final");
 });
@@ -990,7 +1014,7 @@ test("review-head reads the top-level manifest while retaining immutable active-
   };
   await writeFile(manifestPath, `${JSON.stringify(reviewHeadManifest, null, 2)}\n`);
 
-  const plan = await runIsolatedSupabaseDbTests({ root, argv: ["--review-head", "--require-final"] });
+  const plan = await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--review-head", "--require-final"] });
   assert.deepEqual(plan.manifest.orderedNewMigrations, reviewHeadManifest.orderedNewMigrations);
   assert.equal(plan.artifactPaths.manifestPath.endsWith("dashboard-free-tier-v1.manifest.json"), true);
   assert.match(plan.artifactPaths.baselinePath, /dashboard-free-tier-v1-captures\/[a-f0-9]{16}\/baseline\.sql$/u);
@@ -1209,6 +1233,7 @@ test("capture leaves all target artifacts unchanged for redirect, 405, and malfo
 test("isolated DB execute uses sanitized temp config, verifies candidate bytes, gates probes, and stops once", async (t) => {
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t);
+  const tempDirectory = await makeRunnerTempDirectory(t);
   const baseline = await readFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.sql"));
   const reviewedCatalog = JSON.stringify({ captureStatus: "reviewed", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", serverMajor: 17, migrationLedger: [], catalog: [] });
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-origin-main-catalog.json"), reviewedCatalog);
@@ -1250,8 +1275,9 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
 
   const calls = [];
   const staged = { baseline: false, schemaRepair: false, prerequisite: false, parity: false, smoke: false, migration: false, postdeploy: false, probe: false };
-  const result = await runIsolatedSupabaseDbTests({
+  const result = await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
     root,
+    tempDirectory,
     argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f", "--postdeploy-contract", "--test", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql", "--probe", "tests/probe.mjs", "--probe", consumerProbePath],
     randomBytes: () => Buffer.from("a1b2c3d4e5f6", "hex"),
     retainTempRoot: true,
@@ -1273,7 +1299,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
         await writeFile(notificationSettingsPath, "-- mutated after verification\n");
         for (const prerequisite of originalContentPrerequisites) await writeFile(join(root, "supabase/migrations", prerequisite.fileName), "-- mutated after verification\n");
       }
-      if (invocation.args[0] === "db") {
+      if (invocation.args[0] === "migration") {
         staged.baseline = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql"))).equals(baseline);
         staged.schemaRepair = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000001_dashboard_free_tier_test_schema_repair.sql"))).equals(originalSchemaRepair);
         staged.prerequisite = (await readFile(join(invocation.cwd, "supabase/migrations/00000000000002_dashboard_free_tier_test_prerequisites.sql"))).equals(originalPrerequisite);
@@ -1282,7 +1308,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
         staged.parity = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_catalog_parity_test.sql"))).equals(originalParity);
         staged.smoke = (await readFile(join(invocation.cwd, "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"))).equals(originalSmoke);
       }
-      if (invocation.args[0] === "migration") {
+      if (invocation.args[0] === "migration" && staged.parity) {
         staged.migration = (await readFile(join(invocation.cwd, "supabase/migrations/20260814000000_candidate.sql"), "utf8")) === "select 1;\n";
         assert.equal((await readFile(join(invocation.cwd, "supabase/migrations/00000000000003_dashboard_free_tier_notification_settings_prerequisites.sql"))).equals(originalNotificationSettings), true);
         for (const [index, prerequisite] of originalContentPrerequisites.entries()) {
@@ -1310,16 +1336,17 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
     },
   });
   assert.equal(result.status, "passed");
-  assert.deepEqual(calls.filter((call) => call.command.endsWith("/supabase")).map((call) => call.args[0]), ["init", "db", "test", "migration", "test", "status", "stop"]);
+  assert.deepEqual(calls.filter((call) => call.command.endsWith("/supabase")).map((call) => call.args[0]), ["init", "db", "migration", "test", "migration", "test", "status", "stop"]);
   assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
   assert.equal(calls.find((call) => call.command === process.execPath).env.TASK_LOCAL_DB_URL.includes("127.0.0.1"), true);
   assert.equal(calls.find((call) => call.command === process.execPath).env.SUPABASE_DATABASE_READ_TOKEN, undefined);
   assert.equal(
-    Object.keys(calls.find((call) => call.command === "docker").env).some((key) => key.startsWith("SUPABASE_")),
+    Object.keys(calls.find((call) => call.command === "docker").env).some((key) => key.startsWith("SUPABASE_") && key !== "SUPABASE_TELEMETRY_DISABLED"),
     false,
   );
+  assert.equal(calls.find((call) => call.command === "docker").env.SUPABASE_TELEMETRY_DISABLED, "1");
   assert.deepEqual(staged, { baseline: true, schemaRepair: true, prerequisite: true, parity: true, smoke: true, migration: true, postdeploy: true, probe: true });
-  assert.equal(dirname(result.runtime.tempRoot), process.env.RUNNER_TEMP || tmpdir());
+  assert.equal(dirname(result.runtime.tempRoot), tempDirectory);
   const runtimeConfig = await readFile(result.runtime.configPath, "utf8");
   assert.match(runtimeConfig, /project_id = "tips_supabase_db_qa_a1b2c3d4e5f6"/u);
   assert.match(runtimeConfig, /\[db\]\nport = 55433\nmajor_version = 17\n/u);
@@ -1335,7 +1362,7 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
   const falseContractCalls = [];
   await assert.rejects(
-    runIsolatedSupabaseDbTests({
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
       root,
       argv: ["--execute", "--authorized", "--request-id", "false-postdeploy-contract", "--postdeploy-contract"],
       allocatePort: (() => { let port = 55700; return () => ++port; })(),
@@ -1349,20 +1376,20 @@ test("isolated DB execute uses sanitized temp config, verifies candidate bytes, 
   );
   assert.equal(falseContractCalls.filter((call) => call.args[0] === "stop").length, 1);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 2;\n");
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_migration_hash_drift/);
   await writeFile(join(root, "supabase/migrations/20260814000000_candidate.sql"), "select 1;\n");
   await writeFile(schemaRepairPath, "-- drift\n");
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_schema_repair_drift/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_schema_repair_drift/);
   await writeFile(schemaRepairPath, originalSchemaRepair);
   await writeFile(prerequisitePath, "-- drift\n");
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_prerequisite_drift/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "4f77e691-9f40-49aa-9bc4-0be2321e2c8f"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_prerequisite_drift/);
   await writeFile(prerequisitePath, originalPrerequisite);
   const contentPath = join(root, "supabase/migrations", originalContentPrerequisites[0].fileName);
   await writeFile(contentPath, "-- drift\n");
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "content-prerequisite-drift-20260909"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_remote_history_hash_drift/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "content-prerequisite-drift-20260909"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_remote_history_hash_drift/);
   await writeFile(contentPath, originalContentPrerequisites[0].contents);
   await writeFile(notificationSettingsPath, "-- drift\n");
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "registration-prerequisite-drift-20260908"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_notification_settings_prerequisite_drift/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "registration-prerequisite-drift-20260908"], executeProcess: async () => { throw new Error("must not start"); } }), /isolated_supabase_db_notification_settings_prerequisite_drift/);
 });
 
 test("runner stages each requested SQL file after init and before target pgtap", async (t) => {
@@ -1377,7 +1404,7 @@ test("runner stages each requested SQL file after init and before target pgtap",
   await writeFile(join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json"), JSON.stringify({ baselineVersion: "dashboard-free-tier-v1", originMainSha: "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101", baselineSha256: sha256(baseline), catalogSha256: sha256(catalog), requiredObjectSignatures: [], orderedNewMigrations: [] }));
   await activateCanonicalBaseline(root);
   let sawTarget = false;
-  await runIsolatedSupabaseDbTests({
+  await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
     root,
     argv: ["--execute", "--authorized", "--request-id", "97f77e69-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/target_test.sql"],
     allocatePort: (() => { let port = 55500; return () => ++port; })(),
@@ -1390,7 +1417,7 @@ test("runner stages each requested SQL file after init and before target pgtap",
     },
   });
   assert.equal(sawTarget, true);
-  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "98f77e69-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/missing_test.sql"], allocatePort: (() => { let port = 55600; return () => ++port; })(), executeProcess: async () => ({ code: 0, stdout: "", stderr: "" }) }), /isolated_supabase_db_target_missing/);
+  await assert.rejects(runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture, root, argv: ["--execute", "--authorized", "--request-id", "98f77e69-9f40-49aa-9bc4-0be2321e2c8f", "--test", "supabase/tests/missing_test.sql"], allocatePort: (() => { let port = 55600; return () => ++port; })(), executeProcess: async () => ({ code: 0, stdout: "", stderr: "" }) }), /isolated_supabase_db_target_missing/);
 });
 
 test("runner lints the reviewed head after migration application with one injected Supabase executable", async (t) => {
@@ -1407,7 +1434,7 @@ test("runner lints the reviewed head after migration application with one inject
   await activateCanonicalBaseline(root);
 
   const calls = [];
-  await runIsolatedSupabaseDbTests({
+  await runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
     root,
     argv: ["--execute", "--authorized", "--request-id", "97f77e69-9f40-49aa-9bc4-0be2321e2c8f", "--review-head", "--lint", "--test", "supabase/tests/target_test.sql"],
     supabasePath: "/fixture/bin/supabase",
@@ -1438,7 +1465,7 @@ test("runner removes its temp root when port allocation fails before runtime ret
   const logs = [];
   let allocationCount = 0;
   await assert.rejects(
-    runIsolatedSupabaseDbTests({
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
       root,
       argv: ["--execute", "--authorized", "--request-id", requestId],
       tempDirectory,
@@ -1457,6 +1484,7 @@ test("runner removes its temp root when port allocation fails before runtime ret
   assert.deepEqual(logs.at(-1), {
     cleanup: "succeeded",
     stop: "not_required",
+    network: "not_required",
     tempRoot: "removed",
   });
 });
@@ -1470,7 +1498,7 @@ test("runner reports successful temp-root cleanup when Supabase init fails", asy
   const tempRoot = join(tempDirectory, `tips-supabase-db-qa-${requestId}`);
   const logs = [];
   await assert.rejects(
-    runIsolatedSupabaseDbTests({
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
       root,
       argv: ["--execute", "--authorized", "--request-id", requestId],
       tempDirectory,
@@ -1494,6 +1522,7 @@ test("runner reports successful temp-root cleanup when Supabase init fails", asy
   assert.deepEqual(logs.at(-1), {
     cleanup: "succeeded",
     stop: "not_required",
+    network: "not_required",
     tempRoot: "removed",
   });
 });
@@ -1507,7 +1536,7 @@ test("runner retains its temp root after Supabase init failure only when request
   const tempRoot = join(tempDirectory, `tips-supabase-db-qa-${requestId}`);
   const logs = [];
   await assert.rejects(
-    runIsolatedSupabaseDbTests({
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
       root,
       argv: ["--execute", "--authorized", "--request-id", requestId],
       tempDirectory,
@@ -1525,6 +1554,7 @@ test("runner retains its temp root after Supabase init failure only when request
   assert.deepEqual(logs.at(-1), {
     cleanup: "not_required",
     stop: "not_required",
+    network: "not_required",
     tempRoot: "retained",
   });
 });
@@ -1535,7 +1565,7 @@ test("runner reports a nonzero Supabase stop as cleanup failure and cannot retur
   await configureEmptyReviewedRunnerRepo(root);
   const logs = [];
   await assert.rejects(
-    runIsolatedSupabaseDbTests({
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
       root,
       argv: ["--execute", "--authorized", "--request-id", "nonzero-stop-cleanup-fixture"],
       allocatePort: (() => { let port = 55900; return () => ++port; })(),
@@ -1553,6 +1583,7 @@ test("runner reports a nonzero Supabase stop as cleanup failure and cannot retur
   assert.deepEqual(logs.at(-1), {
     cleanup: "failed",
     stop: "failed",
+    network: "succeeded",
     tempRoot: "removed",
   });
 });
@@ -1563,7 +1594,7 @@ test("cleanup failure is logged without masking an earlier execution failure", a
   await configureEmptyReviewedRunnerRepo(root);
   const logs = [];
   await assert.rejects(
-    runIsolatedSupabaseDbTests({
+    runIsolatedSupabaseDbTests({ executeNetwork: isolatedNetworkFixture,
       root,
       argv: ["--execute", "--authorized", "--request-id", "primary-and-cleanup-failure-fixture"],
       allocatePort: (() => { let port = 56000; return () => ++port; })(),
@@ -1588,6 +1619,7 @@ test("cleanup failure is logged without masking an earlier execution failure", a
   assert.deepEqual(logs.at(-1), {
     cleanup: "failed",
     stop: "failed",
+    network: "succeeded",
     tempRoot: "removed",
   });
 });
@@ -2658,4 +2690,195 @@ test("lint failure diagnostics retain errors before truncating unrelated warning
   assert.match(result, /42883/u);
   assert.doesNotMatch(result, /legacy_warning/u);
   assert.equal(summarizeLintErrors("not json"), "not json");
+});
+
+test("isolated CI parses both migration-equivalence gates", async () => {
+  const { parseIsolatedDbArguments } = await import(runnerUrl.href);
+  const parsed = parseIsolatedDbArguments(["--transactional-preflight", "--verify-local-ledger"]);
+  assert.equal(parsed.transactionalPreflight, true);
+  assert.equal(parsed.verifyLocalLedger, true);
+});
+
+test("isolated CI rejects external networks, wrong ownership, IPv6 and broad port publication", async () => {
+  const { validateInternalNetwork, validateInternalContainer, validateInternalRoutes } = await import(runnerUrl.href);
+  const runtime = { projectId: "tips_supabase_db_qa_fixture", networkName: "tips_supabase_db_qa_fixture_internal", ports: { db: 55500 } };
+  const networkId = "a".repeat(64);
+  const network = { Id: networkId, Name: runtime.networkName, Internal: true, Driver: "bridge", EnableIPv6: false,
+    Options: { "com.docker.network.bridge.host_binding_ipv4": "127.0.0.1" }, Labels: { "tips.isolated-db-qa": runtime.projectId } };
+  assert.equal(validateInternalNetwork(JSON.stringify([network]), runtime, networkId), true);
+  for (const changed of [{ Internal: false }, { EnableIPv6: true }, { Labels: {} }, { Options: {} }, { Name: "bridge" }]) {
+    assert.throws(() => validateInternalNetwork(JSON.stringify([{ ...network, ...changed }]), runtime, networkId), /network_invalid/u);
+  }
+  const container = { Name: `/supabase_db_${runtime.projectId}`, State: { Running: true },
+    HostConfig: { NetworkMode: networkId, PortBindings: { "5432/tcp": [{ HostIp: "", HostPort: "55500" }] } },
+    NetworkSettings: { Networks: { [runtime.networkName]: { NetworkID: networkId } }, Ports: { "5432/tcp": [{ HostIp: "127.0.0.1", HostPort: "55500" }] } } };
+  assert.equal(validateInternalContainer(JSON.stringify([container]), runtime, networkId), true);
+  const dual = structuredClone(container); dual.NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
+  assert.throws(() => validateInternalContainer(JSON.stringify([dual]), runtime, networkId), /container_network_invalid/u);
+  const exposed = structuredClone(container); exposed.NetworkSettings.Ports["5432/tcp"][0].HostIp = "0.0.0.0";
+  assert.throws(() => validateInternalContainer(JSON.stringify([exposed]), runtime, networkId), /port_binding_invalid/u);
+  const route = "Iface Destination Gateway Flags RefCnt Use Metric Mask MTU Window IRTT\neth0 000011AC 00000000 0001 0 0 0 0000FFFF 0 0 0\n";
+  assert.equal(validateInternalRoutes(route), true);
+  assert.throws(() => validateInternalRoutes(`${route}eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n`), /default_route_forbidden/u);
+  assert.throws(() => validateInternalRoutes("missing route table"), /route_invalid/u);
+});
+
+test("isolated CI checks native fixture and forward ledger without inventing production history", async () => {
+  const { validateIsolatedMigrationLedger } = await import(runnerUrl.href);
+  const versions = ["20261002114145", "20261002130443"];
+  const fixture = Array.from({ length: 7 }, (_, index) => ({ local: String(index).padStart(14, "0"), remote: String(index).padStart(14, "0"), time: "fixture" }));
+  const receipt = (rows) => JSON.stringify({ message: "Migrations listed", migrations: rows });
+  const pending = [...fixture, ...versions.map((local) => ({ local, remote: "", time: "forward" }))];
+  assert.deepEqual(validateIsolatedMigrationLedger(receipt(pending), { forwardVersions: versions, applied: false }), { fixtureMigrations: 7, forwardMigrations: 2, applied: false });
+  const applied = pending.map((row) => ({ ...row, remote: row.local }));
+  assert.equal(validateIsolatedMigrationLedger(receipt(applied), { forwardVersions: versions }).applied, true);
+  const table = ["Local | Remote | Time", "------|--------|-----", ...applied.map((row) => `${row.local} | ${row.remote} | ${row.time}`)].join("\n");
+  assert.equal(validateIsolatedMigrationLedger(table, { forwardVersions: versions }).forwardMigrations, 2);
+  for (const rows of [pending, applied.slice(1), [...applied, { local: "20261003123456", remote: "20261003123456", time: "unknown" }], [...applied, applied[0]]]) {
+    assert.throws(() => validateIsolatedMigrationLedger(receipt(rows), { forwardVersions: versions }), /ledger_(drift|invalid)/u);
+  }
+});
+
+test("isolated CI stops unsafe containers before staging repository SQL", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const commands = []; const logs = [];
+  await assert.rejects(runIsolatedSupabaseDbTests({ root, argv: ["--execute", "--authorized", "--request-id", "unsafe-network-runtime-fixture"],
+    tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56100; return () => ++port; })(),
+    executeNetwork: async (invocation) => {
+      commands.push(invocation);
+      const result = await isolatedNetworkFixture(invocation);
+      if (invocation.args[0] === "inspect") {
+        const containers = JSON.parse(result.stdout); containers[0].NetworkSettings.Networks.bridge = { NetworkID: "b".repeat(64) };
+        result.stdout = JSON.stringify(containers);
+      }
+      return result;
+    },
+    executeProcess: async (invocation) => {
+      commands.push(invocation);
+      if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+        await assert.rejects(readFile(join(invocation.cwd, "supabase/migrations/00000000000000_dashboard_free_tier_test_baseline.sql")), { code: "ENOENT" });
+      }
+      return { code: 0, stdout: "", stderr: "" };
+    }, log: (entry) => logs.push(JSON.parse(entry)),
+  }), /container_network_invalid/u);
+  assert.equal(commands.some((call) => call.args[0] === "migration"), false);
+  assert.equal(commands.filter((call) => call.args[0] === "stop").length, 1);
+  assert.equal(commands.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
+  assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+});
+
+test("isolated CI runs both real builder preflights before migration-up and checks rollback", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const fileName = "20261002114145_fixture_forward.sql";
+  const contents = "begin;\ncreate table public.isolated_forward_fixture(id integer);\ncommit;\n";
+  await writeFile(join(root, "supabase/migrations", fileName), contents);
+  const manifestPath = join(root, "supabase/test-baselines/dashboard-free-tier-v1.manifest.json");
+  const manifest = JSON.parse(await readFile(manifestPath, "utf8"));
+  manifest.orderedNewMigrations = [{ fileName, status: "final", sha256: sha256(contents) }];
+  await writeFile(manifestPath, JSON.stringify(manifest)); await activateCanonicalBaseline(root);
+  const focused = ["registration_level_test_result_parent_reconciliation_test.sql", "agent_management_calendar_test.sql"];
+  for (const file of focused) await writeFile(join(root, "supabase/tests", file), await readFile(new URL(`../supabase/tests/${file}`, import.meta.url)));
+  for (const drift of [false, true]) {
+    let upCount = 0; let schemaCount = 0; const preflights = []; const calls = []; const logs = [];
+    const run = runIsolatedSupabaseDbTests({ root,
+      argv: ["--execute", "--authorized", "--request-id", `preflight-builder-fixture-${drift}`, "--transactional-preflight", "--verify-local-ledger"],
+      tempDirectory: await makeRunnerTempDirectory(t), executeNetwork: isolatedNetworkFixture,
+      allocatePort: (() => { let port = 56200; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        calls.push(invocation);
+        assert.deepEqual(Object.keys(invocation.env).sort(), ["LANG", "LC_ALL", "PATH", "SUPABASE_TELEMETRY_DISABLED"].sort());
+        if (invocation.args[0] === "migration" && invocation.args[1] === "up") upCount += 1;
+        if (invocation.args[0] === "migration" && invocation.args[1] === "list") {
+          const rows = Array.from({ length: 7 }, (_, index) => ({ local: String(index).padStart(14, "0"), remote: String(index).padStart(14, "0"), time: "fixture" }));
+          rows.push({ local: fileName.slice(0, 14), remote: upCount >= 3 ? fileName.slice(0, 14) : "", time: "forward" });
+          return { code: 0, stdout: JSON.stringify({ message: "Migrations listed", migrations: rows }), stderr: "" };
+        }
+        if (invocation.command === "docker") {
+          schemaCount += 1;
+          return { code: 0, stdout: `${drift && schemaCount > 1 ? "b" : "a"}`.repeat(32), stderr: "" };
+        }
+        if (invocation.args[0] === "test" && invocation.args.at(-1).includes("isolated_transactional_preflight_")) {
+          assert.equal(upCount, 2);
+          const sql = await readFile(join(invocation.cwd, invocation.args.at(-1)), "utf8");
+          assert.match(sql, /create table public\.isolated_forward_fixture/u); assert.match(sql, /set constraints all immediate/u);
+          assert.match(sql.trim(), /rollback;$/u); preflights.push(invocation.args.at(-1));
+        }
+        if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:56202/postgres" }), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    });
+    if (drift) {
+      await assert.rejects(run, /preflight_rollback_drift/u); assert.equal(upCount, 2);
+    } else {
+      const result = await run; assert.equal(upCount, 3); assert.equal(preflights.length, 2);
+      assert.equal(result.verification.transactionalPreflights.length, 2);
+      assert.deepEqual(result.verification.localLedger, { fixtureMigrations: 7, forwardMigrations: 1, applied: true });
+    }
+    assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
+    assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+  }
+});
+
+test("isolated CI uses an owned loopback relay only when internal Docker ports are unpublished", async (t) => {
+  const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  for (const failRelay of [false, true]) {
+    let opened = false; let closed = false; let migrationCount = 0; const logs = [];
+    const run = runIsolatedSupabaseDbTests({ root,
+      argv: ["--execute", "--authorized", "--request-id", `unpublished-port-relay-${failRelay}`],
+      tempDirectory: await makeRunnerTempDirectory(t), allocatePort: (() => { let port = 56300; return () => ++port; })(),
+      executeNetwork: async (invocation) => {
+        const result = await isolatedNetworkFixture(invocation);
+        if (invocation.args[0] === "inspect") {
+          const rows = JSON.parse(result.stdout); rows[0].NetworkSettings.Ports["5432/tcp"] = [];
+          result.stdout = JSON.stringify(rows);
+        }
+        return result;
+      },
+      createRelay: async ({ containerName, port, env }) => {
+        assert.match(containerName, /^supabase_db_tips_supabase_db_qa_[a-f0-9]{12}$/u);
+        assert.equal(port, 56302); assert.equal(env.SUPABASE_ACCESS_TOKEN, undefined);
+        if (failRelay) throw new Error("fixture_relay_bind_failed");
+        opened = true;
+        return { assertBoundary: () => { assert.equal(opened && !closed, true); return true; }, close: async () => { closed = true; } };
+      },
+      executeProcess: async (invocation) => {
+        if (invocation.args[0] === "migration") { assert.equal(opened, true); migrationCount += 1; }
+        if (invocation.args[0] === "stop" && !failRelay) assert.equal(closed, true, "relay closes before owned DB stops");
+        if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:56302/postgres" }), stderr: "" };
+        return { code: 0, stdout: "", stderr: "" };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    });
+    if (failRelay) { await assert.rejects(run, /fixture_relay_bind_failed/u); assert.equal(migrationCount, 0); }
+    else {
+      assert.equal((await run).status, "passed"); assert.equal(closed, true);
+      assert.equal(logs.find((entry) => entry.event === "isolated_supabase_db_network_verified").connection, "owned_docker_exec_loopback");
+      assert.equal(logs.find((entry) => entry.event === "isolated_supabase_db_relay_cleanup").status, "succeeded");
+    }
+    assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
+  }
+});
+
+test("isolated CI relay refuses other containers and inherited production environment before listening", async () => {
+  const { createOwnedLoopbackRelay } = await import("../scripts/isolated-db-loopback-relay.mjs");
+  const allowed = { containerName: "supabase_db_tips_supabase_db_qa_a1b2c3d4e5f6", port: 56302, env: { PATH: process.env.PATH } };
+  for (const changed of [{ containerName: "supabase_db_slnjqlzzhewblvttiidk" }, { port: 0 }, { env: { SUPABASE_ACCESS_TOKEN: "synthetic-forbidden" } }]) {
+    await assert.rejects(createOwnedLoopbackRelay({ ...allowed, ...changed }), /relay_target_invalid/u);
+  }
+});
+
+test("isolated CI abort waits for the owned child to exit before returning to cleanup", async (t) => {
+  const { processResult } = await import(runnerUrl.href);
+  const root = await makeRunnerTempDirectory(t);
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 400);
+  try {
+    const command = "import {writeFileSync} from 'node:fs'; process.on('SIGTERM',()=>setTimeout(()=>{writeFileSync('owned-child-reaped','yes');process.exit(0)},75)); setInterval(()=>{},1000);";
+    await assert.rejects(processResult(process.execPath, ["--input-type=module", "-e", command], {
+      cwd: root, env: { PATH: process.env.PATH }, signal: controller.signal,
+    }), (error) => error.name === "AbortError");
+    assert.equal(await readFile(join(root, "owned-child-reaped"), "utf8"), "yes");
+  } finally { clearTimeout(timer); }
 });
