@@ -19,6 +19,11 @@ import { fileURLToPath } from "node:url"
 import test, { after } from "node:test"
 
 import * as migrationLayoutVerifier from "../scripts/verify-supabase-migration-layout.mjs"
+import {
+  CACHED_POSTGRES_FIXTURE_TEST_COMMAND,
+  OFFLINE_ISOLATED_RUNNER_TEST_COMMAND,
+  OFFLINE_TRANSACTIONAL_CONTRACT_TEST_COMMAND,
+} from "../scripts/run-isolated-postgres-fixture-tests.mjs"
 
 const { validateSupabaseMigrationLayout, hasForbiddenPostdeploySqlExecution, validateIsolatedCiWorkflow } = migrationLayoutVerifier
 
@@ -28,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "4a9a0032d17a1eb586ea9c8762ae9482cb691c425d121aa623556e5f60da2891"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c971d1e4c5421532d2943003b0054397639f039c9b4da509f17b49e257c700ca"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -1746,8 +1751,9 @@ test("isolated main static preflight는 layout·SQLSTATE·builder·receipt·격�
     ["node scripts/verify-supabase-migration-layout.mjs", "db_push_workflow_static_preflight_layout_verifier_missing"],
     ["node scripts/verify-domain-sqlstate-contract.mjs", "db_push_workflow_static_preflight_domain_sqlstate_contract_missing"],
     ["node --test tests/supabase-postdeploy-contract.test.mjs", "db_push_workflow_static_preflight_postdeploy_receipt_test_missing"],
-    ["node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs", "isolated_ci_transaction_builder_tests_missing"],
-    ["node --test tests/isolated-supabase-db-tests.test.mjs", "isolated_ci_runner_tests_missing"],
+    [OFFLINE_TRANSACTIONAL_CONTRACT_TEST_COMMAND, "isolated_ci_transaction_builder_tests_missing"],
+    [OFFLINE_ISOLATED_RUNNER_TEST_COMMAND, "isolated_ci_runner_tests_missing"],
+    ["node --test tests/isolated-postgres-fixture-tests.test.mjs", "isolated_ci_cached_postgres_fixture_guard_tests_missing"],
   ]) {
     assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(command, "echo skipped")), code)
   }
@@ -1774,6 +1780,42 @@ test("isolated transactional preflight는 검사 선행·CLI·local ledger·두 
   }
   for (const command of ["supabase link --project-ref fixture", "supabase test db --linked", "supabase db push --local", "supabase db query --db-url postgres://fixture"]) {
     assertIncludesErrorCode(validateIsolatedCiWorkflow(source + `\n      - run: ${command}\n`), "isolated_ci_production_connection_forbidden")
+  }
+})
+
+test("offline fixture exclusions require all ten cached PostgreSQL cases after the full schema step", async () => {
+  const fixtureStep = `      - name: Test cached PostgreSQL fixture contracts\n        run: ${CACHED_POSTGRES_FIXTURE_TEST_COMMAND}\n`
+  for (const [kind, file, schemaStep] of [
+    ["main", "supabase-db-push.yml", "Run isolated migration and schema contracts"],
+    ["pr", "supabase-sql-review.yml", "Run isolated schema contracts"],
+  ]) {
+    const source = await readFile(join(repoRoot, ".github", "workflows", file), "utf8")
+    assert.deepEqual(validateIsolatedCiWorkflow(source, kind), [])
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(fixtureStep, ""), kind),
+      "isolated_ci_cached_postgres_fixture_tests_missing")
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source + fixtureStep, kind),
+      "isolated_ci_cached_postgres_fixture_tests_missing")
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(CACHED_POSTGRES_FIXTURE_TEST_COMMAND,
+      `${CACHED_POSTGRES_FIXTURE_TEST_COMMAND} --test-name-pattern=none`), kind),
+      "isolated_ci_cached_postgres_fixture_tests_missing")
+    const moved = source.replace(fixtureStep, "").replace(`      - name: ${schemaStep}\n`,
+      `${fixtureStep}\n      - name: ${schemaStep}\n`)
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(moved, kind),
+      "isolated_ci_cached_postgres_fixture_order_invalid")
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(OFFLINE_TRANSACTIONAL_CONTRACT_TEST_COMMAND,
+      OFFLINE_TRANSACTIONAL_CONTRACT_TEST_COMMAND.replace("--test-skip-pattern=", "--test-name-pattern=")), kind),
+      "isolated_ci_transaction_builder_tests_missing")
+    if (kind === "main") {
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(OFFLINE_ISOLATED_RUNNER_TEST_COMMAND,
+        "node --test --test-skip-pattern='.*' tests/isolated-supabase-db-tests.test.mjs"), kind),
+        "isolated_ci_runner_tests_missing")
+    }
+    for (const bypass of ["        if: false\n", "        continue-on-error: true\n"]) {
+      assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(
+        "      - name: Test cached PostgreSQL fixture contracts\n",
+        `      - name: Test cached PostgreSQL fixture contracts\n${bypass}`), kind),
+        "db_push_workflow_layout_bypass")
+    }
   }
 })
 

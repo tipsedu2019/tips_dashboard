@@ -384,9 +384,9 @@ test("PostgreSQL 17 transactional preflight named checkpoint preserves FK errors
   })
   t.after(() => cleanupOwnedPostgres17Fixture(invoke, name, ownerNonce))
   const started = invoke([
-    "run", "--rm", "--detach", "--network", "none", "--name", name,
+    "run", "--pull=never", "--rm", "--detach", "--network", "none", "--name", name,
     "--label", `${postgresFixtureOwnerLabel}=${ownerNonce}`,
-    "--env", "POSTGRES_PASSWORD=task-local-only", "public.ecr.aws/supabase/postgres:17.6.1.156",
+    "--env", "POSTGRES_PASSWORD=task-local-only", "public.ecr.aws/supabase/postgres:17.6.1.159",
   ])
   assert.equal(started.status, 0, started.stderr)
   const psql = (sql) => invoke([

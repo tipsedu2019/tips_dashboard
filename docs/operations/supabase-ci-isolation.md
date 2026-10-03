@@ -12,6 +12,16 @@ checks. The main and PR database jobs use the same pinned Supabase CLI and run
 the original 77 SQL suites and 12 DTO/concurrency probes, plus four regression
 suites from the already-deployed past-state and timetable corrections.
 
+Offline runner and transactional-builder cases remain in the static preflight.
+The ten PostgreSQL fixture cases run as a mandatory, unskipped check after the
+full schema validation in that same job. They reuse the pinned CLI's cached
+`public.ecr.aws/supabase/postgres:17.6.1.159` image with `--pull=never`, rather
+than making a second registry request on another runner. The fixture harness
+requires all ten exact test names and ten actual passing TAP results, with no
+skips, omissions or duplicate results. Each fixture uses `network none`, an
+owned container label and checked cleanup; no repository SQL or assertion is
+removed by the offline/runtime split.
+
 The runner retains baseline catalog parity, smoke tests, local migration lint,
 ACL/permission/domain assertions and the existing read-only postdeploy contract.
 It additionally builds the registration and agent-calendar transactional

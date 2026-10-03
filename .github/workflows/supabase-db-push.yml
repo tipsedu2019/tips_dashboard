@@ -32,13 +32,16 @@ jobs:
         run: node --test tests/supabase-migration-layout.test.mjs
 
       - name: Test transactional safety contracts
-        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+        run: node --test --test-skip-pattern='^PostgreSQL 17 transactional preflight named checkpoint preserves FK errors and rollback$' tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+
+      - name: Test cached PostgreSQL fixture guards
+        run: node --test tests/isolated-postgres-fixture-tests.test.mjs
 
       - name: Test Supabase receipt contracts
         run: node --test tests/supabase-postdeploy-contract.test.mjs
 
       - name: Test isolated runner contracts
-        run: node --test tests/isolated-supabase-db-tests.test.mjs
+        run: node --test --test-skip-pattern='^(?:PostgreSQL trigger capture and parity follow name order across the full BEFORE UPDATE group|PostgreSQL 17 restricted catalog reader executes the fixed statement against the real migration shape|PostgreSQL 17 isolated migration prerequisite creates one exact row and rejects preexisting state|PostgreSQL 17 function ACL reconciliation restores exact parity and detects drift|fixed catalog statement distinguishes stored generated expressions from defaults|fixed catalog statement captures every public enum dependency|fixed catalog statement captures the appointment calendar view fingerprint|fixed catalog statement gives duplicate constraint names stable distinct identities|generated parity uses pg catalog definitions and detects representative object drift)$' tests/isolated-supabase-db-tests.test.mjs
 
       - name: Verify Supabase migration layout
         run: node scripts/verify-supabase-migration-layout.mjs
@@ -180,3 +183,6 @@ jobs:
             --test supabase/tests/timetable_default_projection_performance_test.sql \
             --test supabase/tests/timetable_save_conflict_details_test.sql \
             --test supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql
+
+      - name: Test cached PostgreSQL fixture contracts
+        run: node scripts/run-isolated-postgres-fixture-tests.mjs

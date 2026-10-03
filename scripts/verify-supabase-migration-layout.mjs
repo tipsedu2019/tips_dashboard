@@ -2,6 +2,11 @@ import { createHash } from "node:crypto"
 import { lstat, readdir, readFile } from "node:fs/promises"
 import { dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
+import {
+  CACHED_POSTGRES_FIXTURE_TEST_COMMAND,
+  OFFLINE_ISOLATED_RUNNER_TEST_COMMAND,
+  OFFLINE_TRANSACTIONAL_CONTRACT_TEST_COMMAND,
+} from "./run-isolated-postgres-fixture-tests.mjs"
 
 const defaultRepoRoot = dirname(dirname(fileURLToPath(import.meta.url)))
 const QUARANTINE_RELATIVE_PATH = join("supabase", "pending-migrations", "notification-cutover")
@@ -121,9 +126,9 @@ const ISOLATED_PROBES = Object.freeze([
 ])
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "4a9a0032d17a1eb586ea9c8762ae9482cb691c425d121aa623556e5f60da2891"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c971d1e4c5421532d2943003b0054397639f039c9b4da509f17b49e257c700ca"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "b3bef8e1445f9721d9f57b8dfb67ae79ac5d12a3cbf0c1af5df08160b82dbb40"
+  "9d17673238a1dc53dccdb23450a064d74b1c4974259e01c755894202d13a329a"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
@@ -1128,14 +1133,14 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
     "db_push_workflow_static_preflight_layout_verifier_missing")
   reject(!hasExactRun(staticJob, "node scripts/verify-domain-sqlstate-contract.mjs"),
     "db_push_workflow_static_preflight_domain_sqlstate_contract_missing")
-  reject(!hasExactRun(staticJob, "node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs"),
+  reject(!hasExactRun(staticJob, OFFLINE_TRANSACTIONAL_CONTRACT_TEST_COMMAND),
     "isolated_ci_transaction_builder_tests_missing")
   if (kind === "main") {
     reject(!isolatedJob.some((line) => /^ {4}needs:\s*db-preflight\s*$/.test(line)),
       "isolated_ci_static_dependency_missing")
     reject(!hasExactRun(staticJob, "node --test tests/supabase-postdeploy-contract.test.mjs"),
       "db_push_workflow_static_preflight_postdeploy_receipt_test_missing")
-    reject(!hasExactRun(staticJob, "node --test tests/isolated-supabase-db-tests.test.mjs"),
+    reject(!hasExactRun(staticJob, OFFLINE_ISOLATED_RUNNER_TEST_COMMAND),
       "isolated_ci_runner_tests_missing")
     const verifierCount = lines.filter((line) => /^\s*run:\s*node scripts\/verify-supabase-migration-layout\.mjs\s*$/.test(line)).length
     reject(verifierCount !== 1, "layout_verifier_command_count_mismatch")
@@ -1168,6 +1173,17 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   // Tests and probes are intentionally interleaved in the reviewed command.
   const actualWithoutTargets = command.replace(/ --(?:test|probe) \S+/g, "")
   reject(actualWithoutTargets !== expectedPrefix, "isolated_ci_runner_command_mismatch")
+  // The fixed ten DB fixture cases reuse the pinned CLI image in this same job.
+  // Offline exclusions authorize no missing runtime case or pre-SQL image pull.
+  const fixtureRuns = lines.filter((line) => line.trim() === `run: ${CACHED_POSTGRES_FIXTURE_TEST_COMMAND}`)
+  const fixtureIndex = isolatedJob.findIndex((line) => line.trim() === `run: ${CACHED_POSTGRES_FIXTURE_TEST_COMMAND}`)
+  const schemaIndex = isolatedJob.findIndex((line) => line.includes("node scripts/run-isolated-supabase-db-tests.mjs"))
+  reject(fixtureRuns.length !== 1 || fixtureIndex < 0,
+    "isolated_ci_cached_postgres_fixture_tests_missing")
+  reject(fixtureIndex >= 0 && (schemaIndex < 0 || fixtureIndex <= schemaIndex),
+    "isolated_ci_cached_postgres_fixture_order_invalid")
+  reject(!hasExactRun(staticJob, "node --test tests/isolated-postgres-fixture-tests.test.mjs"),
+    "isolated_ci_cached_postgres_fixture_guard_tests_missing")
   return errors
 }
 

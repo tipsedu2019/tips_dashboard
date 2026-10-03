@@ -10,7 +10,8 @@ import test from "node:test";
 const captureUrl = new URL("../scripts/capture-dashboard-free-tier-catalog.mjs", import.meta.url);
 const runnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs", import.meta.url);
 const docker = "docker";
-const postgres17Image = "public.ecr.aws/supabase/postgres:17.6.1.156";
+const postgres17Image = "public.ecr.aws/supabase/postgres:17.6.1.159";
+const postgresFixtureOwnerLabel = "tips.isolated-db-test-fixture-owner";
 
 function canonical(value) {
   if (Array.isArray(value)) return `[${value.map(canonical).join(",")}]`;
@@ -26,12 +27,31 @@ function captureScopeFixture(functions = ["public.get_dashboard_summary_sources_
   };
 }
 
+function cleanupOwnedPostgres17Fixture(invoke, name, ownerNonce) {
+  const inspected = invoke([
+    "container", "inspect", "--format", `{{ index .Config.Labels "${postgresFixtureOwnerLabel}" }}`, name,
+  ]);
+  if (inspected.status === 1 && [
+    `Error: No such container: ${name}`,
+    `Error: No such object: ${name}`,
+  ].includes(inspected.stderr.trim())) return;
+  assert.equal(inspected.status, 0, inspected.stderr || inspected.error?.message);
+  assert.equal(inspected.stdout.trim(), ownerNonce, "refusing to remove a container without the exact fixture owner label");
+  const removed = invoke(["rm", "--force", name]);
+  assert.equal(removed.status, 0, removed.stderr);
+}
+
 async function withPostgres17(t, run) {
-  const name = `tips-task1-postgres17-${process.pid}-${randomBytes(4).toString("hex")}`;
-  const invoke = (args, options = {}) => spawnSync(docker, args, { encoding: "utf8", timeout: 60_000, ...options });
-  const started = invoke(["run", "--rm", "--detach", "--network", "none", "--name", name, "--env", "POSTGRES_PASSWORD=task-local-only", postgres17Image]);
+  const ownerNonce = randomBytes(12).toString("hex");
+  const name = `tips-task1-postgres17-${process.pid}-${ownerNonce}`;
+  const invoke = (args, options = {}) => spawnSync(docker, args, {
+    encoding: "utf8", timeout: 60_000, ...options,
+    env: { PATH: process.env.PATH, LANG: "C", LC_ALL: "C" },
+  });
+  t.after(() => cleanupOwnedPostgres17Fixture(invoke, name, ownerNonce));
+  const started = invoke(["run", "--pull=never", "--rm", "--detach", "--network", "none", "--name", name,
+    "--label", `${postgresFixtureOwnerLabel}=${ownerNonce}`, "--env", "POSTGRES_PASSWORD=task-local-only", postgres17Image]);
   assert.equal(started.status, 0, started.stderr);
-  t.after(() => invoke(["rm", "--force", name]));
   let consecutiveReadyChecks = 0;
   for (let attempt = 0; attempt < 80; attempt += 1) {
     const pid1 = invoke(["exec", name, "sh", "-c", "tr '\\000' ' ' < /proc/1/cmdline"]);
@@ -66,6 +86,54 @@ async function withPostgres17(t, run) {
   assert.equal(setup.status, 0, setup.stderr);
   return run({ psql });
 }
+
+test("owned isolated PostgreSQL fixture cleanup rejects uncertain ownership and removal failures", () => {
+  const name = "tips-task1-postgres17-owned-fixture";
+  const owner = "synthetic-owner-nonce";
+  const calls = [];
+  cleanupOwnedPostgres17Fixture((args) => {
+    calls.push(args);
+    return args[0] === "container"
+      ? { status: 0, stdout: `${owner}\n`, stderr: "" }
+      : { status: 0, stdout: name, stderr: "" };
+  }, name, owner);
+  assert.deepEqual(calls, [
+    ["container", "inspect", "--format", `{{ index .Config.Labels "${postgresFixtureOwnerLabel}" }}`, name],
+    ["rm", "--force", name],
+  ]);
+  for (const stderr of [`Error: No such container: ${name}`, `Error: No such object: ${name}`]) {
+    let count = 0;
+    cleanupOwnedPostgres17Fixture(() => {
+      count += 1;
+      return { status: 1, stdout: "", stderr };
+    }, name, owner);
+    assert.equal(count, 1);
+  }
+  for (const inspection of [
+    { status: 0, stdout: "different-owner", stderr: "" },
+    { status: 0, stdout: "<no value>", stderr: "" },
+    { status: 1, stdout: "", stderr: "daemon unavailable" },
+    { status: 1, stdout: "", stderr: `Error: No such container: ${name}-other` },
+    { status: null, stdout: "", stderr: "", error: new Error("client timeout") },
+  ]) {
+    const attempted = [];
+    assert.throws(() => cleanupOwnedPostgres17Fixture((args) => {
+      attempted.push(args);
+      return inspection;
+    }, name, owner), assert.AssertionError);
+    assert.equal(attempted.length, 1);
+    assert.equal(attempted[0][0], "container");
+  }
+  const failedRemoval = [];
+  assert.throws(() => cleanupOwnedPostgres17Fixture((args) => {
+    failedRemoval.push(args);
+    return args[0] === "container"
+      ? { status: 0, stdout: `${owner}\n`, stderr: "" }
+      : { status: 1, stdout: "", stderr: "owned container removal failed" };
+  }, name, owner), assert.AssertionError);
+  assert.equal(failedRemoval.length, 2);
+  assert.deepEqual(failedRemoval[1], ["rm", "--force", name]);
+});
 
 async function makeRepo(t) {
   const root = await mkdtemp(join(tmpdir(), "tips-dashboard-baseline-"));
