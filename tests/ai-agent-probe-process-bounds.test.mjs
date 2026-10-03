@@ -15,3 +15,16 @@ for(const probe of ['auth','claim','space-policy','chat-runtime']){
     }finally{clearTimeout(timer);}
   });
 }
+
+test('standalone safety runtime blocks are generated from one canonical source and reject drift',async()=>{
+  const {readFile}=await import('node:fs/promises');
+  const {checkGeneratedRuntime}=await import('../scripts/generate-ai-agent-probe-runtime.mjs');
+  for(const probe of ['auth','claim','space-policy','chat-runtime']){
+    const source=await readFile(`tests/probe-ai-agent-${probe}-concurrency.mjs`,'utf8');
+    assert.equal(checkGeneratedRuntime(source),true,`${probe}: regenerate stale runtime`);
+    for(const [before,after]of [["signals.push('SIGKILL')","signals.push('SIGTERM')"],['PGAPPNAME=','UNSCOPED='],['await closeSessions(...ownedSessions)','await Promise.resolve()']]){
+      assert.ok(source.includes(before));
+      assert.equal(checkGeneratedRuntime(source.replace(before,after)),false,`${probe}: safety mutation must fail freshness`);
+    }
+  }
+});

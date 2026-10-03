@@ -143,6 +143,8 @@ TIPS는 학원 구성원이 학생, 수업, 일정, 교재, 등록, 알림 업�
 
 등록 목록은 단계 탭 아래 한 외곽면 안에 공통 검색/등록 행동, 상담 담당 범위, 데이터, 페이지 이동을 배치한다. `RegistrationListToolbar`는 공통 `DataTableToolbar`, `DataTableCommandRow`, `Button`의 합성이며 별도 시각 체계를 만들지 않는다. 과목별 행 정렬과 상담 기본 범위 `내 담당`을 유지하고, 건수가 0이어도 담당 범위 버튼은 남긴다. 등록 상세에서는 과목 탭과 진행상태를 같은 행에 두고 진행상태 메뉴는 다른 입력과 동일한 `RegistrationSelect`를 사용한다. 관리팀 알림은 해당 진행 단계의 `sectionActions`, 방문 취소 전달은 상담 영역 아래에 배치하며 고정 헤더에 넣지 않는다. 기존 단계별 폼은 접거나 다시 마운트하지 않아 미저장 입력을 유지한다.
 
+공통 `FormDialogContent`·`DetailDialogContent`·`ConfirmationDialogContent`는 `returnFocusRef`를 같은 `DialogFrame`에 전달한다. 발급 입력에서 결과 확인 창으로 이어지는 흐름처럼 최초 열기 요소가 바뀔 수 있으면 명시적인 반환 대상을 연결하고 닫기·Escape 모두에서 확인한다.
+
 행에서 연 편집창은 공통 `DialogContent`의 `restoreFocusToOpener`를 사용한다. 저장 후 행이 사라지거나 직접 링크로 열 수 있는 화면은 `restoreFocusFallbackRef`에 검색창 등 기존 목록 제어를 연결한다. 같은 경로에서 열기 요소를 우선하고, 보이지 않거나 비활성화된 요소·다른 경로에는 초점을 되돌리지 않는다.
 
 프로필 창과 입력 상태는 반응형 사이드바 바깥의 안정된 소유자에 둔다. 계정 메뉴만 현재 사이드바 footer에 연결해 화면 크기가 바뀌어도 열린 창·선택·입력을 유지한다. 닫을 때 현재 계정 메뉴로 초점을 돌리고 메뉴가 보이지 않으면 본문으로 복귀한다.

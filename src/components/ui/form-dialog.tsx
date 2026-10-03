@@ -170,9 +170,9 @@ function FormDialogContent({
   )
 }
 
-function DetailDialogContent({ title, description, children, onClose, compact = true }: DialogFrameProps & { onClose: () => void }) {
+function DetailDialogContent({ title, description, children, onClose, compact = true, returnFocusRef }: DialogFrameProps & { onClose: () => void }) {
   return (
-    <DialogFrame title={title} description={description} compact={compact}>
+    <DialogFrame title={title} description={description} compact={compact} returnFocusRef={returnFocusRef}>
       <div data-slot="detail-dialog-body" className={dialogBodyClassName}>{children}</div>
       <div data-slot="detail-dialog-footer" className={cn(dialogActionsClassName, "flex justify-end")}>
         <Button type="button" variant="outline" onClick={onClose}>닫기</Button>
