@@ -3149,7 +3149,7 @@ test("isolated CI unhealthy or late-ready empty-map DB reaches the same startup 
   }
 });
 
-test("isolated CI runs both real builder preflights before migration-up and checks rollback", async (t) => {
+test("isolated CI runs baseline, both builder preflights and full suite on the owned network with failure cleanup", async (t) => {
   const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
   const fileName = "20261002114145_fixture_forward.sql";
@@ -3161,15 +3161,26 @@ test("isolated CI runs both real builder preflights before migration-up and chec
   await writeFile(manifestPath, JSON.stringify(manifest)); await activateCanonicalBaseline(root);
   const focused = ["registration_level_test_result_parent_reconciliation_test.sql", "agent_management_calendar_test.sql"];
   for (const file of focused) await writeFile(join(root, "supabase/tests", file), await readFile(new URL(`../supabase/tests/${file}`, import.meta.url)));
-  for (const drift of [false, true]) {
-    let upCount = 0; let schemaCount = 0; const preflights = []; const calls = []; const logs = [];
+  for (const scenario of ["passed", "rollback-drift", "baseline-failure", "preflight-0-failure", "preflight-1-failure", "suite-failure"]) {
+    const drift = scenario === "rollback-drift";
+    const expectedNetworkId = createHash("sha256").update(scenario).digest("hex");
+    const failureTestIndex = ["baseline-failure", "preflight-0-failure", "preflight-1-failure", "suite-failure"].indexOf(scenario);
+    let upCount = 0; let schemaCount = 0; let startedNetworkId; const preflights = []; const calls = []; const logs = []; const testCalls = [];
     const run = runIsolatedSupabaseDbTests({ root,
-      argv: ["--execute", "--authorized", "--request-id", `preflight-builder-fixture-${drift}`, "--transactional-preflight", "--verify-local-ledger"],
-      tempDirectory: await makeRunnerTempDirectory(t), executeNetwork: isolatedNetworkFixture,
+      argv: ["--execute", "--authorized", "--request-id", `preflight-builder-fixture-${scenario}`, "--transactional-preflight", "--verify-local-ledger", ...focused.flatMap((file) => ["--test", `supabase/tests/${file}`])],
+      tempDirectory: await makeRunnerTempDirectory(t), executeNetwork: async (invocation) => {
+        calls.push(invocation); const result = await isolatedNetworkFixture(invocation);
+        result.stdout = result.stdout.replaceAll("a".repeat(64), expectedNetworkId);
+        return result;
+      },
       allocatePort: (() => { let port = 56200; return () => ++port; })(),
       executeProcess: async (invocation) => {
         calls.push(invocation);
         assert.deepEqual(Object.keys(invocation.env).sort(), ["LANG", "LC_ALL", "PATH", "SUPABASE_TELEMETRY_DISABLED"].sort());
+        if (invocation.args[0] === "db" && invocation.args[1] === "start") {
+          startedNetworkId = invocation.args[invocation.args.indexOf("--network-id") + 1];
+          assert.equal(startedNetworkId, expectedNetworkId);
+        }
         if (invocation.args[0] === "migration" && invocation.args[1] === "up") upCount += 1;
         if (invocation.args[0] === "migration" && invocation.args[1] === "list") {
           const rows = Array.from({ length: 7 }, (_, index) => ({ local: String(index).padStart(14, "0"), remote: String(index).padStart(14, "0"), time: "fixture" }));
@@ -3186,18 +3197,41 @@ test("isolated CI runs both real builder preflights before migration-up and chec
           assert.match(sql, /create table public\.isolated_forward_fixture/u); assert.match(sql, /set constraints all immediate/u);
           assert.match(sql.trim(), /rollback;$/u); preflights.push(invocation.args.at(-1));
         }
+        if (invocation.args[0] === "test" && invocation.args[1] === "db") {
+          assert.equal(invocation.args.filter((arg) => arg === "--network-id").length, 1);
+          assert.equal(invocation.args[invocation.args.indexOf("--network-id") + 1], startedNetworkId, "every pg_prove invocation shares the actual DB-start network ID");
+          assert.equal(invocation.args.includes("--local"), true);
+          testCalls.push(invocation);
+          if (testCalls.length - 1 === failureTestIndex) return { code: 1, stdout: "", stderr: "synthetic_pgtap_container_failed" };
+        }
         if (invocation.args[0] === "status") return { code: 0, stdout: JSON.stringify({ DB_URL: "postgresql://postgres:postgres@127.0.0.1:56202/postgres" }), stderr: "" };
         return { code: 0, stdout: "", stderr: "" };
       }, log: (entry) => logs.push(JSON.parse(entry)),
     });
     if (drift) {
       await assert.rejects(run, /preflight_rollback_drift/u); assert.equal(upCount, 2);
+      assert.equal(testCalls.length, 2);
+    } else if (failureTestIndex >= 0) {
+      await assert.rejects(run, /isolated_supabase_db_child_failed/u);
+      assert.equal(testCalls.length, failureTestIndex + 1, "a failed pg_prove stage cannot continue to the next test stage");
+      assert.equal(upCount, failureTestIndex === 0 ? 1 : failureTestIndex === 3 ? 3 : 2);
+      assert.equal(calls.some((call) => call.args[0] === "status"), false);
+      assert.equal(logs.find((entry) => entry.event === "isolated_supabase_db_child_failed").step, "test db");
     } else {
       const result = await run; assert.equal(upCount, 3); assert.equal(preflights.length, 2);
       assert.equal(result.verification.transactionalPreflights.length, 2);
       assert.deepEqual(result.verification.localLedger, { fixtureMigrations: 7, forwardMigrations: 1, applied: true });
+      assert.equal(result.verification.sqlTests, focused.length);
     }
+    const expectedStages = [
+      ["supabase/tests/dashboard_free_tier_catalog_parity_test.sql", "supabase/tests/dashboard_free_tier_baseline_smoke_test.sql"],
+      ["supabase/tests/isolated_transactional_preflight_0.sql"],
+      ["supabase/tests/isolated_transactional_preflight_1.sql"],
+      focused.map((file) => `supabase/tests/${file}`),
+    ];
+    assert.deepEqual(testCalls.map((call) => call.args.filter((arg) => arg.startsWith("supabase/tests/"))), expectedStages.slice(0, testCalls.length));
     assert.equal(calls.filter((call) => call.args[0] === "stop").length, 1);
+    assert.equal(calls.filter((call) => call.args[0] === "network" && call.args[1] === "rm").length, 1);
     assert.deepEqual(logs.at(-1), { cleanup: "succeeded", stop: "succeeded", network: "succeeded", tempRoot: "removed" });
   }
 });

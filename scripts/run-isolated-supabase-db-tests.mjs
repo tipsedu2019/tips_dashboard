@@ -753,8 +753,15 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C", SUPABASE_TELEMETRY_DISABLED: "1" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
+  let networkId;
   const invoke = async (argsForCli, { env = cleanEnvironment, signal } = {}) => {
-    const result = await executeProcess({ command: supabasePath, args: argsForCli, cwd: runtime.tempRoot, env, signal });
+    let scopedArgs = argsForCli;
+    if (argsForCli[0] === "test" && argsForCli[1] === "db") {
+      if (!/^[a-f0-9]{64}$/u.test(networkId ?? "")) fail("isolated_supabase_db_network_invalid");
+      // pg_prove runs in its own container and must share the verified DB network.
+      scopedArgs = [...argsForCli.slice(0, 2), "--network-id", networkId, ...argsForCli.slice(2)];
+    }
+    const result = await executeProcess({ command: supabasePath, args: scopedArgs, cwd: runtime.tempRoot, env, signal });
     if (result.code !== 0) {
       const step = ["db", "migration", "test"].includes(argsForCli[0]) ? argsForCli.slice(0, 2).join(" ") : argsForCli[0];
       log(JSON.stringify({
@@ -787,7 +794,6 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   };
   let startAttempted = false;
   let networkCreated = false;
-  let networkId;
   let relay = null;
   let ledgerVerification = null;
   const preflightVerification = [];
