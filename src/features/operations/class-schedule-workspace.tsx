@@ -11,7 +11,7 @@ import { resolveLegacyPastStateCorrectionTarget, resolveLegacyPastStateCorrectio
 import { LegacyPastStateCorrectionDialog } from "./legacy-past-state-correction-dialog";
 import { LegacyLessonScheduleFields } from "./legacy-lesson-schedule-fields";
 import { resolveLegacyLessonDetails, snapshotNewLegacyLessonDetails, snapshotRestoredLegacyLessonDetails } from "./legacy-lesson-defaults";
-import { projectLegacyEffectivePlan, resolveEffectiveSchedule, setLegacyLessonOverride, useLegacyLessonBasics } from "./legacy-effective-schedule.js";
+import { projectLegacyEffectivePlan, resolveEffectiveSchedule, setLegacyLessonOverride, resetLegacyLessonToBasics } from "./legacy-effective-schedule.js";
 import { useCommittedSearch } from "@/hooks/use-committed-search";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import type { CSSProperties, KeyboardEvent } from "react";
@@ -3806,7 +3806,7 @@ export function ClassScheduleWorkspace() {
         setIsLessonDesignSaving(false);
       },
     });
-  }, [actorScope, lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow, setLessonDesignSaveError, setLessonDesignSaveFailure]);
+  }, [legacyEffectiveContext, actorScope, lessonDesignSnapshot, markPendingLessonSessionSelection, lessonPlanForSave, lessonScheduleReadReady, normalizeLessonDraft, isNormalizedLessonSchedule, selectedRowClassItem, refreshSelectedLessonDetail, selectedRow, setLessonDesignSaveError, setLessonDesignSaveFailure]);
 
   const retryLessonDesignRead = useCallback(async () => {
     const token = lessonMutationLifecycleRef.current?.capture(selectedRow?.id) || null;
@@ -4767,7 +4767,7 @@ export function ClassScheduleWorkspace() {
                           {legacySelectedDefaults && legacyLessonDetails && (legacyEffectiveContext?.version === 1 ? legacyHasExplicitOverride : Object.values(legacyLessonDetails).some(value => !value)) ? <Button type="button" size="sm" variant="outline"
                             aria-label={`${selectedLessonSession.dateValue} 기본 정보 적용`}
                             onClick={() => updateLessonPlanDraft(current => legacyEffectiveContext?.version === 1
-                              ? useLegacyLessonBasics(current, selectedLessonSession.dateValue) : ({ ...current,
+                              ? resetLegacyLessonToBasics(current, selectedLessonSession.dateValue) : ({ ...current,
                               sessionSchedules: { ...(current.sessionSchedules as Record<string, unknown> || {}),
                                 [selectedLessonSession.dateValue]: { ...((current.sessionSchedules as Record<string, Record<string, unknown>> || {})[selectedLessonSession.dateValue] || {}),
                                   startTime: legacyLessonDetails.startTime || legacySelectedDefaults.startTime,

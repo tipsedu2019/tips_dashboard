@@ -143,7 +143,7 @@ export function setLegacyLessonOverride(plan, date, next, displayed) {
   return { ...plan, sessionSchedules: { ...plan.sessionSchedules, [date]: details } };
 }
 
-export function useLegacyLessonBasics(plan, date) {
+export function resetLegacyLessonToBasics(plan, date) {
   const onDate = (plan.sessions || []).filter(row => row.date === date);
   if (onDate.length !== 1 || requestOwned(onDate[0])) return plan;
   return { ...plan, sessionSchedules: { ...plan.sessionSchedules, [date]: {} } };

@@ -12,5 +12,5 @@ export function resolveEffectiveSchedule(input: Row): EffectiveSchedule;
 export function effectiveInputForLesson(plan: Row, session: Row, context: Row | null): Row;
 export function projectLegacyEffectivePlan(plan: Row, context: Row | null): Row;
 export function setLegacyLessonOverride(plan: Row, date: string, next: Row, displayed: Row): Row;
-export function useLegacyLessonBasics(plan: Row, date: string): Row;
+export function resetLegacyLessonToBasics(plan: Row, date: string): Row;
 export function occupancyOf(result: EffectiveSchedule, classId: string, id: string): Row | null;

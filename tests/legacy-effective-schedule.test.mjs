@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { resolveEffectiveSchedule, effectiveInputForLesson, projectLegacyEffectivePlan, setLegacyLessonOverride, useLegacyLessonBasics } from '../src/features/operations/legacy-effective-schedule.js';
+import { resolveEffectiveSchedule, effectiveInputForLesson, projectLegacyEffectivePlan, setLegacyLessonOverride, resetLegacyLessonToBasics } from '../src/features/operations/legacy-effective-schedule.js';
 import { legacyLessonScheduleValidationError } from '../src/features/operations/schedule-only-plan.ts';
 import { buildRoomAvailability, isEffectiveMakeupSchedule } from '../src/features/makeup-requests/makeup-request-model.js';
 
@@ -40,7 +40,7 @@ test('stored explicit fields survive unrelated edits; reset is an explicit empty
   const display = projectLegacyEffectivePlan(raw, context).sessions[0];
   const edited = setLegacyLessonOverride(raw, display.date, { ...display, endTime: '21:00' }, display);
   assert.deepEqual(edited.sessionSchedules[display.date], { startTime: '18:00', endTime: '21:00', teacherCatalogId: 'teacher-b', classroomCatalogId: 'room-b' });
-  const reset = useLegacyLessonBasics(edited, display.date);
+  const reset = resetLegacyLessonToBasics(edited, display.date);
   assert.deepEqual(reset.sessionSchedules[display.date], {});
   assert.equal(projectLegacyEffectivePlan(reset, context).sessions[0].startTime, '15:30');
   assert.equal(raw.sessions[0].startTime, '18:00', 'reset does not mutate stored snapshot');
