@@ -84,5 +84,238 @@ select lives_ok($$select public.transition_makeup_request_v2(pg_temp.sid(3),'app
 reset role;
 select is((select schedule_plan from public.classes where id=pg_temp.sid(4)),pg_temp.fixture()->'plan','approval cancellation restores exact original identities, resources and contents');
 select is((select count(*) from public.academic_events),(select calendars from before_counts),'approval cancellation removes only its synthetic calendar effects');
+
+-- Exact reviewed Oct 15 repair logic, exercised on synthetic data only.
+-- Only the six literal content hashes are rebound to synthetic fixture hashes.
+-- No production data, migration, guard, RPC, ACL or runner definition is changed.
+set constraints all immediate; set constraints all deferred;
+create function pg_temp.repair_template() returns text language sql immutable as $tpl$
+select $reviewed$do $repair$
+declare
+ c public.classes;
+ r public.makeup_requests;
+ s jsonb;
+ next_plan jsonb;
+ event_payload jsonb;
+ event_meta jsonb;
+ idx bigint;
+ n bigint;
+ added constant jsonb := '{"startTime":"15:00","endTime":"17:00","teacherCatalogId":"539275aa-060c-4a2d-9c31-11f9b831bc65","teacherName":"한지현","classroomCatalogId":"eb612df2-2f4c-40f1-ae0e-fb18c7303e52","classroomName":"별관 6강"}'::jsonb;
+ sid constant text := 'session:004:2026-10-15:period-1782719919639-7:2026-10-14:makeup';
+begin
+ select * into strict c from public.classes
+ where id='1b2a31dd-c137-4983-9963-75d224a68845' for update;
+ select * into strict r from public.makeup_requests
+ where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7' for update;
+ if c.schedule_storage_mode is distinct from 'legacy'
+ or c.schedule_revision is distinct from 0
+ or c.status is distinct from '수강' or c.closed_at is not null
+ or md5(c.schedule_plan::text) is distinct from '3a16c919c667598e1b95ed170c2b846d'
+ or r.class_id is distinct from c.id or r.status is distinct from 'completed'
+ or r.updated_at is distinct from '2026-09-22 09:00:47.359084+00'::timestamptz
+ or r.schedule_plan_after is distinct from c.schedule_plan
+ or md5(r.schedule_plan_before::text) is distinct from '4d410d7dd44ab52c9fe0f3bbe4e4a7a1'
+ or md5(jsonb_build_array(r.id,r.class_id,r.status,r.cancel_date,r.makeup_start_at,r.makeup_end_at,r.makeup_classroom,r.teacher_catalog_id,r.makeup_slots,r.approved_at,r.makeup_academic_event_id,r.makeup_academic_event_ids,r.schedule_plan_after)::text)
+    is distinct from '05c610f69eaf50abbba0d0d0a0e7a6b4' then
+   raise exception using errcode='P0001',message='reviewed_repair_source_changed';
+ end if;
+ if (select count(*) from public.makeup_requests where class_id=c.id)<>1 then
+   raise exception using errcode='P0001',message='reviewed_repair_other_request_present';
+ end if;
+ select count(*) into n from jsonb_array_elements(c.schedule_plan->'sessions') x
+ where x->>'id'=sid or x->>'date'='2026-10-15';
+ if n<>1 then raise exception using errcode='P0001',message='reviewed_repair_session_ambiguous';end if;
+ select x,ord-1 into strict s,idx
+ from jsonb_array_elements(c.schedule_plan->'sessions') with ordinality e(x,ord)
+ where x->>'id'=sid;
+ if idx<>59 or md5(s::text) is distinct from '77e3b941c822b4df60eecaad923d292c'
+ or s->>'sessionKey' is distinct from sid or s->>'date' is distinct from '2026-10-15'
+ or s->>'originalDate' is distinct from '2026-10-14'
+ or s->>'scheduleState' is distinct from 'makeup' or s->>'state' is distinct from 'makeup'
+ or s ?| array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'] then
+   raise exception using errcode='P0001',message='reviewed_repair_row_changed';
+ end if;
+ select payload into strict event_payload from public.makeup_request_events
+ where id='1ace6f8a-c215-4be0-9bd5-9352545cb604' and request_id=r.id
+ and event_type='approved' and created_at='2026-09-22 09:00:47.359084+00'::timestamptz for share;
+ if event_payload->>'makeup_request_id' is distinct from r.id::text
+ or event_payload->>'cancel_date' is distinct from '2026-10-14'
+ or event_payload->>'teacher_name' is distinct from '한지현'
+ or event_payload->>'makeup_room' is distinct from '별관 6강'
+ or event_payload->'makeup_schedule' is distinct from
+ '[{"place":"별관 6강","end_at":"2026-10-15T17:00:00+09:00","start_at":"2026-10-15T15:00:00+09:00"}]'::jsonb then
+   raise exception using errcode='P0001',message='reviewed_repair_approval_evidence_changed';
+ end if;
+ select substring(note from position('[[TIPS_MAKEUP]]' in note)+length('[[TIPS_MAKEUP]]'))::jsonb
+ into strict event_meta from public.academic_events
+ where id='9481dde4-9783-4589-afa6-28dbcc3c85f6'
+ and date='2026-10-15' and position('[[TIPS_MAKEUP]]' in note)>0 for share;
+ if event_meta->>'requestId' is distinct from r.id::text
+ or event_meta->>'kind' is distinct from 'makeup' or event_meta->>'slotIndex' is distinct from '0'
+ or event_meta->>'startAt' is distinct from '2026-10-15T15:00:00+09:00'
+ or event_meta->>'endAt' is distinct from '2026-10-15T17:00:00+09:00'
+ or event_meta->>'classroom' is distinct from '별관 6강' then
+   raise exception using errcode='P0001',message='reviewed_repair_calendar_evidence_changed';
+ end if;
+ perform 1 from public.teacher_catalogs where id='539275aa-060c-4a2d-9c31-11f9b831bc65' and name='한지현' for share;
+ if not found then raise exception using errcode='P0001',message='reviewed_repair_teacher_changed';end if;
+ perform 1 from public.classroom_catalogs where id='eb612df2-2f4c-40f1-ae0e-fb18c7303e52' and name='별관 6강' for share;
+ if not found or (select count(*) from public.classroom_catalogs where name='별관 6강')<>1 then
+   raise exception using errcode='P0001',message='reviewed_repair_room_changed';end if;
+ next_plan:=jsonb_set(c.schedule_plan,array['sessions',idx::text],s||added,false);
+ if md5(next_plan::text) is distinct from 'b8e1e0b44abae3fe16173217d6bc40c9'
+ or md5((s||added)::text) is distinct from '77557876ec293be525c87d5e1678e2d1'
+ or jsonb_set(next_plan,array['sessions',idx::text],(next_plan#>array['sessions',idx::text])-array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'],false) is distinct from c.schedule_plan then
+   raise exception using errcode='P0001',message='reviewed_repair_delta_unexpected';end if;
+ -- Keep the pre-repair full plan in the unchanged normal audit before-snapshot.
+ perform set_config('app.class_schedule_class_id',c.id::text,true);
+ perform set_config('app.class_schedule_request_operation','repair_legacy_makeup_occupancy_20261004',true);
+ perform set_config('app.class_schedule_change_reason','Restore six missing occupancy fields from approved event 1ace6f8a-c215-4be0-9bd5-9352545cb604; synchronize operational cancellation snapshot',true);
+ update public.classes set schedule_plan=next_plan where id=c.id and schedule_plan=c.schedule_plan;
+ get diagnostics n=row_count;
+ if n<>1 then raise exception using errcode='P0001',message='reviewed_repair_class_race';end if;
+ update public.makeup_requests set schedule_plan_after=next_plan
+ where id=r.id and status='completed' and schedule_plan_after=c.schedule_plan and updated_at=r.updated_at;
+ get diagnostics n=row_count;
+ if n<>1 then raise exception using errcode='P0001',message='reviewed_repair_request_race';end if;
+ if not exists(select 1 from public.classes x join public.makeup_requests m on m.class_id=x.id
+ where x.id=c.id and m.id=r.id and x.schedule_plan=m.schedule_plan_after
+ and m.schedule_plan_before=r.schedule_plan_before and m.status=r.status) then
+   raise exception using errcode='P0001',message='reviewed_repair_cancel_contract_changed';end if;
+ raise notice 'Reviewed two-row repair prepared; class %, session %, before %, after %',c.id,sid,'3a16c919c667598e1b95ed170c2b846d','b8e1e0b44abae3fe16173217d6bc40c9';
+end $repair$;$reviewed$;
+$tpl$;
+create function pg_temp.repair_added() returns jsonb language sql immutable as $$
+select '{"startTime":"15:00","endTime":"17:00","teacherCatalogId":"539275aa-060c-4a2d-9c31-11f9b831bc65","teacherName":"한지현","classroomCatalogId":"eb612df2-2f4c-40f1-ae0e-fb18c7303e52","classroomName":"별관 6강"}'::jsonb
+$$;
+insert into public.teacher_catalogs(id,name,subjects) values('539275aa-060c-4a2d-9c31-11f9b831bc65','한지현',array['수학']);
+insert into public.classroom_catalogs(id,name,subjects) values('eb612df2-2f4c-40f1-ae0e-fb18c7303e52','별관 6강',array['수학']);
+create temp table repair_plans as
+with fillers as (
+ select jsonb_agg(jsonb_build_object('id','synthetic-retained-'||n,'date',(date '2025-01-01'+n)::text,'state','skipped','scheduleState','skipped','teacherNote','synthetic retained content') order by n) rows
+ from generate_series(0,57) n
+), target as (
+ select '{"id":"session:004:2026-10-15:period-1782719919639-7:2026-10-14:makeup","sessionKey":"session:004:2026-10-15:period-1782719919639-7:2026-10-14:makeup","date":"2026-10-15","state":"makeup","scheduleState":"makeup","originalDate":"2026-10-14","isForced":false,"teacherNote":"synthetic retained lesson content","textbookEntries":[{"textbookId":"synthetic","actual":{"start":3,"end":7}}]}'::jsonb row
+), original as (
+ select jsonb_build_object('id','synthetic-original','sessionKey','synthetic-original','date','2026-10-14','state','active','scheduleState','active','isForced',false)||pg_temp.repair_added() row
+)
+select jsonb_build_object('subject','수학','className','Synthetic source-bound repair','selectedDays',jsonb_build_array(3),'sessions',f.rows||jsonb_build_array(o.row)) before_plan,
+ jsonb_build_object('subject','수학','className','Synthetic source-bound repair','selectedDays',jsonb_build_array(3),'sessions',f.rows||jsonb_build_array(o.row||'{"state":"exception","scheduleState":"exception"}'::jsonb,t.row)) old_plan
+from fillers f cross join target t cross join original o;
+alter table repair_plans add column new_plan jsonb;
+update repair_plans set new_plan=jsonb_set(old_plan,'{sessions,59}',(old_plan#>'{sessions,59}')||pg_temp.repair_added());
+insert into public.classes(id,name,subject,teacher,room,schedule,status,schedule_storage_mode,schedule_plan)
+select '1b2a31dd-c137-4983-9963-75d224a68845','Synthetic source-bound repair','수학','한지현','별관 6강','수 15:00-17:00','수강','legacy',old_plan from repair_plans;
+insert into public.makeup_requests(id,status,request_kind,subject,approval_group,requester_id,class_id,class_name,teacher_catalog_id,approver_profile_id,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots,schedule_plan_before,schedule_plan_after,approved_at,updated_at,makeup_academic_event_id,makeup_academic_event_ids)
+select 'e2b20c00-c1a0-4d5e-924b-2f662aced7b7','completed','cancel_makeup','수학','math_high',pg_temp.sid(901),'1b2a31dd-c137-4983-9963-75d224a68845','Synthetic source-bound repair','539275aa-060c-4a2d-9c31-11f9b831bc65',pg_temp.sid(901),'2026-10-14','2026-10-15T15:00:00+09:00','2026-10-15T17:00:00+09:00','별관 6강',
+ '[{"startAt":"2026-10-15T15:00:00+09:00","endAt":"2026-10-15T17:00:00+09:00","classroom":"별관 6강"}]',before_plan,old_plan,'2026-09-22 09:00:48.164079+00','2026-09-22 09:00:47.359084+00','9481dde4-9783-4589-afa6-28dbcc3c85f6','["9481dde4-9783-4589-afa6-28dbcc3c85f6"]' from repair_plans;
+insert into public.makeup_request_events(id,request_id,event_type,created_at,payload)
+values('1ace6f8a-c215-4be0-9bd5-9352545cb604','e2b20c00-c1a0-4d5e-924b-2f662aced7b7','approved','2026-09-22 09:00:47.359084+00',
+'{"makeup_request_id":"e2b20c00-c1a0-4d5e-924b-2f662aced7b7","cancel_date":"2026-10-14","teacher_name":"한지현","makeup_room":"별관 6강","makeup_schedule":[{"place":"별관 6강","start_at":"2026-10-15T15:00:00+09:00","end_at":"2026-10-15T17:00:00+09:00"}]}');
+insert into public.academic_events(id,title,date,type,grade,note)
+values('9481dde4-9783-4589-afa6-28dbcc3c85f6','Synthetic repair makeup','2026-10-15','팁스','all','[[TIPS_MAKEUP]] {"requestId":"e2b20c00-c1a0-4d5e-924b-2f662aced7b7","kind":"makeup","slotIndex":0,"startAt":"2026-10-15T15:00:00+09:00","endAt":"2026-10-15T17:00:00+09:00","classroom":"별관 6강"}');
+-- Two preexisting, fully unknown past lessons on one date remain outside the Oct 15 scope.
+insert into public.classes(id,name,subject,teacher,room,schedule,status,schedule_storage_mode,schedule_plan)
+select pg_temp.sid(n),'Synthetic unresolved history '||n,'영어','Synthetic historical teacher','Synthetic historical room','금 15:30-17:00','수강','legacy',
+ jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','past-'||n,'date','2026-10-02','state','active','scheduleState','active','isForced',false))) from generate_series(71,72) n;
+-- Fixture setup only: recognize these preexisting invalid rows as the baseline.
+update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
+set constraints all immediate;set constraints all deferred;
+create temp table repair_hash_map as
+select * from (values
+ ('3a16c919c667598e1b95ed170c2b846d',md5((select old_plan::text from repair_plans))),
+ ('4d410d7dd44ab52c9fe0f3bbe4e4a7a1',md5((select before_plan::text from repair_plans))),
+ ('77e3b941c822b4df60eecaad923d292c',md5((select (old_plan#>'{sessions,59}')::text from repair_plans))),
+ ('b8e1e0b44abae3fe16173217d6bc40c9',md5((select new_plan::text from repair_plans))),
+ ('77557876ec293be525c87d5e1678e2d1',md5((select (new_plan#>'{sessions,59}')::text from repair_plans))),
+ ('05c610f69eaf50abbba0d0d0a0e7a6b4',(select md5(jsonb_build_array(r.id,r.class_id,r.status,r.cancel_date,r.makeup_start_at,r.makeup_end_at,r.makeup_classroom,r.teacher_catalog_id,r.makeup_slots,r.approved_at,r.makeup_academic_event_id,r.makeup_academic_event_ids,r.schedule_plan_after)::text) from public.makeup_requests r where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'))
+) hashes(reviewed,synthetic);
+create function pg_temp.run_reviewed_repair() returns void language plpgsql as $fn$
+declare stmt text:=pg_temp.repair_template(); h record;
+begin
+ perform dashboard_private.lock_timetable_operating_resources_v1();
+ for h in select * from repair_hash_map loop stmt:=replace(stmt,quote_literal(h.reviewed),quote_literal(h.synthetic));end loop;
+ execute stmt;
+ set constraints all immediate;set constraints all deferred;
+end $fn$;
+create function pg_temp.repair_cancel(key_number int) returns void language plpgsql as $fn$
+begin
+ perform public.transition_makeup_request_v2('e2b20c00-c1a0-4d5e-924b-2f662aced7b7','approval_canceled','{"note":"Synthetic repair cancellation"}','completed',pg_temp.sid(key_number));
+ set constraints all immediate;set constraints all deferred;
+end $fn$;
+create function pg_temp.set_repair_pair(p jsonb) returns void language plpgsql as $fn$
+begin
+ perform dashboard_private.lock_timetable_operating_resources_v1();
+ update public.classes set schedule_plan=p where id='1b2a31dd-c137-4983-9963-75d224a68845';
+ update public.makeup_requests set schedule_plan_after=p where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7';
+ set constraints all immediate;set constraints all deferred;
+end $fn$;
+create temp table repair_counts as select
+ (select count(*) from public.academic_events) calendars,
+ (select count(*) from public.makeup_request_events) events,
+ (select count(*) from dashboard_private.notification_deliveries) deliveries,
+ (select jsonb_agg(jsonb_build_array(id,schedule_plan) order by id) from public.classes where id in(pg_temp.sid(71),pg_temp.sid(72))) history;
+select is((select count(*)::int from repair_hash_map),6,'only six reviewed content hashes rebound for synthetic data');
+
+-- Class-only repair is a concrete cancellation regression; rollback this fixture branch.
+savepoint class_only;
+update public.classes set schedule_plan=(select new_plan from repair_plans) where id='1b2a31dd-c137-4983-9963-75d224a68845';
+set constraints all immediate;set constraints all deferred;
+set local role service_role;
+select throws_ok('select pg_temp.repair_cancel(601)','P0001','makeup_schedule_plan_stale','class-only repair breaks the actual final cancellation RPC');
+reset role;
+rollback to class_only;
+
+savepoint stale_source;
+update public.makeup_requests set makeup_classroom='Synthetic changed source' where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7';
+select throws_ok('select pg_temp.run_reviewed_repair()','P0001','reviewed_repair_source_changed','stale reviewed source aborts before repair');
+rollback to stale_source;
+
+-- Exercise transaction rollback after the complete forward repair and deferred guard.
+savepoint before_reviewed_repair;
+select lives_ok('select pg_temp.run_reviewed_repair()','exact reviewed repair passes real deferred guard');
+select is((select schedule_plan from public.classes where id='1b2a31dd-c137-4983-9963-75d224a68845'),(select new_plan from repair_plans),'forward class plan is exactly the six-field delta');
+select ok((select c.schedule_plan=r.schedule_plan_after from public.classes c join public.makeup_requests r on r.class_id=c.id where r.id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),'forward repair synchronizes operational cancellation snapshot');
+rollback to before_reviewed_repair;
+select is((select schedule_plan from public.classes where id='1b2a31dd-c137-4983-9963-75d224a68845'),(select old_plan from repair_plans),'transaction rollback restores exact old class plan');
+select is((select schedule_plan_after from public.makeup_requests where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),(select old_plan from repair_plans),'transaction rollback restores exact old request snapshot');
+
+select lives_ok('select pg_temp.run_reviewed_repair()','forward repair succeeds independently of other-date unresolved history');
+select is((select schedule_plan_before from public.makeup_requests where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),(select before_plan from repair_plans),'approval before-snapshot unchanged');
+select is((select status from public.makeup_requests where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),'completed','repair does not transition request status');
+select is((select approved_at from public.makeup_requests where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),'2026-09-22 09:00:48.164079+00'::timestamptz,'approval timestamp unchanged');
+select is((select count(*) from public.academic_events),(select calendars from repair_counts),'repair leaves calendar records unchanged');
+select is((select count(*) from public.makeup_request_events),(select events from repair_counts),'repair leaves immutable request events unchanged');
+select is((select count(*) from dashboard_private.notification_deliveries),(select deliveries from repair_counts),'repair creates no notification deliveries');
+select is((select jsonb_agg(jsonb_build_array(id,schedule_plan) order by id) from public.classes where id in(pg_temp.sid(71),pg_temp.sid(72))),(select history from repair_counts),'other-date historical rows remain exactly unchanged');
+select throws_ok('select pg_temp.run_reviewed_repair()','P0001','reviewed_repair_source_changed','already repaired source fails closed on a second invocation');
+select throws_ok('select pg_temp.set_repair_pair((select old_plan from repair_plans))','23P01','timetable_resource_conflict','inverse to missing metadata is correctly blocked by actual guard');
+select is((select schedule_plan from public.classes where id='1b2a31dd-c137-4983-9963-75d224a68845'),(select new_plan from repair_plans),'rejected inverse atomically retains valid class plan');
+select is((select schedule_plan_after from public.makeup_requests where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),(select new_plan from repair_plans),'rejected inverse atomically retains valid request snapshot');
+
+-- Compensation is a new complete known occupancy, not a return to invalid history.
+savepoint compensating_correction;
+select lives_ok($$select pg_temp.set_repair_pair(jsonb_set(jsonb_set((select new_plan from repair_plans),'{sessions,59,startTime}','"17:00"'),'{sessions,59,endTime}','"18:00"'))$$,'reviewed forward compensation with complete nonconflicting occupancy remains possible');
+set local role service_role;
+select lives_ok('select pg_temp.repair_cancel(602)','actual cancellation also works after synchronized compensation');
+reset role;
+rollback to compensating_correction;
+
+set local role service_role;
+select lives_ok('select pg_temp.repair_cancel(603)','actual final cancellation RPC succeeds with repaired paired snapshot');
+reset role;
+select is((select schedule_plan from public.classes where id='1b2a31dd-c137-4983-9963-75d224a68845'),(select before_plan from repair_plans),'cancellation restores original before-plan exactly');
+select is((select status from public.makeup_requests where id='e2b20c00-c1a0-4d5e-924b-2f662aced7b7'),'canceled','normal cancellation status transition is preserved');
+select ok(not exists(select 1 from public.academic_events where id='9481dde4-9783-4589-afa6-28dbcc3c85f6'),'normal cancellation removes its own calendar event');
+select is((select count(*) from public.academic_events),(select calendars-1 from repair_counts),'normal cancellation leaves other calendar records intact');
+
+create function pg_temp.partial_history_repair() returns void language plpgsql as $fn$
+begin
+ update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,0}',(schedule_plan#>'{sessions,0}')||jsonb_build_object('startTime','15:30','endTime','17:00','teacherCatalogId',pg_temp.sid(9),'classroomCatalogId',pg_temp.sid(8))) where id=pg_temp.sid(71);
+ set constraints all immediate;set constraints all deferred;
+end $fn$;
+select throws_ok('select pg_temp.partial_history_repair()','23P01','timetable_resource_conflict','known historical candidate cannot be isolated while same-date fully unknown row remains');
+select is((select jsonb_agg(jsonb_build_array(id,schedule_plan) order by id) from public.classes where id in(pg_temp.sid(71),pg_temp.sid(72))),(select history from repair_counts),'blocked partial historical repair is atomic');
+
 select * from finish();
 rollback;
