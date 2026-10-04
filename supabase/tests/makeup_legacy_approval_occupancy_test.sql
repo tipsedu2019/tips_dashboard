@@ -122,6 +122,227 @@ create function pg_temp.effective_approvals() returns jsonb language sql immutab
 -- END EFFECTIVE APPROVAL PRODUCER FIXTURE
 -- Actual producer -> final reader -> public approval -> replay -> cancellation.
 -- Everything below uses synthetic data in this rollback-only isolated fixture.
+-- The captured baseline retains July's payload writer and omits this exact
+-- existing August function. Restore only that prerequisite in this disposable
+-- fixture transaction; do not change the runner, production migration or guard.
+-- BEGIN CURRENT MAKEUP PAYLOAD WRITER
+create or replace function dashboard_private.notification_makeup_payload_v1(
+  p_request_id uuid,
+  p_source_event_id uuid,
+  p_event_key text
+)
+returns jsonb
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
+    'makeup_request_id', request.id,
+    'process', case p_event_key
+      when 'makeup.submitted' then '신청 제출'
+      when 'makeup.refund_requested' then '환불 신청'
+      when 'makeup.approved' then '결재 승인'
+      when 'makeup.refund_completed' then '환불 완료'
+      when 'makeup.approval_canceled' then '승인 취소'
+      when 'makeup.revision_requested' then '보완 요청'
+      when 'makeup.rejected' then '반려'
+      when 'makeup.deleted' then '삭제'
+      else p_event_key
+    end,
+    'status', case request.status
+      when 'approval_pending' then '결재자 승인 대기'
+      when 'revision_requested' then '보완 요청'
+      when 'rejected' then '반려'
+      when 'manager_pending' then '이전 관리팀 전달'
+      when 'makeup_pending' then '보강대기'
+      when 'refund_pending' then '환불대기'
+      when 'completed' then '완료'
+      when 'canceled' then '승인 취소'
+      else request.status
+    end,
+    'workflow_status', request.status,
+    'request_kind', request.request_kind,
+    'class_name', request.class_name,
+    'subject', request.subject,
+    'approval_group', request.approval_group,
+    'subject_team_key', request.approval_group,
+    'teacher_name', teacher.name,
+    'reason', request.reason,
+    'memo', request.final_note,
+    'event_note', source_event.note,
+    'cancel_date', request.cancel_date,
+    'makeup_schedule', coalesce(
+      nullif(
+        (
+          select pg_catalog.jsonb_agg(
+            pg_catalog.jsonb_strip_nulls(pg_catalog.jsonb_build_object(
+              'start_at', coalesce(slot.value ->> 'startAt', slot.value ->> 'start_at'),
+              'end_at', coalesce(slot.value ->> 'endAt', slot.value ->> 'end_at'),
+              'place', coalesce(
+                nullif(pg_catalog.btrim(coalesce(
+                  slot.value ->> 'classroom', slot.value ->> 'place', slot.value ->> 'room'
+                )), ''),
+                nullif(pg_catalog.btrim(request.makeup_classroom), '')
+              )
+            ))
+            order by slot.ordinality
+          )
+          from pg_catalog.jsonb_array_elements(
+            case when pg_catalog.jsonb_typeof(request.makeup_slots) = 'array'
+              then request.makeup_slots else '[]'::jsonb end
+          ) with ordinality slot(value, ordinality)
+        ),
+        '[]'::jsonb
+      ),
+      case when request.makeup_start_at is not null
+        then pg_catalog.jsonb_build_array(pg_catalog.jsonb_strip_nulls(
+          pg_catalog.jsonb_build_object(
+            'start_at', request.makeup_start_at,
+            'end_at', request.makeup_end_at,
+            'place', nullif(pg_catalog.btrim(request.makeup_classroom), '')
+          )
+        ))
+        else '[]'::jsonb
+      end
+    ),
+    'makeup_places', coalesce(
+      (
+        select pg_catalog.jsonb_agg(place_row.place order by place_row.place)
+        from (
+          select distinct coalesce(
+            nullif(pg_catalog.btrim(coalesce(
+              slot.value ->> 'classroom', slot.value ->> 'place', slot.value ->> 'room'
+            )), ''),
+            nullif(pg_catalog.btrim(request.makeup_classroom), '')
+          ) as place
+          from pg_catalog.jsonb_array_elements(
+            case when pg_catalog.jsonb_typeof(request.makeup_slots) = 'array'
+              then request.makeup_slots else '[]'::jsonb end
+          ) slot(value)
+        ) place_row
+        where place_row.place is not null
+      ),
+      case when nullif(pg_catalog.btrim(request.makeup_classroom), '') is null
+        then '[]'::jsonb
+        else pg_catalog.jsonb_build_array(pg_catalog.btrim(request.makeup_classroom))
+      end
+    ),
+    'makeup_at', coalesce(
+      (
+        select pg_catalog.string_agg(
+          coalesce(slot.value ->> 'startAt', slot.value ->> 'start_at', '')
+            || case when coalesce(slot.value ->> 'endAt', slot.value ->> 'end_at', '') = ''
+              then '' else ' - ' || coalesce(slot.value ->> 'endAt', slot.value ->> 'end_at') end,
+          ', ' order by slot.ordinality
+        )
+        from pg_catalog.jsonb_array_elements(
+          case when pg_catalog.jsonb_typeof(request.makeup_slots) = 'array'
+            then request.makeup_slots else '[]'::jsonb end
+        ) with ordinality slot(value, ordinality)
+      ),
+      request.makeup_start_at::text
+    ),
+    'makeup_room_spaced', request.makeup_classroom,
+    'makeup_room', request.makeup_classroom,
+    'requester_name', requester.name,
+    'approver_name', approver.name,
+    'actor_name', actor.name,
+    'requester_profile_id', case
+      when dashboard_private.notification_profile_is_active_v1(request.requester_id)
+        then request.requester_id
+      else null
+    end,
+    'approver_profile_id', case
+      when dashboard_private.notification_profile_is_active_v1(request.approver_profile_id)
+        then request.approver_profile_id
+      else null
+    end,
+    'management_profile_ids', (
+      select coalesce(pg_catalog.jsonb_agg(profile.id order by profile.id), '[]'::jsonb)
+      from public.profiles profile
+      where profile.role in ('admin', 'staff')
+        and dashboard_private.notification_profile_is_active_v1(profile.id)
+    ),
+    'submitted_at', coalesce(
+      (
+        select pg_catalog.max(history.created_at)
+        from public.makeup_request_events history
+        where history.request_id = request.id
+          and history.event_type in ('submitted', 'resubmitted')
+      ),
+      request.created_at
+    ),
+    'revision_requested_at', (
+      select pg_catalog.max(history.created_at)
+      from public.makeup_request_events history
+      where history.request_id = request.id
+        and history.event_type = 'revision_requested'
+    ),
+    'revision_reason', (
+      select history.note
+      from public.makeup_request_events history
+      where history.request_id = request.id
+        and history.event_type = 'revision_requested'
+      order by history.created_at desc, history.id desc
+      limit 1
+    ),
+    'approved_at', request.approved_at,
+    'approval_note', coalesce(
+      (
+        select history.note
+        from public.makeup_request_events history
+        where history.request_id = request.id
+          and history.event_type = 'approved'
+        order by history.created_at desc, history.id desc
+        limit 1
+      ),
+      request.final_note
+    ),
+    'rejected_at', (
+      select pg_catalog.max(history.created_at)
+      from public.makeup_request_events history
+      where history.request_id = request.id
+        and history.event_type = 'rejected'
+    ),
+    'rejected_reason', coalesce(
+      (
+        select history.note
+        from public.makeup_request_events history
+        where history.request_id = request.id
+          and history.event_type = 'rejected'
+        order by history.created_at desc, history.id desc
+        limit 1
+      ),
+      request.rejected_reason
+    ),
+    'canceled_at', request.canceled_at,
+    'canceled_note', (
+      select history.note
+      from public.makeup_request_events history
+      where history.request_id = request.id
+        and history.event_type in ('approval_canceled', 'completed_canceled')
+      order by history.created_at desc, history.id desc
+      limit 1
+    ),
+    'status_changed_at', source_event.created_at,
+    'attachment_count', 0,
+    'attachment_types', '[]'::jsonb,
+    'fallback_title', '휴보강 알림',
+    'fallback_body', request.class_name || ' · ' || request.status,
+    'occurred_at', source_event.created_at
+  ))
+  from public.makeup_requests request
+  join public.makeup_request_events source_event
+    on source_event.id = p_source_event_id
+   and source_event.request_id = request.id
+  left join public.profiles requester on requester.id = request.requester_id
+  left join public.profiles actor on actor.id = source_event.actor_id
+  left join public.teacher_catalogs teacher on teacher.id = request.teacher_catalog_id
+  left join public.teacher_catalogs approver on approver.id = request.approver_teacher_catalog_id
+  where request.id = p_request_id;
+$$;
+-- END CURRENT MAKEUP PAYLOAD WRITER
 create function pg_temp.eid(n int) returns uuid language sql immutable as $$select ('ae041004-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.eid(901),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','effective-integration@test.invalid');
 insert into public.profiles(id,role,name) values(pg_temp.eid(901),'admin','Synthetic inheritance operator') on conflict(id) do update set role='admin';
@@ -160,36 +381,12 @@ end $$;
 create function pg_temp.effective_cancel(n int,key_number int) returns jsonb language sql as $$
 select public.transition_makeup_request_v2((f#>>'{request,id}')::uuid,'approval_canceled','{"note":"Synthetic cancellation"}','completed',pg_temp.eid(key_number)) from effective_approval_fixtures where (f->>'n')::int=n
 $$;
--- Diagnostic only, owner fixture in a disposable DB. The real public approval
--- above remains the tested path. Re-run the unguarded transition in a forced
--- rollback subtransaction solely to inspect its intermediate source evidence.
-create function pg_temp.debug_effective_source(n int) returns void language plpgsql as $$
-declare f jsonb; c public.classes; proof jsonb; ref jsonb;
-begin
- select x.f into f from effective_approval_fixtures x where (x.f->>'n')::int=n;
- begin
-  perform dashboard_private.transition_makeup_request_v2_unguarded((f#>>'{request,id}')::uuid,'approve',f->'patch','approval_pending',pg_temp.eid(9900+n));
-  select * into c from public.classes where id=(f#>>'{request,class_id}')::uuid;
-  proof:=dashboard_private.legacy_effective_context_v1(c)->'approvedByIdentity';
-  ref:=dashboard_private.read_timetable_operating_reference_v1();
-  raise notice 'EFFECTIVE_SOURCE_DEBUG n=% proof=% unresolved=%',n,proof,(select jsonb_agg(b) from jsonb_array_elements(ref->'datedUnresolvedOccupancies') b where b->>'classId'=c.id::text);
-  if n=6 then
-   raise notice 'EFFECTIVE_PROOF_COMPONENTS %',(select jsonb_build_object('status',m.status,'approvedAt',m.approved_at,
-    'payload',(select jsonb_build_object('requestId',e.payload->'makeup_request_id','teacher',e.payload->'teacher_name','schedule',e.payload->'makeup_schedule','keys',(select jsonb_agg(k) from jsonb_object_keys(e.payload) k)) from public.makeup_request_events e where e.request_id=m.id and e.event_type='approved' order by e.created_at desc,e.id desc limit 1),
-    'calendar',(select jsonb_agg(jsonb_build_object('date',a.date,'meta',dashboard_private.makeup_approval_event_meta_v1(a.note))) from public.academic_events a where a.id=m.makeup_academic_event_id or m.makeup_academic_event_ids ? a.id::text),
-    'teacherExists',exists(select 1 from public.teacher_catalogs tc where tc.id=m.teacher_catalog_id)) from public.makeup_requests m where m.id=(f#>>'{request,id}')::uuid);
-  end if;
-  raise exception using errcode='PZ001',message='synthetic_debug_rollback';
- exception when sqlstate 'PZ001' then null;
- end;
-end $$;
 grant select on effective_approval_fixtures to service_role;
 create temp table effective_before as select (select count(*) from dashboard_private.notification_deliveries) deliveries;
 set local role service_role;
 select lives_ok('select pg_temp.effective_approve(5,2005)','historical source-only makeup resolves during actual approval without repairing its row');
 select lives_ok('select pg_temp.effective_approve(6,2006)','historical source-only midnight endpoint approves without moving the date');
 reset role;
-select pg_temp.debug_effective_source(n) from generate_series(5,6)n where (select status from public.makeup_requests where id=pg_temp.eid(100+n))='approval_pending';
 set constraints all immediate;set constraints all deferred;
 select is((select schedule_plan from public.classes where id=pg_temp.eid(205)),(select f->'after' from effective_approval_fixtures where f->>'n'='5'),'source-only approval preserves exact raw row and after snapshot');
 select is((select x->>'startMinute' from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),'2026-10-15') x where x->>'classId'=pg_temp.eid(205)::text),'900','approved historical makeup uses explicit 15:00, not current 19:30 basic');
@@ -217,6 +414,11 @@ update public.academic_events set note='[[TIPS_MAKEUP]] {}' where id=(select mak
 select is((select (dashboard_private.legacy_effective_context_v1(c)#>>'{approvedByIdentity,historical-approved-makeup,approvedOverrideVerified}')::boolean from public.classes c where id=pg_temp.eid(205)),false,'missing calendar proof leaves source unverified');
 select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') b where b->>'classId'=pg_temp.eid(205)::text),1,'tampered source cannot silently fall back to basics');
 rollback to tampered_source;
+
+savepoint legacy_payload;
+update public.makeup_request_events set payload=payload-'makeup_schedule' where request_id=pg_temp.eid(105) and event_type='approved';
+select is((select (dashboard_private.legacy_effective_context_v1(c)#>>'{approvedByIdentity,historical-approved-makeup,approvedOverrideVerified}')::boolean from public.classes c where id=pg_temp.eid(205)),false,'legacy payload without structured slot proof stays unverified');
+rollback to legacy_payload;
 
 savepoint renamed_teacher;
 update public.teacher_catalogs set name='Renamed inheritance teacher 2' where id=pg_temp.eid(2);
