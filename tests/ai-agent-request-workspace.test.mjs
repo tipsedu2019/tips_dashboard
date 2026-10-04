@@ -5,7 +5,7 @@ import { act, createElement } from 'react';
 import { loadNotificationComponent } from './helpers/notification-component-loader.mjs';
 globalThis.IS_REACT_ACT_ENVIRONMENT=true;
 const userId='10000000-0000-4000-8000-000000000001';
-const row={id:'20000000-0000-4000-8000-000000000001',requesterId:userId,requesterName:'합성 요청자',title:'이전 계정 요청',body:'본문',status:'pending',version:'1',createdAt:'2026-10-03T00:00:00Z',updatedAt:'2026-10-03T00:00:00Z',readyAt:'2026-10-03T00:00:00Z',openQuestionId:null,result:null,notifyOnDone:false,notificationSpace:null};
+const row={id:'20000000-0000-4000-8000-000000000001',requesterId:userId,requesterName:'합성 요청자',title:'이전 계정 요청',body:'본문',status:'pending',version:'1',createdAt:'2026-10-03T00:00:00Z',updatedAt:'2026-10-04T02:30:00Z',readyAt:'2026-10-03T00:00:00Z',openQuestionId:null,result:null,notifyOnDone:false,notificationSpace:null};
 async function mount(t,{policy=false}={}){
  const dom=new JSDOM('<div id="root"></div>',{url:'https://test.invalid/admin/ai-agent'});globalThis.window=dom.window;globalThis.document=dom.window.document;globalThis.self=dom.window;
  for(const key of ['HTMLElement','HTMLInputElement','HTMLTextAreaElement','Element','DocumentFragment','MutationObserver','CustomEvent','Event','MouseEvent','KeyboardEvent','Node','NodeFilter','DOMRect','getComputedStyle'])globalThis[key]=dom.window[key];
@@ -48,4 +48,17 @@ test('in-flight create survives remount without a second dispatch and unlocks fo
 });
 test('policy result confirmation remains available when reread already includes the committed mutation',async t=>{
  const ui=await mount(t,{policy:true});await ui.flush(()=>ui.reads[0].resolve(new Response(JSON.stringify({data:{userId,spaceKeys:[],revision:'0',updatedAt:null},error:null}))));await ui.flush(()=>document.querySelector('#ai-policy-space_1').click());await ui.flush(()=>ui.button('변경 저장').click());const original=ui.writes[0];await ui.flush(()=>original.reject(new Error('lost committed response')));await ui.remount();await ui.flush(()=>ui.reads[1].resolve(new Response(JSON.stringify({data:{userId,spaceKeys:['space_1'],revision:'1',updatedAt:row.updatedAt},error:null}))));assert.equal(ui.button('저장 결과 확인').disabled,false);await ui.flush(()=>ui.button('저장 결과 확인').click());assert.equal(ui.writes[1].init.body,original.init.body);assert.equal(ui.writes[1].init.headers['If-Match'],'"r0"');assert.equal(ui.writes[1].init.headers['Idempotency-Key'],original.init.headers['Idempotency-Key']);
+});
+
+test('desktop and mobile lists distinguish accepted creation and update timestamps',async t=>{
+ const ui=await mount(t);await ui.accept(0);
+ const table=document.querySelector('table');
+ assert.deepEqual([...table.querySelectorAll('th')].map(cell=>cell.textContent),['제목','상태','요청자','생성일','수정일']);
+ const desktopTimes=[...table.querySelectorAll('tbody time')];
+ assert.deepEqual(desktopTimes.map(time=>time.dateTime),[row.createdAt,row.updatedAt]);
+ assert.deepEqual(desktopTimes.map(time=>time.textContent),['26. 10. 3. 오전 9:00','26. 10. 4. 오전 11:30']);
+ const mobileTimes=[...document.querySelectorAll('time')].filter(time=>!table.contains(time));
+ assert.deepEqual(mobileTimes.map(time=>time.dateTime),[row.createdAt,row.updatedAt]);
+ assert.deepEqual(mobileTimes.map(time=>time.textContent),['생성일 26. 10. 3. 오전 9:00','수정일 26. 10. 4. 오전 11:30']);
+ assert.equal(ui.writes.length,0);
 });

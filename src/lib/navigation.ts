@@ -54,7 +54,7 @@ const workspaceMetaEntries: Array<{
   match: string
   meta: AdminWorkspaceMeta
 }> = [
-  { match: "/admin/ai-agent", meta: { section: "운영", title: "AI 요청", summary: "요청과 답변, 처리 이력을 확인합니다." } },
+  { match: "/admin/ai-agent", meta: { section: "운영", title: "AI 에이전트", summary: "요청과 답변, 처리 이력을 확인합니다." } },
   {
     match: "/admin/public-content",
     meta: { section: "관리", title: "홈페이지 관리", summary: "선생님 소개, 공개 후기와 성적을 관리합니다." },
@@ -340,7 +340,7 @@ export function buildAdminNavGroups({
     items: canUseAssistantOperations ? assistantOverviewItems : fullOverviewItems,
   }
 
-  if (canUseAiAgentRequests) overview.items = [...overview.items, { title: "AI 요청", url: "/admin/ai-agent", icon: Bot }]
+  if (canUseAiAgentRequests) overview.items = [...overview.items, { title: "AI 에이전트", url: "/admin/ai-agent", icon: Bot }]
 
   const managementItems: NavItem[] = []
 
