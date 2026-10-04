@@ -704,6 +704,11 @@
       "fileName": "20261002170849_timetable_legacy_default_projection.sql",
       "status": "final",
       "sha256": "ce52cc855ae3f7ec7816123272690386c2606480fbaec94d6ad131249332ee95"
+    },
+    {
+      "fileName": "20261004140440_registration_free_recording.sql",
+      "status": "final",
+      "sha256": "4811713472f11cfff62fb68036db552e2b3fb6730142745671c9f26969788ed9"
     }
   ]
 }
