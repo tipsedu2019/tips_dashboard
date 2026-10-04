@@ -36,7 +36,7 @@ const fixtureRoots = []
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c971d1e4c5421532d2943003b0054397639f039c9b4da509f17b49e257c700ca"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
-  "47fed0b9d8ef5d53f4877600b7234e5b012cbe995734c32bb745b36bf577e73f"
+  "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -1371,7 +1371,7 @@ test("approved manual production workflow requires its exact path and complete r
       `${source}\n`,
       source.replace("on:\n  workflow_dispatch:", "on:\n  push:\n  workflow_dispatch:"),
       source.replaceAll("actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8", "actions/checkout@v4"),
-      source.replace("d41410c94fe654f5a5489b54bb21bc9f1ffa6017", "0000000000000000000000000000000000000000"),
+      source.replace("0da2c5089ecbdc14db7f8b46ac7957fcc11f25b4", "0000000000000000000000000000000000000000"),
       source.replace("default: preflight", "default: install"),
     ]) {
       assert.notEqual(mutation, source, "each adversarial case must change the reviewed bytes")
