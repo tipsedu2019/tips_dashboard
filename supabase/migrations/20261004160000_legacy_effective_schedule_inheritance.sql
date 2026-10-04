@@ -329,27 +329,28 @@ begin
  -- Only after-snapshot makeup identities still present in this class can bind.
  -- Multiple matching requests/slots are retained as an unverified source.
  for candidate in
- with requests as materialized(
-  select m.*,to_jsonb(m) request_json from public.makeup_requests m
-  where m.class_id=c.id and jsonb_typeof(m.schedule_plan_after->'sessions')='array'
-   and exists(select 1 from jsonb_array_elements(case when jsonb_typeof(m.schedule_plan_after->'sessions')='array' then m.schedule_plan_after->'sessions' else '[]' end) selected
-    where dashboard_private.makeup_effective_date_key_v1(selected->>'date') between p_date_from and p_date_to)
- ), selected as materialized(
-  select m.*,v lesson from requests m
-  cross join lateral jsonb_array_elements(m.schedule_plan_after->'sessions') v
-  where dashboard_private.makeup_effective_date_key_v1(v->>'date') between p_date_from and p_date_to
+ -- Filter eligible bindings before materializing anything from request history.
+ -- Neither full before/after snapshots nor private request fields enter the CTE.
+ with selected as materialized(
+  select m.id,m.status,m.approved_at,m.teacher_catalog_id,m.makeup_academic_event_id,m.makeup_academic_event_ids,
+   dashboard_private.legacy_effective_binding_v1(v) lesson,
+   jsonb_build_object('makeup_slots',m.makeup_slots,'makeup_start_at',m.makeup_start_at,
+    'makeup_end_at',m.makeup_end_at,'makeup_classroom',m.makeup_classroom) request_json
+  from public.makeup_requests m cross join lateral jsonb_array_elements(
+   case when jsonb_typeof(m.schedule_plan_after->'sessions')='array' then m.schedule_plan_after->'sessions' else '[]' end) v
+  where m.class_id=c.id
+   and dashboard_private.makeup_effective_date_key_v1(v->>'date') between p_date_from and p_date_to
+   and coalesce(v->>'scheduleState',v->>'state')='makeup' and nullif(v->>'id','') is not null
+   and exists(select 1 from jsonb_array_elements(case when jsonb_typeof(c.schedule_plan->'sessions')='array' then c.schedule_plan->'sessions' else '[]' end) current_row
+    where dashboard_private.legacy_effective_binding_v1(current_row)=dashboard_private.legacy_effective_binding_v1(v))
+   and not exists(select 1 from jsonb_array_elements(case when jsonb_typeof(m.schedule_plan_before->'sessions')='array' then m.schedule_plan_before->'sessions' else '[]' end) previous_row
+    where dashboard_private.legacy_effective_binding_v1(previous_row)=dashboard_private.legacy_effective_binding_v1(v))
  ), linked as materialized(
   select m.*,s slot,ord-1 slot_index,
    public.makeup_numbered_source_instant_v1(s->>'startAt') a,
    public.makeup_numbered_source_instant_v1(s->>'endAt') b
   from selected m
   cross join lateral jsonb_array_elements(public.makeup_numbered_slots_v1(m.request_json)) with ordinality e(s,ord)
-  where coalesce(m.lesson->>'scheduleState',m.lesson->>'state')='makeup'
-   and nullif(m.lesson->>'id','') is not null
-   and exists(select 1 from jsonb_array_elements(case when jsonb_typeof(c.schedule_plan->'sessions')='array' then c.schedule_plan->'sessions' else '[]' end) current_row
-    where dashboard_private.legacy_effective_binding_v1(current_row)=dashboard_private.legacy_effective_binding_v1(m.lesson))
-   and not exists(select 1 from jsonb_array_elements(case when jsonb_typeof(m.schedule_plan_before->'sessions')='array' then m.schedule_plan_before->'sessions' else '[]' end) previous_row
-    where dashboard_private.legacy_effective_binding_v1(previous_row)=dashboard_private.legacy_effective_binding_v1(m.lesson))
  ), dated as materialized(
   select * from linked where lesson->>'date'=to_char(a at time zone 'Asia/Seoul','YYYY-MM-DD')
    and (lesson->>'makeupRequestId' is distinct from id::text or lesson->>'id'='makeup-request:'||id::text||':'||slot_index::text)

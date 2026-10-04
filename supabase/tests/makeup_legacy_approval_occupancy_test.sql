@@ -409,6 +409,21 @@ select is((select dashboard_private.legacy_effective_context_for_dates_v1(c,null
  (select dashboard_private.legacy_effective_context_v1(c)->'approvedByIdentity' from public.classes c where id=pg_temp.eid(205)),'scoped adapter retains verified source-only approved makeup');
 select is((select dashboard_private.legacy_effective_context_for_dates_v1(c,null,'2026-10-16','2026-10-16')->'approvedByIdentity' from public.classes c where id=pg_temp.eid(205)),
  '{}'::jsonb,'outside-window approved source is excluded before source materialization');
+create temp table bounded_slot_normalizer_definition as select pg_get_functiondef('public.makeup_numbered_slots_v1(jsonb)'::regprocedure) ddl;
+do $test$begin execute replace((select ddl from bounded_slot_normalizer_definition),'public.makeup_numbered_slots_v1','pg_temp.original_makeup_slots');end $test$;
+create or replace function public.makeup_numbered_slots_v1(r jsonb) returns jsonb
+language plpgsql immutable security invoker set search_path='' as $test$
+begin
+ if r-array['makeup_slots','makeup_start_at','makeup_end_at','makeup_classroom']<>'{}'::jsonb then
+  raise exception using errcode='P0001',message='unexpected_request_history_projection';
+ end if;
+ return pg_temp.original_makeup_slots(r);
+end $test$;
+select is((select (dashboard_private.legacy_effective_context_for_dates_v1(c,null,'2026-10-15','2026-10-15')#>>'{approvedByIdentity,historical-approved-makeup,approvedOverrideVerified}')::boolean from public.classes c where id=pg_temp.eid(205)),
+ true,'eligible source normalization receives four slot fields, never complete request/snapshots');
+select is((select dashboard_private.legacy_effective_context_for_dates_v1(c,null,'2026-10-16','2026-10-16')->'approvedByIdentity' from public.classes c where id=pg_temp.eid(205)),
+ '{}'::jsonb,'out-of-window source does not reach slot normalization');
+do $test$begin execute (select ddl from bounded_slot_normalizer_definition);end $test$;
 
 -- Exact midnight and source tampering use the actual database adapter.
 select is((select x->>'endMinute' from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),'2026-10-15') x where x->>'classId'=pg_temp.eid(206)::text),'1440','approved source ends at 24:00 on exact makeup date');
