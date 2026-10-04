@@ -494,7 +494,7 @@ select is((select count(*)::int from dashboard_private.timetable_effective_date_
 -- Bounded read contract: real-source parity before any invocation sentinels.
 create temp table bounded_original_functions as select p.oid::regprocedure::text identity,pg_get_functiondef(p.oid) ddl from pg_proc p where p.oid in('dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)'::regprocedure,'dashboard_private.read_makeup_operating_reference_v1(date,date)'::regprocedure);
 insert into public.classes(id,name,subject,status,schedule_storage_mode,teacher,room,schedule,schedule_plan)
-values(pg_temp.eid(470),'Scoped duplicate and unknown','영어','종강','legacy','Inheritance teacher 2','Inheritance room 12','월 06:00-07:00',
+values(pg_temp.eid(470),'Scoped duplicate and unknown','영어','개강 준비','legacy','Inheritance teacher 2','Inheritance room 12','월 06:00-07:00',
  '{"sessions":[{"id":"shared-id","date":"2050-10-10","scheduleState":"makeup"},{"id":"shared-id","date":"1900-01-01","scheduleState":"makeup"},{"id":"unknown-date","date":"2050-10-10 00:00","startTime":"09:00","endTime":"10:00"},42]}'),
  (pg_temp.eid(471),'Scoped moved override','영어','수강','legacy','Inheritance teacher 2','Inheritance room 12','월 06:00-07:00',
  '{"sessions":[{"id":"moved","date":"2050-10-10","scheduleState":"active","startTime":"18:00","endTime":"19:00"}]}');
@@ -502,7 +502,7 @@ create temp table bounded_reference_pair as select dashboard_private.read_timeta
  dashboard_private.read_makeup_operating_reference_v1('2050-10-10','2050-10-10') scoped;
 select is((select scoped->'datedSessions' from bounded_reference_pair),
  (select coalesce(jsonb_agg(x),'[]') from bounded_reference_pair,jsonb_array_elements(full_value->'datedSessions') x where x->>'date'='2050-10-10'),
- 'scoped dated rows match full reader on selected date, including tombstones and all statuses');
+ 'scoped dated rows match full reader on selected date, including tombstones and inactive classes');
 select is((select scoped->'datedUnresolvedOccupancies' from bounded_reference_pair),
  (select coalesce(jsonb_agg(x),'[]') from bounded_reference_pair,jsonb_array_elements(full_value->'datedUnresolvedOccupancies') x where x->>'date' is null or x->>'date'='2050-10-10'),
  'scoped unknowns match full reader including outside-window duplicate IDs, scalar and noncanonical dates');
