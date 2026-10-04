@@ -1080,10 +1080,11 @@ test("registration keeps the observation tab in its fixed position before runtim
     "RegistrationTrackStatusControl",
     "REGISTRATION_WORKFLOW_STATUS_LABELS",
     "getRegistrationInlineWorkflowStatusOptions",
-    "if (isRegistrationObservationWorkflowStatus(track.workflowStatus))",
+    "<RegistrationSelect",
     "const nextStatus = options.find((option) => option.value === value)?.value",
     "if (nextStatus) onStatusChange(track, nextStatus)",
   ]);
+  assert.doesNotMatch(caseListSource, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\)/);
   assert.ok(!caseListSource.includes("value as OpsRegistrationWorkflowStatus"));
 });
 

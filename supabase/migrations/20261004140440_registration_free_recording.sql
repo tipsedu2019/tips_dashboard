@@ -1,6 +1,71 @@
-begin;
+-- Keep this original version. The pinned CLI's default transaction includes
+-- all core statements AND its ledger insert; do not add authored BEGIN/COMMIT.
 set local lock_timeout = '5s';
 set local statement_timeout = '120s';
+
+
+do $registration_core_executor$
+begin
+  if not pg_catalog.pg_try_advisory_xact_lock(20261004, 140440) then
+    raise exception 'registration_index_executor_busy' using errcode = '55P03';
+  end if;
+end;
+$registration_core_executor$;
+
+do $registration_index_core_pre$
+declare
+  v_spec record;
+  v_index oid;
+begin
+  perform pg_catalog.set_config('search_path', '', true);
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.ops_registration_subject_tracks'::regclass
+      and conname = 'ops_registration_subject_tracks_observation_return_workflow_pai'
+  ) then
+    raise exception 'registration_index_phase_core_changed' using errcode = '55000';
+  end if;
+  for v_spec in
+    select * from (values
+      ('ops_registration_observations_open_track_key', 'CREATE UNIQUE INDEX ops_registration_observations_open_track_key ON public.ops_registration_observations USING btree (track_id) WHERE ((decision_kind IS NULL) AND (status = ANY (ARRAY[''scheduled''::text, ''attended_feedback_pending''::text, ''completed''::text, ''no_show''::text])))', false, false, true),
+      ('ops_registration_observations_scheduled_track_key', 'CREATE UNIQUE INDEX ops_registration_observations_scheduled_track_key ON public.ops_registration_observations USING btree (track_id) WHERE ((decision_kind IS NULL) AND (status = ''scheduled''::text))', true, true, false)
+    ) as expected(index_name, definition, required, require_valid, forbidden)
+  loop
+    v_index := pg_catalog.to_regclass('public.' || v_spec.index_name);
+    if v_index is null then
+      if v_spec.required then
+        raise exception 'registration_index_phase_fence_missing: %', v_spec.index_name using errcode = '55000';
+      end if;
+    elsif v_spec.forbidden then
+      raise exception 'registration_index_phase_fence_unexpected: %', v_spec.index_name using errcode = '55000';
+    elsif not exists (
+      select 1 from pg_catalog.pg_index i
+      where i.indexrelid = v_index
+        and i.indrelid = 'public.ops_registration_observations'::regclass
+        and pg_catalog.pg_get_indexdef(i.indexrelid) = v_spec.definition
+        and (not v_spec.require_valid or (i.indisvalid and i.indisready and i.indislive))
+        and exists (select 1 from pg_catalog.pg_class c where c.oid = i.indexrelid and c.relkind = 'i' and not c.relispartition)
+        and not exists (select 1 from pg_catalog.pg_constraint c where c.conindid = i.indexrelid)
+        and not exists (select 1 from pg_catalog.pg_depend d where d.refclassid = 'pg_catalog.pg_class'::regclass and d.refobjid = i.indexrelid)
+        and not exists (select 1 from pg_catalog.pg_inherits h where h.inhrelid = i.indexrelid or h.inhparent = i.indexrelid)
+    ) then
+      raise exception 'registration_index_phase_fence_drift_or_invalid: %', v_spec.index_name using errcode = '55000';
+    end if;
+  end loop;
+end;
+$registration_index_core_pre$;
+
+do $registration_waiting_constraint_pre$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.ops_registration_subject_tracks'::regclass
+      and conname = 'ops_registration_subject_tracks_waiting_detail_class_check'
+  ) then
+    raise exception 'registration_waiting_constraint_missing' using errcode = '55000';
+  end if;
+end;
+$registration_waiting_constraint_pre$;
 
 -- The owner confirmed that registration is optional information plus a manual
 -- progress/outcome property. Neither choosing a status nor saving a partial
@@ -8,8 +73,8 @@ set local statement_timeout = '120s';
 -- Retain all historical return states; they are no longer a prerequisite for
 -- the manual status property. No existing data is rewritten.
 alter table public.ops_registration_subject_tracks
-  drop constraint ops_registration_subject_tracks_observation_return_workflow_pair_check,
-  drop constraint ops_registration_subject_tracks_waiting_detail_class_check,
+  drop constraint if exists ops_registration_subject_tracks_observation_return_workflow_pai,
+  drop constraint if exists ops_registration_subject_tracks_waiting_detail_class_check,
   add constraint ops_registration_subject_tracks_waiting_detail_class_check
     check (waiting_detail_class_id is null or waiting_detail_kind is not distinct from 'current_class') not valid;
 
@@ -328,10 +393,8 @@ $$;
 -- Completed/attended/no-show attempts are history even when the retired
 -- director decision was never recorded. Do not invent a decision or edit them.
 -- Keep the unique scheduled-attempt fence plus the booking RPC's track lock.
-drop index public.ops_registration_observations_open_track_key;
-create unique index ops_registration_observations_open_track_key
-  on public.ops_registration_observations(track_id)
-  where decision_kind is null and status = 'scheduled';
+alter index public.ops_registration_observations_scheduled_track_key
+  rename to ops_registration_observations_open_track_key;
 
 -- Patch the final definitions, including intervening security/read fixes.
 -- Exact anchors fail closed if that final producer contract changes.
@@ -387,5 +450,3 @@ begin
     || replace(v_definition, v_anchor, $patch$(observation.status = 'scheduled'::text AND appointment.status = 'scheduled'::text)$patch$);
 end;
 $current_observation_summary$;
-
-commit;

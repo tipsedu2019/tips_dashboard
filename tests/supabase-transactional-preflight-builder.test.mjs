@@ -21,6 +21,7 @@ const retirementAlter = [
 ].join("\n")
 const retirementCheckpoint = "set constraints dashboard_private.notification_rules_active_template_fkey immediate;"
 const retirementRestore = "set constraints dashboard_private.notification_rules_active_template_fkey deferred;"
+const registrationOnlineFile = "20261004140438_registration_scheduled_index_online.sql"
 const postgresFixtureOwnerLabel = "tips.transactional-preflight-fixture-owner"
 const dashboardPendingVersions = Object.freeze([
   "20260831013310",
@@ -115,6 +116,14 @@ async function createRetirementFixture({ source, file = retirementFile } = {}) {
   const contents = source ?? await readFile(join(repoRoot, "supabase/migrations", retirementFile), "utf8")
   await writeFile(join(fixture.root, "supabase/migrations", file), contents)
   fixture.ledger += "\n   20260909084130 |                | 2026-09-09 08:41:30"
+  return { ...fixture, contents }
+}
+
+async function createRegistrationIndexFixture({ source, file = registrationOnlineFile } = {}) {
+  const fixture = await createFixture()
+  const contents = source ?? await readFile(join(repoRoot, "supabase/migrations", registrationOnlineFile), "utf8")
+  await writeFile(join(fixture.root, "supabase/migrations", file), contents)
+  fixture.ledger += "\n   20261004140438 |                | 2026-10-04 14:04:38"
   return { ...fixture, contents }
 }
 
@@ -299,6 +308,55 @@ test("notification retirement refuses any source hash drift before adapting gene
     const fixture = await createRetirementFixture({ source: changed })
     await assert.rejects(buildFixturePreflight(fixture), {
       message: "transactional_preflight_notification_retirement_hash_mismatch",
+    })
+  }
+})
+
+test("exact registration online source rehearses both index actions with bounded timeouts and rollback-only locks", async () => {
+  const fixture = await createRegistrationIndexFixture()
+  const { sql } = await buildFixturePreflight(fixture)
+  assert.match(sql, /create unique index if not exists ops_registration_observations_scheduled_track_key/u)
+  assert.match(sql, /drop index if exists public\.ops_registration_observations_open_track_key/u)
+  assert.match(sql, /pg_catalog\.pg_try_advisory_xact_lock\(20261004, 140440\)/u)
+  assert.doesNotMatch(sql, /pg_try_advisory_lock\(|(?:create unique index|drop index) concurrently|^reset (?:lock|statement)_timeout;/mu)
+  assert.equal((sql.match(/^set local lock_timeout = '5s';$/gmu) ?? []).length, 2)
+  assert.equal((sql.match(/^set local statement_timeout = '120s';$/gmu) ?? []).length, 2)
+  for (const tag of ["registration_index_online_pre", "registration_index_built", "registration_index_online_post"]) {
+    const guard = fixture.contents.match(new RegExp(`do \\$${tag}\\$[\\s\\S]*?\\$${tag}\\$;`, "u"))?.[0]
+    assert.ok(guard)
+    assert.ok(sql.includes(guard), "catalog guard must remain byte-identical")
+  }
+  assert.equal((sql.match(/^begin;$/gmu) ?? []).length, 1)
+  assert.equal((sql.match(/^commit;$/gmu) ?? []).length, 0)
+  assert.equal((sql.match(/^rollback;$/gmu) ?? []).length, 1)
+  assert.match(sql.trimEnd(), /rollback;$/u)
+})
+
+test("registration online rehearsal rejects source drift including key, predicate, guards, controls and extra statements", async () => {
+  const source = await readFile(join(repoRoot, "supabase/migrations", registrationOnlineFile), "utf8")
+  for (const changed of [
+    source + "\n", source + "select 1;\n", source + "commit;\n",
+    source.replace("(track_id)", "(id)"),
+    source.replace("status = 'scheduled'", "status = 'completed'"),
+    source.replace("and i.indislive", ""),
+    source.replace("pg_try_advisory_lock", "pg_advisory_unlock"),
+    source.replace("reset lock_timeout;", "commit; begin;"),
+    source.replace("drop index concurrently", "drop table"),
+    source.replace("do $registration_index_built$", "begin; do $registration_index_built$"),
+  ]) {
+    const fixture = await createRegistrationIndexFixture({ source: changed })
+    await assert.rejects(buildFixturePreflight(fixture), {
+      message: "transactional_preflight_registration_index_hash_mismatch",
+    })
+  }
+})
+
+test("the online directive and concurrent DDL in any other filename remain unapproved", async () => {
+  const source = await readFile(join(repoRoot, "supabase/migrations", registrationOnlineFile), "utf8")
+  for (const contents of [source, "-- pg-delta: transaction=false\nselect 1;\n", "create index concurrently arbitrary on public.any_table(id);\n"]) {
+    const fixture = await createRegistrationIndexFixture({ source: contents, file: "20261004140438_unrelated.sql" })
+    await assert.rejects(buildFixturePreflight(fixture), {
+      message: "transactional_preflight_nontransactional_migration_unapproved",
     })
   }
 })
@@ -500,6 +558,67 @@ test("PostgreSQL 17 transactional preflight named checkpoint preserves FK errors
   assert.match(invalidTemplate.stderr, /23503:.*violates foreign key constraint "notification_rules_active_template_fkey"/u)
   assert.doesNotMatch(invalidTemplate.stdout, /unexpected_invalid_fk_pass/u)
   assert.equal(snapshot(), before)
+
+  // Exercise the exact online-index rehearsal inside this already-owned PG17
+  // fixture. Native concurrent execution and interruption are separate evidence.
+  const indexSetup = psql(`
+    set role postgres;
+    create table public.ops_registration_subject_tracks(
+      id uuid primary key,
+      constraint ops_registration_subject_tracks_observation_return_workflow_pai check (true)
+    );
+    create table public.ops_registration_observations(
+      id uuid primary key, track_id uuid not null, status text, decision_kind text
+    );
+    create unique index ops_registration_observations_open_track_key
+      on public.ops_registration_observations(track_id)
+      where decision_kind is null and status in ('scheduled','attended_feedback_pending','completed','no_show');
+    insert into public.ops_registration_observations values
+      ('99410000-0000-4000-8000-000000000001','99410000-0000-4000-8000-000000000002','completed',null);
+  `)
+  assert.equal(indexSetup.status, 0, indexSetup.stderr)
+  const indexSnapshotSql = `select jsonb_build_object(
+    'indexes',(select jsonb_agg(jsonb_build_array(c.relname,pg_get_indexdef(i.indexrelid),i.indisvalid,i.indisready,i.indislive) order by c.relname)
+      from pg_index i join pg_class c on c.oid=i.indexrelid
+      where i.indrelid='public.ops_registration_observations'::regclass),
+    'rows',(select jsonb_agg(to_jsonb(o) order by id) from public.ops_registration_observations o)
+  );`
+  const indexSnapshot = () => {
+    const value = psql(indexSnapshotSql)
+    assert.equal(value.status, 0, value.stderr)
+    return value.stdout.trim()
+  }
+  const indexFixture = await createRegistrationIndexFixture()
+  await writeFile(join(indexFixture.root, "supabase/tests/focused.sql"), `begin;
+set local role postgres;
+do $check$
+begin
+  if current_setting('lock_timeout') <> '5s' or current_setting('statement_timeout') <> '2min' then
+    raise exception 'rehearsal_timeout_changed';
+  end if;
+  if pg_advisory_unlock(20261004,140440) then raise exception 'rehearsal_session_lock_leaked'; end if;
+  if to_regclass('public.ops_registration_observations_open_track_key') is not null then
+    raise exception 'rehearsal_old_index_survived';
+  end if;
+end;
+$check$;
+select 'registration_rehearsal_passed';
+rollback;
+`)
+  const indexSql = (await buildFixturePreflight(indexFixture)).sql
+  const beforeIndexes = indexSnapshot()
+  const rehearsed = psql(indexSql)
+  assert.equal(rehearsed.status, 0, rehearsed.stderr)
+  assert.match(rehearsed.stdout, /registration_rehearsal_passed/u)
+  assert.equal(indexSnapshot(), beforeIndexes, "both index catalog and historical rows must roll back exactly")
+  const drift = psql(`create unique index ops_registration_observations_scheduled_track_key
+    on public.ops_registration_observations(track_id) where status='completed';`)
+  assert.equal(drift.status, 0, drift.stderr)
+  const driftedIndexes = indexSnapshot()
+  const rejectedDrift = psql(indexSql)
+  assert.notEqual(rejectedDrift.status, 0)
+  assert.match(rejectedDrift.stderr, /55000:.*registration_index_phase_fence_drift_or_invalid/u)
+  assert.equal(indexSnapshot(), driftedIndexes, "a wrong existing index must not be deleted")
 })
 
 test("Supabase CLI 2.115 JSON ledger에서 forward migrations만 정확히 고른다", async () => {
