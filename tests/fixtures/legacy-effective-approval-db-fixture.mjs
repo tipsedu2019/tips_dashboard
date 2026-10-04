@@ -12,25 +12,27 @@ const shapes = [
   [3, '2026-10-15', '2026-10-02', '21:30', '23:30', '목 10:00-11:00'],
   [4, '2026-10-14', '2026-10-03', '18:00', '20:00', '수 10:00-11:00'],
   [5, '2026-10-14', '2026-10-15', '15:00', '17:00', '수 19:30-21:30'],
+  [6, '2026-10-14', '2026-10-15', '23:00', '00:00', '수 19:30-21:30'],
 ];
 
 export function effectiveApprovalFixtures() {
   return shapes.map(([n, cancelDate, date, start, end, schedule]) => {
-    const t = teacher(n === 5 ? 2 : 1), r = room(n === 5 ? 12 : 11);
+    const t = teacher(n >= 5 ? 2 : 1), r = room(n >= 5 ? 12 : 11);
+    const endDate = n === 6 ? '2026-10-16' : date;
     const request = { id: effectiveId(100+n), class_id: effectiveId(200+n), class_name: `Inheritance approval ${n}`,
       subject: '영어', request_kind: 'cancel_makeup', cancel_date: cancelDate, teacher_catalog_id: t.id,
-      makeup_start_at: `${date}T${start}:00+09:00`, makeup_end_at: `${date}T${end}:00+09:00`, makeup_classroom: r.name,
-      makeup_slots: [{ startAt: `${date}T${start}:00+09:00`, endAt: `${date}T${end}:00+09:00`, classroom: r.name }] };
+      makeup_start_at: `${date}T${start}:00+09:00`, makeup_end_at: `${endDate}T${end}:00+09:00`, makeup_classroom: r.name,
+      makeup_slots: [{ startAt: `${date}T${start}:00+09:00`, endAt: `${endDate}T${end}:00+09:00`, classroom: r.name }] };
     const plan = { sessions: [{ id: `original-${n}`, sessionKey: `original-${n}`, date: cancelDate,
       state: 'active', scheduleState: 'active', isForced: false, originalDate: '', makeupDate: '',
       teacherNote: 'Synthetic content must remain', textbookEntries: [{ textbookId: 'synthetic-book', actual: { start: 1, end: 3 } }] }], sessionStates: {} };
     const after = buildLegacyMakeupApprovalPlan(plan, request, { teacher: t, classrooms: [r] });
-    if (n === 5) {
+    if (n >= 5) {
       // Reproduce a historical approved makeup whose raw row omitted all six
       // resource/time keys. The approved request/calendar remain authoritative.
       const row = after.sessions.find(s => s.scheduleState === 'makeup');
       for (const key of ['startTime', 'endTime', 'teacherCatalogId', 'teacherName', 'classroomCatalogId', 'classroomName', 'makeupRequestId']) delete row[key];
-      row.id = row.sessionKey = 'historical-approved-makeup';
+      row.id = row.sessionKey = n === 5 ? 'historical-approved-makeup' : 'historical-midnight-makeup';
     }
     const events = buildMakeupCalendarDrafts(request).map((draft, index) => {
       const mutation = buildAcademicEventMutationPayload(draft, []);

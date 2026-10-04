@@ -527,11 +527,14 @@ function buildRegularClassCollisions(classes, targetSlots) {
 
 export function isEffectiveMakeupSchedule(value) {
   const minute = v => v === null || Number.isInteger(v) && v >= 0 && v <= 1440;
+  const date = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+    && Number.isFinite(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
   return value?.version === 1 && Array.isArray(value.occupancies) && value.occupancies.every(row => row && typeof row === 'object'
-    && typeof row.classId === 'string' && typeof row.className === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.date)
+    && typeof row.classId === 'string' && typeof row.className === 'string' && date(row.date)
     && (row.classroom === null || typeof row.classroom === 'string')
     && typeof row.uncertain === 'boolean' && typeof row.allRooms === 'boolean'
-    && minute(row.startMinute) && minute(row.endMinute));
+    && minute(row.startMinute) && minute(row.endMinute)
+    && (row.startMinute === null || row.endMinute === null || row.startMinute < row.endMinute));
 }
 
 function buildEffectiveClassCollisions(context, targetSlots, roomNames) {

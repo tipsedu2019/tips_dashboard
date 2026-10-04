@@ -133,7 +133,7 @@ begin
   select * from linked where lesson->>'date'=to_char(a at time zone 'Asia/Seoul','YYYY-MM-DD')
    and (lesson->>'makeupRequestId' is distinct from id::text or lesson->>'id'='makeup-request:'||id::text||':'||slot_index::text)
  )
- select d.*,tc.name teacher_name,
+ select d.*,tc.id verified_teacher_id,
   (select min(id::text) from public.classroom_catalogs where name=d.slot->>'classroom' having count(*)=1) room_id,
   (select e.payload from public.makeup_request_events e where e.request_id=d.id and e.event_type='approved' order by e.created_at desc,e.id desc limit 1) approval_payload,
   exists(select 1 from public.academic_events a cross join lateral (select dashboard_private.makeup_approval_event_meta_v1(a.note) meta) parsed
@@ -147,12 +147,13 @@ begin
   source_id:=candidate.lesson->>'id';
   source:=jsonb_build_object('binding',dashboard_private.legacy_effective_binding_v1(candidate.lesson),
    'approvedOverride',jsonb_build_object('startTime',to_char(candidate.a at time zone 'Asia/Seoul','HH24:MI'),
-    'endTime',to_char(candidate.b at time zone 'Asia/Seoul','HH24:MI'),'teacherCatalogId',candidate.teacher_catalog_id,'classroomCatalogId',candidate.room_id),
+    'endTime',case when (candidate.b at time zone 'Asia/Seoul')::date=(candidate.a at time zone 'Asia/Seoul')::date+1 and (candidate.b at time zone 'Asia/Seoul')::time='00:00'::time then '24:00' else to_char(candidate.b at time zone 'Asia/Seoul','HH24:MI') end,'teacherCatalogId',candidate.teacher_catalog_id,'classroomCatalogId',candidate.room_id),
    'approvedOverrideVerified',coalesce(candidate.status in('completed','makeup_pending') and candidate.approved_at is not null
-    and candidate.a<candidate.b and (candidate.a at time zone 'Asia/Seoul')::date=(candidate.b at time zone 'Asia/Seoul')::date
+    and candidate.a<candidate.b and ((candidate.a at time zone 'Asia/Seoul')::date=(candidate.b at time zone 'Asia/Seoul')::date or ((candidate.b at time zone 'Asia/Seoul')::date=(candidate.a at time zone 'Asia/Seoul')::date+1 and (candidate.b at time zone 'Asia/Seoul')::time='00:00'::time))
     and extract(second from candidate.a)=0 and extract(second from candidate.b)=0 and candidate.calendar_matches
     and candidate.approval_payload->>'makeup_request_id'=candidate.id::text
-    and candidate.approval_payload->>'teacher_name'=candidate.teacher_name
+    and candidate.verified_teacher_id=candidate.teacher_catalog_id
+    and nullif(btrim(candidate.approval_payload->>'teacher_name'),'') is not null
     and exists(select 1 from jsonb_array_elements(case when jsonb_typeof(candidate.approval_payload->'makeup_schedule')='array' then candidate.approval_payload->'makeup_schedule' else '[]' end) p
      where p->>'place'=candidate.slot->>'classroom' and public.makeup_numbered_source_instant_v1(p->>'start_at')=candidate.a and public.makeup_numbered_source_instant_v1(p->>'end_at')=candidate.b),false));
   if sources ? source_id then source:=jsonb_set(source,'{approvedOverrideVerified}','false');end if;
@@ -220,7 +221,7 @@ begin
  legacy_raw:=array_append(legacy_raw,jsonb_build_object('classId',c.id,'session',occupancy));
  -- Date knowledge is independent of time/resource validity and must survive it.
  dt:=null;
- begin dt:=(v->>'date')::date;
+ begin dt:=(v->>'date')::date; if v->>'date' !~ '^[0-9]{4}-[0-9]{2}-[0-9]{2}$' or dt::text is distinct from v->>'date' then dt:=null;end if;
  exception when invalid_datetime_format or datetime_field_overflow then dt:=null;
  end;
  a:=null;b:=null;tid:=null;rid:=null;
@@ -238,6 +239,7 @@ begin
  if jsonb_typeof(v)='object' and dt is not null and state='active'
     and coalesce(v->'isForced','false'::jsonb)='false'::jsonb and coalesce(v->>'originalDate','')='' and coalesce(v->>'makeupDate','')=''
     and not (v ?| array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName'])
+    and not (v ? 'sourceSlotId')
     and jsonb_typeof(c.schedule_plan#>array['sessionSchedules',v->>'date']) is distinct from 'object'
     and not ((effective_context->'approvedByIdentity') ? coalesce(v->>'id',''))
     and coalesce(nullif(v->>'id',''),nullif(v->>'sessionKey','')) is not null
@@ -267,9 +269,14 @@ begin
   regular:=null;
   if state='active' and coalesce(v->'isForced','false'::jsonb)='false'::jsonb
    and coalesce(v->>'originalDate','')='' and coalesce(v->>'makeupDate','')=''
-   and coalesce((date_counts->>(v->>'date'))::int,0)=1 and defaults->'unresolvedOccupancies'='[]'::jsonb
-   and (select count(*) from jsonb_array_elements(defaults->'shadowSlots') x where (x->>'weekday')::int=extract(dow from dt)::int)=1 then
-   select x into regular from jsonb_array_elements(defaults->'shadowSlots') x where (x->>'weekday')::int=extract(dow from dt)::int;
+   and coalesce((date_counts->>(v->>'date'))::int,0)=1 and defaults->'unresolvedOccupancies'='[]'::jsonb then
+   if v ? 'sourceSlotId' then
+    if (select count(*) from jsonb_array_elements(defaults->'shadowSlots') x where coalesce(x->>'sourceSlotId',x->>'id')=v->>'sourceSlotId')=1 then
+     select x into regular from jsonb_array_elements(defaults->'shadowSlots') x where coalesce(x->>'sourceSlotId',x->>'id')=v->>'sourceSlotId';
+    end if;
+   elsif (select count(*) from jsonb_array_elements(defaults->'shadowSlots') x where (x->>'weekday')::int=extract(dow from dt)::int)=1 then
+    select x into regular from jsonb_array_elements(defaults->'shadowSlots') x where (x->>'weekday')::int=extract(dow from dt)::int;
+   end if;
   end if;
   legacy_dated:=array_append(legacy_dated,jsonb_build_object('id','legacy-session:'||c.id::text||':'||ident,'classId',c.id,'sourceSlotId',null,
    'date',dt,'state',state,'startMinute',a,'endMinute',b,'teacherId',tid,'classroomId',rid,'revision',0)
