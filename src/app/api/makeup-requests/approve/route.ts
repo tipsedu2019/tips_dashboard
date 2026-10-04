@@ -8,12 +8,12 @@ import {
   extractMakeupCalendarMeta,
   hasMakeupPart,
   normalizeMakeupSlots,
-  isEffectiveMakeupSchedule,
   type MakeupEffectiveSchedule,
 } from "@/features/makeup-requests/makeup-request-model.js"
 import { buildAcademicEventMutationPayload } from "@/features/operations/academic-event-utils.js"
 import { attemptMakeupApprovalReplay } from "@/features/makeup-requests/makeup-approval-replay.js"
 import { buildLegacyMakeupApprovalPlan } from "@/features/makeup-requests/makeup-approval-plan.js"
+import { readMakeupEffectiveSchedule } from "@/features/makeup-requests/makeup-effective-occupancy"
 
 export const runtime = "nodejs"
 
@@ -270,15 +270,20 @@ export async function POST(request: Request) {
       if (hasMakeupPart(requestRow)) {
         // Keep legacy schedule parsing and pending reservations in the preflight;
         // locked database guards still make the final concurrency decision.
+        const slots = normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom))
+        const signal = AbortSignal.any([request.signal, AbortSignal.timeout(8_000)])
         const { data: context, error: contextError } = await serverClient.rpc("get_makeup_approval_collision_context_v1", {
-          p_slots: normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom)),
-        }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+          p_slots: slots,
+        }).abortSignal(signal).retry(false)
+        signal.throwIfAborted()
         if (contextError) throw contextError
         if (!isRecord(context) || ![context.classes, context.requests, context.academicEvents].every(
           (rows) => Array.isArray(rows) && rows.every(isRecord),
         )) throw new Error("makeup_approval_context_invalid")
-        if (context.effectiveSchedule != null && !isEffectiveMakeupSchedule(context.effectiveSchedule)) throw new Error("makeup_approval_context_invalid")
-        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [], context.effectiveSchedule as MakeupEffectiveSchedule | null | undefined)
+        const effectiveSchedule = await readMakeupEffectiveSchedule({ slots, signal,
+          readBatch: (batch) => serverClient.rpc("get_makeup_effective_occupancy_v1", { p_slots: batch }).abortSignal(signal).retry(false),
+        })
+        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [], effectiveSchedule)
       }
       Object.assign(patch, await buildApprovalEffects(serverClient, requestRow, classRow))
     }

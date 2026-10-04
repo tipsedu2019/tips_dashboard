@@ -396,15 +396,19 @@ select is((select (dashboard_private.legacy_effective_context_v1(c)#>>'{approved
 
 -- The new caller-visible context contains occupancy metadata only, never raw
 -- plans, learning notes, students, source bindings, or approval event payloads.
-create temp table bounded_effective_wire as select dashboard_private.makeup_effective_class_context_v1(f#>'{request,makeup_slots}') value from effective_approval_fixtures where f->>'n'='5';
+create temp table bounded_effective_wire as select public.get_makeup_effective_occupancy_v1('[{"startAt":"2026-10-15T06:00:00.000Z","endAt":"2026-10-15T08:00:00.000Z"}]') value;
 select ok((select jsonb_array_length(value->'occupancies')>0 from bounded_effective_wire),'bounded security test exercises a nonempty real occupancy DTO');
 select ok(not exists(select 1 from bounded_effective_wire,jsonb_array_elements(value->'occupancies') x,jsonb_object_keys(x) k where k<>all(array['id','classId','className','date','startMinute','endMinute','classroom','uncertain','allRooms'])),'bounded helper exposes only allowed class occupancy keys');
 set local role authenticated;
-select lives_ok($q$select public.get_makeup_reservation_context_v1('[{"startAt":"2026-10-15T15:00:00+09:00","endAt":"2026-10-15T17:00:00+09:00"}]','{}')$q$,'authenticated reservation RPC executes new bounded helper without exposing private source adapter');
+select lives_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2026-10-15T06:00:00.000Z","endAt":"2026-10-15T08:00:00.000Z"}]')$q$,'authenticated bounded RPC executes occupancy helper without exposing private source adapter');
 select set_config('request.jwt.claim.sub','',true);
 select throws_ok($q$select dashboard_private.makeup_effective_class_context_v1('[]')$q$,'42501','makeup_auth_required','authenticated role without user identity is denied');
 reset role;
 select set_config('request.jwt.claim.sub',pg_temp.eid(901)::text,true);
+select is((select dashboard_private.legacy_effective_context_for_dates_v1(c,null,'2026-10-15','2026-10-15')->'approvedByIdentity' from public.classes c where id=pg_temp.eid(205)),
+ (select dashboard_private.legacy_effective_context_v1(c)->'approvedByIdentity' from public.classes c where id=pg_temp.eid(205)),'scoped adapter retains verified source-only approved makeup');
+select is((select dashboard_private.legacy_effective_context_for_dates_v1(c,null,'2026-10-16','2026-10-16')->'approvedByIdentity' from public.classes c where id=pg_temp.eid(205)),
+ '{}'::jsonb,'outside-window approved source is excluded before source materialization');
 
 -- Exact midnight and source tampering use the actual database adapter.
 select is((select x->>'endMinute' from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),'2026-10-15') x where x->>'classId'=pg_temp.eid(206)::text),'1440','approved source ends at 24:00 on exact makeup date');
@@ -471,6 +475,77 @@ update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,0,sou
 select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') x where x->>'classId'=pg_temp.eid(460)::text),1,'explicit null source binding does not take the ordinary fast path');
 update public.classes set schedule_plan=jsonb_set(schedule_plan,'{sessions,0,scheduleState}','"skipped"') where id=pg_temp.eid(460);
 select is((select count(*)::int from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),'2050-10-10') x where x->>'classId'=pg_temp.eid(460)::text),0,'unique legacy cancellation still suppresses every period on that date');
+
+-- Bounded read contract: real-source parity before any invocation sentinels.
+create temp table bounded_original_functions as select p.oid::regprocedure::text identity,pg_get_functiondef(p.oid) ddl from pg_proc p where p.oid in('dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)'::regprocedure,'dashboard_private.read_makeup_operating_reference_v1(date,date)'::regprocedure);
+insert into public.classes(id,name,subject,status,schedule_storage_mode,teacher,room,schedule,schedule_plan)
+values(pg_temp.eid(470),'Scoped duplicate and unknown','영어','종강','legacy','Inheritance teacher 2','Inheritance room 12','월 06:00-07:00',
+ '{"sessions":[{"id":"shared-id","date":"2050-10-10","scheduleState":"makeup"},{"id":"shared-id","date":"1900-01-01","scheduleState":"makeup"},{"id":"unknown-date","date":"2050-10-10 00:00","startTime":"09:00","endTime":"10:00"},42]}'),
+ (pg_temp.eid(471),'Scoped moved override','영어','수강','legacy','Inheritance teacher 2','Inheritance room 12','월 06:00-07:00',
+ '{"sessions":[{"id":"moved","date":"2050-10-10","scheduleState":"active","startTime":"18:00","endTime":"19:00"}]}');
+create temp table bounded_reference_pair as select dashboard_private.read_timetable_operating_reference_v1() full_value,
+ dashboard_private.read_makeup_operating_reference_v1('2050-10-10','2050-10-10') scoped;
+select is((select scoped->'datedSessions' from bounded_reference_pair),
+ (select coalesce(jsonb_agg(x),'[]') from bounded_reference_pair,jsonb_array_elements(full_value->'datedSessions') x where x->>'date'='2050-10-10'),
+ 'scoped dated rows match full reader on selected date, including tombstones and all statuses');
+select is((select scoped->'datedUnresolvedOccupancies' from bounded_reference_pair),
+ (select coalesce(jsonb_agg(x),'[]') from bounded_reference_pair,jsonb_array_elements(full_value->'datedUnresolvedOccupancies') x where x->>'date' is null or x->>'date'='2050-10-10'),
+ 'scoped unknowns match full reader including outside-window duplicate IDs, scalar and noncanonical dates');
+select is((select scoped->'unresolvedOccupancies' from bounded_reference_pair),(select full_value->'unresolvedOccupancies' from bounded_reference_pair),'all weekly unknown basics are retained');
+select ok(not exists(select 1 from bounded_reference_pair,jsonb_array_elements(scoped->'datedSessions') x where x->>'date'<>'2050-10-10'),'canonical out-of-window dated history is absent');
+select ok(exists(select 1 from bounded_reference_pair,jsonb_array_elements(scoped->'datedUnresolvedOccupancies') x where x->>'classId'=pg_temp.eid(470)::text and x->>'date'='2050-10-10'),'outside-window duplicate still blocks selected row');
+select ok(not exists(select 1 from jsonb_array_elements(public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-09T21:00:00.000Z","endAt":"2050-10-09T22:00:00.000Z"}]')->'occupancies') x where x->>'classId'=pg_temp.eid(471)::text),'later override suppresses original weekly time before envelope overlap filtering');
+select ok(not has_function_privilege('authenticated','dashboard_private.read_makeup_operating_reference_v1(date,date)','execute'),'raw scoped reference is not client-callable');
+select ok(not has_function_privilege('service_role','dashboard_private.legacy_effective_context_for_dates_v1(public.classes,jsonb,date,date)','execute'),'source verification remains private');
+
+-- Replace only inside this rolled-back fixture: a forbidden history row proves
+-- the scoped resolver skips its interpretation, not merely its output.
+
+do $test$begin execute replace(pg_get_functiondef('dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)'::regprocedure),
+ 'dashboard_private.resolve_legacy_effective_schedule_v1','pg_temp.original_effective_resolver');end $test$;
+create or replace function dashboard_private.resolve_legacy_effective_schedule_v1(p jsonb)
+returns jsonb language plpgsql immutable security invoker set search_path='' as $test$
+begin
+ if p#>>'{session,date}'='1900-01-01' then raise exception using errcode='P0001',message='out_of_window_resolution';end if;
+ return pg_temp.original_effective_resolver(p);
+end $test$;
+select lives_ok($q$select dashboard_private.read_makeup_operating_reference_v1('2050-10-10','2050-10-10')$q$,'date filtering precedes legacy resolution');
+select throws_ok($q$select dashboard_private.read_timetable_operating_reference_v1()$q$,'P0001','out_of_window_resolution','sentinel would detect an accidental full-reader path');
+do $test$begin execute (select ddl from bounded_original_functions where identity='dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)');end $test$;
+
+-- Input guards must fail before source construction. Empty input is cheap.
+
+create or replace function dashboard_private.read_makeup_operating_reference_v1(p_date_from date,p_date_to date)
+returns jsonb language plpgsql stable security definer set search_path='' as $test$
+begin raise exception using errcode='P0001',message='source_read_invoked';end $test$;
+select is(public.get_makeup_effective_occupancy_v1('[]'),' {"version":1,"occupancies":[]}'::jsonb,'empty input invokes no source reader');
+select throws_ok(format('select public.get_makeup_effective_occupancy_v1(%L::jsonb)',jsonb_agg(jsonb_build_object('startAt',to_char(d,'YYYY-MM-DD')||'T00:00:00.000Z','endAt',to_char(d,'YYYY-MM-DD')||'T01:00:00.000Z'))),
+ '22023','makeup_effective_window_invalid','fifteen envelopes fail before source read') from generate_series('2050-10-01'::timestamp,'2050-10-15',interval '1 day') d;
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-01T00:00:00.000Z","endAt":"2050-10-01T01:00:00.000Z"},{"startAt":"2050-10-15T00:00:00.000Z","endAt":"2050-10-15T01:00:00.000Z"}]')$q$,'22023','makeup_effective_window_invalid','two dates spanning fifteen days fail before source read');
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-01T00:00:00.000Z","endAt":"2050-10-01T01:00:00.000Z"},{"startAt":"2050-10-01T02:00:00.000Z","endAt":"2050-10-01T03:00:00.000Z"}]')$q$,'22023','makeup_effective_window_invalid','duplicate-date envelopes fail before source read');
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-02-30T00:00:00.000Z","endAt":"2050-03-01T01:00:00.000Z"}]')$q$,'22023','makeup_effective_window_invalid','non-round-trip date fails before source read');
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-01T00:00:00.000Z","endAt":"2050-10-02T00:00:00.000Z"}]')$q$,'22023','makeup_effective_window_invalid','unsplit multi-day envelope fails before source read');
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-01T00:00:00.000Z","endAt":"2050-10-01T01:00:00.000Z","extra":1}]')$q$,'22023','makeup_effective_window_invalid','extra fields fail before source read');
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-01T00:00:00.000Z","endAt":"2050-10-01T01:00:00.000Z"},{"startAt":"2050-10-14T14:00:00.000Z","endAt":"2050-10-14T15:00:00.000Z"}]')$q$,'P0001','source_read_invoked','fourteen inclusive dates with next-midnight endpoint reaches source');
+do $test$begin execute (select ddl from bounded_original_functions where identity='dashboard_private.read_makeup_operating_reference_v1(date,date)');end $test$;
+
+-- Capacity applies after effective-date state and interval filtering, not to raw
+-- candidate count. Stub definitions are restored exactly before the final transaction rollback.
+
+create or replace function dashboard_private.read_makeup_operating_reference_v1(p_date_from date,p_date_to date)
+returns jsonb language sql stable security definer set search_path='' as $test$
+ select jsonb_build_object('asOfDate','2050-01-01','shadowSlots','[]'::jsonb,'unresolvedOccupancies','[]'::jsonb,'datedUnresolvedOccupancies','[]'::jsonb,
+ 'datedSessions',(select jsonb_agg(jsonb_build_object('id','capacity:'||n,'classId',pg_temp.eid(471),'date',p_date_from,'state',case when n>2000 and current_setting('test.makeup_capacity')='cancelled' then 'skipped' else 'active' end,
+ 'startMinute',540,'endMinute',600,'classroomId',pg_temp.eid(12),'teacherId',pg_temp.eid(2))) from generate_series(1,case when current_setting('test.makeup_capacity')='2000' then 2000 else 2001 end) n))
+$test$;
+select set_config('test.makeup_capacity','2000',true);
+select is(jsonb_array_length(public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-10T00:00:00.000Z","endAt":"2050-10-10T01:00:00.000Z"}]')->'occupancies'),2000,'exactly 2000 final occupancies succeeds without truncation');
+select set_config('test.makeup_capacity','2001',true);
+select throws_ok($q$select public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-10T00:00:00.000Z","endAt":"2050-10-10T01:00:00.000Z"}]')$q$,'22023','makeup_effective_capacity_exceeded','2001 final occupancies explicitly fails closed');
+select set_config('test.makeup_capacity','cancelled',true);
+select is(jsonb_array_length(public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-10T00:00:00.000Z","endAt":"2050-10-10T01:00:00.000Z"}]')->'occupancies'),2000,'2001 candidates with a cancellation still produces the supported 2000 rows');
+select is(jsonb_array_length(public.get_makeup_effective_occupancy_v1('[{"startAt":"2050-10-10T03:00:00.000Z","endAt":"2050-10-10T04:00:00.000Z"}]')->'occupancies'),0,'nonoverlapping candidates do not consume response capacity');
+do $test$begin execute (select ddl from bounded_original_functions where identity='dashboard_private.read_makeup_operating_reference_v1(date,date)');end $test$;
 
 select * from finish();
 rollback;

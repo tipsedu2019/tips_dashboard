@@ -237,7 +237,11 @@ begin
  return result;
 end $$;
 
+drop function public.get_makeup_effective_occupancy_v1(jsonb);
 drop function dashboard_private.makeup_effective_class_context_v1(jsonb);
+drop function dashboard_private.read_makeup_operating_reference_v1(date,date);
+drop function dashboard_private.legacy_effective_context_for_dates_v1(public.classes,jsonb,date,date);
+drop function dashboard_private.makeup_effective_date_key_v1(text);
 drop function dashboard_private.legacy_effective_input_v1(jsonb,jsonb,jsonb,int,int);
 drop function dashboard_private.legacy_effective_context_v1(public.classes,jsonb);
 drop function dashboard_private.legacy_effective_binding_v1(jsonb);

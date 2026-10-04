@@ -541,11 +541,13 @@ function buildEffectiveClassCollisions(context, targetSlots, roomNames) {
   const result = [];
   const label = minutes => minutes === null ? '미정' : `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
   for (const target of targetSlots) {
-    const date = toDateKey(target.startAt);
-    const start = minutesFromDateTime(target.startAt);
-    const end = toDateKey(target.endAt) === date ? minutesFromDateTime(target.endAt) : 1440;
+    const start = Date.parse(target.startAt), end = Date.parse(target.endAt);
     for (const row of context.occupancies) {
-      if (row.date !== date || row.startMinute !== null && row.endMinute !== null && !(start < row.endMinute && row.startMinute < end)) continue;
+      const day = Date.parse(`${row.date}T00:00:00+09:00`);
+      const knownBounds = row.startMinute !== null && row.endMinute !== null;
+      const rowStart = day + (knownBounds ? row.startMinute : 0) * 60_000;
+      const rowEnd = day + (knownBounds ? row.endMinute : 1440) * 60_000;
+      if (!(start < rowEnd && rowStart < end)) continue;
       const rooms = row.allRooms ? roomNames : [normalizeRoomName(row.classroom)];
       for (const classroom of rooms.filter(Boolean)) result.push({
         id: row.id || `${row.classId}:${row.date}`, source: 'regular_class', title: row.className, classroom,

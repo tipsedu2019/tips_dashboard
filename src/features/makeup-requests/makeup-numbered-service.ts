@@ -2,7 +2,8 @@
 
 import { supabase } from "@/lib/supabase"
 import { validatePageSize, type DataTablePageSize, type NumberedPage } from "@/lib/numbered-pagination"
-import { normalizeMakeupSlots, isEffectiveMakeupSchedule, type MakeupEffectiveSchedule } from "./makeup-request-model.js"
+import { normalizeMakeupSlots, type MakeupEffectiveSchedule } from "./makeup-request-model.js"
+import { readMakeupEffectiveSchedule } from "./makeup-effective-occupancy"
 import type { MakeupRequest, MakeupSlotInput } from "./makeup-request-service"
 
 export const MAKEUP_NUMBERED_COLUMNS = ["status", "className", "subject", "teacher", "requester", "reason", "cancelDate", "makeupAt", "makeupRoom", "approver", "submittedAt", "revisionRequestedAt", "approvedAt", "rejectedAt", "canceledAt", "returnedReason", "rejectedReason", "finalNote", "canceledNote"] as const
@@ -124,7 +125,9 @@ export async function readMakeupReservationContext({ slots, eventRequestIds, sig
     || !Array.isArray(data.activeEventRequestIds) || !data.activeEventRequestIds.every((id) => uuid(id) && eventRequestIds.some((requested) => requested.toLowerCase() === id.toLowerCase()))
     || !uniqueIds(data.activeEventRequestIds)
     || !uniqueIds(data.reservations.map((row) => row.id))) throw invalid("makeup_reservation_response_invalid")
-  if (data.effectiveSchedule != null && !isEffectiveMakeupSchedule(data.effectiveSchedule)) throw invalid("makeup_reservation_response_invalid")
+  const effectiveSchedule = await readMakeupEffectiveSchedule({ slots, signal: combined,
+    readBatch: (batch) => supabase!.rpc("get_makeup_effective_occupancy_v1", { p_slots: batch }).abortSignal(combined).retry(false),
+  })
   return { reservations: (data.reservations as MakeupReservation[]).map(normalizeWireSlots), activeEventRequestIds: data.activeEventRequestIds,
-    ...(data.effectiveSchedule !== undefined ? { effectiveSchedule: data.effectiveSchedule as MakeupEffectiveSchedule | null } : {}) }
+    effectiveSchedule }
 }
