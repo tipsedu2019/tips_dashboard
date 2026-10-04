@@ -3387,3 +3387,14 @@ test("isolated CI abort waits for the owned child to exit before returning to cl
     assert.equal(await readFile(join(root, "owned-child-reaped"), "utf8"), "yes");
   } finally { clearTimeout(timer); }
 });
+
+test('AI producer parity is a fixed sole-execute phase and rejects a thin/retained run before process launch',async()=>{
+ const {parseIsolatedDbArguments,runIsolatedSupabaseDbTests}=await import(runnerUrl.href);
+ assert.equal(parseIsolatedDbArguments(['--ai-producer-parity']).aiProducerParity,true);
+ let launched=0;
+ await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity'],executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
+ assert.equal(launched,0);
+ const {AI_SQL_TESTS,AI_PROBES}=await import('../scripts/lib/ai-producer-receipt.mjs');
+ await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity','--transactional-preflight','--verify-local-ledger',...AI_SQL_TESTS.flatMap(p=>['--test',p]),...AI_PROBES.flatMap(p=>['--probe',p])],retainTempRoot:true,executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
+ assert.equal(launched,0);
+});

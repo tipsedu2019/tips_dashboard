@@ -1,6 +1,7 @@
+import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,ACCEPTED_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt} from './lib/ai-producer-receipt.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -180,7 +181,7 @@ export function processResult(command, args, options = {}) {
 }
 
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, transactionalPreflight: false, verifyLocalLedger: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, transactionalPreflight: false, verifyLocalLedger: false, aiProducerParity: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
@@ -193,6 +194,7 @@ export function parseIsolatedDbArguments(argv) {
     else if (value === "--postdeploy-contract") result.postdeployContract = true;
     else if (value === "--transactional-preflight") result.transactionalPreflight = true;
     else if (value === "--verify-local-ledger") result.verifyLocalLedger = true;
+    else if (value === "--ai-producer-parity") result.aiProducerParity = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
@@ -751,6 +753,12 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (sha256(contents) !== expectedHash) fail("isolated_supabase_db_notification_content_prerequisite_drift");
     notificationContentPrerequisites.push({ fileName, contents });
   }
+  let aiPhase = null;
+  if (args.aiProducerParity) {
+    if (retainTempRoot || !args.reviewHead || !args.lint || !args.postdeployContract || !args.requireFinal || !args.transactionalPreflight || !args.verifyLocalLedger
+      || canonical(args.tests) !== canonical(AI_SQL_TESTS) || canonical(args.probes) !== canonical(AI_PROBES)) fail("isolated_ai_parity_full_run_required");
+    aiPhase = { runId: secureRandomBytes(16).toString("hex"), nonce: secureRandomBytes(32).toString("hex"), startedAt: Date.now(), before: await snapshotAiSource(root), captures: {} };
+  }
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
   const preflightTests = args.transactionalPreflight ? await snapshotRequestedFiles(root, TRANSACTIONAL_PREFLIGHT_TESTS) : [];
   const postdeployContract = args.postdeployContract
@@ -760,6 +768,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const probeDependencies = await snapshotRequestedFiles(root,
     [...new Set(args.probes.flatMap((path) => PROBE_DEPENDENCIES[path] ?? []))]);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
+  const aiDirectory = join(runtime.tempRoot, "ai-private-captures");
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C", SUPABASE_TELEMETRY_DISABLED: "1" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
   let networkId;
@@ -825,6 +834,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
   };
   try {
+    if (aiPhase) await mkdir(aiDirectory, { mode: 0o700 });
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
     await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
     const temporaryConfig = `${runtime.configPath}.tmp-${process.pid}`;
@@ -991,16 +1001,53 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       const stagedProbe = join(runtime.tempRoot, probe.path);
       await stageContents(probe.contents, stagedProbe);
       const probeResult = await executeProcess({ command: process.execPath, args: [stagedProbe], cwd: runtime.tempRoot, env: { ...cleanEnvironment, TASK_LOCAL_DB_URL: localDbUrl, TASK_LOCAL_DB_NONCE: nonce } });
+      // Capture BEFORE sanitization/clipping, including failure diagnostics.
+      const identity = Object.keys(AI_PRODUCERS).find((name) => AI_PRODUCERS[name].path === probe.path);
+      const diagnosticStdout = suppressAiCaptures(probeResult.stdout);
+      const diagnosticStderr = suppressAiCaptures(probeResult.stderr);
+      if (aiPhase && identity && /AI_[A-Z_]*CAPTURE:/u.test(probeResult.stderr)) fail("isolated_ai_capture_unexpected");
+      if (aiPhase && identity && probeResult.code === 0) {
+        if (aiPhase.captures[identity]) fail("isolated_ai_capture_duplicate");
+        if (sha256(probe.contents) !== aiPhase.before.closure.find((row) => row.path === probe.path).sha256) fail("isolated_ai_staged_producer_drift");
+        let raw;
+        try { raw = extractAiCapture(probeResult.stdout, identity); } catch { fail("isolated_ai_capture_invalid"); }
+        const producer = AI_PRODUCERS[identity];
+        aiPhase.captures[identity] = { producer: producer.path, sourceSha256: aiPhase.before.closure.find((row) => row.path === producer.path).sha256, file: producer.file, sha256: sha256(raw), bytes: raw.length };
+        await writeFile(join(aiDirectory, producer.file), raw, { mode: 0o600, flag: "wx" });
+      } else if (aiPhase && !identity && /AI_[A-Z_]*CAPTURE:/u.test(probeResult.stdout + probeResult.stderr)) fail("isolated_ai_capture_unexpected");
       if (probeResult.code !== 0) {
         log(JSON.stringify({ event: "isolated_supabase_db_probe_failed", probe: probe.path,
-          stdout: sanitizeChildDiagnostic(probeResult.stdout), stderr: sanitizeChildDiagnostic(probeResult.stderr) }));
+          stdout: sanitizeChildDiagnostic(diagnosticStdout), stderr: sanitizeChildDiagnostic(diagnosticStderr) }));
         fail("isolated_supabase_db_probe_failed");
       }
-      log(JSON.stringify({ event: "isolated_supabase_db_probe_passed", probe: probe.path, stdout: sanitizeChildDiagnostic(probeResult.stdout) }));
+      log(JSON.stringify({ event: "isolated_supabase_db_probe_passed", probe: probe.path, stdout: sanitizeChildDiagnostic(diagnosticStdout) }));
+    }
+    let producerParity = null;
+    if (aiPhase) {
+      const after = await snapshotAiSource(root);
+      if (canonical(after) !== canonical(aiPhase.before)) fail("isolated_ai_source_closure_drift");
+      const receipt = { version: 1, ...aiPhase, after, finishedAt: Date.now(), migrations: ACCEPTED_AI_MIGRATIONS, sqlTests: args.tests, probes: args.probes };
+      for (const identity of Object.keys(AI_PRODUCERS)) {
+        const raw = await readFile(join(aiDirectory, AI_PRODUCERS[identity].file));
+        try { validateAiReceipt(receipt, { expected: aiPhase, source: after, raw, identity }); } catch { fail("isolated_ai_receipt_invalid"); }
+      }
+      const receiptPath = join(aiDirectory, "receipt.json");
+      await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600, flag: "wx" });
+      const consumers = await executeProcess({ command: process.execPath,
+        args: ["--test", "--test-timeout=60000", "--experimental-strip-types", ...AI_CONSUMERS], cwd: root,
+        env: { ...cleanEnvironment, TASK_AI_RECEIPT: receiptPath, TASK_AI_CAPTURE_DIRECTORY: aiDirectory,
+          TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt) } });
+      // Raw producer credentials and private attestation values never enter logs.
+      if (consumers.code !== 0 || !/(?:#|ℹ) tests 2(?:\r?\n)/u.test(consumers.stdout)
+        || !/(?:#|ℹ) pass 2(?:\r?\n)/u.test(consumers.stdout)
+        || !/(?:#|ℹ) skipped 0(?:\r?\n)/u.test(consumers.stdout)) fail("isolated_ai_consumers_failed");
+      if (canonical(await snapshotAiSource(root)) !== canonical(after)) fail("isolated_ai_consumer_source_drift");
+      producerParity = { tests: 2, pass: 2, skipped: 0, sourceHead: after.sourceHead, closure: after.closure, captures: receipt.captures, migrations: receipt.migrations };
+      log(JSON.stringify({ event: "isolated_ai_producer_parity_passed", ...producerParity }));
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath },
       verification: { internalNetwork: true, sqlTests: args.tests.length, probes: args.probes.length,
-        transactionalPreflights: preflightVerification, localLedger: ledgerVerification } };
+        transactionalPreflights: preflightVerification, localLedger: ledgerVerification, producerParity } };
   } catch (error) {
     primaryError = error;
     if (relay?.getDiagnostics) log(JSON.stringify({ event: "isolated_supabase_db_relay_diagnostics", ...relay.getDiagnostics() }));
@@ -1037,7 +1084,13 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
     if (!retainTempRoot) {
       tempRootCleanupAttempted = true;
-      try { await rm(runtime.tempRoot, { recursive: true, force: true }); } catch {
+      try {
+        await rm(runtime.tempRoot, { recursive: true, force: true });
+        if (aiPhase) {
+          try { await lstat(runtime.tempRoot); fail("isolated_ai_private_cleanup_failed"); }
+          catch (error) { if (error.code !== "ENOENT") throw error; }
+        }
+      } catch {
         tempRootState = "failed";
         cleanupFailed = true;
       }

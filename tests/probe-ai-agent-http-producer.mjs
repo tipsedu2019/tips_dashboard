@@ -3,9 +3,153 @@ import assert from 'node:assert/strict';
 import {readFile} from 'node:fs/promises';
 import {spawn} from 'node:child_process';
 import {randomUUID,randomBytes,createHash} from 'node:crypto';
+// BEGIN GENERATED AI PROBE RUNTIME
+// Generated: DO NOT EDIT. Regenerate: node scripts/generate-ai-agent-probe-runtime.mjs
+const {closeSessions,selfTestBounds,startDeadline,configureContainer,session,query,finishRuntime}=(function createAiAgentProbeRuntime({assert,spawn,randomUUID}) {
+  let container, overallDeadline;
+  const ownedChildren = new Set(), ownedSessions = new Set();
+  const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
+  function boundedProcess(command, args, timeoutMs = 40_000) {
+    const child = spawn(command, args, {stdio:['pipe','pipe','pipe']});
+    ownedChildren.add(child);
+    let stdout='', stderr='', closed=false, timedOut=false, spawnError;
+    const signals=[];
+    child.stdout.on('data', data => {stdout+=data;});
+    child.stderr.on('data', data => {stderr+=data;});
+    child.stdin.on('error', error => {if(error.code!=='EPIPE') spawnError=error;});
+    let finish;
+    const exited = new Promise(resolve => {finish=resolve;});
+    child.on('error', error => {spawnError=error;});
+    child.on('close', (code, signal) => {
+      closed=true;clearTimeout(deadline);ownedChildren.delete(child);
+      finish({code,signal,stdout,stderr,out:stdout,err:stderr,timedOut,signals,spawnError});
+    });
+    let cancellation;
+    async function cancel() {
+      if(cancellation) return cancellation;
+      cancellation=(async()=>{
+        if(closed) return;
+        child.stdin.destroy();
+        signals.push('SIGTERM');child.kill('SIGTERM');
+        if(await Promise.race([exited.then(()=>true),delay(750).then(()=>false)])) return;
+        signals.push('SIGKILL');child.kill('SIGKILL');
+        if(!await Promise.race([exited.then(()=>true),delay(1500).then(()=>false)])) {
+          throw new Error('owned child failed confirmed reaping after SIGKILL');
+        }
+      })();
+      return cancellation;
+    }
+    const deadline=setTimeout(()=>{timedOut=true;cancel().catch(error=>{
+      // Failed reaping is an explicit failing result, never a successful cleanup.
+      finish({code:null,stdout,stderr,out:stdout,err:stderr,timedOut,signals,spawnError:error});
+    });},timeoutMs);
+    const complete=exited.then(result=>{
+      if(result.timedOut||result.spawnError) throw new Error(result.spawnError?.message||'owned child host deadline exceeded');
+      return result;
+    });
+    complete.catch(()=>{}); // Interactive sessions may fail before their checkpoint is awaited.
+    return {child,complete,exited,cancel,signals,get stdout(){return stdout;},get closed(){return closed;}};
+  }
+  async function closeSessions(...clients) {
+    const results=await Promise.allSettled(clients.map(client=>client.close()));
+    const failed=results.find(result=>result.status==='rejected');
+    if(failed) throw failed.reason;
+  }
+  async function selfTestBounds() {
+    // A real child ignores TERM and has no natural completion. KILL and close are required.
+    const child=boundedProcess(process.execPath,['-e',"process.on('SIGTERM',()=>{});console.log('READY');setInterval(()=>{},1000)"],1000);
+    while(!child.stdout.includes('READY')&&!child.closed) await delay(10);
+    await assert.rejects(child.complete,/host deadline/);
+    const result=await child.exited;
+    assert.deepEqual(result.signals,['SIGTERM','SIGKILL']);
+    assert.equal(result.signal,'SIGKILL');assert.equal(ownedChildren.size,0);
+    assert.throws(()=>process.kill(child.child.pid,0),{code:'ESRCH'});
+    console.log(JSON.stringify({status:'passed',hungChildTimedOut:true,signals:result.signals,confirmedReaped:true}));
+  }
+
+  function startDeadline(){
+  overallDeadline=setTimeout(async()=>{
+    console.error('AI probe overall host deadline exceeded');process.exitCode=1;
+    try {await closeSessions(...ownedSessions);}catch(error){console.error(error.message);}
+    const results=await Promise.allSettled([...ownedChildren].map(child=>{
+      // Every child here belongs to this process; never enumerate or kill foreign PIDs.
+      child.kill('SIGKILL');return new Promise((resolve,reject)=>{
+        const timer=setTimeout(()=>reject(new Error('overall cleanup failed confirmed reaping')),2000);
+        child.once('close',()=>{clearTimeout(timer);resolve();});
+      });
+    }));
+    for(const result of results)if(result.status==='rejected')console.error(result.reason.message);
+    process.exit(1);
+  },180_000);
+  }
+  function session(timeoutMs = 40_000) {
+    const tag=`ai_probe_${randomUUID()}`;
+    const processChild=boundedProcess('docker',['exec','-i','-e',`PGAPPNAME=${tag}`,'-e','PGOPTIONS=-c statement_timeout=40000 -c idle_in_transaction_session_timeout=40000',container,'psql','-XqAt','--set','ON_ERROR_STOP=1','--set','VERBOSITY=verbose','-U','postgres','-d','postgres'],timeoutMs);
+    const {child,complete}=processChild;
+    let closePromise;
+    const client={child,complete,
+      write:sql=>child.stdin.write(sql),
+      end:sql=>{if(!child.stdin.destroyed&&!child.stdin.writableEnded)child.stdin.end(sql);},
+      async line(pattern){
+        const deadline=Date.now()+20_000;
+        while(Date.now()<deadline){
+          const match=processChild.stdout.match(pattern);if(match)return match;
+          if(processChild.closed){await complete;throw new Error('checkpoint child ended');}
+          await delay(25);
+        }
+        throw new Error('AI probe checkpoint host deadline exceeded');
+      },
+      close(){
+        if(closePromise)return closePromise;
+        closePromise=(async()=>{
+          client.end('rollback;\n');
+          const clean=await Promise.race([processChild.exited.then(()=>true),delay(1500).then(()=>false)]);
+          if(!clean)await processChild.cancel();
+          // Docker client cancellation alone does not prove that its PostgreSQL session ended.
+          // Terminate and verify only this exact randomly named session in this owned DB.
+          if(!clean||(await processChild.exited).timedOut){
+            const sql=`select pg_terminate_backend(pid) from pg_stat_activity where application_name='${tag}';select count(*) from pg_stat_activity where application_name='${tag}';`;
+            let remaining;
+            for(let n=0;n<3;n++){
+              const control=boundedProcess('docker',['exec','-i',container,'psql','-XqAt','--set','ON_ERROR_STOP=1','-U','postgres','-d','postgres'],3000);
+              control.child.stdin.end(sql);const result=await control.complete;
+              assert.equal(result.code,0,'owned session cancellation control failed');
+              remaining=result.stdout.trim().split('\n').at(-1);if(remaining==='0')break;
+              await delay(50);
+            }
+            assert.equal(remaining,'0','owned PostgreSQL session was not confirmed terminated');
+          }
+          ownedSessions.delete(client);
+          await complete;
+          if(!clean)throw new Error('session required forced cancellation during cleanup');
+        })();
+        return closePromise;
+      }
+    };
+    ownedSessions.add(client);return client;
+  }
+  async function query(sql){const client=session(10_000);try{client.end(sql);const result=await client.complete;assert.equal(result.code,0,result.stderr.replace(/tips_agent_[a-f0-9]+/g,'[fixture-key]'));return result.stdout.trim();}finally{await client.close();}}
+
+  function configureContainer(value){assert.match(value,/^supabase_db_tips_supabase_db_qa_[a-f0-9]{12}$/u);container=value;}
+  async function finishRuntime(){
+    clearTimeout(overallDeadline);
+    await closeSessions(...ownedSessions);
+    assert.equal(ownedChildren.size,0,'all owned child processes must be reaped');
+  }
+  return {closeSessions,selfTestBounds,startDeadline,configureContainer,session,query,finishRuntime};
+})({assert,spawn,randomUUID});
+if(process.argv.includes('--self-test-timeout')) {await selfTestBounds();process.exit(0);}
+startDeadline();
+// END GENERATED AI PROBE RUNTIME
 const url=new URL(process.env.TASK_LOCAL_DB_URL || 'https://invalid.invalid');
 assert.equal(url.hostname,'127.0.0.1');assert.equal(url.pathname,'/postgres');assert.match(process.env.TASK_LOCAL_DB_NONCE || '',/^[a-f0-9]{32}$/);
 const config=await readFile('supabase/config.toml','utf8');const project=config.match(/^project_id = "(tips_supabase_db_qa_[a-f0-9]{12})"/m)?.[1];assert.ok(project);assert.ok(config.includes(`[db]\nport = ${url.port}\n`));
+const container=`supabase_db_${project}`;
+// BEGIN GENERATED AI PROBE SESSION SETUP
+// Generated: DO NOT EDIT. Regenerate: node scripts/generate-ai-agent-probe-runtime.mjs
+configureContainer(container);
+// END GENERATED AI PROBE SESSION SETUP
+try {
 const issuer=randomUUID(),owner=randomUUID(),credential=randomUUID(),expiredRequest=randomUUID();
 const credentialHash=createHash('sha256').update('tips_agent_'+randomBytes(32).toString('hex')).digest('hex');
 const nonceHash=createHash('sha256').update(randomBytes(32).toString('hex')).digest('hex');
@@ -72,13 +216,22 @@ ${role('admin')}${cap('catalogAdmin','policy','catalog',{})}${cap('policyMissing
 select 'AI_HTTP_CAPTURE:'||jsonb_build_object('provenance',jsonb_build_object('kind','actual_disposable_db_gateway','synthetic',true,'providerCalls',0,'rolledBack',true),'oldNotificationCounts',jsonb_build_object('before',(select value from old_counts),'after',jsonb_build_object('events',(select count(*) from dashboard_private.notification_events),'deliveries',(select count(*) from dashboard_private.notification_deliveries))),'captures',(select jsonb_agg(to_jsonb(c) order by name) from captures c))::text;
 rollback;
 `;
-const child=spawn('docker',['exec','-i',`supabase_db_${project}`,'psql','-XqAt','--set','ON_ERROR_STOP=1','--set','VERBOSITY=verbose','-U','postgres','-d','postgres'],{stdio:['pipe','pipe','pipe']});
-let stdout='',diagnostic='';child.stdout.on('data',v=>stdout+=v);child.stderr.on('data',v=>{const match=String(v).match(/ERROR:\s+([A-Z0-9]{5}): ([^\n]+)/);if(match)diagnostic=match[1]+':'+match[2].replace(/[a-f0-9]{64}/g,'[redacted]').replace(/tips_agent_[^\s]+/g,'[redacted]');});child.stdin.end(sql);
-const code=await new Promise((resolve,reject)=>{child.on('error',reject);child.on('close',resolve)});
-assert.equal(code,0,'synthetic HTTP producer capture failed after '+stdout.split('\n').filter(line=>line.startsWith('AI_HTTP_STEP:')).at(-1)+' '+diagnostic);
+const client=session();client.end(sql);
+const result=await client.complete;
+assert.equal(result.code,0,'synthetic HTTP producer capture failed');
+const stdout=result.stdout;
+await closeSessions(client);
+assert.equal(await query(`select count(*) from dashboard_private.ai_agent_credentials where id='${credential}';`),'0','HTTP producer transaction must roll back its synthetic credential');
 const capture=stdout.split('\n').find(line=>line.startsWith('AI_HTTP_CAPTURE:'));assert.ok(capture,'producer capture absent');
 const parsed=JSON.parse(capture.slice('AI_HTTP_CAPTURE:'.length));assert.equal(parsed.captures.length,34);assert.deepEqual(parsed.oldNotificationCounts.before,parsed.oldNotificationCounts.after);
 assert.equal(parsed.captures.find(row=>row.name==='historyLast').data.messages.at(-1).seq,'56');
 assert.deepEqual(Object.keys(parsed.captures.find(row=>row.name==='minimalEndedDoneReplay').data.request).sort(),['id','status','version']);
 assert.ok(!capture.includes(credentialHash));assert.ok(!capture.includes(nonceHash));
 console.log(capture);
+
+} finally {
+// BEGIN GENERATED AI PROBE CLEANUP
+// Generated: DO NOT EDIT. Regenerate: node scripts/generate-ai-agent-probe-runtime.mjs
+await finishRuntime();
+// END GENERATED AI PROBE CLEANUP
+}

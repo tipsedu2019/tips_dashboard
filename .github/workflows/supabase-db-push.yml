@@ -28,11 +28,38 @@ jobs:
         with:
           node-version: 22.18.0
 
+      - name: Install static test dependencies
+        run: npm ci --ignore-scripts
+
+      - name: Test AI agent and Chat contracts
+        run: |
+          node --test --experimental-strip-types \
+            tests/ai-agent-credential-service.test.mjs \
+            tests/ai-agent-credential-workspace.test.mjs \
+            tests/ai-agent-local-db-runner.test.mjs \
+            tests/ai-agent-navigation.test.mjs \
+            tests/ai-agent-probe-process-bounds.test.mjs \
+            tests/ai-agent-request-access.test.mjs \
+            tests/ai-agent-request-auth.test.mjs \
+            tests/ai-agent-request-contract.test.mjs \
+            tests/ai-agent-request-draft-navigation.test.mjs \
+            tests/ai-agent-request-recovery.test.mjs \
+            tests/ai-agent-request-routes.test.mjs \
+            tests/ai-agent-request-service.test.mjs \
+            tests/ai-agent-request-workspace.test.mjs \
+            tests/chat-outbox.test.mjs \
+            tests/chat-runtime-configuration.test.mjs \
+            tests/chat-send-route.test.mjs \
+            tests/google-chat-transport.test.mjs
+
       - name: Test Supabase migration boundary
         run: node --test tests/supabase-migration-layout.test.mjs
 
       - name: Test transactional safety contracts
         run: node --test --test-skip-pattern='^PostgreSQL 17 transactional preflight named checkpoint preserves FK errors and rollback$' tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+
+      - name: Test private AI capture receipt guards
+        run: node --test tests/helpers/ai-producer-receipt.test.mjs
 
       - name: Test cached PostgreSQL fixture guards
         run: node --test tests/isolated-postgres-fixture-tests.test.mjs
@@ -82,6 +109,9 @@ jobs:
           tar -xzf "${archive_path}" -C "${cli_dir}"
           "${cli_dir}/supabase" --version
 
+      - name: Install producer parity dependencies
+        run: npm ci --ignore-scripts
+
       - name: Run isolated migration and schema contracts
         shell: bash
         run: |
@@ -89,7 +119,7 @@ jobs:
           TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
             --review-head --lint --require-final --execute --authorized \
             --request-id "github-main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
-            --postdeploy-contract --transactional-preflight --verify-local-ledger \
+            --postdeploy-contract --transactional-preflight --verify-local-ledger --ai-producer-parity \
             --test supabase/tests/agent_api_scoped_schedule_test.sql \
             --test supabase/tests/agent_api_class_changes_test.sql \
             --test supabase/tests/agent_management_calendar_test.sql \
@@ -182,7 +212,18 @@ jobs:
             --test supabase/tests/agent_past_lesson_state_correction_test.sql \
             --test supabase/tests/timetable_default_projection_performance_test.sql \
             --test supabase/tests/timetable_save_conflict_details_test.sql \
-            --test supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql
+            --test supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql \
+            --test supabase/tests/ai_agent_chat_outbox_test.sql \
+            --test supabase/tests/ai_agent_chat_runtime_test.sql \
+            --test supabase/tests/ai_agent_credentials_test.sql \
+            --test supabase/tests/ai_agent_requests_authz_test.sql \
+            --test supabase/tests/ai_agent_requests_transition_test.sql \
+            --test supabase/tests/ai_agent_space_policy_test.sql \
+            --probe tests/probe-ai-agent-auth-concurrency.mjs \
+            --probe tests/probe-ai-agent-claim-concurrency.mjs \
+            --probe tests/probe-ai-agent-space-policy-concurrency.mjs \
+            --probe tests/probe-ai-agent-chat-runtime-concurrency.mjs \
+            --probe tests/probe-ai-agent-http-producer.mjs
 
       - name: Test cached PostgreSQL fixture contracts
         run: node scripts/run-isolated-postgres-fixture-tests.mjs

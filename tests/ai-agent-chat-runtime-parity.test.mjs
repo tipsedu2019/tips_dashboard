@@ -1,12 +1,12 @@
-import test from 'node:test';import assert from 'node:assert/strict';import {readFile} from 'node:fs/promises';
+import {readCurrentAiCapture} from '../scripts/lib/ai-producer-receipt.mjs';
+import test from 'node:test';import assert from 'node:assert/strict';
 import {chatOutboxSchema,chatPreparedSchema,validateChatCompletion} from '../src/features/chat/server/chat-contract.ts';
 import {createChatSendHandler} from '../src/features/chat/server/chat-send-route.ts';
 import {resolveBridgeSource} from '../src/features/chat/server/chat-runtime-configuration.ts';
 import {loadNotificationComponent} from './helpers/notification-component-loader.mjs';
 const {credentialIssueSchema}=loadNotificationComponent('src/features/ai-agent/ai-agent-credential-service.ts');
-const file=process.env.TASK_CHAT_RUNTIME_CAPTURE;
-test('actual final SQL issuer/bridge/completion/attempt DTOs pass strict consumers and durable sender',{skip:!file},async()=>{
- const data=JSON.parse(await readFile(file,'utf8'));assert.deepEqual(data.provenance,{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0});assert.equal(data.migrationHashes.length,6);
+test('actual final SQL issuer/bridge/completion/attempt DTOs pass strict consumers and durable sender',async()=>{
+ const data=await readCurrentAiCapture('chat');assert.deepEqual(data.provenance,{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0});
  assert.deepEqual(credentialIssueSchema.parse(data.first),data.first);assert.deepEqual(credentialIssueSchema.parse(data.replay),data.replay);assert.equal(data.replay.token,null);
  for(const key of ['hostile','safeEmpty','unconfigured'])assert.deepEqual(chatOutboxSchema.parse(data[key]),data[key]);
  for(const key of ['prepared','recorded'])assert.deepEqual(chatPreparedSchema.parse(data[key]),data[key]);

@@ -83,3 +83,21 @@ test('completion rejects relative/body/result/link payload until approved absolu
  for(const [text,origin] of [[completion.payload.text,undefined],[completion.payload.text,'https://dashboard.synthetic.invalid'],[`제목\n개인 결과 · 완료\nhttps://dashboard.synthetic.invalid/admin/ai-agent/${id}`,'https://dashboard.synthetic.invalid'],[`제목 · 완료\nhttps://evil.test/admin/ai-agent/${id}`,'https://dashboard.synthetic.invalid']]){const d=durable({row:{...completion,payload:{text}},completionOrigin:origin});assert.ok((await d.handler(request(body(d.row)))).status>=400);assert.equal(d.fetches,0);}
  const valid={...completion,payload:{text:`제목 · 완료\nhttps://dashboard.synthetic.invalid/admin/ai-agent/${id}`}};const d=durable({row:valid,completionOrigin:'https://dashboard.synthetic.invalid',fetch:async(url,options)=>{assert.equal(new URL(url).searchParams.has('messageReplyOption'),false);assert.equal(JSON.parse(options.body).thread,undefined);return Response.json({name:'spaces/SYNTHETIC/messages/client-custom-name',thread:{name:'spaces/SYNTHETIC/threads/new'}});}});assert.equal((await d.handler(request(body(valid)))).status,200);assert.equal(d.row.state,'sent');assert.equal(d.fetches,1);
 });
+
+test('parsed HTTP JSON order, outer whitespace and escaped characters are equivalent; text is exact',async()=>{
+ const d=durable({originCreated:false});
+ const body={space:'space_1',thread:initial.threadName,text:'답변'};
+ const forms=[JSON.stringify(body),' \n'+JSON.stringify({text:body.text,thread:body.thread,space:body.space})+'\t ',`{"text":"\\ub2f5\\ubcc0","space":"space_1","thread":"${body.thread}"}`];
+ for(const raw of forms){const base=request(body);base.headers.delete('x-chat-intent-id');base.headers.set('x-bridge-event-id',initial.sourceEventId);const req=new Request(base.url,{method:'POST',headers:base.headers,body:raw});assert.equal((await d.handler(req)).status,200);}
+ assert.deepEqual(d.actions,['chat_outbox','chat_outbox','chat_outbox']);assert.equal(d.fetches,0);
+ for(const text of [' 답변','답변 ','답변\n','답변\r\n','답변'.normalize('NFD')]){const other=durable({originCreated:false});const req=request({...body,text});req.headers.delete('x-chat-intent-id');req.headers.set('x-bridge-event-id',initial.sourceEventId);assert.equal((await other.handler(req)).status,409);assert.equal(other.fetches,0);}
+ const lineRow={...initial,payload:{...initial.payload,text:'답변\n두번째 줄'}};const lines=durable({originCreated:false,row:lineRow});const lf=request({...body,text:lineRow.payload.text});lf.headers.delete('x-chat-intent-id');lf.headers.set('x-bridge-event-id',initial.sourceEventId);assert.equal((await lines.handler(lf)).status,200);const crlf=request({...body,text:lineRow.payload.text.replace('\n','\r\n')});crlf.headers.delete('x-chat-intent-id');crlf.headers.set('x-bridge-event-id',initial.sourceEventId);assert.equal((await lines.handler(crlf)).status,409);assert.equal(lines.fetches,0);
+ for(const extra of [{extra:true},{thread:null}]){const other=durable();assert.equal((await other.handler(request({...body,...extra}))).status,400);assert.deepEqual(other.actions,[]);assert.equal(other.fetches,0);}
+});
+
+test('real HTTP prepares with latest get revision and server readyAt passes unchanged',async()=>{
+ const readyAt='2026-10-05T12:34:56.789+00:00',revision='9007199254741007';let input;
+ const row={...initial,state:'retry_wait',revision,readyAt};
+ const handler=createChatSendHandler({rpc:async(name,args)=>{if(args.p_action==='get')return {data:{outbox:row,attempts:[]},error:null};assert.equal(args.p_action,'prepare_attempt');input=args.p_input;return {data:{outbox:row,attempt:null},error:null};},resolveSlot:()=>slot,bridgeSourceId:async()=>key,fetch:async()=>{throw Error('no dispatch authorization');}});
+ const response=await handler(request());assert.equal(response.status,200);assert.deepEqual(input,{id,revision,idempotencyKey:key});assert.equal((await response.json()).data.outbox.readyAt,readyAt);
+});

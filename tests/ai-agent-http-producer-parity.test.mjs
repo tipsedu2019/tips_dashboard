@@ -1,11 +1,11 @@
+import {readCurrentAiCapture} from '../scripts/lib/ai-producer-receipt.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import {readFile} from 'node:fs/promises';
+
 import {createAiAgentRouteHandler} from '../src/features/ai-agent/server/ai-agent-routes.ts';
 import {createAiAgentSpacePolicyHandler} from '../src/features/ai-agent/server/ai-agent-space-policy-route.ts';
 import {parseAiAgentOutput} from '../src/features/ai-agent/server/ai-agent-repository.ts';
 import {aiSpaceCatalogSchema,aiSpacePermissionSchema} from '../src/features/ai-agent/ai-agent-request-contract.ts';
-const fixture=process.env.TASK_AI_HTTP_CAPTURE;
 const key='aa030000-0000-4000-8000-000000000002';
 const nonce='a'.repeat(64),bot='tips_agent_'+'b'.repeat(64);
 function wire(row,rows) {
@@ -31,8 +31,8 @@ function wire(row,rows) {
  if(row.kind==='policy'){route=op==='catalog'?{kind:'spaces'}:{kind:'space-permissions',userId:data.userId};if(op==='set'){method='PATCH';headers['If-Match']='"r0"';body={spaceKeys:data.spaceKeys};}}
  return {request:new Request('https://synthetic.invalid/api'+query,{method,headers:{...headers,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})}),route};
 }
-test('actual disposable DB producers pass real strict parsers and HTTP handlers',{skip:!fixture},async()=>{
- const captured=JSON.parse(await readFile(fixture,'utf8'));
+test('actual disposable DB producers pass real strict parsers and HTTP handlers',async()=>{
+ const captured=await readCurrentAiCapture('http');
  assert.deepEqual(captured.provenance,{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0,rolledBack:true});
  assert.equal(captured.captures.length,34);
  for(const row of captured.captures){

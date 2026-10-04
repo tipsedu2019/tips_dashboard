@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "c971d1e4c5421532d2943003b0054397639f039c9b4da509f17b49e257c700ca"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "28cd3acdf63086f20bf9c5ff9b831f8efeac3d322de8e4aa81ee2bd9a9e698bf"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -125,7 +125,13 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/agent_past_lesson_state_correction_test.sql",
   "supabase/tests/timetable_default_projection_performance_test.sql",
   "supabase/tests/timetable_save_conflict_details_test.sql",
-  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql"
+  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
+  "supabase/tests/ai_agent_chat_outbox_test.sql",
+  "supabase/tests/ai_agent_chat_runtime_test.sql",
+  "supabase/tests/ai_agent_credentials_test.sql",
+  "supabase/tests/ai_agent_requests_authz_test.sql",
+  "supabase/tests/ai_agent_requests_transition_test.sql",
+  "supabase/tests/ai_agent_space_policy_test.sql",
 ])
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -139,7 +145,12 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-dashboard-workload-dto.mjs",
   "tests/probe-registration-subject-snapshot-concurrency.mjs",
   "tests/probe-registration-management-recovery-concurrency.mjs",
-  "tests/probe-registration-visit-cancellation-dto.mjs"
+  "tests/probe-registration-visit-cancellation-dto.mjs",
+  "tests/probe-ai-agent-auth-concurrency.mjs",
+  "tests/probe-ai-agent-claim-concurrency.mjs",
+  "tests/probe-ai-agent-space-policy-concurrency.mjs",
+  "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
+  "tests/probe-ai-agent-http-producer.mjs",
 ])
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
@@ -2152,7 +2163,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   }
 })
 
-test("isolated main·PR는 동일한 SQL 81개·probe 12개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 87개·probe 17개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
@@ -2212,3 +2223,51 @@ test("calendar와 registration rollback preflight 및 동일 focused SQL을 모�
   ]) assertIncludesErrorCode(validateIsolatedCiWorkflow(source), "isolated_ci_focused_preflight_missing")
   assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace("--transactional-preflight", "")), "isolated_ci_required_flag_missing:--transactional-preflight")
 })
+
+const EXPECTED_AI_STATIC_TESTS = Object.freeze([
+  "tests/ai-agent-credential-service.test.mjs",
+  "tests/ai-agent-credential-workspace.test.mjs",
+  "tests/ai-agent-local-db-runner.test.mjs",
+  "tests/ai-agent-navigation.test.mjs",
+  "tests/ai-agent-probe-process-bounds.test.mjs",
+  "tests/ai-agent-request-access.test.mjs",
+  "tests/ai-agent-request-auth.test.mjs",
+  "tests/ai-agent-request-contract.test.mjs",
+  "tests/ai-agent-request-draft-navigation.test.mjs",
+  "tests/ai-agent-request-recovery.test.mjs",
+  "tests/ai-agent-request-routes.test.mjs",
+  "tests/ai-agent-request-service.test.mjs",
+  "tests/ai-agent-request-workspace.test.mjs",
+  "tests/chat-outbox.test.mjs",
+  "tests/chat-runtime-configuration.test.mjs",
+  "tests/chat-send-route.test.mjs",
+  "tests/google-chat-transport.test.mjs"
+])
+
+test('AI registration semantic guards fail independently of workflow hash pins',async()=>{
+ for(const [file,kind]of [['supabase-db-push.yml','main'],['supabase-sql-review.yml','pr']]){
+  const source=await readFile(join(repoRoot,'.github/workflows',file),'utf8');
+  assert.deepEqual(validateIsolatedCiWorkflow(source,kind),[]);
+  const staticCommand='node --test --experimental-strip-types \\\n';
+  for(const target of EXPECTED_AI_STATIC_TESTS)for(const replacement of ['',target+' '+target,'tests/ai-agent-unreviewed.test.mjs']){
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(target,replacement),kind),'isolated_ci_ai_static_inventory_mismatch');
+  }
+  for(const [mutation,code]of [
+   [source.replace(staticCommand,staticCommand.replace('--test','--test --test-name-pattern=selected')),'isolated_ci_ai_static_inventory_mismatch'],
+   [source.replace('--ai-producer-parity',''),'isolated_ci_required_flag_missing:--ai-producer-parity'],
+   [source.replace('--ai-producer-parity','--ai-producer-parity --filtered'),'isolated_ci_runner_command_mismatch'],
+   [source.replace('run: npm ci --ignore-scripts','run: npm ci'),'isolated_ci_ai_dependency_install_order_invalid'],
+   [source.replace('      - name: Test AI agent and Chat contracts','      - name: Test AI agent and Chat contracts\n        if: success()'),'isolated_ci_conditional_execution_forbidden'],
+   [source+'\n      - run: node scripts/second.mjs --execute\n','isolated_ci_execute_count_mismatch'],
+   [source+'\n      - run: bash scripts/indirect.mjs\n','isolated_ci_indirect_execute_forbidden'],
+   [source.replace('run: npm ci --ignore-scripts','run: echo missing'),'isolated_ci_ai_dependency_install_order_invalid'],
+   [source.replace('      - name: Install producer parity dependencies\n        run: npm ci --ignore-scripts\n\n','')+'\n      - name: Late install\n        run: npm ci --ignore-scripts\n','isolated_ci_ai_dependency_install_order_invalid'],
+  ])assertIncludesErrorCode(validateIsolatedCiWorkflow(mutation,kind),code);
+  // Same command in the wrong job, and a second static command, cannot count as registration.
+  const start=source.indexOf('      - name: Test AI agent and Chat contracts'),end=source.indexOf('\n      - name:',start+8),step=source.slice(start,end);
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,start)+source.slice(end)+step,kind),'isolated_ci_ai_static_inventory_mismatch');
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source+step,kind),'isolated_ci_ai_static_command_count_mismatch');
+  for(const path of EXPECTED_CI_PROBES)for(const value of [`--probe ${path} --probe ${path}`,'--probe tests/probe-unknown.mjs'])
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(`--probe ${path}`,value),kind),'isolated_ci_probe_inventory_mismatch');
+ }
+});
