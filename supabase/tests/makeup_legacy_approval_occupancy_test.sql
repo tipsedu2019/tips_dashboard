@@ -354,7 +354,7 @@ insert into public.classes(id,name,subject,schedule_storage_mode,status,teacher,
 select (f#>>'{request,class_id}')::uuid,f#>>'{request,class_name}','영어','legacy','수강',f#>>'{teacher,name}',f#>>'{room,name}',f->>'schedule',f->'plan' from effective_approval_fixtures;
 insert into public.makeup_requests(id,status,request_kind,subject,approval_group,requester_id,class_id,class_name,teacher_catalog_id,teacher_profile_id,approver_teacher_catalog_id,approver_profile_id,cancel_date,makeup_start_at,makeup_end_at,makeup_classroom,makeup_slots)
 select (f#>>'{request,id}')::uuid,'approval_pending','cancel_makeup','영어','english',pg_temp.eid(901),(f#>>'{request,class_id}')::uuid,f#>>'{request,class_name}',(f#>>'{teacher,id}')::uuid,
-case when (f->>'n')::int>=5 then null else pg_temp.eid(901) end,pg_temp.eid(1),pg_temp.eid(901),(f#>>'{request,cancel_date}')::date,(f#>>'{request,makeup_start_at}')::timestamptz,(f#>>'{request,makeup_end_at}')::timestamptz,f#>>'{room,name}',f#>'{request,makeup_slots}' from effective_approval_fixtures;
+case when f#>>'{teacher,id}'=pg_temp.eid(1)::text then pg_temp.eid(901) else null end,pg_temp.eid(1),pg_temp.eid(901),(f#>>'{request,cancel_date}')::date,(f#>>'{request,makeup_start_at}')::timestamptz,(f#>>'{request,makeup_end_at}')::timestamptz,f#>>'{room,name}',f#>'{request,makeup_slots}' from effective_approval_fixtures;
 -- 25 dated ordinary rows, 14 earlier same-day rows, one genuinely missing room.
 insert into public.classes(id,name,subject,schedule_storage_mode,status,teacher,room,schedule,schedule_plan)
 select pg_temp.eid(300+n),'Inherited historical row '||n,'영어','legacy','개강 준비','Inheritance teacher 2',
