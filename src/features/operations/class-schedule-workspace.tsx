@@ -38,7 +38,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { AcademicFilterToolbar } from "@/features/academic/filter-toolbar";
-import { applyCalendarDateSubstitution, applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, getNextBillingPeriodMonth, getSuggestedNextStartDate, normalizeSchedulePlan } from "@/lib/class-schedule-planner";
+import { applyCalendarDateSubstitution, applyCalendarDateToggle, buildSchedulePlanForSave, computeAutoEndDate, getNextBillingPeriodMonth, getSuggestedNextStartDate, normalizeSchedulePlan, isRequestMakeupSession } from "@/lib/class-schedule-planner";
 import { useDraftNavigation } from "@/hooks/use-draft-navigation";
 import { supabase } from "@/lib/supabase";
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js";
@@ -2851,6 +2851,13 @@ export function ClassScheduleWorkspace() {
     () => (lessonPlanDraft ? normalizeLessonDraft(lessonPlanDraft) : null),
     [lessonPlanDraft, normalizeLessonDraft],
   );
+  // Legacy editor controls address dates, while an approved request can own
+  // several separate slots on one date. Keep those effects in the approval flow.
+  const requestOwnedLessonDates = useMemo(() => {
+    if (isNormalizedLessonSchedule) return new Set<string>();
+    const rows = Array.isArray(normalizedLessonPlan?.sessions) ? normalizedLessonPlan.sessions as Record<string, unknown>[] : [];
+    return new Set(rows.filter(isRequestMakeupSession).flatMap(row => [text(row.date), text(row.originalDate)]).filter(Boolean));
+  }, [isNormalizedLessonSchedule, normalizedLessonPlan]);
   const legacyLessonSnapshotDefaults = useMemo(() => ({
     schedule: text(selectedRowClassItem?.schedule || selectedRow?.scheduleLabel),
     teacher: text(selectedRowClassItem?.teacher || selectedRow?.teacher),
@@ -3420,7 +3427,7 @@ export function ClassScheduleWorkspace() {
   const handleLessonSessionStateChange = useCallback(
     (session: (typeof selectedLessonSession), nextState: "active" | "exception" | "makeup" | "tbd") => {
       const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate) {
+      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
         return;
       }
       const isMakeupSession = text(session?.scheduleState) === "makeup";
@@ -3437,12 +3444,12 @@ export function ClassScheduleWorkspace() {
         });
       });
     },
-    [updateLessonPlanDraft],
+    [requestOwnedLessonDates, updateLessonPlanDraft],
   );
   const handleLessonSessionMemoChange = useCallback(
     (session: (typeof selectedLessonSession), nextMemo: string) => {
       const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate) {
+      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
         return;
       }
 
@@ -3459,12 +3466,16 @@ export function ClassScheduleWorkspace() {
         });
       });
     },
-    [updateLessonPlanDraft],
+    [requestOwnedLessonDates, updateLessonPlanDraft],
   );
   const handleLessonSessionMakeupDateDirectChange = useCallback(
     (session: (typeof selectedLessonSession), nextMakeupDate: string) => {
+      if (text(nextMakeupDate) && requestOwnedLessonDates.has(nextMakeupDate)) {
+        setLessonDesignSaveError("승인된 휴보강 날짜입니다. 휴보강 화면에서 일정을 확인해 주세요.");
+        return;
+      }
       const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate) {
+      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
         return;
       }
 
@@ -3480,12 +3491,12 @@ export function ClassScheduleWorkspace() {
         });
       });
     },
-    [updateLessonPlanDraft],
+    [requestOwnedLessonDates, setLessonDesignSaveError, updateLessonPlanDraft],
   );
   const handleLessonSessionSubstitution = useCallback(
     (session: (typeof selectedLessonSession), targetDate: string) => {
       const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate || !targetDate) {
+      if (!sessionDate || !targetDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue)) || requestOwnedLessonDates.has(targetDate)) {
         return;
       }
 
@@ -3493,12 +3504,12 @@ export function ClassScheduleWorkspace() {
         applyCalendarDateSubstitution(current, sessionDate, targetDate) as Record<string, unknown>,
       );
     },
-    [updateLessonPlanDraft],
+    [requestOwnedLessonDates, updateLessonPlanDraft],
   );
   const handleLessonSessionClearSubstitution = useCallback(
     (session: (typeof selectedLessonSession)) => {
       const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate) {
+      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
         return;
       }
 
@@ -3514,12 +3525,12 @@ export function ClassScheduleWorkspace() {
         });
       });
     },
-    [updateLessonPlanDraft],
+    [requestOwnedLessonDates, updateLessonPlanDraft],
   );
   const handleLessonSessionRelease = useCallback(
     (session: (typeof selectedLessonSession)) => {
       const sessionDate = resolveLessonSessionDraftDate(session);
-      if (!sessionDate) {
+      if (!sessionDate || requestOwnedLessonDates.has(sessionDate) || requestOwnedLessonDates.has(text(session?.dateValue))) {
         return;
       }
 
@@ -3536,11 +3547,11 @@ export function ClassScheduleWorkspace() {
       });
       setSelectedLessonCalendarDate(sessionDate);
     },
-    [updateLessonPlanDraft],
+    [requestOwnedLessonDates, updateLessonPlanDraft],
   );
   const handleLessonCalendarToggle = useCallback(
     (dateKey: string, meta: { hasSession: boolean; hasBaseSession: boolean; isMakeup: boolean }) => {
-      if (!lessonScheduleReadReady || isNormalizedLessonSchedule || !dateKey || meta.isMakeup) {
+      if (!lessonScheduleReadReady || isNormalizedLessonSchedule || !dateKey || requestOwnedLessonDates.has(dateKey) || meta.isMakeup) {
         return;
       }
 
@@ -3577,7 +3588,7 @@ export function ClassScheduleWorkspace() {
         scrollLessonDesignPeriodSessionToCalendarAfterRender(nextFocusedSessionId, dialogScrollTop);
       }
     },
-    [buildNextLessonPlanDraft, isNormalizedLessonSchedule, lessonScheduleReadReady, syncLessonDesignDraftSnapshot],
+    [requestOwnedLessonDates, buildNextLessonPlanDraft, isNormalizedLessonSchedule, lessonScheduleReadReady, syncLessonDesignDraftSnapshot],
   );
   const handleLessonCalendarPointerDown = useCallback(() => {
     pendingLessonDesignCalendarPointerScrollTopRef.current = getLessonDesignDialogScrollTop();
@@ -3586,6 +3597,7 @@ export function ClassScheduleWorkspace() {
     (targetDate: string, meta: { hasSession: boolean }) => {
       if (
         !lessonScheduleReadReady || isNormalizedLessonSchedule ||
+        requestOwnedLessonDates.has(targetDate) || requestOwnedLessonDates.has(lessonCalendarDragSource) ||
         meta.hasSession ||
         !lessonCalendarDragSource ||
         !targetDate ||
@@ -3609,7 +3621,7 @@ export function ClassScheduleWorkspace() {
         preferScheduleState: "makeup",
       });
     },
-    [buildNextLessonPlanDraft, isNormalizedLessonSchedule, lessonCalendarDragSource, lessonScheduleReadReady, syncLessonDesignDraftSnapshot],
+    [requestOwnedLessonDates, buildNextLessonPlanDraft, isNormalizedLessonSchedule, lessonCalendarDragSource, lessonScheduleReadReady, syncLessonDesignDraftSnapshot],
   );
   const handleLessonCalendarDateClick = useCallback(
     (
@@ -3620,7 +3632,7 @@ export function ClassScheduleWorkspace() {
         return;
       }
 
-      if (isNormalizedLessonSchedule) {
+      if (isNormalizedLessonSchedule || requestOwnedLessonDates.has(dateKey)) {
         const session = lessonDesignSnapshot?.sessions.find((item) => item.dateValue === dateKey);
         if (!session) return;
         setSelectedLessonCalendarDate(dateKey);
@@ -3632,7 +3644,7 @@ export function ClassScheduleWorkspace() {
       }
       handleLessonCalendarToggle(dateKey, meta);
     },
-    [handleLessonCalendarToggle, isNormalizedLessonSchedule, lessonDesignSnapshot, markPendingLessonSessionSelection],
+    [requestOwnedLessonDates, handleLessonCalendarToggle, isNormalizedLessonSchedule, lessonDesignSnapshot, markPendingLessonSessionSelection],
   );
   const handleLessonPeriodChange = useCallback(
     (periodId: string, field: "startDate" | "endDate", value: string) => {
@@ -4445,7 +4457,7 @@ export function ClassScheduleWorkspace() {
     ? resolveLegacyLessonDetails(selectedLessonSession.dateValue, legacyLessonSnapshotDefaults) : null;
   const pastCorrectionSavedPlan = (selectedRowClassItem?.schedulePlan || selectedRowClassItem?.schedule_plan || {}) as Record<string, unknown>;
   const pastCorrectionTarget = lessonScheduleReadReady && !isNormalizedLessonSchedule && actorScope?.endsWith(":admin")
-    && selectedRowClassItem?.status === "수강" && selectedLessonSession
+    && selectedRowClassItem?.status === "수강" && selectedLessonSession && !requestOwnedLessonDates.has(selectedLessonSession.dateValue)
     ? resolveLegacyPastStateCorrectionTarget(pastCorrectionSavedPlan, selectedLessonSession.id) : null;
   const pastCorrectionDraft = pastCorrectionTarget
     ? resolveLegacyPastStateCorrectionDraft(lessonPlanBaseline, normalizedLessonPlan, pastCorrectionTarget) : null;
@@ -4539,7 +4551,7 @@ export function ClassScheduleWorkspace() {
             const isNormalizedSessionDetailsOpen =
               Boolean(normalizedLessonSessionDraft) && normalizedLessonSessionDetailsOpenSessionId === session.id;
             const isSessionReleasable =
-              showScheduleControls && !normalizedLessonSessionDraft && !["makeup", "skipped"].includes(session.scheduleState);
+              showScheduleControls && !requestOwnedLessonDates.has(session.dateValue) && !normalizedLessonSessionDraft && !["makeup", "skipped"].includes(session.scheduleState);
             return (
                 <div
                   key={`month-session-edit-${session.id}`}
@@ -4600,7 +4612,12 @@ export function ClassScheduleWorkspace() {
 
                 {isSelectedSession && selectedLessonSession ? (
                   <div className="border-t bg-background px-3 py-3">
-                    {showScheduleControls ? (
+                    {showScheduleControls && requestOwnedLessonDates.has(selectedLessonSession.dateValue) ? (
+                      <div className="space-y-2 text-sm text-muted-foreground">
+                        <p>{selectedLessonSession.startTime || "시간 미정"}{selectedLessonSession.endTime ? `–${selectedLessonSession.endTime}` : ""}</p>
+                        <p>승인된 휴보강 일정입니다. 일정 변경은 <Link className="underline underline-offset-4" href="/admin/makeup-requests">휴보강</Link>에서 확인해 주세요.</p>
+                      </div>
+                    ) : showScheduleControls ? (
                       normalizedLessonSessionDraft ? (
                         <div className="grid gap-3">
                           <div className="grid grid-cols-4 gap-1.5">
@@ -5177,10 +5194,10 @@ export function ClassScheduleWorkspace() {
                                           ? `${dateKey} ${daySessions.length > 1 ? daySessions.map((session) => session.scheduleStateLabel).join(" · ") : calendarState === "skipped" ? "해제된 일정" : getScheduleStateLabel(calendarState)}`
                                           : undefined
                                       }
-                                      draggable={!isNormalizedLessonSchedule && lessonScheduleReadReady && Boolean(primarySession) && primarySession?.scheduleState !== "makeup"}
+                                      draggable={!isNormalizedLessonSchedule && lessonScheduleReadReady && !requestOwnedLessonDates.has(dateKey) && Boolean(primarySession) && primarySession?.scheduleState !== "makeup"}
                                       style={primarySessionSurfaceStyle}
                                       onDragStart={(event) => {
-                                        if (isNormalizedLessonSchedule || !lessonScheduleReadReady || !primarySession || primarySession.scheduleState === "makeup") {
+                                        if (isNormalizedLessonSchedule || requestOwnedLessonDates.has(dateKey) || !lessonScheduleReadReady || !primarySession || primarySession.scheduleState === "makeup") {
                                           return;
                                         }
                                         event.dataTransfer.effectAllowed = "move";
@@ -5194,6 +5211,7 @@ export function ClassScheduleWorkspace() {
                                       }}
                                       onDragOver={(event) => {
                                         if (
+                                          requestOwnedLessonDates.has(dateKey) ||
                                           primarySession ||
                                           !lessonCalendarDragSource ||
                                           lessonCalendarDragSource === dateKey
@@ -5211,6 +5229,7 @@ export function ClassScheduleWorkspace() {
                                       }}
                                       onDrop={(event) => {
                                         if (
+                                          requestOwnedLessonDates.has(dateKey) ||
                                           primarySession ||
                                           !lessonCalendarDragSource ||
                                           lessonCalendarDragSource === dateKey
