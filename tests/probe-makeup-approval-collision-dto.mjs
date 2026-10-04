@@ -105,6 +105,12 @@ async function probeEffectiveApprovalConcurrency() {
   const emptyFixtureCounts = JSON.stringify(Array(9).fill(0));
   assert.equal(JSON.stringify(JSON.parse(await query(fixtureCountsSql))), emptyFixtureCounts,
     'fixture namespace must be unused before any committed setup');
+  const transientCountsSql = `select jsonb_build_array(
+    (select count(*) from public.makeup_requests where ${owned('id')}),
+    (select count(*) from public.academic_events where ${owned('id')}),
+    (select count(*) from dashboard_private.notification_request_ledger where ${owned('request_id')}),
+    (select count(*) from dashboard_private.notification_events where payload->>'makeup_request_id' like 'ae041004-0000-4000-8000-%')
+  );`;
   const writerSql = "select to_json(pg_get_functiondef('dashboard_private.notification_makeup_payload_v1(uuid,uuid,text)'::regprocedure));";
   const originalWriter = JSON.parse(await query(writerSql));
   try {
@@ -140,8 +146,11 @@ async function probeEffectiveApprovalConcurrency() {
     for (const s of sessions) if (!s.child.stdin.writableEnded) s.child.stdin.end('rollback;\n');
     await Promise.all(sessions.map(s => s.done));
     // Concurrent transactions must commit to exercise locks/replay. Remove only
-    // this nonce-owned fixture's rows before later probes share the container,
-    // and restore the baseline writer that the fixture temporarily replaced.
+    // this nonce-owned fixture's workflow rows before later probes share the
+    // container, and restore the temporarily replaced writer. Keep class,
+    // catalog, and principal prerequisites until container teardown: the
+    // existing class DELETE audit trigger cannot reference an already-deleted
+    // class. Do not disable that trigger or change its constraint for cleanup.
     await query(`begin;
       delete from dashboard_private.notification_event_fanout_jobs where event_id in
         (select id from dashboard_private.notification_events where payload->>'makeup_request_id' like 'ae041004-0000-4000-8000-%');
@@ -149,19 +158,12 @@ async function probeEffectiveApprovalConcurrency() {
       delete from dashboard_private.notification_request_ledger where ${owned('request_id')};
       delete from public.makeup_requests where ${owned('id')};
       delete from public.academic_events where ${owned('id')};
-      delete from public.classes where ${owned('id')};
-      delete from public.teacher_catalogs where ${owned('id')} or profile_id='${id(901)}';
-      delete from public.classroom_catalogs where ${owned('id')};
-      delete from dashboard_private.notification_audit_logs where actor_profile_id='${id(901)}';
-      delete from public.dashboard_notifications where actor_profile_id='${id(901)}' or recipient_profile_id='${id(901)}';
-      delete from public.profiles where id='${id(901)}';
-      delete from auth.users where id='${id(901)}';
       ${originalWriter}
       commit;`);
-    assert.equal(JSON.stringify(JSON.parse(await query(fixtureCountsSql))), emptyFixtureCounts,
-      'committed concurrency fixtures cannot leak into later workload/DTO probes');
+    assert.deepEqual(JSON.parse(await query(transientCountsSql)), [0, 0, 0, 0],
+      'committed workflow fixtures cannot leak into later workload/DTO probes');
     assert.equal(JSON.parse(await query(writerSql)), originalWriter, 'baseline payload writer is restored exactly');
-    console.log(JSON.stringify({ status: 'passed', effectiveApprovalFixtureCleanup: true, payloadWriterRestored: true }));
+    console.log(JSON.stringify({ status: 'passed', effectiveApprovalWorkflowCleanup: true, payloadWriterRestored: true, retainedPrerequisites: 'until disposable container teardown' }));
   }
 }
 
