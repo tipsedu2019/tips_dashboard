@@ -15,7 +15,6 @@ import {
 import { Label } from "@/components/ui/label"
 
 import { RegistrationSelect } from "./registration-select"
-import { RegistrationObservationChatActions } from "./registration-observation-chat-actions"
 import type {
   RegistrationObservationAttempt,
   RegistrationObservationManagerDetail,
@@ -118,7 +117,7 @@ export function getRegistrationObservationAttemptStatusLabel(
   if (attempt.appointmentStatus === "canceled" || attempt.status === "canceled") return "취소"
   if (attempt.status === "no_show") return "불참"
   if (attempt.status === "completed") return "청강 완료"
-  if (attempt.status === "attended_feedback_pending") return "원장 확인 대기"
+  if (attempt.status === "attended_feedback_pending") return "참석 기록 있음"
   return "청강 예정"
 }
 
@@ -895,9 +894,6 @@ export function RegistrationObservationEditor({
             <dl className="grid gap-2 rounded-md bg-muted/45 p-3 text-sm sm:grid-cols-2">
               <div><dt className="text-xs text-muted-foreground">선생님</dt><dd>{selectedSession.teacherName}</dd></div>
               <div><dt className="text-xs text-muted-foreground">강의실</dt><dd>{selectedSession.classroomName}</dd></div>
-              <div><dt className="text-xs text-muted-foreground">캠퍼스</dt><dd>{selectedSession.campus}</dd></div>
-              <div><dt className="text-xs text-muted-foreground">교재</dt><dd>{selectedSession.textbooks.map((textbook) => textbook.title).filter(Boolean).join(", ") || "없음"}</dd></div>
-              <div className="sm:col-span-2"><dt className="text-xs text-muted-foreground">진도</dt><dd>{selectedSession.progress || "미정"}</dd></div>
             </dl>
           ) : null}
 
@@ -922,11 +918,7 @@ export function RegistrationObservationEditor({
         </div>
       ) : null}
 
-      {readOnly ? <p className="text-sm text-muted-foreground">현재 상태는 이 화면에서 변경할 수 없습니다.</p> : null}
-      {!deepLinkedAttempt && current && ["scheduled", "attended_feedback_pending"].includes(current.status) ? (
-        <RegistrationObservationChatActions observationId={current.observationId} disabled={saving || bookingDirty || mutationCommitted}
-          feedbackAvailable={Date.parse(current.endsAt) <= Date.now()} />
-      ) : null}
+      {readOnly ? <p className="text-sm text-muted-foreground">저장된 청강 기록입니다.</p> : null}
       {feedbackPanel}
       {receipt === "예약 저장됨" ? (
         <div role="status" className="grid gap-1 text-sm">

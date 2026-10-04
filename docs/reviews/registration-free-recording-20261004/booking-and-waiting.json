@@ -1,0 +1,14 @@
+{
+  "external": 0,
+  "counts": {
+    "tasks": 12,
+    "cases": 12,
+    "tracks": 20,
+    "appointments": 5,
+    "consultations": 3,
+    "levelTests": 5,
+    "receipts": 1,
+    "notificationReceipts": 0,
+    "externalCalls": 0
+  }
+}

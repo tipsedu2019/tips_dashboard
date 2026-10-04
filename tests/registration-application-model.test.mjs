@@ -32,11 +32,11 @@ const {
   updateRegistrationApplicationDirtyKeys,
 } = application
 
-test("observation keeps the previous registration workflow visible", () => {
+test("manual trial status remains visible while historical technical statuses preserve their return value", () => {
   assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
     workflowStatus: "observation_requested",
     observationReturnWorkflowStatus: "consultation_completed",
-  }), "consultation_completed")
+  }), "observation_requested")
   assert.equal(resolveRegistrationWorkspaceWorkflowStatus({
     workflowStatus: "observation_feedback_pending",
     observationReturnWorkflowStatus: "waiting_current_class",

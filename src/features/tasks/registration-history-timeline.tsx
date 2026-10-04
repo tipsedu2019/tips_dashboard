@@ -119,7 +119,6 @@ function historyDetailLines(item: RegistrationSubjectHistoryItem) {
   }
   if (typeof metadata.place === "string" && metadata.place) lines.push(`장소: ${metadata.place}`)
   if (item.description) lines.push(`기록 요약: ${item.description}`)
-  if (lines.length === 0) lines.push("자동 기록의 세부 정보가 보존되어 있습니다.")
   return lines
 }
 
@@ -155,7 +154,7 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
     >
       <div>
         <h3 className="text-sm font-semibold">자동 이력</h3>
-        <p className="text-xs text-muted-foreground">누가 · 언제 · 무엇을 · 어떻게 처리했는지 시간순으로 보여 줍니다.</p>
+        <p className="text-xs text-muted-foreground">최근 변경부터 표시합니다. 시간은 한국 시간 기준입니다.</p>
       </div>
       {history.length === 0 ? (
         <p className="rounded-md bg-muted/30 px-3 py-6 text-center text-sm text-muted-foreground">
@@ -164,7 +163,8 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
       ) : (
         <ol className="grid gap-2">
           {history.map((item) => {
-            const detailLines = historyDetailLines(item)
+            const statusSummary = item.title === "진행상태 변경" ? item.description : ""
+            const detailLines = statusSummary ? [] : historyDetailLines(item)
             return (
               <li key={item.id} className="grid min-w-0 gap-2 rounded-md bg-muted/30 px-3 py-2.5">
                 <div className="flex min-w-0 flex-wrap items-start justify-between gap-2">
@@ -178,7 +178,8 @@ export function RegistrationHistoryTimeline({ detail, profiles, embedded = false
                     </p>
                   </div>
                 </div>
-                <RegistrationHistoryDetails lines={detailLines} />
+                {statusSummary ? <p className="break-words text-sm">{statusSummary}</p> : null}
+                {detailLines.length > 0 ? <RegistrationHistoryDetails lines={detailLines} /> : null}
               </li>
             )
           })}

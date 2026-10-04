@@ -79,11 +79,13 @@ const REGISTRATION_INITIAL_ACTIONS = ["inquiry", "level_test", "direct_phone", "
 type RegistrationInitialAction = typeof REGISTRATION_INITIAL_ACTIONS[number]
 
 export const REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS = [
+  "createRegistrationCase",
   "createRegistrationCaseWithInitialWorkflow",
   "syncRegistrationCaseSubjects",
   "saveRegistrationCaseInquiry",
   "updateRegistrationCaseCommon",
   "setRegistrationWorkflowStatus",
+  "saveRegistrationWaitingDetails",
   "setRegistrationAdmissionChecklistItem",
   "routeRegistrationInquiry",
   "assignRegistrationTrackDirector",
@@ -3200,7 +3202,8 @@ function createFixtureTrackEvent(
     systemSource: null,
     reasonCode: input.reason,
     payloadVersion: 2,
-    occurredAt: FIXTURE_NOW,
+    occurredAt: input.eventType === "registration_workflow_status_changed"
+      ? new Date(Date.parse(FIXTURE_NOW) + state.sequence).toISOString() : FIXTURE_NOW,
     legacyText: null,
   }
 }
@@ -3535,6 +3538,21 @@ export function reduceRegistrationSubjectTrackFixture(
   let result: unknown
 
   switch (type) {
+    case "createRegistrationCase": {
+      const subjects = Array.isArray(payload.subjects) && payload.subjects.length === 0
+        ? [] : orderedFixtureSubjects(payload.subjects)
+      const priority = fixtureInputText(payload.priority) || "normal"
+      if (!["low", "normal", "high", "urgent"].includes(priority)) fixtureInitialError("registration_priority_invalid")
+      result = createFixtureRegistrationCaseWithInitialWorkflow(state, {
+        studentName: fixtureInputText(payload.studentName), schoolGrade: fixtureInputText(payload.schoolGrade),
+        schoolName: fixtureInputText(payload.schoolName), parentPhone: fixtureInputText(payload.parentPhone),
+        studentPhone: fixtureInputText(payload.studentPhone), campus: fixtureInputText(payload.campus),
+        inquiryAt: fixtureInputText(payload.inquiryAt), requestNote: fixtureInputText(payload.requestNote),
+        priority, subjects, subjectPlans: Object.fromEntries(subjects.map((subject) => [subject, "inquiry"])),
+        levelTestAppointment: null, visitAppointment: null, directorOverrides: {}, requestKey: key,
+      })
+      break
+    }
     case "createRegistrationCaseWithInitialWorkflow": {
       result = createFixtureRegistrationCaseWithInitialWorkflow(state, normalizedInitialInput!)
       break
@@ -3626,71 +3644,12 @@ export function reduceRegistrationSubjectTrackFixture(
       if (Number(payload.expectedWorkflowRevision) !== selected.workflowRevision) {
         throw new Error("registration_workflow_status_refresh_required")
       }
-      let enrollmentFinalization: Record<string, unknown> | null = null
-      if (nextStatus === "registered") {
-        if (!["enrollment_processing", "registered"].includes(selected.status)) {
-          throw new Error("registration_enrollment_pipeline_invalid")
-        }
-        const selectedEnrollments = detail.enrollments.filter((item) => (
-          item.trackId === selected.id
-          && (item.status === "planned" || (item.status === "enrolled" && item.rosterActive))
-        ))
-        if (selectedEnrollments.length === 0) throw new Error("registration_enrollment_required")
-        if (selectedEnrollments.some((item) => !item.classId || !item.classStartDate || !item.classStartSessionKey || !item.classStartSession)) {
-          throw new Error("registration_enrollment_schedule_incomplete")
-        }
-
-        const studentId = detail.task.studentId || `fixture-student-${detail.task.id}`
-        detail.task.studentId = studentId
-        const plannedEnrollments = selectedEnrollments.filter((item) => item.status === "planned")
-        const plannedBatchIds = Array.from(new Set(
-          plannedEnrollments.map((item) => item.admissionBatchId).filter((item): item is string => Boolean(item)),
-        ))
-        const unbatchedCount = plannedEnrollments.filter((item) => !item.admissionBatchId).length
-        if (plannedBatchIds.length > 1 || (plannedBatchIds.length === 1 && unbatchedCount > 0)) {
-          throw new Error("registration_admission_batch_membership_invariant")
-        }
-        let targetBatch = plannedBatchIds.length === 1
-          ? detail.admissionBatches.find((item) => item.id === plannedBatchIds[0]) || null
-          : null
-        if (plannedBatchIds.length === 1 && (!targetBatch || targetBatch.status === "canceled")) {
-          throw new Error("registration_admission_batch_membership_invariant")
-        }
-        if (plannedEnrollments.length > 0 && plannedBatchIds.length === 0) {
-          targetBatch = batch({
-            id: `fixture-batch-workflow-${detail.task.id}-${detail.admissionBatches.length + 1}`,
-            taskId: detail.task.id,
-            revisionNumber: Math.max(0, ...detail.admissionBatches.map((item) => item.revisionNumber)) + 1,
-            status: "completed",
-          })
-          detail.admissionBatches.push(targetBatch)
-        }
-        for (const item of plannedEnrollments) {
-          item.studentId = studentId
-          item.admissionBatchId ||= targetBatch?.id || null
-          item.status = "enrolled"
-          item.rosterActive = true
-          item.updatedAt = FIXTURE_NOW
-        }
-        if (
-          targetBatch
-          && targetBatch.status !== "canceled"
-          && !detail.enrollments.some((item) => item.admissionBatchId === targetBatch.id && item.status === "planned")
-        ) {
-          targetBatch.status = "completed"
-          targetBatch.updatedAt = FIXTURE_NOW
-        }
-        selected.status = "registered"
-        selected.stageEnteredAt = FIXTURE_NOW
-        enrollmentFinalization = {
-          trackId: selected.id,
-          studentId,
-          batchId: targetBatch?.id || null,
-          enrollmentIds: selectedEnrollments.map((item) => item.id),
-          changed: plannedEnrollments.length > 0,
-        }
-      }
       if (selected.workflowStatus !== nextStatus) {
+        detail.events.push(createFixtureTrackEvent(state, {
+          taskId: detail.task.id, trackId: selected.id, eventType: "registration_workflow_status_changed",
+          subject: selected.subject, source: selected.workflowStatus, destination: nextStatus,
+          reason: "manual_status_change", metadata: { workflowStatus: nextStatus, workflowRevision: selected.workflowRevision + 1 },
+        }))
         selected.workflowStatus = nextStatus as OpsRegistrationWorkflowStatus
         selected.workflowRevision += 1
         selected.workflowStatusEnteredAt = FIXTURE_NOW
@@ -3702,8 +3661,29 @@ export function reduceRegistrationSubjectTrackFixture(
         workflowRevision: selected.workflowRevision,
         workflowStatusEnteredAt: selected.workflowStatusEnteredAt,
         sourceEventIds: [],
-        enrollmentFinalization,
+        enrollmentFinalization: null,
       }
+      break
+    }
+    case "saveRegistrationWaitingDetails": {
+      const detail = requireCase(findCaseByTrackId(state, asText(payload, "trackId")), "track_not_found")
+      const selected = requireCase(detail.tracks.find((item) => item.id === payload.trackId), "track_not_found")
+      const waitingKind = asText(payload, "waitingKind")
+      const classId = asText(payload, "classId")
+      const retakeDecision = asText(payload, "retakeDecision")
+      if ((waitingKind && !["current_class", "current_term_opening", "next_term_opening"].includes(waitingKind))
+        || (classId && waitingKind !== "current_class")
+        || (retakeDecision && !["required", "not_required"].includes(retakeDecision))) throw new Error("registration_waiting_details_invalid")
+      if (classId && !state.classDetails[classId]) throw new Error("registration_waiting_class_not_found")
+      detail.events.push(createFixtureTrackEvent(state, {
+        taskId: detail.task.id, trackId: selected.id, eventType: "registration_fact_saved",
+        subject: selected.subject, source: null, destination: null, reason: null, metadata: { factType: "waiting_details" },
+      }))
+      selected.waitingDetailKind = (asText(payload, "waitingKind") || "") as OpsRegistrationTrackSummary["waitingDetailKind"]
+      selected.waitingDetailClassId = asText(payload, "classId") || null
+      selected.waitingDetailRetakeDecision = (asText(payload, "retakeDecision") || "") as OpsRegistrationTrackSummary["waitingDetailRetakeDecision"]
+      syncCase(state, detail)
+      result = { trackId: selected.id, waitingKind: selected.waitingDetailKind, classId: selected.waitingDetailClassId || "", retakeDecision: selected.waitingDetailRetakeDecision }
       break
     }
     case "setRegistrationAdmissionChecklistItem": {

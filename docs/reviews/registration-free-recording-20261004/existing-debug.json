@@ -1,0 +1,85 @@
+{
+  "blocked": [],
+  "errors": [],
+  "layout": {
+    "viewport": 390,
+    "documentWidth": 390
+  },
+  "historyBounds": {
+    "x": 17,
+    "y": 66,
+    "width": 356,
+    "height": 564
+  },
+  "escapeRestoredFocus": true,
+  "debug": {
+    "counts": {
+      "tasks": 11,
+      "cases": 11,
+      "tracks": 18,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 5,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    },
+    "stateDigest": "1adaa-f0747dad-6f11704e",
+    "lastCreate": null,
+    "notificationTargetHistory": [
+      {
+        "appointmentId": "fixture-appointment-split-visit",
+        "sourceRevision": 1,
+        "targetGeneration": "1",
+        "targetProfileIds": [
+          "fixture-profile-english-director"
+        ],
+        "targetSetHash": "69cda916c6a4812bb4a646a03497a2f542952a6a137565af75f0400417969ae9"
+      },
+      {
+        "appointmentId": "fixture-appointment-split-visit",
+        "sourceRevision": 1,
+        "targetGeneration": "2",
+        "targetProfileIds": [
+          "fixture-profile-math-director"
+        ],
+        "targetSetHash": "0b91c8a2140efecd0546f48c2b072ebf59bd583e1753e7a98c0cf368584b222b"
+      },
+      {
+        "appointmentId": "fixture-appointment-split-visit",
+        "sourceRevision": 1,
+        "targetGeneration": "3",
+        "targetProfileIds": [
+          "fixture-profile-english-director"
+        ],
+        "targetSetHash": "69cda916c6a4812bb4a646a03497a2f542952a6a137565af75f0400417969ae9"
+      }
+    ],
+    "notificationJobs": [
+      {
+        "jobKind": "target_reconciliation",
+        "jobId": "fixture-target-reconciliation-generation-2",
+        "appointmentId": "fixture-appointment-split-visit",
+        "sourceRevision": 1,
+        "targetGeneration": "2",
+        "targetSetHash": "0b91c8a2140efecd0546f48c2b072ebf59bd583e1753e7a98c0cf368584b222b",
+        "status": "succeeded",
+        "outcome": "superseded",
+        "createdOrder": 2,
+        "resolvedOrder": 5
+      },
+      {
+        "jobKind": "target_reconciliation",
+        "jobId": "fixture-target-reconciliation-generation-3",
+        "appointmentId": "fixture-appointment-split-visit",
+        "sourceRevision": 1,
+        "targetGeneration": "3",
+        "targetSetHash": "69cda916c6a4812bb4a646a03497a2f542952a6a137565af75f0400417969ae9",
+        "status": "succeeded",
+        "outcome": "applied",
+        "createdOrder": 3,
+        "resolvedOrder": 4
+      }
+    ]
+  }
+}

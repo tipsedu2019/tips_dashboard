@@ -306,7 +306,7 @@ test("panel source exposes history, attendance, and decisions without feedback f
   assert.match(source, /state\.detail\.feedbackReason/)
   assert.match(source, /recordRegistrationObservationAttendance/)
   assert.match(source, /decideRegistrationObservation/)
-  assert.match(source, /Google Chat/)
+  assert.doesNotMatch(source, /Google Chat/)
   assert.doesNotMatch(source, /SubmitRegistrationObservationFeedbackInput/)
   assert.doesNotMatch(source, /CorrectRegistrationObservationFeedbackInput/)
   assert.doesNotMatch(source, /피드백 저장|피드백 정정/)

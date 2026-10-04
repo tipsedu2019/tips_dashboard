@@ -1,0 +1,74 @@
+[
+  {
+    "role": "admin",
+    "blocked": [],
+    "errors": [],
+    "documentWidth": 398,
+    "viewport": 390,
+    "counts": {
+      "tasks": 12,
+      "cases": 12,
+      "tracks": 20,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "staff",
+    "blocked": [],
+    "errors": [],
+    "documentWidth": 398,
+    "viewport": 390,
+    "counts": {
+      "tasks": 12,
+      "cases": 12,
+      "tracks": 20,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "teacher",
+    "blocked": [],
+    "errors": [],
+    "documentWidth": 398,
+    "viewport": 390,
+    "counts": {
+      "tasks": 12,
+      "cases": 12,
+      "tracks": 20,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "assistant",
+    "blocked": [],
+    "errors": [],
+    "documentWidth": 398,
+    "viewport": 390,
+    "counts": {
+      "tasks": 12,
+      "cases": 12,
+      "tracks": 20,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  }
+]

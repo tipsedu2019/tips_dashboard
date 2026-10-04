@@ -274,7 +274,7 @@ test("batch cancellation keeps different per-subject routing snapshots as separa
 
   const events = buildRegistrationSubjectHistory(detail).filter((item) => item.kind === "event");
   assert.equal(events.length, 2);
-  assert.deepEqual(events.map((item) => item.subjects), [["영어"], ["수학"]]);
+  assert.deepEqual(events.map((item) => item.subjects), [["수학"], ["영어"]]);
   assert.match(events.find((item) => item.subjects[0] === "영어").description, /현재 수업 대기/);
   assert.match(events.find((item) => item.subjects[0] === "수학").description, /미등록 종료/);
 });
@@ -975,4 +975,21 @@ test("migration fallback is explicitly unavailable and never borrows mutable sna
   assert.equal(fallback.actorKind, "migration");
   assert.equal(fallback.actorId, null);
   assert.doesNotMatch(JSON.stringify(fallback), /current-owner|2026-07-31T23:59:59Z/);
+});
+
+test("manual status changes and partial fact saves remain distinct and sort by actual time", () => {
+  const detail = detailFixture();
+  for (const key of ["appointments", "levelTests", "consultations", "enrollments", "admissionBatches"]) detail[key] = [];
+  detail.events = [
+    { id: "first", eventType: "registration_workflow_status_changed", trackId: "eng", source: "inquiry", destination: "observation_requested", occurredAt: "2026-10-04T12:00:00+09:00", payloadVersion: 2 },
+    { id: "second", eventType: "registration_workflow_status_changed", trackId: "eng", source: "observation_requested", destination: "registered", occurredAt: "2026-10-04T04:00:00Z", payloadVersion: 2 },
+    { id: "fact", eventType: "registration_fact_saved", trackId: "eng", metadata: { factType: "waiting_details" }, occurredAt: "2026-10-04T04:00:00.001Z", payloadVersion: 1 },
+    { id: "unknown", eventType: "registration_workflow_status_changed", trackId: "eng", source: "registered", destination: "inquiry_only", occurredAt: "invalid", payloadVersion: 2 },
+  ];
+  const events = buildRegistrationSubjectHistory(detail).filter((item) => item.kind === "event");
+  assert.equal(events.length, 4);
+  assert.deepEqual(events.map((event) => event.title), ["대기 정보 저장", "진행상태 변경", "진행상태 변경", "진행상태 변경"]);
+  assert.equal(events[1].description, "청강 신청 → 등록");
+  assert.equal(events[2].description, "등록 문의 → 청강 신청");
+  assert.equal(events[3].timeKind, "unavailable");
 });

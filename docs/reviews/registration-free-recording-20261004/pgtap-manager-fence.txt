@@ -1,0 +1,77 @@
+BEGIN
+SET
+SET
+SET
+ok 1 - the registration write fence is postgres-owned, private, and non-retryable
+ok 2 - every registration table plus the registration task row has the all-write fence
+ok 3 - comment authorization runs before its private receipt replay implementation
+ok 4 - activity authorization runs before its private receipt replay implementation
+ok 5 - registration delete authorization runs before its private receipt replay implementation
+ok 6 - consultation-result authorization runs before the direct fact-table implementation
+ok 7 - the service-only final plan enters its private active-manager guard before reading the base plan
+ok 8 - the final appointment domain conflict is exact non-retryable SQLSTATE 23514
+ok 9 - the track integrity trigger skips unrelated updates and retains delete coverage
+INSERT 0 4
+INSERT 0 4
+{}
+
+
+INSERT 0 3
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+CREATE FUNCTION
+CREATE FUNCTION
+CREATE FUNCTION
+SET
+
+ok 10 - an active teacher cannot bypass the registration table fence through SECURITY DEFINER
+ok 11 - the same teacher security-definer write remains available for a non-registration task
+ok 12 - a teacher direct call is denied before the legacy consultation-result base executes
+ok 13 - registration legacy source listing is manager-only
+ok 14 - the authenticated registration dispatch preflight denies a teacher
+ok 15 - the registration preflight leaves non-registration dispatch authorization unchanged
+RESET
+
+SET
+ok 16 - an active staff account can create the registration comment receipt
+ok 17 - an active staff account can create the registration activity receipt
+RESET
+UPDATE 1
+
+SET
+ok 18 - a role-changed teacher cannot receive a stored registration comment response
+RESET
+UPDATE 1
+UPDATE 1
+
+SET
+ok 19 - a banned staff account cannot receive a stored registration activity response
+RESET
+INSERT 0 1
+
+SET
+ok 20 - a banned account cannot replay a stored registration delete response
+RESET
+SET
+ok 21 - the service-role plan rejects a teacher actor before reading registration data
+ok 22 - the service-role plan rejects a banned staff actor before reading registration data
+RESET
+{}
+
+
+ok 23 - a null-actor internal registration writer remains available
+INSERT 0 1
+INSERT 0 1
+SET CONSTRAINTS
+SET CONSTRAINTS
+ALTER TABLE
+UPDATE 1
+ALTER TABLE
+ok 24 - updated_at-only track storage is independent from appointment integrity
+ok 25 - status-property storage is independent from appointment integrity
+ok 26 - subject archive storage is independent from appointment integrity
+ok 27 - an actual deterministic appointment conflict is SQLSTATE 23514
+ok 28 - an actual pipeline_status change still invokes appointment integrity
+1..28
+ROLLBACK

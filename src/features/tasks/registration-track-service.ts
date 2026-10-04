@@ -134,6 +134,7 @@ export type OpsRegistrationWorkflowStatus =
   | "waiting_current_class"
   | "waiting_new_class"
   | "waiting_next_opening"
+  | "observation_requested"
   | "enrollment_requested"
   | "payment_in_progress"
   | "registered"
@@ -148,6 +149,7 @@ const OPS_REGISTRATION_WORKFLOW_STATUSES: readonly OpsRegistrationWorkflowStatus
   "waiting_current_class",
   "waiting_new_class",
   "waiting_next_opening",
+  "observation_requested",
   "enrollment_requested",
   "payment_in_progress",
   "registered",
@@ -1582,6 +1584,30 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
   const outerEventType = exactRegistrationTrackEventType(
     value(row, "event_type", "eventType"),
   )
+  if (outerEventType === "registration_fact_saved") {
+    const payload = parseJsonRecord(value(row, "after_value", "afterValue"))
+    const actorId = nullableText(value(row, "actor_id", "actorId"))
+    return {
+      id: text(value(row, "id")),
+      taskId: text(value(row, "task_id", "taskId")),
+      trackId: nullableText(payload?.trackId),
+      eventType: outerEventType,
+      subject: null,
+      source: null,
+      destination: null,
+      reason: null,
+      // Audit payloads can contain contact details; the timeline only needs
+      // the saved fact's kind, not a second copy of the input values.
+      metadata: { factType: text(payload?.factType) },
+      actorId,
+      actorKind: actorId ? "user" : null,
+      systemSource: null,
+      reasonCode: null,
+      payloadVersion: 1,
+      occurredAt: text(value(row, "created_at", "createdAt")),
+      legacyText: null,
+    }
+  }
   const payload = outerEventType === "registration_track_event"
     ? parseJsonRecord(value(row, "after_value", "afterValue"))
     : null
@@ -4162,6 +4188,8 @@ export function loadAssignedScienceConsultationClassOptions(
 export function createRegistrationCase(
   input: Parameters<typeof defaultRegistrationTrackService.createRegistrationCase>[0],
 ): Promise<RegistrationCaseCreateResponse> {
+  const fixture = executeRegistrationSubjectTrackFixtureAction<RegistrationCaseCreateResponse>("createRegistrationCase", input)
+  if (fixture !== null) return fixture
   return defaultRegistrationTrackService.createRegistrationCase(input)
 }
 

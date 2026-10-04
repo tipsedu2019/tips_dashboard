@@ -754,8 +754,6 @@ export function RegistrationWaitingDetailsEditor({
   const [classId, setClassId] = useState(savedClassId)
   const [saving, setSaving] = useState(false)
   const [refreshPending, setRefreshPending] = useState(false)
-  const [validationError, setValidationError] = useState("")
-  const sectionRef = useRef<HTMLElement | null>(null)
   const submissionKeys = useSubmissionKeys()
   const waitingDirty = !refreshPending && (
     waitingKind !== savedWaitingKind
@@ -771,12 +769,6 @@ export function RegistrationWaitingDetailsEditor({
     retakeDecision: savedRetakeDecision,
   }) {
     if (saving || refreshPending || !permissions.canManage) return
-    const clearing = !next.waitingKind && !next.classId && !next.retakeDecision
-    if (!clearing && (!next.waitingKind || (next.waitingKind === "current_class" && !next.classId))) {
-      setValidationError("대기 종류와 필요한 수업을 선택하세요.")
-      focusFirstInvalid(sectionRef.current, next.waitingKind ? `[aria-label="${track.subject} 수업 선택"]` : `[aria-label="${track.subject} 대기 종류"]`)
-      return
-    }
     const kind = "registration-waiting-details"
     const requestKey = submissionKeys.getOrCreate(kind, track.id)
     setSaving(true)
@@ -807,7 +799,6 @@ export function RegistrationWaitingDetailsEditor({
   async function clearWaitingDetails() {
     setWaitingKind("")
     setClassId("")
-    setValidationError("")
     await saveWaitingDetails({ waitingKind: "", classId: "", retakeDecision: "" })
   }
 
@@ -824,7 +815,7 @@ export function RegistrationWaitingDetailsEditor({
   }
 
   return (
-    <section ref={sectionRef} data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3" aria-label={`${track.subject} 대기 처리`}>
+    <section data-registration-action-owner={`${track.subject}:waiting-close`} className="grid min-w-0 gap-3" aria-label={`${track.subject} 대기 처리`}>
       <h3 className="text-sm font-semibold">{track.subject} 대기 정보</h3>
       <RegistrationRefreshRecovery pending={refreshPending} retrying={saving} onRetry={() => void retryRefresh()} ownerLabel={track.subject} />
       {permissions.canManage && !refreshPending ? (
@@ -876,7 +867,6 @@ export function RegistrationWaitingDetailsEditor({
           {customerMessageBlocked ? <p className="text-right text-xs text-muted-foreground">대기 정보를 저장한 뒤 알림톡을 보낼 수 있습니다.</p> : null}
         </>
       ) : !refreshPending ? <p className="text-sm text-muted-foreground">관리 권한이 있는 사용자만 대기 정보를 저장할 수 있습니다.</p> : null}
-      {validationError ? <p role="alert" className="text-xs text-destructive">{validationError}</p> : null}
     </section>
   )
 }
