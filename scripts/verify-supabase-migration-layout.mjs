@@ -135,7 +135,7 @@ const REQUIRED_SQUAWK_CONFIG_SHA256 =
 // Only its exact path AND complete bytes may cross that execution boundary.
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
-  "47fed0b9d8ef5d53f4877600b7234e5b012cbe995734c32bb745b36bf577e73f"
+  "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "8102aff17e018730f6e9138126a6379b69da5ca04835e4f04a115fbc4be0f710"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
