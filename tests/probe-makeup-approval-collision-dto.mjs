@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
-import { buildRoomAvailability } from '../src/features/makeup-requests/makeup-request-model.js';
+import { buildRoomAvailability, isEffectiveMakeupSchedule } from '../src/features/makeup-requests/makeup-request-model.js';
 import { setTimeout as delay } from 'node:timers/promises';
 
 // Only the disposable SQL runner's database; never connect to deployed data.
@@ -19,6 +19,10 @@ assert.ok(end > 0);
 const sql = fixture.slice(0, end).replace('select no_plan();', '') + `
 set local role service_role;
 select jsonb_build_object('slots',pg_temp.slots(),'scoped',public.get_makeup_approval_collision_context_v1(pg_temp.slots()),
+ 'effective',public.get_makeup_effective_occupancy_v1((select jsonb_agg(jsonb_build_object(
+   'startAt',to_char((s->>'startAt')::timestamptz at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"'),
+   'endAt',to_char((s->>'endAt')::timestamptz at time zone 'UTC','YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')))
+   from jsonb_array_elements(pg_temp.slots()) s)),
  'full',jsonb_build_object('classes',(select jsonb_agg(to_jsonb(c)) from
    (select id,name,subject,grade,teacher,room,schedule from public.classes)c),
  'requests',(select jsonb_agg(to_jsonb(r)) from
@@ -36,13 +40,14 @@ assert.equal(await completed, 0, Buffer.concat(errors).toString());
 const wire = JSON.parse(Buffer.concat(chunks).toString().split('\n').findLast(line => line.startsWith('{')));
 const collisions = context => buildRoomAvailability({ ...context, slots: wire.slots }).flatMap(room =>
   room.collisions.map(collision => `${room.name}:${collision.source}:${collision.id}`)).sort();
-const before = collisions(wire.full), after = collisions(wire.scoped);
+assert.ok(isEffectiveMakeupSchedule(wire.effective), 'separate bounded RPC returns actual effective occupancy wire');
+assert.equal('effectiveSchedule' in wire.scoped, false, 'request context keeps its independent original contract');
+const before = collisions(wire.full), after = collisions({ ...wire.scoped, effectiveSchedule: wire.effective });
 assert.ok(before.length >= 7, 'nonempty producer wire exercises classes, pending, legacy dates, and JS whitespace');
 assert.deepEqual(after.filter(c => !c.includes(':regular_class:')), before.filter(c => !c.includes(':regular_class:')), 'request and calendar collision decisions are preserved');
-assert.equal(wire.scoped.effectiveSchedule.version, 1);
-assert.deepEqual(collisions({ ...wire.full, effectiveSchedule: wire.scoped.effectiveSchedule }), after, 'both consumers use shared effective DB class occupancy');
+assert.deepEqual(collisions({ ...wire.full, effectiveSchedule: wire.effective }), after, 'both consumers use shared effective DB class occupancy');
 console.log(JSON.stringify({ status: 'passed', collisions: after.length,
-  fullBytes: Buffer.byteLength(JSON.stringify(wire.full)), scopedBytes: Buffer.byteLength(JSON.stringify(wire.scoped)) }));
+  fullBytes: Buffer.byteLength(JSON.stringify(wire.full)), scopedBytes: Buffer.byteLength(JSON.stringify(wire.scoped)), effectiveBytes: Buffer.byteLength(JSON.stringify(wire.effective)) }));
 // Imported by the already registered collision probe, exclusively on Linux CI.
 // Never run against production, an arbitrary local DB, or a reused container.
 async function probeEffectiveApprovalConcurrency() {
