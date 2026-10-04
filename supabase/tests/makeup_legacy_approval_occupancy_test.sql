@@ -148,24 +148,42 @@ set constraints all immediate;set constraints all deferred;
 select set_config('request.jwt.claim.sub',pg_temp.eid(901)::text,true);
 select set_config('request.jwt.claim.role','service_role',true);
 create function pg_temp.effective_approve(n int,key_number int) returns jsonb language plpgsql as $$
-declare result jsonb; detail text;
+declare result jsonb; detail text; error_context text;
 begin
 select public.transition_makeup_request_v2((f#>>'{request,id}')::uuid,'approve',f->'patch','approval_pending',pg_temp.eid(key_number)) into result from effective_approval_fixtures where (f->>'n')::int=n;
 return result;
 exception when others then
- get stacked diagnostics detail=pg_exception_detail;
- raise notice 'EFFECTIVE_APPROVAL_FAILURE n=% code=% message=% detail=%',n,sqlstate,sqlerrm,detail;
+ get stacked diagnostics detail=pg_exception_detail,error_context=pg_exception_context;
+ raise notice 'EFFECTIVE_APPROVAL_FAILURE n=% code=% message=% detail=% context=%',n,sqlstate,sqlerrm,detail,error_context;
  raise;
 end $$;
 create function pg_temp.effective_cancel(n int,key_number int) returns jsonb language sql as $$
 select public.transition_makeup_request_v2((f#>>'{request,id}')::uuid,'approval_canceled','{"note":"Synthetic cancellation"}','completed',pg_temp.eid(key_number)) from effective_approval_fixtures where (f->>'n')::int=n
 $$;
+-- Diagnostic only, owner fixture in a disposable DB. The real public approval
+-- above remains the tested path. Re-run the unguarded transition in a forced
+-- rollback subtransaction solely to inspect its intermediate source evidence.
+create function pg_temp.debug_effective_source(n int) returns void language plpgsql as $$
+declare f jsonb; c public.classes; proof jsonb; ref jsonb;
+begin
+ select x.f into f from effective_approval_fixtures x where (x.f->>'n')::int=n;
+ begin
+  perform dashboard_private.transition_makeup_request_v2_unguarded((f#>>'{request,id}')::uuid,'approve',f->'patch','approval_pending',pg_temp.eid(9900+n));
+  select * into c from public.classes where id=(f#>>'{request,class_id}')::uuid;
+  proof:=dashboard_private.legacy_effective_context_v1(c)->'approvedByIdentity';
+  ref:=dashboard_private.read_timetable_operating_reference_v1();
+  raise notice 'EFFECTIVE_SOURCE_DEBUG n=% proof=% unresolved=%',n,proof,(select jsonb_agg(b) from jsonb_array_elements(ref->'datedUnresolvedOccupancies') b where b->>'classId'=c.id::text);
+  raise exception using errcode='PZ001',message='synthetic_debug_rollback';
+ exception when sqlstate 'PZ001' then null;
+ end;
+end $$;
 grant select on effective_approval_fixtures to service_role;
 create temp table effective_before as select (select count(*) from dashboard_private.notification_deliveries) deliveries;
 set local role service_role;
 select lives_ok('select pg_temp.effective_approve(5,2005)','historical source-only makeup resolves during actual approval without repairing its row');
 select lives_ok('select pg_temp.effective_approve(6,2006)','historical source-only midnight endpoint approves without moving the date');
 reset role;
+select pg_temp.debug_effective_source(n) from generate_series(5,6)n where (select status from public.makeup_requests where id=pg_temp.eid(100+n))='approval_pending';
 set constraints all immediate;set constraints all deferred;
 select is((select schedule_plan from public.classes where id=pg_temp.eid(205)),(select f->'after' from effective_approval_fixtures where f->>'n'='5'),'source-only approval preserves exact raw row and after snapshot');
 select is((select x->>'startMinute' from dashboard_private.timetable_effective_date_v1(dashboard_private.read_timetable_operating_reference_v1(),'2026-10-15') x where x->>'classId'=pg_temp.eid(205)::text),'900','approved historical makeup uses explicit 15:00, not current 19:30 basic');
