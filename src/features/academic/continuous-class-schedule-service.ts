@@ -88,7 +88,7 @@ export type ContinuousScheduleBoundedReadInput = {
 
 export type ContinuousScheduleBoundedReadResult =
   | { source: "normalized"; data: Record<string, unknown> }
-  | { source: "legacy"; classId: string; sessions: unknown[] }
+  | { source: "legacy"; classId: string; sessions: unknown[]; effectiveScheduleContext?: Record<string, unknown> }
   | { source: "error"; error: unknown };
 
 export type ContinuousScheduleBoundedReader = {
@@ -211,7 +211,10 @@ export function createBoundedContinuousScheduleReader(input: {
         if (result.authoritativeSource === "normalized") {
           return { source: "normalized" as const, data: result };
         }
-        if (result.authoritativeSource === "legacy") return input.loadLegacy(value);
+        if (result.authoritativeSource === "legacy") return {
+          ...await input.loadLegacy(value),
+          ...(record(result.effectiveScheduleContext) ? { effectiveScheduleContext: result.effectiveScheduleContext as Record<string, unknown> } : {}),
+        };
         return { source: "error" as const, error: new Error("Continuous schedule read returned no authoritative source.") };
       } catch (error) {
         if (mapContinuousScheduleRpcError(error).kind === "not_ready" || isMissingScheduleReadRpc(error)) {

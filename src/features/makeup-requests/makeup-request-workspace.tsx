@@ -1494,6 +1494,7 @@ function getSlotRoomAvailability(
     subject,
     ignoreOrphanedMakeupEvents: data.reservationContext ? true : canIgnoreOrphanedMakeupEvents,
     activeEventRequestIds: data.reservationContext?.activeEventRequestIds,
+    effectiveSchedule: data.reservationContext?.effectiveSchedule,
   }).map((room) => data.collisionContextReady === false ? { ...room, available: false } : room)
 }
 

@@ -8,6 +8,8 @@ import {
   extractMakeupCalendarMeta,
   hasMakeupPart,
   normalizeMakeupSlots,
+  isEffectiveMakeupSchedule,
+  type MakeupEffectiveSchedule,
 } from "@/features/makeup-requests/makeup-request-model.js"
 import { buildAcademicEventMutationPayload } from "@/features/operations/academic-event-utils.js"
 import { attemptMakeupApprovalReplay } from "@/features/makeup-requests/makeup-approval-replay.js"
@@ -169,6 +171,7 @@ function assertNoRoomCollision(
   requests: JsonRecord[],
   academicEvents: JsonRecord[],
   classrooms: JsonRecord[],
+  effectiveSchedule?: MakeupEffectiveSchedule | null,
 ) {
   if (!hasMakeupPart(requestRow)) return
   const slots = normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom))
@@ -180,6 +183,7 @@ function assertNoRoomCollision(
     slots,
     currentRequestId: text(requestRow.id),
     subject: text(requestRow.subject),
+    effectiveSchedule,
   })
   for (const slot of slots) {
     const room = text(slot.classroom || requestRow.makeup_classroom)
@@ -273,7 +277,8 @@ export async function POST(request: Request) {
         if (!isRecord(context) || ![context.classes, context.requests, context.academicEvents].every(
           (rows) => Array.isArray(rows) && rows.every(isRecord),
         )) throw new Error("makeup_approval_context_invalid")
-        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [])
+        if (context.effectiveSchedule != null && !isEffectiveMakeupSchedule(context.effectiveSchedule)) throw new Error("makeup_approval_context_invalid")
+        assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [], context.effectiveSchedule as MakeupEffectiveSchedule | null | undefined)
       }
       Object.assign(patch, await buildApprovalEffects(serverClient, requestRow, classRow))
     }

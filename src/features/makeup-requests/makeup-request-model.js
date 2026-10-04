@@ -525,6 +525,35 @@ function buildRegularClassCollisions(classes, targetSlots) {
   return collisions;
 }
 
+export function isEffectiveMakeupSchedule(value) {
+  const minute = v => v === null || Number.isInteger(v) && v >= 0 && v <= 1440;
+  return value?.version === 1 && Array.isArray(value.occupancies) && value.occupancies.every(row => row && typeof row === 'object'
+    && typeof row.classId === 'string' && typeof row.className === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(row.date)
+    && (row.classroom === null || typeof row.classroom === 'string')
+    && typeof row.uncertain === 'boolean' && typeof row.allRooms === 'boolean'
+    && minute(row.startMinute) && minute(row.endMinute));
+}
+
+function buildEffectiveClassCollisions(context, targetSlots, roomNames) {
+  const result = [];
+  const label = minutes => minutes === null ? '미정' : `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  for (const target of targetSlots) {
+    const date = toDateKey(target.startAt);
+    const start = minutesFromDateTime(target.startAt);
+    const end = toDateKey(target.endAt) === date ? minutesFromDateTime(target.endAt) : 1440;
+    for (const row of context.occupancies) {
+      if (row.date !== date || row.startMinute !== null && row.endMinute !== null && !(start < row.endMinute && row.startMinute < end)) continue;
+      const rooms = row.allRooms ? roomNames : [normalizeRoomName(row.classroom)];
+      for (const classroom of rooms.filter(Boolean)) result.push({
+        id: row.id || `${row.classId}:${row.date}`, source: 'regular_class', title: row.className, classroom,
+        startLabel: label(row.startMinute), endLabel: label(row.endMinute),
+        detail: `${row.date} ${label(row.startMinute)}-${label(row.endMinute)}${row.uncertain ? ' · 정보 미정' : ''}`,
+      });
+    }
+  }
+  return result;
+}
+
 function buildMakeupRequestCollisions(requests, targetSlots, currentRequestId) {
   const collisions = [];
 
@@ -636,6 +665,7 @@ export function buildRoomAvailability({
   subject = "",
   ignoreOrphanedMakeupEvents = false,
   activeEventRequestIds,
+  effectiveSchedule,
 } = {}) {
   const selectedSubject = text(subject);
   const roomNames = buildRoomOptions(classrooms, classes, { subject: selectedSubject });
@@ -650,7 +680,9 @@ export function buildRoomAvailability({
     addRoomName(roomNames, slot.classroom);
   }
   const collisions = [
-    ...buildRegularClassCollisions(classes, targetSlots),
+    ...(effectiveSchedule?.version === 1
+      ? buildEffectiveClassCollisions(effectiveSchedule, targetSlots, roomNames)
+      : buildRegularClassCollisions(classes, targetSlots)),
     ...buildMakeupRequestCollisions(requests, targetSlots, currentRequestId),
     ...buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId, activeRequestIds),
   ];
