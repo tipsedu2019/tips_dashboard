@@ -210,11 +210,91 @@ select set_config('request.jwt.claim.sub','${actor}',true);set local role authen
     await closeSessions(blocker,writer);
   }
 }
-console.log(JSON.stringify({status:evidence.every(row=>row.sqlstate==='42501')?'passed':'failed',checkpoints:evidence}));
 for(const row of evidence) {
   assert.equal(row.sqlstate,'42501',`${row.operation} must recheck current role after waiting for the profile lock`);
   assert.deepEqual(row.after,row.before,`${row.operation} must add no request/credential effects`);
 }
+
+// The four ON cases isolate the producer's decisive row-lock rechecks. Normal
+// policy RPC writers additionally take the target profile lock before this row.
+// These fixtures run only in the existing disposable DB, with no provider/grant.
+const onSpace='space_7';
+const onReplayKey=randomUUID();
+const onCreation=key=>`public.ai_agent_user_api_v1('create',jsonb_build_object('title','ON row-lock fixture','body','synthetic','notifyOnDone',true,'notificationSpace','${onSpace}','idempotencyKey','${key}'))`;
+const jsonLiteral=value=>"'"+JSON.stringify(value).replaceAll("'","''")+"'::jsonb";
+const onFixtureSnapshot=()=>query(`select jsonb_build_object('configuration',(select to_jsonb(c) from dashboard_private.chat_space_configuration c where space_key='${onSpace}'),'permission',(select to_jsonb(p) from dashboard_private.chat_user_space_permissions p where user_id='${actor}'),'role',(select role from public.profiles where id='${actor}'));`);
+const onFixtureBefore=JSON.parse(await onFixtureSnapshot());
+assert.notEqual(onFixtureBefore.configuration,null,'ON fixture slot must already exist');
+assert.equal(onFixtureBefore.permission,null,'only the new synthetic actor policy may be inserted');
+const onEvidence=[];
+async function onCounts(){
+  return JSON.parse(await query(`select jsonb_build_object('requests',(select count(*) from dashboard_private.ai_agent_requests where requester_id='${actor}'),'createReceipts',(select count(*) from dashboard_private.ai_agent_request_receipts where principal_kind='user' and principal_id='${actor}' and operation='create'),'requestEvents',(select count(*) from dashboard_private.ai_agent_request_events where requester_id='${actor}'),'hourlyBudget',(select count(*) from dashboard_private.ai_agent_requests where requester_id='${actor}' and created_at>clock_timestamp()-interval '1 hour'),'credentials',(select count(*) from dashboard_private.ai_agent_credentials where created_by='${actor}'));`));
+}
+async function enableOnFixture(){
+  await query(`begin;update public.profiles set role='staff' where id='${actor}';
+insert into dashboard_private.chat_user_space_permissions(user_id,space_keys,configured_by) values('${actor}',array['${onSpace}'],'${actor}') on conflict(user_id) do update set space_keys=excluded.space_keys;
+update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/ON_AUTH_RACE',public_origin='https://dashboard.test.invalid' where space_key='${onSpace}';commit;`);
+}
+try {
+  await enableOnFixture();
+  // Real public ON creation commits the exact receipt used by both replay cases.
+  // This one seed is the disposable baseline, outside denied-case effect counts.
+  const seed=JSON.parse((await query(`begin;select set_config('request.jwt.claim.sub','${actor}',true);set local role authenticated;select ${onCreation(onReplayKey)};commit;`)).split(/\r?\n/u).at(-1));
+  assert.equal(seed.requesterId,actor);assert.equal(seed.notifyOnDone,true);
+  assert.equal(seed.notificationSpace,onSpace);assert.equal(seed.status,'pending');
+  for(const [operation,resource,replay] of [
+    ['on_create_policy_revoke','permission',false],
+    ['on_replay_policy_revoke','permission',true],
+    ['on_create_configuration_remove','configuration',false],
+    ['on_replay_configuration_remove','configuration',true],
+  ]) {
+    await enableOnFixture(); // Active staff and allowed/configured before every case.
+    const before=await onCounts();
+    const expression=onCreation(replay?onReplayKey:randomUUID());
+    const mutation=resource==='permission'
+      ?`update dashboard_private.chat_user_space_permissions set space_keys=array[]::text[] where user_id='${actor}'`
+      :`update dashboard_private.chat_space_configuration set configured=false,resource_name=null where space_key='${onSpace}'`;
+    const blocker=session();const writer=session();
+    try {
+      blocker.write(`begin;set local statement_timeout='30s';${mutation};select 'LOCKED:'||pg_backend_pid();\n`);
+      const blockerPid=Number((await blocker.line(/^LOCKED:(\d+)$/mu))[1]);
+      writer.write(`begin;set local statement_timeout='25s';set local lock_timeout='20s';select 'WRITER:'||pg_backend_pid();
+create function pg_temp.exercise() returns text language plpgsql as $$begin perform ${expression};return '00000:unexpected_success';exception when others then return SQLSTATE||':'||SQLERRM;end$$;
+select set_config('request.jwt.claim.sub','${actor}',true);set local role authenticated;select 'STATE:'||pg_temp.exercise();\n`);
+      const writerPid=Number((await writer.line(/^WRITER:(\d+)$/mu))[1]);
+      let waited=false;
+      const deadline=Date.now()+15_000;
+      while(Date.now()<deadline) {
+        waited=await query(`select ${blockerPid}=any(pg_blocking_pids(${writerPid})) and exists(select 1 from pg_stat_activity where pid=${writerPid} and wait_event_type='Lock');`)==='t';
+        if(waited) break;
+        await new Promise(resolve=>setTimeout(resolve,50));
+      }
+      assert.equal(waited,true,`${operation} must reach the actual ${resource} row-lock checkpoint`);
+      // Publish the revoke/removal only after PostgreSQL proves the writer waits.
+      blocker.end('commit;\n');assert.equal((await blocker.complete).code,0);
+      const state=await writer.line(/^STATE:([A-Z0-9]{5}):([^\r\n]+)$/mu);
+      writer.end('commit;\n');assert.equal((await writer.complete).code,0);
+      const after=await onCounts();
+      assert.equal(state[1],'42501',`${operation} exact SQLSTATE`);
+      assert.equal(state[2],'ai_agent_space_forbidden',`${operation} exact domain message`);
+      assert.deepEqual(after,before,`${operation} adds no request/receipt/audit/budget/credential effects`);
+      onEvidence.push({operation,resource,replay,blockerPid,writerPid,rowLockWaitObserved:waited,revokeCommittedBeforeWriter:true,sqlstate:state[1],message:state[2],before,after});
+    } finally {
+      if(!blocker.child.stdin.destroyed) blocker.end('rollback;\n');
+      if(!writer.child.stdin.destroyed) writer.end('rollback;\n');
+      await closeSessions(blocker,writer);
+    }
+  }
+} finally {
+  // Only this synthetic actor's fixture policy/role and the one snapshotted slot
+  // are restored. Do not touch credentials, support flags, or other users/slots.
+  await query(`begin;update public.profiles set role=(${jsonLiteral(onFixtureBefore)}->>'role') where id='${actor}';
+delete from dashboard_private.chat_user_space_permissions where user_id='${actor}';
+update dashboard_private.chat_space_configuration c set configured=s.configured,resource_name=s.resource_name,revision=s.revision,public_origin=s.public_origin
+from jsonb_populate_record(null::dashboard_private.chat_space_configuration,${jsonLiteral(onFixtureBefore.configuration)})s where c.space_key=s.space_key;commit;`);
+  assert.deepEqual(JSON.parse(await onFixtureSnapshot()),onFixtureBefore,'ON fixture restores exact prior slot, own policy and role');
+}
+console.log(JSON.stringify({status:[...evidence,...onEvidence].every(row=>row.sqlstate==='42501')?'passed':'failed',checkpoints:[...evidence,...onEvidence]}));
 
 } finally {
 // BEGIN GENERATED AI PROBE CLEANUP
