@@ -158,7 +158,7 @@ async function probeEffectiveApprovalConcurrency() {
       delete from dashboard_private.notification_request_ledger where ${owned('request_id')};
       delete from public.makeup_requests where ${owned('id')};
       delete from public.academic_events where ${owned('id')};
-      ${originalWriter}
+      ${originalWriter};
       commit;`);
     assert.deepEqual(JSON.parse(await query(transientCountsSql)), [0, 0, 0, 0],
       'committed workflow fixtures cannot leak into later workload/DTO probes');
