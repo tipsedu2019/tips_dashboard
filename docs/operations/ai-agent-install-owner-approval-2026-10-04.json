@@ -1,0 +1,85 @@
+{
+  "sourceThreadId": "01a0f98f-72f2-72e2-97a9-4b22a53a90c8",
+  "approvalMessageId": "Sentinel_e68d2eea4d588191a386de10e6b8b3e3",
+  "approvedAtUtc": "2026-10-04T09:55:33.769499Z",
+  "userReply": "\uc2b9\uc778",
+  "approvalScope": {
+    "approvedSourceSha": "93b2b34646ad1ceb16989a4eceb33f2b44651ed1",
+    "target": {
+      "projectRef": "slnjqlzzhewblvttiidk",
+      "region": "ap-northeast-2",
+      "databaseUser": "postgres"
+    },
+    "orderedSeven": [
+      {
+        "file": "20261003084028_ai_agent_requests.sql",
+        "version": "20261003084028",
+        "name": "ai_agent_requests",
+        "sha256": "5f4657b2e9835617caec86d7ff17bdd2bf94f664d8001e564031385cf85ea249"
+      },
+      {
+        "file": "20261003084048_ai_agent_scoped_credentials.sql",
+        "version": "20261003084048",
+        "name": "ai_agent_scoped_credentials",
+        "sha256": "809b8ec2ef1e72184dd8a0fc9933b99ece2698585cab2a9509761feb6f1482d9"
+      },
+      {
+        "file": "20261003091944_ai_agent_request_lifecycle.sql",
+        "version": "20261003091944",
+        "name": "ai_agent_request_lifecycle",
+        "sha256": "84b57276ead7a30c7a4a51e7cdfa6952dbf7ebc27542f935b634ad7c1921aa87"
+      },
+      {
+        "file": "20261003092019_ai_agent_chat_outbox.sql",
+        "version": "20261003092019",
+        "name": "ai_agent_chat_outbox",
+        "sha256": "85a96399907447cf73b2e955dfbe39157fa116be3a49700177c58848ee34f614"
+      },
+      {
+        "file": "20261003105447_ai_agent_space_policy.sql",
+        "version": "20261003105447",
+        "name": "ai_agent_space_policy",
+        "sha256": "794a67d1daaaf8aecaca81aad3d8d7363b9c9de1bcbecdcec9f219dd34e00692"
+      },
+      {
+        "file": "20261003133222_ai_agent_chat_delivery_runtime.sql",
+        "version": "20261003133222",
+        "name": "ai_agent_chat_delivery_runtime",
+        "sha256": "a6f0400ec89c95c391d089226deb10e4d74acd847b4b8612ab349bc7b04efffb"
+      },
+      {
+        "file": "20261004030228_ai_agent_request_notification_optin.sql",
+        "version": "20261004030228",
+        "name": "ai_agent_request_notification_optin",
+        "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01"
+      }
+    ],
+    "allowed": [
+      "Review and integrate a separately pinned manual runner",
+      "Use existing named GitHub secrets through the reviewed secure execution path",
+      "Read-only source, target, full-ledger and catalog preflight",
+      "Install exactly the seven reviewed canonical migrations once; preserve authored transactions",
+      "Existing-authorized merge/deploy preserving icn1 and authenticated UI smoke",
+      "If necessary, revoke EXECUTE only on the exact seven new public wrappers, preserving objects, data, audit, ledger and FKs"
+    ],
+    "excluded": [
+      "New bot credentials or existing credential scope expansion",
+      "New webhook or environment/space/provider setup",
+      "Scheduler changes",
+      "Actual Chat sending",
+      "Blind partial-state retry, migration repair or destructive rollback"
+    ],
+    "existingNamedSecrets": [
+      "SUPABASE_ACCESS_TOKEN",
+      "SUPABASE_DB_PASSWORD"
+    ],
+    "restorePointStatus": "Unverified and disclosed before approval",
+    "partialStatePolicy": "Stop, compare safe ledger/catalog evidence, and require a specifically reviewed recovery decision; never blind retry or repair"
+  },
+  "transcriptEvidence": {
+    "assistantMessageId": "Sentinel_b4f1c2d7f9d08191a2fdbaed693357e7",
+    "assistantAtUtc": "2026-10-04T09:21:52Z",
+    "exactApprovalQuestion": "\uc774 \ubc94\uc704\ub85c \uc124\uce58\ud558\uace0 \uae30\uc874\uc5d0 \uc2b9\uc778\ud55c \uc6b4\uc601 \ubc30\ud3ec\uae4c\uc9c0 \uc774\uc5b4\uac08\uae4c? \uc0c8 \ubd07 \ud0a4 \ubc1c\uae09\uacfc \uc2e4\uc81c Chat \ubc1c\uc1a1 \uc124\uc815\uc740 \uc774\ubc88 \uc2b9\uc778\uc5d0 \ud3ec\ud568\ud558\uc9c0 \uc54a\uc744\uac8c",
+    "evidenceAuthority": "Native parent delegation included owner action-time approval transcript; no credential values included"
+  }
+}
