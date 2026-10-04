@@ -173,6 +173,12 @@ begin
   proof:=dashboard_private.legacy_effective_context_v1(c)->'approvedByIdentity';
   ref:=dashboard_private.read_timetable_operating_reference_v1();
   raise notice 'EFFECTIVE_SOURCE_DEBUG n=% proof=% unresolved=%',n,proof,(select jsonb_agg(b) from jsonb_array_elements(ref->'datedUnresolvedOccupancies') b where b->>'classId'=c.id::text);
+  if n=6 then
+   raise notice 'EFFECTIVE_PROOF_COMPONENTS %',(select jsonb_build_object('status',m.status,'approvedAt',m.approved_at,
+    'payload',(select jsonb_build_object('requestId',e.payload->'makeup_request_id','teacher',e.payload->'teacher_name','schedule',e.payload->'makeup_schedule','keys',(select jsonb_agg(k) from jsonb_object_keys(e.payload) k)) from public.makeup_request_events e where e.request_id=m.id and e.event_type='approved' order by e.created_at desc,e.id desc limit 1),
+    'calendar',(select jsonb_agg(jsonb_build_object('date',a.date,'meta',dashboard_private.makeup_approval_event_meta_v1(a.note))) from public.academic_events a where a.id=m.makeup_academic_event_id or m.makeup_academic_event_ids ? a.id::text),
+    'teacherExists',exists(select 1 from public.teacher_catalogs tc where tc.id=m.teacher_catalog_id)) from public.makeup_requests m where m.id=(f#>>'{request,id}')::uuid);
+  end if;
   raise exception using errcode='PZ001',message='synthetic_debug_rollback';
  exception when sqlstate 'PZ001' then null;
  end;
