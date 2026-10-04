@@ -2284,3 +2284,15 @@ test('AI static step rejects successful early exit and extra run-body commands w
   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,end)+'\n          exit 0\n'+source.slice(end),kind),'isolated_ci_ai_static_body_mismatch');
  }
 });
+
+test('AI static step rejects a fake run field nested inside env text without workflow hash checks',async()=>{
+ for(const [file,kind]of [['supabase-db-push.yml','main'],['supabase-sql-review.yml','pr']]){
+  const source=await readFile(join(repoRoot,'.github/workflows',file),'utf8');
+  const start=source.indexOf('      - name: Test AI agent and Chat contracts'),end=source.indexOf('\n      - name:',start+8);
+  const fakeBody=source.slice(start,end).split('\n        run: |\n')[1].split('\n').map(line=>line?'    '+line:line).join('\n');
+  for(const realRun of ['        run: exit 0\n','']){
+   const fakeStep='      - name: Test AI agent and Chat contracts\n'+realRun+'        env:\n          FAKE_SCRIPT: |\n            run: |\n'+fakeBody;
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,start)+fakeStep+source.slice(end),kind),'isolated_ci_ai_static_body_mismatch');
+  }
+ }
+});

@@ -65,7 +65,7 @@ export async function snapshotAiSource(root=ROOT){
  for(const path of AI_SOURCE_CLOSURE){
   const contents=await readFile(join(root,path));
   // Fail closed if a local import is added outside the audited allowlist.
-  if(/\.[mt]?[js]+x?$/u.test(path))for(const match of contents.toString().matchAll(/(?:\bfrom|\bimport(?:\s*\()?|\brequire\s*\()\s*(?:\/\*[\s\S]*?\*\/\s*)*((['"])(?:\\[\s\S]|(?!\2)[^\\\r\n])*\2)/gu)){
+  if(/\.[mt]?[js]+x?$/u.test(path))for(const match of contents.toString().matchAll(/(?:\bfrom|\bimport|\brequire)(?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n\u2028\u2029]*(?:[\r\n\u2028\u2029]|$))*(?:\((?:\s|\/\*[\s\S]*?\*\/|\/\/[^\r\n\u2028\u2029]*(?:[\r\n\u2028\u2029]|$))*)?((['"])(?:\\[\s\S]|(?!\2)[^\\\r\n])*\2)/gu)){
    // Evaluate only the matched quoted literal, never application/source code.
    // JS Unicode/hex escapes must be decoded before classifying local imports.
    const spec=runInNewContext(match[1],Object.create(null),{timeout:50});

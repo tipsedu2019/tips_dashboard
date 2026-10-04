@@ -66,3 +66,25 @@ test('source closure rejects side-effect imports before accepting source provena
   }
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('source closure rejects a side-effect import separated by a line comment',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-line-comment-'));
+ try{
+  const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+  for(const path of [...AI_SOURCE_CLOSURE,...ACCEPTED_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  const file=join(root,'src/features/ai-agent/server/ai-agent-auth.ts'),original=await readFile(file);
+  for(const statement of [
+   'import // side effect\n "./outside.ts";','import /* first */ // side effect\n /* last */ "./outside.ts";',
+   ...['\r\n','\u2028','\u2029'].map(newline=>'import // side effect'+newline+' "./outside.ts";'),
+   'import /* before */ (/* after */ "./outside.ts");',
+   'import // before\n (// after\n "./outside.ts");',
+   'require /* before */ (/* after */ "./outside.ts");',
+   'require // before\r\n (// after\u2028 "./outside.ts");',
+  ]){
+   await writeFile(file,original+'\n'+statement+'\n');
+   await assert.rejects(snapshotAiSource(root),/import outside audited AI closure/);
+  }
+ }finally{await rm(root,{recursive:true,force:true});}
+});
