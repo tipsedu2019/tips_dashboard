@@ -106,6 +106,114 @@ class OfflineSafety(unittest.TestCase):
             with self.assertRaisesRegex(module.Stop, "pooler_region_hostname_mismatch"):
                 module.endpoint("synthetic-unit-only")
 
+    def test_runtime_parser_accepts_only_documented_placeholder_forms(self):
+        # Use the actual runtime urllib.parse, including Python 3.12 on the
+        # Ubuntu runner. The literal placeholder regressed before connection.
+        host = "aws-1-ap-northeast-2.pooler.supabase.com"
+        tenant = "postgres." + module.TARGET
+        literal = "postgres://" + tenant + ":[YOUR-PASSWORD]@" + host + ":6543/postgres"
+        cases = [literal, literal.replace(":[YOUR-PASSWORD]@", ":%5BYOUR-PASSWORD%5D@"),
+                 "postgres://" + tenant + "@" + host + ":5432/postgres",
+                 "postgresql://" + tenant + ":@" + host + ":5432/postgres"]
+        for index, connection in enumerate(cases):
+            with self.subTest(case=index):
+                responses = [{"id": module.TARGET, "region": module.REGION, "status": "ACTIVE_HEALTHY"},
+                             [{"database_type": "PRIMARY", "connection_string": connection}]]
+                with patch.object(module, "api", side_effect=responses) as api, patch.object(module, "snapshot", side_effect=AssertionError("DB forbidden")) as snapshot, patch.object(module, "command", side_effect=AssertionError("CLI forbidden")) as cli:
+                    self.assertEqual(module.endpoint("synthetic-unit-only"), (host, tenant))
+                    self.assertEqual(api.call_args_list[0].args[0], "https://api.supabase.com/v1/projects/" + module.TARGET)
+                    self.assertEqual(api.call_args_list[1].args[0], "https://api.supabase.com/v1/projects/" + module.TARGET + "/config/database/pooler")
+                    snapshot.assert_not_called()
+                    cli.assert_not_called()
+
+    def test_placeholder_normalization_preserves_destination_and_secret_boundaries(self):
+        host = "aws-1-ap-northeast-2.pooler.supabase.com"
+        tenant = "postgres." + module.TARGET
+        literal = "postgres://" + tenant + ":[YOUR-PASSWORD]@" + host + ":6543/postgres"
+        cases = [
+            (literal.replace(host, "attacker.invalid"), "pooler_region_hostname_mismatch"),
+            (literal.replace("ap-northeast-2", "us-east-1"), "pooler_region_hostname_mismatch"),
+            (literal.replace(tenant, "postgres.wrong"), "pooler_tenant_mismatch"),
+            (literal.replace("/postgres", "/other"), "pooler_tenant_mismatch"),
+            (literal + "?sslmode=disable", "pooler_options_requires_review"),
+            (literal + "#fragment", "pooler_options_requires_review"),
+            (literal.replace("[YOUR-PASSWORD]", "synthetic-unexpected-password"), "pooler_password_must_not_be_received"),
+            (literal.replace("[YOUR-PASSWORD]", "%255BYOUR-PASSWORD%255D"), "pooler_password_must_not_be_received"),
+            (literal.replace("[YOUR-PASSWORD]", "%5bYOUR-PASSWORD%5d"), "pooler_password_must_not_be_received"),
+            (literal.replace(":6543/", ":1234/"), "pooler_port_unexpected"),
+            (literal.replace(":6543/", ":not-a-port/"), "pooler_url_parse_failed"),
+            (literal.replace(":6543/", ":99999/"), "pooler_url_parse_failed"),
+            (literal.replace("[YOUR-PASSWORD]", "[BROKEN"), "pooler_url_parse_failed"),
+            (" " + literal, "pooler_connection_string_shape_invalid"),
+            (literal + "\n", "pooler_connection_string_shape_invalid"),
+            (literal.replace("postgres://", "https://"), "pooler_scheme_invalid"),
+            (literal.replace(host, host + ".evil.invalid"), "pooler_region_hostname_mismatch"),
+        ]
+        for index, (connection, expected) in enumerate(cases):
+            with self.subTest(case=index):
+                responses = [{"id": module.TARGET, "region": module.REGION, "status": "ACTIVE_HEALTHY"},
+                             [{"database_type": "PRIMARY", "connection_string": connection}]]
+                with patch.object(module, "api", side_effect=responses), patch.object(module, "snapshot", side_effect=AssertionError("DB forbidden")) as snapshot, patch.object(module, "command", side_effect=AssertionError("CLI forbidden")) as cli:
+                    with self.assertRaises(module.Stop) as caught:
+                        module.endpoint("synthetic-unit-only")
+                    self.assertEqual(str(caught.exception), expected)
+                    snapshot.assert_not_called()
+                    cli.assert_not_called()
+
+    def test_provider_shape_failures_return_bounded_codes(self):
+        project = {"id": module.TARGET, "region": module.REGION, "status": "ACTIVE_HEALTHY"}
+        primary = {"database_type": "PRIMARY", "connection_string": "postgres://postgres." + module.TARGET + ":[YOUR-PASSWORD]@aws-1-ap-northeast-2.pooler.supabase.com:6543/postgres"}
+        cases = [
+            ([[], [primary]], "project_metadata_shape_invalid"),
+            ([project, {}], "pooler_metadata_shape_invalid"),
+            ([project, ["not-a-dict"]], "pooler_metadata_shape_invalid"),
+            ([project, [{"database_type": "PRIMARY"}]], "pooler_connection_string_shape_invalid"),
+            ([project, [{"database_type": "PRIMARY", "connection_string": None}]], "pooler_connection_string_shape_invalid"),
+            ([project, [{"database_type": "PRIMARY", "connection_string": 123}]], "pooler_connection_string_shape_invalid"),
+            ([project, [{"database_type": "PRIMARY", "connection_string": "x" * 4097}]], "pooler_connection_string_shape_invalid"),
+            ([project, [{"database_type": "PRIMARY", "connection_string": primary["connection_string"].replace("postgres://", "postgr\u00e9s://")}]], "pooler_connection_string_shape_invalid"),
+            ([project, [primary, primary]], "primary_pooler_ambiguous"),
+        ]
+        for index, (responses, expected) in enumerate(cases):
+            with self.subTest(case=index):
+                with patch.object(module, "api", side_effect=responses), patch.object(module, "snapshot", side_effect=AssertionError("DB forbidden")) as snapshot, patch.object(module, "command", side_effect=AssertionError("CLI forbidden")) as cli:
+                    with self.assertRaises(module.Stop) as caught:
+                        module.endpoint("synthetic-unit-only")
+                    self.assertEqual(str(caught.exception), expected)
+                    snapshot.assert_not_called()
+                    cli.assert_not_called()
+
+    def test_parse_failure_receipt_is_redacted_and_stops_before_connection(self):
+        cfg, env = self.enabled()
+        cfg["readOnlyApprovalReceiptSha256"] = "b" * 64
+        env.update({"RELEASE_MODE": "preflight", "INSTALL_ACK": module.READ_ACK,
+                    "READ_ONLY_APPROVAL_RECEIPT_SHA256": "b" * 64})
+        marker = "synthetic-provider-detail-must-not-escape"
+        responses = [{"id": module.TARGET, "region": module.REGION, "status": "ACTIVE_HEALTHY"},
+                     [{"database_type": "PRIMARY", "connection_string": "postgres://postgres." + module.TARGET + ":[YOUR-PASSWORD]@aws-1-ap-northeast-2.pooler.supabase.com:" + marker + "/postgres"}]]
+        cwd = os.getcwd()
+        fixtures = ROOT / ".codex-artifacts"
+        fixtures.mkdir(exist_ok=True)
+        with tempfile.TemporaryDirectory(dir=fixtures) as owned:
+            cfg_path = pathlib.Path(owned) / "cfg.json"
+            cfg_path.write_text(json.dumps(cfg))
+            captured = io.StringIO()
+            try:
+                os.chdir(owned)
+                with patch.dict(module.os.environ, env, clear=True), patch.object(module.sys, "argv", ["offline", str(cfg_path), owned, str(SCRIPT)]), patch.object(module, "source_gate"), patch.object(module.shutil, "which", return_value="/offline/psql"), patch.object(module.pathlib.Path, "is_file", return_value=True), patch.object(module, "api", side_effect=responses), patch.object(module, "snapshot", side_effect=AssertionError("DB forbidden")) as snapshot, patch.object(module, "command", side_effect=AssertionError("CLI forbidden")) as cli, contextlib.redirect_stdout(captured):
+                    self.assertEqual(module.main(), 1)
+                    snapshot.assert_not_called()
+                    cli.assert_not_called()
+                receipt_text = pathlib.Path("safe-production-install-receipt.json").read_text()
+                receipt = json.loads(receipt_text)
+                self.assertEqual(receipt["failure"], "pooler_url_parse_failed")
+                self.assertFalse(receipt["productionSuccess"])
+                self.assertFalse(receipt["automaticRetry"])
+                self.assertNotIn(marker, receipt_text + captured.getvalue())
+                self.assertNotIn("[YOUR-PASSWORD]", receipt_text + captured.getvalue())
+            finally:
+                os.chdir(cwd)
+
     def test_preflight_mode_never_initializes_cli_or_mutates_db(self):
         cfg, env = self.enabled()
         cfg["approvalReceiptSha256"] = "STILL_NO_INSTALL_APPROVAL"
