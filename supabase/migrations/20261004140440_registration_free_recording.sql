@@ -35,6 +35,8 @@ declare
   v_receipt_found boolean := false;
   v_status_changed boolean;
   v_previous_workflow_status text;
+  v_source_event_id uuid;
+  v_source_event_ids jsonb := '[]'::jsonb;
 begin
   if v_actor_id is null then
     raise exception 'registration_access_denied' using errcode = '42501';
@@ -144,7 +146,7 @@ begin
     where track.id = v_track.id
     returning track.* into v_track;
 
-    perform dashboard_private.write_registration_track_event_v2(
+    v_source_event_id := dashboard_private.write_registration_track_event_v2(
       v_track.task_id,
       v_track.id,
       'registration_workflow_status_changed',
@@ -158,6 +160,12 @@ begin
       'user',
       null
     );
+    if v_workflow_status = 'registered' and not v_track.migration_review_required then
+      perform dashboard_private.record_registration_subject_completion_v1(
+        v_track.task_id, v_track.id, v_source_event_id, v_previous_workflow_status, v_track.workflow_revision
+      );
+      v_source_event_ids := pg_catalog.jsonb_build_array(v_source_event_id);
+    end if;
   end if;
 
   v_response := pg_catalog.jsonb_build_object(
@@ -165,7 +173,8 @@ begin
     'workflowStatus', v_track.workflow_status,
     'workflowRevision', v_track.workflow_revision,
     'workflowStatusEnteredAt', v_track.workflow_status_entered_at,
-    'enrollmentFinalization', null
+    'enrollmentFinalization', null,
+    'sourceEventIds', v_source_event_ids
   );
 
   insert into dashboard_private.ops_registration_mutations(
@@ -315,5 +324,68 @@ begin
   return v_response;
 end;
 $$;
+
+-- Completed/attended/no-show attempts are history even when the retired
+-- director decision was never recorded. Do not invent a decision or edit them.
+-- Keep the unique scheduled-attempt fence plus the booking RPC's track lock.
+drop index public.ops_registration_observations_open_track_key;
+create unique index ops_registration_observations_open_track_key
+  on public.ops_registration_observations(track_id)
+  where decision_kind is null and status = 'scheduled';
+
+-- Patch the final definitions, including intervening security/read fixes.
+-- Exact anchors fail closed if that final producer contract changes.
+do $historical_observation_booking$
+declare
+  v_definition text;
+  v_anchor text;
+begin
+  v_definition := pg_catalog.pg_get_functiondef(
+    'dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)'::regprocedure
+  );
+  v_anchor := $anchor$        and observation.decision_kind is null
+        and observation.status in (
+          'scheduled',
+          'attended_feedback_pending',
+          'completed',
+          'no_show'
+        )$anchor$;
+  if length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) then
+    raise exception 'registration_observation_current_reader_drift' using errcode = '55000';
+  end if;
+  execute replace(v_definition, v_anchor, $patch$        and observation.decision_kind is null
+        and observation.status = 'scheduled'
+        and appointment.status = 'scheduled'$patch$);
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'dashboard_private.save_registration_observation_booking_v1_impl(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)'::regprocedure
+  );
+  v_anchor := $anchor$          and observation.decision_kind is null
+          and observation.status in (
+            'scheduled', 'attended_feedback_pending', 'completed', 'no_show'
+          )$anchor$;
+  if length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) then
+    raise exception 'registration_observation_booking_history_guard_drift' using errcode = '55000';
+  end if;
+  execute replace(v_definition, v_anchor, $patch$          and observation.status = 'scheduled'$patch$);
+end;
+$historical_observation_booking$;
+
+-- The list and the manager detail must agree about the current booking.
+-- Recreate only the view query with the existing security-invoker setting.
+do $current_observation_summary$
+declare
+  v_definition text;
+  v_anchor text := $anchor$(observation.status = ANY (ARRAY['scheduled'::text, 'attended_feedback_pending'::text, 'completed'::text, 'no_show'::text]))$anchor$;
+begin
+  perform pg_catalog.set_config('search_path', '', true);
+  v_definition := pg_catalog.pg_get_viewdef('public.ops_registration_subject_track_summaries'::regclass, true);
+  if length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) then
+    raise exception 'registration_observation_summary_reader_drift' using errcode = '55000';
+  end if;
+  execute 'create or replace view public.ops_registration_subject_track_summaries with (security_invoker = true) as '
+    || replace(v_definition, v_anchor, $patch$(observation.status = 'scheduled'::text AND appointment.status = 'scheduled'::text)$patch$);
+end;
+$current_observation_summary$;
 
 commit;

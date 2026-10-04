@@ -1584,7 +1584,7 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
   const outerEventType = exactRegistrationTrackEventType(
     value(row, "event_type", "eventType"),
   )
-  if (outerEventType === "registration_fact_saved") {
+  if (["registration_fact_saved", "registration_common_info_updated", "registration_subjects_synced", "registration_subject_removed"].includes(outerEventType)) {
     const payload = parseJsonRecord(value(row, "after_value", "afterValue"))
     const actorId = nullableText(value(row, "actor_id", "actorId"))
     return {
@@ -1592,18 +1592,20 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
       taskId: text(value(row, "task_id", "taskId")),
       trackId: nullableText(payload?.trackId),
       eventType: outerEventType,
-      subject: null,
+      subject: outerEventType === "registration_subject_removed" ? parseAcademicSubject(payload?.subject) : null,
       source: null,
       destination: null,
       reason: null,
       // Audit payloads can contain contact details; the timeline only needs
       // the saved fact's kind, not a second copy of the input values.
-      metadata: { factType: text(payload?.factType) },
+      metadata: outerEventType === "registration_fact_saved"
+        ? { factType: text(payload?.factType) }
+        : {},
       actorId,
       actorKind: actorId ? "user" : null,
       systemSource: null,
       reasonCode: null,
-      payloadVersion: 1,
+      payloadVersion: registrationTrackEventPayloadVersion(payload) || 1,
       occurredAt: text(value(row, "created_at", "createdAt")),
       legacyText: null,
     }

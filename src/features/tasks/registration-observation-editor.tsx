@@ -925,7 +925,7 @@ export function RegistrationObservationEditor({
           <p className="font-medium text-primary">예약 저장됨</p>
         </div>
       ) : receipt ? <p role="status" className="text-sm font-medium text-primary">{receipt}</p> : null}
-      {mutationError ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
+      {mutationError && !saveConfirmOpen ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
       {refreshError ? <p role="alert" className="text-sm text-destructive">{refreshError}</p> : null}
 
       <Dialog open={saveConfirmOpen} onOpenChange={handleSaveConfirmOpenChange}>
@@ -940,6 +940,7 @@ export function RegistrationObservationEditor({
             <DialogTitle>청강 예약을 저장할까요?</DialogTitle>
             <DialogDescription>선택한 반과 회차로 청강 예약을 저장합니다.</DialogDescription>
           </DialogHeader>
+          {mutationError ? <p role="alert" className="text-sm text-destructive">{mutationError}</p> : null}
           <DialogFooter>
             <DialogClose asChild><Button type="button" variant="outline" disabled={saving || mutationCommitted}>돌아가기</Button></DialogClose>
             <Button type="button" onClick={() => void saveBooking()} disabled={saving || mutationCommitted || !bookingDirty}>{saving ? "저장 중" : "청강 예약 저장"}</Button>

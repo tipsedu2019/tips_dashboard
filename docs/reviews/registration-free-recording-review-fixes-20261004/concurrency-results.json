@@ -1,0 +1,39 @@
+{
+  "scenarios": [
+    {
+      "scenario": "same track, different booking keys",
+      "secondSessionWaitSeconds": 1.027,
+      "secondSQLSTATE": "55000",
+      "sameResponse": false
+    },
+    {
+      "scenario": "same booking key concurrent replay",
+      "secondSessionWaitSeconds": 1.027,
+      "secondSQLSTATE": null,
+      "sameResponse": true
+    },
+    {
+      "scenario": "different status keys, same revision",
+      "secondSessionWaitSeconds": 1.026,
+      "secondSQLSTATE": "23514",
+      "sameResponse": false
+    },
+    {
+      "scenario": "same status key concurrent replay",
+      "secondSessionWaitSeconds": 1.035,
+      "secondSQLSTATE": null,
+      "sameResponse": true
+    }
+  ],
+  "counts": {
+    "scheduled": 2,
+    "bookingReceipts": 2,
+    "statusReceipts": 2,
+    "revisions": [
+      10,
+      13
+    ]
+  },
+  "providerCalls": 0,
+  "disposableDatabaseDropped": true
+}

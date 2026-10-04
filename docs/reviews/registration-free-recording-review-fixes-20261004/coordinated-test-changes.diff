@@ -1,0 +1,42 @@
+diff --git a/tests/registration-track-workspace.test.mjs b/tests/registration-track-workspace.test.mjs
+index 31430825..3fb86ac9 100644
+--- a/tests/registration-track-workspace.test.mjs
++++ b/tests/registration-track-workspace.test.mjs
+@@ -860 +860,2 @@ test("saved detail exposes automatic history from a header clock popover only",
+-  assert.match(timeline, /누가 · 언제 · 무엇을 · 어떻게/)
++  assert.match(timeline, /최근 변경부터 표시합니다\. 시간은 한국 시간 기준입니다\./)
++  assert.doesNotMatch(timeline, /자동 기록의 세부 정보가 보존되어 있습니다/)
+@@ -1576 +1577 @@ test("case list keeps the Notion-like workflow status editable in place without
+-  assert.match(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\) \{[\s\S]*?return <RegistrationTrackStatusBadge/);
++  assert.doesNotMatch(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\) \{[\s\S]*?return <RegistrationTrackStatusBadge/);
+@@ -1937,2 +1938,2 @@ test("registration application threads the exact deep-linked attempt into the re
+-  assert.match(detail, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal[\s\S]*?canManageCase/)
+-  assert.match(detail, /canDecide=\{!activeDeepLinkedAttemptCanceled[\s\S]*?canManageCase/)
++  assert.match(detail, /canRecordAttendance=\{false\}/)
++  assert.match(detail, /canDecide=\{false\}/)
+@@ -2130 +2131 @@ test("mounted registration application accepts only its canonical observation bo
+-test("legacy observation status selector resolves to its decoupled manual target", async () => {
++test("trial status remains selectable and changes through the independent manual property", async () => {
+@@ -2242 +2243 @@ test("legacy observation status selector resolves to its decoupled manual target
+-      ["waiting_current_class"],
++      ["observation_requested", "waiting_current_class"],
+@@ -2261 +2262 @@ test("legacy observation status selector resolves to its decoupled manual target
+-      ["waiting_current_class"],
++      ["observation_requested", "waiting_current_class"],
+@@ -2268,2 +2269,4 @@ test("legacy observation status selector resolves to its decoupled manual target
+-    assert.equal(genericStatusCalls.length, 0)
+-    assert.deepEqual(reloadCalls, [])
++    assert.equal(genericStatusCalls.length, 1)
++    assert.equal(genericStatusCalls[0].workflowStatus, "waiting_current_class")
++    assert.equal(genericStatusCalls[0].trackId, trackId)
++    assert.deepEqual(reloadCalls, [trackId])
+@@ -2819 +2822 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
+-    await t.test("undecided completed and no-show attempts keep admin and staff decisions only", async () => {
++    await t.test("undecided completed and no-show attempts remain read-only for admin and staff", async () => {
+@@ -2829 +2832 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
+-          assert.equal(feedback.canDecide, roleCase.canManageCase, `${roleCase.label}:${status}`)
++          assert.equal(feedback.canDecide, false, `${roleCase.label}:${status}`)
+@@ -3883 +3886,2 @@ test("phone and visit consultation completion share one inline subject outcome e
+-  assert.match(application, /청강 확인 정보를 불러오는 중입니다/)
++  assert.match(application, /청강 이력을 불러오는 중입니다/)
++  assert.doesNotMatch(application, /청강 확인 정보를 불러오는 중입니다/)

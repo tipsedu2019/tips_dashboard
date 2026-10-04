@@ -1,0 +1,38 @@
+// @ts-nocheck
+"use client"
+import { useState, useEffect, useRef } from 'react'
+import { RegistrationApplication } from '@/features/tasks/registration-track-editor'
+import { createRegistrationSubjectTrackFixtureState, createRegistrationSubjectTrackFixtureAdapter } from '@/features/tasks/registration-track-fixtures'
+import { installRegistrationSubjectTrackFixtureRuntime } from '@/features/tasks/registration-track-fixture-runtime'
+import { Dialog, DialogContent, DialogTitle } from '@/components/ui/dialog'
+import snapshots from '../../../tests/fixtures/registration-observation-history-reader.json'
+export default function ReviewQA() {
+ const [ready,setReady]=useState(false);const [,refresh]=useState(0);const state=useRef(null);const adapter=useRef(null);const [role,setRole]=useState('staff');const [warning,setWarning]=useState('')
+ useEffect(()=>{
+  const params=new URLSearchParams(location.search);setRole(params.get('role')||'staff');
+  const sample=snapshots.find(row=>row.state===(params.get('state')||'completed'));
+  state.current=createRegistrationSubjectTrackFixtureState();
+  const manager=structuredClone(sample.before);const sessionAttempt=sample.after.currentObservation;
+  const template=Object.values(state.current.observation.sessions)[0][0];
+  const session=Object.fromEntries(Object.keys(template).map(key=>[key,sessionAttempt[key]]));
+  const detail=structuredClone(Object.values(state.current.caseDetails)[0]);
+  const track={...detail.tracks[0],id:manager.track.trackId,taskId:manager.track.taskId,subject:'영어',workflowStatus:manager.track.workflowStatus,workflowRevision:manager.track.workflowRevision,observationSummaryVisible:true,observationAttemptCount:manager.attempts.length,directorProfileId:manager.track.directorProfileId};
+  detail.tracks=[track];detail.task={...detail.task,id:manager.track.taskId,studentName:'합성 재예약 검증',title:'합성 재예약 검증',registrationTracks:[track]};
+  for(const key of ['appointments','levelTests','consultations','enrollments','admissionBatches'])detail[key]=[];
+  state.current.caseDetails[detail.task.id]=detail;
+  state.current.observation.runtimeVersion=1;state.current.observation.schemaReadiness.runtimeVersion=1;
+  state.current.observation.managerDetails={[track.id]:manager};state.current.observation.sessions={[track.id+':'+session.classId]:[session]};
+  for(const attempt of manager.attempts){
+   const feedback={...attempt,studentName:'합성 재예약 검증',studentGrade:'',trackWorkflowRevision:track.workflowRevision,feedbackReason:attempt.status==='completed'?'합성 과거 보고':null,proxySubmitted:false,feedbackSubmittedByName:attempt.status==='completed'?'합성 직원':null,feedbackSubmittedAt:attempt.status==='completed'?attempt.endsAt:null};
+   state.current.observation.feedbackDetails[attempt.observationId]=Object.fromEntries('observationId taskId trackId appointmentId studentName studentGrade subject classId className sessionAuthority sessionDate sessionKey classLessonSessionId legacySessionKey sourceRevision startsAt endsAt classroomName teacherName status attendance suitabilityResult feedbackReason proxySubmitted feedbackSubmittedByName feedbackSubmittedAt revision feedbackRevision appointmentNotificationRevision trackWorkflowRevision decisionKind'.split(' ').map(key=>[key,feedback[key]]));
+  }
+  adapter.current=createRegistrationSubjectTrackFixtureAdapter({getState:()=>state.current,replaceState:next=>{state.current=next;refresh(n=>n+1)}});
+  const rpc=adapter.current.observationClient.rpc.bind(adapter.current.observationClient);let failures=params.has('failOnce')?1:0;let calls=0;
+  adapter.current.observationClient.rpc=(name,args)=>{if(name==='save_registration_observation_booking_v1'){calls++;if(failures-- > 0){const result=Promise.resolve({data:null,error:{code:'57014',message:'합성 일시 오류'}});const request={abortSignal:()=>request,retry:()=>request,then:result.then.bind(result)};return request;}}return rpc(name,args)};
+  window.__REVIEW_QA__={snapshot:()=>({attempts:state.current.observation.managerDetails[track.id].attempts,current:state.current.observation.managerDetails[track.id].currentObservation,bookingCalls:calls,counts:adapter.current.debugSnapshot().counts,original:sample.before.attempts})};
+  const uninstall=installRegistrationSubjectTrackFixtureRuntime('development','registration-subject-tracks',adapter.current);setReady(true);return uninstall;
+ },[]);
+ if(!ready)return <p>합성 준비</p>;
+ const manager=Object.values(state.current.observation.managerDetails)[0];const detail=state.current.caseDetails[manager.track.taskId];
+ return <Dialog open><DialogContent className="max-h-[calc(100dvh-1rem)] overflow-auto sm:max-w-6xl" aria-describedby={undefined}><DialogTitle>합성 재예약 검증 · {role}</DialogTitle><p role="alert">{warning}</p><RegistrationApplication task={detail.task} detail={detail} focusTrackId={manager.track.trackId} onFocusTrack={()=>{}} viewerId="fixture-profile-staff" viewerRole={role} onReload={()=>refresh(n=>n+1)} onWarning={setWarning} profiles={state.current.optionData.profiles} directorOptions={state.current.optionData.profiles} teacherOptions={state.current.optionData.teachers} directorCatalogStatus="authoritative" subjectCapabilities={state.current.subjectCapabilities} classOptions={state.current.optionData.classes} textbookOptions={state.current.optionData.textbooks} customerMessageClient={adapter.current.customerMessageClient} observationRuntime={{available:true,runtimeVersion:1}} /></DialogContent></Dialog>
+}

@@ -1,0 +1,77 @@
+BEGIN
+SET
+SET
+SET
+INSERT 0 2
+INSERT 0 2
+DELETE 1
+INSERT 0 1
+UPDATE 1
+INSERT 0 1
+INSERT 0 1
+DO
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+CREATE FUNCTION
+CREATE TABLE
+GRANT
+INSERT 0 1
+SET CONSTRAINTS
+INSERT 0 5
+INSERT 0 5
+UPDATE 1
+SET CONSTRAINTS
+CREATE TABLE
+GRANT
+
+SET
+INSERT 0 1
+RESET
+UPDATE 1
+UPDATE 1
+INSERT 0 1
+SET
+UPDATE 1
+ok 1 - attended_feedback_pending: reader exposes a fresh booking while preserving history
+ok 2 - attended_feedback_pending: real booking succeeds with no director decision
+UPDATE 1
+ok 3 - attended_feedback_pending: replay returns identical booking
+ok 4 - attended_feedback_pending: duplicate active booking remains denied
+ok 5 - attended_feedback_pending: list summary agrees with the new current booking
+RESET
+ok 6 - attended_feedback_pending: complete old observation and appointment unchanged
+ok 7 - attended_feedback_pending: undecided history and new scheduled attempt read back together
+UPDATE 1
+UPDATE 1
+INSERT 0 1
+SET
+UPDATE 1
+ok 8 - completed: reader exposes a fresh booking while preserving history
+ok 9 - completed: real booking succeeds with no director decision
+UPDATE 1
+ok 10 - completed: replay returns identical booking
+ok 11 - completed: duplicate active booking remains denied
+ok 12 - completed: list summary agrees with the new current booking
+RESET
+ok 13 - completed: complete old observation and appointment unchanged
+ok 14 - completed: undecided history and new scheduled attempt read back together
+UPDATE 1
+UPDATE 1
+INSERT 0 1
+SET
+UPDATE 1
+ok 15 - no_show: reader exposes a fresh booking while preserving history
+ok 16 - no_show: real booking succeeds with no director decision
+UPDATE 1
+ok 17 - no_show: replay returns identical booking
+ok 18 - no_show: duplicate active booking remains denied
+ok 19 - no_show: list summary agrees with the new current booking
+RESET
+ok 20 - no_show: complete old observation and appointment unchanged
+ok 21 - no_show: undecided history and new scheduled attempt read back together
+ok 22 - one scheduled attempt after all historical rebookings
+ok 23 - no decision was fabricated
+1..23
+ROLLBACK

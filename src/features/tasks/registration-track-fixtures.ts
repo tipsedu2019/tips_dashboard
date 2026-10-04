@@ -778,10 +778,9 @@ function executeRegistrationObservationFixtureRpc(
     if (!detail) throw new Error("registration_observation_not_found")
     const attemptLimit = Number(args.p_attempt_limit || 20)
     const attempts = detail.attempts.slice(0, attemptLimit)
-    const currentObservation = detail.currentObservation
-      && attempts.some((attempt) => attempt.observationId === detail.currentObservation?.observationId)
-      ? detail.currentObservation
-      : null
+    const currentObservation = attempts.find((attempt) => (
+      attempt.status === "scheduled" && attempt.appointmentStatus === "scheduled" && attempt.decisionKind === null
+    )) || null
     return { state: current, result: clone({ ...detail, attempts, currentObservation }) }
   }
   if (rpcName === "get_registration_observation_manager_attempt_v1") {
@@ -890,6 +889,9 @@ function executeRegistrationObservationFixtureRpc(
       let operation: "book" | "reschedule"
       let changed = true
       if (existingId === null) {
+        if (detail.attempts.some((attempt) => attempt.status === "scheduled")) {
+          throw new Error("registration_observation_transition_rejected")
+        }
         if (detail.track.workflowRevision !== Number(args.p_expected_workflow_revision)) {
           throw new Error("registration_observation_stale_revision")
         }

@@ -1,0 +1,112 @@
+[
+  {
+    "role": "staff",
+    "state": "attended_feedback_pending",
+    "width": 1440,
+    "documentWidth": 1440,
+    "external": 0,
+    "errors": [],
+    "bookingCalls": 1,
+    "attempts": 2,
+    "oldAttempts": 1,
+    "counts": {
+      "tasks": 11,
+      "cases": 12,
+      "tracks": 19,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "admin",
+    "state": "completed",
+    "width": 390,
+    "documentWidth": 390,
+    "external": 0,
+    "errors": [],
+    "bookingCalls": 2,
+    "attempts": 3,
+    "oldAttempts": 2,
+    "counts": {
+      "tasks": 11,
+      "cases": 12,
+      "tracks": 19,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "staff",
+    "state": "no_show",
+    "width": 390,
+    "documentWidth": 390,
+    "external": 0,
+    "errors": [],
+    "bookingCalls": 1,
+    "attempts": 4,
+    "oldAttempts": 3,
+    "counts": {
+      "tasks": 11,
+      "cases": 12,
+      "tracks": 19,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "teacher",
+    "state": "completed",
+    "width": 390,
+    "documentWidth": 390,
+    "external": 0,
+    "errors": [],
+    "bookingCalls": 0,
+    "attempts": 2,
+    "oldAttempts": 2,
+    "counts": {
+      "tasks": 11,
+      "cases": 12,
+      "tracks": 19,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  },
+  {
+    "role": "assistant",
+    "state": "completed",
+    "width": 1440,
+    "documentWidth": 1440,
+    "external": 0,
+    "errors": [],
+    "bookingCalls": 0,
+    "attempts": 2,
+    "oldAttempts": 2,
+    "counts": {
+      "tasks": 11,
+      "cases": 12,
+      "tracks": 19,
+      "appointments": 5,
+      "consultations": 3,
+      "levelTests": 5,
+      "receipts": 0,
+      "notificationReceipts": 0,
+      "externalCalls": 0
+    }
+  }
+]

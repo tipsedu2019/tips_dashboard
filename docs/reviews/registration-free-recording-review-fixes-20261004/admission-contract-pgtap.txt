@@ -1,0 +1,109 @@
+BEGIN
+1..40
+SET
+SET
+SET
+SET
+ok 1 - checklist and registered-roster functions keep exact signatures
+ok 2 - only authenticated operators can execute the checklist RPC
+ok 3 - public checklist wrapper is security invoker with an empty search path
+INSERT 0 2
+{"sub": "00000000-0000-4000-8000-00000000b101", "role": "authenticated", "email": "admission-checklist-admin@example.invalid"}
+00000000-0000-4000-8000-00000000b101
+authenticated
+INSERT 0 2
+UPDATE 2
+DELETE 2
+INSERT 0 1
+UPDATE 1
+INSERT 0 2
+INSERT 0 2
+release2-rpc
+INSERT 0 2
+
+INSERT 0 2
+INSERT 0 2
+INSERT 0 3
+INSERT 0 2
+ALTER TABLE
+INSERT 0 3
+ALTER TABLE
+{"sub": "00000000-0000-4000-8000-00000000b101", "role": "authenticated", "email": "admission-checklist-admin@example.invalid"}
+00000000-0000-4000-8000-00000000b101
+authenticated
+ok 4 - all five manual checklist values default to false
+SELECT 1
+ok 5 - fixture starts with a deliberately stale legacy parent projection
+SET
+SELECT 1
+SET
+ok 6 - registrationCompleted can be checked first
+ok 7 - checking the last item changes no earlier checklist item
+SET
+ok 8 - the same checklist request is idempotent
+ok 9 - a request key cannot be reused for another checklist value
+ok 10 - unknown checklist keys are rejected without dependency logic
+SET
+{"sub": "00000000-0000-4000-8000-00000000b102", "role": "authenticated", "email": "admission-checklist-teacher@example.invalid"}
+00000000-0000-4000-8000-00000000b102
+SET
+ok 11 - a teacher cannot mutate the admission checklist
+SET
+{"sub": "00000000-0000-4000-8000-00000000b101", "role": "authenticated", "email": "admission-checklist-admin@example.invalid"}
+00000000-0000-4000-8000-00000000b101
+ok 12 - direct legacy compatibility overrides remain rejected
+ok 13 - checklist writes do not mutate workflow, enrollment, messages, or deliveries
+SELECT 1
+ok 14 - a planned capacity claim is not exposed as completed enrollment
+ok 15 - planned roster-active claims do not produce registered or waiting management status
+CREATE FUNCTION
+SELECT 1
+SET
+SELECT 1
+SET
+ok 16 - registered status records one subject Chat source while leaving enrollment and delivery state unchanged
+SELECT 1
+ok 17 - the explicit finalizer gives an unbatched subject its own terminal compatibility batch
+ok 18 - explicit enrollment finalization no longer creates a first-consultation task
+INSERT 0 1
+INSERT 0 1
+SELECT 1
+UPDATE 1
+ok 19 - enrollment cancellation preserves a historical consultation task and its link
+UPDATE 1
+ok 20 - retired consultation assignment no longer blocks enrollment on an ambiguous legacy slot
+ok 21 - reenrollment does not reactivate, modify, or duplicate the historical task
+UPDATE 1
+ok 22 - the other subject batch, claim, workflow, and parent remain independent
+ok 23 - isolated status finalization updates only its own reciprocal roster pair
+INSERT 0 1
+ok 24 - the private finalizer rejects mixed batched and unbatched rows with exact SQLSTATE 23514
+DELETE 1
+UPDATE 1
+ok 25 - the private finalizer rejects a track outside the enrollment pipeline with exact SQLSTATE 23514
+UPDATE 1
+SELECT 1
+SET
+SELECT 1
+SET
+ok 26 - registered status returns a subject Chat source receipt with null enrollmentFinalization and unchanged roster
+UPDATE 1
+SET
+SELECT 1
+SET
+ok 27 - status replay sanitizes a legacy enrollment finalization receipt
+ok 28 - status replay permanently removes the legacy enrollment finalization payload
+SELECT 1
+ok 29 - the explicit private finalizer returns the canonical enrollment receipt
+ok 30 - the explicit finalizer commits the canonical pipeline without changing the manual status revision
+ok 31 - planned enrollment becomes a canonical active enrollment
+ok 32 - student class_ids and class student_ids are reciprocal
+ok 33 - roster history records exactly one enrolled transition
+ok 34 - management count, student classes, and class roster all expose one student
+ok 35 - finalized registration claim and reciprocal arrays count as one registered class
+ok 36 - registered finalization does not infer or cascade checklist values
+ok 37 - registered roster finalization performs no provider or delivery send
+ok 38 - final active roster functions use non-retryable SQLSTATE 23514 for domain conflicts
+ok 39 - retirement maintenance finds only the explicitly linked open first-consultation task
+ok 40 - the historical first-consultation task is canceled with its link and audit history intact
+ROLLBACK

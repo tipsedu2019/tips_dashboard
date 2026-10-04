@@ -87,7 +87,7 @@ export function getRegistrationObservationFeedbackMountPlan(input: {
   managerDetail: Pick<
     RegistrationObservationManagerDetail,
     "currentObservation" | "latestDecisionObservation"
-  > | null
+  > & Partial<Pick<RegistrationObservationManagerDetail, "attempts">> | null
   canManageObservation: boolean
   canManageCase: boolean
 }) {
@@ -97,6 +97,12 @@ export function getRegistrationObservationFeedbackMountPlan(input: {
       observationId: input.managerDetail.currentObservation.observationId,
       historyOnly: false,
     } as const
+  }
+  const latestHistory = input.managerDetail.attempts?.find((attempt) => (
+    ["attended_feedback_pending", "completed", "no_show"].includes(attempt.status)
+  ))
+  if (input.canManageCase && latestHistory) {
+    return { observationId: latestHistory.observationId, historyOnly: true } as const
   }
   if (input.canManageCase && input.managerDetail.latestDecisionObservation) {
     return {

@@ -1,5 +1,7 @@
 # 등록 자유 기록·청강 정리 검토 자료
 
+> 최초 `7626967` 검증 기록입니다. 독립 검토에서 발견한 세 계약 누락 및 수정 검증은 [후속 검토 자료](registration-free-recording-review-fixes-20261004.md)를 기준으로 보세요. 최초의 notification source 0 기대는 호환 계약이 아니었으며 후속 수정에서 복구했습니다.
+
 기준: 배포된 main `010c36d27a76b2fdb8f78edec99d7c3c9bbbd1b0`. 원본 dirty checkout은 수정하지 않았다. 이 변경은 로컬 검토용이며 운영 DB 적용, 배포, 외부 발송은 실행하지 않았다.
 
 ## 동작과 범위

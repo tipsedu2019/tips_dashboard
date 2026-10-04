@@ -857,7 +857,8 @@ test("saved detail exposes automatic history from a header clock popover only", 
   assert.match(timeline, /embedded\?: boolean/)
   assert.match(timeline, /embedded\s*\?[^:]+:[^}]+/)
   assert.doesNotMatch(timeline, /subjectFilter|stageFilter|과목 전체|단계 전체|<select/)
-  assert.match(timeline, /누가 · 언제 · 무엇을 · 어떻게/)
+  assert.match(timeline, /최근 변경부터 표시합니다\. 시간은 한국 시간 기준입니다\./)
+  assert.doesNotMatch(timeline, /자동 기록의 세부 정보가 보존되어 있습니다/)
 })
 
 test("create and detail share the approved subject-first inquiry controls", async () => {
@@ -1573,7 +1574,7 @@ test("case list keeps the Notion-like workflow status editable in place without 
   assert.match(source, /getRegistrationInlineWorkflowStatusOptions/);
   assert.match(source, /<RegistrationSelect/);
   assert.match(source, /aria-label=\{`\$\{track\.subject\} \$\{studentName\} 진행상태`\}/);
-  assert.match(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\) \{[\s\S]*?return <RegistrationTrackStatusBadge/);
+  assert.doesNotMatch(source, /if \(isRegistrationObservationWorkflowStatus\(track\.workflowStatus\)\) \{[\s\S]*?return <RegistrationTrackStatusBadge/);
   assert.match(source, /onValueChange=\{\(value\) => \{[\s\S]*?const nextStatus = options\.find\(\(option\) => option\.value === value\)\?\.value[\s\S]*?if \(nextStatus\) onStatusChange\(track, nextStatus\)/);
   assert.doesNotMatch(source, /value as OpsRegistrationWorkflowStatus/);
   assert.match(source, /event\.stopPropagation\(\)/);
@@ -1934,8 +1935,8 @@ test("registration application threads the exact deep-linked attempt into the re
   assert.match(detail, /activeFeedbackObservationId = activeDeepLinkedAttempt\?\.observationId/)
   assert.doesNotMatch(detail, /activeFeedbackTeacherProfileId/)
   assert.doesNotMatch(detail, /viewerId === activeDeepLinkedAttempt\?\.teacherProfileId/)
-  assert.match(detail, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal[\s\S]*?canManageCase/)
-  assert.match(detail, /canDecide=\{!activeDeepLinkedAttemptCanceled[\s\S]*?canManageCase/)
+  assert.match(detail, /canRecordAttendance=\{false\}/)
+  assert.match(detail, /canDecide=\{false\}/)
   assert.doesNotMatch(detail, /canEditFeedback=/)
 })
 
@@ -2127,7 +2128,7 @@ test("mounted registration application accepts only its canonical observation bo
   }
 })
 
-test("legacy observation status selector resolves to its decoupled manual target", async () => {
+test("trial status remains selectable and changes through the independent manual property", async () => {
   const taskId = "76600000-0000-4000-8000-000000000001"
   const trackId = "76600000-0000-4000-8000-000000000002"
   const directorId = "76600000-0000-4000-8000-000000000003"
@@ -2239,7 +2240,7 @@ test("legacy observation status selector resolves to its decoupled manual target
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.options.map((option) => option.value),
-      ["waiting_current_class"],
+      ["observation_requested", "waiting_current_class"],
     )
 
     hookHarness.flushEffects()
@@ -2258,15 +2259,17 @@ test("legacy observation status selector resolves to its decoupled manual target
     assert.equal(statusSelect.props.disabled, false)
     assert.deepEqual(
       statusSelect.props.options.map((option) => option.value),
-      ["waiting_current_class"],
+      ["observation_requested", "waiting_current_class"],
     )
 
     statusSelect.props.onValueChange("waiting_current_class")
     await flushMountedRegistrationWork()
 
     assert.equal(withdrawalCalls.length, 0)
-    assert.equal(genericStatusCalls.length, 0)
-    assert.deepEqual(reloadCalls, [])
+    assert.equal(genericStatusCalls.length, 1)
+    assert.equal(genericStatusCalls[0].workflowStatus, "waiting_current_class")
+    assert.equal(genericStatusCalls[0].trackId, trackId)
+    assert.deepEqual(reloadCalls, [trackId])
   } finally {
     hookHarness.cleanup()
     globalThis.window = originalWindow
@@ -2816,7 +2819,7 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
       }
     })
 
-    await t.test("undecided completed and no-show attempts keep admin and staff decisions only", async () => {
+    await t.test("undecided completed and no-show attempts remain read-only for admin and staff", async () => {
       for (const status of ["completed", "no_show"]) {
         for (const roleCase of roleCases) {
           const feedback = await mountTerminalHistory({ status, decisionKind: null, roleCase })
@@ -2826,7 +2829,7 @@ test("mounted terminal deep links preserve exact feedback role and status rules"
           }
           assert.equal(feedback.canRecordAttendance, false)
           assert.equal("canEditFeedback" in feedback, false, `${roleCase.label}:${status}`)
-          assert.equal(feedback.canDecide, roleCase.canManageCase, `${roleCase.label}:${status}`)
+          assert.equal(feedback.canDecide, false, `${roleCase.label}:${status}`)
         }
       }
     })
@@ -3880,7 +3883,8 @@ test("phone and visit consultation completion share one inline subject outcome e
   assert.doesNotMatch(stageSource, /onOpenOutcome|전화상담 완료|방문상담 완료/)
   assert.doesNotMatch(application, /onOpenOutcome=\{/)
   assert.doesNotMatch(application, /청강 피드백을 불러오는 중입니다/)
-  assert.match(application, /청강 확인 정보를 불러오는 중입니다/)
+  assert.match(application, /청강 이력을 불러오는 중입니다/)
+  assert.doesNotMatch(application, /청강 확인 정보를 불러오는 중입니다/)
 })
 
 test("registration stage selects have subject-specific accessible names", async () => {

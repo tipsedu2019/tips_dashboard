@@ -173,7 +173,7 @@ create temp table recording_baseline as select
  (select count(*) from public.ops_registration_appointments) appointments,
  (select count(*) from public.ops_registration_observations) observations,
  (select count(*) from public.ops_registration_enrollments) enrollments,
- (select count(*) from dashboard_private.notification_events) notifications;
+ (select count(*) from dashboard_private.notification_deliveries) deliveries;
 select pg_temp.registration_fence_set_actor('99300000-0000-4000-8000-000000000002');
 set local role authenticated;
 select lives_ok($test$
@@ -189,6 +189,7 @@ select lives_ok($test$
      select workflow_revision into revision from public.ops_registration_subject_tracks where id='99320000-0000-4000-8000-000000000001';
      result := public.set_registration_workflow_status_v1('99320000-0000-4000-8000-000000000001',t,revision,'free-target-'||counter);
      if result->>'workflowStatus' is distinct from t or result->'enrollmentFinalization' is distinct from 'null'::jsonb then raise exception 'incorrect recording result'; end if;
+     if jsonb_array_length(result->'sourceEventIds') <> (case when t='registered' and s<>'registered' then 1 else 0 end) then raise exception 'subject notification source contract lost'; end if;
    end loop;
  end loop;
  end $loop$;
@@ -223,8 +224,9 @@ reset role;
 select is((select pipeline_status from public.ops_registration_subject_tracks where id='99320000-0000-4000-8000-000000000001'),'inquiry','manual results preserve historical pipeline data');
 select is((select observation_return_workflow_status from public.ops_registration_subject_tracks where id='99320000-0000-4000-8000-000000000001'),'consultation_completed','historical return metadata remains unchanged after leaving old trial status');
 select is((select student_name from public.ops_tasks where id='99310000-0000-4000-8000-000000000001'),null::text,'no student identity was fabricated');
-select results_eq($$select (select count(*) from public.students), (select count(*) from public.ops_registration_appointments), (select count(*) from public.ops_registration_observations), (select count(*) from public.ops_registration_enrollments), (select count(*) from dashboard_private.notification_events)$$,$$select * from recording_baseline$$,'status and partial facts create no student, appointment, attendance, enrollment or notification');
+select results_eq($$select (select count(*) from public.students), (select count(*) from public.ops_registration_appointments), (select count(*) from public.ops_registration_observations), (select count(*) from public.ops_registration_enrollments), (select count(*) from dashboard_private.notification_deliveries)$$,$$select * from recording_baseline$$,'status and partial facts create no student, appointment, attendance, enrollment or delivery');
 select is((select count(*) from public.ops_task_events where task_id='99310000-0000-4000-8000-000000000001' and event_type='registration_fact_saved'),2::bigint,'partial and blank saves each record one audit event; replay creates none');
 select ok(exists(select 1 from public.ops_task_events where task_id='99310000-0000-4000-8000-000000000001' and event_type='registration_track_event' and after_value::jsonb->>'event_type'='registration_workflow_status_changed'),'manual transitions retain automatic audit history');
+select is((select count(*) from dashboard_private.notification_events where event_key='registration.subject_registration_completed' and payload->>'track_id'='99320000-0000-4000-8000-000000000001'), (select count(*) from public.ops_task_events where task_id='99310000-0000-4000-8000-000000000001' and event_type='registration_track_event' and after_value::jsonb->>'destination'='registered'), 'each registered transition retains its canonical notification source');
 select * from finish();
 rollback;

@@ -1,0 +1,55 @@
+BEGIN
+SET
+SET
+SET
+INSERT 0 4
+INSERT 0 4
+{}
+
+
+INSERT 0 3
+INSERT 0 2
+INSERT 0 2
+INSERT 0 2
+CREATE FUNCTION
+UPDATE 1
+SELECT 1
+
+SET
+ok 1 - staff records all 169 source/target pairs with blank identity/contact and no appointment
+ok 2 - stale manual property revision is exact 23514, not a retryable collision
+ok 3 - current-class intent saves without a selected class
+ok 4 - all waiting information may be blank
+ok 5 - same request replays
+ok 6 - a reused key with changed intent is rejected
+ok 7 - supplied class still requires a real referenced row
+ok 8 - a supplied class cannot be detached from its current-class meaning
+RESET
+
+SET
+ok 9 - director can choose trial without booking or return metadata
+ok 10 - status receipt replay ignores now-stale expected revision
+ok 11 - status replay cannot change requested outcome
+RESET
+
+SET
+ok 12 - teacher cannot record registration status
+ok 13 - teacher cannot save optional facts
+RESET
+UPDATE 1
+SET
+ok 14 - assistant remains denied
+RESET
+
+SET
+ok 15 - banned staff remains denied
+RESET
+ok 16 - manual results preserve historical pipeline data
+ok 17 - historical return metadata remains unchanged after leaving old trial status
+ok 18 - no student identity was fabricated
+ok 19 - status and partial facts create no student, appointment, attendance, enrollment or delivery
+ok 20 - partial and blank saves each record one audit event; replay creates none
+ok 21 - manual transitions retain automatic audit history
+ok 22 - each registered transition retains its canonical notification source
+1..22
+ROLLBACK

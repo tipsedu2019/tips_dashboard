@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 import ts from "typescript";
+import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
@@ -4682,4 +4683,29 @@ test("fact audit mapper keeps the saved fact kind without copying private input 
   assert.equal(result.metadata.factType, "waiting_details");
   assert.equal(result.actorKind, "user");
   assert.ok(!JSON.stringify(result).includes("PRIVATE_SYNTHETIC_PHONE"));
+});
+
+
+test("real common v1/contact v2/subject envelopes retain row provenance through the timeline without private payloads", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const row = (id, type, time, payload, actor = "staff") => ({
+    id, task_id: "task", actor_id: actor, event_type: type, created_at: time,
+    before_value: "PRIVATE_BEFORE", after_value: JSON.stringify(payload),
+  });
+  const events = [
+    row("common-v1", "registration_common_info_updated", "2026-10-04T14:00:00Z", {version: 1, commonRevision: 2, studentName: "PRIVATE_NAME", parentPhone: "PRIVATE_PHONE", requestNote: "PRIVATE_NOTE"}),
+    row("common-v2", "registration_common_info_updated", "2026-10-04T14:02:00Z", {version: 2, commonRevision: 3, parentContactPresent: true, studentContactPresent: false, requestNotePresent: true, changedFields: ["parentContact", "requestNote"], occurredAt: "2026-10-04T14:02:00Z"}),
+    row("subjects", "registration_subjects_synced", "2026-10-04T14:01:00Z", {version: 1, actorId: "staff", subjects: ["영어"], occurredAt: "2026-10-04T14:01:00Z"}),
+    row("removed", "registration_subject_removed", "2026-10-04T14:03:00Z", {version: 1, trackId: "track", subject: "영어", actorId: "staff", directorProfileId: "PRIVATE_DIRECTOR", occurredAt: "2026-10-04T14:03:00Z"}),
+    row("fact", "registration_fact_saved", "2026-10-04T13:00:00Z", {version: 1, factType: "waiting_details", trackId: "track", payload: {parentPhone: "PRIVATE_PHONE"}}),
+    row("unknown", "registration_common_info_updated", null, {version: 1, requestNote: "PRIVATE_NOTE"}, null),
+  ].map(mapTrackEvent);
+  const history = buildRegistrationSubjectHistory({tracks: [{id: "track", subject: "영어"}], events});
+  assert.deepEqual(history.map(item => item.id), ["event:removed", "event:common-v2", "event:subjects", "event:common-v1", "event:fact", "event:unknown"]);
+  assert.deepEqual(history.slice(0, 5).map(item => [item.actorId, item.actorKind, item.timeKind]), Array.from({length: 5}, () => ["staff", "user", "exact"]));
+  assert.equal(history[0].subjects[0], "영어");
+  assert.equal(history[1].occurredAt, "2026-10-04T14:02:00Z");
+  assert.equal(history.at(-1).actorKind, null);
+  assert.equal(history.at(-1).timeKind, "unavailable");
+  assert.doesNotMatch(JSON.stringify({events, history}), /PRIVATE_|parentPhone|requestNotePresent|changedFields/);
 });

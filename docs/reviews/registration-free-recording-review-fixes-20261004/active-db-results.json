@@ -1,0 +1,189 @@
+[
+  {
+    "file": "supabase/tests/active_registration_workflow_sqlstate_contract_test.sql",
+    "exit": 0,
+    "pass": 30,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_teacher_feedback_request_retirement_test.sql",
+    "exit": 0,
+    "pass": 25,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_observation_status_independence_test.sql",
+    "exit": 0,
+    "pass": 27,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_observation_booking_test.sql",
+    "exit": 0,
+    "pass": 47,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_observation_class_lifecycle_test.sql",
+    "exit": 0,
+    "pass": 8,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_notification_readiness_decoupling_test.sql",
+    "exit": 0,
+    "pass": 5,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_flat_common_input_decoupling_test.sql",
+    "exit": 0,
+    "pass": 26,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_subject_soft_archive_test.sql",
+    "exit": 0,
+    "pass": 37,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_subject_snapshot_test.sql",
+    "exit": 0,
+    "pass": 23,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_flat_case_creation_test.sql",
+    "exit": 0,
+    "pass": 28,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_collaboration_write_role_test.sql",
+    "exit": 0,
+    "pass": 12,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_archived_subject_delivery_fence_test.sql",
+    "exit": 0,
+    "pass": 43,
+    "failures": [],
+    "runner": "supabase_admin TCP; dblink setup needs local superuser; authenticated checks unchanged"
+  },
+  {
+    "file": "supabase/tests/registration_manager_write_and_integrity_fence_test.sql",
+    "exit": 0,
+    "pass": 28,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_management_notification_explicit_v2_test.sql",
+    "exit": 0,
+    "pass": 40,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_flat_fact_runtime_finalization_test.sql",
+    "exit": 0,
+    "pass": 13,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_admission_order_independence_test.sql",
+    "exit": 0,
+    "pass": 21,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_multiple_textbooks_test.sql",
+    "exit": 0,
+    "pass": 33,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_admission_checklist_roster_consistency_test.sql",
+    "exit": 0,
+    "pass": 40,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_level_test_result_parent_reconciliation_test.sql",
+    "exit": 0,
+    "pass": 25,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_customer_reminder_claim_final_gate_test.sql",
+    "exit": 0,
+    "pass": 27,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_customer_delivery_lookup_test.sql",
+    "exit": 0,
+    "pass": 15,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_notification_settings_atomic_policy_test.sql",
+    "exit": 0,
+    "pass": 27,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_visit_cancellation_explicit_test.sql",
+    "exit": 0,
+    "pass": 38,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_case_customer_message_history_test.sql",
+    "exit": 0,
+    "pass": 41,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_observation_explicit_chat_test.sql",
+    "exit": 0,
+    "pass": 26,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_management_notification_preview_test.sql",
+    "exit": 0,
+    "pass": 24,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_management_notification_owner_test.sql",
+    "exit": 0,
+    "pass": 22,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_management_notification_source_recovery_test.sql",
+    "exit": 0,
+    "pass": 52,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_manual_workflow_status_test.sql",
+    "exit": 0,
+    "pass": 9,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_free_recording_test.sql",
+    "exit": 0,
+    "pass": 22,
+    "failures": []
+  },
+  {
+    "file": "supabase/tests/registration_observation_history_rebooking_test.sql",
+    "exit": 0,
+    "pass": 23,
+    "failures": []
+  }
+]
