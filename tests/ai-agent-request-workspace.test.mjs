@@ -52,6 +52,7 @@ test('policy result confirmation remains available when reread already includes 
 
 test('desktop and mobile lists distinguish accepted creation and update timestamps',async t=>{
  const ui=await mount(t);await ui.accept(0);
+ assert.equal(document.querySelector('input[aria-label="AI 요청 검색"]').placeholder,'제목 검색');
  const table=document.querySelector('table');
  assert.deepEqual([...table.querySelectorAll('th')].map(cell=>cell.textContent),['제목','상태','요청자','생성일','수정일']);
  const desktopTimes=[...table.querySelectorAll('tbody time')];

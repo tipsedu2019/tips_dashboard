@@ -13,7 +13,7 @@ function wire(row,rows) {
  const headers={'Idempotency-Key':key,Authorization:row.kind==='bot'?`Bearer ${bot}`:'Bearer synthetic-user'};
  let route={kind:'request',id};let method='GET',body,query='';
  if(op==='list'){route={kind:'requests'};query=row.kind==='bot'?'?status=pending&limit=50':'?page=1&pageSize=10&scope=own';}
- if(op==='create'){route={kind:'requests'};method='POST';body={title:data.title,body:data.body,notifyOnDone:false};}
+ if(op==='create'){route={kind:'requests'};method='POST';body={title:data.title,body:data.body,notifyOnDone:data.notifyOnDone,...(data.notifyOnDone?{notificationSpace:data.notificationSpace}:{})};}
  if(op==='activity'){query=name==='historyLast'?'?afterMessageSeq=50&limit=50':'';}
  if(op==='actions'){route={kind:'actions',id:data.items[0].requestId};query=name==='actionsLast'?'?limit=50&cursor='+encodeURIComponent(rows.find(row=>row.name==='actions').data.nextCursor):'?limit=50';}
  if(op==='action_events'){route={kind:'action',id:data.action.requestId,actionId:data.action.id};query=name==='actionEventsLast'?'?limit=50&cursor='+encodeURIComponent(rows.find(row=>row.name==='actionEvents').data.nextCursor):'?limit=50';}
@@ -49,6 +49,7 @@ test('actual disposable DB producers pass real strict parsers and HTTP handlers'
   assert.equal(response.status,200,row.name+' HTTP');assert.deepEqual(await response.json(),{data:row.data,error:null},row.name+' envelope');
   assert.equal(response.headers.get('cache-control'),'no-store, private');assert.equal(calls.length,1,row.name+' single scoped call');assert.equal(calls[0].input.p_action,row.operation,row.name+' operation');
   assert.equal(calls[0].name,row.kind==='policy'?'ai_agent_space_policy_api_v1':row.kind==='bot'?'ai_agent_bot_api_v1':'ai_agent_user_api_v1');
+  if(row.operation==='create'){assert.equal(calls[0].input.p_input.notifyOnDone,row.data.notifyOnDone);assert.equal(calls[0].input.p_input.notificationSpace,row.data.notifyOnDone?row.data.notificationSpace:undefined);}
  }
  const get=name=>captured.captures.find(row=>row.name===name).data;
  assert.equal(get('renewed').request.version,get('claimed').request.version);assert.equal(get('renewed').request.updatedAt,get('claimed').request.updatedAt);
@@ -57,6 +58,7 @@ test('actual disposable DB producers pass real strict parsers and HTTP handlers'
  assert.equal(get('actionEvents').events.length+get('actionEventsLast').events.length,56);
  assert.equal(get('actionEventsLast').events.at(-1).kind,'reconciled_manual_observation');
  assert.deepEqual(Object.keys(get('minimalEndedDoneReplay').request).sort(),['id','status','version']);
+ assert.equal(get('completionCreated').notifyOnDone,true);assert.equal(get('completionCreated').notificationSpace,'space_1');
  assert.equal(get('notification').request.status,'done');assert.equal(get('notification').notification.reason,'space_permission_revoked');
  assert.equal(get('policyMissing').revision,'0');assert.equal(get('policySet').revision,'1');
 });

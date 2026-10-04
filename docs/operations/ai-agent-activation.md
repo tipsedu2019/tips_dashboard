@@ -4,6 +4,8 @@
 
 2026-10-04 현재 상태: Tasks 1–5 로컬 구현은 accepted feature `471312763dd7c430c845504cd1fa85493d9e69e5`에 수용되었다. 통합 base는 `0bbc7593`, CI 소유자의 scoped 수락 HEAD는 `737dfd72f875008265dc98f2909924494bec3c11`이다. 아래 C20 시작점·계획 체크박스·당시 수치는 역사적 기록이며 현재 미구현 상태를 뜻하지 않는다. 현재 통합 QA와 마지막 수정의 검증은 별도로 기록하며, full DB·strict consumer·whole-branch 및 운영 수용을 완료했다고 선언하지 않는다. 운영 SQL 설치·설정·발급·scheduler·provider 증거는 별도 gate다.
 
+최종 opt-in 생성 수정은 기존 여섯 AI migration을 보존하고 CLI 생성 `20261004030228_ai_agent_request_notification_optin.sql`을 추가한다. 현재 canonical manifest는 이전 146개 prefix·metadata를 보존한 147개, AI ordered chain은 일곱 개다. public create의 현재 configured·요청자 정책 검사와 receipt identity·알림 필드 저장을 연결하며, 격리 DB·strict consumer의 새 실행과 독립 재검토는 완료 증거가 나오기 전까지 진행 중이다. 아래 `737dfd72…`의 canonical 146·six 기록은 당시 수락 이력으로 보존한다.
+
 이 문서는 Tasks 1–5의 구현을 운영자가 검토할 수 있는 설정 대상으로 연결한다. 이 문서 작성이나 로컬 테스트 통과는 키 발급, 권한 부여, 환경값 등록, scheduler, hosted SQL 설치·ACL 또는 Chat 발송 승인이 아니다. 일반 source publication/merge/deploy는 기존 승인과 최종 gates를 따른다. parent/controller가 각 항목의 구체적인 대상을 완성한 뒤 기존 승인 범위를 적용하거나 action-time 승인을 확보한다. 이 packet에서 실행한 외부 작업과 실제 발송은 0건이다.
 
 근거: [승인 설계](../superpowers/specs/2026-10-03-ai-agent-requests-design.md), [API·DB 부록](../superpowers/specs/2026-10-03-ai-agent-requests-api-db-appendix.md), [구현 계획](../superpowers/plans/2026-10-03-ai-agent-requests.md). 아래 공간 inventory는 2026-10-03 parent가 전달한 기존 UI session의 읽기 전용 확인 결과다. 설계·계획의 이전 “관리팀 외 6개 UNKNOWN” 기록은 **webhook 존재 여부에 한하여** 이 7개 inventory로 대체한다. 수신자·보안 env 연결·thread 지원·송신 권한까지 확인된 것으로 확대하지 않는다.
@@ -24,7 +26,7 @@
 
 | 승인 대상 | 검토 가능한 정확한 대상 | 현재 상태 |
 | --- | --- | --- |
-| Production migration | 여섯 AI ordered migration의 frozen 파일·SHA-256, 운영 DB target/reference·pending ledger, stop/restore 계획 | **HOLD**: 로컬 등록 완료; exact hosted 설치·ACL 승인·호환성 증거 미확정 |
+| Production migration | 기존 여섯 개와 추가 opt-in 수정의 일곱 AI ordered migration frozen 파일·SHA-256, 운영 DB target/reference·pending ledger, stop/restore 계획 | **HOLD**: 로컬 등록 완료; exact hosted 설치·ACL 승인·호환성 증거 미확정 |
 | 배포 | 새 main `e5a97507…` 합류와 fresh regression을 통과한 Tasks 1–5 accepted commit + 이 문서 commit의 immutable final HEAD/release SHA, 운영 project/environment, 해당 배포의 env/config revision | **HOLD**: 일반 source publication/merge/deploy 권한은 있음; 최종 gates·SQL 선설치·운영 target/restore 증거 미확정 |
 | 새 AI key·지속권한 | §3의 발급자·5 scopes·queue/lifecycle grant·space/purpose·정확한 UTC 만료·회수 ID | **PROPOSED**: 발급/부여하지 않음 |
 | Server env·공간 연결 | §2 inventory와 §4의 최종 Task 5 reference-name map·origin/config revision | **HOLD**: 최종 source reference 이름 확인; 실제 수신자·secure mapping·보안 주입 승인 대기 |
@@ -34,7 +36,7 @@
 
 현재 통합 QA receipt(controller 제공, `737dfd72…` 기준): migration/domain/query source guards 통과; Muse 계약 108 + 86 통과; lint 0 errors/기존 warnings 7개, types·main webpack build·public cache 1/1·client boundary 1/1 통과. genuine Linux fixture 10/10, skipped 0이며 별도 cleanup metadata에서 outer 부재·child namespaces 비어 있음·19 source hashes 불변을 확인했다. 원래 driver의 FAIL은 지원하지 않는 absence wording 때문에 발생한 것으로 원본 결과를 보존했다. Common DB attempt 1은 Mac internal relay timeout으로 db:start에서 SQL 실행 전에 실패했고 cleanup은 성공했으며 진단은 진행 중이다. 전체 static 결과는 6001개 중 5982 pass/19 fail(16 socket EPERM + 세 기존 guard 불일치)였다. 동일한 16개 socket EPERM assertion의 좁은 재실행은 16 tests/16 pass/0 fail/0 skipped이며 대상 7개 파일의 hashes가 전후 동일하다(`.codex-artifacts/final-static-environment-rerun-result.json`). 이는 원래 전체 결과를 덮어쓰거나 새로운 full-suite PASS를 뜻하지 않는다. 마지막 수정의 narrow suite는 별도 receipt로 기록하며 이를 full suite·full DB·strict consumer·whole-branch·production PASS로 확대하지 않는다.
 
-일반 source push/PR merge/deploy는 parent/controller가 gates 이후 진행하도록 승인했다. 순서는 accepted branch source/preview + CI/whole-branch gates → exact hosted SQL 설치·ACL action-time 승인 → 여섯 개의 고정된 AI migration을 정렬 순서대로 설치하고 최종 schema/RPC/ACL 호환성을 읽기 전용으로 확인 → protected main merge/production app build다. main의 Supabase workflow는 isolated validation이며 hosted SQL push가 아니다. 문서화된 Vercel main production build는 자동이므로 SQL 호환성 확인이 먼저다. 실제 hosted target·pending migration ledger·Vercel project/environment·복원 artifact는 미확정이다. 보안 SQL 설치, credential/grant, secure webhook/config, scheduler와 live Chat에는 각각 정확한 대상의 action-time 확인을 유지한다.
+일반 source push/PR merge/deploy는 parent/controller가 gates 이후 진행하도록 승인했다. 순서는 accepted branch source/preview + CI/whole-branch gates → exact hosted SQL 설치·ACL action-time 승인 → 기존 여섯 개와 추가 opt-in 수정으로 구성된 일곱 개의 고정된 AI migration을 정렬 순서대로 설치하고 최종 schema/RPC/ACL 호환성을 읽기 전용으로 확인 → protected main merge/production app build다. main의 Supabase workflow는 isolated validation이며 hosted SQL push가 아니다. 문서화된 Vercel main production build는 자동이므로 SQL 호환성 확인이 먼저다. 실제 hosted target·pending migration ledger·Vercel project/environment·복원 artifact는 미확정이다. 보안 SQL 설치, credential/grant, secure webhook/config, scheduler와 live Chat에는 각각 정확한 대상의 action-time 확인을 유지한다.
 
 Task 6 문서 준비 완료와 Task 7 실제 수용 완료는 별도다. 미완성 필드가 있는 행은 실행 packet으로 사용할 수 없다.
 

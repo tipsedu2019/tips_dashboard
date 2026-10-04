@@ -150,6 +150,7 @@ const container=`supabase_db_${project}`;
 configureContainer(container);
 // END GENERATED AI PROBE SESSION SETUP
 try {
+const configurationBefore=JSON.parse(await query("select jsonb_agg(to_jsonb(c) order by space_key) from dashboard_private.chat_space_configuration c;"));
 const issuer=randomUUID(),owner=randomUUID(),credential=randomUUID(),expiredRequest=randomUUID();
 const credentialHash=createHash('sha256').update('tips_agent_'+randomBytes(32).toString('hex')).digest('hex');
 const nonceHash=createHash('sha256').update(randomBytes(32).toString('hex')).digest('hex');
@@ -197,8 +198,14 @@ ${role('admin')}${cap('actions','user','actions',`jsonb_build_object('id',${rid(
 ${cap('actionsLast','user','actions',`jsonb_build_object('id',${rid('created')},'limit',50,'cursor',${captured('actions')}->>'nextCursor')`)}
 ${cap('actionEvents','user','action_events',`jsonb_build_object('id',${rid('created')},'actionId',${rid('registered')},'limit',50)`)}
 ${cap('actionEventsLast','user','action_events',`jsonb_build_object('id',${rid('created')},'actionId',${rid('registered')},'limit',50,'cursor',${captured('actionEvents')}->>'nextCursor')`)}reset role;
-${role('user')}${cap('completionCreated','user','create',{title:'synthetic completion',body:'synthetic body',idempotencyKey:key(),notifyOnDone:false})}reset role;
-update dashboard_private.ai_agent_requests set notify_on_done=true,notification_space='space_1' where id=(${rid('completionCreated')})::uuid;
+-- Fixture-only slot and own policy, inside this disposable transaction.
+update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/HTTP_OPTIN',public_origin='https://dashboard.test.invalid' where space_key='space_1';
+insert into dashboard_private.chat_user_space_permissions(user_id,space_keys,configured_by) values('${owner}',array['space_1'],'${issuer}');
+${role('user')}${cap('completionCreated','user','create',{title:'synthetic completion',body:'synthetic body',idempotencyKey:key(),notifyOnDone:true,notificationSpace:'space_1'})}reset role;
+-- Preserve the existing revoked-policy completion capture, using actual current
+-- policy loss after the allowed public create. The separate SQL happy path
+-- proves that keeping this policy yields one pending intent.
+delete from dashboard_private.chat_user_space_permissions where user_id='${owner}';
 ${role('bot')}${cap('completionClaim','bot','claim',claim('completionCreated','1'))}
 `;
 const doneInput=claim('completionCreated','2','1')+`||jsonb_build_object('result','synthetic completed')`;
@@ -222,6 +229,8 @@ assert.equal(result.code,0,'synthetic HTTP producer capture failed');
 const stdout=result.stdout;
 await closeSessions(client);
 assert.equal(await query(`select count(*) from dashboard_private.ai_agent_credentials where id='${credential}';`),'0','HTTP producer transaction must roll back its synthetic credential');
+assert.equal(await query(`select count(*) from dashboard_private.chat_user_space_permissions where user_id='${owner}';`),'0','HTTP producer transaction must roll back its synthetic policy');
+assert.deepEqual(JSON.parse(await query("select jsonb_agg(to_jsonb(c) order by space_key) from dashboard_private.chat_space_configuration c;")),configurationBefore,'HTTP producer transaction must roll back every slot fixture change');
 const capture=stdout.split('\n').find(line=>line.startsWith('AI_HTTP_CAPTURE:'));assert.ok(capture,'producer capture absent');
 const parsed=JSON.parse(capture.slice('AI_HTTP_CAPTURE:'.length));assert.equal(parsed.captures.length,34);assert.deepEqual(parsed.oldNotificationCounts.before,parsed.oldNotificationCounts.after);
 assert.equal(parsed.captures.find(row=>row.name==='historyLast').data.messages.at(-1).seq,'56');

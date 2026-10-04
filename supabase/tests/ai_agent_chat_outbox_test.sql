@@ -280,5 +280,35 @@ set local role authenticated;
 select is(public.ai_agent_user_api_v1('activity',jsonb_build_object('id',pg_temp.ai_id(11)))->'notification'->>'reason','provider_rejected','notification maps arbitrary provider code to stable domain reason');
 reset role;
 
+insert into auth.users(id,instance_id,aud,role,email) values(pg_temp.ai_id(900),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','ai-outbox-gateway@test.invalid');
+insert into public.profiles(id,role,name) values(pg_temp.ai_id(900),'staff','synthetic public create') on conflict(id) do update set role=excluded.role;
+update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/PUBLIC_CREATE',public_origin='https://dashboard.test.invalid' where space_key='space_1';
+insert into dashboard_private.chat_user_space_permissions(user_id,space_keys,configured_by) values(pg_temp.ai_id(900),array['space_1'],pg_temp.ai_id(1));
+insert into dashboard_private.ai_agent_credentials(id,created_by,label,token_hash,scopes,expires_at) values(pg_temp.ai_id(901),pg_temp.ai_id(1),'synthetic public create done',repeat('c',64),array['ai-agent:requests:read','ai-agent:requests:claim','ai-agent:requests:update'],clock_timestamp()+interval '1 day');
+insert into dashboard_private.ai_agent_credential_grants(credential_id,queues,actions,expires_at) values(pg_temp.ai_id(901),array['employee_requests'],array['read','claim','done'],clock_timestamp()+interval '1 day');
+-- No chat:send scope, Chat grant, transport, or provider is needed to record done.
+insert into ev values('public_before',jsonb_build_object('attempts',(select count(*) from dashboard_private.chat_delivery_attempts),'events',(select count(*) from dashboard_private.notification_events),'deliveries',(select count(*) from dashboard_private.notification_deliveries)));
+select set_config('request.jwt.claim.sub',pg_temp.ai_id(900)::text,true);
+set local role authenticated;
+insert into ev values('public_on',public.ai_agent_user_api_v1('create',jsonb_build_object('title','Public completion','body','PRIVATE_BODY','notifyOnDone',true,'notificationSpace','space_1','idempotencyKey',pg_temp.ai_id(902))));
+insert into ev values('public_off',public.ai_agent_user_api_v1('create',jsonb_build_object('title','Default OFF completion','body','PRIVATE_BODY','idempotencyKey',pg_temp.ai_id(903))));
+reset role;
+select is((select count(*) from dashboard_private.chat_delivery_outbox where request_id in(select (v->>'id')::uuid from ev where k in('public_on','public_off'))),0::bigint,'public creates produce no outbox before done');
+create function pg_temp.public_claim(k text,n integer) returns jsonb language sql as $$select public.ai_agent_bot_api_v1(repeat('c',64),'claim',jsonb_build_object('id',(select v->>'id' from ev where ev.k=$1),'version','1','idempotencyKey',pg_temp.ai_id(n),'claimTokenHash',repeat('a',64)))$$;
+create function pg_temp.public_done(k text,n integer) returns jsonb language sql as $$select public.ai_agent_bot_api_v1(repeat('c',64),'done',jsonb_build_object('id',(select v->>'id' from ev where ev.k=$1),'version','2','idempotencyKey',pg_temp.ai_id(n),'claimTokenHash',repeat('a',64),'claimGeneration','1','result','PRIVATE_RESULT'))$$;
+set local role service_role;
+select lives_ok($q$select pg_temp.public_claim('public_on',904)$q$,'bot claims authenticated true-created request');
+select is(pg_temp.public_done('public_on',905)->'request'->>'status','done','bot completes authenticated true-created request');
+select lives_ok($q$select pg_temp.public_claim('public_off',906)$q$,'bot claims default OFF public request');
+select is(pg_temp.public_done('public_off',907)->'request'->>'status','done','bot completes default OFF public request');
+select is(pg_temp.public_done('public_on',905)->'request'->>'status','done','exact done receipt replays through public bot gateway');
+reset role;
+select is((select count(*) from dashboard_private.chat_delivery_outbox where request_id=(select (v->>'id')::uuid from ev where k='public_on')),1::bigint,'public true-create and done produce exactly one durable intent including replay');
+select is((select count(*) from dashboard_private.chat_delivery_outbox where request_id=(select (v->>'id')::uuid from ev where k='public_off')),0::bigint,'default OFF done produces zero intents');
+select is((select state from dashboard_private.chat_delivery_outbox where request_id=(select (v->>'id')::uuid from ev where k='public_on')),'pending','configured allowed public request intent remains pending without dispatch');
+select is((select payload->>'text' from dashboard_private.chat_delivery_outbox where request_id=(select (v->>'id')::uuid from ev where k='public_on')),'Public completion'||E' · 완료\nhttps://dashboard.test.invalid/admin/ai-agent/'||(select v->>'id' from ev where k='public_on'),'public creation reaches final sanitized completion payload producer');
+select ok((select payload::text not like '%PRIVATE_BODY%' and payload::text not like '%PRIVATE_RESULT%' from dashboard_private.chat_delivery_outbox where request_id=(select (v->>'id')::uuid from ev where k='public_on')),'completion never copies private body/result');
+select is(jsonb_build_object('attempts',(select count(*) from dashboard_private.chat_delivery_attempts),'events',(select count(*) from dashboard_private.notification_events),'deliveries',(select count(*) from dashboard_private.notification_deliveries)),(select v from ev where k='public_before'),'public creation and done create no attempts or legacy notifications');
+
 select * from finish();
 rollback;

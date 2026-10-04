@@ -7,7 +7,7 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,ACCEPTED_AI_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
@@ -17,12 +17,13 @@ const hash=v=>createHash('sha256').update(v).digest('hex');
 test('independent attestation rejects stale run/source, migration, closure, inventory and raw payload drift',async()=>{
  const source=await snapshotAiSource(),raw=Buffer.from(' {"test":"negative protocol only"} '),now=Date.now();
  const expected={runId:randomBytes(16).toString('hex'),nonce:randomBytes(32).toString('hex'),startedAt:now-1};
- const receipt={version:1,...expected,finishedAt:now,before:source,after:source,migrations:ACCEPTED_AI_MIGRATIONS,sqlTests:AI_SQL_TESTS,probes:AI_PROBES,captures:Object.fromEntries(Object.entries(AI_PRODUCERS).map(([name,p])=>[name,{producer:p.path,file:p.file,sourceSha256:source.closure.find(v=>v.path===p.path).sha256,sha256:hash(raw),bytes:raw.length}]))};
+ const receipt={version:1,...expected,finishedAt:now,before:source,after:source,migrations:CURRENT_AI_MIGRATIONS,sqlTests:AI_SQL_TESTS,probes:AI_PROBES,captures:Object.fromEntries(Object.entries(AI_PRODUCERS).map(([name,p])=>[name,{producer:p.path,file:p.file,sourceSha256:source.closure.find(v=>v.path===p.path).sha256,sha256:hash(raw),bytes:raw.length}]))};
  assert.equal(validateAiReceipt(receipt,{expected,source,raw,identity:'http',now}),true);
  for(const mutate of [
   r=>r.runId='0'.repeat(32),r=>r.nonce='0'.repeat(64),r=>r.startedAt=now-900_001,r=>r.finishedAt=now+1,
   r=>r.before.sourceHead='0'.repeat(40),r=>r.after.closure.pop(),r=>r.after.closure[0].sha256='0'.repeat(64),
-  r=>r.migrations[0].sha256='0'.repeat(64),r=>r.migrations.pop(),r=>r.migrations.push(r.migrations[0]),
+  r=>r.migrations=structuredClone(ACCEPTED_AI_MIGRATIONS),r=>r.migrations[0].sha256='0'.repeat(64),r=>r.migrations[6].sha256='0'.repeat(64),
+  r=>[r.migrations[0],r.migrations[1]]=[r.migrations[1],r.migrations[0]],r=>r.migrations.pop(),r=>r.migrations.push(r.migrations[0]),
   r=>r.sqlTests.pop(),r=>r.sqlTests[0]=r.sqlTests[1],r=>r.probes[0]='tests/unknown.mjs',
   r=>delete r.captures.chat,r=>r.captures.unexpected=r.captures.chat,
   r=>r.captures.http.producer=AI_PRODUCERS.chat.path,r=>r.captures.http.sourceSha256='0'.repeat(64),
@@ -40,9 +41,9 @@ test('actual root consumers fail without a current capture and receipt; no optio
 test('source snapshot rejects undeclared local imports, missing source and canonical migration drift',async()=>{
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-negative-'));
  try{
-  // Only relevant source allowlist and six migrations, no dependency/app copy.
+  // Only relevant source allowlist and seven migrations, no dependency/app copy.
   const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
-  for(const path of [...AI_SOURCE_CLOSURE,...ACCEPTED_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
    await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
   }
   const file=join(root,'src/features/ai-agent/server/ai-agent-auth.ts');
@@ -56,7 +57,7 @@ test('source closure rejects side-effect imports before accepting source provena
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-side-effect-'));
  try{
   const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
-  for(const path of [...AI_SOURCE_CLOSURE,...ACCEPTED_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
    await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
   }
   const file=join(root,'src/features/ai-agent/server/ai-agent-auth.ts'),original=await readFile(file);
@@ -71,7 +72,7 @@ test('source closure rejects a side-effect import separated by a line comment',a
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-line-comment-'));
  try{
   const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
-  for(const path of [...AI_SOURCE_CLOSURE,...ACCEPTED_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
    await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
   }
   const file=join(root,'src/features/ai-agent/server/ai-agent-auth.ts'),original=await readFile(file);
@@ -86,5 +87,36 @@ test('source closure rejects a side-effect import separated by a line comment',a
    await writeFile(file,original+'\n'+statement+'\n');
    await assert.rejects(snapshotAiSource(root),/import outside audited AI closure/);
   }
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('current migration identity preserves the six accepted pins and rejects canonical/source drift',async()=>{
+ assert.equal(ACCEPTED_AI_MIGRATIONS.length,6);
+ assert.equal(CURRENT_AI_MIGRATIONS.length,7);
+ assert.deepEqual(CURRENT_AI_MIGRATIONS.slice(0,6),ACCEPTED_AI_MIGRATIONS);
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-migration-drift-'));
+ try{
+  const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  for(const mutate of [
+   m=>m.orderedNewMigrations.pop(),
+   m=>m.orderedNewMigrations.push({...CURRENT_AI_MIGRATIONS[6],fileName:'20990101000000_ai_agent_unreviewed.sql'}),
+   m=>m.orderedNewMigrations.at(-1).sha256='0'.repeat(64),
+   m=>m.orderedNewMigrations.at(-7).sha256='0'.repeat(64),
+   m=>[m.orderedNewMigrations[140],m.orderedNewMigrations[141]]=[m.orderedNewMigrations[141],m.orderedNewMigrations[140]],
+  ]){
+   const changed=structuredClone(original);mutate(changed);await writeFile(manifestPath,JSON.stringify(changed));
+   await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/);
+  }
+  await writeFile(manifestPath,JSON.stringify(original));
+  const newest=join(root,'supabase/migrations/'+CURRENT_AI_MIGRATIONS[6].fileName);
+  await writeFile(newest,(await readFile(newest))+'\n-- drift\n');
+  await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);
+  await rm(newest);await assert.rejects(snapshotAiSource(root),/ENOENT/);
  }finally{await rm(root,{recursive:true,force:true});}
 });

@@ -734,6 +734,11 @@
       "fileName": "20261003133222_ai_agent_chat_delivery_runtime.sql",
       "sha256": "a6f0400ec89c95c391d089226deb10e4d74acd847b4b8612ab349bc7b04efffb",
       "status": "final"
+    },
+    {
+      "fileName": "20261004030228_ai_agent_request_notification_optin.sql",
+      "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01",
+      "status": "final"
     }
   ]
 }

@@ -68,3 +68,17 @@ test('registration safe JSON remains subject to the streaming byte limit',async(
  const h=harness(action);const payload={note:'x'.repeat(131072)};
  await expectError(h,request('POST',{actionKey:action.actionKey,stepKey:action.stepKey,kind:action.kind,target:action.target,payload,payloadHash:action.payloadHash},botHeaders),{kind:'actions',id},413,'request_too_large');assert.equal(h.calls.length,0);
 });
+
+test('authenticated opt-in create forwards exact consent and space to user gateway',async()=>{
+ const data={...dto,notifyOnDone:true,notificationSpace:'space_1'};
+ const h=harness(data);
+ const res=await h.handle(request('POST',{title:'x',body:'y',notifyOnDone:true,notificationSpace:'space_1'},writes),{kind:'requests'});
+ assert.equal(res.status,200);
+ assert.deepEqual(h.calls,[{name:'ai_agent_user_api_v1',input:{p_action:'create',p_input:{title:'x',body:'y',notifyOnDone:true,notificationSpace:'space_1',idempotencyKey:key}}}]);
+ assert.deepEqual(await res.json(),{data,error:null});
+});
+test('configured-policy opt-in denial preserves exact DB permission error',async()=>{
+ const h=harness(null,{code:'42501',message:'ai_agent_space_forbidden'});
+ await expectError(h,request('POST',{title:'x',body:'y',notifyOnDone:true,notificationSpace:'space_1'},writes),{kind:'requests'},403,'ai_agent_space_forbidden');
+ assert.equal(h.calls.length,1);
+});

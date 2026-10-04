@@ -49,6 +49,10 @@ export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
  {"fileName": "20261003105447_ai_agent_space_policy.sql", "sha256": "794a67d1daaaf8aecaca81aad3d8d7363b9c9de1bcbecdcec9f219dd34e00692", "status": "final"},
  {"fileName": "20261003133222_ai_agent_chat_delivery_runtime.sql", "sha256": "a6f0400ec89c95c391d089226deb10e4d74acd847b4b8612ab349bc7b04efffb", "status": "final"},
 ]);
+// Immutable accepted prefix; only the separately reviewed forward fix is appended.
+export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
+ {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
+]);
 export function extractAiCapture(stdout,identity){
  const producer=AI_PRODUCERS[identity];assert.ok(producer,'unknown capture producer');
  const lines=stdout.split(/\r?\n/u).filter(line=>/AI_[A-Z_]*CAPTURE:/u.test(line));
@@ -76,12 +80,12 @@ export async function snapshotAiSource(root=ROOT){
   closure.push({path,sha256:hash(contents),bytes:contents.length});
  }
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
- assert.equal(manifest.orderedNewMigrations.length,146,'AI canonical manifest inventory');
- assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_')),ACCEPTED_AI_MIGRATIONS,'accepted migration manifest drift');
- for(const m of ACCEPTED_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
+ assert.equal(manifest.orderedNewMigrations.length,147,'AI canonical manifest inventory');
+ assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
+ for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
  assert.match(sourceHead,/^[a-f0-9]{40}$/u);
- return {sourceHead,closure,migrations:ACCEPTED_AI_MIGRATIONS};
+ return {sourceHead,closure,migrations:CURRENT_AI_MIGRATIONS};
 }
 export function validateAiReceipt(receipt,{expected,source,raw,identity,now=Date.now()}){
  assert.equal(receipt?.version,1,'receipt version');
@@ -92,7 +96,7 @@ export function validateAiReceipt(receipt,{expected,source,raw,identity,now=Date
  assert.deepEqual(receipt.before,source,'receipt stale source');assert.deepEqual(receipt.after,source,'receipt closure drift');
  assert.deepEqual(receipt.sqlTests,AI_SQL_TESTS,'receipt SQL inventory');
  assert.deepEqual(receipt.probes,AI_PROBES,'receipt probe inventory');
- assert.deepEqual(receipt.migrations,ACCEPTED_AI_MIGRATIONS,'receipt migration drift');
+ assert.deepEqual(receipt.migrations,CURRENT_AI_MIGRATIONS,'receipt migration drift');
  assert.deepEqual(Object.keys(receipt.captures).sort(),['chat','http']);
  for(const [name,producer]of Object.entries(AI_PRODUCERS)){
   const c=receipt.captures[name];assert.equal(c.producer,producer.path);assert.equal(c.sourceSha256,source.closure.find(row=>row.path===producer.path).sha256);

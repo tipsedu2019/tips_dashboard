@@ -1,4 +1,4 @@
-import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,ACCEPTED_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt} from './lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,CURRENT_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt} from './lib/ai-producer-receipt.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -1056,7 +1056,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (aiPhase) {
       const after = await snapshotAiSource(root);
       if (canonical(after) !== canonical(aiPhase.before)) fail("isolated_ai_source_closure_drift");
-      const receipt = { version: 1, ...aiPhase, after, finishedAt: Date.now(), migrations: ACCEPTED_AI_MIGRATIONS, sqlTests: args.tests, probes: args.probes };
+      const receipt = { version: 1, ...aiPhase, after, finishedAt: Date.now(), migrations: CURRENT_AI_MIGRATIONS, sqlTests: args.tests, probes: args.probes };
       for (const identity of Object.keys(AI_PRODUCERS)) {
         const raw = await readFile(join(aiDirectory, AI_PRODUCERS[identity].file));
         try { validateAiReceipt(receipt, { expected: aiPhase, source: after, raw, identity }); } catch { fail("isolated_ai_receipt_invalid"); }
