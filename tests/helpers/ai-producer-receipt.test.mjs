@@ -7,7 +7,7 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
@@ -17,7 +17,7 @@ const hash=v=>createHash('sha256').update(v).digest('hex');
 test('independent attestation rejects stale run/source, migration, closure, inventory and raw payload drift',async()=>{
  const source=await snapshotAiSource(),raw=Buffer.from(' {"test":"negative protocol only"} '),now=Date.now();
  const expected={runId:randomBytes(16).toString('hex'),nonce:randomBytes(32).toString('hex'),startedAt:now-1};
- const receipt={version:1,...expected,finishedAt:now,before:source,after:source,migrations:CURRENT_AI_MIGRATIONS,sqlTests:AI_SQL_TESTS,probes:AI_PROBES,captures:Object.fromEntries(Object.entries(AI_PRODUCERS).map(([name,p])=>[name,{producer:p.path,file:p.file,sourceSha256:source.closure.find(v=>v.path===p.path).sha256,sha256:hash(raw),bytes:raw.length}]))};
+ const receipt={version:1,...expected,finishedAt:now,before:source,after:source,migrations:CURRENT_AI_MIGRATIONS,credentialPrefix:{...AI_CREDENTIAL_PREFIX,committed:true},sqlTests:AI_SQL_TESTS,probes:AI_PROBES,captures:Object.fromEntries(Object.entries(AI_PRODUCERS).map(([name,p])=>[name,{producer:p.path,file:p.file,sourceSha256:source.closure.find(v=>v.path===p.path).sha256,sha256:hash(raw),bytes:raw.length}]))};
  assert.equal(validateAiReceipt(receipt,{expected,source,raw,identity:'http',now}),true);
  for(const mutate of [
   r=>r.runId='0'.repeat(32),r=>r.nonce='0'.repeat(64),r=>r.startedAt=now-900_001,r=>r.finishedAt=now+1,
@@ -25,6 +25,7 @@ test('independent attestation rejects stale run/source, migration, closure, inve
   r=>r.migrations=structuredClone(ACCEPTED_AI_MIGRATIONS),r=>r.migrations[0].sha256='0'.repeat(64),r=>r.migrations[6].sha256='0'.repeat(64),
   r=>[r.migrations[0],r.migrations[1]]=[r.migrations[1],r.migrations[0]],r=>r.migrations.pop(),r=>r.migrations.push(r.migrations[0]),
   r=>r.sqlTests.pop(),r=>r.sqlTests[0]=r.sqlTests[1],r=>r.probes[0]='tests/unknown.mjs',
+  r=>delete r.credentialPrefix,r=>r.credentialPrefix.committed=false,r=>r.credentialPrefix.migration=CURRENT_AI_MIGRATIONS[5].fileName,
   r=>delete r.captures.chat,r=>r.captures.unexpected=r.captures.chat,
   r=>r.captures.http.producer=AI_PRODUCERS.chat.path,r=>r.captures.http.sourceSha256='0'.repeat(64),
   r=>r.captures.http.sha256='0'.repeat(64),r=>r.captures.http.bytes++,r=>r.captures.http.file='../other.json',

@@ -1,4 +1,4 @@
-import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,CURRENT_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt} from './lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,CURRENT_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt} from './lib/ai-producer-receipt.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
 import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
@@ -790,6 +790,9 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     aiPhase = { runId: secureRandomBytes(16).toString("hex"), nonce: secureRandomBytes(32).toString("hex"), startedAt: Date.now(), before: await snapshotAiSource(root), captures: {} };
   }
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
+  const credentialPrefixIndex = migrations.findIndex((migration) => migration.fileName === AI_CREDENTIAL_PREFIX.migration);
+  const credentialPrefixTest = credentialPrefixIndex >= 0
+    ? (await snapshotRequestedFiles(root, [AI_CREDENTIAL_PREFIX.test]))[0] : null;
   const preflightTests = args.transactionalPreflight ? await snapshotRequestedFiles(root, TRANSACTIONAL_PREFLIGHT_TESTS) : [];
   const postdeployContract = args.postdeployContract
     ? (await snapshotRequestedFiles(root, [POSTDEPLOY_CONTRACT_PATH]))[0]
@@ -849,6 +852,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let relay = null;
   let ledgerVerification = null;
   const preflightVerification = [];
+  let credentialPrefixVerification = null;
   let primaryError = null;
   let lastPendingPublication = null;
   const validateContainerBoundary = (value, phase, options) => {
@@ -990,6 +994,20 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         log(JSON.stringify({ event: "isolated_supabase_db_transactional_preflight_passed", ...preflightVerification.at(-1) }));
       }
     }
+    if (credentialPrefixTest) {
+      // The rollback preflights above need every forward file. Apply a real,
+      // committed prefix now by withholding only the exact snapshotted suffix.
+      // Preserve each SQL file's own BEGIN/COMMIT and NOT VALID FK boundary.
+      const suffix = migrations.slice(credentialPrefixIndex + 1);
+      for (const migration of suffix) await rm(join(runtime.tempRoot, "supabase/migrations", migration.fileName));
+      await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
+      validateIsolatedMigrationLedger(await localLedger(), { forwardVersions: forwardVersions.slice(0, credentialPrefixIndex + 1) });
+      await stageContents(credentialPrefixTest.contents, join(runtime.tempRoot, credentialPrefixTest.path));
+      await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, credentialPrefixTest.path]);
+      credentialPrefixVerification = { ...AI_CREDENTIAL_PREFIX, committed: true };
+      log(JSON.stringify({ event: "isolated_ai_credential_committed_prefix_passed", ...credentialPrefixVerification }));
+      for (const migration of suffix) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
+    }
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
     if (args.verifyLocalLedger) {
       ledgerVerification = validateIsolatedMigrationLedger(await localLedger(), { forwardVersions });
@@ -1056,7 +1074,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (aiPhase) {
       const after = await snapshotAiSource(root);
       if (canonical(after) !== canonical(aiPhase.before)) fail("isolated_ai_source_closure_drift");
-      const receipt = { version: 1, ...aiPhase, after, finishedAt: Date.now(), migrations: CURRENT_AI_MIGRATIONS, sqlTests: args.tests, probes: args.probes };
+      const receipt = { version: 1, ...aiPhase, after, finishedAt: Date.now(), migrations: CURRENT_AI_MIGRATIONS, credentialPrefix: credentialPrefixVerification, sqlTests: args.tests, probes: args.probes };
       for (const identity of Object.keys(AI_PRODUCERS)) {
         const raw = await readFile(join(aiDirectory, AI_PRODUCERS[identity].file));
         try { validateAiReceipt(receipt, { expected: aiPhase, source: after, raw, identity }); } catch { fail("isolated_ai_receipt_invalid"); }
@@ -1072,12 +1090,12 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         || !/(?:#|ℹ) pass 2(?:\r?\n)/u.test(consumers.stdout)
         || !/(?:#|ℹ) skipped 0(?:\r?\n)/u.test(consumers.stdout)) fail("isolated_ai_consumers_failed");
       if (canonical(await snapshotAiSource(root)) !== canonical(after)) fail("isolated_ai_consumer_source_drift");
-      producerParity = { tests: 2, pass: 2, skipped: 0, sourceHead: after.sourceHead, closure: after.closure, captures: receipt.captures, migrations: receipt.migrations };
+      producerParity = { tests: 2, pass: 2, skipped: 0, sourceHead: after.sourceHead, closure: after.closure, captures: receipt.captures, migrations: receipt.migrations, credentialPrefix: receipt.credentialPrefix };
       log(JSON.stringify({ event: "isolated_ai_producer_parity_passed", ...producerParity }));
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath },
       verification: { internalNetwork: true, sqlTests: args.tests.length, probes: args.probes.length,
-        transactionalPreflights: preflightVerification, localLedger: ledgerVerification, producerParity } };
+        transactionalPreflights: preflightVerification, credentialPrefix: credentialPrefixVerification, localLedger: ledgerVerification, producerParity } };
   } catch (error) {
     primaryError = error;
     if (relay?.getDiagnostics) log(JSON.stringify({ event: "isolated_supabase_db_relay_diagnostics", ...relay.getDiagnostics() }));

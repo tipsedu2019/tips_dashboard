@@ -3326,6 +3326,74 @@ test("isolated CI runs baseline, both builder preflights and full suite on the o
   }
 });
 
+test("isolated CI commits the credential prefix, tests it before restoring the suffix, and stops on ACL-test or ledger failure", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const { AI_CREDENTIAL_PREFIX } = await import('../scripts/lib/ai-producer-receipt.mjs');
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const files = ['20261003084028_prefix_fixture.sql', AI_CREDENTIAL_PREFIX.migration, '20261003091944_suffix_fixture.sql'];
+  const contents = files.map((file) => `begin;\nselect '${file}';\ncommit;\n`);
+  for (const [index, file] of files.entries()) await writeFile(join(root, 'supabase/migrations', file), contents[index]);
+  const manifestPath = join(root, 'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.orderedNewMigrations = files.map((fileName, index) => ({ fileName, status: 'final', sha256: sha256(contents[index]) }));
+  await writeFile(manifestPath, JSON.stringify(manifest)); await activateCanonicalBaseline(root);
+  const prefixSql = await readFile(new URL(`../${AI_CREDENTIAL_PREFIX.test}`, import.meta.url));
+  await writeFile(join(root, AI_CREDENTIAL_PREFIX.test), prefixSql);
+  for (const scenario of ['passed', 'prefix-test-failure', 'prefix-ledger-drift']) {
+    let upCount = 0; let prefixCalled = false; const logs = []; const calls = [];
+    const run = runIsolatedSupabaseDbTests({ root,
+      argv: ['--execute', '--authorized', '--request-id', `credential-prefix-${scenario}`, '--verify-local-ledger'],
+      tempDirectory: await makeRunnerTempDirectory(t), executeNetwork: isolatedNetworkFixture,
+      allocatePort: (() => { let port = 56600; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        calls.push(invocation);
+        if (invocation.args[0] === 'migration' && invocation.args[1] === 'up') {
+          upCount += 1;
+          const staged = await readdir(join(invocation.cwd, 'supabase/migrations'));
+          if (upCount === 3) {
+            assert.equal(staged.includes(files[0]) && staged.includes(files[1]), true);
+            assert.equal(staged.includes(files[2]), false, 'suffix is withheld from the real prefix apply');
+          }
+          if (upCount === 4) {
+            assert.equal(prefixCalled, true, 'final apply cannot precede the committed-prefix pgTAP call');
+            assert.equal((await readFile(join(invocation.cwd, 'supabase/migrations', files[2]), 'utf8')), contents[2], 'exact suffix snapshot is restored only after prefix success');
+          }
+        }
+        if (invocation.args[0] === 'migration' && invocation.args[1] === 'list') {
+          const rows = Array.from({ length: 7 }, (_, index) => ({ local: String(index).padStart(14, '0'), remote: String(index).padStart(14, '0') }));
+          const applied = upCount >= 4 || scenario === 'prefix-ledger-drift' ? files : files.slice(0, 2);
+          rows.push(...applied.map((file) => ({ local: file.slice(0, 14), remote: file.slice(0, 14) })));
+          return { code: 0, stdout: JSON.stringify({ message: 'Migrations listed', migrations: rows }), stderr: '' };
+        }
+        if (invocation.args[0] === 'test' && invocation.args.includes(AI_CREDENTIAL_PREFIX.test)) {
+          assert.equal(upCount, 3, 'a separate command observes the already committed prefix');
+          assert.equal(invocation.args.includes('--network-id'), true);
+          assert.equal((await readFile(join(invocation.cwd, AI_CREDENTIAL_PREFIX.test))).equals(prefixSql), true);
+          assert.equal((await readdir(join(invocation.cwd, 'supabase/migrations'))).includes(files[2]), false);
+          prefixCalled = true;
+          if (scenario === 'prefix-test-failure') return { code: 1, stdout: 'Result: FAIL\n', stderr: 'synthetic_prefix_acl_regression' };
+          return { code: 0, stdout: 'Files=1, Tests=13, 1 wallclock secs\nResult: PASS\n', stderr: '' };
+        }
+        if (invocation.args[0] === 'status') return { code: 0, stdout: JSON.stringify({ DB_URL: 'postgresql://postgres:postgres@127.0.0.1:56602/postgres' }), stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    });
+    if (scenario === 'passed') {
+      const result = await run;
+      assert.deepEqual(result.verification.credentialPrefix, { ...AI_CREDENTIAL_PREFIX, committed: true });
+      assert.equal(upCount, 4);
+      assert.deepEqual(logs.find((entry) => entry.event === 'isolated_supabase_db_test_completed' && entry.testFiles.includes(AI_CREDENTIAL_PREFIX.test)).summary, { files: 1, tests: 13, result: 'PASS' });
+    } else {
+      await assert.rejects(run, scenario === 'prefix-test-failure' ? /isolated_supabase_db_child_failed/u : /isolated_supabase_db_ledger_drift/u);
+      assert.equal(upCount, 3, 'neither failed prefix verification can apply the suffix');
+      assert.equal(calls.some((call) => call.args[0] === 'status'), false);
+      assert.equal(logs.some((entry) => entry.event === 'isolated_ai_credential_committed_prefix_passed'), false);
+    }
+    assert.equal(calls.filter((call) => call.args[0] === 'stop').length, 1);
+    assert.deepEqual(logs.at(-1), { cleanup: 'succeeded', stop: 'succeeded', network: 'succeeded', tempRoot: 'removed' });
+  }
+});
+
 test("isolated CI uses an owned loopback relay only when internal Docker ports are unpublished", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);

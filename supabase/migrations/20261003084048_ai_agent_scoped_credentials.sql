@@ -140,7 +140,6 @@ begin
 exception when invalid_text_representation or numeric_value_out_of_range or invalid_datetime_format or datetime_field_overflow or invalid_parameter_value then raise exception using errcode='22023',message='ai_agent_invalid';
 end$$;
 revoke all on function public.create_ai_agent_credential_v1(text,text[],jsonb,timestamptz),public.list_ai_agent_credentials_v1(integer,integer),public.revoke_ai_agent_credential_v1(uuid),public.ai_agent_bot_api_v1(text,text,jsonb) from public,anon,authenticated,service_role;
-grant execute on function public.create_ai_agent_credential_v1(text,text[],jsonb,timestamptz),public.list_ai_agent_credentials_v1(integer,integer),public.revoke_ai_agent_credential_v1(uuid) to authenticated;
 grant execute on function public.ai_agent_bot_api_v1(text,text,jsonb) to service_role;
 -- Enforce new writes now without scanning existing rows under the stronger
 -- ADD FOREIGN KEY locks. Validate after this commit in the outbox migration.

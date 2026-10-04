@@ -13,6 +13,7 @@ export const AI_PRODUCERS=Object.freeze({
  chat:{path:'tests/probe-ai-agent-chat-runtime-concurrency.mjs',prefix:'AI_CHAT_RUNTIME_CAPTURE:',file:'chat.json'},
 });
 export const AI_CONSUMERS=Object.freeze(['tests/ai-agent-http-producer-parity.test.mjs','tests/ai-agent-chat-runtime-parity.test.mjs']);
+export const AI_CREDENTIAL_PREFIX=Object.freeze({migration:'20261003084048_ai_agent_scoped_credentials.sql',test:'supabase/tests/ai_agent_credentials_committed_prefix_test.sql'});
 // Explicit import closure, including type-only imports and the VM-loaded issuer.
 // No app/dependency/environment copy; packages resolve in the source checkout.
 export const AI_SOURCE_CLOSURE=Object.freeze([
@@ -22,6 +23,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'scripts/isolated-db-loopback-relay.mjs',
  'scripts/generate-ai-agent-probe-runtime.mjs',
  'scripts/lib/ai-agent-probe-runtime.mjs',
+ AI_CREDENTIAL_PREFIX.test,
  'package.json','package-lock.json',
  'supabase/test-baselines/dashboard-free-tier-v1.manifest.json',
  'tests/probe-ai-agent-http-producer.mjs',
@@ -43,14 +45,15 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
 ].sort());
 export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
  {"fileName": "20261003084028_ai_agent_requests.sql", "sha256": "5f4657b2e9835617caec86d7ff17bdd2bf94f664d8001e564031385cf85ea249", "status": "final"},
- {"fileName": "20261003084048_ai_agent_scoped_credentials.sql", "sha256": "a9eda6c04c1e7c8633b64813f8abbb7fd68e95308f66574156db846f0ed29d5e", "status": "final"},
+ {"fileName": "20261003084048_ai_agent_scoped_credentials.sql", "sha256": "809b8ec2ef1e72184dd8a0fc9933b99ece2698585cab2a9509761feb6f1482d9", "status": "final"},
  {"fileName": "20261003091944_ai_agent_request_lifecycle.sql", "sha256": "84b57276ead7a30c7a4a51e7cdfa6952dbf7ebc27542f935b634ad7c1921aa87", "status": "final"},
  {"fileName": "20261003092019_ai_agent_chat_outbox.sql", "sha256": "85a96399907447cf73b2e955dfbe39157fa116be3a49700177c58848ee34f614", "status": "final"},
  {"fileName": "20261003105447_ai_agent_space_policy.sql", "sha256": "794a67d1daaaf8aecaca81aad3d8d7363b9c9de1bcbecdcec9f219dd34e00692", "status": "final"},
  {"fileName": "20261003133222_ai_agent_chat_delivery_runtime.sql", "sha256": "a6f0400ec89c95c391d089226deb10e4d74acd847b4b8612ab349bc7b04efffb", "status": "final"},
 ]);
 // Current reviewed source pins. The authorized pre-install Squawk correction
-// supersedes two uninstalled SQL snapshots; prior receipts remain historical.
+// and intermediate-issuance ACL correction supersede uninstalled SQL snapshots;
+// prior receipts remain historical.
 export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
 ]);
@@ -98,6 +101,7 @@ export function validateAiReceipt(receipt,{expected,source,raw,identity,now=Date
  assert.deepEqual(receipt.sqlTests,AI_SQL_TESTS,'receipt SQL inventory');
  assert.deepEqual(receipt.probes,AI_PROBES,'receipt probe inventory');
  assert.deepEqual(receipt.migrations,CURRENT_AI_MIGRATIONS,'receipt migration drift');
+ assert.deepEqual(receipt.credentialPrefix,{...AI_CREDENTIAL_PREFIX,committed:true},'committed credential-prefix evidence required');
  assert.deepEqual(Object.keys(receipt.captures).sort(),['chat','http']);
  for(const [name,producer]of Object.entries(AI_PRODUCERS)){
   const c=receipt.captures[name];assert.equal(c.producer,producer.path);assert.equal(c.sourceSha256,source.closure.find(row=>row.path===producer.path).sha256);
