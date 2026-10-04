@@ -11,6 +11,7 @@ import {
 } from "@/features/makeup-requests/makeup-request-model.js"
 import { buildAcademicEventMutationPayload } from "@/features/operations/academic-event-utils.js"
 import { attemptMakeupApprovalReplay } from "@/features/makeup-requests/makeup-approval-replay.js"
+import { buildLegacyMakeupApprovalPlan } from "@/features/makeup-requests/makeup-approval-plan.js"
 
 export const runtime = "nodejs"
 
@@ -106,13 +107,30 @@ function prepareAcademicEvent(draft: JsonRecord) {
   }
 }
 
-function buildApprovalEffects(requestRow: JsonRecord, classRow: JsonRecord) {
+async function buildApprovalEffects(client: SupabaseClient, requestRow: JsonRecord, classRow: JsonRecord) {
   const schedulePlanBefore = isRecord(classRow.schedule_plan) ? classRow.schedule_plan : {}
-  const schedulePlanAfter = applyMakeupRequestToSchedulePlan(
-    schedulePlanBefore,
-    classRow,
-    requestRow,
-  )
+  let schedulePlanAfter: JsonRecord
+  if (classRow.schedule_storage_mode === "normalized") {
+    // The normalized SQL consumer owns its session effects; preserve that contract.
+    schedulePlanAfter = applyMakeupRequestToSchedulePlan(schedulePlanBefore, classRow, requestRow)
+  } else {
+    let teacher: JsonRecord | null = null
+    let classrooms: JsonRecord[] = []
+    if (hasMakeupPart(requestRow)) {
+      const roomNames = [...new Set(normalizeMakeupSlots(requestRow, text(requestRow.makeup_classroom)).map(slot => text(slot.classroom)))]
+      const [teacherResult, roomResult] = await Promise.all([
+        client.from("teacher_catalogs").select("id,name").eq("id", text(requestRow.teacher_catalog_id))
+          .abortSignal(AbortSignal.timeout(8_000)).retry(false).maybeSingle(),
+        client.from("classroom_catalogs").select("id,name").in("name", roomNames)
+          .abortSignal(AbortSignal.timeout(8_000)).retry(false),
+      ])
+      if (teacherResult.error) throw teacherResult.error
+      if (roomResult.error) throw roomResult.error
+      teacher = isRecord(teacherResult.data) ? teacherResult.data : null
+      classrooms = asArray(roomResult.data).filter(isRecord)
+    }
+    schedulePlanAfter = buildLegacyMakeupApprovalPlan(schedulePlanBefore, requestRow, { teacher, classrooms })
+  }
   const calendarDrafts = buildMakeupCalendarDrafts(requestRow)
   const calendarEvents = calendarDrafts.map((draft) => (
     prepareAcademicEvent(draft)
@@ -257,7 +275,7 @@ export async function POST(request: Request) {
         )) throw new Error("makeup_approval_context_invalid")
         assertNoRoomCollision(requestRow, context.classes as JsonRecord[], context.requests as JsonRecord[], context.academicEvents as JsonRecord[], [])
       }
-      Object.assign(patch, buildApprovalEffects(requestRow, classRow))
+      Object.assign(patch, await buildApprovalEffects(serverClient, requestRow, classRow))
     }
 
     const { data, error } = await serverClient.rpc("transition_makeup_request_v2", {
@@ -271,8 +289,12 @@ export async function POST(request: Request) {
     return completedApprovalResponse(data)
   } catch (error) {
     const message = text((error as { message?: unknown })?.message)
-    const status = makeupApprovalErrorStatus(error)
-    const userMessage = message === "makeup_room_collision"
+    const status = message === "makeup_approval_schedule_incomplete" ? 409 : makeupApprovalErrorStatus(error)
+    const userMessage = message === "makeup_approval_schedule_incomplete"
+      ? "신청된 보강 시간·선생님·강의실 또는 휴강 회차를 확인해 주세요."
+      : message === "timetable_resource_conflict"
+        ? "보강 일정에 충돌하거나 확인되지 않은 시간표 정보가 있어 승인하지 못했습니다."
+      : message === "makeup_room_collision"
       ? "보강 강의실 충돌이 있어 승인하지 못했습니다."
       : message === "makeup_request_source_changed"
         ? "신청 후 수업 정보가 변경되어 다시 확인해야 합니다."

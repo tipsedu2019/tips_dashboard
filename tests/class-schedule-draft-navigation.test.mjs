@@ -8,6 +8,7 @@ import ts from 'typescript';
 import { JSDOM } from 'jsdom';
 import { act, createElement, useEffect, StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
+import { buildLegacyMakeupApprovalPlan } from '../src/features/makeup-requests/makeup-approval-plan.js';
 import { buildSchedulePlanForSave } from '../src/lib/class-schedule-planner.js';
 
 const require = createRequire(import.meta.url), rootPath = path.resolve(import.meta.dirname, '..');
@@ -1333,3 +1334,27 @@ for (const kind of ['teacher', 'both', 'same-class', 'unknown-past']) {
     assert.doesNotMatch(panel.textContent, /23P01|timetable_resource_conflict|dashboard_private|[0-9a-f]{8}-[0-9a-f]{4}-/i);
   });
 }
+
+test('approved legacy request rows stay selectable but cannot be edited by date or calendar', async t => {
+  const payload = legacyRecoveryDetail({firstState:'active'});
+  const before = payload.classItem.schedulePlan;
+  const request = { id:id(750), teacher_catalog_id:id(101), request_kind:'cancel_makeup', cancel_date:'2026-10-01',
+    makeup_slots:[{startAt:'2026-10-02T10:00:00+09:00',endAt:'2026-10-02T11:00:00+09:00',classroom:'합성 강의실'},
+      {startAt:'2026-10-02T12:00:00+09:00',endAt:'2026-10-02T13:00:00+09:00',classroom:'합성 강의실'}] };
+  payload.classItem.schedulePlan=buildLegacyMakeupApprovalPlan(before,request,{teacher:{id:id(101),name:'합성 담당'},classrooms:[{id:id(201),name:'합성 강의실'}]});
+  const page = await recoveryEditor(t,payload);
+  for (const date of ['2026-10-01','2026-10-02']) {
+    const panel=await selectLegacyRecoveryRow(page,date);
+    assert.match(panel.textContent,/승인된 휴보강 일정/);
+    assert.equal(panel.querySelector('a[href="/admin/makeup-requests"]')?.textContent,'휴보강');
+    assert.equal(panel.querySelector('input[type="time"]'),null);
+    assert.equal(panel.querySelector('textarea'),null);
+    assert.equal(panel.querySelector('button[aria-label$="일정 해제"]'),null);
+    const cell=document.querySelector(`[data-lesson-calendar-date="${date}"]`);
+    assert.ok(cell); assert.equal(cell.draggable,false);
+    const previous=JSON.stringify(page.observed.lessonPlanDraft);
+    await act(async()=>cell.click());
+    assert.equal(JSON.stringify(page.observed.lessonPlanDraft),previous,'calendar click selects without changing state');
+  }
+  assert.equal(saveRequests(page).length,0);
+});
