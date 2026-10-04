@@ -203,6 +203,38 @@ def quote(value):
     return "'" + value.replace("'", "''") + "'"
 
 
+def snapshot_failure_code(stderr):
+    # Classify ephemeral stderr into a closed set. Never return provider text,
+    # parsed identifiers, or arbitrary SQLSTATE-like fragments.
+    if not isinstance(stderr, str) or len(stderr) > LIMIT:
+        return "read_only_snapshot_failed"
+    matches = set()
+    text = stderr.casefold()
+    if any(marker in text for marker in ("password authentication failed", "fe_sendauth: no password supplied", "sasl authentication failed")):
+        matches.add("read_only_snapshot_authentication_failed")
+    if any(marker in text for marker in ("certificate verify failed", "does not match host name")):
+        matches.add("read_only_snapshot_tls_verification_failed")
+    if any(marker in text for marker in ("could not translate host name", "name or service not known", "temporary failure in name resolution", "connection refused", "network is unreachable", "no route to host", "connection timed out", "timeout expired")):
+        matches.add("read_only_snapshot_network_failed")
+    sqlstates = {
+        "42501": "read_only_snapshot_sqlstate_42501",
+        "42P01": "read_only_snapshot_sqlstate_42P01",
+        "42703": "read_only_snapshot_sqlstate_42703",
+        "42883": "read_only_snapshot_sqlstate_42883",
+        "42601": "read_only_snapshot_sqlstate_42601",
+        "42804": "read_only_snapshot_sqlstate_42804",
+        "57014": "read_only_snapshot_sqlstate_57014",
+        "55P03": "read_only_snapshot_sqlstate_55P03",
+    }
+    for state, code in sqlstates.items():
+        # VERBOSITY sqlstate emits only severity and state, optionally prefixed
+        # by psql's file/line or error marker. Embedded codes/tails stay unknown.
+        pattern = r"(?m)^(?:psql:(?:[^:\r\n]+:[0-9]+:|[ \t]+error:)[ \t]*)?(?:ERROR|FATAL):[ \t]+" + state + r"[ \t]*$"
+        if re.search(pattern, stderr):
+            matches.add(code)
+    return next(iter(matches)) if len(matches) == 1 else "read_only_snapshot_failed"
+
+
 def snapshot(cfg, host, user, password, post=False):
     tables = "ARRAY[" + ",".join(quote(v) for v in cfg["tables"]) + "]::text[]"
     functions = "ARRAY[" + ",".join(quote(v) for v in cfg["functions"]) + "]::text[]"
@@ -220,13 +252,17 @@ SELECT json_build_object('issuanceOff',(SELECT count(*)=1 AND bool_and(NOT issua
     env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "PGHOST": host, "PGPORT": "5432", "PGUSER": user, "PGDATABASE": "postgres", "PGPASSWORD": password, "PGSSLMODE": "verify-full", "PGSSLROOTCERT": CA, "PGCONNECT_TIMEOUT": "10"}
     try:
         result = subprocess.run(["psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1"], env=env, input=sql, capture_output=True, text=True, timeout=30)
-        require(result.returncode == 0 and len(result.stdout) <= LIMIT, "read_only_snapshot_failed")
+        require(len(result.stdout) <= LIMIT and len(result.stderr) <= LIMIT, "read_only_snapshot_output_limit")
+        if result.returncode != 0:
+            raise Stop(snapshot_failure_code(result.stderr))
         records = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
         require(len(records) == (3 if post else 1), "snapshot_shape_invalid")
         require(records[0]["user"] == "postgres" and records[0]["readOnly"] == "on" and records[0]["tls"] is True, "snapshot_session_boundary_failed")
         return records
-    except (subprocess.TimeoutExpired, ValueError):
-        raise Stop("read_only_snapshot_failed") from None
+    except subprocess.TimeoutExpired:
+        raise Stop("read_only_snapshot_timeout") from None
+    except ValueError:
+        raise Stop("read_only_snapshot_invalid_json") from None
 
 
 def verify_initial(value, cfg):

@@ -263,5 +263,123 @@ class OfflineSafety(unittest.TestCase):
             self.assertTrue(owned_children[0].stderr.closed)
 
 
+    def test_snapshot_failure_classifier_only_returns_bounded_unambiguous_codes(self):
+        cases = [
+            ("FATAL: password authentication failed for user synthetic", "read_only_snapshot_authentication_failed"),
+            ("fe_sendauth: no password supplied", "read_only_snapshot_authentication_failed"),
+            ("SASL authentication failed", "read_only_snapshot_authentication_failed"),
+            ("SSL error: certificate verify failed", "read_only_snapshot_tls_verification_failed"),
+            ("server certificate does not match host name synthetic", "read_only_snapshot_tls_verification_failed"),
+            ("could not translate host name synthetic", "read_only_snapshot_network_failed"),
+            ("Temporary failure in name resolution", "read_only_snapshot_network_failed"),
+            ("connection refused", "read_only_snapshot_network_failed"),
+            ("network is unreachable", "read_only_snapshot_network_failed"),
+            ("no route to host", "read_only_snapshot_network_failed"),
+            ("connection timed out", "read_only_snapshot_network_failed"),
+            ("timeout expired", "read_only_snapshot_network_failed"),
+            ("SSL private key: no password supplied", "read_only_snapshot_failed"),
+            ("SSL connection has been closed unexpectedly", "read_only_snapshot_failed"),
+            ("authentication mechanism unavailable", "read_only_snapshot_failed"),
+            ("provider detail ERROR: 42501", "read_only_snapshot_failed"),
+            ("ERROR: A1B2C", "read_only_snapshot_failed"),
+            ("ERROR: 42501: provider detail", "read_only_snapshot_failed"),
+            ("ERROR: 42501X", "read_only_snapshot_failed"),
+            ("ERROR: 42501\nERROR: 42P01", "read_only_snapshot_failed"),
+            ("password authentication failed\ncertificate verify failed", "read_only_snapshot_failed"),
+            ("provider detail", "read_only_snapshot_failed"),
+        ]
+        states = ("42501", "42P01", "42703", "42883", "42601", "42804", "57014", "55P03")
+        for state in states:
+            cases.append(("ERROR:  " + state + "\n", "read_only_snapshot_sqlstate_" + state))
+        cases.extend([
+            ("psql:<stdin>:3: ERROR:  42501\n", "read_only_snapshot_sqlstate_42501"),
+            ("psql: error: FATAL:  42P01\n", "read_only_snapshot_sqlstate_42P01"),
+        ])
+        for index, (stderr, expected) in enumerate(cases):
+            with self.subTest(case=index):
+                self.assertEqual(module.snapshot_failure_code(stderr), expected)
+
+    def test_snapshot_failures_keep_provider_details_out_of_main_receipt_and_output(self):
+        marker = "synthetic-secret-sentinel-do-not-persist"
+        provider = "https://synthetic-provider.invalid/path?token=" + marker
+        host = "synthetic-session-host.invalid"
+        user = "synthetic-session-user"
+        tail = "\n" + marker + " " + provider + " " + host + " " + user + "\n"
+        cases = [
+            ("FATAL: password authentication failed for user " + user, "read_only_snapshot_authentication_failed"),
+            ("SSL error: certificate verify failed", "read_only_snapshot_tls_verification_failed"),
+            ("could not translate host name " + host + ": Name or service not known", "read_only_snapshot_network_failed"),
+            ("connection refused", "read_only_snapshot_network_failed"),
+            ("provider detail", "read_only_snapshot_failed"),
+            ("SSL private key: no password supplied", "read_only_snapshot_failed"),
+            ("SSL connection has been closed unexpectedly", "read_only_snapshot_failed"),
+            ("provider detail ERROR: 42501", "read_only_snapshot_failed"),
+            ("ERROR: A1B2C", "read_only_snapshot_failed"),
+            ("ERROR: 42501: provider detail", "read_only_snapshot_failed"),
+            ("password authentication failed\ncertificate verify failed", "read_only_snapshot_failed"),
+            ("ERROR: 42501\nERROR: 42P01", "read_only_snapshot_failed"),
+        ]
+        for state in ("42501", "42P01", "42703", "42883", "42601", "42804", "57014", "55P03"):
+            cases.append(("ERROR:  " + state, "read_only_snapshot_sqlstate_" + state))
+        outcomes = [(module.subprocess.CompletedProcess(["psql"], 1, "", stderr + tail), expected) for stderr, expected in cases]
+        outcomes.extend([
+            (module.subprocess.CompletedProcess(["psql"], 0, "{" + marker, tail), "read_only_snapshot_invalid_json"),
+            (module.subprocess.CompletedProcess(["psql"], 0, "X" * (module.LIMIT + 1) + marker, tail), "read_only_snapshot_output_limit"),
+            (module.subprocess.CompletedProcess(["psql"], 1, "", "X" * (module.LIMIT + 1) + tail), "read_only_snapshot_output_limit"),
+            (module.subprocess.TimeoutExpired(["psql", marker], 30, output=marker.encode(), stderr=tail.encode()), "read_only_snapshot_timeout"),
+        ])
+        fixtures = ROOT / ".codex-artifacts"
+        fixtures.mkdir(exist_ok=True)
+        for index, (outcome, expected) in enumerate(outcomes):
+            with self.subTest(case=index):
+                cfg, env = self.enabled()
+                cfg["readOnlyApprovalReceiptSha256"] = "b" * 64
+                env.update({"RELEASE_MODE": "preflight", "INSTALL_ACK": module.READ_ACK,
+                            "READ_ONLY_APPROVAL_RECEIPT_SHA256": "b" * 64,
+                            "SUPABASE_DB_PASSWORD": marker})
+                cwd = os.getcwd()
+                with tempfile.TemporaryDirectory(dir=fixtures) as owned:
+                    cfg_path = pathlib.Path(owned) / "cfg.json"
+                    cfg_path.write_text(json.dumps(cfg))
+                    captured, captured_error = io.StringIO(), io.StringIO()
+                    process = patch.object(module.subprocess, "run", side_effect=outcome) if isinstance(outcome, module.subprocess.TimeoutExpired) else patch.object(module.subprocess, "run", return_value=outcome)
+                    try:
+                        os.chdir(owned)
+                        with patch.dict(module.os.environ, env, clear=True), patch.object(module.sys, "argv", ["offline", str(cfg_path), owned, str(SCRIPT)]), patch.object(module, "source_gate"), patch.object(module.shutil, "which", return_value="/offline/psql"), patch.object(module.pathlib.Path, "is_file", return_value=True), patch.object(module, "endpoint", return_value=(host, user)), patch.object(module, "api", side_effect=AssertionError("network forbidden")) as api, process as psql, patch.object(module, "command", side_effect=AssertionError("CLI forbidden")) as cli, contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured_error):
+                            self.assertEqual(module.main(), 1)
+                            psql.assert_called_once()
+                            api.assert_not_called()
+                            cli.assert_not_called()
+                        receipt_text = pathlib.Path("safe-production-install-receipt.json").read_text()
+                        receipt = json.loads(receipt_text)
+                        self.assertEqual(receipt["failure"], expected)
+                        self.assertFalse(receipt["productionSuccess"])
+                        self.assertFalse(receipt["automaticRetry"])
+                        self.assertNotIn("before", receipt)
+                        output = receipt_text + captured.getvalue() + captured_error.getvalue()
+                        for forbidden in (marker, provider, host, user):
+                            self.assertNotIn(forbidden, output)
+                    finally:
+                        os.chdir(cwd)
+
+    def test_snapshot_keeps_verified_read_only_session_and_original_psql_boundary(self):
+        record = {"user": "postgres", "readOnly": "on", "tls": True}
+        result = module.subprocess.CompletedProcess(["psql"], 0, json.dumps(record) + "\n", "")
+        with patch.object(module.subprocess, "run", return_value=result) as psql:
+            self.assertEqual(module.snapshot(CFG, "synthetic-host.invalid", "synthetic-user", "synthetic-password"), [record])
+        args, kwargs = psql.call_args
+        self.assertEqual(args[0], ["psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1"])
+        self.assertEqual(kwargs["env"]["PGSSLMODE"], "verify-full")
+        self.assertEqual(kwargs["env"]["PGSSLROOTCERT"], module.CA)
+        self.assertEqual(kwargs["env"]["PGPORT"], "5432")
+        self.assertEqual(kwargs["timeout"], 30)
+        self.assertTrue(kwargs["input"].startswith("\\set VERBOSITY sqlstate\nBEGIN; SET TRANSACTION READ ONLY;"))
+        self.assertTrue(kwargs["input"].endswith("ROLLBACK;\n"))
+        insecure = module.subprocess.CompletedProcess(["psql"], 0, json.dumps({**record, "tls": False}) + "\n", "")
+        with patch.object(module.subprocess, "run", return_value=insecure):
+            with self.assertRaisesRegex(module.Stop, "snapshot_session_boundary_failed"):
+                module.snapshot(CFG, "synthetic-host.invalid", "synthetic-user", "synthetic-password")
+
+
 if __name__ == "__main__":
     unittest.main()
