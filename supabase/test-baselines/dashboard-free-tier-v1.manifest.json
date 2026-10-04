@@ -712,7 +712,7 @@
     },
     {
       "fileName": "20261003084048_ai_agent_scoped_credentials.sql",
-      "sha256": "a0ae48fa06def310113da34822f792416a85c0b4311acc1bc51397f30b53696a",
+      "sha256": "a9eda6c04c1e7c8633b64813f8abbb7fd68e95308f66574156db846f0ed29d5e",
       "status": "final"
     },
     {
@@ -722,7 +722,7 @@
     },
     {
       "fileName": "20261003092019_ai_agent_chat_outbox.sql",
-      "sha256": "95212aec139a02b259cc1f7a2ede7c8f7ea51526bb4d2ba2d6dbbbf804dfeedb",
+      "sha256": "85a96399907447cf73b2e955dfbe39157fa116be3a49700177c58848ee34f614",
       "status": "final"
     },
     {

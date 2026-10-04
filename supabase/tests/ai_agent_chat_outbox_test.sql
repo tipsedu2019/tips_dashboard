@@ -2,6 +2,15 @@ begin;
 select no_plan();
 select has_function('public','ai_agent_chat_api_v1',array['text','text','jsonb'],'service-only Chat gateway exists');
 select has_table('dashboard_private','chat_delivery_outbox','completion intent has independent durable store');
+select is((
+ select count(*) from pg_constraint c
+ join (values
+  ('ai_agent_claim_credential_fk','dashboard_private.ai_agent_request_claims'::regclass,'dashboard_private.ai_agent_credentials'::regclass),
+  ('ai_agent_event_credential_fk','dashboard_private.ai_agent_request_events'::regclass,'dashboard_private.ai_agent_credentials'::regclass),
+  ('ai_agent_event_issuer_fk','dashboard_private.ai_agent_request_events'::regclass,'public.profiles'::regclass)
+ ) expected(name,relation,referenced) on c.conname=expected.name and c.conrelid=expected.relation and c.confrelid=expected.referenced
+ where c.contype='f' and c.convalidated
+),3::bigint,'final migration chain validates all three credential and issuer foreign keys');
 create function pg_temp.ai_id(n integer) returns uuid language sql immutable as $$select ('ae030000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 insert into auth.users(id,instance_id,aud,role,email) select pg_temp.ai_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','ai-outbox-'||n||'@test.invalid' from generate_series(1,2)n;
 insert into public.profiles(id,role,name) select pg_temp.ai_id(n),case n when 1 then 'admin' else 'staff' end,'synthetic outbox' from generate_series(1,2)n on conflict(id) do update set role=excluded.role;
@@ -58,7 +67,7 @@ insert into ev values('sending',pg_temp.prepare('completion',301));
 select is((select v->'outbox'->>'state' from ev where k='sending'),'sending','durable attempt starts before transport');
 select is((select v->'attempt'->>'seq' from ev where k='sending'),'1','attempt event seq precision-safe');
 reset role;
-select is((select attempt_count from dashboard_private.chat_delivery_outbox where id=(select (v->>'id')::uuid from ev where k='completion')),1,'prepare increments durable count before any provider result');
+select is((select attempt_count from dashboard_private.chat_delivery_outbox where id=(select (v->>'id')::uuid from ev where k='completion')),1::bigint,'prepare increments durable count before any provider result');
 select is((select payload_hash from dashboard_private.ai_agent_request_receipts where principal_id=pg_temp.ai_id(3) and operation='prepare_attempt' and idempotency_key=pg_temp.ai_id(301)),encode(sha256(convert_to(jsonb_build_object('id',(select v->>'id' from ev where k='completion'),'revision','1')::text,'UTF8')),'hex'),'actual prepare receipt hashes full JSONB input excluding only idempotencyKey');
 select isnt((select payload_hash from dashboard_private.ai_agent_request_receipts where principal_id=pg_temp.ai_id(3) and operation='prepare_attempt' and idempotency_key=pg_temp.ai_id(301)),encode(sha256(convert_to(jsonb_build_object('revision','1')::text,'UTF8')),'hex'),'prepare fingerprint includes outbox identity');
 set local role service_role;
@@ -159,7 +168,7 @@ create function pg_temp.exhaust_retries() returns jsonb language plpgsql as $$de
  if n=2 then insert into ev values('second_retry',result);end if;
  end loop;return result;end$$;
 select is(pg_temp.exhaust_retries()->'outbox'->>'state','failed','maximum five attempts exhaust definite retry policy');
-select is((select attempt_count from dashboard_private.chat_delivery_outbox where id=(select (v->>'id')::uuid from ev where k='retry')),5,'retry cap is stored in DB');
+select is((select attempt_count from dashboard_private.chat_delivery_outbox where id=(select (v->>'id')::uuid from ev where k='retry')),5::bigint,'retry cap is stored in DB');
 select ok((select (v->'outbox'->>'attemptCount')::integer=2 and v->'outbox'->>'state'='retry_wait' and extract(epoch from (v->'outbox'->>'readyAt')::timestamptz-(v->'outbox'->>'updatedAt')::timestamptz)>=3.99 and extract(epoch from (v->'outbox'->>'readyAt')::timestamptz-(v->'outbox'->>'updatedAt')::timestamptz)<5.01 from ev where k='second_retry'),'second definite 429 stores four seconds plus subsecond jitter with count two');
 set local role service_role;
 insert into ev values('budget',pg_temp.bridge(repeat('e',64),'event-budget',420));

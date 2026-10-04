@@ -34,9 +34,6 @@ create table dashboard_private.chat_user_space_permissions (
 );
 create index ai_agent_credentials_issuer_created on dashboard_private.ai_agent_credentials(created_by,created_at desc,id);
 create index chat_user_space_permissions_configurer on dashboard_private.chat_user_space_permissions(configured_by);
-alter table dashboard_private.ai_agent_request_claims add constraint ai_agent_claim_credential_fk foreign key(credential_id) references dashboard_private.ai_agent_credentials(id);
-alter table dashboard_private.ai_agent_request_events add constraint ai_agent_event_credential_fk foreign key(credential_id) references dashboard_private.ai_agent_credentials(id);
-alter table dashboard_private.ai_agent_request_events add constraint ai_agent_event_issuer_fk foreign key(issuer_id) references public.profiles(id);
 alter table dashboard_private.ai_agent_credentials enable row level security;
 alter table dashboard_private.ai_agent_credential_grants enable row level security;
 alter table dashboard_private.chat_credential_space_grants enable row level security;
@@ -145,4 +142,9 @@ end$$;
 revoke all on function public.create_ai_agent_credential_v1(text,text[],jsonb,timestamptz),public.list_ai_agent_credentials_v1(integer,integer),public.revoke_ai_agent_credential_v1(uuid),public.ai_agent_bot_api_v1(text,text,jsonb) from public,anon,authenticated,service_role;
 grant execute on function public.create_ai_agent_credential_v1(text,text[],jsonb,timestamptz),public.list_ai_agent_credentials_v1(integer,integer),public.revoke_ai_agent_credential_v1(uuid) to authenticated;
 grant execute on function public.ai_agent_bot_api_v1(text,text,jsonb) to service_role;
+-- Enforce new writes now without scanning existing rows under the stronger
+-- ADD FOREIGN KEY locks. Validate after this commit in the outbox migration.
+alter table dashboard_private.ai_agent_request_claims add constraint ai_agent_claim_credential_fk foreign key(credential_id) references dashboard_private.ai_agent_credentials(id) not valid;
+alter table dashboard_private.ai_agent_request_events add constraint ai_agent_event_credential_fk foreign key(credential_id) references dashboard_private.ai_agent_credentials(id) not valid;
+alter table dashboard_private.ai_agent_request_events add constraint ai_agent_event_issuer_fk foreign key(issuer_id) references public.profiles(id) not valid;
 commit;

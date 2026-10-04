@@ -43,13 +43,14 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
 ].sort());
 export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
  {"fileName": "20261003084028_ai_agent_requests.sql", "sha256": "5f4657b2e9835617caec86d7ff17bdd2bf94f664d8001e564031385cf85ea249", "status": "final"},
- {"fileName": "20261003084048_ai_agent_scoped_credentials.sql", "sha256": "a0ae48fa06def310113da34822f792416a85c0b4311acc1bc51397f30b53696a", "status": "final"},
+ {"fileName": "20261003084048_ai_agent_scoped_credentials.sql", "sha256": "a9eda6c04c1e7c8633b64813f8abbb7fd68e95308f66574156db846f0ed29d5e", "status": "final"},
  {"fileName": "20261003091944_ai_agent_request_lifecycle.sql", "sha256": "84b57276ead7a30c7a4a51e7cdfa6952dbf7ebc27542f935b634ad7c1921aa87", "status": "final"},
- {"fileName": "20261003092019_ai_agent_chat_outbox.sql", "sha256": "95212aec139a02b259cc1f7a2ede7c8f7ea51526bb4d2ba2d6dbbbf804dfeedb", "status": "final"},
+ {"fileName": "20261003092019_ai_agent_chat_outbox.sql", "sha256": "85a96399907447cf73b2e955dfbe39157fa116be3a49700177c58848ee34f614", "status": "final"},
  {"fileName": "20261003105447_ai_agent_space_policy.sql", "sha256": "794a67d1daaaf8aecaca81aad3d8d7363b9c9de1bcbecdcec9f219dd34e00692", "status": "final"},
  {"fileName": "20261003133222_ai_agent_chat_delivery_runtime.sql", "sha256": "a6f0400ec89c95c391d089226deb10e4d74acd847b4b8612ab349bc7b04efffb", "status": "final"},
 ]);
-// Immutable accepted prefix; only the separately reviewed forward fix is appended.
+// Current reviewed source pins. The authorized pre-install Squawk correction
+// supersedes two uninstalled SQL snapshots; prior receipts remain historical.
 export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
 ]);

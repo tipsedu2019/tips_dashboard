@@ -2,6 +2,12 @@ begin;
 set local lock_timeout='5s';
 set local statement_timeout='120s';
 
+-- The credentials migration committed its NOT VALID additions. Validate in
+-- this separate transaction, so the row scan does not retain those ADD locks.
+alter table dashboard_private.ai_agent_request_claims validate constraint ai_agent_claim_credential_fk;
+alter table dashboard_private.ai_agent_request_events validate constraint ai_agent_event_credential_fk;
+alter table dashboard_private.ai_agent_request_events validate constraint ai_agent_event_issuer_fk;
+
 -- Runtime configuration is server-owned; these seven slots start unconfigured.
 -- No RPC in this migration activates a slot or writes a provider URL/secret.
 create table dashboard_private.chat_space_configuration (
@@ -26,7 +32,7 @@ create table dashboard_private.chat_delivery_outbox (
  upstream_request_id uuid not null default gen_random_uuid() unique,
  state text not null default 'pending' check(state in('pending','sending','sent','retry_wait','failed','delivery_unknown','cancelled','incident')),
  revision bigint not null default 1 check(revision>0),
- reason text, attempt_count integer not null default 0 check(attempt_count between 0 and 5),
+ reason text, attempt_count bigint not null default 0 check(attempt_count between 0 and 5),
  active_attempt_id uuid, lease_expires_at timestamptz,
  ready_at timestamptz not null default clock_timestamp(),
  created_at timestamptz not null default clock_timestamp(), updated_at timestamptz not null default clock_timestamp(),
@@ -43,7 +49,7 @@ create table dashboard_private.chat_delivery_attempts (
  created_at timestamptz not null default clock_timestamp(), unique(attempt_id,seq)
 );
 create table dashboard_private.chat_send_global_budget (
- singleton boolean primary key default true check(singleton), minute timestamptz, count integer not null default 0 check(count between 0 and 60)
+ singleton boolean primary key default true check(singleton), minute timestamptz, count bigint not null default 0 check(count between 0 and 60)
 );
 insert into dashboard_private.chat_send_global_budget(singleton) values(true);
 create table dashboard_private.chat_space_send_budgets (
