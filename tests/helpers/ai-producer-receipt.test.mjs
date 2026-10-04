@@ -51,3 +51,18 @@ test('source snapshot rejects undeclared local imports, missing source and canon
   await rm(file);await assert.rejects(snapshotAiSource(root),/ENOENT/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('source closure rejects side-effect imports before accepting source provenance',async()=>{
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-side-effect-'));
+ try{
+  const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+  for(const path of [...AI_SOURCE_CLOSURE,...ACCEPTED_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  const file=join(root,'src/features/ai-agent/server/ai-agent-auth.ts'),original=await readFile(file);
+  for(const statement of ['import "./unhashed-side-effect.ts";','import\n "./unhashed-side-effect.ts";','import "@/unhashed-side-effect";','import /* side effect */ "./unhashed-side-effect.ts";',String.raw`import "\u002e\u002funhashed-side-effect.ts";`,String.raw`import('\x2e\x2funhashed-side-effect.ts');`,String.raw`export {x} from "\u002e\u002funhashed-side-effect.ts";`,String.raw`import x from "\u002e\u002funhashed-side-effect.ts";`,String.raw`require("\u002e\u002funhashed-side-effect.ts");`]){
+   await writeFile(file,original+'\n'+statement+'\n');
+   await assert.rejects(snapshotAiSource(root),/import outside audited AI closure/);
+  }
+ }finally{await rm(root,{recursive:true,force:true});}
+});

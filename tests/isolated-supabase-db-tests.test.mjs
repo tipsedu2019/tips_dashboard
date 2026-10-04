@@ -3398,3 +3398,35 @@ test('AI producer parity is a fixed sole-execute phase and rejects a thin/retain
  await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity','--transactional-preflight','--verify-local-ledger',...AI_SQL_TESTS.flatMap(p=>['--test',p]),...AI_PROBES.flatMap(p=>['--probe',p])],retainTempRoot:true,executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
  assert.equal(launched,0);
 });
+
+test('host deadline bounds a real pre-test hang and confirms TERM/KILL reaping', {timeout:6000},async(t)=>{
+ const runner=await import(runnerUrl.href);
+ assert.equal(typeof runner.executeProcessWithDeadline,'function');
+ const root=await makeRunnerTempDirectory(t);
+ const command="import {writeFileSync} from 'node:fs'; writeFileSync('pid',String(process.pid)); process.on('SIGTERM',()=>writeFileSync('term','seen')); setInterval(()=>{},1000);";
+ const started=Date.now();
+ await assert.rejects(runner.executeProcessWithDeadline({command:process.execPath,args:['--input-type=module','-e',command],cwd:root,env:{PATH:process.env.PATH}}, {timeoutMs:250}),/isolated_supabase_db_host_deadline_exceeded/);
+ assert.ok(Date.now()-started<5500,'host hang must have a finite deadline and reaping grace');
+ const pid=Number(await readFile(join(root,'pid'),'utf8'));assert.equal(await readFile(join(root,'term'),'utf8'),'seen');assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+});
+
+test('host deadline rejects a late successful executor after cancellation',async()=>{
+ const runner=await import(runnerUrl.href);assert.equal(typeof runner.executeProcessWithDeadline,'function');
+ await assert.rejects(runner.executeProcessWithDeadline({command:'synthetic-no-child',args:[]},{timeoutMs:10,executeProcess:async({signal})=>{await new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));return {code:0,stdout:'',stderr:''};}}),/isolated_supabase_db_host_deadline_exceeded/);
+});
+
+test('final stop and network removal get host deadlines while cleanup failure preserves primary error',async(t)=>{
+ const {runIsolatedSupabaseDbTests}=await import(runnerUrl.href);
+ const root=await makeRepo(t);await configureEmptyReviewedRunnerRepo(root);const cleanup=[];const logs=[];
+ await assert.rejects(runIsolatedSupabaseDbTests({root,argv:['--execute','--authorized','--request-id','fix-round1-cleanup-negative'],tempDirectory:await makeRunnerTempDirectory(t),allocatePort:(()=>{let port=56400;return ()=>++port;})(),
+  executeNetwork:async(invocation)=>{if(invocation.args[0]==='network'&&invocation.args[1]==='rm'){cleanup.push(invocation);return {code:1,stdout:'',stderr:''};}const result=await isolatedNetworkFixture(invocation);if(invocation.args[0]==='inspect'){const containers=JSON.parse(result.stdout);containers[0].NetworkSettings.Networks.bridge={NetworkID:'b'.repeat(64)};result.stdout=JSON.stringify(containers);}return result;},
+  executeProcess:async(invocation)=>{if(invocation.args[0]==='stop'){cleanup.push(invocation);return {code:1,stdout:'',stderr:''};}return {code:0,stdout:'',stderr:''};},log:line=>logs.push(JSON.parse(line))}),/container_network_invalid/u);
+ assert.equal(cleanup.length,2);
+ for(const call of cleanup){assert.ok(call.signal instanceof AbortSignal,'cleanup subprocess must have host cancellation');assert.equal(call.timeoutMs,call.args[0]==='stop'?30000:10000);}
+ assert.deepEqual(logs.at(-1),{cleanup:'failed',stop:'failed',network:'failed',tempRoot:'removed'});
+});
+
+test('host deadline fails closed when an injected executor never settles after cancellation',{timeout:7000},async()=>{
+ const {executeProcessWithDeadline}=await import(runnerUrl.href);
+ await assert.rejects(executeProcessWithDeadline({command:'synthetic-no-child',args:[]},{timeoutMs:10,executeProcess:()=>new Promise(()=>{})}),/isolated_supabase_db_owned_child_reaping_failed/);
+});

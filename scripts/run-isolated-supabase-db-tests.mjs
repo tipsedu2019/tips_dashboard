@@ -164,20 +164,50 @@ export function processResult(command, args, options = {}) {
     const stdoutChunks = []; const stderrChunks = [];
     let processError;
     let killTimer;
+    let reapTimer;
     child.stdout.on("data", (chunk) => { stdoutChunks.push(chunk); });
     child.stderr.on("data", (chunk) => { stderrChunks.push(chunk); });
     // AbortError can arrive before the process exits. Reap this owned child
     // before returning to resource cleanup; escalate only that child if needed.
     child.on("error", (error) => {
       processError = error;
-      killTimer ||= setTimeout(() => child.kill("SIGKILL"), 2000);
+      killTimer ||= setTimeout(() => {
+        child.kill("SIGKILL");
+        reapTimer = setTimeout(() => rejectPromise(new Error("isolated_supabase_db_owned_child_reaping_failed")), 2000);
+      }, 2000);
     });
     child.on("close", (code) => {
       clearTimeout(killTimer);
+      clearTimeout(reapTimer);
       if (processError) rejectPromise(processError);
       else resolvePromise({ code, stdout: decodeUtf8ProcessChunks(stdoutChunks), stderr: decodeUtf8ProcessChunks(stderrChunks) });
     });
   });
+}
+
+// Host limits include pre-test imports; Node's per-test timeout cannot bound those.
+export const HOST_PROCESS_DEADLINES = Object.freeze({ aiConsumers: 75_000, stop: 30_000, networkRemove: 10_000 });
+export async function executeProcessWithDeadline(invocation, { timeoutMs = invocation.timeoutMs,
+  executeProcess = (value) => processResult(value.command, value.args, value) } = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 300_000) fail("isolated_supabase_db_host_deadline_invalid");
+  const controller = new AbortController();
+  const signal = invocation.signal ? AbortSignal.any([invocation.signal, controller.signal]) : controller.signal;
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; controller.abort(); }, timeoutMs);
+  // processResult waits for close after TERM, then KILL, and fails on unconfirmed reaping.
+  // The outer fallback also prevents a broken injected executor from blocking finally.
+  let fallback;
+  try {
+    const result = await Promise.race([
+      executeProcess({ ...invocation, timeoutMs, signal }),
+      new Promise((_resolve, reject) => { fallback = setTimeout(() => reject(new Error("isolated_supabase_db_owned_child_reaping_failed")), timeoutMs + 5000); }),
+    ]);
+    if (expired) fail("isolated_supabase_db_host_deadline_exceeded");
+    return result;
+  } catch (error) {
+    if (expired && error.message !== "isolated_supabase_db_owned_child_reaping_failed") fail("isolated_supabase_db_host_deadline_exceeded");
+    throw error;
+  } finally { clearTimeout(timer); clearTimeout(fallback); }
 }
 
 export function parseIsolatedDbArguments(argv) {
@@ -1033,10 +1063,10 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       }
       const receiptPath = join(aiDirectory, "receipt.json");
       await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600, flag: "wx" });
-      const consumers = await executeProcess({ command: process.execPath,
+      const consumers = await executeProcessWithDeadline({ command: process.execPath, timeoutMs: HOST_PROCESS_DEADLINES.aiConsumers,
         args: ["--test", "--test-timeout=60000", "--experimental-strip-types", ...AI_CONSUMERS], cwd: root,
         env: { ...cleanEnvironment, TASK_AI_RECEIPT: receiptPath, TASK_AI_CAPTURE_DIRECTORY: aiDirectory,
-          TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt) } });
+          TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt) } }, { executeProcess });
       // Raw producer credentials and private attestation values never enter logs.
       if (consumers.code !== 0 || !/(?:#|ℹ) tests 2(?:\r?\n)/u.test(consumers.stdout)
         || !/(?:#|ℹ) pass 2(?:\r?\n)/u.test(consumers.stdout)
@@ -1068,7 +1098,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (startAttempted) {
       stopAttempted = true;
       try {
-        const stopResult = await executeProcess({ command: supabasePath, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment });
+        const stopResult = await executeProcessWithDeadline({ command: supabasePath, timeoutMs: HOST_PROCESS_DEADLINES.stop, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment }, { executeProcess });
         stopState = stopResult?.code === 0 ? "succeeded" : "failed";
       } catch {
         stopState = "failed";
@@ -1077,7 +1107,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
     if (networkCreated) {
       try {
-        const result = await executeNetwork({ command: "docker", args: ["network", "rm", runtime.networkName], cwd: runtime.tempRoot, env: cleanEnvironment });
+        const result = await executeProcessWithDeadline({ command: "docker", timeoutMs: HOST_PROCESS_DEADLINES.networkRemove, args: ["network", "rm", runtime.networkName], cwd: runtime.tempRoot, env: cleanEnvironment }, { executeProcess: executeNetwork });
         networkState = result?.code === 0 ? "succeeded" : "failed";
       } catch { networkState = "failed"; }
       cleanupFailed ||= networkState === "failed";

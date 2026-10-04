@@ -5,6 +5,7 @@ import {readFile, lstat} from 'node:fs/promises';
 import {execFileSync} from 'node:child_process';
 import {join,dirname,resolve} from 'node:path';
 import {fileURLToPath} from 'node:url';
+import {runInNewContext} from 'node:vm';
 const ROOT=resolve(fileURLToPath(new URL('../..',import.meta.url)));
 const hash=bytes=>createHash('sha256').update(bytes).digest('hex');
 export const AI_PRODUCERS=Object.freeze({
@@ -64,8 +65,11 @@ export async function snapshotAiSource(root=ROOT){
  for(const path of AI_SOURCE_CLOSURE){
   const contents=await readFile(join(root,path));
   // Fail closed if a local import is added outside the audited allowlist.
-  if(/\.[mt]?[js]+x?$/u.test(path))for(const match of contents.toString().matchAll(/(?:\bfrom\s*|\bimport\s*\(|\brequire\s*\()\s*['"]([^'"]+)['"]/gu)){
-   const spec=match[1];if(!spec.startsWith('.')&&!spec.startsWith('@/'))continue;
+  if(/\.[mt]?[js]+x?$/u.test(path))for(const match of contents.toString().matchAll(/(?:\bfrom|\bimport(?:\s*\()?|\brequire\s*\()\s*(?:\/\*[\s\S]*?\*\/\s*)*((['"])(?:\\[\s\S]|(?!\2)[^\\\r\n])*\2)/gu)){
+   // Evaluate only the matched quoted literal, never application/source code.
+   // JS Unicode/hex escapes must be decoded before classifying local imports.
+   const spec=runInNewContext(match[1],Object.create(null),{timeout:50});
+   if(!spec.startsWith('.')&&!spec.startsWith('@/'))continue;
    const stem=spec.startsWith('@/')?'src/'+spec.slice(2):join(dirname(path),spec);
    assert.ok([stem,stem+'.ts',stem+'.tsx',stem+'.js',stem+'.mjs'].some(target=>AI_SOURCE_CLOSURE.includes(target)),'import outside audited AI closure');
   }

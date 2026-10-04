@@ -1184,6 +1184,10 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
     "isolated_ci_ai_static_inventory_mismatch")
   reject((unfolded.match(/node --test[^\n]*tests\/ai-agent-/g) || []).length !== 1,
     "isolated_ci_ai_static_command_count_mismatch")
+  const staticStep = staticText.split(/^ {6}- name: /m).find((step) => step.startsWith("Test AI agent and Chat contracts\n")) || ""
+  const staticBody = staticStep.split(/\n\s*run: \|\n/)[1]?.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " ")).filter(Boolean) || []
+  reject(!equalJson(staticBody,[`node --test --experimental-strip-types ${AI_STATIC_TESTS.join(" ")}`]),
+    "isolated_ci_ai_static_body_mismatch")
   for (const [job, target] of [[staticJob, "node --test --experimental-strip-types \\"],
     [isolatedJob, "node scripts/run-isolated-supabase-db-tests.mjs"]]) {
     const installations = job.map((line, index) => line.trim() === "run: npm ci --ignore-scripts" ? index : -1).filter((index) => index >= 0)

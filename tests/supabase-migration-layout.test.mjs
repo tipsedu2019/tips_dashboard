@@ -2271,3 +2271,16 @@ test('AI registration semantic guards fail independently of workflow hash pins',
    assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(`--probe ${path}`,value),kind),'isolated_ci_probe_inventory_mismatch');
  }
 });
+
+test('AI static step rejects successful early exit and extra run-body commands without workflow hash checks',async()=>{
+ for(const [file,kind]of [['supabase-db-push.yml','main'],['supabase-sql-review.yml','pr']]){
+  const source=await readFile(join(repoRoot,'.github/workflows',file),'utf8');
+  const prefix='      - name: Test AI agent and Chat contracts\n        run: |\n';
+  assert.ok(source.includes(prefix));assert.deepEqual(validateIsolatedCiWorkflow(source,kind),[]);
+  for(const command of ['exit 0','set +e','if false; then','echo skipped; exit 0']){
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(prefix,prefix+'          '+command+'\n'),kind),'isolated_ci_ai_static_body_mismatch');
+  }
+  const start=source.indexOf(prefix),end=source.indexOf('\n      - name:',start+prefix.length);
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,end)+'\n          exit 0\n'+source.slice(end),kind),'isolated_ci_ai_static_body_mismatch');
+ }
+});
