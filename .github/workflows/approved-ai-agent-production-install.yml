@@ -32,7 +32,7 @@ jobs:
     env:
       APPROVED_SOURCE_SHA: '93b2b34646ad1ceb16989a4eceb33f2b44651ed1'
       # Pin independently reviewed deployment tooling; source checkout remains distinct.
-      REVIEWED_RUNNER_SHA: 'd1d11f1e0361b9d989d2be1b102d96ef00661891'
+      REVIEWED_RUNNER_SHA: 'd41410c94fe654f5a5489b54bb21bc9f1ffa6017'
       INSTALL_APPROVAL_RECEIPT_SHA256: 'f3ff9102db2fe46c02a56b36136c27f08eaf1a9a7b73483f087bda287d6c3cf9'
       READ_ONLY_APPROVAL_RECEIPT_SHA256: '8b09ee1c9ce30d076ad7ecf31914e5e43a7b88021348ba83288ea802215d76b3'
       RELEASE_MODE: ${{ inputs.mode }}
