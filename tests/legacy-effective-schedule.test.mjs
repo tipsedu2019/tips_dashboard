@@ -90,3 +90,13 @@ test('effective wire contract rejects malformed bounds and accepts unknown compo
     assert.equal(isEffectiveMakeupSchedule({ version: 1, occupancies: [row] }), false);
   }
 });
+
+test('an unknown date retains independently explicit bounds without inheriting defaults', () => {
+  const result = resolveEffectiveSchedule({ ...input, session: { id: 'bad-date-known-range', date: 'not-a-date', startTime: '09:00', endTime: '10:00', classroomName: '기본 강의실' } });
+  assert.equal(result.kind, 'unresolved');
+  assert.deepEqual(result.errors, ['invalid_date']);
+  assert.equal(result.values.startTime, '09:00');
+  assert.equal(result.values.endTime, '10:00');
+  assert.equal(result.values.classroomCatalogId, 'room-a');
+  assert.equal(result.values.teacherCatalogId, null, 'invalid date has no inherited slot');
+});

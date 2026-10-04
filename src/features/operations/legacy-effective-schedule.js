@@ -29,13 +29,17 @@ export function resolveEffectiveSchedule(input) {
   if (!text(row.id || row.sessionKey) || (input.identityCount ?? 1) !== 1) out.errors.push('ambiguous_identity');
   if (!dateValid(date)) out.errors.push('invalid_date');
   if (!['active', 'makeup', 'exception', 'skipped', 'tbd'].includes(state)) out.errors.push('invalid_state');
-  if (out.errors.length) return out;
-  if (['exception', 'skipped', 'tbd'].includes(state)) { out.kind = 'cancelled'; return out; }
+  // A bad date cannot erase independently explicit bounds/resources. It never
+  // inherits a weekday or becomes resolved, but can retain a bounded blocker.
+  const explicitOnInvalidDate = out.errors.length === 1 && out.errors[0] === 'invalid_date'
+    && [...fields, 'teacherName', 'classroomName'].some(key => own(row, key));
+  if (out.errors.length && !explicitOnInvalidDate) return out;
+  if (!out.errors.length && ['exception', 'skipped', 'tbd'].includes(state)) { out.kind = 'cancelled'; return out; }
 
   // Explicit dates are authoritative. A weekday is only a basic-slot selector.
   // For a date outside all basic weekdays, inherit only each unanimously known
   // component, never invent a choice between different basic times/resources.
-  const allSlots = (input.basicSlots || []).filter(object);
+  const allSlots = dateValid(date) ? (input.basicSlots || []).filter(object) : [];
   const weekday = new Date(`${date}T00:00:00Z`).getUTCDay();
   let slots, basicSource;
   if (own(row, 'sourceSlotId')) {

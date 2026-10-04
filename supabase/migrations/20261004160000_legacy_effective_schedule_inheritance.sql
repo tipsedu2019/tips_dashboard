@@ -20,12 +20,13 @@ begin
   if d!~'^[0-9]{4}-[0-9]{2}-[0-9]{2}$' or dt::text<>d then raise exception 'invalid date';end if;
  exception when others then errors:=errors||'"invalid_date"'::jsonb;end;
  if state not in('active','makeup','exception','skipped','tbd') then errors:=errors||'"invalid_state"'::jsonb;end if;
- if errors<>'[]'::jsonb then
+ if errors<>'[]'::jsonb and not (errors='["invalid_date"]'::jsonb and lesson ?| array['startTime','endTime','teacherCatalogId','classroomCatalogId','teacherName','classroomName']) then
   return jsonb_build_object('date',d,'state',state,'kind',kind,'values',vals,'provenance',provenance,'missing',missing,'errors',errors);
  end if;
- if state in('exception','skipped','tbd') then
+ if errors='[]'::jsonb and state in('exception','skipped','tbd') then
   return jsonb_build_object('date',d,'state',state,'kind','cancelled','values',vals,'provenance',provenance,'missing',missing,'errors',errors);
  end if;
+ if errors ? 'invalid_date' then allslots:='[]';dt:=null;end if;
  if lesson ? 'sourceSlotId' then
   select coalesce(jsonb_agg(s),'[]') into slots from jsonb_array_elements(allslots) s where coalesce(lesson->>'sourceSlotId','')<>'' and s->>'id'=lesson->>'sourceSlotId';
   basic_source:='basic_bound_slot';

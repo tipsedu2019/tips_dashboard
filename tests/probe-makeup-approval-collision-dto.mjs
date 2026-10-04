@@ -70,7 +70,7 @@ async function probeEffectiveApprovalConcurrency() {
   const first = fixtures[0];
   let serialized = JSON.stringify(first);
   for (const [from, to] of [[101,107],[201,207],[1010,1070],[1011,1071]]) serialized = serialized.replaceAll(id(from), id(to));
-  const other = JSON.parse(serialized); other.n = 7;
+  const other = JSON.parse(serialized); other.n = 7; other.schedule = '금 11:00-12:00';
   fixtures.push(other);
   const auth = name => `begin; set local statement_timeout='20s'; set local application_name=${quote(name)}; set local role service_role; select set_config('request.jwt.claim.sub','${id(901)}',true); select set_config('request.jwt.claim.role','service_role',true);\n`;
   const approve = (fixture, key) => `select public.transition_makeup_request_v2('${fixture.request.id}','approve',${quote(JSON.stringify(fixture.patch))}::jsonb,'approval_pending','${id(key)}');\n`;
