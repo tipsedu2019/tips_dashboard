@@ -131,10 +131,16 @@ const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
   "9d17673238a1dc53dccdb23450a064d74b1c4974259e01c755894202d13a329a"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
+// This separately reviewed, owner-approved manual release is not isolated CI.
+// Only its exact path AND complete bytes may cross that execution boundary.
+const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
+const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
+  "01ed679016a4102a001ef31f0127cacd8863e9068948602bc2ef4b9737f01b16"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
   ["free-tier-guardrails.yml", "8102aff17e018730f6e9138126a6379b69da5ca04835e4f04a115fbc4be0f710"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
+  [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
 ])
 const APPROVED_GITHUB_ACTION_REFS = Object.freeze([
   ["actions/checkout", "08c6903cd8c0fde910a37f88322edcfb5dd907a8"],
@@ -1695,6 +1701,8 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         reportedActions.add(actionName)
       }
     }
+    if (workflowRelativeToDirectory === APPROVED_MANUAL_PRODUCTION_WORKFLOW
+      && sha256(workflow) === APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256) continue
     const kind = workflowRelativeToDirectory === REQUIRED_DB_PUSH_WORKFLOW ? "main"
       : workflowRelativeToDirectory === REQUIRED_SQL_REVIEW_WORKFLOW ? "pr"
         : workflowRelativeToDirectory === "free-tier-guardrails.yml" ? "guardrails" : "other"

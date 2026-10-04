@@ -1,0 +1,6 @@
+{
+  "authority": "parent /root; delegated task /root/ci_registration_implementation",
+  "sourceHead": "93b2b34646ad1ceb16989a4eceb33f2b44651ed1",
+  "scope": "Existing task authorization for the scoped read-only prerequisite check; no seven-migration installation approval. Proposal remains unactivated and unexecuted until runner review and activation. No new credential grant or login.",
+  "parentInstructionVerbatim": "Avoid gratuitous new owner approval for readonly already task authorized: READ_ONLY_APPROVAL_RECEIPT can pin current parent task authorization/task thread reference, not imply need new SQL/credential grant owner question. New runner activation still unapproved/unconfigured so reviewed runner SHA/proposalOnly guards retain. Distinguish manual preflight approval task existing vs new installation owner receipt."
+}
