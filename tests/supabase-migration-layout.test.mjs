@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import test, { after } from "node:test"
+import test, { after, afterEach } from "node:test"
 
 import * as migrationLayoutVerifier from "../scripts/verify-supabase-migration-layout.mjs"
 import {
@@ -32,7 +32,7 @@ const isolatedRunnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs
 const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
-const fixtureRoots = []
+const fixtureRoots = new Set()
 const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "28cd3acdf63086f20bf9c5ff9b831f8efeac3d322de8e4aa81ee2bd9a9e698bf"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
@@ -264,18 +264,33 @@ async function sha256(path) {
 
 async function createRepoFixture() {
   const fixtureRoot = await mkdtemp(join(tmpdir(), "tips-supabase-migration-layout-"))
-  fixtureRoots.push(fixtureRoot)
-  await Promise.all([
+  fixtureRoots.add(fixtureRoot)
+  const copies = await Promise.allSettled([
     cp(join(repoRoot, ".github"), join(fixtureRoot, ".github"), { recursive: true }),
     cp(join(repoRoot, "supabase"), join(fixtureRoot, "supabase"), { recursive: true }),
     copyFile(join(repoRoot, ".squawk.toml"), join(fixtureRoot, ".squawk.toml")),
   ])
+  for (const copy of copies) {
+    if (copy.status === "rejected") throw copy.reason
+  }
   await mkdir(join(fixtureRoot, "scripts"), { recursive: true })
   await copyFile(
     join(repoRoot, "scripts", "verify-supabase-postdeploy-contract.mjs"),
     join(fixtureRoot, "scripts", "verify-supabase-postdeploy-contract.mjs"),
   )
   return fixtureRoot
+}
+
+async function removeRepoFixture(fixtureRoot) {
+  await rm(fixtureRoot, { force: true, recursive: true })
+  fixtureRoots.delete(fixtureRoot)
+}
+
+async function cleanupRepoFixtures() {
+  const removals = await Promise.allSettled([...fixtureRoots].map(removeRepoFixture))
+  for (const removal of removals) {
+    if (removal.status === "rejected") throw removal.reason
+  }
 }
 
 function assertIncludesErrorCode(errors, code) {
@@ -325,9 +340,8 @@ async function validateWorkflowFixture(source) {
   return validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
 }
 
-after(async () => {
-  await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
-})
+afterEach(cleanupRepoFixtures)
+after(cleanupRepoFixtures)
 
 test("원격 이력과 정렬한 migration identity와 바이트를 독립 상수로 고정한다", async () => {
   for (const [file, expectedHash] of REMOTE_HISTORY_ALIGNED_SQL) {
@@ -2149,17 +2163,21 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   for (const [name, predicate] of requiredPredicates) {
     assert.ok(source.includes(predicate), `missing source predicate: ${name}`)
     const fixtureRoot = await createRepoFixture()
-    const fixturePath = join(
-      fixtureRoot,
-      "supabase",
-      "tests",
-      "active_registration_workflow_postdeploy_readonly.sql",
-    )
-    await writeFile(fixturePath, source.replace(predicate, `removed_${name.replaceAll(" ", "_")}`))
-    assertIncludesErrorCode(
-      await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }),
-      "postdeploy_contract_sql_hash_mismatch",
-    )
+    try {
+      const fixturePath = join(
+        fixtureRoot,
+        "supabase",
+        "tests",
+        "active_registration_workflow_postdeploy_readonly.sql",
+      )
+      await writeFile(fixturePath, source.replace(predicate, `removed_${name.replaceAll(" ", "_")}`))
+      assertIncludesErrorCode(
+        await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }),
+        "postdeploy_contract_sql_hash_mismatch",
+      )
+    } finally {
+      await removeRepoFixture(fixtureRoot)
+    }
   }
 })
 

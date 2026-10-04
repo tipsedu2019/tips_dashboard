@@ -91,11 +91,11 @@ select throws_ok($q$select pg_temp.bridge(repeat('e',64),'event-unauthorized',31
 select throws_ok($q$select pg_temp.bridge(repeat('f',64),'event-1',316,'{"text":" Synthetic reply"}')$q$,'23514','ai_agent_idempotency_conflict','same event leading text whitespace changes identity');
 select throws_ok($q$select pg_temp.bridge(repeat('f',64),'event-1',317,'{"text":"Synthetic reply "}')$q$,'23514','ai_agent_idempotency_conflict','same event trailing text whitespace changes identity');
 reset role;
-update dashboard_private.chat_space_configuration set configured=false where space_key='space_1';
+update dashboard_private.chat_space_configuration set configured=false,resource_name=null where space_key='space_1';
 set local role service_role;
 select throws_ok($q$select pg_temp.bridge(repeat('f',64),'event-1',318)$q$,'42501','ai_agent_space_forbidden','current configuration precedes stable source dedupe receipt');
 reset role;
-update dashboard_private.chat_space_configuration set configured=true where space_key='space_1';
+update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/fixture_space' where space_key='space_1';
 select is((select count(*) from dashboard_private.chat_delivery_outbox where bridge_source_id=pg_temp.ai_id(5)),1::bigint,'stable bridge dedupe creates only one intent');
 update dashboard_private.chat_space_send_budgets set last_dispatch_at=clock_timestamp()-interval '2 seconds';
 set local role service_role;
