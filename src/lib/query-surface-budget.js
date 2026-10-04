@@ -112,6 +112,11 @@ const EXACT_CONTINUOUS_SCHEDULE_OPERATION_RPC_NAMES = new Set([
   "generate_class_lesson_sessions_v1",
   "save_class_lesson_session_v1",
   "save_class_lesson_content_v1",
+  // Final 20261002114145 + agent_past_lesson_state_correction_test.sql:
+  // one authorized selected-lesson review or idempotent correction receipt.
+  // Only pagination is inapplicable; finite response budgets and retry(false) stay mandatory.
+  "preview_past_lesson_state_correction_v1",
+  "save_past_lesson_state_correction_v1",
 ])
 
 // Pageable, not scalar: additions require final migration + pgTAP proof of a
@@ -1627,14 +1632,18 @@ function analyzeChain({ surface, file, symbol, scope, query }) {
       else if (value > 30) reasons.push("rpc_page_limit_exceeds_30")
     }
   }
-  // This exact authorized, idempotent class mutation returns one receipt. Its
-  // 20s response budget avoids aborting a committed save at the DB's 8s boundary.
-  // Keep every read/other RPC at 8s and retain the retry(false) proof below.
+  // These exact authorized class operations return one review/receipt. Preserve
+  // their existing 20s response budget, including reviewed past-correction saves.
+  // Other RPCs keep the 8s budget; retry(false) remains mandatory for every call.
   const entryArguments = query.entryArguments ?? query.entry.arguments
-  const classMutationResponseBudget = query.directMethod === "rpc"
-    && entryArguments[0] && lexicalLiteralValue(entryArguments[0]) === "update_class_operational_v1"
+  const classOperationResponseBudget = query.directMethod === "rpc"
+    && entryArguments[0] && [
+      "update_class_operational_v1",
+      "preview_past_lesson_state_correction_v1",
+      "save_past_lesson_state_correction_v1",
+    ].includes(lexicalLiteralValue(entryArguments[0]))
     && isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"), 20000)
-  if (query.directMethod && !legacyFullCompatibility && !classMutationResponseBudget
+  if (query.directMethod && !legacyFullCompatibility && !classOperationResponseBudget
     && !isExactTimeoutAbortSignal(finalOperation(query.operations, "abortSignal"))) reasons.push("list_abort_signal_missing")
   const retry = finalOperation(query.operations, "retry")
   if (query.directMethod && !legacyFullCompatibility && !(retry && retry.arguments.length === 1 && retry.arguments[0].kind === ts.SyntaxKind.FalseKeyword)) reasons.push("list_retry_false_missing")

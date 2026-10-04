@@ -134,7 +134,7 @@ function rpcFixture(count = 2) {
     warnings: count ? [{ code: 'unknown_occupancy', count }] : [] };
   const calls = [], controls = { failure: null, malformed: null };
   const action = createLegacyPastStateCorrectionAction({ createRequestKey: () => 'ab000000-0000-4000-8000-000000000009',
-    rpc: async (name, args) => {
+    invoke: async (name, args) => {
       calls.push({ name, args: structuredClone(args) });
       if (controls.failure) return { data: null, error: controls.failure };
       if (controls.malformed !== null) return { data: controls.malformed, error: null };

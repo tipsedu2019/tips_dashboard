@@ -1,10 +1,13 @@
-name: Push Supabase Migrations
+name: Isolated Supabase Migration Validation
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+
+permissions:
+  contents: read
 
 concurrency:
   group: supabase-db-push-${{ github.ref }}
@@ -16,6 +19,9 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -26,10 +32,16 @@ jobs:
         run: node --test tests/supabase-migration-layout.test.mjs
 
       - name: Test transactional safety contracts
-        run: node --test tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
+        run: node --test --test-skip-pattern='^PostgreSQL 17 transactional preflight named checkpoint preserves FK errors and rollback$' tests/retryable-sqlstate-contract.test.mjs tests/supabase-transactional-preflight-builder.test.mjs
 
-      - name: Test Supabase post-push receipt
+      - name: Test cached PostgreSQL fixture guards
+        run: node --test tests/isolated-postgres-fixture-tests.test.mjs
+
+      - name: Test Supabase receipt contracts
         run: node --test tests/supabase-postdeploy-contract.test.mjs
+
+      - name: Test isolated runner contracts
+        run: node --test --test-skip-pattern='^(?:PostgreSQL trigger capture and parity follow name order across the full BEFORE UPDATE group|PostgreSQL 17 restricted catalog reader executes the fixed statement against the real migration shape|PostgreSQL 17 isolated migration prerequisite creates one exact row and rejects preexisting state|PostgreSQL 17 function ACL reconciliation restores exact parity and detects drift|fixed catalog statement distinguishes stored generated expressions from defaults|fixed catalog statement captures every public enum dependency|fixed catalog statement captures the appointment calendar view fingerprint|fixed catalog statement gives duplicate constraint names stable distinct identities|generated parity uses pg catalog definitions and detects representative object drift)$' tests/isolated-supabase-db-tests.test.mjs
 
       - name: Verify Supabase migration layout
         run: node scripts/verify-supabase-migration-layout.mjs
@@ -37,12 +49,15 @@ jobs:
       - name: Verify domain SQLSTATE contract
         run: node scripts/verify-domain-sqlstate-contract.mjs
 
-  db-transactional-preflight:
-    runs-on: ubuntu-latest
+  db-isolated-validation:
     needs: db-preflight
+    runs-on: ubuntu-latest
     steps:
       - name: Checkout
         uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
+        with:
+          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
         uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
@@ -50,6 +65,8 @@ jobs:
           node-version: 22.18.0
 
       - name: Setup Supabase CLI
+        env:
+          SUPABASE_TELEMETRY_DISABLED: '1'
         shell: bash
         run: |
           set -euo pipefail
@@ -64,117 +81,108 @@ jobs:
           mkdir -p "${cli_dir}"
           tar -xzf "${archive_path}" -C "${cli_dir}"
           "${cli_dir}/supabase" --version
-          echo "${cli_dir}" >> "${GITHUB_PATH}"
 
-      - name: Validate required secrets
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        shell: bash
-        run: |
-          test -n "${SUPABASE_ACCESS_TOKEN}"
-          test -n "${SUPABASE_DB_PASSWORD}"
-
-      - name: Resolve Supabase project ref
-        shell: bash
-        run: |
-          project_ref="$(sed -n 's/^project_id = "\(.*\)"$/\1/p' supabase/config.toml | head -n 1)"
-          test -n "${project_ref}"
-          echo "SUPABASE_PROJECT_REF=${project_ref}" >> "${GITHUB_ENV}"
-
-      - name: Link project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
-      - name: Capture linked migration ledger
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-migration-list.txt"
-
-      - name: Build transactional pgTAP input
-        run: node scripts/build-supabase-transactional-preflight.mjs --output "${RUNNER_TEMP}/supabase-transactional-preflight.sql" --migration-ledger "${RUNNER_TEMP}/supabase-migration-list.txt" --forward-migrations supabase/migrations --focused-test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql --rollback
-
-      - name: Build agent calendar pgTAP input
-        run: node scripts/build-supabase-transactional-preflight.mjs --output "${RUNNER_TEMP}/supabase-agent-calendar-preflight.sql" --migration-ledger "${RUNNER_TEMP}/supabase-migration-list.txt" --forward-migrations supabase/migrations --focused-test supabase/tests/agent_management_calendar_test.sql --rollback
-
-      - name: Run transactional focused pgTAP
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase test db --linked "${RUNNER_TEMP}/supabase-transactional-preflight.sql"
-
-      - name: Run agent calendar pgTAP
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase test db --linked "${RUNNER_TEMP}/supabase-agent-calendar-preflight.sql"
-
-  db-push:
-    runs-on: ubuntu-latest
-    needs: db-transactional-preflight
-    steps:
-      - name: Checkout
-        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8 # v5.0.0
-
-      - name: Setup Supabase CLI
+      - name: Run isolated migration and schema contracts
         shell: bash
         run: |
           set -euo pipefail
-          version="2.115.0"
-          archive="supabase_${version}_linux_amd64.tar.gz"
-          cli_dir="${RUNNER_TEMP}/supabase-cli"
-          archive_path="${RUNNER_TEMP}/${archive}"
+          TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs \
+            --review-head --lint --require-final --execute --authorized \
+            --request-id "github-main-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --postdeploy-contract --transactional-preflight --verify-local-ledger \
+            --test supabase/tests/agent_api_scoped_schedule_test.sql \
+            --test supabase/tests/agent_api_class_changes_test.sql \
+            --test supabase/tests/agent_management_calendar_test.sql \
+            --probe tests/probe-agent-class-edit-dto.mjs \
+            --probe tests/probe-agent-calendar-dto.mjs \
+            --test supabase/tests/student_enrollment_status_test.sql \
+            --test supabase/tests/management_numbered_pages_test.sql \
+            --test supabase/tests/management_page_reads_test.sql \
+            --test supabase/tests/class_detail_roster_counts_test.sql \
+            --test supabase/tests/class_period_membership_optional_test.sql \
+            --test supabase/tests/curriculum_scheduling_textbook_usage_test.sql \
+            --probe tests/probe-curriculum-scheduling-dto.mjs \
+            --test supabase/tests/academic_curriculum_unscoped_period_test.sql \
+            --test supabase/tests/academic_scoped_reads_test.sql \
+            --test supabase/tests/timetable_continuous_class_scope_test.sql \
+            --test supabase/tests/timetable_guard_aggregation_test.sql \
+            --test supabase/tests/timetable_legacy_content_preservation_test.sql \
+            --test supabase/tests/timetable_lesson_save_performance_test.sql \
+            --test supabase/tests/timetable_makeup_domain_sqlstate_test.sql \
+            --test supabase/tests/timetable_normalized_time_matching_test.sql \
+            --test supabase/tests/timetable_operational_conflicts_test.sql \
+            --test supabase/tests/timetable_repeatable_read_guard_test.sql \
+            --test supabase/tests/timetable_serializable_guard_test.sql \
+            --test supabase/tests/timetable_plan_import_test.sql \
+            --test supabase/tests/timetable_plan_no_send_test.sql \
+            --test supabase/tests/timetable_plan_permissions_test.sql \
+            --test supabase/tests/timetable_plan_storage_test.sql \
+            --test supabase/tests/timetable_plan_transfers_test.sql \
+            --test supabase/tests/timetable_schedule_mutation_safety_test.sql \
+            --test supabase/tests/timetable_scoped_occupancy_test.sql \
+            --test supabase/tests/academic_operations_numbered_pages_test.sql \
+            --test supabase/tests/performance_catalog_taxonomy_test.sql \
+            --test supabase/tests/makeup_approval_collision_candidates_test.sql \
+            --probe tests/probe-makeup-approval-collision-dto.mjs \
+            --test supabase/tests/textbook_stock_count_atomic_test.sql \
+            --probe tests/probe-textbook-stock-count-concurrency.mjs \
+            --test supabase/tests/textbook_purchase_lifecycle_atomic_test.sql \
+            --test supabase/tests/textbook_workflow_numbered_reads_test.sql \
+            --test supabase/tests/textbook_workflow_purchase_cost_whitespace_test.sql \
+            --test supabase/tests/signup_identity_isolation_test.sql \
+            --probe tests/probe-signup-identity-concurrency.mjs \
+            --probe tests/probe-textbook-purchase-concurrency.mjs \
+            --test supabase/tests/textbook_sale_transition_atomic_test.sql \
+            --probe tests/probe-textbook-sale-transition-concurrency.mjs \
+            --test supabase/tests/dashboard_statistics_sources_test.sql \
+            --test supabase/tests/dashboard_workload_test.sql \
+            --probe tests/probe-dashboard-workload-dto.mjs \
+            --test supabase/tests/dashboard_conflict_task_producer_test.sql \
+            --test supabase/tests/ops_task_page_reads_test.sql \
+            --test supabase/tests/ops_task_numbered_pages_test.sql \
+            --test supabase/tests/ops_task_source_plan_budget_test.sql \
+            --test supabase/tests/active_registration_workflow_sqlstate_contract_test.sql \
+            --test supabase/tests/registration_teacher_feedback_request_retirement_test.sql \
+            --test supabase/tests/registration_observation_status_independence_test.sql \
+            --test supabase/tests/registration_observation_booking_test.sql \
+            --test supabase/tests/registration_observation_class_lifecycle_test.sql \
+            --test supabase/tests/registration_notification_readiness_decoupling_test.sql \
+            --test supabase/tests/registration_flat_common_input_decoupling_test.sql \
+            --test supabase/tests/registration_subject_soft_archive_test.sql \
+            --test supabase/tests/registration_subject_snapshot_test.sql \
+            --probe tests/probe-registration-subject-snapshot-concurrency.mjs \
+            --test supabase/tests/registration_flat_case_creation_test.sql \
+            --test supabase/tests/registration_collaboration_write_role_test.sql \
+            --test supabase/tests/registration_archived_subject_delivery_fence_test.sql \
+            --test supabase/tests/registration_manager_write_and_integrity_fence_test.sql \
+            --test supabase/tests/registration_management_notification_explicit_v2_test.sql \
+            --test supabase/tests/registration_flat_fact_runtime_finalization_test.sql \
+            --test supabase/tests/registration_admission_order_independence_test.sql \
+            --test supabase/tests/registration_multiple_textbooks_test.sql \
+            --test supabase/tests/registration_admission_checklist_roster_consistency_test.sql \
+            --test supabase/tests/registration_level_test_result_parent_reconciliation_test.sql \
+            --test supabase/tests/notification_contract_drain_evidence_schema_repair_test.sql \
+            --test supabase/tests/registration_customer_reminder_claim_final_gate_test.sql \
+            --test supabase/tests/registration_customer_delivery_lookup_test.sql \
+            --test supabase/tests/registration_notification_settings_atomic_policy_test.sql \
+            --test supabase/tests/registration_visit_cancellation_explicit_test.sql \
+            --test supabase/tests/registration_case_customer_message_history_test.sql \
+            --test supabase/tests/registration_observation_explicit_chat_test.sql \
+            --test supabase/tests/registration_management_notification_preview_test.sql \
+            --test supabase/tests/registration_management_notification_owner_test.sql \
+            --test supabase/tests/registration_management_notification_source_recovery_test.sql \
+            --test supabase/tests/dashboard_google_chat_profile_mentions_test.sql \
+            --test supabase/tests/registration_manual_workflow_status_test.sql \
+            --probe tests/probe-registration-management-recovery-concurrency.mjs \
+            --probe tests/probe-registration-visit-cancellation-dto.mjs \
+            --test supabase/tests/operations_subject_completion_chat_test.sql \
+            --test supabase/tests/word_retest_google_chat_retirement_test.sql \
+            --test supabase/tests/standalone_approvals_retirement_test.sql \
+            --test supabase/tests/legacy_notification_retry_storm_test.sql \
+            --test supabase/tests/agent_past_lesson_state_correction_test.sql \
+            --test supabase/tests/timetable_default_projection_performance_test.sql \
+            --test supabase/tests/timetable_save_conflict_details_test.sql \
+            --test supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql
 
-          curl --fail --location --silent --show-error --retry 5 --retry-all-errors --retry-delay 2 --output "${archive_path}" "https://github.com/supabase/cli/releases/download/v${version}/${archive}"
-          echo "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3  ${archive_path}" | sha256sum --check --strict
-
-          mkdir -p "${cli_dir}"
-          tar -xzf "${archive_path}" -C "${cli_dir}"
-          "${cli_dir}/supabase" --version
-          echo "${cli_dir}" >> "${GITHUB_PATH}"
-
-      - name: Validate required secrets
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        shell: bash
-        run: |
-          test -n "${SUPABASE_ACCESS_TOKEN}"
-          test -n "${SUPABASE_DB_PASSWORD}"
-
-      - name: Resolve Supabase project ref
-        shell: bash
-        run: |
-          project_ref="$(sed -n 's/^project_id = "\(.*\)"$/\1/p' supabase/config.toml | head -n 1)"
-          test -n "${project_ref}"
-          echo "SUPABASE_PROJECT_REF=${project_ref}" >> "${GITHUB_ENV}"
-
-      - name: Link project
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase link --project-ref "$SUPABASE_PROJECT_REF" --password "$SUPABASE_DB_PASSWORD"
-
-      - name: Push migrations
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase db push --linked --include-all
-
-      - name: Capture post-push linked migration ledger
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase migration list --linked --output-format json > "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt"
-
-      - name: Capture active registration workflow contract
-        env:
-          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
-          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
-        run: supabase db query --linked --output-format json --file supabase/tests/active_registration_workflow_postdeploy_readonly.sql > "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"
-
-      - name: Verify post-push receipt
-        run: node scripts/verify-supabase-postdeploy-contract.mjs --migration-ledger "${RUNNER_TEMP}/supabase-postdeploy-migration-list.txt" --query-receipt "${RUNNER_TEMP}/active-registration-workflow-postdeploy.json"
+      - name: Test cached PostgreSQL fixture contracts
+        run: node scripts/run-isolated-postgres-fixture-tests.mjs

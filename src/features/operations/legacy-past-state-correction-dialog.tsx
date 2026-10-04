@@ -41,7 +41,7 @@ export function LegacyPastStateCorrectionDialog({ open, onOpenChange, classId, e
   const currentRef = useRef({ open, scopeKey, isCurrent });
   currentRef.current = { open, scopeKey, isCurrent };
   const errorRef = useRef<HTMLDivElement>(null);
-  const action = useMemo(() => createLegacyPastStateCorrectionAction({ rpc }), [rpc]);
+  const action = useMemo(() => createLegacyPastStateCorrectionAction({ invoke: rpc }), [rpc]);
   useEffect(() => { activeRef.current = true; return () => { activeRef.current = false; }; }, []);
   useEffect(() => { onDirtyChange(open && Boolean(reason.trim())); }, [onDirtyChange, open, reason]);
   useEffect(() => {

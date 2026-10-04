@@ -84,7 +84,7 @@ test("public classes API preserves class plans and their supporting catalogs", a
   );
   assert.deepEqual(payload.classes[0].schedulePlan, {
     textbooks: [],
-    sessions: [{ id: "session-1" }],
+    sessions: [{ id: "session-1", displaySessionNumber: null }],
   });
   assert.equal(payload.textbooks[0].id, "textbook-1");
   assert.equal(payload.textbooks[0].title, "교재");
