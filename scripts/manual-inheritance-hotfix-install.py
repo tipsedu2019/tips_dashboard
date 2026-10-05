@@ -41,7 +41,7 @@ STALE_SOURCE = False  # Exact bounded replacement reviewed; proposal/owner gates
 SOURCE = "1eccff3254b7024dc242bcffd11eb4505ff0700c"
 MIGRATION = "20261004160000_legacy_effective_schedule_inheritance.sql"
 SQL_SHA256 = "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
-CONTRACT_SHA256 = "f6dcf4d177af273f26d2d9da8360300a8249a47b5dce62f2afa2dc2d97675d03"
+CONTRACT_SHA256 = "c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484"
 SAFE_RECEIPT = "inheritance-hotfix-safe-receipt.json"
 
 
@@ -258,6 +258,17 @@ def load_contract():
     return cfg
 
 
+def install_pause_gate(cfg, env):
+    # The immutable authority binds a required scope, not a current pause fact.
+    # An operator must freshly attest that scope and hold it until verification.
+    pause = cfg["installationQuiescence"]
+    require(env.get("INSTALL_PAUSE_ACK") == pause["pauseAck"], "install_pause_ack_missing")
+    epoch = env.get("INSTALL_PAUSE_AT_EPOCH", "")
+    require(isinstance(epoch, str) and re.fullmatch(r"[0-9]{10}", epoch), "install_pause_epoch_invalid")
+    age = time.time() - int(epoch)
+    require(0 <= age < pause["pauseAttestationMaxAgeSeconds"], "install_pause_attestation_stale_or_future")
+
+
 def approval_gate(cfg, env, credentials=True):
     receipt_hash = cfg.get("approvalReceiptSha256")
     require(isinstance(receipt_hash, str) and HEX64.fullmatch(receipt_hash), "owner_authority_pending")
@@ -279,10 +290,10 @@ def approval_gate(cfg, env, credentials=True):
         "after": cfg["after"],
         "allowedModes": ["preflight", "install"],
         "maxInstallDispatches": 1,
-        "otherDatabaseWritersPausedForInstall": True,
+        "installationQuiescence": cfg["installationQuiescence"],
         "noAutomaticRetryRepairOrRollback": True,
     }
-    require(isinstance(authority, dict) and all(canonical(authority.get(k)) == canonical(v) for k, v in expected.items()), "owner_authority_scope_mismatch")
+    require(isinstance(authority, dict) and "otherDatabaseWritersPausedForInstall" not in authority and all(canonical(authority.get(k)) == canonical(v) for k, v in expected.items()), "owner_authority_scope_mismatch")
     now = time.time()
     approved, expires = authority.get("approvedAtEpoch"), authority.get("expiresAtEpoch")
     require(type(approved) in (int, float) and type(expires) in (int, float) and approved <= now < expires <= approved + 86400, "owner_authority_expired_or_invalid")
@@ -292,6 +303,8 @@ def approval_gate(cfg, env, credentials=True):
     mode = env.get("RELEASE_MODE", "preflight")
     require(mode in ("preflight", "install"), "invalid_release_mode")
     require(env.get("INSTALL_ACK") == (READ_ACK if mode == "preflight" else ACK), "manual_ack_missing")
+    if mode == "install":
+        install_pause_gate(cfg, env)
     if credentials:
         require(bool(env.get("SUPABASE_DB_PASSWORD", "").strip()), "provided_db_password_required")
         require(bool(env.get("SUPABASE_ACCESS_TOKEN", "").strip()), "existing_api_token_required")
@@ -417,6 +430,9 @@ def install_once(cfg, source, cli, host, user, password, receipt):
     ca_gate()
     dsn = f"host={host} port=5432 user={user} dbname=postgres sslmode=verify-full sslrootcert={CA} connect_timeout=10"
     child_env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "PGPASSWORD": password, "SUPABASE_TELEMETRY_DISABLED": "1"}
+    # Recheck after source/CA validation and immediately before the only push.
+    # Expiry stops without invoking the CLI; it never resumes business writers.
+    install_pause_gate(cfg, os.environ)
     receipt["phase"] = "one_pr97_canonical_push"
     # Native filename/version. No include-all, temporary SQL view, seed, vault,
     # role update, history repair, compensation or retry, including on timeout.

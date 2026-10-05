@@ -322,12 +322,12 @@ after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
 })
 
-test("approved PR97 installer passes all 30 offline safety tests without inherited secrets", async () => {
+test("PR97 installer proposal passes all 37 offline safety tests without inherited secrets", async () => {
   const suitePath = join(repoRoot, "tests", "manual-inheritance-hotfix-install.test.py")
-  assert.equal(await sha256(suitePath), "ee96e9d8de9883c25b03b1380dc6a809822786fa9f034e70798492d7f687cb0a")
+  assert.equal(await sha256(suitePath), "87c46955d6a1b52fad649ba5ae63805e38575bd1b76bcb9a38f9279ba66fc907")
   assert.equal(
     await sha256(join(repoRoot, "scripts", "manual-inheritance-hotfix-install.py")),
-    "94493a4b14d6a99cde1e63c983be6e236135f06aa81a4433df36012730dabac9",
+    "e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5",
   )
   const result = spawnSync("python3", [suitePath], {
     cwd: repoRoot,
@@ -343,7 +343,7 @@ test("approved PR97 installer passes all 30 offline safety tests without inherit
   assert.ifError(result.error)
   const output = `${result.stdout}${result.stderr}`
   assert.equal(result.status, 0, output)
-  assert.match(output, /\bRan 30 tests in [\d.]+s\b/)
+  assert.match(output, /\bRan 37 tests in [\d.]+s\b/)
   assert.match(output, /(?:^|\n)OK\s*$/)
   assert.doesNotMatch(output, /\bskipped=/)
 })

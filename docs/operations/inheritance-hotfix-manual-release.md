@@ -1,4 +1,4 @@
-# Approved inheritance hotfix manual release — activation preparation
+# Inheritance hotfix manual release — pause contract correction proposal
 
 The final replacement product candidate is PR97 source
 `1eccff3254b7024dc242bcffd11eb4505ff0700c`. The owner approved the presented
@@ -8,13 +8,16 @@ PR97 DB fix and subsequent application deployment with “진행해” at
 to the exact source, SQL and runner fingerprints below and permits normal
 reviewed runner CI integration and one conditional installation.
 
-Installation is still INACTIVE: the copied envelope has `proposalOnly:true`
+Installation is still INACTIVE: the envelope has `proposalOnly:true`
 and `approvalReceiptSha256:null`, and the template is outside
-`.github/workflows`. Approval does not prove that other database writers have
-paused and drained. That operational confirmation is pending, so no executable
-owner receipt has been created. The unchanged runner requires that confirmation
-even for its read-only preflight. Registration CI, a hash-bound owner receipt,
-and fresh TLS/ledger/catalog evidence are required before installation.
+`.github/workflows`. The previously approved runner required an immutable claim
+that all other database writers were paused, including for its read-only
+preflight. That claim has not been established. This separately prepared
+correction changes those runner/contract fingerprints and requires the parent
+to assess owner approval coverage before activation or execution. It is not
+covered merely by retaining the earlier approval text. No executable owner
+receipt has been created. Registration CI, new hash-bound authority and fresh
+TLS/ledger/catalog evidence remain required before installation.
 Application merge/deployment remains owned by the incident application thread
 after a successful DB receipt; this runner does not deploy the product.
 
@@ -44,18 +47,20 @@ or production latency evidence. The local fixture is not a full Supabase/HTTP
 auth or mutation-trigger clone. Vercel preview remains blocked with a FAILURE
 status; three green GitHub jobs do not mean every PR status is green.
 
-Draft ownership remains exactly five new files:
+The isolated correction owns the following existing files:
 
 - `scripts/manual-inheritance-hotfix-install.py`
 - `scripts/inheritance-hotfix-release-manifest.json`
 - `tests/manual-inheritance-hotfix-install.test.py`
 - `docs/operations/inheritance-hotfix-manual-release.md`
 - `docs/operations/drafts/inheritance-hotfix-install.workflow.yml`
+- `tests/supabase-migration-layout.test.mjs` (offline wrapper pins and expected test count only)
 
 The transport is standalone, using the exact reviewed K CA/transport helper
 copies with no runtime AI import, held AI workflow dependency or generalized
-release framework. The current inactive proposal is frozen at these fingerprints;
-they identify reviewed files, not owner approval or production readiness:
+release framework. The earlier approved five-file packet remains frozen in its
+original checkout at the following historical fingerprints. They are not the
+fingerprints of this new correction and cannot authorize its execution:
 
 - Runner SHA256:
   `94493a4b14d6a99cde1e63c983be6e236135f06aa81a4433df36012730dabac9`.
@@ -68,7 +73,8 @@ they identify reviewed files, not owner approval or production readiness:
 - Inactive workflow template SHA256:
   `80f1f2c2847efa4859ccd1e45e7a4a06129f0b52d31c4bea286b51934554fb71`.
 
-Controlled cached Python 3.12.14 with an `env -i` environment passed all 30 offline
+Historical frozen-packet validation: controlled cached Python 3.12.14 with an
+`env -i` environment passed all 30 offline
 unit tests in 0.190 seconds. The corrected catalog assertion distinguishes the
 thirteen SQL declaration targets from eleven actual catalog changes and verifies
 the two old DTO RPCs remain exactly unchanged. Units exercised functions including
@@ -194,8 +200,11 @@ ledger INSERT; DDL plus ledger are not atomic. Any command failure, partial
 application, ambiguity, changed prerequisite or postflight mismatch stops without
 retry, ledger repair or automatic rollback.
 
-All other DB writers must be explicitly paused and confirmed for the install
-window; workflow concurrency cannot lock unrelated writers. Receipt bound
+The frozen runner required all other DB writers to be explicitly paused and
+confirmed for the install window. This proposal replaces that condition
+with the exact `installationQuiescence` requirement described below; it does not
+attest that the old universal condition was satisfied. Workflow concurrency
+cannot lock production callers. Receipt bound
 `maxInstallDispatches=1` is one-dispatch authorization, not durable replay
 prevention. A failed or ambiguous attempt requires fresh review and authority
 before any retry.
@@ -218,9 +227,10 @@ registration are separate reviewed changes after CI and the new owner receipt.
 
 The following retained owner-review outline records the frozen reviewed scope;
 the approval evidence is recorded at the top of this document. Execution remains
-conditional on activation/
-registration CI, a new owner receipt, fresh action-time TLS/ledger/catalog
-evidence and confirmed paused writers:
+conditional on activation/registration CI, a new owner receipt and fresh
+action-time TLS/ledger/catalog evidence. The following historical outline is
+retained to show the originally approved boundary; its all-writer condition and
+old runner pins do not authorize this correction:
 
 > Approve secure SELECT-only TLS/target/ledger/catalog preflight for source
 > `1eccff3254b7024dc242bcffd11eb4505ff0700c` and canonical SQL
@@ -263,8 +273,100 @@ Required release evidence remains separate:
 | Validation | Required evidence / current boundary |
 |---|---|
 | Product source | Final `1eccff3` exact SQL/date bounds and all three GitHub jobs passed; Vercel preview remains blocked. Old947/946 is superseded. |
-| Runner freeze and offline checks | Current five fingerprints above; controlled Python 3.12.14 `env -i` offline units 30/30 PASS in 0.190s, AST/JSON/Psych YAML PASS and ten exact reviewed helper copies. The fourteen-entry catalog covers thirteen SQL targets and unchanged writer, with two old DTO RPCs verified exactly unchanged. Final runner/manifest/test/workflow scope review is complete; semantic actionlint and activation/registration CI remain pending. Units called `main` under mocks; no production entrypoint/live preflight/install/CA-only flag or real API/DB/CLI ran. |
+| Runner freeze and offline checks | The historical frozen packet above passed 30/30 offline units and review. This correction requires separate final hashes, updated offline failure-boundary tests and independent review. The fourteen-entry catalog still covers thirteen SQL targets and the unchanged writer, with two old DTO RPCs exactly unchanged. Semantic actionlint and activation/registration CI remain pending. No production entrypoint/live preflight/install/CA-only flag or real API/DB/CLI ran. |
 | Disposable PostgreSQL 17 / native CLI | Exact before/final catalog/body hashes/ACLs and canonical inventory/ledger behavior with no authentication fallback; product bounded-runtime evidence is not native installation evidence. No business RPCs or rollback proof by the runner. |
 | Runtime TLS/ledger/catalog preflight | Approved immediate secure SELECT-only TLS/target/full inventory and fresh exact before-ledger/catalog evidence, conditional on the required receipt and CI. Historical 362 rows are not current authority; no live preflight has run. |
-| One install dispatch | Explicit owner-only scoped DEFINER plus two-signature client EXECUTE/resource-scope approval, new hash-bound receipt and all other DB writers confirmed paused; one dispatch only, ambiguity stops. |
+| One install dispatch | Parent assessment of approval coverage for the corrected runner/contract, explicit owner-only scoped DEFINER plus two-signature client EXECUTE/resource-scope approval, new hash-bound receipt and freshly confirmed scoped pause/drain; one dispatch only, ambiguity stops. |
 | Product / recovery | Deployment/UI/human business verification are separate decisions; forward recovery without automatic rollback or raw-plan repair. |
+
+## Proposed installation quiescence contract
+
+The immutable owner receipt binds the exact `installationQuiescence` object as
+a required installation scope. It contains no assertion that callers are
+currently paused. The obsolete `otherDatabaseWritersPausedForInstall` receipt
+field is rejected. Read-only preflight requires no pause acknowledgement: it
+uses an explicit read-only transaction and invokes no business functions.
+Another production DDL installer remains coordinated out of the installation window;
+an observed catalog/ledger mismatch stops rather than being reconciled.
+
+Before installation, the operator must pause and drain all of the following:
+
+- Other production DDL and migration installers, including the held AI installer.
+- Human/bot writes to class schedules, defaults, lessons, slots, teacher/room
+  scheduling catalogs, and roster/enrollment operations that mutate this domain.
+- Makeup approval, cancellation and lifecycle writes, including their transitive
+  timetable triggers and finalization calls.
+- Human/bot calls using the replaced schedule readers, including open schedule
+  views that call `get_class_schedule_v1`: that function can materialize runtime
+  class plans through `ensure_continuous_class_plan_runtime_v1`.
+- Calendar/`academic_events` and makeup approval-evidence
+  (`makeup_request_events`) writers that can alter inherited schedule or
+  occupancy provenance, including direct editing, cleanup or backfill outside
+  the lifecycle RPCs. The readers use their latest approved payload, linkage,
+  event date and note metadata when resolving inherited overrides.
+
+Close those views and suspend the affected bot calls before confirming the
+pause; stopping only save buttons or one API route is insufficient because
+browser Supabase access and RPCs bypass such a route. Drain existing affected
+transactions before dispatch. The operator must hold this scope until a verified
+post-install checkpoint, or an explicit diagnosis of an unknown/failed state
+permits resumption. The runner does not establish or automatically restore the
+pause, and a timestamp never makes it an enforced database lock.
+
+Unrelated science/recruiting retention, rate-limit cleanup and notification
+journal writes do not require pause under this proposed scoped contract. The
+read-only production inventory at 2026-10-05 01:04:21 UTC observed exactly these
+three active cron jobs with source-matching command hashes, without reading or
+printing their commands:
+
+| Job ID | Name | GMT schedule | Proposed control |
+|---|---|---|---|
+| 2 | `science-consultation-retention-6m` | `17 3 * * *` | Leave active |
+| 3 | `science-consultation-rate-limit-cleanup` | `47 3 * * *` | Leave active |
+| 6 | `recruiting-retention-cleanup` | `13 * * * *` | Leave active |
+
+The read at 01:08:32 UTC found no other active client transaction, queued net
+request or running cron job. Those are momentary observations, not proof of a
+continuous pause or fresh native verify-full TLS/ledger/catalog evidence.
+No cron, latch, flag, permission, environment setting or business state was
+changed. No new maintenance infrastructure is proposed.
+
+Only `install` requires the exact runtime acknowledgement
+`AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED` in `INSTALL_PAUSE_ACK`
+and a ten-digit UTC epoch in `INSTALL_PAUSE_AT_EPOCH`. The epoch is when the
+operator confirmed the scoped pause and drain, not when approval was issued.
+The runner checks `0 <= now - epoch < 300 seconds` before credentials and again
+immediately before its sole native CLI push. Missing, wrong, future or stale
+confirmation stops without invoking that CLI. It does not grant a five-minute
+lease or permit writers to resume at the five-minute mark.
+
+Finish normal CI, authority registration and the separate read-only preflight
+before starting the pause. Confirm the actors have stopped, drain, record the
+epoch, then dispatch the one install immediately. Expected operational pause is
+about five minutes for dispatch/setup, one small function-only migration and
+after-checkpoint verification; this is an estimate, not measured production
+latency. The CLI can run up to 600 seconds and the workflow up to 15 minutes;
+failure or ambiguity can extend the hold for diagnosis. If the attestation
+expires during setup, native CLI invocation remains zero and no automatic retry
+or new receipt is issued.
+
+The corrected SQL/source, fourteen-function oracle, permission decisions,
+verify-full CA/target restrictions, ten reviewed transport helper copies and
+single-attempt/unknown-state boundaries are unchanged. Current correction pins:
+
+- Runner SHA256: `e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5`.
+- Unsigned contract SHA256: `c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484`.
+
+Full file hashes, test results and independent review must be returned with the
+proposal before approval coverage is assessed. No altered-contract live
+preflight or install is permitted merely by preparing or reviewing these files.
+
+The corrected offline suite contains the original 30 tests plus seven pause
+contract tests. Controlled Python 3.12.14 with `env -i` passed 37/37, using only
+synthetic authority, credentials and mocked I/O. It covers preflight without a
+pause, exact scope and legacy-field rejection, missing/wrong acknowledgement,
+epoch format and age boundaries, and expiry after source/CA checks with zero
+native CLI calls. The normal CI wrapper pins both script and suite bytes before
+running them. JSON/AST/Psych YAML parsing, layout verification, unchanged helper
+ASTs and frozen packet/workflow byte preservation passed locally. These results
+do not demonstrate actual production pause or native preflight.

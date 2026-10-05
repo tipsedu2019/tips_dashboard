@@ -1,5 +1,5 @@
 # INACTIVE REVIEW TEMPLATE. This path cannot register or dispatch a workflow.
-# Exact bounded replacement source1ecc/SQLca71 reviewed; owner approval pending.
+# Pause contract correction proposal; new owner authority coverage is pending.
 # Activation, immutable runner/envelope/owner pins and CI registration need review.
 name: Manual approved PR97 inheritance hotfix installation
 
@@ -17,6 +17,16 @@ on:
         type: string
         default: READ ONLY PR97 INHERITANCE PREFLIGHT
         required: true
+      install_pause_ack:
+        description: Install only; attest that the exact approved affected scope is paused and drained
+        type: string
+        default: ''
+        required: false
+      install_pause_at_epoch:
+        description: Install only; UTC epoch at which affected writers and other DDL installers were confirmed paused
+        type: string
+        default: ''
+        required: false
 
 permissions:
   contents: read
@@ -36,11 +46,13 @@ jobs:
       APPROVED_SOURCE_SHA: '1eccff3254b7024dc242bcffd11eb4505ff0700c'
       # Immutable reviewed runner commit comes AFTER the owner receipt is bound.
       REVIEWED_RUNNER_SHA: 'PENDING_REVIEWED_RUNNER_COMMIT'
-      RUNNER_SCRIPT_SHA256: '94493a4b14d6a99cde1e63c983be6e236135f06aa81a4433df36012730dabac9'
+      RUNNER_SCRIPT_SHA256: 'e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5'
       MANIFEST_SHA256: 'PENDING_ACTIVATED_MANIFEST_SHA256'
       OWNER_APPROVAL_RECEIPT_SHA256: 'PENDING_ACTION_TIME_OWNER_RECEIPT'
       RELEASE_MODE: ${{ inputs.mode }}
       INSTALL_ACK: ${{ inputs.install_ack }}
+      INSTALL_PAUSE_ACK: ${{ inputs.install_pause_ack }}
+      INSTALL_PAUSE_AT_EPOCH: ${{ inputs.install_pause_at_epoch }}
       SUPABASE_TELEMETRY_DISABLED: '1'
       PYTHONDONTWRITEBYTECODE: '1'
     steps:
@@ -59,6 +71,8 @@ jobs:
             [[ "${INSTALL_ACK}" == 'READ ONLY PR97 INHERITANCE PREFLIGHT' ]]
           elif [[ "${RELEASE_MODE}" == install ]]; then
             [[ "${INSTALL_ACK}" == 'INSTALL ONLY PR97 INHERITANCE MIGRATION ONCE' ]]
+            [[ "${INSTALL_PAUSE_ACK}" == 'AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED' ]]
+            [[ "${INSTALL_PAUSE_AT_EPOCH}" =~ ^[0-9]{10}$ ]]
           else
             exit 1
           fi

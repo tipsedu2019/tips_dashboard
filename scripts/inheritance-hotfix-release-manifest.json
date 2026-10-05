@@ -2993,7 +2993,21 @@
     },
     "singleInstallDispatch": true,
     "noAutomaticRetryRepairOrRollback": true,
-    "requiresOtherDatabaseWritersPaused": true,
+    "installationQuiescence": {
+      "readOnlyPreflightRequiresPause": false,
+      "requiredForInstall": [
+        "other_production_ddl_and_migration_installers",
+        "class_schedule_defaults_lessons_slots_teacher_room_and_roster_enrollment_writers",
+        "makeup_approval_cancellation_and_lifecycle_writers",
+        "human_and_bot_calls_using_replaced_schedule_readers_including_get_class_schedule_v1_runtime_materialization",
+        "calendar_academic_event_and_makeup_approval_evidence_writers_altering_inherited_schedule_or_occupancy_provenance"
+      ],
+      "affectedInFlightTransactionsMustBeDrained": true,
+      "unrelatedRetentionAndNotificationJournalWritersRequirePause": false,
+      "resumeOnlyAfter": "verified_post_install_checkpoint_or_explicit_unknown_state_diagnosis",
+      "pauseAck": "AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED",
+      "pauseAttestationMaxAgeSeconds": 300
+    },
     "newPermissions": [
       {
         "signature": "dashboard_private.read_makeup_operating_reference_v1(date,date)",
