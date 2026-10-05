@@ -150,6 +150,41 @@ class OfflineInheritanceSafety(unittest.TestCase):
         after = {**session, "versions": rows, "functions": copy.deepcopy(cfg["afterCatalog"])}
         return cfg, before, after
 
+    def session_mismatch_cases(self, before):
+        expected = {
+            "userMatchesPostgres": True, "databaseMatchesPostgres": True,
+            "readOnlyOn": True, "serverMajor17": True,
+            "backendSslTrue": True, "backendSslObserved": "true",
+        }
+        cases = [
+            ({"user": "synthetic-session-secret-marker"}, {"userMatchesPostgres": False}),
+            ({"database": "synthetic-session-secret-marker"}, {"databaseMatchesPostgres": False}),
+            ({"readOnly": "synthetic-session-secret-marker"}, {"readOnlyOn": False}),
+            ({"serverMajor": 16}, {"serverMajor17": False}),
+            ({"tls": False}, {"backendSslTrue": False, "backendSslObserved": "false"}),
+            ({"tls": None}, {"backendSslTrue": False, "backendSslObserved": "null"}),
+            ({"tls": 1}, {"backendSslTrue": False, "backendSslObserved": "invalid"}),
+            ({"tls": "true"}, {"backendSslTrue": False, "backendSslObserved": "invalid"}),
+            ({"tls": {"raw": "synthetic-session-secret-marker"}}, {"backendSslTrue": False, "backendSslObserved": "invalid"}),
+            ({"user": "synthetic-session-secret-marker", "database": "synthetic-session-secret-marker", "readOnly": "off", "serverMajor": 16, "tls": False},
+             {"userMatchesPostgres": False, "databaseMatchesPostgres": False, "readOnlyOn": False, "serverMajor17": False, "backendSslTrue": False, "backendSslObserved": "false"}),
+        ]
+        values = [(copy.deepcopy({**before, **change}), {**expected, **diagnostic})
+                  for change, diagnostic in cases]
+        missing = copy.deepcopy(before)
+        del missing["tls"]
+        values.append((missing, {**expected, "backendSslTrue": False, "backendSslObserved": "missing"}))
+        return values
+
+    def assert_session_diagnostic(self, actual, expected):
+        self.assertEqual(actual, expected)
+        self.assertEqual(set(actual), set(expected))
+        for key in expected:
+            if key == "backendSslObserved":
+                self.assertIn(actual[key], ("true", "false", "null", "missing", "invalid"))
+            else:
+                self.assertIs(type(actual[key]), bool)
+
     @contextlib.contextmanager
     def source_fixture(self):
         with tempfile.TemporaryDirectory(prefix="inheritance-offline-") as owned:
@@ -335,6 +370,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
             self.assertFalse(receipt["productionSuccess"])
             self.assertFalse(receipt["automaticRetry"])
             self.assertFalse(receipt["historyRepair"])
+            self.assertNotIn("sessionBoundary", receipt)
             self.assertNotIn(marker, receipt_text + captured.getvalue())
 
     def test_source_review_status_blocks_before_contract_or_authority(self):
@@ -696,18 +732,60 @@ class OfflineInheritanceSafety(unittest.TestCase):
 
     def test_snapshot_uses_verify_full_and_rejects_session_mismatch(self):
         cfg, before, _ = self.snapshot_fixture()
-        wrong = copy.deepcopy(before)
-        wrong["tls"] = False
-        result = types.SimpleNamespace(returncode=0, stdout=json.dumps(wrong), stderr="")
+        for wrong, expected in self.session_mismatch_cases(before):
+            with self.subTest(diagnostic=expected):
+                result = types.SimpleNamespace(returncode=0, stdout=json.dumps(wrong), stderr="synthetic-session-secret-marker")
+                with patch.object(self.module, "ca_gate"), patch.object(self.module.subprocess, "run", return_value=result) as process:
+                    with self.assertRaisesRegex(self.module.SessionBoundaryStop, "^snapshot_session_boundary_failed$") as stopped:
+                        self.snapshot_impl(cfg, "aws-1-ap-northeast-2.pooler.supabase.com", "postgres." + self.module.TARGET, "synthetic-unit-only")
+                    self.assertIsInstance(stopped.exception, self.module.Stop)
+                    self.assert_session_diagnostic(stopped.exception.diagnostic, expected)
+                    self.assertNotIn("synthetic-session-secret-marker", str(stopped.exception) + json.dumps(stopped.exception.diagnostic))
+                    process.assert_called_once()
+                    self.assertEqual(process.call_args.args, (["psql", "-X", "-qAt", "-v", "ON_ERROR_STOP=1"],))
+                    self.assertEqual(process.call_args.kwargs["input"], self.module.snapshot_sql(cfg))
+                    self.assertEqual(process.call_args.kwargs["timeout"], 30)
+                    env = process.call_args.kwargs["env"]
+                    self.assertEqual(set(env), {"PATH", "LANG", "PGHOST", "PGPORT", "PGUSER", "PGDATABASE", "PGPASSWORD", "PGSSLMODE", "PGSSLROOTCERT", "PGCONNECT_TIMEOUT"})
+                    self.assertEqual(env["PGSSLMODE"], "verify-full")
+                    self.assertEqual(env["PGPORT"], "5432")
+                    self.assertEqual(env["PGSSLROOTCERT"], self.module.CA)
+                    self.assertNotIn("SUPABASE_ACCESS_TOKEN", env)
+                    self.assertNotIn("GH_TOKEN", env)
+        result = types.SimpleNamespace(returncode=0, stdout=json.dumps(before), stderr="")
         with patch.object(self.module, "ca_gate"), patch.object(self.module.subprocess, "run", return_value=result) as process:
-            with self.assertRaisesRegex(self.module.Stop, "^snapshot_session_boundary_failed$"):
-                self.snapshot_impl(cfg, "aws-1-ap-northeast-2.pooler.supabase.com", "postgres." + self.module.TARGET, "synthetic-unit-only")
-            env = process.call_args.kwargs["env"]
-            self.assertEqual(env["PGSSLMODE"], "verify-full")
-            self.assertEqual(env["PGPORT"], "5432")
-            self.assertEqual(env["PGSSLROOTCERT"], self.module.CA)
-            self.assertNotIn("SUPABASE_ACCESS_TOKEN", env)
-            self.assertNotIn("GH_TOKEN", env)
+            self.assertEqual(self.snapshot_impl(cfg, "aws-1-ap-northeast-2.pooler.supabase.com", "postgres." + self.module.TARGET, "synthetic-unit-only"), before)
+            process.assert_called_once()
+
+    def test_main_session_failure_emits_only_bounded_diagnostic_and_never_dispatches_cli(self):
+        cfg, before, _ = self.snapshot_fixture()
+        marker = "synthetic-session-secret-marker"
+        for mode in ("preflight", "install"):
+            for wrong, expected in self.session_mismatch_cases(before):
+                with self.subTest(mode=mode, diagnostic=expected):
+                    captured = io.StringIO()
+                    result = types.SimpleNamespace(returncode=0, stdout=json.dumps(wrong), stderr=marker)
+                    with tempfile.TemporaryDirectory(prefix="inheritance-session-offline-") as owned:
+                        receipt_path = pathlib.Path(owned) / "receipt.json"
+                        env = {"GITHUB_WORKSPACE": owned, "RELEASE_MODE": mode, "GH_TOKEN": marker, "SUPABASE_ACCESS_TOKEN": marker, "SUPABASE_DB_PASSWORD": marker}
+                        with patch.object(self.module, "SAFE_RECEIPT", str(receipt_path)), patch.object(self.module.sys, "argv", ["offline"]), patch.dict(self.module.os.environ, env, clear=True), patch.object(self.module, "load_contract", return_value=cfg), patch.object(self.module, "approval_gate", return_value=mode), patch.object(self.module, "source_gate"), patch.object(self.module, "ca_gate"), patch.object(self.module, "ci_gate"), patch.object(self.module.shutil, "which", return_value="/offline/psql"), patch.object(self.module, "endpoint", return_value=(marker, marker)), patch.object(self.module.subprocess, "run", return_value=result) as process, patch.object(self.module, "snapshot", side_effect=self.snapshot_impl) as snapshot, patch.object(self.module, "command", side_effect=forbidden) as command, patch.object(self.module, "install_once", side_effect=forbidden) as install, contextlib.redirect_stdout(captured):
+                            self.assertEqual(self.module.main(), 1)
+                            process.assert_called_once()
+                            snapshot.assert_called_once()
+                            command.assert_not_called()
+                            install.assert_not_called()
+                        receipt_text = receipt_path.read_text()
+                        receipt = json.loads(receipt_text)
+                        self.assertEqual(receipt["failure"], "snapshot_session_boundary_failed")
+                        self.assert_session_diagnostic(receipt["sessionBoundary"], expected)
+                        self.assertEqual(json.loads(captured.getvalue()), receipt)
+                        self.assertEqual(receipt["phase"], "read_only_target_and_before")
+                        self.assertFalse(receipt["productionSuccess"])
+                        self.assertFalse(receipt["automaticRetry"])
+                        self.assertFalse(receipt["historyRepair"])
+                        self.assertNotIn("readOnlyPreflightSuccess", receipt)
+                        self.assertNotIn("cli", receipt)
+                        self.assertNotIn(marker, receipt_text + captured.getvalue())
 
     def test_install_failure_has_one_command_and_at_most_one_diagnostic_snapshot(self):
         cfg, before, _ = self.snapshot_fixture()
@@ -775,6 +853,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
             receipt_text = receipt_path.read_text()
             receipt = json.loads(receipt_text)
             self.assertTrue(receipt["readOnlyPreflightSuccess"])
+            self.assertNotIn("sessionBoundary", receipt)
             self.assertFalse(receipt["productionSuccess"])
             self.assertFalse(receipt["automaticRetry"])
             self.assertFalse(receipt["historyRepair"])

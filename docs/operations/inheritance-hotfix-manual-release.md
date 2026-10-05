@@ -361,7 +361,7 @@ The corrected SQL/source, fourteen-function oracle, permission decisions,
 verify-full CA/target restrictions, ten reviewed transport helper copies and
 single-attempt/unknown-state boundaries are unchanged. Current correction pins:
 
-- Runner SHA256: `e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5`.
+- Runner SHA256: `c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3`.
 - Unsigned contract SHA256: `c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484`.
 
 The corrected file hashes, 37 offline tests and independent approval were
@@ -371,9 +371,9 @@ actual pause/drain; preparing files or creating this immutable receipt does not
 establish that operational fact.
 
 - Public owner receipt SHA256:
-  `4b539cae533335aa3c70625a290f3208c8357a8e3c77094a2d8a0868d37d93fd`.
+  `391195e4e52bdfef0f622dd6117b288204cfee5bc6656fe7406c97e7fab2862d`.
 - Activated manifest SHA256:
-  `bed4ed8005518c5795e73027f782c95b2e77e78f8b37ad42d6abbcba62457acd`.
+  `3a1c64c4f1aaa4886aed0ed8bd92d08fb3eb49909e4bf0e1e4dff8b6127b3e30`.
 - Approval validity: 2026-10-05 00:36:55 UTC through
   2026-10-06 00:36:55 UTC, bound to the original provided owner approval time.
 
@@ -386,3 +386,13 @@ native CLI calls. The normal CI wrapper pins both script and suite bytes before
 running them. JSON/AST/Psych YAML parsing, layout verification, unchanged helper
 ASTs and frozen packet/workflow byte preservation passed locally. These results
 do not demonstrate actual production pause or native preflight.
+
+The first native read-only preflight, run `37255664103`, safely stopped at
+`snapshot_session_boundary_failed` before the ledger/catalog checkpoint. The
+parent authorized this diagnostic-only rebinding within the same operation.
+It preserves the query, transport and all five session predicates; the safe
+receipt now records only five policy-match booleans and a fixed backend-SSL
+enum on failure. Backend SSL observation is not labelled client TLS proof.
+The diagnostic suite passed 38/38 with synthetic I/O and the wrapper passed
+1/1 without skips. No install, pause or production mutation has occurred.
+Approval timestamps, scope and no-retry restrictions remain unchanged.
