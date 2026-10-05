@@ -159,6 +159,7 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/academic_operations_numbered_pages_test.sql",
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
+  "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",

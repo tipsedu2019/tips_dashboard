@@ -13,7 +13,54 @@ import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
+import {parseIsolatedDbArguments,runIsolatedSupabaseDbTests} from '../../scripts/run-isolated-supabase-db-tests.mjs';
 const hash=v=>createHash('sha256').update(v).digest('hex');
+const isolatedWorkflows=['supabase-db-push.yml','supabase-sql-review.yml'];
+const legacyOccupancyTest='supabase/tests/makeup_legacy_approval_occupancy_test.sql';
+async function workflowInventory(name){
+ const source=await readFile(new URL('../../.github/workflows/'+name,import.meta.url),'utf8');
+ return {
+  tests:[...source.matchAll(/--test (supabase\/tests\/\S+\.sql)/gu)].map(match=>match[1]),
+  probes:[...source.matchAll(/--probe (tests\/\S+\.mjs)/gu)].map(match=>match[1]),
+ };
+}
+function parityArguments({tests,probes}){
+ return ['--review-head','--lint','--require-final','--execute','--authorized',
+  '--request-id','ai-parity-inventory-regression','--postdeploy-contract',
+  '--transactional-preflight','--verify-local-ledger','--ai-producer-parity',
+  ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
+}
+test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
+ assert.equal(AI_SQL_TESTS.length,88);
+ assert.equal(AI_PROBES.length,17);
+ assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
+ assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
+ for(const name of isolatedWorkflows){
+  const parsed=parseIsolatedDbArguments(parityArguments(await workflowInventory(name)));
+  assert.deepEqual(parsed.tests,AI_SQL_TESTS,name+' SQL inventory');
+  assert.deepEqual(parsed.probes,AI_PROBES,name+' probe inventory');
+ }
+});
+test('full parity guard rejects missing, duplicate and reordered workflow selectors before process launch',async()=>{
+ let launched=0;
+ const executeProcess=async()=>{launched++;throw new Error('process launch forbidden in inventory regression');};
+ for(const name of isolatedWorkflows){
+  const inventory=await workflowInventory(name);
+  const swapFirst=list=>[list[1],list[0],...list.slice(2)];
+  for(const [label,changed] of [
+   ['missing legacy occupancy',{...inventory,tests:inventory.tests.filter(path=>path!==legacyOccupancyTest)}],
+   ['duplicate SQL',{...inventory,tests:[...inventory.tests,legacyOccupancyTest]}],
+   ['reordered SQL',{...inventory,tests:swapFirst(inventory.tests)}],
+   ['missing probe',{...inventory,probes:inventory.probes.slice(1)}],
+   ['duplicate probe',{...inventory,probes:[...inventory.probes,inventory.probes[0]]}],
+   ['reordered probes',{...inventory,probes:swapFirst(inventory.probes)}],
+  ]){
+   await assert.rejects(runIsolatedSupabaseDbTests({argv:parityArguments(changed),executeProcess}),
+    /isolated_ai_parity_full_run_required/,name+' '+label);
+   assert.equal(launched,0,name+' '+label+' must stop before process launch');
+  }
+ }
+});
 test('independent attestation rejects stale run/source, migration, closure, inventory and raw payload drift',async()=>{
  const source=await snapshotAiSource(),raw=Buffer.from(' {"test":"negative protocol only"} '),now=Date.now();
  const expected={runId:randomBytes(16).toString('hex'),nonce:randomBytes(32).toString('hex'),startedAt:now-1};
