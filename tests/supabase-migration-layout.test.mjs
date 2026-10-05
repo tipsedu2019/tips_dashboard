@@ -322,6 +322,32 @@ after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
 })
 
+test("approved PR97 installer passes all 30 offline safety tests without inherited secrets", async () => {
+  const suitePath = join(repoRoot, "tests", "manual-inheritance-hotfix-install.test.py")
+  assert.equal(await sha256(suitePath), "ee96e9d8de9883c25b03b1380dc6a809822786fa9f034e70798492d7f687cb0a")
+  assert.equal(
+    await sha256(join(repoRoot, "scripts", "manual-inheritance-hotfix-install.py")),
+    "94493a4b14d6a99cde1e63c983be6e236135f06aa81a4433df36012730dabac9",
+  )
+  const result = spawnSync("python3", [suitePath], {
+    cwd: repoRoot,
+    env: {
+      PATH: process.env.PATH || "/usr/bin:/bin",
+      LANG: process.env.LANG || "C.UTF-8",
+      PYTHONDONTWRITEBYTECODE: "1",
+    },
+    encoding: "utf8",
+    timeout: 30_000,
+    maxBuffer: 256 * 1024,
+  })
+  assert.ifError(result.error)
+  const output = `${result.stdout}${result.stderr}`
+  assert.equal(result.status, 0, output)
+  assert.match(output, /\bRan 30 tests in [\d.]+s\b/)
+  assert.match(output, /(?:^|\n)OK\s*$/)
+  assert.doesNotMatch(output, /\bskipped=/)
+})
+
 test("원격 이력과 정렬한 migration identity와 바이트를 독립 상수로 고정한다", async () => {
   for (const [file, expectedHash] of REMOTE_HISTORY_ALIGNED_SQL) {
     let actualHash
