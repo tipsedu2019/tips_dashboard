@@ -39,7 +39,7 @@ const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-production-install.yml"
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
-  "5165cf5d8f741d961fee84c323e6ef86b0eb5c70ae199b4dff219151e0e92806"
+  "ea5585cb5e94b5f1dbd825a5a41cc7665fbf3b2778b7f4bfe4ee953f1d812ade"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -325,12 +325,12 @@ after(async () => {
   await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
 })
 
-test("PR97 installer proposal passes all 37 offline safety tests without inherited secrets", async () => {
+test("PR97 installer proposal passes all 38 offline safety tests without inherited secrets", async () => {
   const suitePath = join(repoRoot, "tests", "manual-inheritance-hotfix-install.test.py")
-  assert.equal(await sha256(suitePath), "ba7e800d900b7234cdbba5003cc329927e2f987af4ec61cb565b4321a36aab76")
+  assert.equal(await sha256(suitePath), "b1b85d2f9244f80f98721f6a2375282d94495c63cde6fad10b317644e31780e1")
   assert.equal(
     await sha256(join(repoRoot, "scripts", "manual-inheritance-hotfix-install.py")),
-    "e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5",
+    "c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3",
   )
   const result = spawnSync("python3", [suitePath], {
     cwd: repoRoot,
@@ -346,7 +346,7 @@ test("PR97 installer proposal passes all 37 offline safety tests without inherit
   assert.ifError(result.error)
   const output = `${result.stdout}${result.stderr}`
   assert.equal(result.status, 0, output)
-  assert.match(output, /\bRan 37 tests in [\d.]+s\b/)
+  assert.match(output, /\bRan 38 tests in [\d.]+s\b/)
   assert.match(output, /(?:^|\n)OK\s*$/)
   assert.doesNotMatch(output, /\bskipped=/)
 })
@@ -1443,7 +1443,7 @@ test("approved PR97 manual production workflow cannot transfer or widen its exac
   const workflowDir = join(repoRoot, ".github", "workflows")
   const source = await readFile(join(workflowDir, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW), "utf8")
   assert.equal(await sha256(join(workflowDir, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW)), APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256)
-  assert.match(source, /REVIEWED_RUNNER_SHA: '5348b262181f4e26e84e4566952ecfa9645d97a0'/)
+  assert.match(source, /REVIEWED_RUNNER_SHA: 'c27000f9b964c446becdad3b0313bf6c0b2f53f9'/)
   for (const kind of ["main", "pr", "guardrails", "other"]) {
     assertIncludesErrorCode(validateIsolatedCiWorkflow(source, kind), "isolated_ci_production_secret_forbidden")
   }
@@ -1458,10 +1458,10 @@ test("approved PR97 manual production workflow cannot transfer or widen its exac
       `${source}\n`,
       source.replace("on:\n  workflow_dispatch:", "on:\n  push:\n  workflow_dispatch:"),
       source.replaceAll("actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8", "actions/checkout@v4"),
-      source.replace("5348b262181f4e26e84e4566952ecfa9645d97a0", "0".repeat(40)),
-      source.replace("e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5", "0".repeat(64)),
-      source.replace("bed4ed8005518c5795e73027f782c95b2e77e78f8b37ad42d6abbcba62457acd", "0".repeat(64)),
-      source.replace("4b539cae533335aa3c70625a290f3208c8357a8e3c77094a2d8a0868d37d93fd", "0".repeat(64)),
+      source.replace("c27000f9b964c446becdad3b0313bf6c0b2f53f9", "0".repeat(40)),
+      source.replace("c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3", "0".repeat(64)),
+      source.replace("3a1c64c4f1aaa4886aed0ed8bd92d08fb3eb49909e4bf0e1e4dff8b6127b3e30", "0".repeat(64)),
+      source.replace("391195e4e52bdfef0f622dd6117b288204cfee5bc6656fe7406c97e7fab2862d", "0".repeat(64)),
       source.replace("default: preflight", "default: install"),
     ]) {
       assert.notEqual(mutation, source, "each adversarial case must change the reviewed bytes")

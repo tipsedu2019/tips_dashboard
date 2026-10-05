@@ -385,6 +385,20 @@ ROLLBACK;
 """
 
 
+class SessionBoundaryStop(Stop):
+    def __init__(self, value):
+        super().__init__("snapshot_session_boundary_failed")
+        tls = value.get("tls")
+        self.diagnostic = {
+            "userMatchesPostgres": value.get("user") == "postgres",
+            "databaseMatchesPostgres": value.get("database") == "postgres",
+            "readOnlyOn": value.get("readOnly") == "on",
+            "serverMajor17": value.get("serverMajor") == 17,
+            "backendSslTrue": tls is True,
+            "backendSslObserved": "missing" if "tls" not in value else "true" if tls is True else "false" if tls is False else "null" if tls is None else "invalid",
+        }
+
+
 def snapshot(cfg, host, user, password):
     ca_gate()
     env = {"PATH": os.environ.get("PATH", ""), "LANG": "C.UTF-8", "PGHOST": host, "PGPORT": "5432", "PGUSER": user, "PGDATABASE": "postgres", "PGPASSWORD": password, "PGSSLMODE": "verify-full", "PGSSLROOTCERT": CA, "PGCONNECT_TIMEOUT": "10"}
@@ -396,7 +410,8 @@ def snapshot(cfg, host, user, password):
         records = [json.loads(line) for line in result.stdout.splitlines() if line.strip()]
         require(len(records) == 1 and isinstance(records[0], dict), "snapshot_shape_invalid")
         value = records[0]
-        require(value.get("user") == "postgres" and value.get("database") == "postgres" and value.get("readOnly") == "on" and value.get("tls") is True and value.get("serverMajor") == 17, "snapshot_session_boundary_failed")
+        if not (value.get("user") == "postgres" and value.get("database") == "postgres" and value.get("readOnly") == "on" and value.get("tls") is True and value.get("serverMajor") == 17):
+            raise SessionBoundaryStop(value)
         return value
     except subprocess.TimeoutExpired:
         raise Stop("read_only_snapshot_timeout") from None
@@ -486,6 +501,8 @@ def main():
             receipt["phase"] = "only_pr97_ddl_and_canonical_ledger_verified"
     except Stop as error:
         receipt["failure"] = str(error)
+        if isinstance(error, SessionBoundaryStop):
+            receipt["sessionBoundary"] = error.diagnostic
     except Exception:
         receipt["failure"] = "unexpected_failure_unknown_state_stop_no_retry"
     pathlib.Path(SAFE_RECEIPT).write_text(json.dumps(receipt, indent=2) + "\n")

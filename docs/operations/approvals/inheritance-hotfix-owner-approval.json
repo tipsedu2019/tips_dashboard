@@ -5,7 +5,7 @@
   "projectRef": "slnjqlzzhewblvttiidk",
   "region": "ap-northeast-2",
   "unsignedContractSha256": "c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484",
-  "scriptSha256": "e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5",
+  "scriptSha256": "c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3",
   "caSha256": "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7",
   "newPermissions": [
     {
@@ -135,6 +135,14 @@
     "historicalScopeOutlinePath": "docs/operations/inheritance-hotfix-manual-release.md",
     "reviewedCorrectionCommit": "8f03c6590d24a8bd6351e5ad17f043cefa65fc27",
     "correctionCoverageAcceptedByParent": true,
-    "parentCoverageAcceptanceText": "The independently reviewed 8f03c659 pause-contract correction remains within the owner's approved single-SQL installation and existing-secret workflow scope: same target/source/SQL/permissions, no new credentials, and a technically scoped pause replacing an unnecessarily universal pause. Proceed with normal draft PR, exact-head CI, reviewed integration and read-only native preflight without pause. Preserve the exact unchanged SQL hash ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3 and source 1eccff32. A truthful receipt may cite owner approval Sentinel_b3c67b70438c81918771cbde73202245 and the original full question in your prior prompt, but must not assert pause/drain before verified. Once preflight passes and the executable is ready, report ready-for-pause promptly; I will coordinate the actual short owner/staff/bot pause. Don't request a pause while CI/TLS/ledger blockers are still unknown. Continue to completion of these authorized stages; no install until fresh scoped pause/drain. The changed runner hashes are now reviewed and accepted for this same operation, not new blanket permission."
+    "parentCoverageAcceptanceText": "The independently reviewed 8f03c659 pause-contract correction remains within the owner's approved single-SQL installation and existing-secret workflow scope: same target/source/SQL/permissions, no new credentials, and a technically scoped pause replacing an unnecessarily universal pause. Proceed with normal draft PR, exact-head CI, reviewed integration and read-only native preflight without pause. Preserve the exact unchanged SQL hash ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3 and source 1eccff32. A truthful receipt may cite owner approval Sentinel_b3c67b70438c81918771cbde73202245 and the original full question in your prior prompt, but must not assert pause/drain before verified. Once preflight passes and the executable is ready, report ready-for-pause promptly; I will coordinate the actual short owner/staff/bot pause. Don't request a pause while CI/TLS/ledger blockers are still unknown. Continue to completion of these authorized stages; no install until fresh scoped pause/drain. The changed runner hashes are now reviewed and accepted for this same operation, not new blanket permission.",
+    "diagnosticOnlyRebinding": {
+      "baseRunnerScriptSha256": "e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5",
+      "reviewedDiagnosticRunnerScriptSha256": "c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3",
+      "independentReview": "APPROVE",
+      "failedReadOnlyPreflightRun": "https://github.com/tipsedu2019/tips_dashboard/actions/runs/37255664103",
+      "sourceSqlPermissionsQueryAndGatesUnchanged": true,
+      "parentInstruction": "Proceed with the independently reviewed diagnostic-only runner c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3: update binding/receipt transparently, normal reviewed publication+CI+integration, then rerun read-only native preflight. Same user-approved operation, unchanged source/SQL/permissions/query/gates; this diagnostic correction requires no new owner choice. Continue authorized recoverable diagnostic fixes through evidence of the failing gate; don't terminate merely to request parent reconfirmation of a harmless hash change after independent review. Never loosen a security gate or substitute MCP validation for the native session. If actual credentials/access/security changes are needed, stop and report exact action. No install/pause until native preflight passes and actual scoped pause is verified. Please prioritize identifying the failed session boolean and completing the original approved operation rather than further release-process expansion."
+    }
   }
 }

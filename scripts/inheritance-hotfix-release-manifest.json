@@ -1,6 +1,6 @@
 {
   "proposalOnly": false,
-  "approvalReceiptSha256": "4b539cae533335aa3c70625a290f3208c8357a8e3c77094a2d8a0868d37d93fd",
+  "approvalReceiptSha256": "391195e4e52bdfef0f622dd6117b288204cfee5bc6656fe7406c97e7fab2862d",
   "contract": {
     "schemaVersion": 1,
     "approvedSourceSha": "1eccff3254b7024dc242bcffd11eb4505ff0700c",
