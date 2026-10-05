@@ -27,6 +27,22 @@ MANIFEST = ROOT / "scripts/inheritance-hotfix-release-manifest.json"
 SOURCE = "1eccff3254b7024dc242bcffd11eb4505ff0700c"
 SQL_SHA256 = "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
 MIGRATION = "20261004160000_legacy_effective_schedule_inheritance.sql"
+NOW = 1_800_000_000
+PAUSE_ACK = "AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED"
+EXPECTED_QUIESCENCE = {
+    "readOnlyPreflightRequiresPause": False,
+    "requiredForInstall": [
+        "other_production_ddl_and_migration_installers",
+        "class_schedule_defaults_lessons_slots_teacher_room_and_roster_enrollment_writers",
+        "makeup_approval_cancellation_and_lifecycle_writers",
+        "human_and_bot_calls_using_replaced_schedule_readers_including_get_class_schedule_v1_runtime_materialization",
+    ],
+    "affectedInFlightTransactionsMustBeDrained": True,
+    "unrelatedRetentionAndNotificationJournalWritersRequirePause": False,
+    "resumeOnlyAfter": "verified_post_install_checkpoint_or_explicit_unknown_state_diagnosis",
+    "pauseAck": PAUSE_ACK,
+    "pauseAttestationMaxAgeSeconds": 300,
+}
 
 # These are source-segment hashes from independently reviewed helper source
 # SHA256 31bf00adb87f7ac07a3379ae58859eef16f756aa3a9fc50b967add288a727667.
@@ -87,7 +103,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
 
     def authority_fixture(self, changes=None):
         cfg = copy.deepcopy(self.contract)
-        now = 1_000_000
+        now = NOW
         authority = {
             "approvalKind": "owner_action_time_inheritance_hotfix",
             "sourceSha": SOURCE, "sqlSha256": SQL_SHA256,
@@ -97,7 +113,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
             "caSha256": self.module.CA_SHA256,
             "newPermissions": cfg["newPermissions"], "before": cfg["before"], "after": cfg["after"],
             "allowedModes": ["preflight", "install"], "maxInstallDispatches": 1,
-            "otherDatabaseWritersPausedForInstall": True,
+            "installationQuiescence": copy.deepcopy(EXPECTED_QUIESCENCE),
             "noAutomaticRetryRepairOrRollback": True,
             "approvedAtEpoch": now - 30, "expiresAtEpoch": now + 60,
         }
@@ -114,6 +130,10 @@ class OfflineInheritanceSafety(unittest.TestCase):
             "SUPABASE_ACCESS_TOKEN": "synthetic-unit-only", "GH_TOKEN": "synthetic-unit-only",
         }
         return cfg, env, authority, raw, now
+
+    def install_env(self, env, epoch=NOW):
+        return {**env, "RELEASE_MODE": "install", "INSTALL_ACK": self.module.ACK,
+                "INSTALL_PAUSE_ACK": PAUSE_ACK, "INSTALL_PAUSE_AT_EPOCH": str(epoch)}
 
     def snapshot_fixture(self):
         # Historical production ledger names are deliberately not copied here.
@@ -213,6 +233,15 @@ class OfflineInheritanceSafety(unittest.TestCase):
         activated["sourceReviewStatus"] = "reviewed_current"
         activated["approvalReceiptSha256"] = "a" * 64
         self.assertEqual(hashlib.sha256(canonical(activated["contract"])).hexdigest(), self.module.CONTRACT_SHA256)
+
+    def test_contract_binds_affected_writer_scope_without_asserting_a_current_pause(self):
+        self.assertEqual(self.contract["installationQuiescence"], EXPECTED_QUIESCENCE)
+        self.assertNotIn("requiresOtherDatabaseWritersPaused", self.contract)
+        _, env, authority, _, _ = self.authority_fixture()
+        self.assertEqual(authority["installationQuiescence"], EXPECTED_QUIESCENCE)
+        self.assertNotIn("otherDatabaseWritersPausedForInstall", authority)
+        self.assertNotIn("INSTALL_PAUSE_ACK", env)
+        self.assertNotIn("INSTALL_PAUSE_AT_EPOCH", env)
 
     def test_new_execution_permissions_require_specific_owner_review(self):
         catalog = {row["signature"]: row for row in self.contract["afterCatalog"]}
@@ -351,7 +380,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
             {"sqlSha256": "a" * 64}, {"scriptSha256": "a" * 64},
             {"unsignedContractSha256": "a" * 64}, {"newPermissions": []},
             {"maxInstallDispatches": 2}, {"maxInstallDispatches": True},
-            {"otherDatabaseWritersPausedForInstall": False},
+            {"installationQuiescence": {}},
             {"allowedModes": ["install"]}, {"before": {"count": 362}},
             {"after": {"count": 369}}, {"noAutomaticRetryRepairOrRollback": False},
         ]
@@ -364,15 +393,32 @@ class OfflineInheritanceSafety(unittest.TestCase):
 
     def test_authority_cannot_be_future_expired_or_long_lived(self):
         cases = [
-            {"approvedAtEpoch": 1_000_001}, {"expiresAtEpoch": 1_000_000},
-            {"approvedAtEpoch": 900_000, "expiresAtEpoch": 1_000_060},
-            {"approvedAtEpoch": True}, {"expiresAtEpoch": "1_000_060"},
+            {"approvedAtEpoch": NOW + 1}, {"expiresAtEpoch": NOW},
+            {"approvedAtEpoch": NOW - 100_000, "expiresAtEpoch": NOW + 60},
+            {"approvedAtEpoch": True}, {"expiresAtEpoch": str(NOW + 60)},
         ]
         for index, change in enumerate(cases):
             with self.subTest(case=index):
                 cfg, env, authority, raw, now = self.authority_fixture(change)
                 with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", return_value=now):
                     with self.assertRaisesRegex(self.module.Stop, "^owner_authority_expired_or_invalid$"):
+                        self.module.approval_gate(cfg, env, credentials=False)
+
+    def test_authority_requires_exact_quiescence_scope_and_rejects_legacy_pause_facts(self):
+        missing = copy.deepcopy(EXPECTED_QUIESCENCE)
+        del missing["affectedInFlightTransactionsMustBeDrained"]
+        partial = copy.deepcopy(EXPECTED_QUIESCENCE)
+        partial["requiredForInstall"] = partial["requiredForInstall"][:-1]
+        changed = copy.deepcopy(EXPECTED_QUIESCENCE)
+        changed["unrelatedRetentionAndNotificationJournalWritersRequirePause"] = True
+        extra = {**EXPECTED_QUIESCENCE, "allDatabaseWritersPaused": True}
+        cases = [{"installationQuiescence": value} for value in (None, True, [], missing, partial, changed, extra)]
+        cases += [{"otherDatabaseWritersPausedForInstall": value} for value in (True, False)]
+        for change in cases:
+            with self.subTest(change=change):
+                cfg, env, authority, raw, now = self.authority_fixture(change)
+                with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", return_value=now):
+                    with self.assertRaisesRegex(self.module.Stop, "^owner_authority_scope_mismatch$"):
                         self.module.approval_gate(cfg, env, credentials=False)
 
     def test_authority_cannot_omit_or_broaden_an_individual_permission(self):
@@ -420,6 +466,101 @@ class OfflineInheritanceSafety(unittest.TestCase):
             self.assertEqual(self.module.approval_gate(cfg, env, credentials=False), "preflight")
             with self.assertRaisesRegex(self.module.Stop, "^provided_db_password_required$"):
                 self.module.approval_gate(cfg, env)
+
+    def test_preflight_with_credentials_needs_no_runtime_pause_attestation(self):
+        cfg, env, authority, raw, now = self.authority_fixture()
+        self.assertNotIn("INSTALL_PAUSE_ACK", env)
+        self.assertNotIn("INSTALL_PAUSE_AT_EPOCH", env)
+        with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", return_value=now), patch.object(self.module, "install_pause_gate", side_effect=forbidden) as pause:
+            self.assertEqual(self.module.approval_gate(cfg, env), "preflight")
+            pause.assert_not_called()
+
+    def test_install_missing_or_wrong_pause_ack_stops_before_credentials_and_helpers(self):
+        for ack in (None, "", PAUSE_ACK.lower(), PAUSE_ACK + " ", "ALL DATABASE WRITERS PAUSED"):
+            with self.subTest(ack=ack):
+                cfg, env, authority, raw, now = self.authority_fixture()
+                env = self.install_env(env)
+                if ack is None:
+                    del env["INSTALL_PAUSE_ACK"]
+                else:
+                    env["INSTALL_PAUSE_ACK"] = ack
+                for key in ("SUPABASE_DB_PASSWORD", "SUPABASE_ACCESS_TOKEN", "GH_TOKEN"):
+                    del env[key]
+                captured = io.StringIO()
+                with tempfile.TemporaryDirectory(prefix="inheritance-pause-offline-") as owned:
+                    receipt_path = pathlib.Path(owned) / "receipt.json"
+                    with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", return_value=now), patch.object(self.module, "load_contract", return_value=cfg), patch.object(self.module, "SAFE_RECEIPT", str(receipt_path)), patch.object(self.module.sys, "argv", ["offline"]), patch.dict(self.module.os.environ, env, clear=True), patch.object(self.module, "source_gate", side_effect=forbidden) as source, patch.object(self.module, "ca_gate", side_effect=forbidden) as ca, patch.object(self.module, "ci_gate", side_effect=forbidden) as ci, patch.object(self.module, "endpoint", side_effect=forbidden) as endpoint, patch.object(self.module, "install_once", side_effect=forbidden) as install, contextlib.redirect_stdout(captured):
+                        self.assertEqual(self.module.main(), 1)
+                        for unused in (source, ca, ci, endpoint, install):
+                            unused.assert_not_called()
+                    receipt = json.loads(receipt_path.read_text())
+                    self.assertEqual(receipt["failure"], "install_pause_ack_missing")
+                    self.assertFalse(receipt["productionSuccess"])
+                    self.assertFalse(receipt["automaticRetry"])
+
+    def test_install_epoch_must_be_exact_ten_digits_before_credentials(self):
+        for epoch in (None, "", "180000000", "18000000000", "1800000000000", str(NOW) + ".0", "+" + str(NOW), " " + str(NOW), "１８００００００００", NOW, True):
+            with self.subTest(epoch=epoch):
+                cfg, env, authority, raw, now = self.authority_fixture()
+                env = self.install_env(env)
+                if epoch is None:
+                    del env["INSTALL_PAUSE_AT_EPOCH"]
+                else:
+                    env["INSTALL_PAUSE_AT_EPOCH"] = epoch
+                for key in ("SUPABASE_DB_PASSWORD", "SUPABASE_ACCESS_TOKEN", "GH_TOKEN"):
+                    del env[key]
+                with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", return_value=now):
+                    for credentials in (False, True):
+                        with self.subTest(credentials=credentials), self.assertRaisesRegex(self.module.Stop, "^install_pause_epoch_invalid$"):
+                            self.module.approval_gate(cfg, env, credentials=credentials)
+
+    def test_install_pause_age_requires_fresh_nonfuture_attestation(self):
+        cfg, original_env, authority, raw, now = self.authority_fixture()
+        for age in (0, 299, 299.999, 300, 301, -0.001, -1):
+            with self.subTest(age=age):
+                # Keep owner authority independently valid throughout all age
+                # boundaries so it cannot mask an attestation rejection.
+                env = self.install_env(original_env, epoch=now - 299)
+                clock = now - 299 + age
+                authority["approvedAtEpoch"] = now - 600
+                raw = canonical(authority)
+                receipt_hash = hashlib.sha256(raw).hexdigest()
+                cfg["approvalReceiptSha256"] = receipt_hash
+                env["OWNER_APPROVAL_RECEIPT_SHA256"] = receipt_hash
+                with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", return_value=clock):
+                    if 0 <= age < 300:
+                        self.assertEqual(self.module.approval_gate(cfg, env), "install")
+                        self.assertEqual(self.module.approval_gate(cfg, env, credentials=False), "install")
+                    else:
+                        for key in ("SUPABASE_DB_PASSWORD", "SUPABASE_ACCESS_TOKEN", "GH_TOKEN"):
+                            del env[key]
+                        with self.assertRaisesRegex(self.module.Stop, "^install_pause_attestation_stale_or_future$"):
+                            self.module.approval_gate(cfg, env)
+
+    def test_pause_expiring_during_source_and_ca_checks_blocks_cli_without_dispatch_phase(self):
+        cfg, env, authority, raw, now = self.authority_fixture()
+        env = self.install_env(env)
+        clock = [now]
+        receipt = {"phase": "read_only_target_and_before", "productionSuccess": False}
+        def source_checked(*_args):
+            clock[0] = now + 299
+        def ca_checked():
+            clock[0] = now + 300
+        with tempfile.TemporaryDirectory(prefix="inheritance-pause-expiry-offline-") as owned:
+            source = pathlib.Path(owned)
+            cli = source / "supabase"
+            cli.touch()
+            with patch.object(self.module, "bounded_json", return_value=(authority, raw)), patch.object(self.module.time, "time", side_effect=lambda: clock[0]), patch.dict(self.module.os.environ, env, clear=True), patch.object(self.module, "source_gate", side_effect=source_checked) as checked_source, patch.object(self.module, "ca_gate", side_effect=ca_checked) as checked_ca, patch.object(self.module, "command", side_effect=forbidden) as command, patch.object(self.module, "snapshot", side_effect=forbidden) as diagnostic:
+                self.assertEqual(self.module.approval_gate(cfg, env), "install")
+                with self.assertRaisesRegex(self.module.Stop, "^install_pause_attestation_stale_or_future$"):
+                    self.module.install_once(cfg, source, cli, "aws-1-ap-northeast-2.pooler.supabase.com", "postgres." + self.module.TARGET, "synthetic-unit-only", receipt)
+                checked_source.assert_called_once()
+                checked_ca.assert_called_once()
+                command.assert_not_called()
+                diagnostic.assert_not_called()
+        self.assertEqual(receipt["phase"], "read_only_target_and_before")
+        self.assertNotIn("cli", receipt)
+        self.assertFalse(receipt["productionSuccess"])
 
     def test_source_gate_rejects_ignored_environment_without_reading_it(self):
         with self.source_fixture() as (source, cfg):
@@ -572,7 +713,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
                         cli = source / "supabase"
                         cli.touch()
                         snapshot_behavior = {"return_value": before} if diagnostic_available else {"side_effect": self.module.Stop("read_only_snapshot_failed")}
-                        with patch.object(self.module, "source_gate"), patch.object(self.module, "ca_gate"), patch.object(self.module, "command", return_value=result) as command, patch.object(self.module, "snapshot", **snapshot_behavior) as diagnostic:
+                        with patch.dict(self.module.os.environ, self.install_env({}), clear=True), patch.object(self.module.time, "time", return_value=NOW), patch.object(self.module, "source_gate"), patch.object(self.module, "ca_gate"), patch.object(self.module, "command", return_value=result) as command, patch.object(self.module, "snapshot", **snapshot_behavior) as diagnostic:
                             with self.assertRaisesRegex(self.module.Stop, "^cli_failed_unknown_state_stop_no_retry$"):
                                 self.module.install_once(cfg, source, cli, "aws-1-ap-northeast-2.pooler.supabase.com", "postgres." + self.module.TARGET, "synthetic-unit-only", receipt)
                             command.assert_called_once()
@@ -598,7 +739,7 @@ class OfflineInheritanceSafety(unittest.TestCase):
             source = pathlib.Path(owned)
             cli = source / "supabase"
             cli.touch()
-            with patch.object(self.module, "source_gate"), patch.object(self.module, "ca_gate"), patch.object(self.module, "command", return_value=result) as command, patch.object(self.module, "snapshot", side_effect=forbidden) as diagnostic:
+            with patch.dict(self.module.os.environ, self.install_env({}), clear=True), patch.object(self.module.time, "time", return_value=NOW), patch.object(self.module, "source_gate"), patch.object(self.module, "ca_gate"), patch.object(self.module, "command", return_value=result) as command, patch.object(self.module, "snapshot", side_effect=forbidden) as diagnostic:
                 self.module.install_once(self.contract, source, cli, "aws-1-ap-northeast-2.pooler.supabase.com", "postgres." + self.module.TARGET, "synthetic-unit-only", receipt)
                 command.assert_called_once()
                 diagnostic.assert_not_called()
