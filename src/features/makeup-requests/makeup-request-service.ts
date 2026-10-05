@@ -109,6 +109,7 @@ export type MakeupSlotInput = {
 }
 
 export type MakeupRequest = {
+  notificationWarning?: string
   id: string
   status: MakeupRequestStatus
   subject: string
@@ -374,7 +375,7 @@ function mapClass(row: Row): MakeupClassOption {
   }
 }
 
-function mapRequest(row: Row, profilesById: Map<string, Pick<MakeupProfileOption, "label">>, teachersById: Map<string, Pick<MakeupTeacherOption, "name">>, eventsByRequestId = new Map<string, MakeupRequestEvent[]>()) {
+function mapRequest(row: Row, profilesById: Map<string, Pick<MakeupProfileOption, "label">>, teachersById: Map<string, Pick<MakeupTeacherOption, "name">>, eventsByRequestId = new Map<string, MakeupRequestEvent[]>()): MakeupRequest {
   const id = text(row.id)
   const requesterId = text(row.requester_id)
   const teacherCatalogId = text(row.teacher_catalog_id)
@@ -532,10 +533,11 @@ type MakeupMutationWire = {
 
 async function dispatchLegacyMakeupNotification(sourceEventId: string) {
   if (!supabase || !sourceEventId) return
+  const warning = "알림 후처리를 완료하지 못했습니다. 저장은 완료되어 다시 저장할 필요가 없습니다."
   try {
-    const { data } = await supabase.auth.getSession()
+    const { data, error } = await supabase.auth.getSession()
     const accessToken = data.session?.access_token
-    if (!accessToken) return
+    if (error || !accessToken) return warning
     const response = await fetch("/api/notifications/legacy/makeup", {
       method: "POST",
       keepalive: true,
@@ -545,11 +547,21 @@ async function dispatchLegacyMakeupNotification(sourceEventId: string) {
       },
       body: JSON.stringify({ sourceEventId }),
     })
-    if (!response.ok && response.status !== 202) {
+    const outcome = parseObject(await response.json().catch(() => null))
+    if (
+      !response.ok
+      || outcome.ok !== true
+      || [outcome.sent, outcome.deduped, outcome.failed].some((count) => (
+        typeof count !== "number" || !Number.isSafeInteger(count) || count < 0
+      ))
+      || Number(outcome.failed) > 0
+    ) {
       console.warn("휴보강 저장은 완료됐지만 알림 후처리를 완료하지 못했습니다.")
+      return warning
     }
   } catch (error) {
     console.warn("휴보강 저장은 완료됐지만 알림 후처리를 완료하지 못했습니다.", error)
+    return warning
   }
 }
 
@@ -571,7 +583,7 @@ async function runMakeupMutationRpc(
   const profilesById = new Map(workspaceData.profiles.map((profile) => [profile.id, profile]))
   const teachersById = new Map(workspaceData.teachers.map((teacher) => [teacher.id, teacher]))
   const request = mapRequest(requestRow, profilesById, teachersById)
-  await dispatchLegacyMakeupNotification(sourceEventId)
+  request.notificationWarning = await dispatchLegacyMakeupNotification(sourceEventId)
   return { request, sourceEventId }
 }
 
@@ -884,10 +896,10 @@ export async function approveMakeupRequest(requestId: string, actorId: string, n
     [request.teacherCatalogId, { name: request.teacherLabel }],
     [request.approverTeacherCatalogId, { name: request.approverLabel }],
   ])
-  const approvedRequest = { ...mapRequest(requestRow, profilesById, teachersById),
+  const approvedRequest: MakeupRequest = { ...mapRequest(requestRow, profilesById, teachersById),
     requesterLabel: request.requesterLabel, teacherLabel: request.teacherLabel, approverLabel: request.approverLabel,
   }
-  await dispatchLegacyMakeupNotification(sourceEventId)
+  approvedRequest.notificationWarning = await dispatchLegacyMakeupNotification(sourceEventId)
   return approvedRequest
 }
 

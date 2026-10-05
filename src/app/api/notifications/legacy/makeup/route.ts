@@ -537,6 +537,7 @@ async function dispatchGoogleChat(
       dispatch_token: text(materialized.dispatchToken),
       status: "sending",
       channel_key: "google_chat",
+      workflow_key: "makeup_requests",
       connection_key: item.connectionKey,
       webhook_url: webhookUrl,
       rendered_title: item.renderedTitle,
