@@ -298,7 +298,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(nextSession)
 
       const shouldRefreshProfile = event === "USER_UPDATED"
+      const inflight = profileRequestRef.current
+      const hasMatchingProfileRequest = Boolean(inflight.promise) && (
+        inflight.key === sessionKey || inflight.key.startsWith(`${sessionKey}:user-updated:`)
+      )
+      // Duplicate events must adopt a pending permission recheck before reusing a cached profile.
       const canReuseResolvedProfile = authResolutionRef.current.canReuseResolvedProfile(sessionKey)
+        && !hasMatchingProfileRequest
       if (!shouldRefreshProfile && canReuseResolvedProfile) {
         setLoading(false)
         return
@@ -314,8 +320,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const requestKey = shouldRefreshProfile
         ? `${sessionKey}:user-updated:${resolution.generation}`
-        : sessionKey
-      const inflight = profileRequestRef.current
+        : hasMatchingProfileRequest ? inflight.key : sessionKey
       if (inflight.key === requestKey && inflight.promise) {
         const resolvedProfile = { ...(await inflight.promise), ...resolution }
         applyResolvedProfile(resolvedProfile)
