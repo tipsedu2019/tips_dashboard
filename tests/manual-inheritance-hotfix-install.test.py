@@ -234,6 +234,17 @@ class OfflineInheritanceSafety(unittest.TestCase):
         activated["sourceReviewStatus"] = "reviewed_current"
         activated["approvalReceiptSha256"] = "a" * 64
         self.assertEqual(hashlib.sha256(canonical(activated["contract"])).hexdigest(), self.module.CONTRACT_SHA256)
+        calls = []
+        def synthetic_manifest(path):
+            if path != self.module.MANIFEST:
+                raise AssertionError("synthetic activation attempted real owner authority access")
+            calls.append(path)
+            return activated, canonical(activated)
+        with patch.object(self.module, "bounded_json", side_effect=synthetic_manifest), patch.object(self.module, "approval_gate", side_effect=forbidden) as authority:
+            loaded = self.module.load_contract()
+            authority.assert_not_called()
+        self.assertEqual(calls, [self.module.MANIFEST])
+        self.assertEqual(loaded, {**self.contract, "approvalReceiptSha256": "a" * 64})
 
     def test_contract_binds_affected_writer_scope_without_asserting_a_current_pause(self):
         self.assertEqual(self.contract["installationQuiescence"], EXPECTED_QUIESCENCE)

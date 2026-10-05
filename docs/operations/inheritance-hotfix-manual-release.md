@@ -1,4 +1,4 @@
-# Inheritance hotfix manual release — pause contract correction proposal
+# Approved scoped inheritance hotfix manual release — activation preparation
 
 The final replacement product candidate is PR97 source
 `1eccff3254b7024dc242bcffd11eb4505ff0700c`. The owner approved the presented
@@ -8,16 +8,23 @@ PR97 DB fix and subsequent application deployment with “진행해” at
 to the exact source, SQL and runner fingerprints below and permits normal
 reviewed runner CI integration and one conditional installation.
 
-Installation is still INACTIVE: the envelope has `proposalOnly:true`
-and `approvalReceiptSha256:null`, and the template is outside
-`.github/workflows`. The previously approved runner required an immutable claim
-that all other database writers were paused, including for its read-only
-preflight. That claim has not been established. This separately prepared
-correction changes those runner/contract fingerprints and requires the parent
-to assess owner approval coverage before activation or execution. It is not
-covered merely by retaining the earlier approval text. No executable owner
-receipt has been created. Registration CI, new hash-bound authority and fresh
-TLS/ledger/catalog evidence remain required before installation.
+The parent reviewed and accepted correction commit
+`8f03c6590d24a8bd6351e5ad17f043cefa65fc27` within that same approved single-SQL
+operation: target, source, SQL, permissions and existing-secret execution scope
+are unchanged. This is not new blanket permission. The corrected receipt binds
+the required affected installation scope, without claiming that callers have
+already paused or drained. It cites the provided owner approval reference
+`Sentinel_b3c67b70438c81918771cbde73202245` and timestamp, and preserves the
+parent's correction-coverage instruction. The retained question outline is
+historical scope evidence, not a claimed verbatim transcript.
+
+The activated envelope has `proposalOnly:false` and the receipt hash below.
+Dedicated workflow registration, exact-head CI and normal integration must
+finish before a read-only native preflight dispatch. Installation remains
+conditional on a successful fresh TLS/ledger/catalog preflight and an actual
+scoped pause/drain with a fresh runtime acknowledgement. The parent coordinates
+that short owner/staff/bot pause only after preflight passes and the executable
+is ready. No production install has been dispatched by this preparation.
 Application merge/deployment remains owned by the incident application thread
 after a successful DB receipt; this runner does not deploy the product.
 
@@ -209,13 +216,13 @@ cannot lock production callers. Receipt bound
 prevention. A failed or ambiguous attempt requires fresh review and authority
 before any retry.
 
-The manifest remains a public inactive envelope with `proposalOnly:true`,
-`sourceReviewStatus:'reviewed_current'` and `approvalReceiptSha256:null`.
-The proposal/receipt gates must stop before
+The manifest is a public activated envelope with `proposalOnly:false`,
+`sourceReviewStatus:'reviewed_current'` and the exact owner receipt hash below.
+An inactive or mismatched proposal/receipt must stop before
 credential handling, source/transport operations, API or DB. `CONTRACT_SHA256`
 covers only `contract`, encoded as UTF-8 canonical JSON using `sort_keys=True`,
 `separators=(',', ':')` and `ensure_ascii=True`; the script pins that digest.
-The envelope's proposal flag and receipt hash remain outside it. A future receipt
+The envelope's proposal flag and receipt hash remain outside it. The receipt
 binds exact product/SQL/target/catalog/ledger, the three new permission decisions
 including two client EXECUTE grants and DTO/resource scope, and reviewed
 script/unsigned-contract/CA pins. It must not hash a
@@ -223,7 +230,7 @@ final manifest containing its own hash. The contract must not hash its pinning
 script or this document. Later activation pins an immutable reviewed runner
 commit and files without a commit self-reference. Old, placeholder or AI receipts
 cannot authorize this release. Workflow activation and exact-path/full-hash
-registration are separate reviewed changes after CI and the new owner receipt.
+registration remain separate reviewed changes requiring CI and normal integration.
 
 The following retained owner-review outline records the frozen reviewed scope;
 the approval evidence is recorded at the top of this document. Execution remains
@@ -276,7 +283,7 @@ Required release evidence remains separate:
 | Runner freeze and offline checks | The historical frozen packet above passed 30/30 offline units and review. This correction requires separate final hashes, updated offline failure-boundary tests and independent review. The fourteen-entry catalog still covers thirteen SQL targets and the unchanged writer, with two old DTO RPCs exactly unchanged. Semantic actionlint and activation/registration CI remain pending. No production entrypoint/live preflight/install/CA-only flag or real API/DB/CLI ran. |
 | Disposable PostgreSQL 17 / native CLI | Exact before/final catalog/body hashes/ACLs and canonical inventory/ledger behavior with no authentication fallback; product bounded-runtime evidence is not native installation evidence. No business RPCs or rollback proof by the runner. |
 | Runtime TLS/ledger/catalog preflight | Approved immediate secure SELECT-only TLS/target/full inventory and fresh exact before-ledger/catalog evidence, conditional on the required receipt and CI. Historical 362 rows are not current authority; no live preflight has run. |
-| One install dispatch | Parent assessment of approval coverage for the corrected runner/contract, explicit owner-only scoped DEFINER plus two-signature client EXECUTE/resource-scope approval, new hash-bound receipt and freshly confirmed scoped pause/drain; one dispatch only, ambiguity stops. |
+| One install dispatch | Parent accepted correction8f03 within the existing owner-approved operation. Explicit owner-only scoped DEFINER plus two-signature client EXECUTE/resource-scope approval, the hash-bound receipt and freshly confirmed scoped pause/drain remain required; one dispatch only, ambiguity stops. |
 | Product / recovery | Deployment/UI/human business verification are separate decisions; forward recovery without automatic rollback or raw-plan repair. |
 
 ## Proposed installation quiescence contract
@@ -357,9 +364,18 @@ single-attempt/unknown-state boundaries are unchanged. Current correction pins:
 - Runner SHA256: `e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5`.
 - Unsigned contract SHA256: `c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484`.
 
-Full file hashes, test results and independent review must be returned with the
-proposal before approval coverage is assessed. No altered-contract live
-preflight or install is permitted merely by preparing or reviewing these files.
+The corrected file hashes, 37 offline tests and independent approval were
+returned before the parent accepted coverage. Normal reviewed integration and
+read-only native preflight are now authorized. Installation still requires an
+actual pause/drain; preparing files or creating this immutable receipt does not
+establish that operational fact.
+
+- Public owner receipt SHA256:
+  `4b539cae533335aa3c70625a290f3208c8357a8e3c77094a2d8a0868d37d93fd`.
+- Activated manifest SHA256:
+  `bed4ed8005518c5795e73027f782c95b2e77e78f8b37ad42d6abbcba62457acd`.
+- Approval validity: 2026-10-05 00:36:55 UTC through
+  2026-10-06 00:36:55 UTC, bound to the original provided owner approval time.
 
 The corrected offline suite contains the original 30 tests plus seven pause
 contract tests. Controlled Python 3.12.14 with `env -i` passed 37/37, using only

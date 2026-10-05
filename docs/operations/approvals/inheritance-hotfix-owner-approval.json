@@ -1,0 +1,140 @@
+{
+  "approvalKind": "owner_action_time_inheritance_hotfix",
+  "sourceSha": "1eccff3254b7024dc242bcffd11eb4505ff0700c",
+  "sqlSha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3",
+  "projectRef": "slnjqlzzhewblvttiidk",
+  "region": "ap-northeast-2",
+  "unsignedContractSha256": "c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484",
+  "scriptSha256": "e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5",
+  "caSha256": "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7",
+  "newPermissions": [
+    {
+      "signature": "dashboard_private.read_makeup_operating_reference_v1(date,date)",
+      "owner": "postgres",
+      "returns": "jsonb",
+      "securityDefiner": true,
+      "grantees": [],
+      "guard": "owner-only direct EXECUTE; internal postgres DEFINER call; non-null ordered dates within 14 inclusive KST days",
+      "scope": "private date-scoped operating reference; no authenticated/service direct source-adapter access",
+      "resourceBound": "Date eligibility precedes dated resolution/materialization; history/JSONB identity scans, detoasting, complete basics/catalogs and dense in-window work remain; no execution-work budget or production latency proof."
+    },
+    {
+      "owner": "postgres",
+      "returns": "jsonb",
+      "dtoKeys": [
+        "id",
+        "classId",
+        "className",
+        "date",
+        "startMinute",
+        "endMinute",
+        "classroom",
+        "uncertain",
+        "allRooms"
+      ],
+      "signature": "dashboard_private.makeup_effective_class_context_v1(jsonb)",
+      "securityDefiner": true,
+      "grantees": [
+        "authenticated",
+        "service_role"
+      ],
+      "guard": "auth.uid() non-null OR current role service_role; no staff/active-profile/class-ownership gate",
+      "scope": "class occupancy outside request RLS, constrained by validated day envelopes and actual overlap",
+      "resourceBounds": {
+        "maxDayEnvelopes": 14,
+        "maxInclusiveKstDays": 14,
+        "maxFinalOccupancyRows": 2000,
+        "overflowSqlstate": "22023",
+        "overflowMessage": "makeup_effective_capacity_exceeded",
+        "executionWorkBudgetEstablished": false,
+        "productionLatencyProven": false,
+        "databaseCancellationProven": false,
+        "multipleBatchesSingleSnapshot": false
+      },
+      "resourceBound": "Up to 14 canonical UTC envelopes on distinct KST days within 14 inclusive days; final occupancy sentinel over 2000 fails closed with 22023. History scans/detoasting remain. Response capacity is not an execution budget; client deadline does not prove DB cancellation."
+    },
+    {
+      "owner": "postgres",
+      "returns": "jsonb",
+      "dtoKeys": [
+        "id",
+        "classId",
+        "className",
+        "date",
+        "startMinute",
+        "endMinute",
+        "classroom",
+        "uncertain",
+        "allRooms"
+      ],
+      "signature": "public.get_makeup_effective_occupancy_v1(jsonb)",
+      "securityDefiner": false,
+      "grantees": [
+        "authenticated",
+        "service_role"
+      ],
+      "guard": "INVOKER wrapper calls authenticated occupancy DEFINER with the same UID/service guard",
+      "scope": "public RPC exposing only the nine-field bounded occupancy DTO; existing request/event RPCs and their RLS remain unchanged",
+      "resourceBounds": {
+        "maxDayEnvelopes": 14,
+        "maxInclusiveKstDays": 14,
+        "maxFinalOccupancyRows": 2000,
+        "overflowSqlstate": "22023",
+        "overflowMessage": "makeup_effective_capacity_exceeded",
+        "executionWorkBudgetEstablished": false,
+        "productionLatencyProven": false,
+        "databaseCancellationProven": false,
+        "multipleBatchesSingleSnapshot": false
+      },
+      "resourceBound": "Caller uses lazy sequential batches sharing the existing eight-second read deadline/cancellation, no automatic retries or parallel fan-out, no successful context after partial failure; multiple batches are not one DB snapshot."
+    }
+  ],
+  "before": {
+    "count": 362,
+    "latest": "20261002170849",
+    "versionsSha256": "63d5517028ceb647b242b24edba0957fd6ce010fb3abc762a6dfef363733f93b",
+    "versionNamesCanonicalJsonSha256": "83737a2ac0f6a24694abd0409fc7c48c48dbe2469c7af17b0df4b6fee05b3037"
+  },
+  "after": {
+    "count": 363,
+    "latest": "20261004160000",
+    "versionsSha256": "1edeca0dfb3d8a32c4f29b4c467d30ca25ba8ce77cee1a8ab62ee5e8d841def3",
+    "versionNamesCanonicalJsonSha256": "30068071bb6ec8e22117ee77d383fa6d2ac4e5712f0cf17d7cad1344e746a617"
+  },
+  "allowedModes": [
+    "preflight",
+    "install"
+  ],
+  "maxInstallDispatches": 1,
+  "installationQuiescence": {
+    "readOnlyPreflightRequiresPause": false,
+    "requiredForInstall": [
+      "other_production_ddl_and_migration_installers",
+      "class_schedule_defaults_lessons_slots_teacher_room_and_roster_enrollment_writers",
+      "makeup_approval_cancellation_and_lifecycle_writers",
+      "human_and_bot_calls_using_replaced_schedule_readers_including_get_class_schedule_v1_runtime_materialization",
+      "calendar_academic_event_and_makeup_approval_evidence_writers_altering_inherited_schedule_or_occupancy_provenance"
+    ],
+    "affectedInFlightTransactionsMustBeDrained": true,
+    "unrelatedRetentionAndNotificationJournalWritersRequirePause": false,
+    "resumeOnlyAfter": "verified_post_install_checkpoint_or_explicit_unknown_state_diagnosis",
+    "pauseAck": "AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED",
+    "pauseAttestationMaxAgeSeconds": 300
+  },
+  "noAutomaticRetryRepairOrRollback": true,
+  "approvedAtEpoch": 1791160615,
+  "expiresAtEpoch": 1791247015,
+  "approvalProvenance": {
+    "recordSource": "delegated parent approval record and retained runbook timestamps",
+    "sourceThreadId": "01a0f98f-72f2-72e2-97a9-4b22a53a90c8",
+    "ownerApprovalMessageReference": "Sentinel_b3c67b70438c81918771cbde73202245",
+    "providedOwnerAnswer": "진행해",
+    "ownerApprovalAtUtc": "2026-10-05T00:36:55Z",
+    "originalProposalAtUtc": "2026-10-04T23:00:53Z",
+    "originalProposalVerbatimIncluded": false,
+    "historicalScopeOutlinePath": "docs/operations/inheritance-hotfix-manual-release.md",
+    "reviewedCorrectionCommit": "8f03c6590d24a8bd6351e5ad17f043cefa65fc27",
+    "correctionCoverageAcceptedByParent": true,
+    "parentCoverageAcceptanceText": "The independently reviewed 8f03c659 pause-contract correction remains within the owner's approved single-SQL installation and existing-secret workflow scope: same target/source/SQL/permissions, no new credentials, and a technically scoped pause replacing an unnecessarily universal pause. Proceed with normal draft PR, exact-head CI, reviewed integration and read-only native preflight without pause. Preserve the exact unchanged SQL hash ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3 and source 1eccff32. A truthful receipt may cite owner approval Sentinel_b3c67b70438c81918771cbde73202245 and the original full question in your prior prompt, but must not assert pause/drain before verified. Once preflight passes and the executable is ready, report ready-for-pause promptly; I will coordinate the actual short owner/staff/bot pause. Don't request a pause while CI/TLS/ledger blockers are still unknown. Continue to completion of these authorized stages; no install until fresh scoped pause/drain. The changed runner hashes are now reviewed and accepted for this same operation, not new blanket permission."
+  }
+}
