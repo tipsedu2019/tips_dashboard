@@ -313,7 +313,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setSession(nextSession)
 
       const shouldRefreshProfile = event === "USER_UPDATED"
+      const inflight = profileRequestRef.current
+      const hasMatchingProfileRequest = Boolean(inflight.promise) && (
+        inflight.key === sessionKey || inflight.key.startsWith(`${sessionKey}:user-updated:`)
+      )
+      // Duplicate events must adopt a pending permission recheck before reusing a cached profile.
       const canReuseResolvedProfile = authResolutionRef.current.canReuseResolvedProfile(sessionKey)
+        && !hasMatchingProfileRequest
       if (!shouldRefreshProfile && canReuseResolvedProfile) {
         setLoading(false)
         return
@@ -329,8 +335,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
       const requestKey = shouldRefreshProfile
         ? `${sessionKey}:user-updated:${resolution.generation}`
-        : sessionKey
-      const inflight = profileRequestRef.current
+        : hasMatchingProfileRequest ? inflight.key : sessionKey
       if (inflight.key === requestKey && inflight.promise) {
         const resolvedProfile = { ...(await inflight.promise), ...resolution }
         applyResolvedProfile(resolvedProfile)
@@ -355,15 +360,19 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const client = supabase
     const authResolution = authResolutionRef.current
     const initialSnapshot = authResolution.captureSnapshot()
+    let hasReceivedAuthEvent = false
+    const isInitialSnapshotCurrent = () => (
+      !hasReceivedAuthEvent && authResolution.isSnapshotCurrent(initialSnapshot)
+    )
 
     loadInitialAuthSession(client)
       .then(async ({ data, error }) => {
-        if (!isActive || !authResolution.isSnapshotCurrent(initialSnapshot)) return
+        if (!isActive || !isInitialSnapshotCurrent()) return
         if (error) {
           if (isStaleRefreshTokenError(error)) {
             await client.auth.signOut({ scope: "local" })
             if (!isActive) return
-            if (!authResolution.isSnapshotCurrent(initialSnapshot)) return
+            if (!isInitialSnapshotCurrent()) return
             const resolution = authResolution.begin("anonymous")
             resetAnonymousSession(resolution)
             return
@@ -376,7 +385,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         await applyResolvedUser(data.session, resolution, "INITIAL_SESSION")
       })
       .catch((error) => {
-        if (!isActive || !authResolution.isSnapshotCurrent(initialSnapshot)) return
+        if (!isActive || !isInitialSnapshotCurrent()) return
         setAuthError(getAuthErrorMessage(error, "로그인 상태를 확인하지 못했습니다."))
         setLoading(false)
       })
@@ -385,6 +394,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     const authSubscriptionTimer = setTimeout(() => {
       if (!isActive) return
       const result = client.auth.onAuthStateChange((event, nextSession) => {
+        if (!isActive) return
+        // Invalidate initialization immediately without coalescing queued events.
+        hasReceivedAuthEvent = true
         setTimeout(() => {
           if (!isActive) return
           const resolution = authResolution.begin(getSessionKey(nextSession))

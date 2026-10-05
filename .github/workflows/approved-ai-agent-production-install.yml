@@ -1,0 +1,120 @@
+name: Manual approved seven-migration production installation
+
+# Owner-approved manual-only runner. No automatic trigger or retry.
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only prerequisite check or separately approved installation
+        type: choice
+        options: [preflight, install]
+        default: preflight
+        required: true
+      install_ack:
+        description: Exact read-only or install acknowledgement for the selected mode
+        type: string
+        default: READ ONLY PRODUCTION PREREQUISITE CHECK
+        required: true
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: supabase-production-slnjqlzzhewblvttiidk
+  cancel-in-progress: false
+
+jobs:
+  approved-install-only:
+    if: github.repository == 'tipsedu2019/tips_dashboard' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      APPROVED_SOURCE_SHA: '93b2b34646ad1ceb16989a4eceb33f2b44651ed1'
+      # Pin independently reviewed deployment tooling; source checkout remains distinct.
+      REVIEWED_RUNNER_SHA: '0da2c5089ecbdc14db7f8b46ac7957fcc11f25b4'
+      INSTALL_APPROVAL_RECEIPT_SHA256: 'f3ff9102db2fe46c02a56b36136c27f08eaf1a9a7b73483f087bda287d6c3cf9'
+      READ_ONLY_APPROVAL_RECEIPT_SHA256: '8b09ee1c9ce30d076ad7ecf31914e5e43a7b88021348ba83288ea802215d76b3'
+      RELEASE_MODE: ${{ inputs.mode }}
+      SUPABASE_TELEMETRY_DISABLED: '1'
+    steps:
+      - name: Require immutable runner and owner approval pins
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${APPROVED_SOURCE_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${REVIEWED_RUNNER_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "${RELEASE_MODE}" == preflight ]]; then
+            [[ "${READ_ONLY_APPROVAL_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          elif [[ "${RELEASE_MODE}" == install ]]; then
+            [[ "${INSTALL_APPROVAL_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          else
+            exit 1
+          fi
+
+      - name: Checkout exact approved product source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ env.APPROVED_SOURCE_SHA }}
+          path: approved-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout independently reviewed runner
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ env.REVIEWED_RUNNER_SHA }}
+          path: release-runner
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify exact owner and read-only authority receipts
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' "${INSTALL_APPROVAL_RECEIPT_SHA256}" release-runner/docs/operations/ai-agent-install-owner-approval-2026-10-04.json | sha256sum --check --strict
+          printf '%s  %s\n' "${READ_ONLY_APPROVAL_RECEIPT_SHA256}" release-runner/docs/operations/ai-agent-read-only-task-authorization-2026-10-04.json | sha256sum --check --strict
+
+      - name: Verify pinned runner offline guards before credentials
+        working-directory: release-runner
+        shell: bash
+        run: PYTHONDONTWRITEBYTECODE=1 python3 tests/manual-production-install.test.py
+
+      - name: Prepare exact already reviewed CLI version
+        if: inputs.mode == 'install'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/psql
+          test -r /etc/ssl/certs/ca-certificates.crt
+          cli_dir="${RUNNER_TEMP}/approved-supabase-cli"
+          archive_path="${RUNNER_TEMP}/supabase_2.115.0_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error --output "${archive_path}" https://github.com/supabase/cli/releases/download/v2.115.0/supabase_2.115.0_linux_amd64.tar.gz
+          echo "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3  ${archive_path}" | sha256sum --check --strict
+          mkdir -p "${cli_dir}"
+          tar -xzf "${archive_path}" -C "${cli_dir}"
+          test "$("${cli_dir}/supabase" --version)" = '2.115.0'
+
+      - name: One approved install with read-only before and after checkpoints
+        shell: bash
+        env:
+          # Existing repository secrets only. No value appears in shell arguments.
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+          INSTALL_ACK: ${{ inputs.install_ack }}
+        run: |
+          set -euo pipefail
+          python3 release-runner/scripts/manual-production-install.py \
+            release-runner/scripts/approved-seven-migrations.json \
+            approved-source \
+            "${RUNNER_TEMP}/approved-supabase-cli/supabase"
+
+      - name: Preserve only the explicit safe receipt
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: approved-install-safe-receipt
+          path: safe-production-install-receipt.json
+          if-no-files-found: error
+          retention-days: 7

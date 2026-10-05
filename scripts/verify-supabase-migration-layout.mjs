@@ -58,6 +58,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/academic_operations_numbered_pages_test.sql",
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
+  "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",
@@ -158,15 +159,25 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "28cd3acdf63086f20bf9c5ff9b831f8efeac3d322de8e4aa81ee2bd9a9e698bf"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "cad749d41fac3d9642ebd1e5fd3227353f39040ea92fdeaf80bd7ab72fe5db85"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "4b810fea5f650fb22f0ecddefde82eed04eae817a49e6848bfb4887e2980b34c"
+  "e67344ba368a57afe379909bf2910e021787345b4483f70d92d4952903cfba07"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
+// This separately reviewed, owner-approved manual release is not isolated CI.
+// Only its exact path AND complete bytes may cross that execution boundary.
+const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
+const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
+  "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
+const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-production-install.yml"
+const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
+  "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "8102aff17e018730f6e9138126a6379b69da5ca04835e4f04a115fbc4be0f710"],
+  ["free-tier-guardrails.yml", "4e7fd2bd74424d2e8e7bdc2b5a13638b07a65b738f594cba775d4537ff9e8d5c"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
+  [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
+  [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
 ])
 const APPROVED_GITHUB_ACTION_REFS = Object.freeze([
   ["actions/checkout", "08c6903cd8c0fde910a37f88322edcfb5dd907a8"],
@@ -1767,6 +1778,10 @@ export async function validateSupabaseMigrationLayout({ repoRoot = defaultRepoRo
         reportedActions.add(actionName)
       }
     }
+    if ((workflowRelativeToDirectory === APPROVED_MANUAL_PRODUCTION_WORKFLOW
+      && sha256(workflow) === APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256)
+      || (workflowRelativeToDirectory === APPROVED_INHERITANCE_PRODUCTION_WORKFLOW
+        && sha256(workflow) === APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256)) continue
     const kind = workflowRelativeToDirectory === REQUIRED_DB_PUSH_WORKFLOW ? "main"
       : workflowRelativeToDirectory === REQUIRED_SQL_REVIEW_WORKFLOW ? "pr"
         : workflowRelativeToDirectory === "free-tier-guardrails.yml" ? "guardrails" : "other"

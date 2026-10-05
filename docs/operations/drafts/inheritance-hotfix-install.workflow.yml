@@ -1,0 +1,146 @@
+# INACTIVE REVIEW TEMPLATE. This path cannot register or dispatch a workflow.
+# Pause contract correction proposal; new owner authority coverage is pending.
+# Activation, immutable runner/envelope/owner pins and CI registration need review.
+name: Manual approved PR97 inheritance hotfix installation
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Read-only preflight or one separately approved PR97 installation
+        type: choice
+        options: [preflight, install]
+        default: preflight
+        required: true
+      install_ack:
+        description: Exact acknowledgement for the selected approved mode
+        type: string
+        default: READ ONLY PR97 INHERITANCE PREFLIGHT
+        required: true
+      install_pause_ack:
+        description: Install only; attest that the exact approved affected scope is paused and drained
+        type: string
+        default: ''
+        required: false
+      install_pause_at_epoch:
+        description: Install only; UTC epoch at which affected writers and other DDL installers were confirmed paused
+        type: string
+        default: ''
+        required: false
+
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: supabase-production-slnjqlzzhewblvttiidk
+  cancel-in-progress: false
+
+jobs:
+  inheritance-hotfix-only:
+    if: github.repository == 'tipsedu2019/tips_dashboard' && github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    env:
+      SOURCE_REVIEW_STATUS: 'reviewed_current'
+      APPROVED_SOURCE_SHA: '1eccff3254b7024dc242bcffd11eb4505ff0700c'
+      # Immutable reviewed runner commit comes AFTER the owner receipt is bound.
+      REVIEWED_RUNNER_SHA: 'PENDING_REVIEWED_RUNNER_COMMIT'
+      RUNNER_SCRIPT_SHA256: 'e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5'
+      MANIFEST_SHA256: 'PENDING_ACTIVATED_MANIFEST_SHA256'
+      OWNER_APPROVAL_RECEIPT_SHA256: 'PENDING_ACTION_TIME_OWNER_RECEIPT'
+      RELEASE_MODE: ${{ inputs.mode }}
+      INSTALL_ACK: ${{ inputs.install_ack }}
+      INSTALL_PAUSE_ACK: ${{ inputs.install_pause_ack }}
+      INSTALL_PAUSE_AT_EPOCH: ${{ inputs.install_pause_at_epoch }}
+      SUPABASE_TELEMETRY_DISABLED: '1'
+      PYTHONDONTWRITEBYTECODE: '1'
+    steps:
+      - name: Require reviewed immutable pins and one manual attempt before checkout or credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "${SOURCE_REVIEW_STATUS}" == 'reviewed_current' ]]
+          [[ "${GITHUB_RUN_ATTEMPT}" == '1' ]]
+          [[ "${APPROVED_SOURCE_SHA}" == '1eccff3254b7024dc242bcffd11eb4505ff0700c' ]]
+          [[ "${REVIEWED_RUNNER_SHA}" =~ ^[0-9a-f]{40}$ ]]
+          [[ "${RUNNER_SCRIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${MANIFEST_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          [[ "${OWNER_APPROVAL_RECEIPT_SHA256}" =~ ^[0-9a-f]{64}$ ]]
+          if [[ "${RELEASE_MODE}" == preflight ]]; then
+            [[ "${INSTALL_ACK}" == 'READ ONLY PR97 INHERITANCE PREFLIGHT' ]]
+          elif [[ "${RELEASE_MODE}" == install ]]; then
+            [[ "${INSTALL_ACK}" == 'INSTALL ONLY PR97 INHERITANCE MIGRATION ONCE' ]]
+            [[ "${INSTALL_PAUSE_ACK}" == 'AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED' ]]
+            [[ "${INSTALL_PAUSE_AT_EPOCH}" =~ ^[0-9]{10}$ ]]
+          else
+            exit 1
+          fi
+
+      - name: Checkout exact PR97 product source
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ env.APPROVED_SOURCE_SHA }}
+          path: approved-source
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Checkout independently reviewed dedicated runner
+        uses: actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8
+        with:
+          ref: ${{ env.REVIEWED_RUNNER_SHA }}
+          path: release-runner
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Verify script, activated envelope and action-time authority before credentials
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s  %s\n' "${RUNNER_SCRIPT_SHA256}" release-runner/scripts/manual-inheritance-hotfix-install.py | sha256sum --check --strict
+          printf '%s  %s\n' "${MANIFEST_SHA256}" release-runner/scripts/inheritance-hotfix-release-manifest.json | sha256sum --check --strict
+          printf '%s  %s\n' "${OWNER_APPROVAL_RECEIPT_SHA256}" release-runner/docs/operations/approvals/inheritance-hotfix-owner-approval.json | sha256sum --check --strict
+          python3 release-runner/scripts/manual-inheritance-hotfix-install.py --verify-release-authority-only
+
+      - name: Verify pinned public CA before credentials
+        shell: bash
+        run: python3 release-runner/scripts/manual-inheritance-hotfix-install.py --verify-ca-only
+
+      - name: Validate reviewed offline failure boundaries before credentials
+        working-directory: release-runner
+        shell: bash
+        run: python3 tests/manual-inheritance-hotfix-install.test.py
+
+      - name: Prepare exact reviewed CLI only for explicit install
+        if: inputs.mode == 'install'
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -x /usr/bin/psql
+          cli_dir="${RUNNER_TEMP}/inheritance-supabase-cli"
+          archive_path="${RUNNER_TEMP}/supabase_2.115.0_linux_amd64.tar.gz"
+          curl --fail --location --silent --show-error --proto '=https' --proto-redir '=https' --tlsv1.2 --output "${archive_path}" https://github.com/supabase/cli/releases/download/v2.115.0/supabase_2.115.0_linux_amd64.tar.gz
+          printf '%s  %s\n' 'ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3' "${archive_path}" | sha256sum --check --strict
+          mkdir -p "${cli_dir}"
+          tar -xzf "${archive_path}" -C "${cli_dir}"
+          test "$("${cli_dir}/supabase" --version)" = '2.115.0'
+
+      - name: One approved PR97 attempt with read-only before and after checkpoints
+        shell: bash
+        env:
+          # Existing secrets only, supplied only to this reviewed step.
+          SUPABASE_ACCESS_TOKEN: ${{ secrets.SUPABASE_ACCESS_TOKEN }}
+          SUPABASE_DB_PASSWORD: ${{ secrets.SUPABASE_DB_PASSWORD }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 release-runner/scripts/manual-inheritance-hotfix-install.py
+
+      - name: Preserve only safe hashes, counts and boundary results
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: inheritance-hotfix-safe-receipt
+          path: inheritance-hotfix-safe-receipt.json
+          if-no-files-found: warn
+          retention-days: 7

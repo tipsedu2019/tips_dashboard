@@ -1,0 +1,3142 @@
+{
+  "proposalOnly": false,
+  "approvalReceiptSha256": "43566bd8202594f3e8963f53041b05abd1011f6b61c51574d3b9aabf92f38eba",
+  "contract": {
+    "schemaVersion": 1,
+    "approvedSourceSha": "1eccff3254b7024dc242bcffd11eb4505ff0700c",
+    "target": {
+      "projectRef": "slnjqlzzhewblvttiidk",
+      "region": "ap-northeast-2",
+      "databaseUser": "postgres"
+    },
+    "onlyMigration": {
+      "file": "20261004160000_legacy_effective_schedule_inheritance.sql",
+      "version": "20261004160000",
+      "name": "legacy_effective_schedule_inheritance",
+      "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
+    },
+    "allSourceMigrations": [
+      {
+        "file": "20260316090000_class_terms.sql",
+        "version": "20260316090000",
+        "name": "class_terms",
+        "sha256": "c7b9f4d2bf035944b99ffb1cd31ced799c71dc8264bfc4e1ec637f6eb0dce56e"
+      },
+      {
+        "file": "20260316091000_academic_calendar_extension.sql",
+        "version": "20260316091000",
+        "name": "academic_calendar_extension",
+        "sha256": "fdee7b5f36b3f7d664fe6af4094ccaf1a630bf87e572acc955144f751cb6355d"
+      },
+      {
+        "file": "20260316092000_rls_recursion_fix.sql",
+        "version": "20260316092000",
+        "name": "rls_recursion_fix",
+        "sha256": "569362777521626c6a2f85a98cb67f9de1b4f03cb56b7c6b62318909dd71d8a9"
+      },
+      {
+        "file": "20260317103000_class_terms_authenticated_write.sql",
+        "version": "20260317103000",
+        "name": "class_terms_authenticated_write",
+        "sha256": "f6fe4d2e8751ba4a9ab63cd3457e16eb2f7f1e0f8bf229d9a6beb658ad75d630"
+      },
+      {
+        "file": "20260317150000_curriculum_and_textbook_schema_alignment.sql",
+        "version": "20260317150000",
+        "name": "curriculum_and_textbook_schema_alignment",
+        "sha256": "289aaf88a12122f487fdffe667271b83d9db6cc5d7a5fc06fecdeacb2232605d"
+      },
+      {
+        "file": "20260318103000_curriculum_roadmap.sql",
+        "version": "20260318103000",
+        "name": "curriculum_roadmap",
+        "sha256": "b058334420d355a3dcd5579c1432947298816a814d7d77f32b3e1b047c12f0e0"
+      },
+      {
+        "file": "20260318120000_teacher_classroom_catalogs.sql",
+        "version": "20260318120000",
+        "name": "teacher_classroom_catalogs",
+        "sha256": "4d8a8790a4cad1f63fc2f3cb397795da7fe1fee7560c50a4431efbb1ff97c3fa"
+      },
+      {
+        "file": "20260323110000_textbooks_authenticated_write.sql",
+        "version": "20260323110000",
+        "name": "textbooks_authenticated_write",
+        "sha256": "93fae362c1e370cb22bb7fd367201c34c689f79442294c81180140bd7bc16309"
+      },
+      {
+        "file": "20260324120000_class_schedule_workspace.sql",
+        "version": "20260324120000",
+        "name": "class_schedule_workspace",
+        "sha256": "b9c801745cd349a3497c110427664f8a3047a6568b213677ffdba24f1ebef639"
+      },
+      {
+        "file": "20260426090000_class_groups_many_to_many.sql",
+        "version": "20260426090000",
+        "name": "class_groups_many_to_many",
+        "sha256": "f3b3cf872f11d3cd864af3666d3240f0ced5280db59b42ac850a16327e047ee2"
+      },
+      {
+        "file": "20260429110000_textbook_management.sql",
+        "version": "20260429110000",
+        "name": "textbook_management",
+        "sha256": "60e3f43537aaff2cd854db368dfab541bf0b1006575fd8bc8d046d1ba0787d71"
+      },
+      {
+        "file": "20260429123000_textbooks_updated_at.sql",
+        "version": "20260429123000",
+        "name": "textbooks_updated_at",
+        "sha256": "8e2448faf2b8cbe5483373aeb2f2544e089f40cd47112eb13345a30b3d9f142d"
+      },
+      {
+        "file": "20260429133000_textbook_purchase_line_class_id.sql",
+        "version": "20260429133000",
+        "name": "textbook_purchase_line_class_id",
+        "sha256": "c8c73ef25af281dda455fcaea2ef99ea084df295fdc2d3118dae49ca781d3fbf"
+      },
+      {
+        "file": "20260429143000_textbook_publisher_supplier_settings.sql",
+        "version": "20260429143000",
+        "name": "textbook_publisher_supplier_settings",
+        "sha256": "68800f693b953e918af697a64bfae3173f798ccf5e2905f56e704ba0f1a38013"
+      },
+      {
+        "file": "20260429150000_import_textbook_notion_master.sql",
+        "version": "20260429150000",
+        "name": "import_textbook_notion_master",
+        "sha256": "7e1b3f27d3ec6ddc3e81dc3085fa33318c32f622ca13bddf569fd2564b31c6e0"
+      },
+      {
+        "file": "20260429151000_complete_textbook_publisher_supplier_links.sql",
+        "version": "20260429151000",
+        "name": "complete_textbook_publisher_supplier_links",
+        "sha256": "a53f7bf820cb8020b409c1fd4e8a9da58ef1b8c9ad95c7aa9fe26e0bce2e6952"
+      },
+      {
+        "file": "20260429162000_teacher_account_link_audit.sql",
+        "version": "20260429162000",
+        "name": "teacher_account_link_audit",
+        "sha256": "f4f52d29328754549dac0bd3a72e5f4c6bc4d877ebaf7e0bcfc7c09642226bb4"
+      },
+      {
+        "file": "20260430090000_merge_sukyung_textbook_publisher.sql",
+        "version": "20260430090000",
+        "name": "merge_sukyung_textbook_publisher",
+        "sha256": "dae73bb817336f557efc6ea5bb51aeab720bf865034db643e274211659918c4c"
+      },
+      {
+        "file": "20260430113000_makeedu_textbook_payment_sync.sql",
+        "version": "20260430113000",
+        "name": "makeedu_textbook_payment_sync",
+        "sha256": "758f60a1b3d7b27e20ed8bbf63cf4d9b60af81865b532bf8076766aef0d93b4c"
+      },
+      {
+        "file": "20260430150000_textbook_purchase_request_free_title.sql",
+        "version": "20260430150000",
+        "name": "textbook_purchase_request_free_title",
+        "sha256": "45f0dff87e380fa4b82e87cb0395b4f1352242fd5218291ce671737f3398c085"
+      },
+      {
+        "file": "20260501100000_textbook_taxonomy_settings.sql",
+        "version": "20260501100000",
+        "name": "textbook_taxonomy_settings",
+        "sha256": "3cd1cc4f7fdf2c9d79434e7911c2d1e6858e6d5276619107a5a2d507e8798738"
+      },
+      {
+        "file": "20260503120000_student_status_and_enrollment_history.sql",
+        "version": "20260503120000",
+        "name": "student_status_and_enrollment_history",
+        "sha256": "fa17793efe8896ddecaa7edbac7e8aee0e9ceec1fddf0ff54a6260f586ab76d7"
+      },
+      {
+        "file": "20260520140332_auth_profile_viewer_defaults.sql",
+        "version": "20260520140332",
+        "name": "auth_profile_viewer_defaults",
+        "sha256": "0c46b380dcb1c8371f3d7a2963686cb00228b6a8770f6f490a1227e71a45fe18"
+      },
+      {
+        "file": "20260521190000_ops_taskbox.sql",
+        "version": "20260521190000",
+        "name": "ops_taskbox",
+        "sha256": "de8034d4d5cbcf1a9d5c0670da7ab1d26120ae5fe72749594554c362988a3031"
+      },
+      {
+        "file": "20260521191000_ops_registration_detail_completion.sql",
+        "version": "20260521191000",
+        "name": "ops_registration_detail_completion",
+        "sha256": "203223eb7d33b045e3ea8b81f08414a8bb696fdcfd3641eb8797c7d3af1ee028"
+      },
+      {
+        "file": "20260521192000_ops_taskbox_least_privilege.sql",
+        "version": "20260521192000",
+        "name": "ops_taskbox_least_privilege",
+        "sha256": "125e4a53e16ce90e4df3edaabcab8f1532835da1378bc81f571899c605dd2afd"
+      },
+      {
+        "file": "20260522103000_ops_registration_pipeline_status.sql",
+        "version": "20260522103000",
+        "name": "ops_registration_pipeline_status",
+        "sha256": "7f318359dfe3c0357c6f42942a7f646da2f44cd8fc8609b288d270c0baecbbea"
+      },
+      {
+        "file": "20260522114000_ops_task_management_links.sql",
+        "version": "20260522114000",
+        "name": "ops_task_management_links",
+        "sha256": "1981b3a7c398e38da87c9f78c592141b609372f1590ff328475248ce8fcd167f"
+      },
+      {
+        "file": "20260523190000_approval_requests.sql",
+        "version": "20260523190000",
+        "name": "approval_requests",
+        "sha256": "e086e3492038982eb08cdacde7e756b526ef745a598ff49ed5b9e6242c97de16"
+      },
+      {
+        "file": "20260524113000_approval_templates.sql",
+        "version": "20260524113000",
+        "name": "approval_templates",
+        "sha256": "1c25d2b5b4e0245d95459bb8a14f498b5a815f954d720a651a64b305953316e0"
+      },
+      {
+        "file": "20260524150000_ops_word_retest_teacher_access.sql",
+        "version": "20260524150000",
+        "name": "ops_word_retest_teacher_access",
+        "sha256": "9580983ef17e61852573357307d7f947ba1ea8d981a1dca04f724f45122f6408"
+      },
+      {
+        "file": "20260524153000_ops_task_history_delete_guard.sql",
+        "version": "20260524153000",
+        "name": "ops_task_history_delete_guard",
+        "sha256": "3bfb5ea1dad870aa9c2db8b1ff4d728431e93faabf17d527c09d9db3d6440ccb"
+      },
+      {
+        "file": "20260524154000_ops_task_detail_history_delete_guard.sql",
+        "version": "20260524154000",
+        "name": "ops_task_detail_history_delete_guard",
+        "sha256": "ba031c46f3a4ce33b51186f9a04f892b15ab93193cae4335d21df7bbaafe6821"
+      },
+      {
+        "file": "20260524160000_ops_task_completed_operation_status_guard.sql",
+        "version": "20260524160000",
+        "name": "ops_task_completed_operation_status_guard",
+        "sha256": "2cb4b9891d5df6de8f905b3870f3c794d9310731e4c7582f22b76b188c47886d"
+      },
+      {
+        "file": "20260524161000_approval_function_search_path.sql",
+        "version": "20260524161000",
+        "name": "approval_function_search_path",
+        "sha256": "6b5f7b98039ffe68ef7857c4cf0e6391474b29a08260de2c96670517f7d7e6ac"
+      },
+      {
+        "file": "20260524162000_ops_completed_operation_detail_update_guard.sql",
+        "version": "20260524162000",
+        "name": "ops_completed_operation_detail_update_guard",
+        "sha256": "a1d154ef734eb9703c563b06d7d5d17c98164b0e6473a266f498eb5779e7185d"
+      },
+      {
+        "file": "20260525091554_assistant_dashboard_role.sql",
+        "version": "20260525091554",
+        "name": "assistant_dashboard_role",
+        "sha256": "7b3f1af6ffb70d65a6420fc3b02d2c235f0a8cf4f0730584b6e9cfe1417366ce"
+      },
+      {
+        "file": "20260525092032_assistant_academic_event_access.sql",
+        "version": "20260525092032",
+        "name": "assistant_academic_event_access",
+        "sha256": "1223bf6f9e0b794fef5495421a99d32d2911b8cc8b0619759767002e9c17c950"
+      },
+      {
+        "file": "20260610120000_student_counseling_note.sql",
+        "version": "20260610120000",
+        "name": "student_counseling_note",
+        "sha256": "e29da6448dd879d19113d4b5b5a6eba4c132c2b24b7eb7c2dc3dfc5a2db7b832"
+      },
+      {
+        "file": "20260610123000_class_type.sql",
+        "version": "20260610123000",
+        "name": "class_type",
+        "sha256": "f8b840513939d08b35961466b65d6fc8b31d1fadbcb61f16b75091204dc51751"
+      },
+      {
+        "file": "20260610124000_student_recent_issue.sql",
+        "version": "20260610124000",
+        "name": "student_recent_issue",
+        "sha256": "b46328166d874913f537bc1b4a263cc0660c9489034833824c4783c7db6c3b66"
+      },
+      {
+        "file": "20260610130000_class_student_operational_rls.sql",
+        "version": "20260610130000",
+        "name": "class_student_operational_rls",
+        "sha256": "d852e1375b8a2b5015838855b839a483f7aeef402983acddf897ae680f4a2399"
+      },
+      {
+        "file": "20260623111146_textbook_teacher_copy_scope.sql",
+        "version": "20260623111146",
+        "name": "textbook_teacher_copy_scope",
+        "sha256": "7bac11ad42fa501462185c019ad232bb042a85c5f43a030f97eff6fc2aed4e9d"
+      },
+      {
+        "file": "20260630093000_textbook_sub_subject_id_default.sql",
+        "version": "20260630093000",
+        "name": "textbook_sub_subject_id_default",
+        "sha256": "1ef98b4626e77b608731a999614a35ed6a5f04d6332fde88806623cb61906529"
+      },
+      {
+        "file": "20260630122000_auth_signup_teacher_autolink.sql",
+        "version": "20260630122000",
+        "name": "auth_signup_teacher_autolink",
+        "sha256": "391e87d6410398458d4ae4c478b527e3c2f578fe2835e7d6cec421f05d62a2df"
+      },
+      {
+        "file": "20260630143000_ops_task_team_workflow.sql",
+        "version": "20260630143000",
+        "name": "ops_task_team_workflow",
+        "sha256": "de16b0d5183337a34e72c3d7d48545a4ed5a47d397f0346b024caeaa542499d6"
+      },
+      {
+        "file": "20260630163411_remote_history_placeholder.sql",
+        "version": "20260630163411",
+        "name": "remote_history_placeholder",
+        "sha256": "5c9e351b75a6e1dc7b2493ceaf70bd682929cb7da33461301f07dfbd799d6c7e"
+      },
+      {
+        "file": "20260630174951_remote_history_placeholder.sql",
+        "version": "20260630174951",
+        "name": "remote_history_placeholder",
+        "sha256": "5c9e351b75a6e1dc7b2493ceaf70bd682929cb7da33461301f07dfbd799d6c7e"
+      },
+      {
+        "file": "20260702173249_ops_word_retest_score_metadata.sql",
+        "version": "20260702173249",
+        "name": "ops_word_retest_score_metadata",
+        "sha256": "7d09ecc9a1d4f6312b6ee723a66a6b74f003b17602f563140956de145ad4d09f"
+      },
+      {
+        "file": "20260706102047_makeup_requests.sql",
+        "version": "20260706102047",
+        "name": "makeup_requests",
+        "sha256": "22fcb8f9ce65dad6ed62f8aa187edb83c2e0f6fb799013b2fb781a3e7303cd26"
+      },
+      {
+        "file": "20260706105512_makeup_request_slots.sql",
+        "version": "20260706105512",
+        "name": "makeup_request_slots",
+        "sha256": "b914797827281196e7319fb70ecc59c4443201f732a2f5380505728939c99004"
+      },
+      {
+        "file": "20260706123000_makeup_notification_controls.sql",
+        "version": "20260706123000",
+        "name": "makeup_notification_controls",
+        "sha256": "06e9b75c10d99233d530f49d04e7f20a55cb4664ebb70500637c5de994408ed1"
+      },
+      {
+        "file": "20260706123433_remote_history_placeholder.sql",
+        "version": "20260706123433",
+        "name": "remote_history_placeholder",
+        "sha256": "5c9e351b75a6e1dc7b2493ceaf70bd682929cb7da33461301f07dfbd799d6c7e"
+      },
+      {
+        "file": "20260706154220_remote_history_placeholder.sql",
+        "version": "20260706154220",
+        "name": "remote_history_placeholder",
+        "sha256": "5c9e351b75a6e1dc7b2493ceaf70bd682929cb7da33461301f07dfbd799d6c7e"
+      },
+      {
+        "file": "20260707093000_makeup_notification_executive_chat.sql",
+        "version": "20260707093000",
+        "name": "makeup_notification_executive_chat",
+        "sha256": "f4b5ceb93d74467428134f4343cc1e40310051c1f892e3f9032ff97159ffb4f9"
+      },
+      {
+        "file": "20260707104347_makeup_notification_templates.sql",
+        "version": "20260707104347",
+        "name": "makeup_notification_templates",
+        "sha256": "d8146e54593615984d97e78b309059ef4d52d3cdfcbaba2747385b2e06dda324"
+      },
+      {
+        "file": "20260707143000_dashboard_push_subscriptions.sql",
+        "version": "20260707143000",
+        "name": "dashboard_push_subscriptions",
+        "sha256": "d91384d9e9662c992c54e67dcc85da2377f9953580e13eebf64069d3814ffcaa"
+      },
+      {
+        "file": "20260707152220_makeup_request_flow_types.sql",
+        "version": "20260707152220",
+        "name": "makeup_request_flow_types",
+        "sha256": "cb747959171c1677e639284e5b4250daacf80acd89422a47346bdd260498a92d"
+      },
+      {
+        "file": "20260707152233_makeup_notification_delivery_retention.sql",
+        "version": "20260707152233",
+        "name": "makeup_notification_delivery_retention",
+        "sha256": "7b1c5fe9136bf9ef0599ff16e06af1136099f53ae8e7581a0e92abf6ef52861c"
+      },
+      {
+        "file": "20260707163000_operator_delete_closed_documents.sql",
+        "version": "20260707163000",
+        "name": "operator_delete_closed_documents",
+        "sha256": "a76f6a5c6feef9d854fc2506fc6819e230b23e8fbe52fdcf0fb2db900cab97a5"
+      },
+      {
+        "file": "20260707170000_google_chat_webhook_settings.sql",
+        "version": "20260707170000",
+        "name": "google_chat_webhook_settings",
+        "sha256": "9748f40d8644ff253000bf2727d5afb401db5d6dd827c5be22337c763e3c4db1"
+      },
+      {
+        "file": "20260708025405_makeup_request_refund_flow.sql",
+        "version": "20260708025405",
+        "name": "makeup_request_refund_flow",
+        "sha256": "b072b8075ca2f470690235f7cd9175544a41fc100f1f1d429a86e11e0317cc26"
+      },
+      {
+        "file": "20260708084517_makeup_notification_refund_trigger.sql",
+        "version": "20260708084517",
+        "name": "makeup_notification_refund_trigger",
+        "sha256": "2678c3ab3fdd9497d64a3d552ec7801c847e59e3f73548b5a82f5ea0a53da244"
+      },
+      {
+        "file": "20260710052914_registration_operational_fields.sql",
+        "version": "20260710052914",
+        "name": "registration_operational_fields",
+        "sha256": "70e09c30b9baf73a382d2929d06525c0a6c44463c8c9d3aca974a4de8d9b19f6"
+      },
+      {
+        "file": "20260710052921_registration_application_workflow.sql",
+        "version": "20260710052921",
+        "name": "registration_application_workflow",
+        "sha256": "0f2a6002c603c5166f051cf0e106f40b855d724516b1d92d7d2d3f91fc04fe97"
+      },
+      {
+        "file": "20260710053001_registration_message_least_privilege.sql",
+        "version": "20260710053001",
+        "name": "registration_message_least_privilege",
+        "sha256": "b0e791d29813252f1470b27c7e339e43a61f337651b3bcf6a8fb591b5e92172f"
+      },
+      {
+        "file": "20260710053144_registration_message_policy_performance.sql",
+        "version": "20260710053144",
+        "name": "registration_message_policy_performance",
+        "sha256": "fdf11fd6181d7f2b0e01d3225a240e83b1f04ab4e78d0c2f38bf68041e7d8fdc"
+      },
+      {
+        "file": "20260710111827_registration_workflow_hardening.sql",
+        "version": "20260710111827",
+        "name": "registration_workflow_hardening",
+        "sha256": "05e3e7101e94d9ec19d723d4b5df4002a4a37cfbdc649b90e6d1cfa640a92fce"
+      },
+      {
+        "file": "20260711123928_drop_registration_inquiry_channel.sql",
+        "version": "20260711123928",
+        "name": "drop_registration_inquiry_channel",
+        "sha256": "eb938869c39189505713dc0bd6d44168ca107a5f630085cc4f183df1b28cbffa"
+      },
+      {
+        "file": "20260712172644_registration_subject_tracks_schema.sql",
+        "version": "20260712172644",
+        "name": "registration_subject_tracks_schema",
+        "sha256": "5e4bd1a081f96ddaa2dac15ad56ac96e3f1861a8808fc2f64828e0b6d72c2194"
+      },
+      {
+        "file": "20260712182834_registration_subject_track_mutations.sql",
+        "version": "20260712182834",
+        "name": "registration_subject_track_mutations",
+        "sha256": "7c8d8115784de3ae19412b2c7dd18e4a2a44cd4e6417101e5a655d4e8cef18f3"
+      },
+      {
+        "file": "20260713233658_fix_registration_compatibility_trigger.sql",
+        "version": "20260713233658",
+        "name": "fix_registration_compatibility_trigger",
+        "sha256": "9586b3d385df210111e46a08e9aa11f06ac2d2d09b64fd0f8598af9cd5bf44f9"
+      },
+      {
+        "file": "20260714004931_fix_roster_trigger_record_fields.sql",
+        "version": "20260714004931",
+        "name": "fix_roster_trigger_record_fields",
+        "sha256": "72200b4ddc447596613f259aed2db13980d51e083841bbd18c25caae9b79421f"
+      },
+      {
+        "file": "20260714073327_registration_intake_workflow.sql",
+        "version": "20260714073327",
+        "name": "registration_intake_workflow",
+        "sha256": "2e0972735d05f7789d71f54307ff0bebd5d54920614939ba2b697b82a42406e4"
+      },
+      {
+        "file": "20260714104301_textbook_taxonomy_arrays.sql",
+        "version": "20260714104301",
+        "name": "textbook_taxonomy_arrays",
+        "sha256": "ff5b623114cbc49fd5f014f5f4a8a2a4d5ca57f4452636ce0fb457350ca2e819"
+      },
+      {
+        "file": "20260716100000_registration_intake_runtime_guard.sql",
+        "version": "20260716100000",
+        "name": "registration_intake_runtime_guard",
+        "sha256": "39b4d7db16250b135b16dcc6240b0ded10bb5cea3829844803988f18e9838d2f"
+      },
+      {
+        "file": "20260716110000_notification_control_plane_expand.sql",
+        "version": "20260716110000",
+        "name": "notification_control_plane_expand",
+        "sha256": "0f8b2ad3172c0b03a0100ab4e7b67a93c70e74ef69616c84a372f96fd4e72954"
+      },
+      {
+        "file": "20260716111000_notification_control_plane_settings_rpc.sql",
+        "version": "20260716111000",
+        "name": "notification_control_plane_settings_rpc",
+        "sha256": "729223a711954094c029212640decff07e8b9155f9bdc1264faebd0522e76bb7"
+      },
+      {
+        "file": "20260716112000_notification_control_plane_worker_rpc.sql",
+        "version": "20260716112000",
+        "name": "notification_control_plane_worker_rpc",
+        "sha256": "4ab9c5f48f018d655c000e1898057df8d13883eaeeee00974cb4760bdb615250"
+      },
+      {
+        "file": "20260716112500_notification_workflow_settings_seed.sql",
+        "version": "20260716112500",
+        "name": "notification_workflow_settings_seed",
+        "sha256": "0ba6a077bd797ff8a5dcbe6f76ae6380522f78a859265c019a2f782ac8f642c5"
+      },
+      {
+        "file": "20260716113000_notification_control_plane_runtime_marker.sql",
+        "version": "20260716113000",
+        "name": "notification_control_plane_runtime_marker",
+        "sha256": "68491b6151614794d90ff16517872106006b2e35d023e8edde14e2db804c651e"
+      },
+      {
+        "file": "20260716113500_notification_inbox_contract_fix.sql",
+        "version": "20260716113500",
+        "name": "notification_inbox_contract_fix",
+        "sha256": "d38d60ac19cb81cc1ebd4636d9de9e152d5b1e38b91daa28e849ccf8ea6bb9aa"
+      },
+      {
+        "file": "20260716114000_registration_history_v2.sql",
+        "version": "20260716114000",
+        "name": "registration_history_v2",
+        "sha256": "17aa48aa5333b6964aa99a007e702671296c5496771c74b58aed41c136b96166"
+      },
+      {
+        "file": "20260716120000_registration_appointment_calendar.sql",
+        "version": "20260716120000",
+        "name": "registration_appointment_calendar",
+        "sha256": "de688285483000171b98a319e1f4708e87229d95e1e4c44bf1d5cae5d301ddb6"
+      },
+      {
+        "file": "20260716130000_registration_appointment_reminder_producer.sql",
+        "version": "20260716130000",
+        "name": "registration_appointment_reminder_producer",
+        "sha256": "5c720442c40dd3afe51461b9703cc33cf188ee18cfb1742fb504edbbc80d3759"
+      },
+      {
+        "file": "20260716190000_notification_ops_task_producers.sql",
+        "version": "20260716190000",
+        "name": "notification_ops_task_producers",
+        "sha256": "d59c7b2953d717d58f33d1a7a5166ef6fd94f6063818398b6c22a83ce8aab9af"
+      },
+      {
+        "file": "20260716191000_notification_transfer_withdrawal_producers.sql",
+        "version": "20260716191000",
+        "name": "notification_transfer_withdrawal_producers",
+        "sha256": "f573639c98470b9dcc7953fc6a7f85082a50b8500bd4d0b496018381b48a3e93"
+      },
+      {
+        "file": "20260716192000_notification_makeup_adapter.sql",
+        "version": "20260716192000",
+        "name": "notification_makeup_adapter",
+        "sha256": "7fd7554bec7455b56b20208a0ed6da698655dbf23f2295cd93117c340383bc53"
+      },
+      {
+        "file": "20260716193000_notification_approval_producers.sql",
+        "version": "20260716193000",
+        "name": "notification_approval_producers",
+        "sha256": "cdca3a5d51f7f02e61c7156ff3a7b71996aa1ae2ce49d545d77c6d9568c4fff1"
+      },
+      {
+        "file": "20260716194000_notification_registration_handoffs.sql",
+        "version": "20260716194000",
+        "name": "notification_registration_handoffs",
+        "sha256": "01e5c2a5514463752da3659f3f8c15322af2475677d8119d138519086276a7d1"
+      },
+      {
+        "file": "20260716194500_notification_legacy_contract_telemetry.sql",
+        "version": "20260716194500",
+        "name": "notification_legacy_contract_telemetry",
+        "sha256": "8d79646fa5ef4a2c1d8007dc7223de5190cdde0278686271904c6b28935d6b9f"
+      },
+      {
+        "file": "20260716194930_ops_task_delete_producer.sql",
+        "version": "20260716194930",
+        "name": "ops_task_delete_producer",
+        "sha256": "d2fdee41bd9a572f0d90b95b17b3b71e2f7f8d8efdb839dc72069112242e93cc"
+      },
+      {
+        "file": "20260718114930_notification_immediate_reconciliation_completion.sql",
+        "version": "20260718114930",
+        "name": "notification_immediate_reconciliation_completion",
+        "sha256": "fe1ad8e1eec453fe2e13acd2a676c9f900e98d5134e7d99ba70a84659b663b30"
+      },
+      {
+        "file": "20260718115629_notification_immediate_reconciliation_insert_guard.sql",
+        "version": "20260718115629",
+        "name": "notification_immediate_reconciliation_insert_guard",
+        "sha256": "acbcf2d8756445ceaf203d7cd1ff4e7b3a77195013065a965df24d30ed969c19"
+      },
+      {
+        "file": "20260720113000_registration_level_test_place_boundaries.sql",
+        "version": "20260720113000",
+        "name": "registration_level_test_place_boundaries",
+        "sha256": "baf22fa525ab3a7f747cd723fcc10d04d7213dcd90dc04f0d5ccfb19789e3734"
+      },
+      {
+        "file": "20260721131836_word_retest_reretry.sql",
+        "version": "20260721131836",
+        "name": "word_retest_reretry",
+        "sha256": "be3da009b99eb50cb2d3f805e6bf09c9f90bc93087c28035a29ff78b3df2c181"
+      },
+      {
+        "file": "20260721131903_assistant_word_retest_makeup_permissions.sql",
+        "version": "20260721131903",
+        "name": "assistant_word_retest_makeup_permissions",
+        "sha256": "6e6cba9fbb45b316a86ce71c2e2fa97023595b1f90f95616e2ecd33ae5c650cd"
+      },
+      {
+        "file": "20260721132249_assistant_makeup_policy_performance.sql",
+        "version": "20260721132249",
+        "name": "assistant_makeup_policy_performance",
+        "sha256": "16db8635b7a3d6712145334d31673a56d07a99fe0b55e7d5c6208515b42f17ae"
+      },
+      {
+        "file": "20260722090000_academic_subject_foundation.sql",
+        "version": "20260722090000",
+        "name": "academic_subject_foundation",
+        "sha256": "4f5dcbb3ce5821e0ed3dfd48338687c710353410444006dc4f8ea616e69d95ba"
+      },
+      {
+        "file": "20260722093000_science_team_and_classroom.sql",
+        "version": "20260722093000",
+        "name": "science_team_and_classroom",
+        "sha256": "e3a872e4efb60f745c31341db229d1de232107525a683835dc62c85b1d0bb957"
+      },
+      {
+        "file": "20260722100000_registration_science_subject.sql",
+        "version": "20260722100000",
+        "name": "registration_science_subject",
+        "sha256": "246ec974b2c3ae0c725ac3059463c2a967f19ccb615fe036af32671ffb638bc1"
+      },
+      {
+        "file": "20260722110000_science_classes_and_textbooks.sql",
+        "version": "20260722110000",
+        "name": "science_classes_and_textbooks",
+        "sha256": "20f8314d6c00189ef2856a41013ed1d28451bb2f8a1aea30e85409589e841058"
+      },
+      {
+        "file": "20260722120000_science_notification_connection.sql",
+        "version": "20260722120000",
+        "name": "science_notification_connection",
+        "sha256": "ce0ca95663fe2a7dd5ae54ebad6b09ae315dbed548bbc074185230907441dd46"
+      },
+      {
+        "file": "20260722130000_notification_prepare_acl_hardening.sql",
+        "version": "20260722130000",
+        "name": "notification_prepare_acl_hardening",
+        "sha256": "970d203f816736b05ed56d973d415a75e00e2f659f55f84c7831c60db8c261a3"
+      },
+      {
+        "file": "20260722142020_registration_science_director_and_case_delete.sql",
+        "version": "20260722142020",
+        "name": "registration_science_director_and_case_delete",
+        "sha256": "4a2bd2b463cb4855434dc957857afc54a8c452120f5a90fabe63d9f91b2237eb"
+      },
+      {
+        "file": "20260722142108_registration_case_inquiry_atomic_save.sql",
+        "version": "20260722142108",
+        "name": "registration_case_inquiry_atomic_save",
+        "sha256": "8bde820572ca5368baca002cf1f900206aa9502a1ddd342ba323797ddb35d5b2"
+      },
+      {
+        "file": "20260722145935_word_retest_absence_storm_guard.sql",
+        "version": "20260722145935",
+        "name": "word_retest_absence_storm_guard",
+        "sha256": "872e8cfbb52510355443e982d98bb6c9b84b150be0e43c44ce9e2c58daf15b5c"
+      },
+      {
+        "file": "20260726035612_dashboard_conflict_task_producer.sql",
+        "version": "20260726035612",
+        "name": "dashboard_conflict_task_producer",
+        "sha256": "1a1c532c0751bbda6bcdb6bb60afbebc279cf6c29a2c3785d6d0c1cc88526db8"
+      },
+      {
+        "file": "20260726035635_word_retest_expected_at.sql",
+        "version": "20260726035635",
+        "name": "word_retest_expected_at",
+        "sha256": "58cfceb7dcff6ed6479149b1e76f5d90d9165f4b46f2c9cfc994ce804b9a70f6"
+      },
+      {
+        "file": "20260728152442_continuous_class_schedule_foundation.sql",
+        "version": "20260728152442",
+        "name": "continuous_class_schedule_foundation",
+        "sha256": "f1379226324b047f4396a2f5e791547a8d26d24b63bf0ab5fff7f9f72b2dc149"
+      },
+      {
+        "file": "20260728230427_continuous_class_schedule_release2_contracts.sql",
+        "version": "20260728230427",
+        "name": "continuous_class_schedule_release2_contracts",
+        "sha256": "c3fc23a6f54e7bed3f1fab56ec4c24e4da90ca9821359e7b3d35052ca6ba4253"
+      },
+      {
+        "file": "20260728233510_continuous_class_schedule_release2_mutations.sql",
+        "version": "20260728233510",
+        "name": "continuous_class_schedule_release2_mutations",
+        "sha256": "c78304a2e193f6669561e76f8e302718d75bed0f9d5bffe4286992b4bb27f143"
+      },
+      {
+        "file": "20260729013858_continuous_class_schedule_release2_consumers.sql",
+        "version": "20260729013858",
+        "name": "continuous_class_schedule_release2_consumers",
+        "sha256": "31ea1df2af51e71d5b88ac6584aa4f2fd2006e79a6b867b4207552f5a162dbb1"
+      },
+      {
+        "file": "20260729083619_continuous_class_schedule_backfill_correction.sql",
+        "version": "20260729083619",
+        "name": "continuous_class_schedule_backfill_correction",
+        "sha256": "2913bbd354039fa0ae5e3dbd3b5c8f0ba53a9c420054c7fe033134533f3368cf"
+      },
+      {
+        "file": "20260729102438_continuous_class_schedule_release2_runtime_activate.sql",
+        "version": "20260729102438",
+        "name": "continuous_class_schedule_release2_runtime_activate",
+        "sha256": "cb2d500d5769ee58beaff62296d0a5022200a8f0911e62c04dffe6cb082788ad"
+      },
+      {
+        "file": "20260729121500_continuous_class_schedule_generation_dedupe.sql",
+        "version": "20260729121500",
+        "name": "continuous_class_schedule_generation_dedupe",
+        "sha256": "356e15ba05bc3212da30000d5fc195df6c7fbe29bfb0c6615ffb5cefb7b6b803"
+      },
+      {
+        "file": "20260730140041_class_create_group_atomicity.sql",
+        "version": "20260730140041",
+        "name": "class_create_group_atomicity",
+        "sha256": "bbf356d7396cf7afcddf7040e704d427cb313550fda629cae1619509c67c8c58"
+      },
+      {
+        "file": "20260730140226_class_group_trigger_error_message_fix.sql",
+        "version": "20260730140226",
+        "name": "class_group_trigger_error_message_fix",
+        "sha256": "4809a4753c6dd53100e396d0b6dc646daf4e563570c3380f75ba09041c879b69"
+      },
+      {
+        "file": "20260730140446_class_group_rpc_acl_hardening.sql",
+        "version": "20260730140446",
+        "name": "class_group_rpc_acl_hardening",
+        "sha256": "276ebf0c7354b851781f7fb6fd636d74f1e6b189d9c8992ab7a73832fb2f4905"
+      },
+      {
+        "file": "20260730161538_notification_google_chat_connection_catalog.sql",
+        "version": "20260730161538",
+        "name": "notification_google_chat_connection_catalog",
+        "sha256": "a3f72d4ec2a410796d5796019649859d5a329d5bec0e3e83f48242272dd88dda"
+      },
+      {
+        "file": "20260731011040_notification_transfer_withdrawal_deep_links.sql",
+        "version": "20260731011040",
+        "name": "notification_transfer_withdrawal_deep_links",
+        "sha256": "ed5dfb81c2cb5d1bc6dca5c38de62745c02d88b5a4b858ec57e8f0d2c6afb5ab"
+      },
+      {
+        "file": "20260731011229_notification_owner_aware_delivery_summary.sql",
+        "version": "20260731011229",
+        "name": "notification_owner_aware_delivery_summary",
+        "sha256": "eb06042e4e70e05d4fc745053dccc52ac01fa253928f3f04fa442f5ec9704b54"
+      },
+      {
+        "file": "20260801090000_registration_manual_workflow_status.sql",
+        "version": "20260801090000",
+        "name": "registration_manual_workflow_status",
+        "sha256": "ddab1c6cfd0d888d5e7686878b61fd985720a0fa44a1fd9e461db9775c76f5f9"
+      },
+      {
+        "file": "20260801091000_registration_status_independent_appointments.sql",
+        "version": "20260801091000",
+        "name": "registration_status_independent_appointments",
+        "sha256": "0456576f33f4c9f9bea375790b2a6cee905840bcdd62a98deca002c9667d0706"
+      },
+      {
+        "file": "20260801092000_registration_status_independent_placement.sql",
+        "version": "20260801092000",
+        "name": "registration_status_independent_placement",
+        "sha256": "f37ac09d62d00cd5160ad2345a1c4c42777d3388e2d53841cb489e656db858ed"
+      },
+      {
+        "file": "20260801100000_registration_status_independent_enrollment_details.sql",
+        "version": "20260801100000",
+        "name": "registration_status_independent_enrollment_details",
+        "sha256": "4220a22c37e6618eaa301d52ea2a9b815d92ee4a68905ec5fb45e60854ceb3f8"
+      },
+      {
+        "file": "20260801110000_withdrawal_subject_scoped_completion.sql",
+        "version": "20260801110000",
+        "name": "withdrawal_subject_scoped_completion",
+        "sha256": "b6a40751ee758da8a342e2295697a2e18b6bc230e8f8eeec6c94c48a6a623815"
+      },
+      {
+        "file": "20260803120000_registration_workflow_data_integrity.sql",
+        "version": "20260803120000",
+        "name": "registration_workflow_data_integrity",
+        "sha256": "b277864f74e5d776d99afbfb29332d0746248edb94de336742c23ffad6eb7e2b"
+      },
+      {
+        "file": "20260803123000_registration_enrollment_details_canonical_bridge.sql",
+        "version": "20260803123000",
+        "name": "registration_enrollment_details_canonical_bridge",
+        "sha256": "30d55f055adedc4c552452e8d1d322d2ea1235bd2e06aa253213c392e99a3ca4"
+      },
+      {
+        "file": "20260803130000_registration_summary_enrollment_details.sql",
+        "version": "20260803130000",
+        "name": "registration_summary_enrollment_details",
+        "sha256": "ade09083ddbda05878c350c0bc2e7cf83d3cabd72fca0bdd09ec72d48d96b1dd"
+      },
+      {
+        "file": "20260803140000_notification_content_contracts.sql",
+        "version": "20260803140000",
+        "name": "notification_content_contracts",
+        "sha256": "c501226c91e88ac92b4464847f026f4950195d5f8333e66b682e3395fae06280"
+      },
+      {
+        "file": "20260803141000_notification_task_content_payload.sql",
+        "version": "20260803141000",
+        "name": "notification_task_content_payload",
+        "sha256": "9c439f5c4d885d70ff04bfc3cfa329affa96c6cd3008011af5b40b84a4b45956"
+      },
+      {
+        "file": "20260803142000_notification_word_retest_content_payload.sql",
+        "version": "20260803142000",
+        "name": "notification_word_retest_content_payload",
+        "sha256": "cf4342833bf32a86c6e8bff6f04428d68871f02a4c1819d713ff72bb5fdcfeb8"
+      },
+      {
+        "file": "20260803143000_notification_registration_content_payload.sql",
+        "version": "20260803143000",
+        "name": "notification_registration_content_payload",
+        "sha256": "61373ad01e3d47d1eeb1fadb5d98e6f9b802665148650391b8ca3bc28b3331c8"
+      },
+      {
+        "file": "20260803144000_notification_transfer_content_payload.sql",
+        "version": "20260803144000",
+        "name": "notification_transfer_content_payload",
+        "sha256": "80ed588ae512fa0ffbd318c49b6f1f928cb09a3181fc1199b2ec86e80ba5ed2f"
+      },
+      {
+        "file": "20260803145000_notification_withdrawal_content_payload.sql",
+        "version": "20260803145000",
+        "name": "notification_withdrawal_content_payload",
+        "sha256": "6bc943b720a564847baff2240d4a90756ce46c6e776968a39a799683de083bd7"
+      },
+      {
+        "file": "20260803150000_notification_makeup_content_single_writer.sql",
+        "version": "20260803150000",
+        "name": "notification_makeup_content_single_writer",
+        "sha256": "27d9bd79cab12492a8955354c69894829edda79376a16242152a0e6aeeb54183"
+      },
+      {
+        "file": "20260803151000_notification_approval_content_payload.sql",
+        "version": "20260803151000",
+        "name": "notification_approval_content_payload",
+        "sha256": "f038641e13c036c31da3d3eb651cc1e8ccff9e9d72c25a9c8073017b6b915e02"
+      },
+      {
+        "file": "20260803152000_notification_system_templates_vnext.sql",
+        "version": "20260803152000",
+        "name": "notification_system_templates_vnext",
+        "sha256": "5bbc304163231a680358191e742070d6809b7e8b9c3a5f823e6613ad2c5249e5"
+      },
+      {
+        "file": "20260803153000_notification_legacy_content_projection.sql",
+        "version": "20260803153000",
+        "name": "notification_legacy_content_projection",
+        "sha256": "772f586887a81c9231056bff1f3b4a0333dc58f4306aa1190f5fc314a9c43150"
+      },
+      {
+        "file": "20260805100000_notification_system_template_vnext_promotion.sql",
+        "version": "20260805100000",
+        "name": "notification_system_template_vnext_promotion",
+        "sha256": "d74518e6f2fa98390094040bc3a0eff75c6b000fea01b665d2a30c0ee545e54d"
+      },
+      {
+        "file": "20260805101000_notification_control_plane_template_variable_wire_contract.sql",
+        "version": "20260805101000",
+        "name": "notification_control_plane_template_variable_wire_contract",
+        "sha256": "5d51c99a7f17a188b1eb7c96da986f6338b6774790f7101e23020f8bed086a4c"
+      },
+      {
+        "file": "20260805110000_registration_customer_solapi_storage.sql",
+        "version": "20260805110000",
+        "name": "registration_customer_solapi_storage",
+        "sha256": "82e649a5b8150c5bc9727e6ebde3ad65d46cb47d51a7a5512eda6bd4d967448a"
+      },
+      {
+        "file": "20260805111000_registration_customer_solapi_message_rpc.sql",
+        "version": "20260805111000",
+        "name": "registration_customer_solapi_message_rpc",
+        "sha256": "f29880fac2c6e11640ad7a4837805a11cf905e5d3d2ccb04c3b4bd721e6193fe"
+      },
+      {
+        "file": "20260805112000_registration_customer_solapi_activation.sql",
+        "version": "20260805112000",
+        "name": "registration_customer_solapi_activation",
+        "sha256": "31873e08893b75788a3d84290c8d7d27eb7571796f6e88080ef99da47453248d"
+      },
+      {
+        "file": "20260806120000_registration_management_google_chat_events.sql",
+        "version": "20260806120000",
+        "name": "registration_management_google_chat_events",
+        "sha256": "f0e2785f9e985cf035eb023f27d58506d4ab4796d5e05fa68d604fbf86ef0de9"
+      },
+      {
+        "file": "20260806123000_notification_korean_template_tokens.sql",
+        "version": "20260806123000",
+        "name": "notification_korean_template_tokens",
+        "sha256": "5a178ed20d449b8a6c32f92fc14426435334578faf1d505df9707dc0b66df163"
+      },
+      {
+        "file": "20260806130000_registration_customer_message_audit_dedupe.sql",
+        "version": "20260806130000",
+        "name": "registration_customer_message_audit_dedupe",
+        "sha256": "49a6ee565798a757a075fc6b02b0745fe47d3f0a4d45714ffb9953dff94a9a2e"
+      },
+      {
+        "file": "20260806133000_registration_notification_processing_readiness.sql",
+        "version": "20260806133000",
+        "name": "registration_notification_processing_readiness",
+        "sha256": "4e6fcbafb63d48bcd547cecb19d050148776554fed1a56f58903039e61a569d8"
+      },
+      {
+        "file": "20260807030434_registration_korean_template_renderer.sql",
+        "version": "20260807030434",
+        "name": "registration_korean_template_renderer",
+        "sha256": "53e0d49c96c9ea38418e082370755a071ab75d3d44fe7b12c6240eb44fd6945e"
+      },
+      {
+        "file": "20260807111442_registration_management_google_chat_dispatch.sql",
+        "version": "20260807111442",
+        "name": "registration_management_google_chat_dispatch",
+        "sha256": "e367278104df0fad8d74e17cafd7eb0fd24baa90e32efb1cdec18e0cb8ac6b5b"
+      },
+      {
+        "file": "20260807125038_registration_customer_message_preview_target_rpc.sql",
+        "version": "20260807125038",
+        "name": "registration_customer_message_preview_target_rpc",
+        "sha256": "3cb54293dbef73b0eccbc92e14bda2e7f51d2c51e0a55d927daa8192ce720f37"
+      },
+      {
+        "file": "20260808044202_registration_level_test_summary_consultation_chat.sql",
+        "version": "20260808044202",
+        "name": "registration_level_test_summary_consultation_chat",
+        "sha256": "06f57db749b84e41d4647ce44d231633a1ad2f54da9b2149cd93bd33349990bb"
+      },
+      {
+        "file": "20260808050410_registration_director_retry_circuit_breaker.sql",
+        "version": "20260808050410",
+        "name": "registration_director_retry_circuit_breaker",
+        "sha256": "068349ad45c5c230a45c789d70fab3ce7b1c19e69ea6f958c68f921941048004"
+      },
+      {
+        "file": "20260808070601_registration_customer_reminder_automation.sql",
+        "version": "20260808070601",
+        "name": "registration_customer_reminder_automation",
+        "sha256": "8b76c5a94e0c050e22dfbe5a9891aadd05c2e250a5c82f5312ff8711ebc673d5"
+      },
+      {
+        "file": "20260808070812_registration_customer_reminder_fk_indexes.sql",
+        "version": "20260808070812",
+        "name": "registration_customer_reminder_fk_indexes",
+        "sha256": "6cfbd6ffefee609cbb50dad3f76223822a9a9d2fb8db14304f867bc7c6e08629"
+      },
+      {
+        "file": "20260808071232_registration_customer_reminder_vault_rotation_rpc.sql",
+        "version": "20260808071232",
+        "name": "registration_customer_reminder_vault_rotation_rpc",
+        "sha256": "e1eaad321f8a7ae6b361dae45c1567852060cefe24c33206a511905897252c9a"
+      },
+      {
+        "file": "20260808071646_registration_customer_reminder_vault_rotation_fix.sql",
+        "version": "20260808071646",
+        "name": "registration_customer_reminder_vault_rotation_fix",
+        "sha256": "3894054045ac279e744921a7eb594daa3c140a35c06a6801165ad41ed32b871d"
+      },
+      {
+        "file": "20260808124315_registration_customer_message_subject_admission_details.sql",
+        "version": "20260808124315",
+        "name": "registration_customer_message_subject_admission_details",
+        "sha256": "c75e570cb032c5d4d7ec266b2128d103618a0490e293255aab6f688d71574ef0"
+      },
+      {
+        "file": "20260808172543_dashboard_class_session_dates.sql",
+        "version": "20260808172543",
+        "name": "dashboard_class_session_dates",
+        "sha256": "7e399915d263f73e321a1d75c8bdea2d91c5ab064e86bd938200e9fa5c7b9683"
+      },
+      {
+        "file": "20260808172642_registration_customer_reminder_off_cron.sql",
+        "version": "20260808172642",
+        "name": "registration_customer_reminder_off_cron",
+        "sha256": "1c91139daa2c58dd7f9cee9570a4c33c7cca5152df2a0cd7b78b1853bf56a7d6"
+      },
+      {
+        "file": "20260808172743_rls_policy_initplan_consolidation.sql",
+        "version": "20260808172743",
+        "name": "rls_policy_initplan_consolidation",
+        "sha256": "8e2f2b10e0f0d888993bd69a96aaab21f6b09bc1b0f635f188a7b806715d4d82"
+      },
+      {
+        "file": "20260808172835_ops_registration_read_policy_optimization.sql",
+        "version": "20260808172835",
+        "name": "ops_registration_read_policy_optimization",
+        "sha256": "7247ef0e28fee4464b1942316260ea00d693510e0135119f24fe62d0f8e8b334"
+      },
+      {
+        "file": "20260809021903_dashboard_snapshot_sources.sql",
+        "version": "20260809021903",
+        "name": "dashboard_snapshot_sources",
+        "sha256": "56b552aed17b19b9abd9ce53fb1672e6766b2e96ba6e56cdc7d802ed3363b483"
+      },
+      {
+        "file": "20260809100000_registration_observation_core_schema.sql",
+        "version": "20260809100000",
+        "name": "registration_observation_core_schema",
+        "sha256": "ec8d56240d4984d6e799097f282d7e332ed43d295ee8c40fbb567075b1b4e796"
+      },
+      {
+        "file": "20260809101000_registration_observation_reads.sql",
+        "version": "20260809101000",
+        "name": "registration_observation_reads",
+        "sha256": "f761a4676da56e3a282a7cc1cfda79b84f569fbaa3d2b2a5eec326979cf4eb83"
+      },
+      {
+        "file": "20260809102000_registration_observation_booking.sql",
+        "version": "20260809102000",
+        "name": "registration_observation_booking",
+        "sha256": "f299a5c8de20f77056bdcbb48dbe84875ef52b09f0909e33d7b306953332f16f"
+      },
+      {
+        "file": "20260809102200_registration_observation_shared_event_filter.sql",
+        "version": "20260809102200",
+        "name": "registration_observation_shared_event_filter",
+        "sha256": "f6a13d47b3d0ae28e15f8332139b469d1a19ed06fe6dbb4c8ca92131bab484ed"
+      },
+      {
+        "file": "20260809102400_registration_observation_core_review_fixes.sql",
+        "version": "20260809102400",
+        "name": "registration_observation_core_review_fixes",
+        "sha256": "2fcdc011ce53db29b6c9b533c1e3cd6b74f0cc64a157b14e1e06a359fb73e73b"
+      },
+      {
+        "file": "20260809102450_registration_observation_core_review_followup.sql",
+        "version": "20260809102450",
+        "name": "registration_observation_core_review_followup",
+        "sha256": "b07bebd1f554fc0170e50a0f7fb04219cac2d8808b5cf79504e8ab32ff293b95"
+      },
+      {
+        "file": "20260809102500_registration_observation_feedback_access.sql",
+        "version": "20260809102500",
+        "name": "registration_observation_feedback_access",
+        "sha256": "279401464ebdbc6c26d94e410321eb13950e1b86ce654941bae888f8c5394fc1"
+      },
+      {
+        "file": "20260809103000_registration_observation_feedback_mutations.sql",
+        "version": "20260809103000",
+        "name": "registration_observation_feedback_mutations",
+        "sha256": "f87ef9164260ffbe279ad429f58501907ad5a419005f075f4c64477fc7fef946"
+      },
+      {
+        "file": "20260809103500_registration_observation_feedback_decisions.sql",
+        "version": "20260809103500",
+        "name": "registration_observation_feedback_decisions",
+        "sha256": "cead8fbbe9539c2bed6cb76a3d83029145b4dbb03370489ed54f3372b8af81e5"
+      },
+      {
+        "file": "20260809104000_registration_observation_enrollment_source.sql",
+        "version": "20260809104000",
+        "name": "registration_observation_enrollment_source",
+        "sha256": "4921559e65cc2db17efe2613f79b7b70507166c165986859c34396afc2e39013"
+      },
+      {
+        "file": "20260809104500_dashboard_google_chat_profile_mentions.sql",
+        "version": "20260809104500",
+        "name": "dashboard_google_chat_profile_mentions",
+        "sha256": "dd91bf230d575e8a4bfcc8bae276549c6c79c6e8ed0ffda3decf991d38c0408e"
+      },
+      {
+        "file": "20260809105000_registration_observation_google_chat.sql",
+        "version": "20260809105000",
+        "name": "registration_observation_google_chat",
+        "sha256": "7812becdf8391afbb2175435c963871c90f804f8e04f8f3013b3800c0fa1b416"
+      },
+      {
+        "file": "20260809106000_registration_observation_solapi_contract.sql",
+        "version": "20260809106000",
+        "name": "registration_observation_solapi_contract",
+        "sha256": "1afffa260aed7683a3891ab6340d4612c4705554aaafd1163aa08ac8e7a717ba"
+      },
+      {
+        "file": "20260809106100_registration_observation_solapi_queue.sql",
+        "version": "20260809106100",
+        "name": "registration_observation_solapi_queue",
+        "sha256": "34a83274c87c5b0de364028a80c6b19ad01c092ba119f8635191ac3a219672ba"
+      },
+      {
+        "file": "20260809106200_registration_observation_solapi_dispatch.sql",
+        "version": "20260809106200",
+        "name": "registration_observation_solapi_dispatch",
+        "sha256": "33f58ff36dd21828201e95411d050a61791b7cae19123d9eb6b96663f6aa757f"
+      },
+      {
+        "file": "20260811142055_science_consultation_requests.sql",
+        "version": "20260811142055",
+        "name": "science_consultation_requests",
+        "sha256": "340b7d2c8d53ade12c7a2f9df98669218826d56a8b6e02f920e897788378d547"
+      },
+      {
+        "file": "20260811142152_science_consultation_requests_deny_policy.sql",
+        "version": "20260811142152",
+        "name": "science_consultation_requests_deny_policy",
+        "sha256": "e5abe58f49fe926eb3e35a4471cd9adb49c052f0d677453ffd0f48d80a88c491"
+      },
+      {
+        "file": "20260811142353_science_consultation_rate_limits.sql",
+        "version": "20260811142353",
+        "name": "science_consultation_rate_limits",
+        "sha256": "aa177ab5d3151d7f2fa55883f7efc8526999828ee5cbd210693f5ddafc09fc30"
+      },
+      {
+        "file": "20260812002019_notification_adapters_forward_install.sql",
+        "version": "20260812002019",
+        "name": "notification_adapters_forward_install",
+        "sha256": "f0c22f18906d8a9bcaf2dbbdb682d4458682565ea756bb7e515c18aaeed3243a"
+      },
+      {
+        "file": "20260812003000_notification_delivery_pending_schedule_fix.sql",
+        "version": "20260812003000",
+        "name": "notification_delivery_pending_schedule_fix",
+        "sha256": "df877be9a4cea2e421d5fca4bef2515fb8602b3726d1f90231a02fa367a6f0f5"
+      },
+      {
+        "file": "20260812193844_registration_observation_notification_compliance_repair.sql",
+        "version": "20260812193844",
+        "name": "registration_observation_notification_compliance_repair",
+        "sha256": "8da64456c39365eba0c95a4630413d99924dd921861ad124485de35e1a1a6fad"
+      },
+      {
+        "file": "20260812195130_notification_worker_production_schedule.sql",
+        "version": "20260812195130",
+        "name": "notification_worker_production_schedule",
+        "sha256": "7b902a798422d6003c3f2bcd0ef5bf3c7f1b86597c92316601b17b810db48c94"
+      },
+      {
+        "file": "20260812213138_notification_delivery_lease_reap_schedule_fix.sql",
+        "version": "20260812213138",
+        "name": "notification_delivery_lease_reap_schedule_fix",
+        "sha256": "231ea102519027057723c99610f26725b3b5daffd1c184ce4abbd7b3eb136220"
+      },
+      {
+        "file": "20260813014859_registration_observation_teacher_subject_aliases.sql",
+        "version": "20260813014859",
+        "name": "registration_observation_teacher_subject_aliases",
+        "sha256": "f789404a65fed86de47fe297701c25373900ba9579777bc3fff2694b201ce2ff"
+      },
+      {
+        "file": "20260813045951_registration_consultation_notes.sql",
+        "version": "20260813045951",
+        "name": "registration_consultation_notes",
+        "sha256": "fc6794d4f4139b49ed2ab95cb67e7003a9173e98cbf57ea0922f795ca930034e"
+      },
+      {
+        "file": "20260813052101_continuous_class_schedule_subject_aliases.sql",
+        "version": "20260813052101",
+        "name": "continuous_class_schedule_subject_aliases",
+        "sha256": "024de1da2d857cc2b9bd8b67af69f79f2203fcac957131944816f6638b35d6d9"
+      },
+      {
+        "file": "20260813053000_textbook_teacher_request_access.sql",
+        "version": "20260813053000",
+        "name": "textbook_teacher_request_access",
+        "sha256": "e6f2751d2828cac1463e54ebbae2980aeb4c37880377545c90add045e3439d3c"
+      },
+      {
+        "file": "20260813064146_registration_observation_legacy_schedule_slots.sql",
+        "version": "20260813064146",
+        "name": "registration_observation_legacy_schedule_slots",
+        "sha256": "04aa8468bbf65058db0efe15dfb2f796a3dec226f96c156e4543ba0d6471a9c6"
+      },
+      {
+        "file": "20260813093446_registration_observation_legacy_schedule_slot_catalogs.sql",
+        "version": "20260813093446",
+        "name": "registration_observation_legacy_schedule_slot_catalogs",
+        "sha256": "95584c46753a4fdc96dae922afd75a7334ff14a4edc597b007a44fcae58136de"
+      },
+      {
+        "file": "20260813192115_dashboard_daily_brief.sql",
+        "version": "20260813192115",
+        "name": "dashboard_daily_brief",
+        "sha256": "7ce3eaa85df822396728b9e39b5973507a3c1399c1d92dfe067de824249a0e25"
+      },
+      {
+        "file": "20260813194812_dashboard_statistics_sources.sql",
+        "version": "20260813194812",
+        "name": "dashboard_statistics_sources",
+        "sha256": "16342644a58772134f57d4948e6ebfdfa5b07d2d8f38d251d14f2c2f1a049262"
+      },
+      {
+        "file": "20260813205051_dashboard_statistics_cache.sql",
+        "version": "20260813205051",
+        "name": "dashboard_statistics_cache",
+        "sha256": "7ce560e6c3b6864f4b99adcf1cbe9271235ca8e0906d1e93ce985f6f22ca5de0"
+      },
+      {
+        "file": "20260813234824_ops_task_page_reads.sql",
+        "version": "20260813234824",
+        "name": "ops_task_page_reads",
+        "sha256": "8bf1d40d90f9da0b95fd901254bb61a8a791acf948f1d07be6ba4ba092c4fe06"
+      },
+      {
+        "file": "20260814011752_management_page_reads.sql",
+        "version": "20260814011752",
+        "name": "management_page_reads",
+        "sha256": "58545f29874968eecd729840332da96c4a26ccbcab3302b8a74eb43222db2017"
+      },
+      {
+        "file": "20260814035710_operations_scoped_reads.sql",
+        "version": "20260814035710",
+        "name": "operations_scoped_reads",
+        "sha256": "602fb173e2ef92133e1cbda5070170cdb79f47c50a4f49ed12bbc9ee5710716e"
+      },
+      {
+        "file": "20260814062437_academic_scoped_reads.sql",
+        "version": "20260814062437",
+        "name": "academic_scoped_reads",
+        "sha256": "5bef23fe05594ea01bfd1ec562a41d8b31cc9d3d782d28cd355d3fbb8eb576c6"
+      },
+      {
+        "file": "20260814102020_registration_observation_current_history.sql",
+        "version": "20260814102020",
+        "name": "registration_observation_current_history",
+        "sha256": "943036d53f5153e983a3b9aad6bfdcc0543750f4b84e4e9c8620b4860742c7ce"
+      },
+      {
+        "file": "20260814105829_lightweight_registration_external_alerts.sql",
+        "version": "20260814105829",
+        "name": "lightweight_registration_external_alerts",
+        "sha256": "457088c6a979f91b20d20c4a20058dbb5a50e96ed914ff9c2fa055a3fcdcbc6c"
+      },
+      {
+        "file": "20260814115116_dashboard_audit_diff_format.sql",
+        "version": "20260814115116",
+        "name": "dashboard_audit_diff_format",
+        "sha256": "8fcd458950cee39866dc6be500628f79f4a9ad7a2ae45f54eefe683f79f0871d"
+      },
+      {
+        "file": "20260815035229_fix_observation_legacy_session_list.sql",
+        "version": "20260815035229",
+        "name": "fix_observation_legacy_session_list",
+        "sha256": "cd906960ca317971b2d90f62375ae60c0f636689166250e4a02a1da144dc1a10"
+      },
+      {
+        "file": "20260815040537_expose_observation_return_status.sql",
+        "version": "20260815040537",
+        "name": "expose_observation_return_status",
+        "sha256": "e0bf5610982b6e1c24c576fe817fdae5d523d3b756c281d06ccb865ad724caa9"
+      },
+      {
+        "file": "20260815090142_registration_customer_reminder_daily_cron.sql",
+        "version": "20260815090142",
+        "name": "registration_customer_reminder_daily_cron",
+        "sha256": "98a71ee0af07ac97624dbb0aa35a2cfc27495cfb32f10be31c67215e62f6cecb"
+      },
+      {
+        "file": "20260815092155_retire_dashboard_notification_channels.sql",
+        "version": "20260815092155",
+        "name": "retire_dashboard_notification_channels",
+        "sha256": "d462fcf51ff0703636270e41891fc5e8bdb08965804efecd5c6b24a7a34b3885"
+      },
+      {
+        "file": "20260815093650_fix_observation_frozen_state_rpc_name.sql",
+        "version": "20260815093650",
+        "name": "fix_observation_frozen_state_rpc_name",
+        "sha256": "91a6743a5c328cd07981cdfe8a30fe3c7b3e84aed23a59299884f4d1d4f18b85"
+      },
+      {
+        "file": "20260815120000_event_driven_notification_worker.sql",
+        "version": "20260815120000",
+        "name": "event_driven_notification_worker",
+        "sha256": "e94d129b539802af128eb01455eb6b27959062607f5f90d593e0671ee1f26b84"
+      },
+      {
+        "file": "20260815121000_registration_teacher_followup_tasks.sql",
+        "version": "20260815121000",
+        "name": "registration_teacher_followup_tasks",
+        "sha256": "34a408b01be109431f49157b522d0c80a639b3843f5af8a98f052574412bb5bd"
+      },
+      {
+        "file": "20260815122000_registration_consultation_outcome_revision.sql",
+        "version": "20260815122000",
+        "name": "registration_consultation_outcome_revision",
+        "sha256": "3dab34cd419f74b70fd92e9247fa92911c85b596dfb84271975275d959f088ae"
+      },
+      {
+        "file": "20260815123000_notification_manual_retry_indexes.sql",
+        "version": "20260815123000",
+        "name": "notification_manual_retry_indexes",
+        "sha256": "39272e6322a0614cf57d663be9329b7bdadbee24317bd046c6510a235ad23acf"
+      },
+      {
+        "file": "20260815174243_registration_consultation_result_request_key_text.sql",
+        "version": "20260815174243",
+        "name": "registration_consultation_result_request_key_text",
+        "sha256": "63f06dac2a4e07c2bb8c75043abf799bb60312a5f77626a5c4a95c0d4bfb8efa"
+      },
+      {
+        "file": "20260815182919_registration_customer_solapi_activation_evidence.sql",
+        "version": "20260815182919",
+        "name": "registration_customer_solapi_activation_evidence",
+        "sha256": "d8ce2248466c2eb5c755c2de2aed50e08b33950e459278a2e3ce9c77dd767a06"
+      },
+      {
+        "file": "20260816002344_registration_customer_reminder_provider_payload_checksum.sql",
+        "version": "20260816002344",
+        "name": "registration_customer_reminder_provider_payload_checksum",
+        "sha256": "b18efe7b3e0bfd05eb773b8fa655748dc4add3332166c55f9f163ead338acb9a"
+      },
+      {
+        "file": "20260816003407_registration_same_day_customer_reminders.sql",
+        "version": "20260816003407",
+        "name": "registration_same_day_customer_reminders",
+        "sha256": "80b8e4e45b27133ac378cd81e9871422d61e6305f37525cc934ca950acf632a7"
+      },
+      {
+        "file": "20260816133708_normalize_class_dates.sql",
+        "version": "20260816133708",
+        "name": "normalize_class_dates",
+        "sha256": "aa85cd966d716fcc81df1d5e9983812f219b2b0d81492200da45f2f8e3cbc112"
+      },
+      {
+        "file": "20260817111315_registration_customer_booking_source_eligibility.sql",
+        "version": "20260817111315",
+        "name": "registration_customer_booking_source_eligibility",
+        "sha256": "d913ecb61b58b179fbbf054bd22249380d43c174f00c56c846774a8ad9ea37a2"
+      },
+      {
+        "file": "20260817111325_registration_observation_booking_followup_tasks.sql",
+        "version": "20260817111325",
+        "name": "registration_observation_booking_followup_tasks",
+        "sha256": "f931bf0eb3d7aba5fff71d0818b9bcaed4612176363187aaef1f7e64ffb7e2cd"
+      },
+      {
+        "file": "20260818083818_optimize_registration_task_stats.sql",
+        "version": "20260818083818",
+        "name": "optimize_registration_task_stats",
+        "sha256": "c769cb9c63f213b600693b35f8c947ed9af41c4de4cf997498aa1791f174df79"
+      },
+      {
+        "file": "20260818202752_decouple_registration_phone_save_from_retired_in_app.sql",
+        "version": "20260818202752",
+        "name": "decouple_registration_phone_save_from_retired_in_app",
+        "sha256": "ac3310879f165b45388115dc5943ac42ac0ea77ca8e493b7fe5545a452809694"
+      },
+      {
+        "file": "20260819012301_registration_customer_message_bundles.sql",
+        "version": "20260819012301",
+        "name": "registration_customer_message_bundles",
+        "sha256": "ae876875c6744b1967b5cee04886a4527d501cf3c777e996b018c9d69ba7ff04"
+      },
+      {
+        "file": "20260819012401_fix_registration_customer_message_bundle_coalesce.sql",
+        "version": "20260819012401",
+        "name": "fix_registration_customer_message_bundle_coalesce",
+        "sha256": "8295101faafb8feb37984a076b27ba93408e9ee22aeb98c7910066c9697e7db6"
+      },
+      {
+        "file": "20260819101957_backfill_legacy_active_class_periods.sql",
+        "version": "20260819101957",
+        "name": "backfill_legacy_active_class_periods",
+        "sha256": "1f63fcfbd12bda0b58e5931adc8176414137729b7d68592f56397d77451967bd"
+      },
+      {
+        "file": "20260819103434_registration_appointment_integrity_guard.sql",
+        "version": "20260819103434",
+        "name": "registration_appointment_integrity_guard",
+        "sha256": "3e2d4297a472681765c8de302f2082fec797f5ee08258abd90298ccdb1d1c5f9"
+      },
+      {
+        "file": "20260819122006_registration_notion_style_editing.sql",
+        "version": "20260819122006",
+        "name": "registration_notion_style_editing",
+        "sha256": "ff294e4d901d25d0c866b1045f6abedb5245172799c09d7d622de269a75a22ed"
+      },
+      {
+        "file": "20260819122911_registration_enrollment_external_correction.sql",
+        "version": "20260819122911",
+        "name": "registration_enrollment_external_correction",
+        "sha256": "ef1885dfe3c8b964e4ca8994a9836ebc43220307c73fa315dface239aa0ce848"
+      },
+      {
+        "file": "20260819151002_registration_admission_preview_status_compatibility.sql",
+        "version": "20260819151002",
+        "name": "registration_admission_preview_status_compatibility",
+        "sha256": "c292103602b495efe7b6c49c3e92f7b92ebd264cf52d2d781871a3542c306eeb"
+      },
+      {
+        "file": "20260819152417_registration_admission_preview_active_resolver_status_compatibility.sql",
+        "version": "20260819152417",
+        "name": "registration_admission_preview_active_resolver_status_compatibility",
+        "sha256": "0f2653938f2f5726e7c4ed6c494fa8862230f8cd588208667cd9d9595cb98bd9"
+      },
+      {
+        "file": "20260820054534_registration_appointment_workflow_independence.sql",
+        "version": "20260820054534",
+        "name": "registration_appointment_workflow_independence",
+        "sha256": "9f5b21c61a1cf2b4809c8941f50fc15e3c7a85a15d41d43770f7d9feac37c915"
+      },
+      {
+        "file": "20260820055224_notification_source_registry_prerequisite.sql",
+        "version": "20260820055224",
+        "name": "notification_source_registry_prerequisite",
+        "sha256": "e14f69436a3bc79762b4c57990934511491f7925f36dd6f91ca6225fe4b3d344"
+      },
+      {
+        "file": "20260820150057_ops_task_completion_actor.sql",
+        "version": "20260820150057",
+        "name": "ops_task_completion_actor",
+        "sha256": "2bd12279b8f79757dfbf6e5d84423bf34019d5f172c80e36377166002e89ceba"
+      },
+      {
+        "file": "20260820152710_registration_level_test_result_integrity_repair.sql",
+        "version": "20260820152710",
+        "name": "registration_level_test_result_integrity_repair",
+        "sha256": "5cdd8659ba97aaae3efca3341873b8c5bebccb1247f1bd18b68ec3532ce772c4"
+      },
+      {
+        "file": "20260823074406_registration_workflow_stale_revision_nonretryable.sql",
+        "version": "20260823074406",
+        "name": "registration_workflow_stale_revision_nonretryable",
+        "sha256": "28a5af2540ed20475200e30d410e97b7fd4f7772e89a989f8a0ed64aee29532a"
+      },
+      {
+        "file": "20260823212430_fix_notification_contract_drain_evidence.sql",
+        "version": "20260823212430",
+        "name": "fix_notification_contract_drain_evidence",
+        "sha256": "3f280303a759e1be85f7be1988f57239596f9cec2b3cc40d79c5cd263a760663"
+      },
+      {
+        "file": "20260824080823_notification_legacy_retry_storm.sql",
+        "version": "20260824080823",
+        "name": "notification_legacy_retry_storm",
+        "sha256": "f8586a8af1b5bef4c1a0f3b0e2389a708ed5c542d2e1af56116dc29515d8c5a7"
+      },
+      {
+        "file": "20260824182043_registration_admission_order_independence.sql",
+        "version": "20260824182043",
+        "name": "registration_admission_order_independence",
+        "sha256": "cc541b6ddae1a43f6a1022491b547efafb8775006dd39c0d14ba76e551467bd4"
+      },
+      {
+        "file": "20260824182143_class_close_atomic_roster_transition.sql",
+        "version": "20260824182143",
+        "name": "class_close_atomic_roster_transition",
+        "sha256": "f6fd3c2d23f6f618f7cbb287cbb5c77ecd450324f58ed7a3dd9017acce91e06f"
+      },
+      {
+        "file": "20260824182243_class_close_enrollment_constraints_validate.sql",
+        "version": "20260824182243",
+        "name": "class_close_enrollment_constraints_validate",
+        "sha256": "0dbaba62795870cf6ba93794d2f53c40bc83a694c4ef9947f0b367c6dc2de5b1"
+      },
+      {
+        "file": "20260825090000_registration_customer_reminder_claim_final_gate.sql",
+        "version": "20260825090000",
+        "name": "registration_customer_reminder_claim_final_gate",
+        "sha256": "78c551b1627dd62f6aa9c2855d610a7462e066e12f7a79d780b8e79f0088e5b0"
+      },
+      {
+        "file": "20260825152044_registration_admission_checklist_roster_consistency.sql",
+        "version": "20260825152044",
+        "name": "registration_admission_checklist_roster_consistency",
+        "sha256": "d8eca1e1c781b43d4c7bb2e75a5d685afb1bce408bd455ac3d0c9cca5ea6df7b"
+      },
+      {
+        "file": "20260825170546_registration_admission_checklist_constraints_validate.sql",
+        "version": "20260825170546",
+        "name": "registration_admission_checklist_constraints_validate",
+        "sha256": "6baac885c5dc73c12e7b417ac3dc6864ed65cdbaac2d14e8effd854ee0e078fc"
+      },
+      {
+        "file": "20260826101200_registration_legacy_first_consultation.sql",
+        "version": "20260826101200",
+        "name": "registration_legacy_first_consultation",
+        "sha256": "3637d62a4a52914e4c0e82f2ee38454f11dd0169ed8d1ec9c3b7dab8aabb7ccc"
+      },
+      {
+        "file": "20260827135933_add_worksheet_v2_snapshots.sql",
+        "version": "20260827135933",
+        "name": "add_worksheet_v2_snapshots",
+        "sha256": "0a7a93800ba8ab49485a27f15af95b891aa5eafcd4b027885c58b99c9a0a7785"
+      },
+      {
+        "file": "20260827135956_add_worksheet_paper_kind_export.sql",
+        "version": "20260827135956",
+        "name": "add_worksheet_paper_kind_export",
+        "sha256": "c22f35ecb6ae606f5ade508c7c73cfe445d3d8695f42f248684a650a0019fdb5"
+      },
+      {
+        "file": "20260827135958_redact_legacy_gemini_error_text.sql",
+        "version": "20260827135958",
+        "name": "redact_legacy_gemini_error_text",
+        "sha256": "00985e9d463c6c2feae6511ef71fe9c2b2b6adb2c4e9abf839e00017214de65e"
+      },
+      {
+        "file": "20260827140002_record_worksheet_output_projection.sql",
+        "version": "20260827140002",
+        "name": "record_worksheet_output_projection",
+        "sha256": "49b805b839e1a5fb567d704a6527bc1de1384d24b0ecabe6968b96ed5a637fd9"
+      },
+      {
+        "file": "20260828160941_secure_worksheet_history_ownership.sql",
+        "version": "20260828160941",
+        "name": "secure_worksheet_history_ownership",
+        "sha256": "1251d6e51e32e0085f212d2f874b6b5eadb65c9c34f2c30fb5cba5a44e269723"
+      },
+      {
+        "file": "20260831013310_management_numbered_pages.sql",
+        "version": "20260831013310",
+        "name": "management_numbered_pages",
+        "sha256": "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667"
+      },
+      {
+        "file": "20260831031913_ops_task_numbered_pages.sql",
+        "version": "20260831031913",
+        "name": "ops_task_numbered_pages",
+        "sha256": "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"
+      },
+      {
+        "file": "20260831052546_academic_operations_numbered_pages.sql",
+        "version": "20260831052546",
+        "name": "academic_operations_numbered_pages",
+        "sha256": "32b51bd8ac1fc14d32bf01a260d1fa22a9324b658960de265f5b89bc0c61b0df"
+      },
+      {
+        "file": "20260831061736_approval_numbered_pages.sql",
+        "version": "20260831061736",
+        "name": "approval_numbered_pages",
+        "sha256": "f371ec311759886788112090fc0aeaeb9242ffb7f86d98348216eb553cbc799d"
+      },
+      {
+        "file": "20260831063537_approval_detail_trim_parity.sql",
+        "version": "20260831063537",
+        "name": "approval_detail_trim_parity",
+        "sha256": "6fb6efd7e5ba2441aa1ce91d23f2903d975c79567e42bea9d061aa5d6bf74c9b"
+      },
+      {
+        "file": "20260831065351_makeup_numbered_pages.sql",
+        "version": "20260831065351",
+        "name": "makeup_numbered_pages",
+        "sha256": "9c5bd203b41adee3cdceb4723c6a1f440b4abd67a6adfea0bfb06e3d5f0465bf"
+      },
+      {
+        "file": "20260831101449_makeup_system_note_whitespace_parity.sql",
+        "version": "20260831101449",
+        "name": "makeup_system_note_whitespace_parity",
+        "sha256": "940613f164be35b25661750e8be5c0f15409409890308a5e046ef0fed31369ff"
+      },
+      {
+        "file": "20260831103631_makeup_source_precision_parity.sql",
+        "version": "20260831103631",
+        "name": "makeup_source_precision_parity",
+        "sha256": "47413b333331c9abfe4e771f52e9078b4edc8d88e8cf2b0125dc437a246328ba"
+      },
+      {
+        "file": "20260831123610_textbook_inventory_numbered_reads.sql",
+        "version": "20260831123610",
+        "name": "textbook_inventory_numbered_reads",
+        "sha256": "f4ba6fc76223af13704a1187ff45db5f187b1633392b2516714c9a1e2522dcb5"
+      },
+      {
+        "file": "20260831151654_record_worksheet_ox_output_projection.sql",
+        "version": "20260831151654",
+        "name": "record_worksheet_ox_output_projection",
+        "sha256": "951576acef6b2533f81b8d0241ac4a48ba57639400451589cd39e608465ad188"
+      },
+      {
+        "file": "20260831152429_textbook_workflow_numbered_reads.sql",
+        "version": "20260831152429",
+        "name": "textbook_workflow_numbered_reads",
+        "sha256": "50106bd78e9ac61d1bc45b78f82309bf10abbd545187d47736823a707796e27e"
+      },
+      {
+        "file": "20260831164103_textbook_workflow_purchase_cost_whitespace.sql",
+        "version": "20260831164103",
+        "name": "textbook_workflow_purchase_cost_whitespace",
+        "sha256": "a264ec78c4944fa8af5cfd42772ea2a40b64e1b473395421a61b91463489f947"
+      },
+      {
+        "file": "20260831170552_textbook_closing_work_context_reads.sql",
+        "version": "20260831170552",
+        "name": "textbook_closing_work_context_reads",
+        "sha256": "85d36756ec325de86fd8edea2bd2b5b693a4cb9b9fda8b07e9bafb0ce56facdd"
+      },
+      {
+        "file": "20260831184952_textbook_reference_numbered_reads.sql",
+        "version": "20260831184952",
+        "name": "textbook_reference_numbered_reads",
+        "sha256": "d963654d5a55bb10102f52b91dcc8402f1f89c8797688139a8393a4670b445e7"
+      },
+      {
+        "file": "20260831234634_textbook_class_sale_roster_school.sql",
+        "version": "20260831234634",
+        "name": "textbook_class_sale_roster_school",
+        "sha256": "458b951d33356be1f8544c1d1b7c80e4023031dedb78ce7029bef9ea10aa301b"
+      },
+      {
+        "file": "20260901045629_textbook_supplier_numbered_reads.sql",
+        "version": "20260901045629",
+        "name": "textbook_supplier_numbered_reads",
+        "sha256": "f2df2c48c4959cf3c03e763d16002677a8359bb9f705f5b6c7f6d830b7c6e637"
+      },
+      {
+        "file": "20260901065056_textbook_owner_settings_contract_fix.sql",
+        "version": "20260901065056",
+        "name": "textbook_owner_settings_contract_fix",
+        "sha256": "cff2df0b819ba4bc5d9e64b3223899ba4a5e304fe25ded166b4b0b70b3faf965"
+      },
+      {
+        "file": "20260901072345_textbook_taxonomy_numbered_drafts.sql",
+        "version": "20260901072345",
+        "name": "textbook_taxonomy_numbered_drafts",
+        "sha256": "d22d9ac3a9656c92b9d2cb6978e49ad5ec6fec3955b0d095c4ee33214c3a3c26"
+      },
+      {
+        "file": "20260901110000_registration_observation_stale_revision_nonretryable.sql",
+        "version": "20260901110000",
+        "name": "registration_observation_stale_revision_nonretryable",
+        "sha256": "93a3b4542d21b337926079b644cd01341839cabe8d5cb35f5a5bb305c7f1f222"
+      },
+      {
+        "file": "20260901110100_registration_teacher_feedback_request_retirement.sql",
+        "version": "20260901110100",
+        "name": "registration_teacher_feedback_request_retirement",
+        "sha256": "b786c22838da6647dbc4c8af0fd4a704051e009104fbfea2fc02b45f7d0e0627"
+      },
+      {
+        "file": "20260901110200_registration_status_property_decoupling.sql",
+        "version": "20260901110200",
+        "name": "registration_status_property_decoupling",
+        "sha256": "1fefac50812807dc7fc33a22c813dfe0e21877322caa314649c8d48c9f813dd3"
+      },
+      {
+        "file": "20260901110300_registration_observation_status_independence.sql",
+        "version": "20260901110300",
+        "name": "registration_observation_status_independence",
+        "sha256": "aeaf28249134783ec052a0b9698e330be1263c87cf9790c02b88c55919df64be"
+      },
+      {
+        "file": "20260901110400_registration_notification_readiness_decoupling.sql",
+        "version": "20260901110400",
+        "name": "registration_notification_readiness_decoupling",
+        "sha256": "8d7d7f92c659dd5e3f9a89b602f68380da54752d23adccbbd5d8c8b40e688a04"
+      },
+      {
+        "file": "20260901110500_registration_flat_common_input_decoupling.sql",
+        "version": "20260901110500",
+        "name": "registration_flat_common_input_decoupling",
+        "sha256": "1dc89222a261d987a5d799ac5c2fffbb29e67cd7f5e90b399995ab94db638c4a"
+      },
+      {
+        "file": "20260901110600_registration_subject_soft_archive.sql",
+        "version": "20260901110600",
+        "name": "registration_subject_soft_archive",
+        "sha256": "3435f142e0642bb7a6a6bc7f2b0bbbfd7d3ef730cfef1659cbcf86b269f005f3"
+      },
+      {
+        "file": "20260901110650_registration_subject_soft_archive_validate.sql",
+        "version": "20260901110650",
+        "name": "registration_subject_soft_archive_validate",
+        "sha256": "75b55328cd7df6a2db72be1444b967417fa3a4000996d3e0069504d139cd5d30"
+      },
+      {
+        "file": "20260901110700_registration_flat_case_creation.sql",
+        "version": "20260901110700",
+        "name": "registration_flat_case_creation",
+        "sha256": "ff48d9f4c2b6928f755d9b899b2f4c01e03b5587511c30bc942ba132e262d5d6"
+      },
+      {
+        "file": "20260901110800_registration_collaboration_write_role.sql",
+        "version": "20260901110800",
+        "name": "registration_collaboration_write_role",
+        "sha256": "b599d60d98abe41926cfeec0b3879147acfe1a47ba74e24a96a69b81fa90eb2f"
+      },
+      {
+        "file": "20260901110900_registration_archived_subject_delivery_fence.sql",
+        "version": "20260901110900",
+        "name": "registration_archived_subject_delivery_fence",
+        "sha256": "ad75e49923afa71d3bab42b977f6e7877ce5bf643adb74614984549b934ef08c"
+      },
+      {
+        "file": "20260901111000_registration_manager_write_and_integrity_fence.sql",
+        "version": "20260901111000",
+        "name": "registration_manager_write_and_integrity_fence",
+        "sha256": "0dc3f5dc6af59107c3927ea723c4b8a1fc7d9a1b3c7663ce7fdc66801cf10c36"
+      },
+      {
+        "file": "20260901111100_registration_management_notification_explicit_v2.sql",
+        "version": "20260901111100",
+        "name": "registration_management_notification_explicit_v2",
+        "sha256": "1e273a71cdd45ad3141f34a5e9ad6e46f295451775fdd4c07a1b42775f0b8234"
+      },
+      {
+        "file": "20260901111150_registration_track_event_payload_sqlstate_compatibility.sql",
+        "version": "20260901111150",
+        "name": "registration_track_event_payload_sqlstate_compatibility",
+        "sha256": "fa1dd028ece6fb29775804e5cae6668b9b39081bb914274d54d64518faf4e855"
+      },
+      {
+        "file": "20260901111200_registration_flat_fact_runtime_finalization.sql",
+        "version": "20260901111200",
+        "name": "registration_flat_fact_runtime_finalization",
+        "sha256": "860c2235c7ad170f41ca8b31911f6b432b8e848f1dd32165c5435840ef4ea891"
+      },
+      {
+        "file": "20260905064919_ops_task_parameter_sensitive_plans.sql",
+        "version": "20260905064919",
+        "name": "ops_task_parameter_sensitive_plans",
+        "sha256": "95319e3d4c19a3ac84514f7615b22021270dbd56dc107fb526dee12cee7a83fb"
+      },
+      {
+        "file": "20260905123149_dashboard_statistics_conflict_identity.sql",
+        "version": "20260905123149",
+        "name": "dashboard_statistics_conflict_identity",
+        "sha256": "e5d0c6271a06b1d9b6a0b0b412b2055d8728663336b974ec78c52ce38cc471c2"
+      },
+      {
+        "file": "20260905123831_dashboard_conflict_visibility_boolean.sql",
+        "version": "20260905123831",
+        "name": "dashboard_conflict_visibility_boolean",
+        "sha256": "ec60770fffff7b31c3ebd6e141a26a98c25e4b4754b7aed2dfec1df66d700afb"
+      },
+      {
+        "file": "20260905143000_dashboard_conflict_business_sqlstate.sql",
+        "version": "20260905143000",
+        "name": "dashboard_conflict_business_sqlstate",
+        "sha256": "541b17f33d35cd711f971977cb161b60fd2b5bc46d5f258ea452766357b59826"
+      },
+      {
+        "file": "20260907092019_registration_subject_snapshot_guard.sql",
+        "version": "20260907092019",
+        "name": "registration_subject_snapshot_guard",
+        "sha256": "8ba0d2ace8c60a5a7856c1a869e52b012cbe718b403ed906e24fe25ec1cb9089"
+      },
+      {
+        "file": "20260907101952_retire_word_retest_google_chat.sql",
+        "version": "20260907101952",
+        "name": "retire_word_retest_google_chat",
+        "sha256": "88952fd01468729c861edd6a7552c0830285b92dd87f102680090fd85dec7b08"
+      },
+      {
+        "file": "20260907103333_validate_word_retest_google_chat_retirement.sql",
+        "version": "20260907103333",
+        "name": "validate_word_retest_google_chat_retirement",
+        "sha256": "3d33ba12435834cc7999bac4a371f48acb9b468f7799f488e88cca7f2583b36b"
+      },
+      {
+        "file": "20260907112516_registration_customer_delivery_lookup.sql",
+        "version": "20260907112516",
+        "name": "registration_customer_delivery_lookup",
+        "sha256": "164f6980461722528a1a6c1c35f8a20aeab627d7d507fc3bc0c5c889738c1045"
+      },
+      {
+        "file": "20260908042503_notification_settings_atomic_registration_policy.sql",
+        "version": "20260908042503",
+        "name": "notification_settings_atomic_registration_policy",
+        "sha256": "972d7d082a85980d35b7e974f2b88addd2b87f2318a467bcb239663cb2ae9c2f"
+      },
+      {
+        "file": "20260908042546_registration_visit_cancellation_explicit.sql",
+        "version": "20260908042546",
+        "name": "registration_visit_cancellation_explicit",
+        "sha256": "0d305e78476f74a9ab8e1fa3c7dd476dfb9ae10c4bce02c0e826b106045edbf2"
+      },
+      {
+        "file": "20260908042842_registration_case_customer_message_history.sql",
+        "version": "20260908042842",
+        "name": "registration_case_customer_message_history",
+        "sha256": "0d1f4052715eff2c3bfeedfb7309daad54985b0b91c579f7ff8d3dd946144f7d"
+      },
+      {
+        "file": "20260908044018_registration_observation_explicit_chat.sql",
+        "version": "20260908044018",
+        "name": "registration_observation_explicit_chat",
+        "sha256": "b13b9e00934165b6974e7ce6a952133f088ab6093ad29b8bc3d413bb49496295"
+      },
+      {
+        "file": "20260908044502_registration_management_notification_preview.sql",
+        "version": "20260908044502",
+        "name": "registration_management_notification_preview",
+        "sha256": "ec34efa4af5382a5a0c3dc0aae2a8cd70f478775fcbecb1da3a62a3edc6fe544"
+      },
+      {
+        "file": "20260908062222_registration_management_notification_source_recovery.sql",
+        "version": "20260908062222",
+        "name": "registration_management_notification_source_recovery",
+        "sha256": "89ef4c52e56f943823675a314b02764f8568fb9a73fc153bfafd02daf13d9c4a"
+      },
+      {
+        "file": "20260908090400_registration_management_dispatch_owner.sql",
+        "version": "20260908090400",
+        "name": "registration_management_dispatch_owner",
+        "sha256": "dd4de3c455ae3ebac51f333d475974f8cb7dee3810fb90df7b35036e9c3ca3f9"
+      },
+      {
+        "file": "20260908105302_textbook_sale_transition_atomic.sql",
+        "version": "20260908105302",
+        "name": "textbook_sale_transition_atomic",
+        "sha256": "134e8f6fbb37d3ad746c6cd2578a205575cad29b8738c1732586f739cc53f016"
+      },
+      {
+        "file": "20260908112155_textbook_stock_count_atomic.sql",
+        "version": "20260908112155",
+        "name": "textbook_stock_count_atomic",
+        "sha256": "516c1cefb2f038c034005135cf28da167831739d1e6c71ec2fadedfc0f33562b"
+      },
+      {
+        "file": "20260909045433_dashboard_conflict_monitoring_only.sql",
+        "version": "20260909045433",
+        "name": "dashboard_conflict_monitoring_only",
+        "sha256": "e68e00ed8d68e9fe4aad0d88f4e7ece8f7ae01fc146e778d1881b2a52df9e203"
+      },
+      {
+        "file": "20260909045454_registration_admission_preview_saved_facts.sql",
+        "version": "20260909045454",
+        "name": "registration_admission_preview_saved_facts",
+        "sha256": "56afc8314ac4d4e1638f38d4da07ea8e4f6e78e37c22cd5f419c9ac193bcd1fa"
+      },
+      {
+        "file": "20260909050634_registration_followup_task_retirement.sql",
+        "version": "20260909050634",
+        "name": "registration_followup_task_retirement",
+        "sha256": "0141bda9b6f2180dc9d719e9fca96098fadc648f5f5de7e82f119e331274f999"
+      },
+      {
+        "file": "20260909050822_registration_followup_task_retirement_validate.sql",
+        "version": "20260909050822",
+        "name": "registration_followup_task_retirement_validate",
+        "sha256": "4bb680eadef0cdf6c174027f3dac29ba030204e2410f671211f0a50d5fdb1c5f"
+      },
+      {
+        "file": "20260909050943_operations_subject_completion_chat.sql",
+        "version": "20260909050943",
+        "name": "operations_subject_completion_chat",
+        "sha256": "de23eea15bf0dafd2dbebef7650019738779c74838aa777ba441a037c5e28f75"
+      },
+      {
+        "file": "20260909063900_operations_subject_completion_constraints_validate.sql",
+        "version": "20260909063900",
+        "name": "operations_subject_completion_constraints_validate",
+        "sha256": "d50707caabc9e5684d5ff0526d091aee5dab089cb5771ebeade3ee33cdb894a1"
+      },
+      {
+        "file": "20260909084130_retire_tasks_and_word_retest_notifications.sql",
+        "version": "20260909084130",
+        "name": "retire_tasks_and_word_retest_notifications",
+        "sha256": "69290e004a62fde1a7e1230a49513a45be76cb60c9af572d432fc62cf82feee3"
+      },
+      {
+        "file": "20260909084131_validate_unused_notification_retirement.sql",
+        "version": "20260909084131",
+        "name": "validate_unused_notification_retirement",
+        "sha256": "a8941cf65d1ed8e3b88da06ef6d92f9f0fc90e6605fa5bfd165076b6b97d2381"
+      },
+      {
+        "file": "20260909091156_worksheet_history_summaries.sql",
+        "version": "20260909091156",
+        "name": "worksheet_history_summaries",
+        "sha256": "92106ceb036738069cc999da847fc022b5c8dc42bbcc2791ca9d390eadb1d196"
+      },
+      {
+        "file": "20260909152352_allow_classes_without_period_memberships.sql",
+        "version": "20260909152352",
+        "name": "allow_classes_without_period_memberships",
+        "sha256": "97e8d39f387c7c8a7936102e31759ffbaa0c3866b68438235331963a43d7d58e"
+      },
+      {
+        "file": "20260909153611_remove_academic_curriculum_default_period_scope.sql",
+        "version": "20260909153611",
+        "name": "remove_academic_curriculum_default_period_scope",
+        "sha256": "9135a5684b62fb9e11712182eb28e01f83532f3cd2eccbb626b66603ae81e7c8"
+      },
+      {
+        "file": "20260911102816_recruiting_applications_private_intake.sql",
+        "version": "20260911102816",
+        "name": "recruiting_applications_private_intake",
+        "sha256": "e0b8d2c7b917bc9ecb47b2be57b55c4f5b0e4f0b40bbf83c97559cbefdc0e39c"
+      },
+      {
+        "file": "20260912074228_public_site_content_management.sql",
+        "version": "20260912074228",
+        "name": "public_site_content_management",
+        "sha256": "522a4fdd7050ed745ea9c234a33fa0bd6963aab309a80ee7a829b3ace960ef87"
+      },
+      {
+        "file": "20260921114313_textbook_lifecycle_atomic.sql",
+        "version": "20260921114313",
+        "name": "textbook_lifecycle_atomic",
+        "sha256": "c95a5d5fa4e829025943bc80fd3b35e6ada0b807fb8797742e5b2b8b3a657cd4"
+      },
+      {
+        "file": "20260921114314_signup_identity_isolation.sql",
+        "version": "20260921114314",
+        "name": "signup_identity_isolation",
+        "sha256": "acf7b70ff77cab9614cd61cb6f348492869298af7127e6c051a5b1f3988e9afb"
+      },
+      {
+        "file": "20260921132000_purchase_group_return_state.sql",
+        "version": "20260921132000",
+        "name": "purchase_group_return_state",
+        "sha256": "f9f6c2c830eaea550214b0cc46ba735df2b8d9da4eedea3409f11d725a1a0e18"
+      },
+      {
+        "file": "20260921132001_signup_teacher_ownership.sql",
+        "version": "20260921132001",
+        "name": "signup_teacher_ownership",
+        "sha256": "5c47b8ec037cb7b42440e6eb485c786fbc2d9a84554b7bf572c1cb9b54733d47"
+      },
+      {
+        "file": "20260921133800_purchase_return_read_consistency.sql",
+        "version": "20260921133800",
+        "name": "purchase_return_read_consistency",
+        "sha256": "509fa0a84608d959ec92e485f1deca9470725f5c4be1371800d9d66903989fe2"
+      },
+      {
+        "file": "20260921141000_signup_confirmation_link.sql",
+        "version": "20260921141000",
+        "name": "signup_confirmation_link",
+        "sha256": "8081664146cada5997101bbdc50941f8dfb0819fe002a07ab454e1011c1dacfe"
+      },
+      {
+        "file": "20260921144020_student_enrollment_status.sql",
+        "version": "20260921144020",
+        "name": "student_enrollment_status",
+        "sha256": "8340be5894d4147aea02e66b008456755a8e7b4ff277de63e1effd42b6600a5e"
+      },
+      {
+        "file": "20260922012306_dashboard_workload_reads.sql",
+        "version": "20260922012306",
+        "name": "dashboard_workload_reads",
+        "sha256": "06ae08ae68e241b14b2e9ed78cee6905c29c8bf38bb665340f8ff7ace31872d1"
+      },
+      {
+        "file": "20260922021144_retire_standalone_approvals.sql",
+        "version": "20260922021144",
+        "name": "retire_standalone_approvals",
+        "sha256": "b66a9a4ec4bab1af127eec6783c29179ff3f24cb69c1fa14f2fe54600c50915c"
+      },
+      {
+        "file": "20260922021343_validate_standalone_approvals_retirement.sql",
+        "version": "20260922021343",
+        "name": "validate_standalone_approvals_retirement",
+        "sha256": "88dcbdbdaddae37cc78a299101a329af1414ac18d39e7fb54322a687e237a6a9"
+      },
+      {
+        "file": "20260922023940_timetable_continuous_class_scope.sql",
+        "version": "20260922023940",
+        "name": "timetable_continuous_class_scope",
+        "sha256": "ce83b2692195757381ff73e946cd24ff2080d61ebe231cacac1c5516e0648757"
+      },
+      {
+        "file": "20260922054047_curriculum_schedule_and_class_textbooks.sql",
+        "version": "20260922054047",
+        "name": "curriculum_schedule_and_class_textbooks",
+        "sha256": "7791c39138ce0d9ab552dd64576db2a60169a8e8624faa48dd01430819e0fe72"
+      },
+      {
+        "file": "20260922064700_validate_class_textbook_usage.sql",
+        "version": "20260922064700",
+        "name": "validate_class_textbook_usage",
+        "sha256": "6f4cb5e2df771c54eeb00100b62c3a512749fa4942384be141fbdd8565239da5"
+      },
+      {
+        "file": "20260922095634_exclude_closed_observation_classes.sql",
+        "version": "20260922095634",
+        "name": "exclude_closed_observation_classes",
+        "sha256": "d7ee31a9cf9d28edaca22eb491fdc0a37583cc9a683a59dd55b15a996c5de820"
+      },
+      {
+        "file": "20260922105632_registration_multiple_textbooks.sql",
+        "version": "20260922105632",
+        "name": "registration_multiple_textbooks",
+        "sha256": "ac78bfbe76c223ae9467b1c70809aeebc8a431ee85954e65c3b60b80748314d9"
+      },
+      {
+        "file": "20260922140000_class_detail_roster_counts.sql",
+        "version": "20260922140000",
+        "name": "class_detail_roster_counts",
+        "sha256": "8752e43ff7a3dcb4f605455bf24e2808ff297f16ab8732fd5afddb12dfc9d932"
+      },
+      {
+        "file": "20260923063151_timetable_schedule_mutation_safety.sql",
+        "version": "20260923063151",
+        "name": "timetable_schedule_mutation_safety",
+        "sha256": "4c696dd3f5f81201b21b0a188b22ec5712f8660b10c1921449b0a229179fdd86"
+      },
+      {
+        "file": "20260923065331_timetable_schedule_partial_resources.sql",
+        "version": "20260923065331",
+        "name": "timetable_schedule_partial_resources",
+        "sha256": "2f3cd6910576de54a72392749f155175a6fc0207622e8cf816e2210ff9f1abdc"
+      },
+      {
+        "file": "20260923070639_timetable_schedule_literal_resources.sql",
+        "version": "20260923070639",
+        "name": "timetable_schedule_literal_resources",
+        "sha256": "f62fc12aa838f3af15af1e86f7e9303d2260ec962d091fd43d16d437c999882a"
+      },
+      {
+        "file": "20260923073614_timetable_normalized_slot_resources.sql",
+        "version": "20260923073614",
+        "name": "timetable_normalized_slot_resources",
+        "sha256": "47c3db6992e8506c1cf6ab198adf075fe7940cb20e7a9c325574dbfc04cd6eb2"
+      },
+      {
+        "file": "20260923074255_timetable_legacy_ambiguous_room_parser.sql",
+        "version": "20260923074255",
+        "name": "timetable_legacy_ambiguous_room_parser",
+        "sha256": "9cf4b9ccc6aac716e9314d031435527646efafe8e443041216bca2d930a3b8fe"
+      },
+      {
+        "file": "20260923075249_timetable_normalized_slot_time_matching.sql",
+        "version": "20260923075249",
+        "name": "timetable_normalized_slot_time_matching",
+        "sha256": "233a19ad17a90a530c829a200d4d77866cc20cf96e3a7de174a7c7bdbea2eb34"
+      },
+      {
+        "file": "20260923081138_timetable_plan_storage.sql",
+        "version": "20260923081138",
+        "name": "timetable_plan_storage",
+        "sha256": "e782461503ea539261bbfe1c84e437e765902199a361e9050f7bb2249ab92035"
+      },
+      {
+        "file": "20260923085008_timetable_operational_conflict_guards.sql",
+        "version": "20260923085008",
+        "name": "timetable_operational_conflict_guards",
+        "sha256": "1a8a7f13d79753b41b9d11121a780824d93259401e810b33b25cad76d971cb20"
+      },
+      {
+        "file": "20260923120931_timetable_plan_transfers.sql",
+        "version": "20260923120931",
+        "name": "timetable_plan_transfers",
+        "sha256": "447000352b24a537275ee9f24de827ef881740c24c84a67c9d83835a3d962e9f"
+      },
+      {
+        "file": "20260923131454_timetable_makeup_domain_sqlstates.sql",
+        "version": "20260923131454",
+        "name": "timetable_makeup_domain_sqlstates",
+        "sha256": "ac705f9449e90fe1d2dc29406b6f0e8a5889e60ca40454b877396a6618c8c817"
+      },
+      {
+        "file": "20260923134651_timetable_reference_aggregation.sql",
+        "version": "20260923134651",
+        "name": "timetable_reference_aggregation",
+        "sha256": "3f1ae143975e1cab355f6497ca481b71d242dde53833c8a736698d1da7d927a4"
+      },
+      {
+        "file": "20260923150523_timetable_plan_import_recovery.sql",
+        "version": "20260923150523",
+        "name": "timetable_plan_import_recovery",
+        "sha256": "4693aea069f4389660e9198ae15fc7c1f3d551fdffba1a6b90e5818d4e774a8c"
+      },
+      {
+        "file": "20260923164328_timetable_import_original_placement.sql",
+        "version": "20260923164328",
+        "name": "timetable_import_original_placement",
+        "sha256": "a8e4826aaaea9f70d2572f332a1ec3106a3f1ab30a2f50e0ce6afe8fa14a37d7"
+      },
+      {
+        "file": "20260924124904_timetable_legacy_reference_aggregation.sql",
+        "version": "20260924124904",
+        "name": "timetable_legacy_reference_aggregation",
+        "sha256": "aa69ccd3170f7adbbe52732a35209bf8edd3876e4709413aed14e7492eb2087e"
+      },
+      {
+        "file": "20260927071716_timetable_scoped_occupancy.sql",
+        "version": "20260927071716",
+        "name": "timetable_scoped_occupancy",
+        "sha256": "6fc4bfa1e0e2aecb6552e38d5a21c47987ba41fd6ef49cc88d095fb53d4323ea"
+      },
+      {
+        "file": "20260927103000_performance_catalog_and_workload.sql",
+        "version": "20260927103000",
+        "name": "performance_catalog_and_workload",
+        "sha256": "cb55652cc72e41860de0560d3baa6b75ea0f6eea4ef85222ac2df5b6220066e5"
+      },
+      {
+        "file": "20260927130000_makeup_approval_collision_candidates.sql",
+        "version": "20260927130000",
+        "name": "makeup_approval_collision_candidates",
+        "sha256": "38a41f5890318f9e48ddc23ff7987865dfc9046ad2e06ff55231ea7b3a190a85"
+      },
+      {
+        "file": "20260927141000_student_enrollment_batch_reads.sql",
+        "version": "20260927141000",
+        "name": "student_enrollment_batch_reads",
+        "sha256": "04d90be530041537dfcb92389c767bdf9118098a50ce051e3bf6b2a20fe6bfe8"
+      },
+      {
+        "file": "20260927151448_curriculum_session_read_aggregation.sql",
+        "version": "20260927151448",
+        "name": "curriculum_session_read_aggregation",
+        "sha256": "4956c90de275bbdc2e5eb0bf5927e15b2b02d52d9d5e0c42c4aae4ebc9201385"
+      },
+      {
+        "file": "20260928010618_registration_stats_narrow_summary.sql",
+        "version": "20260928010618",
+        "name": "registration_stats_narrow_summary",
+        "sha256": "1aeeb251213739d9aa12d2cd6ad6efc832fff3d06cfc9dbda8fd6f270c4b939c"
+      },
+      {
+        "file": "20260928021444_registration_numbered_keys_narrow_summary.sql",
+        "version": "20260928021444",
+        "name": "registration_numbered_keys_narrow_summary",
+        "sha256": "d4b3c450540a19fed98582cf56f224d93d5fdf54383720fa49e2249b7c2ceb64"
+      },
+      {
+        "file": "20260929100158_legacy_lesson_schedule_compatibility.sql",
+        "version": "20260929100158",
+        "name": "legacy_lesson_schedule_compatibility",
+        "sha256": "f575e0d687beb0e602eb9ca06eb07828cd56338a4306557985d80ac62f661309"
+      },
+      {
+        "file": "20260929110109_agent_api_scoped_schedule.sql",
+        "version": "20260929110109",
+        "name": "agent_api_scoped_schedule",
+        "sha256": "50f8bcc39ec77dc8dea68aa87c2b908b96e0ca54829fb07ccad5c3a58ac9793e"
+      },
+      {
+        "file": "20260929112742_lesson_design_teacher_subject_aliases.sql",
+        "version": "20260929112742",
+        "name": "lesson_design_teacher_subject_aliases",
+        "sha256": "bbffd465a538dcb2fb2d8e105c0621576ebd26e0e98c53b35640bf621a13db43"
+      },
+      {
+        "file": "20260929113744_agent_api_audit_history_decoupling.sql",
+        "version": "20260929113744",
+        "name": "agent_api_audit_history_decoupling",
+        "sha256": "2f29859963f8dfbda20860f5dd57f268c23f3fd06a4a625e6f9e168cb97db585"
+      },
+      {
+        "file": "20260929121505_lesson_save_conflict_validation_performance.sql",
+        "version": "20260929121505",
+        "name": "lesson_save_conflict_validation_performance",
+        "sha256": "184eb0ba449c75080f63d20d59049f428ab3014c9fbf8d5177b31ebfba590ed7"
+      },
+      {
+        "file": "20260929130122_agent_api_class_changes.sql",
+        "version": "20260929130122",
+        "name": "agent_api_class_changes",
+        "sha256": "797985bbb2c27410dc3b9ba4974d4e665f594514f94fdd7545c96f6447f35b2e"
+      },
+      {
+        "file": "20260929132914_agent_legacy_dated_override.sql",
+        "version": "20260929132914",
+        "name": "agent_legacy_dated_override",
+        "sha256": "75856b015a854c0b597a1748147ab9e0664863a243771aa0a022b0f251b0ebf0"
+      },
+      {
+        "file": "20260929154143_timetable_director_preparing_workflow.sql",
+        "version": "20260929154143",
+        "name": "timetable_director_preparing_workflow",
+        "sha256": "4ff18f0af84b8bb4af9947b9f41911ad556f4f98c3f0f69c1cbe35d44a083dde"
+      },
+      {
+        "file": "20260930092804_agent_management_calendar.sql",
+        "version": "20260930092804",
+        "name": "agent_management_calendar",
+        "sha256": "99d388f89a05d66fe17cbd41cf2a171114541dfab11e6d79b57f7f4b6f59dab7"
+      },
+      {
+        "file": "20261002114145_narrow_past_lesson_state_correction.sql",
+        "version": "20261002114145",
+        "name": "narrow_past_lesson_state_correction",
+        "sha256": "8456b73483c15448e5a017234578cca5e6797a192641e94197b522a84d52f9dc"
+      },
+      {
+        "file": "20261002130443_past_state_correction_reference_reuse.sql",
+        "version": "20261002130443",
+        "name": "past_state_correction_reference_reuse",
+        "sha256": "b53f3101aab765bfebde15ccb6b14733c335e546c91f29e05a5764ace6dd75ee"
+      },
+      {
+        "file": "20261002134521_timetable_save_conflict_details.sql",
+        "version": "20261002134521",
+        "name": "timetable_save_conflict_details",
+        "sha256": "6e8f39b0caf642c55f4b71326cdf7fa7cf275ee19ec05ae701982eb4cc9f414c"
+      },
+      {
+        "file": "20261002143852_past_state_unknown_snapshot_reader_fast_path.sql",
+        "version": "20261002143852",
+        "name": "past_state_unknown_snapshot_reader_fast_path",
+        "sha256": "2aedc62ea8b7b8a6a72dcbe2d7737bedcca04a435240bf4f4d2516b67ab37f3f"
+      },
+      {
+        "file": "20261002170849_timetable_legacy_default_projection.sql",
+        "version": "20261002170849",
+        "name": "timetable_legacy_default_projection",
+        "sha256": "ce52cc855ae3f7ec7816123272690386c2606480fbaec94d6ad131249332ee95"
+      },
+      {
+        "file": "20261004160000_legacy_effective_schedule_inheritance.sql",
+        "version": "20261004160000",
+        "name": "legacy_effective_schedule_inheritance",
+        "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
+      }
+    ],
+    "before": {
+      "count": 362,
+      "latest": "20261002170849",
+      "versionsSha256": "63d5517028ceb647b242b24edba0957fd6ce010fb3abc762a6dfef363733f93b",
+      "versionNamesCanonicalJsonSha256": "83737a2ac0f6a24694abd0409fc7c48c48dbe2469c7af17b0df4b6fee05b3037"
+    },
+    "after": {
+      "count": 363,
+      "latest": "20261004160000",
+      "versionsSha256": "1edeca0dfb3d8a32c4f29b4c467d30ca25ba8ce77cee1a8ab62ee5e8d841def3",
+      "versionNamesCanonicalJsonSha256": "30068071bb6ec8e22117ee77d383fa6d2ac4e5712f0cf17d7cad1344e746a617"
+    },
+    "beforeCatalog": [
+      {
+        "signature": "dashboard_private.legacy_effective_binding_v1(jsonb)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.legacy_effective_context_for_dates_v1(public.classes,jsonb,date,date)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.legacy_effective_context_v1(public.classes,jsonb)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.legacy_effective_input_v1(jsonb,jsonb,jsonb,integer,integer)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.makeup_effective_class_context_v1(jsonb)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.makeup_effective_date_key_v1(text)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.notification_makeup_payload_v1(uuid,uuid,text)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "md5",
+        "bodyHash": "ff4f02efcca4d52b159a7b9edd934dd5",
+        "language": "sql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.read_makeup_operating_reference_v1(date,date)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "dashboard_private.read_timetable_operating_reference_v1()",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "1138c86e711b05d4a89f95ab1db72953a81612657e5ffceb18109f5cf54ac789",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "public.get_class_schedule_v1(uuid,date,date)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "v",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "authenticated",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": true,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "964c8c8ec5ca9b7cd8139a0d3e942371e1af4e105883c015dfeb0e2d21325cdc",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "public.get_makeup_approval_collision_context_v1(jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\"",
+          "TimeZone=UTC"
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "c1bf744aa949841b8bf591c8ba271c26e829df5cb5c6b60f2a35a7a48a6f6055",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "public.get_makeup_effective_occupancy_v1(jsonb)",
+        "exists": false,
+        "owner": null,
+        "securityDefiner": null,
+        "volatility": null,
+        "config": null,
+        "acl": null,
+        "anonExecute": null,
+        "authenticatedExecute": null,
+        "serviceRoleExecute": null,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": null,
+        "language": null,
+        "returns": null,
+        "kind": null,
+        "returnsSet": null
+      },
+      {
+        "signature": "public.get_makeup_reservation_context_v1(jsonb,uuid[])",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\"",
+          "TimeZone=UTC"
+        ],
+        "acl": [
+          {
+            "grantee": "authenticated",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": true,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "cb871e7112af202941985a23e419fa1eceefbb8d4b59f16f3fae761409f831ca",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      }
+    ],
+    "afterCatalog": [
+      {
+        "signature": "dashboard_private.legacy_effective_binding_v1(jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "i",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "da694a06d4a539d7dff78bcf258ad4cc7aab87d903b9b8498e77494bb1d6f365",
+        "language": "sql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.legacy_effective_context_for_dates_v1(public.classes,jsonb,date,date)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "e5a52a6d32c212173231fec160582f09baf547565d51cf9b142321f6e15cc240",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.legacy_effective_context_v1(public.classes,jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "8e4d903255b3f3c8dc7d729bcc58b5bd6ab711847e2e0b92f0870a37b1b0f7f6",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.legacy_effective_input_v1(jsonb,jsonb,jsonb,integer,integer)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "i",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "9fc9c355bfc7c0a678eb735c1096bdf34ad6e1b81fc7ce483ecff3194b8385d5",
+        "language": "sql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.makeup_effective_class_context_v1(jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "authenticated",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": true,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "25d647e693c382ee6eaf7221649785c1ed23e836a65d5f8e5b7bb9b41cbea51c",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.makeup_effective_date_key_v1(text)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "i",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "29dd4656f37b92e6902cd52cf1ded7268d4c30696cc5356bf8161984e251f343",
+        "language": "plpgsql",
+        "returns": "date",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.notification_makeup_payload_v1(uuid,uuid,text)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "md5",
+        "bodyHash": "ff4f02efcca4d52b159a7b9edd934dd5",
+        "language": "sql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.read_makeup_operating_reference_v1(date,date)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "98ff3a3678ce0ce85786f08c49daddc861253a3bef53c4af5df3a7b2371832e8",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.read_timetable_operating_reference_v1()",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "04f3cf774684bc5b90fc1f75b0cdbe5b8b5c00bb3fc32fc103f3828fd47f560f",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "i",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": false,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "62c95c1b67746ab3633233dce3c2adf2657c8b9bb48f6f433ecff523d79f50f5",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "public.get_class_schedule_v1(uuid,date,date)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": true,
+        "volatility": "v",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "authenticated",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": true,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "302cd795903981618b4c51ce284c980c17c2c543dd561f236b6552e79fa3b80a",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "public.get_makeup_approval_collision_context_v1(jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\"",
+          "TimeZone=UTC"
+        ],
+        "acl": [
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": false,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "c1bf744aa949841b8bf591c8ba271c26e829df5cb5c6b60f2a35a7a48a6f6055",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "public.get_makeup_effective_occupancy_v1(jsonb)",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\""
+        ],
+        "acl": [
+          {
+            "grantee": "authenticated",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": true,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "1e3aff21f606bd61d7af94b9c93b7c03ceb8dcc3d59b158e24c983e9f4b107a3",
+        "language": "sql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      },
+      {
+        "signature": "public.get_makeup_reservation_context_v1(jsonb,uuid[])",
+        "exists": true,
+        "owner": "postgres",
+        "securityDefiner": false,
+        "volatility": "s",
+        "config": [
+          "search_path=\"\"",
+          "TimeZone=UTC"
+        ],
+        "acl": [
+          {
+            "grantee": "authenticated",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "postgres",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          },
+          {
+            "grantee": "service_role",
+            "grantor": "postgres",
+            "privilege": "EXECUTE",
+            "grantable": false
+          }
+        ],
+        "anonExecute": false,
+        "authenticatedExecute": true,
+        "serviceRoleExecute": true,
+        "bodyHashAlgorithm": "sha256",
+        "bodyHash": "cb871e7112af202941985a23e419fa1eceefbb8d4b59f16f3fae761409f831ca",
+        "language": "plpgsql",
+        "returns": "jsonb",
+        "kind": "f",
+        "returnsSet": false
+      }
+    ],
+    "ca": {
+      "path": "supabase/certs/prod-ca-2021.crt",
+      "sha256": "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7",
+      "bytes": 1367
+    },
+    "cli": {
+      "version": "2.115.0",
+      "linuxAmd64ArchiveSha256": "ff099608ce758b625532ef03a61f4c9520b995e94ff6cd5480dc0428cad64cb3"
+    },
+    "excluded": {
+      "pr96SourceSha": "37a4298f77af2fe91ea20ba335a74249383cd990",
+      "versions": [
+        "20261004140438",
+        "20261004140440"
+      ],
+      "ai362To369Release": true
+    },
+    "singleInstallDispatch": true,
+    "noAutomaticRetryRepairOrRollback": true,
+    "installationQuiescence": {
+      "readOnlyPreflightRequiresPause": false,
+      "requiredForInstall": [
+        "other_production_ddl_and_migration_installers",
+        "class_schedule_defaults_lessons_slots_teacher_room_and_roster_enrollment_writers",
+        "makeup_approval_cancellation_and_lifecycle_writers",
+        "human_and_bot_calls_using_replaced_schedule_readers_including_get_class_schedule_v1_runtime_materialization",
+        "calendar_academic_event_and_makeup_approval_evidence_writers_altering_inherited_schedule_or_occupancy_provenance"
+      ],
+      "affectedInFlightTransactionsMustBeDrained": true,
+      "unrelatedRetentionAndNotificationJournalWritersRequirePause": false,
+      "resumeOnlyAfter": "verified_post_install_checkpoint_or_explicit_unknown_state_diagnosis",
+      "pauseAck": "AFFECTED PR97 WRITERS AND OTHER DDL INSTALLERS PAUSED",
+      "pauseAttestationMaxAgeSeconds": 300
+    },
+    "newPermissions": [
+      {
+        "signature": "dashboard_private.read_makeup_operating_reference_v1(date,date)",
+        "owner": "postgres",
+        "returns": "jsonb",
+        "securityDefiner": true,
+        "grantees": [],
+        "guard": "owner-only direct EXECUTE; internal postgres DEFINER call; non-null ordered dates within 14 inclusive KST days",
+        "scope": "private date-scoped operating reference; no authenticated/service direct source-adapter access",
+        "resourceBound": "Date eligibility precedes dated resolution/materialization; history/JSONB identity scans, detoasting, complete basics/catalogs and dense in-window work remain; no execution-work budget or production latency proof."
+      },
+      {
+        "owner": "postgres",
+        "returns": "jsonb",
+        "dtoKeys": [
+          "id",
+          "classId",
+          "className",
+          "date",
+          "startMinute",
+          "endMinute",
+          "classroom",
+          "uncertain",
+          "allRooms"
+        ],
+        "signature": "dashboard_private.makeup_effective_class_context_v1(jsonb)",
+        "securityDefiner": true,
+        "grantees": [
+          "authenticated",
+          "service_role"
+        ],
+        "guard": "auth.uid() non-null OR current role service_role; no staff/active-profile/class-ownership gate",
+        "scope": "class occupancy outside request RLS, constrained by validated day envelopes and actual overlap",
+        "resourceBounds": {
+          "maxDayEnvelopes": 14,
+          "maxInclusiveKstDays": 14,
+          "maxFinalOccupancyRows": 2000,
+          "overflowSqlstate": "22023",
+          "overflowMessage": "makeup_effective_capacity_exceeded",
+          "executionWorkBudgetEstablished": false,
+          "productionLatencyProven": false,
+          "databaseCancellationProven": false,
+          "multipleBatchesSingleSnapshot": false
+        },
+        "resourceBound": "Up to 14 canonical UTC envelopes on distinct KST days within 14 inclusive days; final occupancy sentinel over 2000 fails closed with 22023. History scans/detoasting remain. Response capacity is not an execution budget; client deadline does not prove DB cancellation."
+      },
+      {
+        "owner": "postgres",
+        "returns": "jsonb",
+        "dtoKeys": [
+          "id",
+          "classId",
+          "className",
+          "date",
+          "startMinute",
+          "endMinute",
+          "classroom",
+          "uncertain",
+          "allRooms"
+        ],
+        "signature": "public.get_makeup_effective_occupancy_v1(jsonb)",
+        "securityDefiner": false,
+        "grantees": [
+          "authenticated",
+          "service_role"
+        ],
+        "guard": "INVOKER wrapper calls authenticated occupancy DEFINER with the same UID/service guard",
+        "scope": "public RPC exposing only the nine-field bounded occupancy DTO; existing request/event RPCs and their RLS remain unchanged",
+        "resourceBounds": {
+          "maxDayEnvelopes": 14,
+          "maxInclusiveKstDays": 14,
+          "maxFinalOccupancyRows": 2000,
+          "overflowSqlstate": "22023",
+          "overflowMessage": "makeup_effective_capacity_exceeded",
+          "executionWorkBudgetEstablished": false,
+          "productionLatencyProven": false,
+          "databaseCancellationProven": false,
+          "multipleBatchesSingleSnapshot": false
+        },
+        "resourceBound": "Caller uses lazy sequential batches sharing the existing eight-second read deadline/cancellation, no automatic retries or parallel fan-out, no successful context after partial failure; multiple batches are not one DB snapshot."
+      }
+    ],
+    "functionChangeSummary": {
+      "new": 9,
+      "replaced": 4,
+      "changed": 13,
+      "catalogWithUnchangedWriter": 14,
+      "newDefiners": 2,
+      "newPublicRpcs": 1,
+      "newDirectApplicationExecutableFunctions": 2,
+      "publicAndAnonExecuteDenied": true
+    },
+    "preflightEvidence": {
+      "historicalRecordedAt": "2026-10-04T18:03:09.531Z",
+      "productionRefreshedForReplacement": false,
+      "knownAbsentInHistoricalPacket": [
+        "dashboard_private.legacy_effective_binding_v1(jsonb)",
+        "dashboard_private.legacy_effective_context_v1(public.classes,jsonb)",
+        "dashboard_private.legacy_effective_input_v1(jsonb,jsonb,jsonb,integer,integer)",
+        "dashboard_private.makeup_effective_class_context_v1(jsonb)",
+        "dashboard_private.resolve_legacy_effective_schedule_v1(jsonb)"
+      ],
+      "additionalRequiredAbsentSignatures": [
+        "dashboard_private.legacy_effective_context_for_dates_v1(public.classes,jsonb,date,date)",
+        "dashboard_private.makeup_effective_date_key_v1(text)",
+        "dashboard_private.read_makeup_operating_reference_v1(date,date)",
+        "public.get_makeup_effective_occupancy_v1(jsonb)"
+      ],
+      "immediateLiveLedgerCatalogTlsRecheckRequired": true
+    },
+    "productCiEvidence": {
+      "sourceSha": "1eccff3254b7024dc242bcffd11eb4505ff0700c",
+      "requiredChecks": [
+        "supabase-sql-review",
+        "supabase-schema-contract",
+        "free-tier-guardrails"
+      ],
+      "sqlSchemaRunId": 37229234314,
+      "guardrailsRunId": 37229234347,
+      "suppliedEvidenceAllThreePassed": true,
+      "freshActionTimeApiRecheckRequired": true,
+      "vercelPreviewGreenClaimed": false
+    },
+    "rollbackSource": {
+      "file": "supabase/rollbacks/20261004160000_legacy_effective_schedule_inheritance.sql",
+      "sha256": "e057be0af5c417b9094adadebe68e07110c311f10a9c29f6a175b94e3f550a77",
+      "executedOrRecoveryValidated": false,
+      "recoveryPolicy": "forward-only; no automatic rollback or history repair"
+    }
+  },
+  "sourceReviewStatus": "reviewed_current"
+}

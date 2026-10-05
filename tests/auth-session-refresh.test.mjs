@@ -8,6 +8,7 @@ import { JSDOM } from "jsdom";
 import { act, createElement, StrictMode, useEffect, useState } from "react";
 import ts from "typescript";
 
+globalThis.fetch = async () => { throw new Error("Network is disabled for synthetic auth tests"); };
 const require = createRequire(import.meta.url);
 const repo = new URL("../", import.meta.url);
 const dom = new JSDOM("<!doctype html><html><body></body></html>", {
@@ -62,11 +63,24 @@ async function setup(t, { strict = false, initialPending = false } = {}) {
   const initial = Promise.withResolvers();
   const requests = [], listeners = new Set(), destinations = [];
   let getSessionCalls = 0, context, mounts = 0;
+  let lastAuthCallback;
+  let sdkSession = initialPending ? null : session();
+  const signOutCalls = [];
+  const queueAuthEvent = (event, next) => {
+    sdkSession = next;
+    const requestCount = requests.length;
+    listeners.forEach(callback => assert.equal(callback(event, next), undefined));
+    assert.equal(requests.length, requestCount, "profile I/O stays outside the SDK callback");
+  };
   const client = {
     auth: {
       getSession() { getSessionCalls += 1; return initial.promise; },
-      onAuthStateChange(callback) { listeners.add(callback); return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } }; },
-      signOut: async () => ({ error: null }),
+      onAuthStateChange(callback) { lastAuthCallback = callback; listeners.add(callback); return { data: { subscription: { unsubscribe: () => listeners.delete(callback) } } }; },
+      signOut: async options => {
+        signOutCalls.push(options);
+        queueAuthEvent("SIGNED_OUT", null);
+        return { error: null };
+      },
     },
     from(table) {
       assert.equal(table, "profiles");
@@ -108,14 +122,20 @@ async function setup(t, { strict = false, initialPending = false } = {}) {
   await act(async () => { await delay(0); });
   assert.equal(listeners.size, 1);
   return {
-    requests, destinations, container, unmount,
+    requests, destinations, container, unmount, signOutCalls, queueAuthEvent,
+    get sdkSession() { return sdkSession; }, get listenerCount() { return listeners.size; },
+    queueInitialError: error => initial.resolve({ data: { session: null }, error }),
+    queueInitialSession: value => initial.resolve({ data: { session: value }, error: null }),
+    rejectInitial: error => initial.reject(error),
+    lateAuthEvent: (event, next) => lastAuthCallback(event, next),
     get context() { return context; }, get mounts() { return mounts; }, get initialCalls() { return getSessionCalls; },
     input: () => container.querySelector("input"),
     initial: value => act(async () => initial.resolve({ data: { session: value }, error: null })),
     resolve: (index, data = profile()) => act(async () => requests[index].resolve({ data, error: null })),
     fail: index => act(async () => requests[index].resolve({ data: null, error: { message: "Failed to fetch" } })),
+    reject: index => act(async () => requests[index].reject(new Error("Synthetic profile transport failure"))),
     emit: (event, next) => act(async () => {
-      listeners.forEach(callback => callback(event, next));
+      queueAuthEvent(event, next);
       await delay(0);
     }),
     edit: value => act(async () => {
@@ -274,4 +294,289 @@ test("React strict-effect replay shares initialization and does not remount chil
   assert.ok(h.input() === input, "the original input node stays mounted");
   assert.equal(h.input().value, "strict 갱신 메모");
   assert.equal(h.mounts, mounts);
+});
+
+for (const event of ["SIGNED_IN", "TOKEN_REFRESHED", "INITIAL_SESSION"]) {
+  for (const errorFirst of [false, true]) {
+    test(`queued ${event} prevents an old initialization error from signing out the fresh SDK session (errorFirst=${errorFirst})`, async t => {
+      const h = await setup(t, { initialPending: true });
+      await act(async () => {
+        if (errorFirst) h.queueInitialError(new Error("Invalid Refresh Token: Refresh Token Already Used"));
+        h.queueAuthEvent(event, session("user-b", 200));
+        if (!errorFirst) h.queueInitialError(new Error("Invalid Refresh Token: Refresh Token Already Used"));
+        await delay(0);
+      });
+      assert.equal(h.signOutCalls.length, 0);
+      assert.equal(h.sdkSession?.user.id, "user-b");
+      await h.resolve(0, profile("user-b", "staff"));
+      assert.equal(h.context.user.id, "user-b");
+      assert.deepEqual(h.destinations, []);
+    });
+  }
+}
+
+test("a truly rejected initialization still signs out locally and redirects", async t => {
+  const h = await setup(t, { initialPending: true });
+  await act(async () => {
+    h.queueInitialError(new Error("Invalid Refresh Token: Refresh Token Not Found"));
+    await delay(0);
+    // signOut emits its own deferred event after the initialization continuation.
+    await delay(0);
+  });
+  assert.deepEqual(h.signOutCalls, [{ scope: "local" }]);
+  assert.equal(h.sdkSession, null);
+  assert.equal(h.context.user, null);
+  assert.equal(h.context.session, null);
+  assert.match(h.destinations.at(-1), /^\/sign-in\?next=/);
+});
+
+test("queued logout and same-account sign-in discard the draft and the pending old profile read", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.edit("로그아웃 전 비공개 메모");
+  await h.emit("TOKEN_REFRESHED", session("user-a", 200));
+  await act(async () => {
+    h.queueAuthEvent("SIGNED_OUT", null);
+    h.queueAuthEvent("SIGNED_IN", session("user-a", 200));
+    await delay(0);
+  });
+  assert.equal(h.requests.length, 3, "re-login must read a fresh profile");
+  assert.equal(h.input(), null);
+  await h.resolve(1, profile("user-a", "admin"));
+  assert.equal(h.context.user, null);
+  await h.resolve(2, profile("user-a", "viewer"));
+  assert.equal(h.context.role, "viewer");
+  assert.equal(h.context.canManageAll, false);
+  assert.equal(h.input().value, "");
+});
+
+test("same-session USER_UPDATED still applies revoked permissions", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await act(async () => {
+    h.queueAuthEvent("USER_UPDATED", session());
+    await delay(0);
+  });
+  assert.equal(h.requests.length, 2);
+  await h.resolve(1, profile("user-a", "viewer"));
+  assert.equal(h.context.role, "viewer");
+  assert.equal(h.context.canManageAll, false);
+});
+
+test("unmount removes the auth subscription and queued auth work cannot read profiles", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await act(async () => {
+    h.queueAuthEvent("SIGNED_IN", session("user-b", 200));
+    await h.unmount();
+    await delay(0);
+    h.queueAuthEvent("SIGNED_IN", session("user-c", 300));
+    h.lateAuthEvent("SIGNED_IN", session("user-c", 300));
+  });
+  assert.equal(h.listenerCount, 0);
+  assert.equal(h.requests.length, 1);
+  assert.deepEqual(h.destinations, []);
+});
+
+test("explicit logout still calls the SDK and rejects a pending profile renewal", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.edit("로그아웃 전 메모");
+  await h.emit("TOKEN_REFRESHED", session("user-a", 200));
+  await act(async () => {
+    assert.equal(await h.context.logout(), true);
+    await delay(0);
+  });
+  assert.deepEqual(h.signOutCalls, [undefined]);
+  assert.equal(h.sdkSession, null);
+  assert.equal(h.context.user, null);
+  assert.equal(h.input(), null);
+  await h.resolve(1);
+  assert.equal(h.context.user, null);
+  assert.match(h.destinations.at(-1), /^\/sign-in\?next=/);
+});
+
+test("a queued new account prevents a stale initial success from starting a profile read", async t => {
+  const h = await setup(t, { initialPending: true });
+  await act(async () => {
+    h.queueAuthEvent("SIGNED_IN", session("user-b", 200));
+    h.queueInitialSession(session("user-a"));
+    await delay(0);
+  });
+  assert.equal(h.requests.length, 1);
+  assert.deepEqual(h.requests[0].filters, [["id", "user-b"]]);
+  await h.resolve(0, profile("user-b", "staff"));
+  assert.equal(h.context.user.id, "user-b");
+});
+
+test("a queued refresh suppresses a rejected initialization promise", async t => {
+  const h = await setup(t, { initialPending: true });
+  await act(async () => {
+    h.queueAuthEvent("TOKEN_REFRESHED", session("user-a", 200));
+    h.rejectInitial(new Error("Old initialization transport failure"));
+    await delay(0);
+  });
+  assert.equal(h.context.authError, null);
+  assert.equal(h.signOutCalls.length, 0);
+  await h.resolve(0);
+  assert.equal(h.context.session.expires_at, 200);
+  assert.deepEqual(h.destinations, []);
+});
+
+for (const [before, after, canManage] of [["admin", "viewer", false], ["viewer", "admin", true]]) {
+  test(`USER_UPDATED followed by identical SIGNED_IN applies ${before} to ${after} without another profile read`, async t => {
+    const h = await setup(t);
+    await h.resolve(0, profile("user-a", before));
+    await h.edit("동일 계정의 작성 중 메모");
+    const input = h.input();
+    await act(async () => {
+      h.queueAuthEvent("USER_UPDATED", session());
+      h.queueAuthEvent("SIGNED_IN", session());
+      await delay(0);
+    });
+    assert.equal(h.requests.length, 2);
+    await h.resolve(1, profile("user-a", after));
+    assert.equal(h.context.role, after);
+    assert.equal(h.context.canManageAll, canManage);
+    assert.equal(h.context.user.isFallbackRole, false);
+    assert.ok(h.input() === input);
+    assert.equal(input.value, "동일 계정의 작성 중 메모");
+    await h.emit("SIGNED_IN", session());
+    assert.equal(h.requests.length, 2, "completed profiles keep the existing dedupe contract");
+  });
+}
+
+test("duplicate sign-in and refresh events share a pending forced permission recheck", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.emit("USER_UPDATED", session());
+  for (const event of ["SIGNED_IN", "SIGNED_IN", "TOKEN_REFRESHED"]) await h.emit(event, session());
+  assert.equal(h.requests.length, 2);
+  await h.resolve(1, profile("user-a", "viewer"));
+  assert.equal(h.context.role, "viewer");
+  assert.equal(h.context.canManageAll, false);
+});
+
+for (const failure of ["fail", "reject"]) {
+  test(`a shared recheck ${failure} applies the existing viewer fallback instead of keeping cached admin`, async t => {
+    const h = await setup(t);
+    await h.resolve(0);
+    await h.emit("USER_UPDATED", session());
+    await h.emit("SIGNED_IN", session());
+    assert.equal(h.requests.length, 2);
+    await h[failure](1);
+    assert.equal(h.context.role, "viewer");
+    assert.equal(h.context.canManageAll, false);
+    assert.equal(h.context.user.isFallbackRole, true);
+    assert.match(h.context.authError, /프로필을 불러오지 못해/);
+  });
+}
+
+test("a newer USER_UPDATED still starts a fresh read and its duplicate cannot apply the older response", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.emit("USER_UPDATED", session());
+  await h.emit("USER_UPDATED", session());
+  await h.emit("SIGNED_IN", session());
+  assert.equal(h.requests.length, 3, "distinct permission updates must not reuse a pre-update read");
+  await h.resolve(2, profile("user-a", "viewer"));
+  await h.resolve(1, profile("user-a", "admin"));
+  assert.equal(h.context.role, "viewer");
+  assert.equal(h.context.canManageAll, false);
+});
+
+for (const updateFirst of [true, false]) {
+  test(`refresh and USER_UPDATED cross in order updateFirst=${updateFirst} without restoring stale privileges`, async t => {
+    const h = await setup(t);
+    await h.resolve(0);
+    if (updateFirst) {
+      await h.emit("USER_UPDATED", session());
+      await h.emit("TOKEN_REFRESHED", session("user-a", 200));
+    } else {
+      await h.emit("TOKEN_REFRESHED", session("user-a", 200));
+      await h.emit("USER_UPDATED", session("user-a", 200));
+    }
+    await h.emit("SIGNED_IN", session("user-a", 200));
+    assert.equal(h.requests.length, 3);
+    await h.resolve(2, profile("user-a", "viewer"));
+    await h.resolve(1, profile("user-a", "admin"));
+    assert.equal(h.context.role, "viewer");
+    assert.equal(h.context.canManageAll, false);
+    assert.equal(h.context.session.expires_at, 200);
+  });
+}
+
+test("logout invalidates a shared permission recheck and re-login reads a fresh profile", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.edit("로그아웃 전 메모");
+  await h.emit("USER_UPDATED", session());
+  await h.emit("SIGNED_IN", session());
+  await act(async () => {
+    assert.equal(await h.context.logout(), true);
+    await delay(0);
+  });
+  assert.equal(h.context.user, null);
+  assert.equal(h.input(), null);
+  await h.emit("SIGNED_IN", session());
+  assert.equal(h.requests.length, 3);
+  await h.resolve(1, profile("user-a", "admin"));
+  assert.equal(h.context.user, null);
+  await h.resolve(2, profile("user-a", "viewer"));
+  assert.equal(h.context.role, "viewer");
+  assert.equal(h.input().value, "");
+});
+
+test("a different account cannot share or apply the previous account's permission recheck", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.edit("이전 계정의 메모");
+  await h.emit("USER_UPDATED", session());
+  await h.emit("SIGNED_IN", session());
+  await h.emit("SIGNED_IN", session("user-b", 100));
+  assert.equal(h.requests.length, 3);
+  assert.deepEqual(h.requests[2].filters, [["id", "user-b"]]);
+  assert.equal(h.input(), null);
+  await h.resolve(1, profile("user-a", "admin"));
+  assert.equal(h.context.user, null);
+  await h.resolve(2, profile("user-b", "teacher"));
+  assert.equal(h.context.user.id, "user-b");
+  assert.equal(h.context.role, "teacher");
+  assert.equal(h.input().value, "");
+});
+
+test("a synthetic downgraded actor cannot write through the real server authorization handler", async t => {
+  const h = await setup(t);
+  await h.resolve(0);
+  await h.emit("USER_UPDATED", session());
+  await h.emit("SIGNED_IN", session());
+  await h.resolve(1, profile("user-a", "viewer"));
+  assert.equal(h.context.canManageAll, false);
+  const { authenticateNotificationRequest } = await import("../src/features/notifications/server/notification-auth.ts");
+  const { createNotificationControlPlaneRouteHandlers } = await import("../src/features/notifications/server/notification-control-plane-route.ts");
+  let userChecks = 0, roleChecks = 0, writes = 0;
+  const handlers = createNotificationControlPlaneRouteHandlers({
+    authenticate: request => authenticateNotificationRequest(request, {
+      createAuthenticatedClient: () => ({
+        auth: { getUser: async () => { userChecks += 1; return { data: { user: { id: "user-a" } }, error: null }; } },
+        rpc: async name => { assert.equal(name, "current_dashboard_role"); roleChecks += 1; return { data: "viewer", error: null }; },
+      }),
+    }),
+    getControlPlane: async () => { throw new Error("unexpected read"); },
+    saveControlPlane: async () => { writes += 1; throw new Error("unauthorized write"); },
+  });
+  const response = await handlers.patch(new Request("https://test.invalid/api/notifications/control-plane", {
+    method: "PATCH",
+    headers: { Authorization: "Bearer synthetic-test-token", "Content-Type": "application/json", "X-Client-Role": "admin" },
+    body: JSON.stringify({
+      workflow_key: "transfer",
+      expected_rule_revisions: { "30000000-0000-4000-8000-000000000101": "1" },
+      expected_contract_versions: { "30000000-0000-4000-8000-000000000101": "1" },
+      patch: { rules: { "30000000-0000-4000-8000-000000000101": { enabled: true } } },
+      request_id: "30000000-0000-4000-8000-000000000201",
+    }),
+  }));
+  assert.equal(response.status, 403);
+  assert.equal((await response.json()).code, "notification_forbidden");
+  assert.deepEqual([userChecks, roleChecks, writes], [1, 1, 0]);
 });

@@ -55,6 +55,8 @@ jobs:
             tests/academic-operations-numbered-pagination.test.mjs \
             tests/public-content-performance.test.mjs \
             tests/makeup-approval-performance.test.mjs \
+            tests/makeup-approval-plan.test.mjs \
+            tests/makeup-approval-db-fixture.test.mjs \
             tests/registration-subject-capability-probe.test.mjs
       - name: Verify shared dashboard design contracts
         run: |

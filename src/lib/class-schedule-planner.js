@@ -1,3 +1,17 @@
+const MAKEUP_REQUEST_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+// A preservation tag, never an authorization grant. SQL still validates occupancy.
+export function isRequestMakeupSession(session) {
+  const requestId = session?.makeupRequestId;
+  if (typeof requestId !== 'string' || !MAKEUP_REQUEST_UUID.test(requestId)) return false;
+  if (session.makeupRequestRole === 'cancel' && typeof (session.id || session.sessionKey) === 'string') return true;
+  if (session.id === `makeup-cancel:${requestId}` && session.sessionKey === session.id) return true;
+  const prefix = `makeup-request:${requestId}:`;
+  return typeof session.id === 'string' && session.id.startsWith(prefix)
+    && /^[0-9]+$/.test(session.id.slice(prefix.length))
+    && session.sessionKey === session.id;
+}
+
 function parseSchedule(scheduleStr = "") {
   const text = String(scheduleStr || "").trim();
   if (!text) {
@@ -958,7 +972,7 @@ function sessionOccupancy(session = {}) {
 
 function normalizeSessionSchedules(rawPlan = {}) {
   const result = {};
-  const sessions = Array.isArray(rawPlan.sessions) ? rawPlan.sessions : [];
+  const sessions = (Array.isArray(rawPlan.sessions) ? rawPlan.sessions : []).filter(session => !isRequestMakeupSession(session));
   const dateCounts = new Map();
   for (const session of sessions) dateCounts.set(session.date, (dateCounts.get(session.date) || 0) + 1);
   for (const session of sessions) {
@@ -1206,8 +1220,10 @@ export function calculateSchedulePlan(planInput) {
     ),
   );
   const textbooks = normalizeTextbookCatalog(safePlanInput, safePlanInput);
+  const requestMakeups = (safePlanInput.sessions || []).filter(isRequestMakeupSession);
+  const requestCancelDates = new Set(requestMakeups.filter(session => session.makeupRequestRole === 'cancel' || session.id.startsWith('makeup-cancel:')).map(session => session.date));
   const existingMaps = buildExistingSessionMaps(
-    safePlanInput.sessions,
+    (safePlanInput.sessions || []).filter(session => !isRequestMakeupSession(session)),
     textbooks,
   );
 
@@ -1261,12 +1277,12 @@ export function calculateSchedulePlan(planInput) {
       const hasBaseSession = selectedDays.includes(cursor.getDay());
 
       if (
-        hasBaseSession ||
+        !requestCancelDates.has(dateString) && (hasBaseSession ||
         overrideState === "force_active" ||
         overrideState === "exception" ||
         overrideState === "makeup" ||
         overrideState === "tbd" ||
-        overrideState === "skipped"
+        overrideState === "skipped")
       ) {
         baseEntries.push({
           billingId: period.id,
@@ -1410,7 +1426,15 @@ export function calculateSchedulePlan(planInput) {
     );
   });
 
-  const rangedSessions = applyTextbookSessionRanges(sessions, textbooks);
+  // Request-owned makeup slots retain their individual identity and occupancy,
+  // including multiple slots on one date and dates outside billing periods.
+  const rangedSessions = [...applyTextbookSessionRanges(sessions, textbooks), ...requestMakeups]
+    .sort((left, right) => getDateTime(left.date) - getDateTime(right.date));
+  if (requestMakeups.length) {
+    for (const period of billingPeriods) {
+      period.totalSessions = rangedSessions.filter(session => session.billingId === period.id && isCountedScheduleState(session.scheduleState)).length;
+    }
+  }
   const rangedSessionById = new Map(
     rangedSessions.map((session) => [String(session?.id || "").trim(), session]),
   );
@@ -1652,7 +1676,7 @@ export function buildSchedulePlanForSave(plan, defaults = {}) {
       endSessionId: textbook.endSessionId || "",
       rangePresets: normalizeTextbookRangePresets(textbook.rangePresets),
     })),
-    sessions: calculated.sessions.map((session) => ({
+    sessions: calculated.sessions.map((session) => isRequestMakeupSession(session) ? { ...session } : ({
       ...sessionOccupancy(session),
       id: session.id,
       sessionKey: session.sessionKey || session.session_key || session.id,
