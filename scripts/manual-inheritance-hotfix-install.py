@@ -103,28 +103,14 @@ def endpoint(token):
     project = api("https://api.supabase.com/v1/projects/" + TARGET, token)
     require(isinstance(project, dict), "project_metadata_shape_invalid")
     require(project.get("id") == TARGET and project.get("region") == REGION and project.get("status") == "ACTIVE_HEALTHY", "project_metadata_mismatch")
-    configs = api("https://api.supabase.com/v1/projects/" + TARGET + "/config/database/pooler", token)
-    require(isinstance(configs, list) and all(isinstance(row, dict) for row in configs), "pooler_metadata_shape_invalid")
-    primary = [r for r in configs if r.get("database_type") == "PRIMARY"]
-    require(len(primary) == 1, "primary_pooler_ambiguous")
-    connection = primary[0].get("connection_string")
-    require(isinstance(connection, str) and len(connection) <= 4096 and connection.isascii() and all(ord(char) > 32 and ord(char) != 127 for char in connection), "pooler_connection_string_shape_invalid")
-    # Encode only the exact non-secret password placeholder. Do not decode
-    # credentials or normalize a host, tenant, option, or arbitrary URI.
-    connection = connection.replace(":[YOUR-PASSWORD]@", ":%5BYOUR-PASSWORD%5D@", 1)
-    try:
-        value = urllib.parse.urlsplit(connection)
-        host, user, password, port = value.hostname, value.username, value.password, value.port
-    except (ValueError, TypeError):
-        raise Stop("pooler_url_parse_failed") from None
-    require(value.scheme in ("postgres", "postgresql"), "pooler_scheme_invalid")
-    require(user == "postgres." + TARGET and value.path == "/postgres", "pooler_tenant_mismatch")
-    require(password in (None, "", "[YOUR-PASSWORD]", "%5BYOUR-PASSWORD%5D"), "pooler_password_must_not_be_received")
-    require(not value.query and not value.fragment, "pooler_options_requires_review")
-    require(bool(re.fullmatch(r"aws-[0-9]+-ap-northeast-2\.pooler\.supabase\.com", host or "")), "pooler_region_hostname_mismatch")
-    require(port in (5432, 6543), "pooler_port_unexpected")
-    # Always choose the official session pooler port. Never a transaction-mode connection.
-    return host, user
+    database = project.get("database")
+    require(isinstance(database, dict), "direct_database_metadata_shape_invalid")
+    host = database.get("host")
+    # This hostname was confirmed by the authorized official project response.
+    # Require the same response again at action time; no inference, override,
+    # pooler fallback, alternate target, or change to the native TLS gates.
+    require(host == "db.slnjqlzzhewblvttiidk.supabase.co", "direct_database_hostname_mismatch")
+    return host, "postgres"
 
 def command(argv, env, cwd, seconds):
     process = subprocess.Popen(argv, cwd=cwd, env=env, stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE, start_new_session=True)
