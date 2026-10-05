@@ -4,6 +4,7 @@ import { invalidatePublicClassesCache } from "@/server/public-classes-cache-inva
 import { createAgentEditApiHandler } from "./http-v2.ts";
 import { createAgentApiHandler } from "./http.ts";
 import { createAgentCalendarHandler } from "./http-calendar.ts";
+import { createPersonalDashboardReadHandler, isPersonalDashboardReadAuthorization } from "./personal-dashboard-read.ts";
 
 const dependencies = {
   enabled: () => process.env.TIPS_AGENT_API_ENABLED === "true",
@@ -20,4 +21,7 @@ const dependencies = {
 export const handleAgentApiRequest = createAgentApiHandler(dependencies);
 const handleClassEdit = createAgentEditApiHandler(dependencies);
 const handleCalendar = createAgentCalendarHandler(dependencies);
-export const handleAgentEditApiRequest = (request: Request, path: string[]) => path[0] === "calendar" ? handleCalendar(request, path) : handleClassEdit(request, path);
+const handlePersonalDashboardRead = createPersonalDashboardReadHandler(dependencies);
+export const handleAgentEditApiRequest = (request: Request, path: string[]) => isPersonalDashboardReadAuthorization(request)
+  ? handlePersonalDashboardRead(request, path)
+  : path[0] === "calendar" ? handleCalendar(request, path) : handleClassEdit(request, path);

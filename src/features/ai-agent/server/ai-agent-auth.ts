@@ -11,6 +11,7 @@ export class AiHttpError extends Error {
 export async function authenticateAiAgent(request:Request,dependencies:AiDependencies):Promise<AiPrincipal> {
   const token=/^Bearer ([^\s]+)$/.exec(request.headers.get('authorization') ?? '')?.[1];
   if(!token) throw new AiHttpError(401,'ai_agent_unauthorized');
+  if(token.startsWith('tips_dashboard_personal_')) throw new AiHttpError(401,'ai_agent_unauthorized');
   if(token.startsWith('tips_agent_')) {
     if(!/^tips_agent_[a-f0-9]{64}$/.test(token)) throw new AiHttpError(401,'ai_agent_unauthorized');
     return {kind:'bot',tokenHash:createHash('sha256').update(token).digest('hex'),rpc:dependencies.botRpc};
