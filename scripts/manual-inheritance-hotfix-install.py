@@ -41,7 +41,7 @@ STALE_SOURCE = False  # Exact bounded replacement reviewed; proposal/owner gates
 SOURCE = "1eccff3254b7024dc242bcffd11eb4505ff0700c"
 MIGRATION = "20261004160000_legacy_effective_schedule_inheritance.sql"
 SQL_SHA256 = "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
-CONTRACT_SHA256 = "6b2a202708017688960267a25e5da1c351f8eb335de88111c8401f97075770f2"
+CONTRACT_SHA256 = "c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484"
 SAFE_RECEIPT = "inheritance-hotfix-safe-receipt.json"
 
 

@@ -36,6 +36,7 @@ EXPECTED_QUIESCENCE = {
         "class_schedule_defaults_lessons_slots_teacher_room_and_roster_enrollment_writers",
         "makeup_approval_cancellation_and_lifecycle_writers",
         "human_and_bot_calls_using_replaced_schedule_readers_including_get_class_schedule_v1_runtime_materialization",
+        "calendar_academic_event_and_makeup_approval_evidence_writers_altering_inherited_schedule_or_occupancy_provenance",
     ],
     "affectedInFlightTransactionsMustBeDrained": True,
     "unrelatedRetentionAndNotificationJournalWritersRequirePause": False,

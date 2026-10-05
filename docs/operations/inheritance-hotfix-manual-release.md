@@ -299,6 +299,11 @@ Before installation, the operator must pause and drain all of the following:
 - Human/bot calls using the replaced schedule readers, including open schedule
   views that call `get_class_schedule_v1`: that function can materialize runtime
   class plans through `ensure_continuous_class_plan_runtime_v1`.
+- Calendar/`academic_events` and makeup approval-evidence
+  (`makeup_request_events`) writers that can alter inherited schedule or
+  occupancy provenance, including direct editing, cleanup or backfill outside
+  the lifecycle RPCs. The readers use their latest approved payload, linkage,
+  event date and note metadata when resolving inherited overrides.
 
 Close those views and suspend the affected bot calls before confirming the
 pause; stopping only save buttons or one API route is insufficient because
@@ -349,8 +354,8 @@ The corrected SQL/source, fourteen-function oracle, permission decisions,
 verify-full CA/target restrictions, ten reviewed transport helper copies and
 single-attempt/unknown-state boundaries are unchanged. Current correction pins:
 
-- Runner SHA256: `32c68a41607f807e71a3fea128f01715b58630ed5684a6d5791de64add93cb15`.
-- Unsigned contract SHA256: `6b2a202708017688960267a25e5da1c351f8eb335de88111c8401f97075770f2`.
+- Runner SHA256: `e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5`.
+- Unsigned contract SHA256: `c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484`.
 
 Full file hashes, test results and independent review must be returned with the
 proposal before approval coverage is assessed. No altered-contract live

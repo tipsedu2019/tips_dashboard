@@ -324,10 +324,10 @@ after(async () => {
 
 test("PR97 installer proposal passes all 37 offline safety tests without inherited secrets", async () => {
   const suitePath = join(repoRoot, "tests", "manual-inheritance-hotfix-install.test.py")
-  assert.equal(await sha256(suitePath), "47b936abb6f03a6a6366d3128115f3dcb9e0ff7c66ea8474f6c83d9e9295fdf5")
+  assert.equal(await sha256(suitePath), "87c46955d6a1b52fad649ba5ae63805e38575bd1b76bcb9a38f9279ba66fc907")
   assert.equal(
     await sha256(join(repoRoot, "scripts", "manual-inheritance-hotfix-install.py")),
-    "32c68a41607f807e71a3fea128f01715b58630ed5684a6d5791de64add93cb15",
+    "e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5",
   )
   const result = spawnSync("python3", [suitePath], {
     cwd: repoRoot,
