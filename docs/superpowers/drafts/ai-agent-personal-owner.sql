@@ -508,13 +508,13 @@ begin
  insert into dashboard_private.ai_agent_credentials(created_by,credential_kind,owner_profile_id,label,token_hash,scopes,expires_at) values(actor,'personal',p_owner_profile_id,btrim(p_label),encode(sha256(convert_to(raw,'UTF8')),'hex'),p_scopes,expires) returning * into cred;
  if has_ai then insert into dashboard_private.ai_agent_credential_grants(credential_id,queues,actions,expires_at) values(cred.id,queues,actions,expires);end if;
  if has_chat then insert into dashboard_private.chat_credential_space_grants(credential_id,space_keys,purposes,bridge_source_id,expires_at) values(cred.id,spaces,purposes,bridge,expires);end if;
- return jsonb_build_object('id',cred.id,'label',cred.label,'token',raw,'scopes',cred.scopes,'grant',p_grant,'expiresAt',cred.expires_at,'credentialKind',cred.credential_kind,'ownerProfileId',cred.owner_profile_id,'issuerProfileId',cred.created_by);
+ return jsonb_build_object('id',cred.id,'label',cred.label,'token',raw,'scopes',cred.scopes,'grant',p_grant,'expiresAt',cred.expires_at,'credentialKind',cred.credential_kind,'ownerProfileId',cred.owner_profile_id,'issuerProfileId',cred.created_by,'ownerName',(select p.name from public.profiles p where p.id=cred.owner_profile_id),'issuerName',(select p.name from public.profiles p where p.id=cred.created_by));
 exception when invalid_text_representation then raise exception using errcode='22023',message='ai_agent_invalid';
 end$$;
 
 create function dashboard_private.ai_agent_personal_credential_json_v1(c dashboard_private.ai_agent_credentials) returns jsonb
 language sql stable set search_path='' as $$
- select jsonb_build_object('id',c.id,'label',c.label,'scopes',c.scopes,'expiresAt',c.expires_at,'credentialKind',c.credential_kind,'ownerProfileId',c.owner_profile_id,'issuerProfileId',c.created_by,'createdAt',c.created_at,'revokedAt',c.revoked_at,'lastUsedAt',c.last_used_at,'grant',jsonb_strip_nulls(jsonb_build_object('queues',a.queues,'actions',a.actions,'spaceKeys',g.space_keys,'purposes',g.purposes,'bridgeSourceId',g.bridge_source_id)))
+ select jsonb_build_object('id',c.id,'label',c.label,'scopes',c.scopes,'expiresAt',c.expires_at,'credentialKind',c.credential_kind,'ownerProfileId',c.owner_profile_id,'issuerProfileId',c.created_by,'ownerName',(select p.name from public.profiles p where p.id=c.owner_profile_id),'issuerName',(select p.name from public.profiles p where p.id=c.created_by),'createdAt',c.created_at,'revokedAt',c.revoked_at,'lastUsedAt',c.last_used_at,'grant',jsonb_strip_nulls(jsonb_build_object('queues',a.queues,'actions',a.actions,'spaceKeys',g.space_keys,'purposes',g.purposes,'bridgeSourceId',g.bridge_source_id)))
  from dashboard_private.ai_agent_credential_grants a full join dashboard_private.chat_credential_space_grants g on g.credential_id=a.credential_id
  where coalesce(a.credential_id,g.credential_id)=c.id
 $$;
@@ -523,7 +523,23 @@ create function public.ai_agent_personal_credential_api_v1(p_action text,p_input
 language plpgsql security definer set search_path='' as $$
 declare actor uuid:=auth.uid(); actor_role text; owner_id uuid; enabled boolean; k uuid; resource uuid:='00000000-0000-0000-0000-000000000000'; fingerprint text; rec dashboard_private.ai_agent_request_receipts; c dashboard_private.ai_agent_credentials; result jsonb; scopes text[]; expires timestamptz; page integer; size integer;
 begin
- if p_action='create' then
+ if p_action='owners' then
+  -- Display-only candidates never grant authority. Creation independently locks
+  -- and rechecks the selected owner's current role/auth before issuance.
+  select role into actor_role from public.profiles where id=actor for share;
+  if actor is null or actor_role is distinct from 'admin' then raise exception using errcode='42501',message='ai_agent_forbidden';end if;
+  perform 1 from auth.users where id=actor and deleted_at is null and (banned_until is null or banned_until<=clock_timestamp()) for share;
+  if not found then raise exception using errcode='42501',message='ai_agent_forbidden';end if;
+  perform dashboard_private.ai_agent_assert_input_v1(p_input,array['page','pageSize']);
+  if (p_input ? 'page' and jsonb_typeof(p_input->'page') is distinct from 'number') or (p_input ? 'pageSize' and jsonb_typeof(p_input->'pageSize') is distinct from 'number') then raise exception using errcode='22023',message='ai_agent_invalid';end if;
+  page:=coalesce((p_input->>'page')::integer,1);size:=coalesce((p_input->>'pageSize')::integer,10);
+  if page<1 or page>10000 or size not in(10,15,20) then raise exception using errcode='22023',message='ai_agent_invalid';end if;
+  with eligible as materialized (
+   select p.id,p.name from public.profiles p join auth.users u on u.id=p.id
+   where p.role='teacher' and u.deleted_at is null and (u.banned_until is null or u.banned_until<=clock_timestamp())
+  ) select jsonb_build_object('items',(select coalesce(jsonb_agg(jsonb_build_object('id',x.id,'name',x.name) order by x.name nulls last,x.id),'[]') from(select * from eligible order by name nulls last,id limit size offset(page-1)*size)x),'total',(select count(*) from eligible),'page',page,'pageSize',size) into result;
+  return result;
+ elsif p_action='create' then
   perform dashboard_private.ai_agent_assert_input_v1(p_input,array['ownerProfileId','label','scopes','grant','expiresAt','idempotencyKey']);
   k:=dashboard_private.ai_agent_required_uuid_v1(p_input,'idempotencyKey');owner_id:=dashboard_private.ai_agent_required_uuid_v1(p_input,'ownerProfileId');
   select issuance_enabled into enabled from dashboard_private.ai_agent_chat_support where singleton for share;

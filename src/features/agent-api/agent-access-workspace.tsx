@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs";
 import { AiAgentCredentialWorkspace } from "@/features/ai-agent/ai-agent-credential-issue-dialog";
+import { AiAgentPersonalCredentialWorkspace } from "@/features/ai-agent/ai-agent-personal-credential-workspace";
 import { AiAgentSpacePolicySettings } from "@/features/ai-agent/ai-agent-space-policy-settings";
 import { requestAppNavigation } from "@/lib/guarded-navigation";
 import { Copy, Plus, RefreshCw, X } from "lucide-react";
@@ -31,8 +32,8 @@ export function AgentAccessWorkspace({ apiEnabled }: { apiEnabled: boolean }) {
   const allowed = !loading && role === "admin" && user?.isFallbackRole === false;
   if (!allowed) return <AgentConnectionWorkspace apiEnabled={apiEnabled} />;
   return <WorkspaceTabs value={tab} onValueChange={(value) => requestAppNavigation(() => setTab(value))}>
-    <div className="px-4 sm:px-5 lg:px-6"><WorkspaceTabsList aria-label="AI 연결 설정"><WorkspaceTabsTrigger value="connections">연결 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="requests">AI 요청 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="spaces">알림 공간</WorkspaceTabsTrigger></WorkspaceTabsList></div>
-    <WorkspaceTabsPanel>{tab === "spaces" ? <AiAgentSpacePolicySettings /> : tab === "requests" ? <AiAgentCredentialWorkspace /> : <AgentConnectionWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
+    <div className="px-4 sm:px-5 lg:px-6"><WorkspaceTabsList aria-label="AI 연결 설정"><WorkspaceTabsTrigger value="connections">연결 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="requests">AI 요청 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="personal">개인 요청 키</WorkspaceTabsTrigger><WorkspaceTabsTrigger value="spaces">알림 공간</WorkspaceTabsTrigger></WorkspaceTabsList></div>
+    <WorkspaceTabsPanel>{tab === "spaces" ? <AiAgentSpacePolicySettings /> : tab === "personal" ? <AiAgentPersonalCredentialWorkspace /> : tab === "requests" ? <AiAgentCredentialWorkspace /> : <AgentConnectionWorkspace apiEnabled={apiEnabled} />}</WorkspaceTabsPanel>
   </WorkspaceTabs>;
 }
 

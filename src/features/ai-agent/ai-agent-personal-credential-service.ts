@@ -17,6 +17,8 @@ const metadata = {
   credentialKind: z.literal('personal'),
   ownerProfileId: uuid,
   issuerProfileId: uuid,
+  ownerName: z.string().nullable(),
+  issuerName: z.string().nullable(),
   scopes: z.array(scope).min(1),
   grant,
   expiresAt: z.iso.datetime({ offset: true }),
@@ -42,6 +44,17 @@ export const personalCredentialCreateSchema = z.strictObject({
   grant,
   expiresAt: z.iso.datetime({ offset: true }).nullable(),
 });
+const pageInputSchema = z.strictObject({
+  page: z.number().int().min(1).max(10000),
+  pageSize: z.union([z.literal(10), z.literal(15), z.literal(20)]),
+});
+export const personalCredentialOwnersSchema = z.strictObject({
+  ...pageInputSchema.shape,
+  total: z.number().int().nonnegative(),
+  items: z.array(z.strictObject({ id: uuid, name: z.string().nullable() })),
+}).refine(value => value.total >= value.items.length
+  && value.items.length <= value.pageSize
+  && new Set(value.items.map(item => item.id)).size === value.items.length);
 export type AiPersonalCredentialCreate = z.infer<typeof personalCredentialCreateSchema>;
 export type AiPersonalCredential = z.infer<typeof personalCredentialListSchema>['items'][number];
 
@@ -59,7 +72,7 @@ export function createAiAgentPersonalCredentialService(d: Dependencies) {
     && sameAiRequestActor(d.actor, d.getCurrentActor());
   const canCreate = () => active() && d.actor.role === 'admin';
   const check = (action: string) => {
-    if (!active() || action === 'create' && !canCreate()) {
+    if (!active() || ['create', 'owners'].includes(action) && !canCreate()) {
       throw new AiCredentialError(true, 'actor_changed');
     }
   };
@@ -88,6 +101,15 @@ export function createAiAgentPersonalCredentialService(d: Dependencies) {
   return {
     active,
     canCreate,
+    async owners(page = 1, pageSize = 20) {
+      check('owners');
+      const input = pageInputSchema.parse({ page, pageSize });
+      const result = parse(personalCredentialOwnersSchema, await invoke('owners', input));
+      if (result.page !== input.page || result.pageSize !== input.pageSize) {
+        throw new AiCredentialError(false, 'personal_credential_invalid');
+      }
+      return result;
+    },
     async create(payload: AiPersonalCredentialCreate, key: string) {
       check('create');
       const input = personalCredentialCreateSchema.parse(payload);
@@ -101,10 +123,7 @@ export function createAiAgentPersonalCredentialService(d: Dependencies) {
     },
     async list(page: number, pageSize: number) {
       check('list');
-      const input = z.strictObject({
-        page: z.number().int().min(1).max(10000),
-        pageSize: z.union([z.literal(10), z.literal(15), z.literal(20)]),
-      }).parse({ page, pageSize });
+      const input = pageInputSchema.parse({ page, pageSize });
       const result = parse(personalCredentialListSchema, await invoke('list', input));
       if (result.items.some(item => d.actor.role === 'teacher'
         ? item.ownerProfileId !== d.actor.userId : item.issuerProfileId !== d.actor.userId)) {

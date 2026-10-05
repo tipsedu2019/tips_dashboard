@@ -11,6 +11,7 @@ const key = '20000000-0000-4000-8000-000000000001';
 const issued = {
   id: key, label: 'synthetic personal', credentialKind: 'personal',
   ownerProfileId: owner.userId, issuerProfileId: issuer.userId,
+  ownerName: '합성 선생님', issuerName: null,
   scopes: ['ai-agent:requests:read'], grant: { queues: ['employee_requests'], actions: ['read'] },
   expiresAt: '2026-10-06T00:00:00Z', token: 'tips_agent_' + 'a'.repeat(64),
 };
@@ -63,9 +64,44 @@ test('teacher can manage own metadata but cannot issue credentials', async () =>
   assert.equal(client.active(), true);
   assert.equal(client.canCreate(), false);
   await assert.rejects(client.create(payload, key), /actor_changed/);
+  await assert.rejects(client.owners(), /actor_changed/);
   assert.equal(calls, 0);
   assert.deepEqual(await client.list(1, 10), list);
   assert.equal(calls, 1);
+});
+
+test('owner choices are admin-only paged display metadata and retain UUID identity for duplicate names', async () => {
+  const choices = { page: 1, pageSize: 20, total: 2, items: [
+    { id: owner.userId, name: null }, { id: other, name: null },
+  ] };
+  const calls = [];
+  const client = service(issuer, async (name, args) => { calls.push({ name, args }); return { data: choices, error: null }; });
+  assert.deepEqual(await client.owners(), choices);
+  assert.deepEqual(calls, [{ name: 'ai_agent_personal_credential_api_v1', args: {
+    p_action: 'owners', p_input: { page: 1, pageSize: 20 },
+  } }]);
+  for (const data of [
+    { ...choices, page: 2 }, { ...choices, pageSize: 10 },
+    { ...choices, total: 1 },
+    { ...choices, items: [choices.items[0], choices.items[0]] },
+    { ...choices, items: [{ ...choices.items[0], email: 'private@test.invalid' }] },
+  ]) await assert.rejects(service(issuer, async () => ({ data, error: null })).owners(), /personal_credential_invalid/);
+  assert.deepEqual(await service(issuer, async () => ({ data: { ...list, items: [{ ...listed, ownerName: '동명이인', issuerName: '동명이인' }] }, error: null })).list(1, 10),
+    { ...list, items: [{ ...listed, ownerName: '동명이인', issuerName: '동명이인' }] });
+});
+
+test('owner enumeration preserves current-actor boundary and invalid pagination makes zero RPC calls', async () => {
+  let current = issuer;
+  const pending = Promise.withResolvers();
+  const client = createAiAgentPersonalCredentialService({ actor: issuer, getCurrentActor: () => current, rpc: () => pending.promise });
+  const result = client.owners();
+  current = { ...issuer, role: 'teacher' };
+  pending.resolve({ data: { page: 1, pageSize: 20, total: 1, items: [{ id: owner.userId, name: '숨길 표시명' }] }, error: null });
+  await assert.rejects(result, /actor_changed/);
+  let calls = 0;
+  const valid = service(issuer, async () => { calls++; return { data: null, error: null }; });
+  for (const [page, size] of [[0, 20], [1, 50], [10001, 10]]) await assert.rejects(valid.owners(page, size));
+  assert.equal(calls, 0);
 });
 
 test('list validates current owner/issuer authority and accepts support-disabled management', async () => {

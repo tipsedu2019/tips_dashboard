@@ -19,12 +19,14 @@ export function createAiAgentRequestService({ actor, getCurrentActor, getSession
   getSession: () => Promise<AiRequestSession>; fetcher?: typeof fetch;
 }) {
   let disposed = false;
+  let lifecycle = 0;
   const active = () => !disposed && sameAiRequestActor(actor, getCurrentActor());
-  const checkActor = () => { if (!active()) throw new AiRequestServiceError('actor_changed', false); };
+  const checkActor = (expected = lifecycle) => { if (!active() || expected !== lifecycle) throw new AiRequestServiceError('actor_changed', false); };
   async function send<T>(path: string, schema: z.ZodType<T>, options: { method?: string; body?: unknown; key?: string; version?: string; allowZeroVersion?: boolean; signal?: AbortSignal } = {}): Promise<T> {
-    checkActor();
+    const activation = lifecycle;
+    checkActor(activation);
     const session = await getSession();
-    checkActor();
+    checkActor(activation);
     if (!session || session.user.id !== actor.userId || !session.access_token) throw new AiRequestServiceError('actor_session_mismatch', false);
     const headers: Record<string, string> = { Authorization: `Bearer ${session.access_token}` };
     if (options.body !== undefined) headers['Content-Type'] = 'application/json';
@@ -33,11 +35,11 @@ export function createAiAgentRequestService({ actor, getCurrentActor, getSession
       if (!(options.allowZeroVersion ? /^(0|[1-9][0-9]{0,18})$/ : /^[1-9][0-9]{0,18}$/).test(options.version)) throw new AiRequestServiceError('invalid_version', true);
       headers['If-Match'] = `"r${options.version}"`;
     }
-    checkActor();
+    checkActor(activation);
     const response = await fetcher(`/api/ai-agent/${path}`, { method: options.method ?? 'GET', headers, body: options.body === undefined ? undefined : JSON.stringify(options.body), signal: options.signal ? AbortSignal.any([options.signal, AbortSignal.timeout(15_000)]) : AbortSignal.timeout(15_000), cache: 'no-store' });
-    checkActor();
+    checkActor(activation);
     const envelope = await response.json();
-    checkActor();
+    checkActor(activation);
     if (!response.ok || envelope.error !== null || envelope.data === null) throw new AiRequestServiceError(typeof envelope.error?.code === 'string' ? envelope.error.code : 'invalid_response', response.status >= 400 && response.status < 500);
     const parsed = schema.safeParse(envelope.data);
     if (!parsed.success) throw new AiRequestServiceError('invalid_response', false);
@@ -45,7 +47,9 @@ export function createAiAgentRequestService({ actor, getCurrentActor, getSession
   }
   const requestPath = (id: string) => `requests/${z.uuid().parse(id)}`;
   return {
-    actor, active, dispose() { disposed = true; },
+    actor, active,
+    mount() { lifecycle++; disposed = !sameAiRequestActor(actor, getCurrentActor()); return !disposed; },
+    dispose() { lifecycle++; disposed = true; },
     list(input: AiRequestListQuery, signal?: AbortSignal) {
       const query = aiRequestListQuerySchema.parse(input);
       if (query.scope === 'all' && actor.role !== 'admin') throw new AiRequestServiceError('forbidden', true);
@@ -54,12 +58,14 @@ export function createAiAgentRequestService({ actor, getCurrentActor, getSession
     },
     create(input: AiCreateRequest, key: string) { return send('requests', aiRequestSchema, {method:'POST',body:aiCreateRequestSchema.parse(input),key}); },
     async activity(id: string, signal?: AbortSignal) {
+      const activation = lifecycle;
       let result: AiActivity | null = null;
       let messageSeq = '', eventSeq = '';
       const seen = new Set<string>();
       do {
         const query = new URLSearchParams({...(messageSeq?{afterMessageSeq:messageSeq}:{}),...(eventSeq?{afterEventSeq:eventSeq}:{}),limit:'50'});
         const page = await send(`${requestPath(id)}?${query}`, aiActivitySchema, {signal});
+        checkActor(activation);
         if (!result) result = {...page,messages:[],events:[],actions:[]};
         result.request = page.request; result.claim = page.claim; result.notification = page.notification;
         for (const item of page.messages) if (!result.messages.some(value=>value.id===item.id)) result.messages.push(item);
@@ -79,13 +85,15 @@ export function createAiAgentRequestService({ actor, getCurrentActor, getSession
     cancel(id:string, version:string, key:string) { return send(requestPath(id),aiRequestSchema,{method:'PATCH',body:{status:'cancelled'},version,key}); },
     resume(id:string, reason:string, version:string, key:string) { return send(`${requestPath(id)}/resume`,aiRequestSchema,{method:'POST',body:{reason,confirmed:true},version,key}); },
     async actions(id:string, signal?:AbortSignal) {
+      const activation = lifecycle;
       const items: z.infer<typeof aiActionsSchema>['items'] = []; let cursor: string | null = null; const seen=new Set<string>();
-      do { const query:URLSearchParams=new URLSearchParams({limit:'50',...(cursor?{cursor}:{})}); const page:z.infer<typeof aiActionsSchema>=await send(`${requestPath(id)}/actions?${query}`,aiActionsSchema,{signal}); items.push(...page.items); cursor=page.nextCursor; if(cursor && seen.has(cursor)) throw new AiRequestServiceError('invalid_cursor',false); if(cursor) seen.add(cursor); } while(cursor);
+      do { const query:URLSearchParams=new URLSearchParams({limit:'50',...(cursor?{cursor}:{})}); const page:z.infer<typeof aiActionsSchema>=await send(`${requestPath(id)}/actions?${query}`,aiActionsSchema,{signal}); checkActor(activation); items.push(...page.items); cursor=page.nextCursor; if(cursor && seen.has(cursor)) throw new AiRequestServiceError('invalid_cursor',false); if(cursor) seen.add(cursor); } while(cursor);
       return items;
     },
     async actionJournal(id:string, actionId:string, signal?:AbortSignal) {
+      const activation = lifecycle;
       let cursor:string|null=null; let result:z.infer<typeof aiActionJournalSchema>|null=null; const seen=new Set<string>();
-      do { const query:URLSearchParams=new URLSearchParams({limit:'50',...(cursor?{cursor}:{})}); const page:z.infer<typeof aiActionJournalSchema>=await send(`${requestPath(id)}/actions/${z.uuid().parse(actionId)}?${query}`,aiActionJournalSchema,{signal}); result=result?{...page,events:[...result.events,...page.events]}:{...page}; cursor=page.nextCursor; if(cursor&&seen.has(cursor)) throw new AiRequestServiceError('invalid_cursor',false); if(cursor)seen.add(cursor); } while(cursor); return result;
+      do { const query:URLSearchParams=new URLSearchParams({limit:'50',...(cursor?{cursor}:{})}); const page:z.infer<typeof aiActionJournalSchema>=await send(`${requestPath(id)}/actions/${z.uuid().parse(actionId)}?${query}`,aiActionJournalSchema,{signal}); checkActor(activation); result=result?{...page,events:[...result.events,...page.events]}:{...page}; cursor=page.nextCursor; if(cursor&&seen.has(cursor)) throw new AiRequestServiceError('invalid_cursor',false); if(cursor)seen.add(cursor); } while(cursor); return result;
     },
     spaces: (signal?:AbortSignal) => send('spaces',aiSpaceCatalogSchema,{signal}),
     permission: (userId:string, signal?:AbortSignal) => send(`space-permissions/${z.uuid().parse(userId)}`,aiSpacePermissionSchema,{signal}),

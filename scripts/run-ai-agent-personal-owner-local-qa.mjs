@@ -6,6 +6,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { CURRENT_AI_MIGRATIONS } from './lib/ai-producer-receipt.mjs';
 import { loadNotificationComponent } from '../tests/helpers/notification-component-loader.mjs';
+import { createPersonalOwnerConcurrencyRuntime } from './lib/ai-agent-personal-owner-concurrency-runtime.mjs';
+import { runPersonalOwnerConcurrencyProbes } from '../tests/probe-ai-agent-personal-owner-concurrency.mjs';
 
 export const PERSONAL_OWNER_IMAGE = 'public.ecr.aws/supabase/postgres:17.6.1.159';
 const ROOT = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -26,6 +28,11 @@ const CONSUMER_CLOSURE = Object.freeze([
   'src/features/ai-agent/ai-agent-personal-credential-service.ts',
   'src/features/ai-agent/ai-agent-credential-service.ts',
   'src/features/ai-agent/ai-agent-request-access.ts',
+]);
+const CONCURRENCY_CLOSURE = Object.freeze([
+  'scripts/lib/ai-agent-personal-owner-concurrency-runtime.mjs',
+  'tests/probe-ai-agent-personal-owner-concurrency.mjs',
+  'tests/ai-agent-personal-owner-concurrency.test.mjs',
 ]);
 const REGRESSIONS = Object.freeze([
   'supabase/tests/ai_agent_requests_authz_test.sql',
@@ -154,11 +161,11 @@ async function sources() {
     if (source.sha256 !== entry.sha256) fail('legacy_catalog_source_drift');
     legacySources.push(source);
   }
-  return { bootstrap: await readSource(BOOTSTRAP), migrations: migrationSources, legacySources, legacyStatements: extractPersonalOwnerLegacyCatalog(...legacySources), draft: await readSource(DRAFT), test: await readSource(TEST), regressions: await Promise.all(REGRESSIONS.map(readSource)), consumers: await Promise.all(CONSUMER_CLOSURE.map(readSource)), harness: await readSource('scripts/run-ai-agent-personal-owner-local-qa.mjs') };
+  return { bootstrap: await readSource(BOOTSTRAP), migrations: migrationSources, legacySources, legacyStatements: extractPersonalOwnerLegacyCatalog(...legacySources), draft: await readSource(DRAFT), test: await readSource(TEST), regressions: await Promise.all(REGRESSIONS.map(readSource)), consumers: await Promise.all(CONSUMER_CLOSURE.map(readSource)), concurrency: await Promise.all(CONCURRENCY_CLOSURE.map(readSource)), harness: await readSource('scripts/run-ai-agent-personal-owner-local-qa.mjs') };
 }
 
 const metadata = source => ({ path: source.path, bytes: source.bytes.length, sha256: source.sha256 });
-const evidence = input => ({ bootstrap: metadata(input.bootstrap), migrations: input.migrations.map(metadata), legacySources: input.legacySources.map(metadata), legacyStatements: input.legacyStatements.map(source => ({ ...metadata(source), id: source.id, provenance: source.provenance, ...(source.originalCombinedStatementSha256 ? { originalCombinedStatementSha256: source.originalCombinedStatementSha256, originalCombinedStatementBytes: source.originalCombinedStatementBytes } : {}) })), draft: metadata(input.draft), test: metadata(input.test), regressions: input.regressions.map(metadata), consumers: input.consumers.map(metadata), harness: metadata(input.harness) });
+const evidence = input => ({ bootstrap: metadata(input.bootstrap), migrations: input.migrations.map(metadata), legacySources: input.legacySources.map(metadata), legacyStatements: input.legacyStatements.map(source => ({ ...metadata(source), id: source.id, provenance: source.provenance, ...(source.originalCombinedStatementSha256 ? { originalCombinedStatementSha256: source.originalCombinedStatementSha256, originalCombinedStatementBytes: source.originalCombinedStatementBytes } : {}) })), draft: metadata(input.draft), test: metadata(input.test), regressions: input.regressions.map(metadata), consumers: input.consumers.map(metadata), concurrency: input.concurrency.map(metadata), harness: metadata(input.harness) });
 const boundaries = Object.freeze({ integrationScope: 'focused_synthetic_prerequisites_exact_seven_ai_migrations_and_owner_draft', fullDashboardBaseline: false, fullRequiredCi: false, providerJwtSignatureVerification: false, legacyIssuerExecuted: false, legacyCatalogOnly: true, legacyIssuerDependenciesComplete: false, noSendChecksUseEmptySyntheticCounters: true, production: false, realCredentials: false, network: 'none', ports: [], volumes: [], pullPolicy: 'never' });
 
 export function parsePersonalOwnerTap(stdout) {
@@ -178,17 +185,19 @@ export async function consumePersonalOwnerCapture(stdout) {
   if (captures.length !== 1) fail('producer_capture_missing_or_duplicate');
   const raw = captures[0].slice(CAPTURE_PREFIX.length);
   let capture; try { capture = JSON.parse(raw); } catch { fail('producer_capture_invalid'); }
-  if (!capture || Array.isArray(capture) || Object.keys(capture).sort().join(',') !== 'firstIssue,list,replayIssue') fail('producer_capture_invalid');
+  if (!capture || Array.isArray(capture) || Object.keys(capture).sort().join(',') !== 'firstIssue,list,owners,replayIssue') fail('producer_capture_invalid');
   const consumer = loadNotificationComponent('src/features/ai-agent/ai-agent-personal-credential-service.ts');
   // Never echo a schema error or producer data: the first issuance contains an
   // actual ephemeral synthetic token. Production schemas consume it in memory.
   const first = consumer.personalCredentialIssueSchema.safeParse(capture.firstIssue);
   const replay = consumer.personalCredentialIssueSchema.safeParse(capture.replayIssue);
   const list = consumer.personalCredentialListSchema.safeParse(capture.list);
-  if (!first.success || !replay.success || !list.success) fail('producer_consumer_contract_mismatch');
+  const owners = consumer.personalCredentialOwnersSchema.safeParse(capture.owners);
+  if (!first.success || !replay.success || !list.success || !owners.success) fail('producer_consumer_contract_mismatch');
   if (first.data.token === null || replay.data.token !== null || first.data.ownerProfileId === first.data.issuerProfileId || JSON.stringify({ ...first.data, token: null }) !== JSON.stringify(replay.data) || list.data.total < 1 || list.data.items.length < 1) fail('producer_capture_not_representative');
   const listed = list.data.items.find(item => item.id === first.data.id);
   if (!listed || listed.credentialKind !== 'personal' || listed.ownerProfileId !== first.data.ownerProfileId || listed.issuerProfileId !== first.data.issuerProfileId) fail('producer_inventory_identity_mismatch');
+  if (owners.data.total < 1 || !owners.data.items.some(item => item.id === first.data.ownerProfileId) || !owners.data.items.some(item => item.name === null)) fail('producer_owners_not_representative');
   const actor = { userId: first.data.issuerProfileId, role: 'admin' };
   const calls = [];
   const service = consumer.createAiAgentPersonalCredentialService({
@@ -196,7 +205,7 @@ export async function consumePersonalOwnerCapture(stdout) {
     rpc: async (name, args) => {
       if (name !== 'ai_agent_personal_credential_api_v1') fail('consumer_rpc_mismatch');
       calls.push(args.p_action);
-      return { data: args.p_action === 'list' ? capture.list : calls.length === 1 ? capture.firstIssue : capture.replayIssue, error: null };
+      return { data: args.p_action === 'list' ? capture.list : args.p_action === 'owners' ? capture.owners : calls.length === 1 ? capture.firstIssue : capture.replayIssue, error: null };
     },
   });
   const payload = { label: first.data.label, ownerProfileId: first.data.ownerProfileId, scopes: first.data.scopes, grant: first.data.grant, expiresAt: first.data.expiresAt };
@@ -206,8 +215,9 @@ export async function consumePersonalOwnerCapture(stdout) {
   await service.create(payload, key);
   await service.create(payload, key);
   await service.list(1,10);
-  if (calls.join(',') !== 'create,create,list') fail('consumer_rpc_mismatch');
-  return { status: 'passed', firstIssue: true, metadataOnlyReplay: true, nonemptyInventory: true, ownerDistinctFromIssuer: true, realServiceRpcCalls: calls.length, captureSha256: hash(Buffer.from(raw)), rawCaptureLogged: false };
+  await service.owners(1,20);
+  if (calls.join(',') !== 'create,create,list,owners') fail('consumer_rpc_mismatch');
+  return { status: 'passed', firstIssue: true, metadataOnlyReplay: true, nonemptyInventory: true, nonemptyOwners: true, nullableOwnerName: true, ownerDistinctFromIssuer: true, realServiceRpcCalls: calls.length, captureSha256: hash(Buffer.from(raw)), rawCaptureLogged: false };
 }
 
 export function validatePersonalOwnerContainer(info, name, nonce) {
@@ -307,10 +317,14 @@ export async function runPersonalOwnerLocalQa(argv = process.argv.slice(2)) {
       regressions.push({ source: metadata(source), ...parsePersonalOwnerTap(executed.stdout) });
     }
     requireRunning();
+    phase = 'personal_owner_concurrency_probes';
+    const runtime = await createPersonalOwnerConcurrencyRuntime({name,nonce,requireRunning,registerStop: stop => { activeStops.add(stop); return () => activeStops.delete(stop); }});
+    const concurrency = await runPersonalOwnerConcurrencyProbes({runtime,parseTap: parsePersonalOwnerTap,requireRunning});
+    requireRunning();
     const after = await sources();
     if (JSON.stringify(evidence(after)) !== JSON.stringify(evidence(input))) fail('source_changed_during_run');
     requireRunning();
-    result = { status: 'passed', requestId: args.requestId, ...common, databaseVersions: version.stdout.trim().split('\n'), tap, producerParity, regressions, regressionTotal: regressions.reduce((sum,entry) => sum + entry.tests,0), sourceStable: true, cleanup: 'owned_container_removed_and_absence_confirmed' };
+    result = { status: 'passed', requestId: args.requestId, ...common, databaseVersions: version.stdout.trim().split('\n'), tap, producerParity, regressions, regressionTotal: regressions.reduce((sum,entry) => sum + entry.tests,0), concurrency, sourceStable: true, cleanup: 'owned_container_removed_and_absence_confirmed' };
   } catch (error) { failure = error; failure.phase = phase; failure.sourceEvidence = evidence(input); }
   finally {
     if (startAttempted) {

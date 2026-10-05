@@ -18,3 +18,26 @@ test('complete activity follows both positive cursors without initial zero and d
 test('policy absence and first CAS are revision0, without exposing provider fields',async()=>{let sent;const ui=setup({fetcher:async(url,init)=>{sent={url,init};return new Response(JSON.stringify({data:{userId:actor.userId,spaceKeys:[],revision:init.method==='PATCH'?'1':'0',updatedAt:null},error:null}));}});assert.equal((await ui.service.permission(actor.userId)).revision,'0');await ui.service.setPermission(actor.userId,[],'0','30000000-0000-4000-8000-000000000001');assert.equal(sent.init.headers['If-Match'],'"r0"');assert.deepEqual(JSON.parse(sent.init.body),{spaceKeys:[]});});
 test('uncertain receipt retries exact submitted payload and key despite newer draft',async()=>{const {createAiAgentRequestAttempt}=loadNotificationComponent('src/features/ai-agent/ai-agent-request-attempt.ts');const attempt=createAiAgentRequestAttempt(),sent=[];await assert.rejects(attempt.submit({title:'submitted'},async(payload,key)=>{sent.push({payload,key});throw new Error('uncertain network');}));const outcome=await attempt.submit({title:'newer input'},async(payload,key)=>{sent.push({payload,key});return 'receipt';});assert.deepEqual(sent[0],sent[1]);assert.deepEqual(outcome.submitted,{title:'submitted'});assert.equal(attempt.pending,null);});
 test('request mutation never accepts revision0 reserved for policy',async()=>{const ui=setup();await assert.rejects(ui.service.cancel(request.id,'0','30000000-0000-4000-8000-000000000001'));assert.equal(ui.calls.length,0);});
+
+test('effect remount restores the same current actor but cannot reactivate a different actor or role', async () => {
+ const ui=setup(); ui.service.dispose(); assert.equal(ui.service.active(),false);
+ assert.equal(ui.service.mount(),true); assert.equal((await ui.service.list({page:1,pageSize:10,scope:'own'})).total,1);
+ ui.service.dispose();ui.switchActor({...actor,role:'teacher'});assert.equal(ui.service.mount(),false);
+ await assert.rejects(ui.service.list({page:1,pageSize:10,scope:'own'}),/actor_changed/);
+ assert.equal(ui.calls.length,1);
+});
+for(const stage of ['session','fetch','json'])test(`dispose and remount keep the old ${stage} await invalid`,async()=>{
+ const pending=Promise.withResolvers(),data={data:{items:[request],total:1,page:1,pageSize:10},error:null};let sessionCalls=0,fetchCalls=0;
+ const ui=setup({getSession:async()=>{sessionCalls++;return stage==='session'&&sessionCalls===1?pending.promise:{user:{id:actor.userId},access_token:'synthetic'};},fetcher:async()=>{
+  fetchCalls++;if(stage==='fetch'&&fetchCalls===1)return pending.promise;
+  if(stage==='json'&&fetchCalls===1)return {ok:true,status:200,json:()=>pending.promise};
+  return Response.json(data);
+ }});
+ const stale=ui.service.list({page:1,pageSize:10,scope:'own'});
+ await new Promise(resolve=>setImmediate(resolve));ui.service.dispose();assert.equal(ui.service.mount(),true);
+ pending.resolve(stage==='session'?{user:{id:actor.userId},access_token:'synthetic'}:stage==='fetch'?Response.json(data):data);
+ await assert.rejects(stale,/actor_changed/);
+ if(stage==='session')assert.equal(fetchCalls,0);
+ assert.equal((await ui.service.list({page:1,pageSize:10,scope:'own'})).total,1);
+ ui.service.dispose();await assert.rejects(ui.service.list({page:1,pageSize:10,scope:'own'}),/actor_changed/);
+});
