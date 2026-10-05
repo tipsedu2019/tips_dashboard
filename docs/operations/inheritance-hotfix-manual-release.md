@@ -358,10 +358,11 @@ expires during setup, native CLI invocation remains zero and no automatic retry
 or new receipt is issued.
 
 The corrected SQL/source, fourteen-function oracle, permission decisions,
-verify-full CA/target restrictions, ten reviewed transport helper copies and
-single-attempt/unknown-state boundaries are unchanged. Current correction pins:
+verify-full CA/target restrictions, nine reviewed transport helper copies and
+single-attempt/unknown-state boundaries are unchanged. The endpoint helper is
+the independently reviewed same-project direct metadata alternative. Current correction pins:
 
-- Runner SHA256: `c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3`.
+- Runner SHA256: `56a12309946860fb28b3043384b6f4fe6f75c00434331df02cab22f0722791af`.
 - Unsigned contract SHA256: `c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484`.
 
 The corrected file hashes, 37 offline tests and independent approval were
@@ -371,9 +372,9 @@ actual pause/drain; preparing files or creating this immutable receipt does not
 establish that operational fact.
 
 - Public owner receipt SHA256:
-  `391195e4e52bdfef0f622dd6117b288204cfee5bc6656fe7406c97e7fab2862d`.
+  `43566bd8202594f3e8963f53041b05abd1011f6b61c51574d3b9aabf92f38eba`.
 - Activated manifest SHA256:
-  `3a1c64c4f1aaa4886aed0ed8bd92d08fb3eb49909e4bf0e1e4dff8b6127b3e30`.
+  `3c398313ddbfb441cd41149c924ec5df6c8b7124cb323ac44678aa757b65f00e`.
 - Approval validity: 2026-10-05 00:36:55 UTC through
   2026-10-06 00:36:55 UTC, bound to the original provided owner approval time.
 
@@ -396,3 +397,12 @@ enum on failure. Backend SSL observation is not labelled client TLS proof.
 The diagnostic suite passed 38/38 with synthetic I/O and the wrapper passed
 1/1 without skips. No install, pause or production mutation has occurred.
 Approval timestamps, scope and no-retry restrictions remain unchanged.
+
+
+### Reviewed same-project direct read-only preflight
+
+The shared session-pooler native run [37259689977](https://github.com/tipsedu2019/tips_dashboard/actions/runs/37259689977) returned user/database/read-only/Postgres-17 policy matches true and only backend SSL false. Its strict gate stopped before ledger/catalog verification. The SQL observes the Postgres backend connection; it does not directly observe the separate client-to-pooler TLS session. No install or writer pause was dispatched.
+
+An authorized official Supabase project response confirmed this project’s direct database hostname. The reviewed runner requires the same project ID, region, healthy status and exact official hostname again at action time and uses the same database role on port 5432. It accepts no host override or pooler fallback. Only endpoint selection changed; verify-full, the pinned public CA, SQL/session checks, source/CI gates, before/after ledger and catalog comparisons, pause freshness and the one-install/no-retry boundary are unchanged.
+
+The current Mac resolver could not return an address even though DNS had one AAAA and no A record. No Mac authentication or SQL was attempted. This does not establish GitHub native reachability. The reviewed native workflow must run in read-only preflight mode and pass every gate before any scoped writer pause or installation. Offline endpoint tests cover the official response and reject malformed or wrong project/database/hostname data without fallback or raw metadata/token output. The original approval expiry remains unchanged.
