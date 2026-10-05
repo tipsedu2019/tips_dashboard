@@ -37,6 +37,9 @@ const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "08fc1771d335e9816aaef1c9bee45408dcba5c
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
+const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-production-install.yml"
+const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
+  "5165cf5d8f741d961fee84c323e6ef86b0eb5c70ae199b4dff219151e0e92806"
 const POSTDEPLOY_READONLY_SQL_SHA256 =
   "6801d9f955efeed480827f5448ae88ab43254271c605cd27609eb37140271eda"
 const ADMISSION_ORDER_INDEPENDENCE_MIGRATION =
@@ -1381,6 +1384,7 @@ test("approved manual production workflow requires its exact path and complete r
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
     ["supabase-sql-review.yml", "f547133e80451acfbb30b4c29cda438ecb109c8fe7e71b32939c4fbc42ee8ef6"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
+    [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
     assert.equal(await sha256(join(workflowDir, name)), expectedHash, name)
   }
@@ -1430,6 +1434,79 @@ test("approved manual production workflow requires its exact path and complete r
     const isolatedReplacementErrors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
     assertIncludesErrorForFile(isolatedReplacementErrors, "allowed_workflow_hash_mismatch", "supabase-db-push.yml")
     assertIncludesErrorForFile(isolatedReplacementErrors, "isolated_ci_production_secret_forbidden", "supabase-db-push.yml")
+  } finally {
+    await rm(fixtureRoot, { force: true, recursive: true })
+  }
+})
+
+test("approved PR97 manual production workflow cannot transfer or widen its exact reviewed boundary", async () => {
+  const workflowDir = join(repoRoot, ".github", "workflows")
+  const source = await readFile(join(workflowDir, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW), "utf8")
+  assert.equal(await sha256(join(workflowDir, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW)), APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256)
+  assert.match(source, /REVIEWED_RUNNER_SHA: '5348b262181f4e26e84e4566952ecfa9645d97a0'/)
+  for (const kind of ["main", "pr", "guardrails", "other"]) {
+    assertIncludesErrorCode(validateIsolatedCiWorkflow(source, kind), "isolated_ci_production_secret_forbidden")
+  }
+  const fixtureRoot = await createRepoFixture()
+  const fixtureDir = join(fixtureRoot, ".github", "workflows")
+  const fixturePath = join(fixtureDir, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW)
+  const aiPath = join(fixtureDir, APPROVED_MANUAL_PRODUCTION_WORKFLOW)
+  const aiSource = await readFile(aiPath, "utf8")
+  try {
+    assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
+    for (const mutation of [
+      `${source}\n`,
+      source.replace("on:\n  workflow_dispatch:", "on:\n  push:\n  workflow_dispatch:"),
+      source.replaceAll("actions/checkout@08c6903cd8c0fde910a37f88322edcfb5dd907a8", "actions/checkout@v4"),
+      source.replace("5348b262181f4e26e84e4566952ecfa9645d97a0", "0".repeat(40)),
+      source.replace("e55770f86c4027f3d62410fa34922c66f3a44a909320734559da81d77bec85f5", "0".repeat(64)),
+      source.replace("bed4ed8005518c5795e73027f782c95b2e77e78f8b37ad42d6abbcba62457acd", "0".repeat(64)),
+      source.replace("4b539cae533335aa3c70625a290f3208c8357a8e3c77094a2d8a0868d37d93fd", "0".repeat(64)),
+      source.replace("default: preflight", "default: install"),
+    ]) {
+      assert.notEqual(mutation, source, "each adversarial case must change the reviewed bytes")
+      await writeFile(fixturePath, mutation)
+      const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+      assertIncludesErrorForFile(errors, "allowed_workflow_hash_mismatch", APPROVED_INHERITANCE_PRODUCTION_WORKFLOW)
+      assertIncludesErrorForFile(errors, "isolated_ci_production_secret_forbidden", APPROVED_INHERITANCE_PRODUCTION_WORKFLOW)
+    }
+    await writeFile(fixturePath, source)
+    for (const copiedPath of ["unapproved-inheritance-install.yml", `nested/${APPROVED_INHERITANCE_PRODUCTION_WORKFLOW}`]) {
+      const destination = join(fixtureDir, copiedPath)
+      await mkdir(dirname(destination), { recursive: true })
+      await writeFile(destination, source)
+      const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+      assertIncludesErrorCode(errors, "workflow_file_set_mismatch")
+      assertIncludesErrorForFile(errors, "unexpected_workflow_file", copiedPath)
+      assertIncludesErrorForFile(errors, "isolated_ci_production_secret_forbidden", copiedPath)
+      await rm(destination)
+    }
+    await rm(fixturePath)
+    assertIncludesErrorCode(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), "workflow_file_set_mismatch")
+    await symlink(join(workflowDir, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW), fixturePath)
+    const symlinkErrors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+    assertIncludesErrorCode(symlinkErrors, "workflow_file_set_mismatch")
+    assertIncludesErrorForFile(symlinkErrors, "workflow_entry_not_regular", APPROVED_INHERITANCE_PRODUCTION_WORKFLOW)
+    await rm(fixturePath)
+    await writeFile(fixturePath, aiSource)
+    await writeFile(aiPath, source)
+    const swappedErrors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+    for (const name of [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW]) {
+      assertIncludesErrorForFile(swappedErrors, "allowed_workflow_hash_mismatch", name)
+      assertIncludesErrorForFile(swappedErrors, "isolated_ci_production_secret_forbidden", name)
+    }
+    await writeFile(fixturePath, source)
+    await writeFile(aiPath, aiSource)
+    for (const name of ["supabase-db-push.yml", "supabase-sql-review.yml", "free-tier-guardrails.yml"]) {
+      const destination = join(fixtureDir, name)
+      const original = await readFile(destination, "utf8")
+      await writeFile(destination, source)
+      const errors = await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
+      assertIncludesErrorForFile(errors, "allowed_workflow_hash_mismatch", name)
+      assertIncludesErrorForFile(errors, "isolated_ci_production_secret_forbidden", name)
+      await writeFile(destination, original)
+    }
+    assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
   } finally {
     await rm(fixtureRoot, { force: true, recursive: true })
   }
