@@ -5,7 +5,7 @@
   "projectRef": "slnjqlzzhewblvttiidk",
   "region": "ap-northeast-2",
   "unsignedContractSha256": "c02ed49d3db72712230d664126e95ebbf3072cacaeda477c0a821d45d62d0484",
-  "scriptSha256": "c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3",
+  "scriptSha256": "56a12309946860fb28b3043384b6f4fe6f75c00434331df02cab22f0722791af",
   "caSha256": "700723581420dd1ac98fd7e9ac529f0ef210eadcaf87fc868a3ad7d114c2f3b7",
   "newPermissions": [
     {
@@ -143,6 +143,27 @@
       "failedReadOnlyPreflightRun": "https://github.com/tipsedu2019/tips_dashboard/actions/runs/37255664103",
       "sourceSqlPermissionsQueryAndGatesUnchanged": true,
       "parentInstruction": "Proceed with the independently reviewed diagnostic-only runner c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3: update binding/receipt transparently, normal reviewed publication+CI+integration, then rerun read-only native preflight. Same user-approved operation, unchanged source/SQL/permissions/query/gates; this diagnostic correction requires no new owner choice. Continue authorized recoverable diagnostic fixes through evidence of the failing gate; don't terminate merely to request parent reconfirmation of a harmless hash change after independent review. Never loosen a security gate or substitute MCP validation for the native session. If actual credentials/access/security changes are needed, stop and report exact action. No install/pause until native preflight passes and actual scoped pause is verified. Please prioritize identifying the failed session boolean and completing the original approved operation rather than further release-process expansion."
+    },
+    "directEndpointRebinding": {
+      "baseRunnerScriptSha256": "c5fc468b7d61fa4454d04ae2ab94e4111ad8590272b6bb25ae86e7e0ea0773c3",
+      "reviewedDirectRunnerScriptSha256": "56a12309946860fb28b3043384b6f4fe6f75c00434331df02cab22f0722791af",
+      "independentRouteReview": "APPROVE",
+      "failedSharedPoolerReadOnlyRun": "https://github.com/tipsedu2019/tips_dashboard/actions/runs/37259689977",
+      "officialMetadataEvidence": {
+        "source": "authorized Supabase get_project response",
+        "projectRef": "slnjqlzzhewblvttiidk",
+        "region": "ap-northeast-2",
+        "status": "ACTIVE_HEALTHY",
+        "databaseHostname": "db.slnjqlzzhewblvttiidk.supabase.co"
+      },
+      "exactOfficialMetadataRequiredAgainAtActionTime": true,
+      "sameSourceSqlContractPermissionsAndAllNativeTlsSessionLedgerCatalogGates": true,
+      "noNewCredentialAccessProviderSslNetworkSettingOrTarget": true,
+      "nativeDirectPreflightRequiredBeforeInstall": true,
+      "directUserApprovalReference": "Sentinel_5a51e523b8d88191a6ea9b917028ac92",
+      "directUserApprovalAtUtc": "2026-10-05T03:13:17Z",
+      "directUserApprovalAnswer": "운영 배포까지 승인한다. 진행해",
+      "parentScopeInstruction": "The user deployment approval covers the safe alternative execution flow for the same project/database with the existing approved credentials. Confirm the official direct endpoint from an official response, retain verify-full, the pinned CA and every existing user/database/read-only/version/ledger/catalog gate, and assess it with the smallest reviewed native read-only change. No new secret, expanded access, SSL setting, network setting or external target is authorized. Installation remains blocked until native preflight succeeds and actual fresh scoped pause/drain is verified."
     }
   }
 }

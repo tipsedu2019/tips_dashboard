@@ -47,6 +47,8 @@ EXPECTED_QUIESCENCE = {
 
 # These are source-segment hashes from independently reviewed helper source
 # SHA256 31bf00adb87f7ac07a3379ae58859eef16f756aa3a9fc50b967add288a727667.
+# The endpoint pin is the reviewed same-project direct metadata alternative;
+# every other helper keeps its original reviewed source pin.
 # No held AI checkout is needed or imported when this suite eventually runs.
 REVIEWED_HELPERS = {
     "Stop": "658138aef0732e3fc33561d89237ace08b5a6704513a52a7b6cd6669e0ff7449",
@@ -55,7 +57,7 @@ REVIEWED_HELPERS = {
     "digest_versions": "56e9d01a6bc02354270a08738d5e3e5bee25541c4464eace3dac50ec67c7284e",
     "api": "a290b6b5df7cef27573f52094a16be5cfc12a603b1842dd145a2ea1647410942",
     "ci_gate": "9a89bb9e2bb2aebabf265b58b6e75e53e681e1a694e90d307f194b546378cef1",
-    "endpoint": "96a1fe5b07c828d4190407b3c607cd253ab8d492ec3324f6efdc6bf67d09a443",
+    "endpoint": "065ed79dd9006fcb10900e2cad1d0bac63a4ec27f29bc47cccca4c34d98e2925",
     "command": "0e652be14b47c478fbdf2dee2443439d8c296543f7a04c10312b8c448e608b03",
     "quote": "27a962c0ad2abf3c18759057990b4eb831cf577821eaf39e8dfcf608e64d8a39",
     "snapshot_failure_code": "079b6c58cef28b9de747e7e3de646f0acc97373a4a45c4c14767491466f453f8",
@@ -213,6 +215,60 @@ class OfflineInheritanceSafety(unittest.TestCase):
             if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in REVIEWED_HELPERS
         }
         self.assertEqual(actual, REVIEWED_HELPERS)
+
+    def test_direct_endpoint_requires_one_official_project_response_and_fixed_postgres_user(self):
+        host = "db.slnjqlzzhewblvttiidk.supabase.co"
+        marker = "synthetic-direct-metadata-token-marker"
+        project = {
+            "id": "slnjqlzzhewblvttiidk", "region": "ap-northeast-2", "status": "ACTIVE_HEALTHY",
+            "database": {"host": host, "extra": marker}, "unrelatedMetadata": marker,
+        }
+        captured = io.StringIO()
+        with patch.object(self.module, "api", return_value=project) as api, contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+            self.assertEqual(self.module.endpoint(marker), (host, "postgres"))
+            api.assert_called_once_with("https://api.supabase.com/v1/projects/slnjqlzzhewblvttiidk", marker)
+        self.assertEqual(captured.getvalue(), "")
+
+    def test_direct_endpoint_rejects_unverified_metadata_without_fallback_or_raw_disclosure(self):
+        host = "db.slnjqlzzhewblvttiidk.supabase.co"
+        marker = "synthetic-direct-metadata-token-marker"
+        project = {"id": "slnjqlzzhewblvttiidk", "region": "ap-northeast-2", "status": "ACTIVE_HEALTHY", "database": {"host": host}}
+        cases = [(value, "project_metadata_shape_invalid") for value in (None, True, marker, [project], [project, project])]
+        for field, value in (
+            ("id", marker), ("id", None), ("region", "ap-southeast-1"),
+            ("region", None), ("status", "INACTIVE"), ("status", "ACTIVE_HEALTHY "),
+            ("status", None),
+        ):
+            cases.append(({**project, field: value}, "project_metadata_mismatch"))
+        for field in ("id", "region", "status"):
+            missing = copy.deepcopy(project)
+            del missing[field]
+            cases.append((missing, "project_metadata_mismatch"))
+        cases.append(({"projects": [project]}, "project_metadata_mismatch"))
+        for database in (None, marker, [], [{"host": host}], True):
+            cases.append(({**project, "database": database}, "direct_database_metadata_shape_invalid"))
+        missing_database = copy.deepcopy(project)
+        del missing_database["database"]
+        cases.append((missing_database, "direct_database_metadata_shape_invalid"))
+        for wrong_host in (
+            None, "", marker, True, 1, [host], {"host": host},
+            "db.other-project.supabase.co", "aws-1-ap-northeast-2.pooler.supabase.com",
+            host + ".attacker.invalid", host + ".", host.upper(), " " + host,
+            host + ":5432", host + ",db.other-project.supabase.co", "https://" + host,
+            "postgresql://postgres:" + marker + "@" + host + "/postgres",
+        ):
+            cases.append(({**project, "database": {"host": wrong_host}}, "direct_database_hostname_mismatch"))
+        cases.append(({**project, "database": {}}, "direct_database_hostname_mismatch"))
+        for metadata, reason in cases:
+            with self.subTest(reason=reason, metadata=metadata):
+                captured = io.StringIO()
+                with patch.object(self.module, "api", return_value=metadata) as api, contextlib.redirect_stdout(captured), contextlib.redirect_stderr(captured):
+                    with self.assertRaisesRegex(self.module.Stop, "^" + reason + "$") as stopped:
+                        self.module.endpoint(marker)
+                    api.assert_called_once_with("https://api.supabase.com/v1/projects/slnjqlzzhewblvttiidk", marker)
+                self.assertEqual(str(stopped.exception), reason)
+                self.assertEqual(captured.getvalue(), "")
+                self.assertNotIn(marker, str(stopped.exception) + captured.getvalue())
 
     def test_contract_is_only_the_reviewed_single_migration(self):
         cfg = self.contract
