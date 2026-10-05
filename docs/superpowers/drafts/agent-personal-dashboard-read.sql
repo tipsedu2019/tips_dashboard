@@ -51,7 +51,7 @@ revoke all on function dashboard_private.agent_personal_dashboard_identity_v1() 
 -- needs separate authorization and must validate explicit grants before storing.
 create function public.agent_personal_dashboard_read_v1(p_token_hash text,p_action text,p_input jsonb default '{}') returns jsonb
 language plpgsql security definer set search_path='' set lock_timeout='5s' set statement_timeout='15s' as $$
-declare cred dashboard_private.agent_personal_dashboard_credentials; owner public.profiles; c public.classes; sid uuid; cid uuid; catalog_id uuid; yr integer; page integer; scope text; context jsonb; slots jsonb; sessions jsonb; events jsonb; areas jsonb; schools jsonb; school jsonb; row_count bigint; authorization jsonb; resource jsonb; minute timestamptz; invalid_projection boolean;
+declare cred dashboard_private.agent_personal_dashboard_credentials; owner public.profiles; c public.classes; sid uuid; cid uuid; catalog_id uuid; yr integer; page integer; scope text; context jsonb; slots jsonb; sessions jsonb; events jsonb; areas jsonb; schools jsonb; school jsonb; row_count bigint; read_authorization jsonb; resource jsonb; minute timestamptz; invalid_projection boolean;
 begin
  if p_token_hash is null or p_token_hash !~ '^[a-f0-9]{64}$' then raise exception using errcode='28000',message='agent_unauthorized';end if;
  select * into cred from dashboard_private.agent_personal_dashboard_credentials where token_hash=p_token_hash for update;
@@ -74,7 +74,7 @@ begin
  minute:=date_trunc('minute',clock_timestamp());
  if cred.rate_window is distinct from minute then cred.rate_count:=0;end if;
  if cred.rate_count>=60 then raise exception using errcode='54000',message='agent_rate_limited';end if;
- authorization:=jsonb_build_object('credentialId',cred.id,'credentialKind',cred.credential_kind,'ownerProfileId',owner.id,'ownerRole',owner.role,'scope',scope);
+ read_authorization:=jsonb_build_object('credentialId',cred.id,'credentialKind',cred.credential_kind,'ownerProfileId',owner.id,'ownerRole',owner.role,'scope',scope);
  if p_action='class_context' then
   if jsonb_typeof(p_input->'classId') is distinct from 'string' then raise exception using errcode='22023',message='agent_invalid';end if;
   cid:=(p_input->>'classId')::uuid;
@@ -137,7 +137,7 @@ begin
  -- immutable grant/identity fields are serialized by the credential lock.
  if cred.expires_at<=clock_timestamp() then raise exception using errcode='28000',message='agent_unauthorized';end if;
  update dashboard_private.agent_personal_dashboard_credentials set last_used_at=clock_timestamp(),rate_window=minute,rate_count=cred.rate_count+1 where id=cred.id;
- return jsonb_build_object('data',jsonb_build_object('authorization',authorization,'resource',resource,'context',context));
+ return jsonb_build_object('data',jsonb_build_object('authorization',read_authorization,'resource',resource,'context',context));
 exception when invalid_text_representation or invalid_datetime_format or datetime_field_overflow or numeric_value_out_of_range then raise exception using errcode='22023',message='agent_invalid';
 end$$;
 revoke all on function public.agent_personal_dashboard_read_v1(text,text,jsonb) from public,anon,authenticated,service_role;

@@ -1,6 +1,6 @@
--- Source-only synthetic pgTAP. Requires the final ordered domain migrations and
+-- Synthetic pgTAP. Requires the final ordered domain migrations and
 -- the separately reviewed agent-personal-dashboard-read DRAFT. No issuance RPC,
--- production credential, provider operation or installation is exercised here.
+-- production credential, provider operation or operational installation is exercised here.
 -- Execution requires a separately authorized isolated fixture; all changes roll back.
 begin;
 select plan(110);
@@ -11,6 +11,9 @@ create function pg_temp.pd_class(cid integer default 201,key_number integer defa
 create function pg_temp.pd_calendar(sid integer default 501,key_number integer default 701) returns jsonb language sql as $$select pg_temp.pd_read(key_number,'calendar_context',jsonb_build_object('schoolId',pg_temp.pd_id(sid),'schoolYear',2099))$$;
 insert into auth.users(id,instance_id,aud,role,email) select pg_temp.pd_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','dashboard-read-'||n||'@test.invalid' from generate_series(1,4)n;
 insert into public.profiles(id,role,name) select pg_temp.pd_id(n),case n when 1 then 'admin' when 4 then 'viewer' else 'teacher' end,'Synthetic dashboard profile '||n from generate_series(1,4)n on conflict(id) do update set role=excluded.role;
+-- Canonical Auth insertion creates catalogs. Keep that trigger enabled and
+-- detach its links before seeding the explicit reciprocal UUIDs used here.
+update public.teacher_catalogs set profile_id=null where profile_id in(pg_temp.pd_id(2),pg_temp.pd_id(3));
 insert into public.teacher_catalogs(id,name,subjects,profile_id) values(pg_temp.pd_id(101),'Synthetic owner teacher',array['영어'],pg_temp.pd_id(2)),(pg_temp.pd_id(102),'Synthetic other teacher',array['영어'],pg_temp.pd_id(3));
 update public.profiles set teacher_catalog_id=pg_temp.pd_id(case id when pg_temp.pd_id(2) then 101 else 102 end) where id in(pg_temp.pd_id(2),pg_temp.pd_id(3));
 insert into public.classroom_catalogs(id,name,subjects) values(pg_temp.pd_id(103),'Synthetic room',array['영어']);
@@ -227,15 +230,48 @@ update public.classes set status='개강 준비' where id=pg_temp.pd_id(201);
 set local role service_role;
 select throws_ok($q$select pg_temp.pd_class()$q$,'42501','agent_class_not_active','preparing class is unsupported initial personal scope');
 reset role;
-update public.classes set status='수강',closed_at=clock_timestamp() where id=pg_temp.pd_id(201);
+-- Only this synthetic lifecycle fixture uses the canonical close context.
+-- Restore its prior value before testing service-role reads; no guard is changed.
+set local role postgres;
+do $pd_close_fixture$
+declare previous_context text:=coalesce(current_setting('app.class_close_mutation',true),'');
+begin
+ perform set_config('app.class_close_mutation','v1',true);
+ update public.classes set status='수강',closed_at=clock_timestamp() where id=pg_temp.pd_id(201);
+ perform set_config('app.class_close_mutation',previous_context,true);
+end
+$pd_close_fixture$;
+reset role;
 set local role service_role;
 select throws_ok($q$select pg_temp.pd_class()$q$,'42501','agent_class_not_active','closed class remains denied despite UUID assignment');
 reset role;
-update public.classes set closed_at=null,status='종강' where id=pg_temp.pd_id(201);
+-- Only this synthetic lifecycle fixture uses the canonical close context.
+-- Restore its prior value before testing service-role reads; no guard is changed.
+set local role postgres;
+do $pd_close_fixture$
+declare previous_context text:=coalesce(current_setting('app.class_close_mutation',true),'');
+begin
+ perform set_config('app.class_close_mutation','v1',true);
+ update public.classes set closed_at=null,status='종강' where id=pg_temp.pd_id(201);
+ perform set_config('app.class_close_mutation',previous_context,true);
+end
+$pd_close_fixture$;
+reset role;
 set local role service_role;
 select throws_ok($q$select pg_temp.pd_class()$q$,'42501','agent_class_not_active','completed class remains denied without closed timestamp');
 reset role;
-update public.classes set status='수강' where id=pg_temp.pd_id(201);
+-- Only this synthetic lifecycle fixture uses the canonical close context.
+-- Restore its prior value before testing service-role reads; no guard is changed.
+set local role postgres;
+do $pd_close_fixture$
+declare previous_context text:=coalesce(current_setting('app.class_close_mutation',true),'');
+begin
+ perform set_config('app.class_close_mutation','v1',true);
+ update public.classes set status='수강' where id=pg_temp.pd_id(201);
+ perform set_config('app.class_close_mutation',previous_context,true);
+end
+$pd_close_fixture$;
+reset role;
 update public.class_schedule_slots set start_time='09:00:01' where id=pg_temp.pd_id(301);
 set local role service_role;
 select throws_ok($q$select pg_temp.pd_class()$q$,'42501','agent_scope_forbidden','unsupported seconds are denied rather than silently rounded');

@@ -1,6 +1,6 @@
 # 개인 대시보드 업무 읽기 — 로컬 최소 단위
 
-기준은 로컬 `52b0e2e2` 이후 추가 커밋이다. 기존 615 DB assertion, 네 브라우저 조합, 267/269 Node 결과와 54개 보존 자료를 변경하지 않는다. 이 단위는 일반 업무 읽기의 코드·SQL 초안·합성 HTTP 계약이며 운영 준비 완료 또는 실제 DB 권한 검증을 뜻하지 않는다. 신규 SQL을 설치·실행하거나 키를 발급·변경하지 않는다.
+기준은 로컬 `52b0e2e2` 이후 추가 커밋이다. 기존 615 DB assertion, 네 브라우저 조합, 267/269 Node 결과와 54개 보존 자료를 변경하지 않는다. 이 단위는 일반 업무 읽기의 코드·SQL 초안·격리 합성 DB 검증이다. 운영 준비 완료 또는 관리형 Auth 권한 검증을 뜻하지 않는다. 운영 SQL 설치·실행과 키 발급·변경은 하지 않는다.
 
 ## 현재 대시보드와의 관계
 
@@ -36,7 +36,15 @@ POST/PATCH/DELETE, preview/commit, receipt/operation, catalog, 학생·기타 �
 
 합성 Node 검사는 별도 RPC producer fixture를 주입해 실제 HTTP dispatch/strict parser/canonical projector를 실행한다. 현재 owner role·삭제/ban·UUID 연결·배정·issuer 상태·scope 거부, 타교사·다른 class·누락 owner, 재시도, 교차 family, write RPC 0건, unknown/private 필드와 DB 오류 redaction을 검사한다. fixture의 grant 거부는 upstream authority denial 계약 검증이며 불변 store grant UPDATE 기능의 증거가 아니다.
 
-신규 Node 38개가 통과했다. 관련 전체 23파일은 307개 중 305개 통과·기존 formal parity capture 누락 두 개 실패·skip 0이며 TypeScript와 변경 앱 파일 ESLint도 통과했다. 새 SQL 초안과 pgTAP 소스 110개 assertion은 정적으로 검토했으나 실행하지 않았다. 실제 RLS/ACL/row lock/SQLSTATE 실행이나 SQL→TS producer parity를 통과했다고 주장하지 않는다. 이전 615 DB 검증은 요청함 개인 소유자 범위이며 이 신규 일반 업무 callback의 DB 증거로 대체하지 않는다. 신규 store/RPC가 설치되지 않은 현재 운영 환경에서는 개인 업무 bearer로 읽을 수 없다.
+`6c4a3dc7`의 Node 38개가 통과했다. 당시 관련 전체 23파일은 307개 중 305개 통과·기존 formal parity capture 누락 두 개 실패·skip 0이며 TypeScript와 변경 앱 파일 ESLint도 통과했다. 후속 QA에서 Node 38개를 다시 실행해 전부 통과했다. 실제 SQL 설치에서 발견한 예약어 변수 구문 오류는 내부 변수 `authorization` 세 곳을 `read_authorization`으로 고쳤다. JSON key와 권한 계약은 유지한다.
+
+별도 `run-agent-personal-dashboard-read-local-qa.mjs`는 캐시 PostgreSQL 이미지 ID를 고정하고 `--pull=never`, `--network=none`, 포트·볼륨 0으로 새 합성 DB를 만든다. 원본 baseline·repair와 순서대로 147개 원본 migration을 적용한 뒤 신규 초안을 실행했다. 신규 RLS/ACL/ownership/불변 grant/현재 Auth 상태/SQLSTATE 검사는 **110/110**, 실제 경합 5건은 **10/10** 통과했다. owner 역할 상실, 성공 읽기의 owner lock, UUID 배정 변경, 폐기 및 락 대기 중 만료를 확인했다. 만료 검사는 초기 credential 검사를 통과한 실제 owner lock 대기와 DB clock 만료를 관측한 뒤 `28000/agent_unauthorized`, 사용량 불변, 임시행 제거를 확인했다. fixture는 canonical Auth/catalog 및 class-close guard를 유지한다.
+
+실제 SQL producer DTO 세 개를 strict TS schema로 검증했고, 실제 새 SQL callback을 호출하는 HTTP handler GET 세 건 및 owner 역할 상실 후 `42501`→403 재시도 거부도 통과했다. Supabase client/provider 대신 컨테이너 내부 psql transport를 사용했으므로 서명된 provider JWT나 운영 종단 연결의 증거는 아니다. 소유 프로세스·DB 세션·컨테이너 정리를 확인했다. 실행은 `6c4a3dc7` 작업트리의 고정 source SHA들에 대한 것이며 최종 커밋 blob과 별도로 매핑한다. 이 일회성 runner의 HEAD guard는 해당 기준 head에 고정되어 있다.
+
+전체 원본 baseline parity는 **1901/1923 PASS·22 FAIL**, smoke는 **13/14 PASS·ledger 1 FAIL**이다. 22개에는 캐시 Auth 테이블 구조뿐 아니라 RLS·ACL fingerprint도 포함된다. 집중 runner는 전체 assertion 순서·개수·원문 라벨과 실패 stdout SHA까지 고정하고 다른 실패·누락·skip·TODO를 거부하면서 이 원본 실패들을 그대로 보고한다. 기존 CI·driver·parity·고정 7개 migration은 수정하지 않고 가짜 CLI ledger나 formal capture를 만들지 않는다. 신규 callback의 실제 owner postgres, service-role 전용 EXECUTE, Auth id PK/타입, row-lock 권한, anon/authenticated 직접 Auth DML 차단과 관측된 RLS/ACL을 별도로 기록했다.
+
+캐시 이미지의 선행조건으로 기존 합성 fixture와 바이트가 같은 GUC Auth reader 3개, nullable Auth 필드, 기존 offline replay의 초기 Storage 관계 2개를 사용한다. 관리형 Auth/Storage 서비스와 동등하다는 증거는 아니다. Storage bucket/policy는 이후 원본 migration이 추가한다. 설치된 캐시 Zod 4.3.2의 전체 695개 파일을 hash로 고정했지만 lock 4.3.6과 달라 dependency parity는 false다. CLI 설치·업데이트·외부 image pull은 0건이다. 이전 615 DB 검증은 신규 일반 업무 callback 증거로 재사용하지 않는다. 현재 운영 환경에는 신규 store/RPC가 설치되지 않았다.
 
 정식 parity 두 개의 정확한 생성 경로는 original driver의 baseline → 147개 forward migration → SQL 88개와 probe 17개 → committed-prefix 검증 → 현재 실행 SQL HTTP/Chat capture → consumer 두 개다. 실제 운영 credential/Chat 발송은 필수 전제가 아니다. 독립 검토한 `52b0e2e2` 계획은 closure 27개와 정확 inventory를 보존했으나, 기존 CLI/daemon의 pull·업데이트 외부 통신 차단과 전체 image graph가 입증되지 않아 실행 HOLD다. 캐시 CLI 2.103.0은 CI 2.115.0과 동일하지 않다. internal bridge/cache 존재로 외부 통신 0을 주장하지 않는다. guard·original driver/CLI를 수정하거나 focused receipt로 대체하지 않는다. 현재 추가 Auth source 변경이 있으므로 52b 계획은 해당 과거 head의 계획으로만 보존하고 새 커밋의 capture로 사용하지 않는다.
 
