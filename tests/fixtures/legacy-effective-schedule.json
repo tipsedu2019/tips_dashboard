@@ -1,0 +1,2393 @@
+[
+  {
+    "name": "past absence inherits present class basics",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "future absence uses identical contract",
+    "input": {
+      "session": {
+        "id": "future",
+        "date": "2050-10-07",
+        "state": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2050-10-07",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "changed current basics affect absent fields only",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "new-basic",
+          "weekday": 5,
+          "startTime": "17:00",
+          "endTime": "18:00",
+          "teacherCatalogId": "teacher-b",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "17:00",
+        "endTime": "18:00",
+        "teacherCatalogId": "teacher-b",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "partial start override inherits three remaining values",
+    "input": {
+      "session": {
+        "id": "partial",
+        "date": "2026-10-02",
+        "state": "active",
+        "startTime": "16:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "16:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "resource-name override wins over basic identity",
+    "input": {
+      "session": {
+        "id": "name",
+        "date": "2026-10-02",
+        "teacherName": "다른 교사"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-b",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "full explicit override needs no basics",
+    "input": {
+      "session": {
+        "id": "full",
+        "date": "2026-10-02",
+        "state": "makeup",
+        "startTime": "21:30",
+        "endTime": "23:30",
+        "teacherCatalogId": "teacher-b",
+        "classroomCatalogId": "room-b"
+      },
+      "basicSlots": [],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "makeup",
+      "kind": "resolved",
+      "values": {
+        "startTime": "21:30",
+        "endTime": "23:30",
+        "teacherCatalogId": "teacher-b",
+        "classroomCatalogId": "room-b"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "session",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "session"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "date override affects only its own fields",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "dateOverride": {
+        "endTime": "18:00"
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "18:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "date_override",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "ordinary date map wins over raw row override",
+    "input": {
+      "session": {
+        "id": "specific",
+        "date": "2026-10-02",
+        "startTime": "16:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "dateOverride": {
+        "startTime": "14:00",
+        "endTime": "18:00"
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "14:00",
+        "endTime": "18:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "date_override",
+        "endTime": "date_override",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "date map replaces whole ordinary override object",
+    "input": {
+      "session": {
+        "id": "stale-raw",
+        "date": "2026-10-02",
+        "startTime": "16:00",
+        "teacherCatalogId": "teacher-b"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "dateOverride": {
+        "endTime": "18:00"
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "18:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "date_override",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "empty date map resets ordinary row to basics",
+    "input": {
+      "session": {
+        "id": "stale-raw",
+        "date": "2026-10-02",
+        "startTime": "16:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "dateOverride": {}
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "request-owned makeup ignores shared date map",
+    "input": {
+      "session": {
+        "id": "makeup-request:11111111-1111-4111-8111-111111111111:0",
+        "sessionKey": "makeup-request:11111111-1111-4111-8111-111111111111:0",
+        "makeupRequestId": "11111111-1111-4111-8111-111111111111",
+        "date": "2026-10-02",
+        "state": "makeup",
+        "startTime": "16:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "dateOverride": {
+        "startTime": "14:00",
+        "endTime": "18:00"
+      },
+      "sessionCountOnDate": 2
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "makeup",
+      "kind": "resolved",
+      "values": {
+        "startTime": "16:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "invalid request tag does not bypass ordinary date map",
+    "input": {
+      "session": {
+        "id": "makeup-request:11111111-1111-4111-8111-111111111111:0",
+        "sessionKey": "makeup-request:11111111-1111-4111-8111-111111111111:0",
+        "makeupRequestId": "invalid",
+        "date": "2026-10-02",
+        "state": "makeup",
+        "startTime": "16:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "dateOverride": {
+        "startTime": "14:00"
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "makeup",
+      "kind": "resolved",
+      "values": {
+        "startTime": "14:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "date_override",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "whole-minute legacy time normalizes without precision loss",
+    "input": {
+      "session": {
+        "id": "whole-minute",
+        "date": "2026-10-02",
+        "startTime": "9:00:00.000",
+        "endTime": "10:00:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "09:00",
+        "endTime": "10:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "session",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "fractional-minute explicit time remains unresolved",
+    "input": {
+      "session": {
+        "id": "fraction",
+        "date": "2026-10-02",
+        "startTime": "15:30:00.0000001"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": null,
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "startTime"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "end at midnight remains valid",
+    "input": {
+      "session": {
+        "id": "midnight",
+        "date": "2026-10-02",
+        "endTime": "24:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "24:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "session",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "explicit clear does not inherit null",
+    "input": {
+      "session": {
+        "id": "clear",
+        "date": "2026-10-02",
+        "teacherCatalogId": null
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": null,
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "teacherCatalogId"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "explicit clear does not inherit \"\"",
+    "input": {
+      "session": {
+        "id": "clear",
+        "date": "2026-10-02",
+        "teacherCatalogId": ""
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": null,
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "teacherCatalogId"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "explicit cleared name does not inherit",
+    "input": {
+      "session": {
+        "id": "clear-name",
+        "date": "2026-10-02",
+        "classroomName": null
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": null
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "session"
+      },
+      "missing": [
+        "classroomCatalogId"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "missing room basic retains known time and teacher",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "missing-room",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": null
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": null
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "classroomCatalogId"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "missing basic time stays unknown",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "missing-time",
+          "weekday": 5,
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": null,
+        "endTime": null,
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "startTime",
+        "endTime"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "invalid explicit identity never falls through to default",
+    "input": {
+      "session": {
+        "id": "bad-identity",
+        "date": "2026-10-02",
+        "teacherCatalogId": "unknown-teacher"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": null,
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "teacherCatalogId"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "hidden catalog identity still occupies a resource",
+    "input": {
+      "session": {
+        "id": "hidden",
+        "date": "2026-10-02",
+        "teacherCatalogId": "teacher-hidden"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-hidden",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "session",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "legacy exception stays cancelled",
+    "input": {
+      "session": {
+        "id": "tombstone",
+        "date": "2026-10-02",
+        "scheduleState": "exception"
+      },
+      "basicSlots": [],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "exception",
+      "kind": "cancelled",
+      "values": {},
+      "provenance": {},
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "legacy skipped stays cancelled",
+    "input": {
+      "session": {
+        "id": "tombstone",
+        "date": "2026-10-02",
+        "scheduleState": "skipped"
+      },
+      "basicSlots": [],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "skipped",
+      "kind": "cancelled",
+      "values": {},
+      "provenance": {},
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "legacy tbd stays cancelled",
+    "input": {
+      "session": {
+        "id": "tombstone",
+        "date": "2026-10-02",
+        "scheduleState": "tbd"
+      },
+      "basicSlots": [],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "tbd",
+      "kind": "cancelled",
+      "values": {},
+      "provenance": {},
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "id suffix does not cancel an active lesson",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:skipped",
+        "date": "2026-10-02",
+        "state": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "explicit historical date is never moved to basic weekday",
+    "input": {
+      "session": {
+        "id": "stale-id:2026-10-07",
+        "date": "2026-10-03",
+        "state": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-03",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_shared",
+        "endTime": "basic_shared",
+        "teacherCatalogId": "basic_shared",
+        "classroomCatalogId": "basic_shared"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "off-weekday different basic times remain ambiguous per field",
+    "input": {
+      "session": {
+        "id": "dated-exception",
+        "date": "2026-10-03",
+        "state": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        },
+        {
+          "id": "base-wed",
+          "weekday": 3,
+          "startTime": "18:00",
+          "endTime": "20:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-03",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": null,
+        "endTime": null,
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_shared",
+        "endTime": "basic_shared",
+        "teacherCatalogId": "basic_shared",
+        "classroomCatalogId": "basic_shared"
+      },
+      "missing": [
+        "startTime",
+        "endTime"
+      ],
+      "errors": []
+    }
+  },
+  {
+    "name": "explicit source slot selects basics without changing actual date",
+    "input": {
+      "session": {
+        "id": "bound",
+        "date": "2026-10-03",
+        "sourceSlotId": "base-fri"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        },
+        {
+          "id": "other-sat",
+          "weekday": 6,
+          "startTime": "18:00",
+          "endTime": "20:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-03",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_bound_slot",
+        "endTime": "basic_bound_slot",
+        "teacherCatalogId": "basic_bound_slot",
+        "classroomCatalogId": "basic_bound_slot"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "partial override can resolve ambiguous basic start only",
+    "input": {
+      "session": {
+        "id": "partial-ambiguous",
+        "date": "2026-10-03",
+        "startTime": "16:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        },
+        {
+          "id": "base-wed",
+          "weekday": 3,
+          "startTime": "15:00",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-03",
+      "state": "active",
+      "kind": "resolved",
+      "values": {
+        "startTime": "16:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "basic_shared",
+        "teacherCatalogId": "basic_shared",
+        "classroomCatalogId": "basic_shared"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "verified approved makeup values precede missing row and basics",
+    "input": {
+      "session": {
+        "id": "prior-makeup",
+        "date": "2026-10-15",
+        "state": "makeup",
+        "originalDate": "2026-10-14"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "approvedOverride": {
+        "startTime": "15:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-b",
+        "classroomCatalogId": "room-b"
+      },
+      "approvedOverrideVerified": true
+    },
+    "expected": {
+      "date": "2026-10-15",
+      "state": "makeup",
+      "kind": "resolved",
+      "values": {
+        "startTime": "15:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-b",
+        "classroomCatalogId": "room-b"
+      },
+      "provenance": {
+        "startTime": "approved_override",
+        "endTime": "approved_override",
+        "teacherCatalogId": "approved_override",
+        "classroomCatalogId": "approved_override"
+      },
+      "missing": [],
+      "errors": []
+    }
+  },
+  {
+    "name": "unverified approval source is not silently defaulted",
+    "input": {
+      "session": {
+        "id": "unverified",
+        "date": "2026-10-02"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "approvedOverride": {
+        "startTime": "16:00"
+      },
+      "approvedOverrideVerified": false
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": null,
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "approved_override",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "startTime"
+      ],
+      "errors": [
+        "startTime:unverified_approved_override"
+      ]
+    }
+  },
+  {
+    "name": "date override cannot identify two same-day lessons",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "sessionCountOnDate": 2,
+      "dateOverride": {
+        "teacherCatalogId": "teacher-b"
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "15:30",
+        "endTime": "17:00",
+        "teacherCatalogId": null,
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "basic_weekday",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "date_override",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [
+        "teacherCatalogId"
+      ],
+      "errors": [
+        "teacherCatalogId:ambiguous_date_override"
+      ]
+    }
+  },
+  {
+    "name": "known invalid override interval stays invalid",
+    "input": {
+      "session": {
+        "id": "invalid-range",
+        "date": "2026-10-02",
+        "startTime": "18:00"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {
+        "startTime": "18:00",
+        "endTime": "17:00",
+        "teacherCatalogId": "teacher-a",
+        "classroomCatalogId": "room-a"
+      },
+      "provenance": {
+        "startTime": "session",
+        "endTime": "basic_weekday",
+        "teacherCatalogId": "basic_weekday",
+        "classroomCatalogId": "basic_weekday"
+      },
+      "missing": [],
+      "errors": [
+        "invalid_time_range"
+      ]
+    }
+  },
+  {
+    "name": "invalid date cannot create a new date",
+    "input": {
+      "session": {
+        "id": "bad-date",
+        "date": "2026-02-30"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      }
+    },
+    "expected": {
+      "date": "2026-02-30",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {},
+      "provenance": {},
+      "missing": [],
+      "errors": [
+        "invalid_date"
+      ]
+    }
+  },
+  {
+    "name": "duplicate identity stays unresolved",
+    "input": {
+      "session": {
+        "id": "synthetic:2026-10-02:active",
+        "date": "2026-10-02",
+        "scheduleState": "active"
+      },
+      "basicSlots": [
+        {
+          "id": "base-fri",
+          "weekday": 5,
+          "startTime": "15:30",
+          "endTime": "17:00",
+          "teacherCatalogId": "teacher-a",
+          "classroomCatalogId": "room-a"
+        }
+      ],
+      "catalogs": {
+        "teachers": [
+          {
+            "id": "teacher-a",
+            "name": "기본 교사"
+          },
+          {
+            "id": "teacher-b",
+            "name": "다른 교사"
+          },
+          {
+            "id": "teacher-hidden",
+            "name": "숨김 교사",
+            "isVisible": false
+          }
+        ],
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "기본 강의실"
+          },
+          {
+            "id": "room-b",
+            "name": "다른 강의실"
+          }
+        ]
+      },
+      "identityCount": 2
+    },
+    "expected": {
+      "date": "2026-10-02",
+      "state": "active",
+      "kind": "unresolved",
+      "values": {},
+      "provenance": {},
+      "missing": [],
+      "errors": [
+        "ambiguous_identity"
+      ]
+    }
+  }
+]

@@ -161,3 +161,17 @@ test("runtime-not-ready reloads legacy while other normalized read failures stay
     /class id and a date range/i,
   );
 });
+
+test("bounded legacy read carries server inheritance context without changing raw legacy rows", async () => {
+  const raw = [{ id: "ordinary", date: "2026-10-02" }];
+  const context = { version: 1, basicSlots: [{ weekday: 5, startTime: "15:30" }], approvedByIdentity: {} };
+  const reader = createBoundedContinuousScheduleReader({
+    runtimeProbe: { async probe() { return { mode: "ready", version: 1 }; }, reset() {} },
+    async readSchedule() { return { authoritativeSource: "legacy", effectiveScheduleContext: context }; },
+    async loadLegacy(input) { return { source: "legacy", classId: input.classId, sessions: raw }; },
+  });
+  assert.deepEqual(await reader.load({ classId: CLASS_ID, dateFrom: "2026-10-01", dateTo: "2026-10-31" }), {
+    source: "legacy", classId: CLASS_ID, sessions: raw, effectiveScheduleContext: context,
+  });
+  assert.deepEqual(raw, [{ id: "ordinary", date: "2026-10-02" }]);
+});

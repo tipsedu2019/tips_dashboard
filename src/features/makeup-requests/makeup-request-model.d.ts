@@ -68,6 +68,8 @@ export function hasCancelPart(request?: unknown): boolean;
 export function hasMakeupPart(request?: unknown): boolean;
 export function normalizeMakeupSlots(source?: unknown, fallbackClassroom?: string): MakeupSlot[];
 export function extractMakeupCalendarMeta(note?: string): Record<string, unknown> | null;
+export type MakeupEffectiveSchedule = { version: 1; occupancies: Array<Record<string, unknown>> };
+export function isEffectiveMakeupSchedule(value: unknown): value is MakeupEffectiveSchedule;
 export function buildRoomAvailability(options?: {
   classrooms?: unknown[];
   classes?: unknown[];
@@ -80,6 +82,7 @@ export function buildRoomAvailability(options?: {
   subject?: string;
   ignoreOrphanedMakeupEvents?: boolean;
   activeEventRequestIds?: string[];
+  effectiveSchedule?: MakeupEffectiveSchedule | null;
 }): MakeupRoomAvailability[];
 export function getDefaultMakeupEndAt(startAt: string, classItem?: unknown): string;
 export function applyMakeupRequestToSchedulePlan(

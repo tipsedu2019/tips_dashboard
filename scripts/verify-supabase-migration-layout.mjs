@@ -59,6 +59,8 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
   "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
+  "supabase/tests/makeup_numbered_pages_test.sql",
+  "supabase/tests/makeup_numbered_optional_keys_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",
@@ -127,9 +129,9 @@ const ISOLATED_PROBES = Object.freeze([
 ])
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "08fc1771d335e9816aaef1c9bee45408dcba5c77a80ef12a2220cfdd822a8edf"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "69d6f72ccf67f7819f8008c73c9aa6d794b155444dd0279645d89637875b0277"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "f547133e80451acfbb30b4c29cda438ecb109c8fe7e71b32939c4fbc42ee8ef6"
+  "79e6f7eb065b4fbca4b4b7c7ba5a905fe036b9b1ec33d3f94394a0495520b4d2"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.

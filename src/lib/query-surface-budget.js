@@ -29,6 +29,10 @@ const EXACT_SCALAR_RPC_NAMES = new Set([
   "get_makeup_detail_v1",
   // Purpose-complete reservation context is nonpageable, not a scalar count.
   "get_makeup_reservation_context_v1",
+  // 20261004160000 + makeup_legacy_approval_occupancy_test.sql: complete
+  // occupancy for at most 14 days; SQL rejects output over 2000 rows rather
+  // than truncating. Nonpageable; the 8s deadline and retry(false) still apply.
+  "get_makeup_effective_occupancy_v1",
   // Textbook summaries/detail are purpose-specific nonpageable reads. Balance
   // is complete selected-ID context; duplicate is an exact count + max10 preview,
   // not a scalar count or a pageable exemption.

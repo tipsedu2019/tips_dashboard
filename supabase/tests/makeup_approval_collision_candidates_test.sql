@@ -7,6 +7,7 @@ $$;
 insert into auth.users(id,instance_id,aud,role,email,raw_app_meta_data,raw_user_meta_data,created_at,updated_at)
 values(pg_temp.cid(800),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','collision-perf@test.invalid','{}','{}',now(),now());
 insert into public.profiles(id,role,name) values(pg_temp.cid(800),'admin','fixture') on conflict(id) do update set role='admin';
+select set_config('request.jwt.claim.sub',pg_temp.cid(800)::text,true);
 insert into public.classes(id,name,subject,room,schedule) values
  (pg_temp.cid(701),'Friday','영어','A','금 09:00-10:00'),
  (pg_temp.cid(702),'Monday','영어','A','월 09:00-10:00'),
@@ -40,7 +41,8 @@ set local role service_role;
 select lives_ok($$select public.get_makeup_approval_collision_context_v1(pg_temp.slots())$$,'service role executes entire pure-helper chain');
 select throws_ok($$select public.get_makeup_approval_collision_context_v1('{}')$$,'22023','makeup_reservation_request_invalid','invalid shape exact SQLSTATE');
 select throws_ok($$select public.get_makeup_approval_collision_context_v1('[{}]')$$,'22023','makeup_reservation_request_invalid','invalid slot exact SQLSTATE');
-select is(public.get_makeup_approval_collision_context_v1('[]'),' {"classes":[],"requests":[],"academicEvents":[]}'::jsonb,'no slots read no candidates');
+select is(public.get_makeup_approval_collision_context_v1('[]'),' {"classes":[],"requests":[],"academicEvents":[]}'::jsonb,'no slots read no request-context candidates');
+select is(public.get_makeup_effective_occupancy_v1('[]'),' {"version":1,"occupancies":[]}'::jsonb,'separate empty occupancy read returns complete empty result');
 select is((select jsonb_agg(r->>'id' order by r->>'id') from jsonb_array_elements(public.get_makeup_approval_collision_context_v1(pg_temp.slots())->'requests')r),
  jsonb_build_array(pg_temp.cid(1),pg_temp.cid(5),pg_temp.cid(6)),'pending plus legacy and high precision survive, historical adjacent inactive excluded');
 select is((select jsonb_agg(r->>'id' order by r->>'id') from jsonb_array_elements(public.get_makeup_approval_collision_context_v1(pg_temp.slots())->'classes')r),

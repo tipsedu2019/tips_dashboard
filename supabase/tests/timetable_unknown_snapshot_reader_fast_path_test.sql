@@ -199,47 +199,65 @@ set constraints all deferred;
 create temp table reader_result as select
  pg_temp.c12_reference() before_reference,
  dashboard_private.read_timetable_operating_reference_v1() after_reference;
-select is(after_reference,before_reference,'all edge fixtures preserve complete reader JSONB') from reader_result;
-select is(after_reference->>'datedFingerprint',before_reference->>'datedFingerprint','full dated fingerprint is unchanged') from reader_result;
-select is(after_reference->>'shadowFingerprint',before_reference->>'shadowFingerprint','full weekly-and-dated shadow fingerprint is unchanged') from reader_result;
-select is(after_reference->>'datedComplete','false','unknown snapshots retain fail-closed completeness') from reader_result;
-select is(
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') with ordinality entries(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(before_reference->'datedUnresolvedOccupancies') with ordinality entries(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- label||': blocker payload and order parity') from cases order by n;
-select is(
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(after_reference->'datedSessions') with ordinality entries(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(before_reference->'datedSessions') with ordinality entries(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- label||': dated occupancy parity') from cases order by n;
-
--- Fixed expectations prevent a shared control/candidate bug from declaring an
--- unknown row resolved or erasing its exact known date or fingerprint.
-select is((select v from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId'=pg_temp.fid(301)::text),
- jsonb_build_object('classId',pg_temp.fid(301),'label','Synthetic reader case 1','scope','all','resourceId',null,'reason','incomplete_read',
-  'date',pg_temp.past_day(),'startMinute',null,'endMinute',null,'teacherId',null,'classroomId',null,
-  'occupancyFingerprint',md5(((pg_temp.unknown_row()-array['memo','state'])||jsonb_build_object('identity','synthetic-row','scheduleState','active'))::text)),
- 'absent snapshots retain the exact conservative blocker and occupancy fingerprint');
-select ok(not exists(select 1 from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(301)::text),
- 'absent historical snapshots never become a resolved dated lesson');
-select ok((select bool_and(v->'date'='null'::jsonb) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId' in(pg_temp.fid(302)::text,pg_temp.fid(303)::text,pg_temp.fid(304)::text,pg_temp.fid(305)::text)),
- 'absent/null/invalid dates remain explicit undated blockers');
-select is((select v->'teacherId' from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId'=pg_temp.fid(313)::text),
- to_jsonb(pg_temp.fid(101)),'partial retained teacher UUID survives fallback validation');
-select is((select v->'startMinute' from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId'=pg_temp.fid(313)::text),
- '540'::jsonb,'partial retained interval survives fallback validation');
-select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(318)::text and v->>'state'='active' and v->>'inheritedWeeklySlotId' is not null),
- 1::bigint,'valid future producer still inherits its weekly slot before fast path');
-select ok((select v->'startMinute'='null'::jsonb and v->'endMinute'='null'::jsonb and v->>'teacherId'=pg_temp.fid(101)::text and v->>'classroomId'=pg_temp.fid(201)::text
- from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId'=pg_temp.fid(319)::text),
- 'unmatched future weekday retains uniquely known teacher and room before fast path');
-select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId' in(pg_temp.fid(320)::text,pg_temp.fid(321)::text,pg_temp.fid(322)::text) and v->>'state'='skipped'),
- 3::bigint,'unique skipped/exception/tbd rows preserve existing cancellation authority');
-select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId' in(pg_temp.fid(316)::text,pg_temp.fid(317)::text)),
- 4::bigint,'duplicate identities or dates cannot acquire cancellation authority');
-select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId' in(pg_temp.fid(323)::text,pg_temp.fid(324)::text,pg_temp.fid(325)::text)),
- 3::bigint,'forced/makeup/unmarked future rows stay unknown');
-select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(341)::text),
- 2::bigint,'future inheritance still includes every matching weekly interval');
+-- The owner-approved inheritance contract deliberately changes dated occupancy.
+-- Preserve every unrelated reader field against the frozen control; verify each
+-- dated case against explicit expected counts and targeted values below.
+select is(after_reference-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint'],
+ before_reference-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint'],
+ 'weekly metadata and all unrelated reader fields retain frozen control parity') from reader_result;
+select isnt(after_reference->>'datedFingerprint',before_reference->>'datedFingerprint','changed effective occupancy changes dated fingerprint') from reader_result;
+select isnt(after_reference->>'shadowFingerprint',before_reference->>'shadowFingerprint','changed effective occupancy changes shadow fingerprint') from reader_result;
+select is(after_reference->>'datedComplete','false','invalid and explicitly unknown fixtures still fail closed') from reader_result;
+create temp table expected_counts(n int primary key, dated int, blockers int);
+insert into expected_counts values
+ (1,1,0),
+ (2,0,1),
+ (3,0,1),
+ (4,0,1),
+ (5,0,1),
+ (6,0,1),
+ (7,0,1),
+ (8,0,1),
+ (9,1,0),
+ (10,1,0),
+ (11,0,1),
+ (12,1,0),
+ (13,1,0),
+ (14,1,0),
+ (15,0,1),
+ (16,0,2),
+ (17,0,2),
+ (18,1,0),
+ (19,1,0),
+ (20,1,0),
+ (21,1,0),
+ (22,1,0),
+ (23,1,0),
+ (24,1,0),
+ (25,1,0),
+ (26,0,1),
+ (27,0,1),
+ (28,1,0),
+ (29,1,0),
+ (31,0,1),
+ (32,0,1),
+ (33,0,1),
+ (34,0,1),
+ (35,0,1),
+ (36,0,1),
+ (40,0,1),
+ (41,2,0);
+select is((select count(*)::int from reader_result,jsonb_array_elements(after_reference->'datedSessions') x where x->>'classId'=pg_temp.fid(300+c.n)::text),e.dated,c.label||': effective dated row count') from cases c join expected_counts e using(n) order by n;
+select is((select count(*)::int from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') x where x->>'classId'=pg_temp.fid(300+c.n)::text),e.blockers,c.label||': unresolved row count') from cases c join expected_counts e using(n) order by n;
+select is((select count(*) from expected_counts),(select count(*) from cases),'every edge fixture has an independently specified outcome');
+-- Fixed values also protect exact dates, partial fields and cancellation.
+select ok((select v->>'date'=pg_temp.past_day()::text and v->>'startMinute'='540' and v->>'endMinute'='600' and v->>'teacherId'=pg_temp.fid(101)::text and v->>'classroomId'=pg_temp.fid(201)::text from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(301)::text),'past absence inherits complete basics on its exact stored date');
+select ok((select bool_and(v->'date'='null'::jsonb) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId' in(pg_temp.fid(302)::text,pg_temp.fid(303)::text,pg_temp.fid(304)::text,pg_temp.fid(305)::text)),'absent/null/invalid dates remain undated blockers');
+select ok((select v->>'startMinute'='540' and v->>'teacherId'=pg_temp.fid(101)::text and v->>'classroomId'=pg_temp.fid(201)::text from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(313)::text),'partial explicit fields inherit only remaining room');
+select ok((select v->>'date'=pg_temp.future_day(2)::text and v->>'startMinute'='540' from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(319)::text),'off-weekday date is not shifted when shared basics are inherited');
+select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId' in(pg_temp.fid(320)::text,pg_temp.fid(321)::text,pg_temp.fid(322)::text) and v->>'state'='skipped'),3::bigint,'unique skipped exception and tbd rows retain cancellation authority');
+select ok((select v->'teacherId'='null'::jsonb and v->>'startMinute'='540' from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') v where v->>'classId'=pg_temp.fid(315)::text),'explicit empty teacher remains unknown while times inherit');
+select is((select count(*) from reader_result,jsonb_array_elements(after_reference->'datedSessions') v where v->>'classId'=pg_temp.fid(341)::text),2::bigint,'ordinary inheritance retains every same-weekday basic interval');
 
 select * from finish();
 rollback;

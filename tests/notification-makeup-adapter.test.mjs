@@ -775,7 +775,8 @@ test("승인 일정 효과는 인증된 서버가 원본에서 계산하고 공�
   assert.match(approvalRoute, /assertCurrentSource\(requestRow, classRow\)/)
   assert.match(approvalRoute, /assertNoRoomCollision/)
   assert.match(approvalRoute, /get_makeup_approval_collision_context_v1/)
-  assert.match(approvalRoute, /p_slots: normalizeMakeupSlots/)
+  assert.match(approvalRoute, /const slots = normalizeMakeupSlots\(requestRow, text\(requestRow\.makeup_classroom\)\)/)
+  assert.match(approvalRoute, /rpc\("get_makeup_approval_collision_context_v1", \{\s*p_slots: slots,/)
   assert.ok(
     approvalRoute.indexOf("const replay = await attemptMakeupApprovalReplay")
       < approvalRoute.indexOf('readOne(serverClient, "makeup_requests", requestId)'),

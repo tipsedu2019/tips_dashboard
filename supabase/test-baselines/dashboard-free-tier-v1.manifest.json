@@ -704,6 +704,26 @@
       "fileName": "20261002170849_timetable_legacy_default_projection.sql",
       "status": "final",
       "sha256": "ce52cc855ae3f7ec7816123272690386c2606480fbaec94d6ad131249332ee95"
+    },
+    {
+      "fileName": "20261004160000_legacy_effective_schedule_inheritance.sql",
+      "status": "final",
+      "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
+    },
+    {
+      "fileName": "20261006095753_makeup_approval_reference_reuse.sql",
+      "status": "final",
+      "sha256": "f828177eec981e634650c065d1736c1e08c4bbd61e234e7b0c3bf3b7d607dd4d"
+    },
+    {
+      "fileName": "20261006103004_timetable_date_override_lookup_reuse.sql",
+      "status": "final",
+      "sha256": "bf352d2e98afe0dfe329a03cf780c460975198d46b843d3ad165151a1005ed78"
+    },
+    {
+      "fileName": "20261006160956_makeup_numbered_optional_display_keys.sql",
+      "status": "final",
+      "sha256": "838b107a906454ee6238c428821611324459917e62c7206ff6083eedd512889a"
     }
   ]
 }
