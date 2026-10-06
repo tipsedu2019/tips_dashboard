@@ -149,6 +149,7 @@ test("dashboard conflict source normalizer rejects any missing or non-array sour
     academicExamDays: [],
     academicEventExamDetails: [],
     academicEvents: [],
+    withdrawalRosterCutoffs: [],
   }
 
   assert.deepEqual(

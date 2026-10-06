@@ -66,5 +66,45 @@ export function normalizeDashboardSummarySources(value) {
 }
 
 export function normalizeDashboardConflictSources(value) {
-  return normalizeSourceObject(value, CONFLICT_SOURCE_KEYS)
+  const normalized = normalizeSourceObject(value, CONFLICT_SOURCE_KEYS)
+  const cutoffs = value.withdrawalRosterCutoffs === undefined ? [] : value.withdrawalRosterCutoffs
+  if (!Array.isArray(cutoffs)) {
+    throw new Error(DASHBOARD_SOURCE_FORMAT_ERROR)
+  }
+  normalized.withdrawalRosterCutoffs = cutoffs.map((row) => {
+    if (
+      !row || typeof row !== "object" || Array.isArray(row)
+      || typeof row.classId !== "string" || !row.classId.trim()
+      || typeof row.studentId !== "string" || !row.studentId.trim()
+      || typeof row.lastLessonDate !== "string" || !/^\d{4}-\d{2}-\d{2}$/u.test(row.lastLessonDate)
+    ) {
+      throw new Error(DASHBOARD_SOURCE_FORMAT_ERROR)
+    }
+    return {
+      classId: row.classId.trim(),
+      studentId: row.studentId.trim(),
+      lastLessonDate: row.lastLessonDate,
+    }
+  })
+  return normalized
+}
+
+export function attachDashboardWithdrawalRosterCutoffs(classes = [], rows = []) {
+  const cutoffsByClassId = new Map()
+  for (const row of rows) {
+    const cutoffs = cutoffsByClassId.get(row.classId) || new Map()
+    const previousDate = cutoffs.get(row.studentId)
+    if (!previousDate || row.lastLessonDate < previousDate) {
+      cutoffs.set(row.studentId, row.lastLessonDate)
+    }
+    cutoffsByClassId.set(row.classId, cutoffs)
+  }
+
+  return classes.map((classItem) => {
+    if (!classItem || typeof classItem !== "object") return classItem
+    return {
+      ...classItem,
+      withdrawalRosterCutoffs: Object.fromEntries(cutoffsByClassId.get(String(classItem.id || "").trim()) || []),
+    }
+  })
 }

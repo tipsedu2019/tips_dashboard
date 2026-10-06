@@ -129,7 +129,7 @@ function loadRegistrationCompletionRollbackWithMocks(mocks) {
 function loadRegistrationManagementSyncWithMocks(mocks) {
   const syncSource = sourceBetween(
     "async function syncRegistrationManagementLinks",
-    "async function markWithdrawalRosterUpdated",
+    "async function markTransferRosterUpdated",
   );
   const compiled = ts.transpileModule(
     `${syncSource}\nmodule.exports = { syncRegistrationManagementLinks }`,
@@ -264,7 +264,7 @@ test("registration lookup never falls back to an arbitrary same-name row and rev
   );
   const syncSource = sourceBetween(
     "async function syncRegistrationManagementLinks",
-    "async function markWithdrawalRosterUpdated",
+    "async function markTransferRosterUpdated",
   );
 
   assert.match(findByNameSource, /input\.type === "registration"/);
@@ -633,7 +633,7 @@ test("registration completion validates and synchronizes textbook work only when
   );
   const syncSource = sourceBetween(
     "async function syncRegistrationManagementLinks",
-    "async function markWithdrawalRosterUpdated",
+    "async function markTransferRosterUpdated",
   );
   const registrationReadySource = readySource.slice(
     readySource.indexOf('if (input.type === "registration" && isRegistrationWorkflowComplete(input))'),

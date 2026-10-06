@@ -4319,7 +4319,7 @@ test("management sync connects registration transfer withdrawal and word retest 
     "선택 필요",
     "연결 필요",
     '"registration_completed"',
-    '"withdrawal_completed"',
+    'runIdempotentOpsTaskProducerRpc("complete_ops_withdrawal_roster_transition_v3"',
     '"transfer_from_class"',
     '"transfer_to_class"',
     ".from(\"ops_word_retests\")",

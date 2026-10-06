@@ -15,6 +15,7 @@ import {
   dashboardSnapshotCache,
 } from "@/features/dashboard/snapshot-cache.js"
 import {
+  attachDashboardWithdrawalRosterCutoffs,
   getDashboardSourceError,
   normalizeDashboardConflictSources,
   normalizeDashboardSummarySources,
@@ -205,7 +206,10 @@ export function useTipsDashboardMetrics() {
       .load(cacheScope, "conflict", readDashboardConflictSources)
       .then((conflict) => {
         if (!isCurrent) return
-        const classes = attachDashboardClassSessionDates(sourceData.classes, conflict.sessionDates)
+        const classes = attachDashboardWithdrawalRosterCutoffs(
+          attachDashboardClassSessionDates(sourceData.classes, conflict.sessionDates),
+          conflict.withdrawalRosterCutoffs,
+        )
         setMetrics({
           ...buildMetrics({
             classes,

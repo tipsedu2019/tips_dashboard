@@ -1,6 +1,6 @@
 import { supabase } from "@/lib/supabase"
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
-import { ACTIVE_STUDENT_STATUS, WITHDRAWN_STUDENT_STATUS } from "@/lib/student-status.js"
+import { ACTIVE_STUDENT_STATUS } from "@/lib/student-status.js"
 
 import {
   REGISTRATION_PIPELINE_STATUSES,
@@ -3144,15 +3144,6 @@ function getOpsStudentClassMode(student: Row | null, classId: string) {
   return ""
 }
 
-function getWithdrawalStudentStatusAfterClassRemoval(student: Row | null, classId: string) {
-  const removedClassId = text(classId)
-  const remainingClassIds = normalizeIdList(student?.class_ids).filter((id) => id !== removedClassId)
-  const remainingWaitlistClassIds = normalizeIdList(student?.waitlist_class_ids).filter((id) => id !== removedClassId)
-  return remainingClassIds.length === 0 && remainingWaitlistClassIds.length === 0
-    ? WITHDRAWN_STUDENT_STATUS
-    : ACTIVE_STUDENT_STATUS
-}
-
 function hasOpsStudentClassRosterLink(student: Row | null, classRow: Row | null) {
   const studentId = text(student?.id)
   const classId = text(classRow?.id)
@@ -3256,6 +3247,16 @@ async function getOpsRosterRuntimeState() {
   return runtime
 }
 
+async function assertWithdrawalLastLessonRuntimeReady() {
+  if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
+  const { data, error } = await supabase.rpc("withdrawal_last_lesson_release_runtime_version")
+  if (error && !isMissingOpsRosterRpc(error)) throw error
+  if (error || data !== "withdrawal_last_lesson_release_v1") {
+    throw new Error("퇴원 기준일을 포함하는 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요.")
+  }
+  await getOpsRosterRuntimeState()
+}
+
 async function applyReadyOpsRosterMode(
   studentId: string,
   classId: string,
@@ -3288,10 +3289,18 @@ async function applyReadyOpsRosterMode(
 
 async function completeReadyOpsRosterTransition(taskId: string, type: OpsTaskType) {
   if (!supabase || !taskId || !["withdrawal", "transfer"].includes(type)) return null
+  if (type === "withdrawal") {
+    await assertWithdrawalLastLessonRuntimeReady()
+    const response = await runIdempotentOpsTaskProducerRpc("complete_ops_withdrawal_roster_transition_v3", {
+      p_task_id: taskId,
+    })
+    return {
+      sourceEventIds: producerSourceEventIds(response),
+      publicClassesCacheRefresh: await invalidatePublicClassesCacheAfterMutation(supabase, "class"),
+    }
+  }
   const runtime = await getOpsRosterRuntimeState()
-  const v2FunctionName = type === "withdrawal"
-    ? "complete_ops_withdrawal_roster_transition_v2"
-    : "complete_ops_transfer_roster_transition_v2"
+  const v2FunctionName = "complete_ops_transfer_roster_transition_v2"
   if (runtime.mode !== "legacy") {
     try {
       const response = await runIdempotentOpsTaskProducerRpc(v2FunctionName, {
@@ -3307,9 +3316,7 @@ async function completeReadyOpsRosterTransition(taskId: string, type: OpsTaskTyp
     }
   }
 
-  const legacyFunctionName = type === "withdrawal"
-    ? "complete_ops_withdrawal_roster_transition"
-    : "complete_ops_transfer_roster_transition"
+  const legacyFunctionName = "complete_ops_transfer_roster_transition"
   const { data, error } = await supabase.rpc(legacyFunctionName, {
     p_task_id: taskId,
     p_request_key: `ops-${type}-completion-${taskId}`,
@@ -4155,15 +4162,6 @@ async function syncRegistrationManagementLinks(
   return publicClassesChanged
 }
 
-async function markWithdrawalRosterUpdated(taskId: string) {
-  if (!supabase) return
-  const { error } = await supabase
-    .from("ops_withdrawal_details")
-    .upsert({ task_id: taskId, timetable_roster_updated: true })
-  if (error) throw error
-  await writeEvent(taskId, "auto_checked", "시간표 명단 변경", "", "완료")
-}
-
 async function markTransferRosterUpdated(taskId: string) {
   if (!supabase) return
   const { error } = await supabase
@@ -4174,6 +4172,9 @@ async function markTransferRosterUpdated(taskId: string) {
 }
 
 async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput) {
+  if (input.status === "done") {
+    throw new Error("퇴원 완료는 기준일을 포함하는 명단 처리 경로에서 진행하세요.")
+  }
   const student = await resolveOpsStudent(input)
   const classRow = await resolveOpsClass(input.classId, input.className, input.withdrawal?.teacherName)
 
@@ -4185,32 +4186,6 @@ async function syncWithdrawalManagementLinks(taskId: string, input: OpsTaskInput
     subject: text(classRow?.subject) || text(input.subject) || null,
   })
 
-  if (input.status === "done") {
-    assertResolvedManagementRecord(student, "퇴원 완료 전에 기존 학생을 연결하세요.")
-    assertResolvedManagementRecord(classRow, "퇴원 완료 전에 기존 수업을 연결하세요.")
-    assertOpsStudentInClass(student, classRow, "퇴원 완료 전에 학생이 해당 수업 명단에 있는지 확인하세요.")
-    const classLabel = text(classRow.name) || text(input.className)
-    const nextStudentStatus = getWithdrawalStudentStatusAfterClassRemoval(student, text(classRow.id))
-    try {
-      await removeOpsStudentFromClass(student, classRow, "withdrawal_completed")
-      await setOpsStudentStatus(student, nextStudentStatus)
-      await markWithdrawalRosterUpdated(taskId)
-    } catch (error) {
-      try {
-        await rollbackOpsWithdrawalCompletionSync(taskId, student, classRow)
-      } catch (rollbackError) {
-        attachOpsTaskCleanupError(error, rollbackError)
-      }
-      throw error
-    }
-    await writeAutoSyncEventOnce(taskId, "수업명단", `${classLabel} 제거 · withdrawal_completed`)
-    await writeAutoSyncEventOnce(
-      taskId,
-      "학생 상태",
-      nextStudentStatus === WITHDRAWN_STUDENT_STATUS ? "퇴원" : "다른 수강 과목 유지 · 재원",
-    )
-    return true
-  }
   return false
 }
 
@@ -4369,6 +4344,9 @@ export async function createOpsTransitionTask(input: OpsTaskInput): Promise<OpsT
   if (!["transfer", "withdrawal"].includes(input.type)) {
     throw new Error("전반·퇴원 업무만 안전 생성 경로를 사용할 수 있습니다.")
   }
+  if (input.type === "withdrawal" && input.status === "done") {
+    await assertWithdrawalLastLessonRuntimeReady()
+  }
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
   try {
@@ -4381,6 +4359,7 @@ export async function createOpsTransitionTask(input: OpsTaskInput): Promise<OpsT
       sourceEventIds: producerSourceEventIds(response),
     }
   } catch (error) {
+    if (input.type === "withdrawal" && input.status === "done") throw error
     if (!isMissingOpsRosterRpc(error)) throw error
     resetRegistrationSubjectTrackRuntimeProbe()
     return createOpsTask(input, { skipTransitionProducer: true })
@@ -4393,6 +4372,9 @@ export async function createOpsTask(
 ): Promise<OpsTaskProducerReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
+  if (input.type === "withdrawal" && input.status === "done") {
+    await assertWithdrawalLastLessonRuntimeReady()
+  }
   assertRegistrationInquiryBaseReady(input)
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
@@ -4414,8 +4396,8 @@ export async function createOpsTask(
     }
   }
   const stagesReadyOpsRosterCompletion = input.status === "done"
-    && ["withdrawal", "transfer"].includes(input.type)
-    && (await getOpsRosterRuntimeState()).mode === "ready"
+    && (input.type === "withdrawal"
+      || (input.type === "transfer" && (await getOpsRosterRuntimeState()).mode === "ready"))
   const stagesTerminalRegistrationParent = input.type === "registration"
     && ["done", "canceled"].includes(input.status || "requested")
   const initialParentInput: OpsTaskInput = stagesTerminalRegistrationParent || stagesReadyOpsRosterCompletion
@@ -4572,6 +4554,9 @@ export async function updateOpsTask(
   const nextStatus = input.status || "requested"
   assertCompletedOperationStatusTransition(existingTask, nextStatus)
   assertCompletedOperationEditable(existingTask)
+  if (input.type === "withdrawal" && nextStatus === "done") {
+    await assertWithdrawalLastLessonRuntimeReady()
+  }
   assertRegistrationInquiryBaseReady(input)
   assertManagementSyncReady(input)
   await assertManagementSyncRecordsReady(input)
@@ -4634,6 +4619,7 @@ export async function updateOpsTask(
       clearOpsTaskWorkspaceDataCache()
       return { sourceEventIds }
     } catch (error) {
+      if (input.type === "withdrawal" && nextStatus === "done") throw error
       if (!isMissingOpsRosterRpc(error)) throw error
       resetRegistrationSubjectTrackRuntimeProbe()
     }
