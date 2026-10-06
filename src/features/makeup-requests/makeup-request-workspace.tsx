@@ -614,8 +614,31 @@ function getMakeupRequestCardValue(request: MakeupRequest, columnKey: MakeupRequ
   return getMakeupRequestTableValue(request, columnKey)
 }
 
-function hasMakeupRequestRoomCollision(request: MakeupRequest, data: MakeupRequestWorkspaceData) {
-  return getRequestSlots(request).some((slot) => {
+export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  let data = workspaceData
+  const context = data.reservationContext
+  const completedReservation = context?.reservations.find((item) => item.id === request.id && item.status === "completed")
+  const effectiveSchedule = context?.effectiveSchedule
+  const requestSlots = getRequestSlots(request)
+  if (request.status === "completed" && request.id && request.classId && completedReservation && effectiveSchedule) {
+    const ownLessonPrefix = `legacy-session:${request.classId}:makeup-request:${request.id}:`
+    const occupancies = effectiveSchedule.occupancies.filter((row) => {
+      if (row.classId !== request.classId || row.uncertain !== false || row.allRooms !== false
+        || typeof row.id !== "string" || !row.id.startsWith(ownLessonPrefix)
+        || typeof row.startMinute !== "number" || typeof row.endMinute !== "number") return true
+      const index = row.id.slice(ownLessonPrefix.length)
+      if (!/^(0|[1-9]\d*)$/.test(index) || !Number.isSafeInteger(Number(index))) return true
+      const slot = requestSlots[Number(index)]
+      const day = Date.parse(`${row.date}T00:00:00+09:00`)
+      // Only the completed request's exact bound lesson is its own reservation.
+      // Keep other classes, uncertain rows, and changed lesson metadata visible.
+      return !slot || row.classroom !== (slot.classroom || request.makeupClassroom)
+        || Date.parse(slot.startAt || "") !== day + row.startMinute * 60_000
+        || Date.parse(slot.endAt || "") !== day + row.endMinute * 60_000
+    })
+    data = { ...data, reservationContext: { ...context, effectiveSchedule: { ...effectiveSchedule, occupancies } } }
+  }
+  return requestSlots.some((slot) => {
     const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
     return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject)?.collisions.length)
   })
