@@ -184,3 +184,97 @@ test('approval keeps one request-context read and never saves after a late batch
     assert.equal(fixture.calls.filter(c=>c.name==='transition_makeup_request_v2').length,1,'only initial idempotent replay probe; no save');
   }
 });
+
+
+test('completed request display excludes only its exact approved slots', async t => {
+  const { hasMakeupRequestRoomCollision } = modules(null, { '@/providers/auth-provider': { useAuth: () => null } })('src/features/makeup-requests/makeup-request-workspace.tsx');
+  const requestId = id(701), classId = id(702), otherRequestId = id(703), otherClassId = id(704);
+  const room = 'Synthetic room';
+  const slot = (date = '2026-10-15', start = '15:00', end = '17:00') => ({
+    id: 'slot-1', startAt: `${date}T${start}:00+09:00`, endAt: `${date}T${end}:00+09:00`, classroom: room,
+  });
+  const request = (slots = [slot()]) => ({ id: requestId, classId, status: 'completed', makeupSlots: slots });
+  const occupancy = (patch = {}) => ({
+    id: `legacy-session:${classId}:makeup-request:${requestId}:0`,
+    classId, className: 'Synthetic class', date: '2026-10-15',
+    startMinute: 900, endMinute: 1020, classroom: room, uncertain: false, allRooms: false, ...patch,
+  });
+  const collision = (rows, { currentRequest = request(), reservations = [request()], academicEvents = [], ...options } = {}) => {
+    const data = {
+      classrooms: [{ name: room }], classes: [], requests: [currentRequest], academicEvents, collisionContextReady: true,
+      reservationContext: { reservations, activeEventRequestIds: reservations.map(r => r.id), effectiveSchedule: { version: 1, occupancies: rows } },
+      ...options,
+    };
+    const before = structuredClone(data);
+    const result = hasMakeupRequestRoomCollision(currentRequest, data);
+    assert.deepEqual(data, before, 'display filtering does not mutate the shared occupancy context');
+    return result;
+  };
+
+  await t.test('completed display excludes its own exact lesson, request reservation, and calendar event', () => {
+    for (const [date, start, end, startMinute, endMinute] of [
+      ['2026-10-15', '15:00', '17:00', 900, 1020],
+      ['2026-10-02', '21:30', '23:30', 1290, 1410],
+      ['2026-10-03', '18:00', '20:00', 1080, 1200],
+    ]) {
+      const slots = [slot(date, start, end)];
+      const ownEvent = { id: 'own-calendar', note: '[[TIPS_MAKEUP]] ' + JSON.stringify({
+        kind: 'makeup', requestId, classroom: room, startAt: slots[0].startAt, endAt: slots[0].endAt,
+      }) };
+      assert.equal(collision([occupancy({ date, startMinute, endMinute })], {
+        currentRequest: request(slots), reservations: [request(slots)], academicEvents: [ownEvent],
+      }), false);
+    }
+  });
+
+  await t.test('pending states, stale status, and missing class or reservation context retain blockers', () => {
+    for (const status of ['approval_pending', 'makeup_pending', 'manager_pending', 'canceled']) {
+      assert.equal(collision([occupancy()], { currentRequest: { ...request(), status } }), true, status);
+      assert.equal(collision([occupancy()], { reservations: [{ ...request(), status }] }), true, `reservation ${status}`);
+    }
+    assert.equal(collision([occupancy()], { reservations: [] }), true);
+    assert.equal(collision([occupancy()], { currentRequest: { ...request(), classId: '' } }), true);
+    assert.equal(collision([occupancy()], { currentRequest: { ...request(), id: '' } }), true);
+  });
+
+  await t.test('every independent foreign lesson, request, and event still reports a conflict', () => {
+    const foreign = occupancy({ id: `legacy-session:${classId}:makeup-request:${otherRequestId}:0` });
+    const regular = occupancy({ id: `legacy-session:${classId}:ordinary-lesson` });
+    const copiedToOtherClass = occupancy({ classId: otherClassId, id: `legacy-session:${otherClassId}:makeup-request:${requestId}:0` });
+    for (const row of [foreign, regular, copiedToOtherClass]) {
+      assert.equal(collision([occupancy(), row]), true, row.id);
+    }
+    const otherReservation = { ...request(), id: otherRequestId, status: 'approval_pending' };
+    assert.equal(collision([occupancy()], { reservations: [request(), otherReservation] }), true);
+    const otherEvent = { id: 'other-calendar-event', note: '[[TIPS_MAKEUP]] ' + JSON.stringify({
+      kind: 'makeup', requestId: otherRequestId, classroom: room, startAt: slot().startAt, endAt: slot().endAt,
+    }) };
+    assert.equal(collision([occupancy()], { reservations: [request(), { ...otherReservation, makeupSlots: [] }], academicEvents: [otherEvent] }), true);
+  });
+
+  await t.test('uncertain, changed, or unbound lesson metadata stays a collision', () => {
+    for (const patch of [
+      { uncertain: true }, { allRooms: true }, { startMinute: null },
+      { startMinute: 899 }, { endMinute: 1021 },
+      { id: `legacy-session:${classId}:makeup-request:${requestId}:0:extra` },
+      { id: `legacy-session:${classId}:makeup-request:${requestId}:00` },
+      { id: `legacy-session:${classId}:makeup-request:${requestId}:1` },
+      { id: `legacy-session:other-class:makeup-request:${requestId}:0` },
+      { id: 'session:unbound-normalized-lesson' },
+    ]) assert.equal(collision([occupancy(patch)]), true, JSON.stringify(patch));
+    const moved = slot('2026-10-16');
+    assert.equal(collision([occupancy()], { currentRequest: request([moved]), reservations: [request([moved])],
+      reservationContext: { reservations: [request([moved])], activeEventRequestIds: [], effectiveSchedule: { version: 1, occupancies: [occupancy({ date: '2026-10-16', startMinute: 899 })] } },
+    }), true);
+  });
+
+  await t.test('exact multi-slot identity and midnight work while the shared approval model remains conservative', () => {
+    const slots = [slot(), { id: 'slot-2', startAt: '2026-10-16T14:00:00Z', endAt: '2026-10-16T15:00:00Z', classroom: room }];
+    const rows = [occupancy(), occupancy({ id: `legacy-session:${classId}:makeup-request:${requestId}:1`, date: '2026-10-16', startMinute: 1380, endMinute: 1440 })];
+    assert.equal(collision(rows, { currentRequest: request(slots), reservations: [request(slots)] }), false);
+    const { buildRoomAvailability } = modules(null)('src/features/makeup-requests/makeup-request-model.js');
+    assert.equal(buildRoomAvailability({ classrooms: [{ name: room }], requests: [request()], slots: [slot()], currentRequestId: requestId,
+      effectiveSchedule: { version: 1, occupancies: [occupancy()] },
+    })[0].available, false, 'API/shared model receives no display-only exclusion');
+  });
+});
