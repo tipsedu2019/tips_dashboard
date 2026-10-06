@@ -49,12 +49,12 @@ select pg_temp.pid(301),'Synthetic sixty-row class','영어','수강','legacy',
    'sessionSchedules',jsonb_build_object(pg_temp.past_day()::text,jsonb_build_object('startTime','17:00','endTime','19:00','teacherCatalogId',pg_temp.pid(101),'classroomCatalogId',pg_temp.pid(201))),
    'history',jsonb_build_array(jsonb_build_object('retained','SYNTHETIC_HISTORY')),
    'privateNote','SYNTHETIC_PRIVATE','generatedAt','2001-01-01T00:00:00Z'), '[]'::jsonb;
--- Twenty-three historical NULL snapshots; present-day weekly metadata uses
--- different resources and cannot establish historical resource/time facts.
+-- Twenty-three explicitly cleared historical snapshots. Absence now inherits;
+-- explicit NULL still cannot borrow present-day resource/time facts.
 insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room,schedule_plan,student_ids)
 select pg_temp.pid(400+n),'Synthetic uncertainty '||n,'영어','수강','legacy',
  '월 08:00-09:00','Synthetic other teacher','Synthetic other room',
- jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','unknown-'||n,'date',pg_temp.past_day(),'scheduleState','active','state','active','isForced',false))), '[]'::jsonb
+ jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','unknown-'||n,'date',pg_temp.past_day(),'scheduleState','active','state','active','isForced',false,'startTime',null,'endTime',null,'teacherCatalogId',null,'classroomCatalogId',null))), '[]'::jsonb
 from generate_series(1,23) n;
 insert into dashboard_private.continuous_class_schedule_runtime(singleton,version) values(true,1)
  on conflict(singleton) do update set version=1;

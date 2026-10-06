@@ -1,3 +1,4 @@
+import { effectiveInputForLesson, resolveEffectiveSchedule } from './legacy-effective-schedule.js';
 type Plan = Record<string, unknown>;
 type Session = Record<string, unknown>;
 const contentFields = ["textbookEntries", "rangeStart", "rangeEnd", "rangeLabel", "progressStatus", "publicNote", "teacherNote"] as const;
@@ -112,6 +113,7 @@ export function legacyLessonScheduleValidationError(
   plan: Plan,
   savedPlan: Plan,
   today = new Intl.DateTimeFormat('sv-SE', { timeZone: 'Asia/Seoul' }).format(new Date()),
+  effectiveContext: Record<string, unknown> | null = null,
 ): string {
   const saved = Array.isArray(savedPlan.sessions) ? savedPlan.sessions as Session[] : [];
   const sessions = Array.isArray(plan.sessions) ? plan.sessions as Session[] : [];
@@ -133,9 +135,17 @@ export function legacyLessonScheduleValidationError(
     const date = String(row.date || '선택한 날짜');
     const regular = state === 'active' && !row.isForced && !row.originalDate;
     const hasOverride = occupancyFields.some(field => Object.prototype.hasOwnProperty.call(row, field) && row[field] !== undefined);
-    if (regular && !hasOverride && date >= today) continue;
+    if (effectiveContext?.version !== 1 && regular && !hasOverride && date >= today) continue;
     if (regular && hasOverride && (dateCounts.get(date) || 0) > 1) return `${date} 같은 날짜에 여러 회차가 있어 개별 시간·선생님·강의실을 수정할 수 없습니다. 입력을 확인해 주세요.`;
     const kind = regular ? '수업' : '보강';
+    if (effectiveContext?.version === 1) {
+      const result = resolveEffectiveSchedule(effectiveInputForLesson(plan, row, effectiveContext));
+      if (result.kind === 'resolved') continue;
+      if (result.errors.includes('invalid_time_range')) return `${date} 종료 시간을 시작 시간 이후로 입력해 주세요.`;
+      if (result.missing.includes('startTime') || result.missing.includes('endTime')) return `${date} ${kind}의 시작·종료 시간을 입력해 주세요.`;
+      if (result.missing.includes('teacherCatalogId') || result.missing.includes('classroomCatalogId')) return `${date} ${kind}의 선생님·강의실을 선택해 주세요.`;
+      return `${date} ${kind}의 날짜와 회차 정보를 확인해 주세요.`;
+    }
     if (!/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.startTime || '')) || !/^(?:[01]\d|2[0-3]):[0-5]\d$/.test(String(row.endTime || ''))) return `${date} ${kind}의 시작·종료 시간을 입력해 주세요.`;
     if (String(row.startTime) >= String(row.endTime)) return `${date} 종료 시간을 시작 시간 이후로 입력해 주세요.`;
     if (!(row.teacherCatalogId || row.teacherName) || !(row.classroomCatalogId || row.classroomName)) return `${date} ${kind}의 선생님·강의실을 선택해 주세요.`;

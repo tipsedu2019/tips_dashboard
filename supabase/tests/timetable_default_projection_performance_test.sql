@@ -262,18 +262,64 @@ alter table reader_result add column after_reference jsonb;
 update reader_result set before_reference=before_outcome->'reference',after_reference=after_outcome->'reference';
 select is(before_outcome->>'sqlstate','00000','C15 handles malformed fixture parsers with exact SQLSTATE00000') from reader_result;
 select is(after_outcome->>'sqlstate','00000','installed candidate retains handled-parser SQLSTATE00000') from reader_result;
-select is(after_reference,before_reference,'complete reader JSONB equals frozen C15') from reader_result;
-select is(after_reference->>'datedFingerprint',before_reference->>'datedFingerprint','dated fingerprint equals frozen C15') from reader_result;
-select is(after_reference->>'shadowFingerprint',before_reference->>'shadowFingerprint','complete shadow fingerprint equals frozen C15') from reader_result;
-select is(
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(after_reference->'datedSessions') with ordinality e(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(before_reference->'datedSessions') with ordinality e(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- label||': dated payload and order') from cases order by n;
-select is(
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') with ordinality e(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- (select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,jsonb_array_elements(before_reference->'datedUnresolvedOccupancies') with ordinality e(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text),
- label||': blocker payload and order') from cases order by n;
-
+-- The owner-approved inheritance contract deliberately changes dated occupancy.
+-- Preserve every unrelated reader field against the frozen control; verify each
+-- dated case against explicit expected counts and targeted values below.
+select is(after_reference-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint'],
+ before_reference-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint'],
+ 'weekly metadata and all unrelated reader fields retain frozen control parity') from reader_result;
+select isnt(after_reference->>'datedFingerprint',before_reference->>'datedFingerprint','changed effective occupancy changes dated fingerprint') from reader_result;
+select isnt(after_reference->>'shadowFingerprint',before_reference->>'shadowFingerprint','changed effective occupancy changes shadow fingerprint') from reader_result;
+select is(after_reference->>'datedComplete','false','invalid and explicitly unknown fixtures still fail closed') from reader_result;
+create temp table expected_counts(n int primary key, dated int, blockers int);
+insert into expected_counts values
+ (1,2,0),
+ (2,5,0),
+ (3,1,0),
+ (4,1,0),
+ (5,0,1),
+ (6,0,1),
+ (7,1,0),
+ (8,3,0),
+ (9,0,1),
+ (10,1,0),
+ (11,1,0),
+ (12,1,0),
+ (13,0,2),
+ (14,0,2),
+ (15,1,0),
+ (16,1,0),
+ (17,2,0),
+ (18,0,1),
+ (19,0,1),
+ (20,0,1),
+ (21,0,1),
+ (22,0,1),
+ (23,1,0),
+ (24,0,1),
+ (25,0,1),
+ (26,1,0),
+ (27,1,0),
+ (28,0,1),
+ (29,0,1),
+ (30,0,1),
+ (31,0,1),
+ (32,0,1),
+ (33,0,1),
+ (34,0,0),
+ (35,0,1),
+ (36,2,0),
+ (37,0,1),
+ (38,0,1),
+ (39,1,0),
+ (40,1,0),
+ (41,1,0),
+ (42,1,0),
+ (43,0,1),
+ (44,0,0);
+select is((select count(*)::int from reader_result,jsonb_array_elements(after_reference->'datedSessions') x where x->>'classId'=pg_temp.fid(300+c.n)::text),e.dated,c.label||': effective dated row count') from cases c join expected_counts e using(n) order by n;
+select is((select count(*)::int from reader_result,jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') x where x->>'classId'=pg_temp.fid(300+c.n)::text),e.blockers,c.label||': unresolved row count') from cases c join expected_counts e using(n) order by n;
+select is((select count(*) from expected_counts),(select count(*) from cases),'every edge fixture has an independently specified outcome');
 create function pg_temp.dated_for(n int) returns jsonb language sql stable as
 $$select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,
  jsonb_array_elements(after_reference->'datedSessions') with ordinality e(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text$$;
@@ -282,13 +328,13 @@ $$select coalesce(jsonb_agg(v order by ord),'[]'::jsonb) from reader_result,
  jsonb_array_elements(after_reference->'datedUnresolvedOccupancies') with ordinality e(v,ord) where v->>'classId'=pg_temp.fid(300+n)::text$$;
 
 -- Fixed expectations prevent shared control/candidate mistakes from passing.
-select is(jsonb_array_length(pg_temp.dated_for(1)),1,'plain future inherits while past remains unknown');
-select is(jsonb_array_length(pg_temp.blockers_for(1)),1,'past plain row retains one dated blocker');
+select is(jsonb_array_length(pg_temp.dated_for(1)),2,'past and future use the same absent-field rule');
+select is(jsonb_array_length(pg_temp.blockers_for(1)),0,'complete inherited past row adds no blocker');
 select is(jsonb_array_length(pg_temp.dated_for(2)),5,'every repeated future row uses current defaults');
-select is(pg_temp.blockers_for(3)->0->'startMinute','null'::jsonb,'unmatched weekday keeps time unknown');
-select is(pg_temp.blockers_for(3)->0->>'teacherId',pg_temp.fid(101)::text,'unmatched single pair retains teacher');
-select is(pg_temp.blockers_for(3)->0->>'classroomId',pg_temp.fid(201)::text,'unmatched single pair retains room');
-select is(jsonb_array_length(pg_temp.dated_for(4)),0,'past plain row never inherits');
+select is(pg_temp.dated_for(3)->0->'startMinute','540'::jsonb,'off-weekday row inherits shared time without changing date');
+select is(pg_temp.dated_for(3)->0->>'teacherId',pg_temp.fid(101)::text,'unmatched single pair retains teacher');
+select is(pg_temp.dated_for(3)->0->>'classroomId',pg_temp.fid(201)::text,'unmatched single pair retains room');
+select is(jsonb_array_length(pg_temp.dated_for(4)),1,'past plain row inherits complete basics');
 select is(pg_temp.blockers_for(5)->0->>'reason','unresolved_resource','bounded unknown remains resource uncertainty');
 select is(pg_temp.blockers_for(5)->0->'weekday','0'::jsonb,'Sunday weekday zero remains present in inherited unknown occupancy');
 select is(pg_temp.blockers_for(5)->0->'startMinute','0'::jsonb,'midnight zero remains a known bound');
@@ -297,8 +343,8 @@ select is(pg_temp.blockers_for(5)->0->'teacherId','null'::jsonb,'unknown teacher
 select is(pg_temp.blockers_for(5)->0->>'classroomId',pg_temp.fid(201)::text,'bounded unknown retains known room');
 select is(jsonb_array_length(pg_temp.dated_for(6)),0,'empty defaults cannot create inherited occupancy');
 select ok((pg_temp.blockers_for(6)->0) @> '{"startMinute":null,"endMinute":null,"teacherId":null,"classroomId":null}'::jsonb,'empty defaults grant no resources');
-select is(jsonb_array_length(pg_temp.dated_for(7)),0,'global incomplete defaults block known-slot inheritance');
-select ok((pg_temp.blockers_for(7)->0) @> '{"startMinute":null,"endMinute":null,"teacherId":null,"classroomId":null}'::jsonb,'global incomplete defaults remain conservative');
+select is(jsonb_array_length(pg_temp.dated_for(7)),1,'a known matching weekday supplies its complete components');
+select ok(exists(select 1 from reader_result,jsonb_array_elements(after_reference->'unresolvedOccupancies') x where x->>'classId'=pg_temp.fid(307)::text),'unparsed global basic fragment remains a guard blocker');
 select is((select jsonb_agg(v->'startMinute' order by ord) from jsonb_array_elements(pg_temp.dated_for(8)) with ordinality e(v,ord)),
  '[660,540,540]'::jsonb,'weekday membership preserves original order and duplicates');
 select is(jsonb_array_length(pg_temp.dated_for(8)),3,'weekly duplicates retain multiplicity');
@@ -309,21 +355,22 @@ select is(jsonb_array_length(pg_temp.dated_for(13)||pg_temp.dated_for(14)),0,'du
 select is(jsonb_array_length(pg_temp.blockers_for(13)||pg_temp.blockers_for(14)),4,'duplicate cancellation inputs remain four blockers');
 select ok(pg_temp.dated_for(15)->0->>'overriddenWeeklySlotId' is not null,'unique explicit regular override is preserved');
 select ok(not ((pg_temp.dated_for(16)->0) ? 'overriddenWeeklySlotId'),'multiple defaults cannot imply unique override');
-select is(jsonb_array_length(pg_temp.dated_for(17)),1,'closed explicit historical occupancy remains present');
-select is(jsonb_array_length(pg_temp.blockers_for(17)),1,'closed plain historical uncertainty remains present');
+select is(jsonb_array_length(pg_temp.dated_for(17)),2,'closed historical rows retain both explicit and inherited occupancy');
+select is(jsonb_array_length(pg_temp.blockers_for(17)),0,'closed history uses the same inheritance contract');
 select ok(not exists(select 1 from reader_result,jsonb_array_elements(after_reference->'shadowClasses') c where c->>'id' in(pg_temp.fid(317)::text,pg_temp.fid(341)::text)),'closed classes stay outside weekly admission');
 select ok((select bool_and(v->'date'='null'::jsonb) from jsonb_array_elements(pg_temp.blockers_for(18)||pg_temp.blockers_for(19)||pg_temp.blockers_for(20)||pg_temp.blockers_for(21)) v),'NULL missing empty and invalid dates stay explicitly undated');
-select ok((pg_temp.blockers_for(22)->0) @> '{"startMinute":null,"endMinute":null,"teacherId":null,"classroomId":null}'::jsonb,'invalid time retains early parser boundary');
-select is(pg_temp.blockers_for(23)->0->>'teacherId',pg_temp.fid(101)::text,'partial valid teacher survives fallback');
-select is(pg_temp.blockers_for(23)->0->'startMinute','570'::jsonb,'partial valid interval survives fallback');
+select ok((pg_temp.blockers_for(22)->0) @> jsonb_build_object('startMinute',null,'endMinute',630,'teacherId',pg_temp.fid(101),'classroomId',pg_temp.fid(201)),'invalid start retains other independently known components');
+select is(pg_temp.dated_for(23)->0->>'teacherId',pg_temp.fid(101)::text,'partial valid teacher survives fallback');
+select is(pg_temp.dated_for(23)->0->'startMinute','570'::jsonb,'partial valid interval survives fallback');
 select is(pg_temp.blockers_for(24)->0->'teacherId','null'::jsonb,'malformed teacher UUID remains unresolved');
 select is(pg_temp.blockers_for(25)->0->>'teacherId',pg_temp.fid(101)::text,'malformed room UUID retains parsed teacher');
-select is(jsonb_array_length(pg_temp.dated_for(26)||pg_temp.dated_for(27)||pg_temp.dated_for(28)||pg_temp.dated_for(29)||pg_temp.dated_for(38)||pg_temp.dated_for(39)),0,'forced linked empty-identity present-null unknown-state and unmarked rows cannot inherit');
+select is(jsonb_array_length(pg_temp.dated_for(26)||pg_temp.dated_for(27)||pg_temp.dated_for(39)),3,'forced linked and unmarked valid rows inherit absent fields');
+select is(jsonb_array_length(pg_temp.dated_for(28)||pg_temp.dated_for(29)||pg_temp.dated_for(38)),0,'empty identity explicit null and unknown state remain unresolved');
 select is(jsonb_array_length(pg_temp.blockers_for(30)),1,'scalar lesson retains one handled blocker');
 select ok(not ((pg_temp.blockers_for(31)->0) ? 'occupancyFingerprint'),'nonarray sessions retain class-level blocker');
 select is(jsonb_array_length(pg_temp.dated_for(32)),0,'oversized schedule cannot create inherited occupancy');
 select is(jsonb_array_length(pg_temp.blockers_for(34)),0,'empty history adds no dated blocker for incomplete defaults');
-select ok((pg_temp.blockers_for(35)->0) @> '{"teacherId":null,"classroomId":null}'::jsonb,'unknown defaults from another weekday grant no resources');
+select ok((pg_temp.blockers_for(35)->0) @> jsonb_build_object('teacherId',null,'classroomId',pg_temp.fid(201),'startMinute',0,'endMinute',1440),'off-weekday missing teacher retains shared known time and room');
 select is(jsonb_array_length(pg_temp.dated_for(36)),2,'matched weekday keeps both mixed-resource slots');
 select is(pg_temp.blockers_for(37)->0->>'teacherId',pg_temp.fid(101)::text,'multiple intervals with one pair retain unmatched teacher');
 select is(pg_temp.blockers_for(43)->0->>'classroomId',pg_temp.fid(201)::text,'one pair across weekdays retains unmatched room');
@@ -353,7 +400,7 @@ begin
   update public.classes set name='C19 synthetic changed metadata' where id=pg_temp.fid(301);
   after_control:=pg_temp.c15_reference();
   after_candidate:=dashboard_private.read_timetable_operating_reference_v1();
-  result:=jsonb_build_object('beforeEqual',before_candidate=before_control,'afterEqual',after_candidate=after_control,
+  result:=jsonb_build_object('beforeEqual',(before_candidate-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint'])=(before_control-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint']),'afterEqual',(after_candidate-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint'])=(after_control-array['datedSessions','datedUnresolvedOccupancies','datedComplete','datedFingerprint','shadowFingerprint']),
    'freshFingerprint',before_candidate->>'shadowFingerprint' is distinct from after_candidate->>'shadowFingerprint');
   raise exception using errcode='Z1901',message='synthetic_metadata_rollback';
  exception when sqlstate 'Z1901' then null;
@@ -361,8 +408,8 @@ begin
  return result;
 end $f$;
 create temp table fresh_result as select pg_temp.fresh_metadata_case() value;
-select is(value->'beforeEqual','true'::jsonb,'freshness probe starts with full control parity') from fresh_result;
-select is(value->'afterEqual','true'::jsonb,'new invocation keeps control parity after metadata edit') from fresh_result;
+select is(value->'beforeEqual','true'::jsonb,'freshness probe starts with unchanged metadata parity') from fresh_result;
+select is(value->'afterEqual','true'::jsonb,'new invocation keeps unchanged metadata parity after edit') from fresh_result;
 select is(value->'freshFingerprint','true'::jsonb,'new invocation recomputes full metadata fingerprint') from fresh_result;
 
 select is((select jsonb_agg(to_jsonb(c) order by c.id) from public.classes c where c.id in(select pg_temp.fid(300+n) from cases) or c.id=pg_temp.fid(501)),
@@ -375,8 +422,8 @@ select is((select count(*) from public.student_class_enrollment_history),(select
 select is((select count(*) from public.dashboard_audit_logs),(select audits from no_send),'reader and probes leave no audit record');
 select is((select provolatile::text from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'s','reader remains STABLE');
 select is(encode(extensions.digest((select prosrc from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'sha256'),'hex'),
- '1138c86e711b05d4a89f95ab1db72953a81612657e5ffceb18109f5cf54ac789',
- 'assertions execute the exact final C19 reader body');
+ '04f3cf774684bc5b90fc1f75b0cdbe5b8b5c00bb3fc32fc103f3828fd47f560f',
+ 'assertions execute the exact final inheritance reader body');
 select ok((select prosecdef from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),'reader remains SECURITY DEFINER');
 select ok((select proconfig @> array['search_path=""'] from pg_proc where oid='dashboard_private.read_timetable_operating_reference_v1()'::regprocedure),
  'reader retains empty search_path');

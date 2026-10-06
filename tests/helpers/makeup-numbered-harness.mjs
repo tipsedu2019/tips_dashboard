@@ -50,10 +50,16 @@ function response(request, totalCount = 112, patch = {}) {
   return { page, pageSize, totalCount, viewCounts: counts, ...facets,
     rows: Array.from({ length: Math.min(pageSize, Math.max(0, totalCount - (page - 1) * pageSize)) }, (_, i) => row((page - 1) * pageSize + i + 1)), ...patch };
 }
-function transport() {
+function transport({ deferEffective = false } = {}) {
   const requests = [], arrivals = new Set();
   const supabase = { auth: { async getUser() { return { data: { user: { id: id(804) } }, error: null }; }, async getSession() { return { data: { session: null }, error: null }; }, onAuthStateChange() { return { data: { subscription: { unsubscribe() {} } } }; } },
-    rpc(name, args) { return pending({ name, args }); }, from(table) { return pending({ table, steps: [] }); } };
+    rpc(name, args) {
+      const chain = pending({ name, args });
+      // These older pagination fixtures contain no effective dated occupancies.
+      // Dedicated batching/failure fixtures opt into controlling this response.
+      if (name === 'get_makeup_effective_occupancy_v1' && !deferEffective) requests.at(-1).resolve({ data: { version: 1, occupancies: [] }, error: null });
+      return chain;
+    }, from(table) { return pending({ table, steps: [] }); } };
   function pending(metadata) {
     const deferred = Promise.withResolvers(), request = { ...metadata, ...deferred }; requests.push(request); for (const notify of arrivals) notify();
     const chain = { then: deferred.promise.then.bind(deferred.promise), abortSignal(signal) { request.signal = signal; return this; }, retry(value) { request.retry = value; return this; } };

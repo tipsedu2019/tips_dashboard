@@ -54,11 +54,11 @@ select is((select count(*) from dashboard_private.notification_deliveries),(sele
 select ok(not has_function_privilege('authenticated','dashboard_private.read_timetable_class_weekly_v2(public.classes)','execute'),'new private reader inaccessible to authenticated callers');
 select ok(not has_function_privilege('anon','dashboard_private.timetable_blocker_intersects_v2(jsonb,jsonb)','execute'),'new private matcher inaccessible to anon');
 select ok((select teacher_catalog_id is null and classroom_catalog_id is null from public.class_lesson_sessions where id=pg_temp.sid(501)),'normalized dated source UUIDs remain null');
--- Closed classes retain dated uncertainty, but a plain future regular row
--- whose weekday no longer matches still has its single known resource pair.
+-- Explicitly cleared times remain uncertain even with current class basics;
+-- independently inherited resources still scope the conservative blocker.
 select set_config('app.class_close_mutation','v1',true);
 insert into public.classes(id,name,subject,status,schedule_storage_mode,schedule,teacher,room,schedule_plan) values
-(pg_temp.sid(305),'closed off-weekday legacy','영어','종강','legacy','수 18:00-19:30','other scoped teacher','other scoped room',jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','old-regular','date',pg_temp.next_day(5),'scheduleState','active','isForced',false))));
+(pg_temp.sid(305),'closed off-weekday legacy','영어','종강','legacy','수 18:00-19:30','other scoped teacher','other scoped room',jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','old-regular','date',pg_temp.next_day(5),'scheduleState','active','isForced',false,'startTime',null,'endTime',null))));
 create temp table off_weekday_original as select to_jsonb(c) row from public.classes c where id=pg_temp.sid(305);
 update dashboard_private.timetable_operating_write_baselines set reference=dashboard_private.read_timetable_operating_reference_v1() where transaction_id=txid_current();
 set constraints all immediate;set constraints all deferred;
@@ -87,7 +87,7 @@ update public.classes set schedule_plan=jsonb_build_object('sessions',jsonb_buil
  jsonb_build_object('id','duplicate','date',pg_temp.next_day(3),'scheduleState','active','isForced',false),
  jsonb_build_object('id','past','date',pg_temp.next_day(3)-21,'scheduleState','active','isForced',false)
 )) where id=pg_temp.sid(303);
-select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') s where s->>'classId'=pg_temp.sid(303)::text),7,'non-default and past records remain explicit uncertainty');
+select is((select count(*)::int from jsonb_array_elements(dashboard_private.read_timetable_operating_reference_v1()->'datedUnresolvedOccupancies') s where s->>'classId'=pg_temp.sid(303)::text),5,'ambiguous multi-period overrides and duplicate identities remain uncertain; plain past and unmarked rows inherit');
 -- Duplicate names must never choose a catalog arbitrarily.
 drop index public.teacher_catalogs_name_key;
 insert into public.teacher_catalogs(id,name,subjects) values(pg_temp.sid(103),'scoped teacher',array['영어']);

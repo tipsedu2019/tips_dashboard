@@ -704,6 +704,11 @@
       "fileName": "20261002170849_timetable_legacy_default_projection.sql",
       "status": "final",
       "sha256": "ce52cc855ae3f7ec7816123272690386c2606480fbaec94d6ad131249332ee95"
+    },
+    {
+      "fileName": "20261004160000_legacy_effective_schedule_inheritance.sql",
+      "status": "final",
+      "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
     }
   ]
 }
