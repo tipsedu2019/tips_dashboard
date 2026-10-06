@@ -1,5 +1,6 @@
 begin;
 set local lock_timeout='5s';
+set local statement_timeout='8s';
 
 -- Preserve the complete reference and immutable class plan while avoiding
 -- repeated traversal of the full plan for a single per-date override lookup.
