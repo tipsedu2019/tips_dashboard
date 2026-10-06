@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "08fc1771d335e9816aaef1c9bee45408dcba5c77a80ef12a2220cfdd822a8edf"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "69d6f72ccf67f7819f8008c73c9aa6d794b155444dd0279645d89637875b0277"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -82,6 +82,8 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
   "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
+  "supabase/tests/makeup_numbered_pages_test.sql",
+  "supabase/tests/makeup_numbered_optional_keys_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",
@@ -1382,7 +1384,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "4e7fd2bd74424d2e8e7bdc2b5a13638b07a65b738f594cba775d4537ff9e8d5c"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "f547133e80451acfbb30b4c29cda438ecb109c8fe7e71b32939c4fbc42ee8ef6"],
+    ["supabase-sql-review.yml", "79e6f7eb065b4fbca4b4b7c7ba5a905fe036b9b1ec33d3f94394a0495520b4d2"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2324,7 +2326,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 })
 
-test("isolated main·PR는 동일한 SQL 81개·probe 12개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 83개·probe 12개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
