@@ -2,6 +2,8 @@ import assert from "node:assert/strict"
 import { readFile } from "node:fs/promises"
 import test from "node:test"
 
+import "./helpers/notification-makeup-legacy-contract-regression.mjs"
+
 const authModuleUrl = new URL(
   "../src/features/notifications/server/notification-auth.ts",
   import.meta.url,

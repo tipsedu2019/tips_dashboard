@@ -29,7 +29,7 @@ const STATIC_QUERY_KEYS: Readonly<Record<StaticNotificationPath, ReadonlySet<str
   "/admin/registration": new Set(["taskId", "trackId", "appointmentId", "observationId", "view"]),
   "/admin/transfer": new Set(["flow", "taskId"]),
   "/admin/withdrawal": new Set(["flow", "taskId"]),
-  "/admin/makeup-requests": new Set(["request"]),
+  "/admin/makeup-requests": new Set(["request", "requestId"]),
 })
 
 const WORKFLOW_BY_STATIC_PATH: Readonly<Record<StaticNotificationPath, NotificationWorkflowKey>> = Object.freeze({
@@ -68,6 +68,21 @@ function validateStaticQuery(parsed: URL, path: StaticNotificationPath) {
     assertSafeQueryValue(key)
     assertSafeQueryValue(queryValue)
     seen.add(key)
+  }
+
+  if (path === "/admin/makeup-requests") {
+    if (
+      seen.size > 1
+      || parsed.search.includes("%")
+      || [...parsed.searchParams.values()].some((value) => !CANONICAL_UUID_PATTERN.test(value))
+    ) linkError()
+    // The retained legacy SQL producer uses requestId; the app's canonical
+    // notification link uses request. Accept only the same request identity.
+    const legacyRequestId = parsed.searchParams.get("requestId")
+    if (legacyRequestId) {
+      parsed.searchParams.delete("requestId")
+      parsed.searchParams.set("request", legacyRequestId)
+    }
   }
 
   if (parsed.searchParams.has("view") && parsed.searchParams.get("view") !== "calendar") {
@@ -134,9 +149,10 @@ function parseNotificationAppLink(
   const path = staticPath(parsed.pathname)
   if (!path || WORKFLOW_BY_STATIC_PATH[path] !== workflowKey) linkError()
   const observationDetail = validateStaticQuery(parsed, path)
+  const relativeUrl = path === "/admin/makeup-requests" ? `${parsed.pathname}${parsed.search}` : value
   return Object.freeze({
-    relativeUrl: value,
-    absoluteUrl: `${APP_ORIGIN}${value}`,
+    relativeUrl,
+    absoluteUrl: `${APP_ORIGIN}${relativeUrl}`,
     buttonText: observationDetail ? "청강 상세 보기" : "대시보드에서 보기",
     workflowKey,
   })
