@@ -714,6 +714,11 @@
       "fileName": "20261006095753_makeup_approval_reference_reuse.sql",
       "status": "final",
       "sha256": "f828177eec981e634650c065d1736c1e08c4bbd61e234e7b0c3bf3b7d607dd4d"
+    },
+    {
+      "fileName": "20261006103004_timetable_date_override_lookup_reuse.sql",
+      "status": "final",
+      "sha256": "225cf54d1274126f90e7d46d020769fc3292a28ded2def61191de8f695b641b1"
     }
   ]
 }

@@ -105,5 +105,85 @@ select ok(not has_function_privilege('authenticated','dashboard_private.registra
 set local role anon;
 select throws_ok($q$select public.get_operations_class_lesson_design_detail_v1('ac290000-0000-4000-8000-000000000301')$q$,'42501','permission denied for function get_operations_class_lesson_design_detail_v1','anonymous RPC fails with exact permission SQLSTATE');
 reset role;
+-- Insert after RESET ROLE and before finish()/ROLLBACK in
+-- timetable_legacy_content_preservation_test.sql. No transaction/plan wrapper.
+-- All fixtures are temporary, synthetic, and independent of live class rows.
+-- Compare the real producer/consumer contract, including malformed JSON shapes.
+create temp table pr97_lookup_20261006_plans as
+select value plan from jsonb_array_elements('[null,{},[],[{"sessionSchedules":{"2050-01-03":{"startTime":"09:00","endTime":"11:00"}}}],42,true,"sessionSchedules"]'::jsonb)
+union all
+select jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('id','unrelated','memo',repeat('x',10000))),
+ 'sessionSchedules',value,'note',repeat('y',10000))
+from jsonb_array_elements('[null,{},[],true,42,"malformed",{"2050-01-03":{}},{"2050-01-03":{"startTime":"09:00","endTime":"11:00"}},{"2050-01-03":{"startTime":null,"endTime":""}},{"0":{"startTime":"10:00"}},{"-1":{"teacherName":"Teacher 1"}},[{"startTime":"12:00"},null,{"classroomName":"Room 1"}],{"null":{"startTime":"07:00"},"":{"endTime":"18:00"}},[{},[],"scalar"]]'::jsonb);
+
+create temp table pr97_lookup_20261006_lessons as
+select value lesson from jsonb_array_elements('[null,{},[],42,"scalar"]'::jsonb)
+union all
+select lesson
+from jsonb_array_elements('["2050-01-03","2050-02-30","2024-02-29","0000-01-01"," 2050-01-03","0","-1","1","2","",null,0,true,{},[]]'::jsonb) dates(date_value)
+cross join lateral (values
+ (jsonb_build_object('id','lesson','date',date_value,'scheduleState','active')),
+ (jsonb_build_object('id','lesson','sessionKey','lesson','date',date_value,'scheduleState','makeup','startTime',null,'classroomName','')),
+ (jsonb_build_object('id','lesson','date',date_value,'scheduleState','exception')),
+ (jsonb_build_object('id','','sessionKey','fallback','date',date_value,'state','active'))
+) variants(lesson);
+
+create temp table pr97_lookup_20261006_contexts as
+with base as (
+ select '{"basicSlots":[{"id":"base","weekday":1,"startTime":"09:00","endTime":"10:00","teacherCatalogId":"10000000-0000-4000-8000-000000000001","classroomCatalogId":"20000000-0000-4000-8000-000000000001"}],"catalogs":{"teachers":[{"id":"10000000-0000-4000-8000-000000000001","name":"Teacher 1"}],"rooms":[{"id":"20000000-0000-4000-8000-000000000001","name":"Room 1"}]}}'::jsonb value
+)
+select value||jsonb_build_object('approvedByIdentity',source) context
+from base cross join (values
+ ('{}'::jsonb),
+ ('{"lesson":{"binding":{"id":"lesson","date":"2050-01-03","scheduleState":"active"},"approvedOverride":{"startTime":"13:00","endTime":"14:00"},"approvedOverrideVerified":true}}'::jsonb),
+ ('{"lesson":{"binding":null,"approvedOverride":{"startTime":null},"approvedOverrideVerified":false}}'::jsonb)
+) sources(source);
+
+create temp table pr97_lookup_20261006_counts as
+select * from (values (1,1),(2,1),(1,2),(0,0),(null::int,null::int)) counts(identity_count,date_count);
+
+create temp table pr97_lookup_20261006_summary as
+with inputs as materialized (
+ select dashboard_private.legacy_effective_input_v1(plan,lesson,context,identity_count,date_count) original_input,
+ dashboard_private.legacy_effective_input_v1(
+  jsonb_build_object('sessionSchedules',plan->'sessionSchedules'),lesson,context,identity_count,date_count) lookup_input
+ from pr97_lookup_20261006_plans cross join pr97_lookup_20261006_lessons
+ cross join pr97_lookup_20261006_contexts cross join pr97_lookup_20261006_counts
+)
+select count(*)::int cases,
+ count(*) filter(where original_input is distinct from lookup_input)::int input_differences,
+ count(*) filter(where dashboard_private.resolve_legacy_effective_schedule_v1(original_input)
+  is distinct from dashboard_private.resolve_legacy_effective_schedule_v1(lookup_input))::int result_differences
+from inputs;
+select is((select cases from pr97_lookup_20261006_summary),20475,
+ 'lookup-plan parity covers 20475 plan/session/context/multiplicity combinations');
+select is((select input_differences from pr97_lookup_20261006_summary),0,
+ 'thin lookup plan preserves exact effective-input JSON for all malformed and explicit-value cases');
+select is((select result_differences from pr97_lookup_20261006_summary),0,
+ 'thin lookup plan preserves real resolver values, unknowns, provenance and errors');
+
+create temp table pr97_lookup_20261006_sql_null as
+select dashboard_private.legacy_effective_input_v1(null::jsonb,null::jsonb,context,1,1) original_input,
+ dashboard_private.legacy_effective_input_v1(jsonb_build_object('sessionSchedules',null::jsonb),null::jsonb,context,1,1) lookup_input
+from pr97_lookup_20261006_contexts;
+select ok((select bool_and(original_input is not distinct from lookup_input) from pr97_lookup_20261006_sql_null),
+ 'SQL NULL plan/session preserve exact producer output separately from JSON null');
+select ok((select bool_and(dashboard_private.resolve_legacy_effective_schedule_v1(original_input)
+ is not distinct from dashboard_private.resolve_legacy_effective_schedule_v1(lookup_input)) from pr97_lookup_20261006_sql_null),
+ 'SQL NULL plan/session preserve real unresolved-result behavior');
+
+select is(dashboard_private.legacy_effective_input_v1(
+ jsonb_build_object('sessionSchedules','[{"startTime":"12:00"}]'::jsonb),
+ '{"id":"malformed-date","date":"0","scheduleState":"active"}'::jsonb,
+ (select context from pr97_lookup_20261006_contexts where context->'approvedByIdentity'='{}'::jsonb),1,1)->'dateOverride',
+ '{"startTime":"12:00"}'::jsonb,
+ 'array-valued date map preserves #> index-zero lookup even for a malformed lesson date');
+select is(dashboard_private.legacy_effective_input_v1(
+ jsonb_build_object('sessionSchedules','{"2050-01-03":{"startTime":null,"endTime":""}}'::jsonb),
+ '{"id":"explicit-null","date":"2050-01-03","scheduleState":"active"}'::jsonb,
+ (select context from pr97_lookup_20261006_contexts where context->'approvedByIdentity'='{}'::jsonb),1,1)->'dateOverride',
+ '{"startTime":null,"endTime":""}'::jsonb,
+ 'thin lookup plan retains explicit null and empty overrides instead of inheriting basics');
+
 select * from finish();
 rollback;
