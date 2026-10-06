@@ -37,7 +37,8 @@ begin
  end loop;
  end loop;
 end $f$;
-do $$begin execute replace(replace(pg_get_functiondef('dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),'dashboard_private.assert_timetable_operational_conflicts_v1()','pg_temp.final_guard()'),'dashboard_private.read_timetable_operating_reference_v1()','pg_temp.fixture_reference()');end$$;
+-- Follow the final checker implementation, including its validated-reference return.
+do $$begin execute replace(replace(pg_get_functiondef('dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),'dashboard_private.validate_timetable_operating_reference_v1()','pg_temp.final_guard()'),'dashboard_private.read_timetable_operating_reference_v1()','pg_temp.fixture_reference()');end$$;
 create function pg_temp.ref(weekly jsonb,dated jsonb,unknown_rows jsonb default '[]') returns jsonb language sql as $$select jsonb_build_object('asOfDate','2026-01-01','shadowSlots',weekly,'datedSessions',dated,'unresolvedOccupancies','[]'::jsonb,'datedUnresolvedOccupancies',unknown_rows)$$;
 create function pg_temp.slot(id text,c text,t text,r text,d text default '2026-01-05',state text default 'active',source text default null) returns jsonb language sql as $$select jsonb_build_object('id',id,'classId',c,'sourceSlotId',source,'weekday',1,'date',d,'state',state,'startMinute',600,'endMinute',660,'teacherId',t,'classroomId',r)$$;
 create function pg_temp.outcomes(before_ref jsonb,after_ref jsonb) returns jsonb language plpgsql as $$declare old_result text:='00000';new_result text:='00000';begin
@@ -87,5 +88,162 @@ with fixtures as (
  from fixtures cross join unnest(array[date '2025-01-06',date '2026-01-05',date '2026-01-12',date '2026-01-13']) d
 )
 select ok(bool_and(expected is not distinct from actual),'effective-date materialization preserves all 180 prior result multisets') from compared;
+-- Discard the synthetic comparison baseline before testing real finalizer boundaries.
+delete from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current();
+
+-- Validated-reference reuse, access and deferred-write regression coverage.
+set constraints all deferred;
+
+select ok(to_regprocedure('dashboard_private.validate_timetable_operating_reference_v1()') is not null,
+ 'new checked-reference helper exists');
+select is((select prorettype::regtype::text from pg_proc
+ where oid='dashboard_private.assert_timetable_operational_conflicts_v1()'::regprocedure),
+ 'void','existing assertion signature remains void');
+select is((select prorettype::regtype::text from pg_proc
+ where oid='dashboard_private.validate_timetable_operating_reference_v1()'::regprocedure),
+ 'jsonb','new helper returns the validated reference');
+select ok(not has_function_privilege('anon','dashboard_private.validate_timetable_operating_reference_v1()','EXECUTE'),
+ 'new helper grants no anonymous execution');
+select ok(not has_function_privilege('authenticated','dashboard_private.validate_timetable_operating_reference_v1()','EXECUTE'),
+ 'new helper grants no authenticated execution');
+select ok(not has_function_privilege('service_role','dashboard_private.validate_timetable_operating_reference_v1()','EXECUTE'),
+ 'new helper grants no service-role direct execution');
+select is((select count(*)::int from dashboard_private.timetable_operating_write_baselines),0,
+ 'isolated test starts without a pending baseline');
+
+create function pg_temp.rr_slot(p_id text,p_class text,p_teacher text,p_room text)
+returns jsonb language sql immutable as $fn$
+ select jsonb_build_object('id',p_id,'classId',p_class,'sourceSlotId',null,
+ 'date','2050-01-03','state','active','startMinute',600,'endMinute',660,
+ 'teacherId',p_teacher,'classroomId',p_room,'revision',0)
+$fn$;
+create function pg_temp.rr_ref(p_dated jsonb) returns jsonb language sql immutable as $fn$
+ select jsonb_build_object('asOfDate','2050-01-01','shadowSlots','[]'::jsonb,
+ 'datedSessions',p_dated,'unresolvedOccupancies','[]'::jsonb,
+ 'datedUnresolvedOccupancies','[]'::jsonb,'shadowFingerprint',md5(p_dated::text))
+$fn$;
+create temp table rr_fixtures as
+select pg_temp.rr_ref(jsonb_build_array(a)) before_ref,
+ pg_temp.rr_ref(jsonb_build_array(a,b)) safe_ref,
+ pg_temp.rr_ref(jsonb_build_array(a,b,d)) later_safe_ref,
+ pg_temp.rr_ref(jsonb_build_array(a,b,c)) conflict_ref
+from (select pg_temp.rr_slot('a','class-a','teacher-a','room-a') a,
+ pg_temp.rr_slot('b','class-b','teacher-b','room-b') b,
+ pg_temp.rr_slot('c','class-c','teacher-a','room-c') c,
+ pg_temp.rr_slot('d','class-d','teacher-d','room-d') d) q;
+create temp table rr_signals as
+select change_sequence baseline from public.timetable_invalidation_signals where id='operating';
+select is((select count(*)::int from rr_signals),1,'existing operating signal is present');
+
+create function pg_temp.rr_start(p_reference jsonb) returns void language plpgsql as $fn$
+begin
+ if exists(select 1 from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()) then
+  raise exception 'test_baseline_not_clean';
+ end if;
+ perform set_config('test.rr_reference',p_reference::text,true);
+ perform set_config('test.rr_reads','0',true);
+end $fn$;
+create function pg_temp.rr_reads() returns int language sql volatile as $fn$
+ select coalesce(nullif(current_setting('test.rr_reads',true),''),'0')::int
+$fn$;
+
+-- Current_setting is only a test fixture here. The candidate implementation
+-- contains no GUC cache and never trusts a client-provided reference.
+create or replace function dashboard_private.read_timetable_operating_reference_v1()
+returns jsonb language plpgsql stable security definer set search_path='' as $fn$
+begin
+ perform pg_catalog.set_config('test.rr_reads',
+  (coalesce(nullif(pg_catalog.current_setting('test.rr_reads',true),''),'0')::int+1)::text,true);
+ return pg_catalog.current_setting('test.rr_reference')::jsonb;
+end $fn$;
+
+create temp table rr_writes(id integer primary key,reference jsonb not null);
+insert into rr_writes values(1,'{}');
+create function pg_temp.rr_publish_after_row() returns trigger language plpgsql as $fn$
+begin
+ perform set_config('test.rr_reference',new.reference::text,true);
+ return new;
+end $fn$;
+create trigger rr_before before update on rr_writes for each statement
+ execute function dashboard_private.timetable_operating_before_statement_v1();
+create trigger rr_row after update on rr_writes for each row
+ execute function pg_temp.rr_publish_after_row();
+create trigger rr_after after update on rr_writes for each statement
+ execute function dashboard_private.timetable_operating_after_statement_v1();
+
+-- One baseline, one wrapper assertion, one final assertion. Fingerprinting must
+-- reuse the final assertion's result instead of issuing a fourth global read.
+select pg_temp.rr_start(before_ref) from rr_fixtures;
+update rr_writes set reference=(select safe_ref from rr_fixtures);
+select is(pg_temp.rr_reads(),1,'first statement captures exactly one baseline');
+select lives_ok('select dashboard_private.assert_timetable_operational_conflicts_v1()',
+ 'public-wrapper boundary accepts a safe write');
+select is(pg_temp.rr_reads(),2,'wrapper validation reads its own current reference');
+set constraints all immediate;
+select is(pg_temp.rr_reads(),3,'deferred validation and fingerprint share one reference');
+select is((select count(*)::int from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
+ 0,'successful finalizer removes its baseline');
+select is((select change_sequence from public.timetable_invalidation_signals where id='operating'),
+ (select baseline+1 from rr_signals),'changed occupancy advances the operating signal once');
+set constraints all immediate;
+select is(pg_temp.rr_reads(),3,'second flush has no baseline and adds no read');
+set constraints all deferred;
+
+-- A wrapper result must not cache away a later write. Failure is caught in a
+-- pgTAP subtransaction and the surrounding savepoint restores the queued state.
+savepoint rr_later_conflict;
+select pg_temp.rr_start(before_ref) from rr_fixtures;
+update rr_writes set reference=(select safe_ref from rr_fixtures);
+select lives_ok('select dashboard_private.assert_timetable_operational_conflicts_v1()',
+ 'safe first write passes the wrapper check before a later write');
+update rr_writes set reference=(select conflict_ref from rr_fixtures);
+select is(pg_temp.rr_reads(),2,'later statement reuses only the original baseline');
+select throws_ok('set constraints all immediate','23P01','timetable_resource_conflict',
+ 'deferred boundary rejects a conflict introduced after successful wrapper validation');
+select is((select change_sequence from public.timetable_invalidation_signals where id='operating'),
+ (select baseline+1 from rr_signals),'rejected finalizer publishes no operating signal');
+rollback to rr_later_conflict;
+release savepoint rr_later_conflict;
+select is((select count(*)::int from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
+ 0,'savepoint rollback restores clean baseline after later conflict');
+
+-- Every direct statement remains guarded when constraints are immediate.
+set constraints all immediate;
+select pg_temp.rr_start(before_ref) from rr_fixtures;
+update rr_writes set reference=(select safe_ref from rr_fixtures);
+select is(pg_temp.rr_reads(),2,'immediate mode captures before and validates after');
+select lives_ok('select dashboard_private.assert_timetable_operational_conflicts_v1()',
+ 'wrapper remains callable after immediate finalizer cleanup');
+select is(pg_temp.rr_reads(),2,'wrapper with no baseline does not rebuild the reference');
+select is((select count(*)::int from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
+ 0,'immediate finalizer cleans its baseline');
+select is((select change_sequence from public.timetable_invalidation_signals where id='operating'),
+ (select baseline+2 from rr_signals),'immediate successful change emits exactly one signal');
+update rr_writes set reference=(select conflict_ref from rr_fixtures) where false;
+select is(pg_temp.rr_reads(),4,'zero-row statement still executes capture and final check');
+select is((select change_sequence from public.timetable_invalidation_signals where id='operating'),
+ (select baseline+2 from rr_signals),'zero-row unchanged reference emits no signal');
+select is((select count(*)::int from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
+ 0,'zero-row immediate statement also cleans baseline');
+set constraints all deferred;
+
+-- Multiple deferred trigger events must validate final state once and then
+-- observe cleanup; do not restore or validate a stale intermediate reference.
+select pg_temp.rr_start(before_ref) from rr_fixtures;
+update rr_writes set reference=(select safe_ref from rr_fixtures);
+update rr_writes set reference=(select later_safe_ref from rr_fixtures);
+select is(pg_temp.rr_reads(),1,'multiple writes retain one original baseline');
+select lives_ok('select dashboard_private.assert_timetable_operational_conflicts_v1()',
+ 'wrapper checks the latest of multiple safe writes');
+set constraints all immediate;
+select is(pg_temp.rr_reads(),3,'multiple queued finalizers cause one final reference read');
+select is((select change_sequence from public.timetable_invalidation_signals where id='operating'),
+ (select baseline+3 from rr_signals),'multiple writes emit one final invalidation signal');
+select is((select count(*)::int from dashboard_private.timetable_operating_write_baselines where transaction_id=txid_current()),
+ 0,'all queued finalizers leave no baseline');
+select is(dashboard_private.validate_timetable_operating_reference_v1(),null::jsonb,
+ 'helper without a baseline returns NULL');
+select is(pg_temp.rr_reads(),3,'no-baseline helper does not read global state');
+
 select * from finish();
 rollback;
