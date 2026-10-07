@@ -32,7 +32,7 @@ function canonicalAnnualDefinition(source) {
   const definitions = [...source.matchAll(/create or replace function public\.get_operations_annual_board_v1\(p_academic_year integer\)[\s\S]*?\n\$function\$;/g)];
   assert.equal(definitions.length, 1, "one complete annual function definition is present");
   const definition = definitions[0];
-  assert.match(source.slice(0, definition.index), /^(?:--[^\n]*\n|\s)*$/, "only comments and whitespace precede the function");
+  assert.match(source.slice(0, definition.index), /^(?:--[^\n]*\n|\s)*(?:set lock_timeout = '1s';\nset statement_timeout = '5s';\n\s*)?$/, "only comments, whitespace and the exact reviewed timeout pair precede the function");
   assert.match(source.slice(definition.index + definition[0].length), /^\s*$/, "no extra statement follows the function");
   return definition[0];
 }
@@ -151,7 +151,7 @@ test("historical SQL source-slice role outputs retain their provenance and the c
   const recordedMigration = await readFile(new URL("./fixtures/academic-annual-board-range-recorded-migration.sql", import.meta.url));
   const migration = await readFile(new URL("../supabase/migrations/20261006183148_operations_annual_board_range.sql", import.meta.url));
   assert.equal(createHash("sha256").update(recordedMigration).digest("hex"), fixture.provenance.migrationSha256, "the archived historical producer matches the original recorded raw source hash");
-  assert.equal(canonicalAnnualDefinition(migration.toString("utf8")), canonicalAnnualDefinition(recordedMigration.toString("utf8")), "the current draft differs only in its migration header; this is source equivalence, not current-schema execution evidence");
+  assert.equal(canonicalAnnualDefinition(migration.toString("utf8")), canonicalAnnualDefinition(recordedMigration.toString("utf8")), "the current draft differs only in its migration header and reviewed timeout declarations; this is source equivalence, not current-schema execution evidence");
   assert.deepEqual(Object.keys(fixture.roles).sort(), ["admin", "assistant", "staff", "teacher", "viewer"]);
   assert.ok(fixture.expected.length > 0, "non-empty literal consumer expectations accompany the SQL output");
   for (const [role, record] of Object.entries(fixture.roles)) {

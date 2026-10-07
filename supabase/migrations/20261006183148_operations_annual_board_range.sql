@@ -3,6 +3,9 @@
 -- Read stored inclusive rangeEnd metadata without changing saved events or subject exam dates.
 -- CREATE OR REPLACE keeps the existing signature and function ACLs; security invoker and filters remain unchanged.
 
+set lock_timeout = '1s';
+set statement_timeout = '5s';
+
 create or replace function public.get_operations_annual_board_v1(p_academic_year integer)
 returns jsonb
 language plpgsql

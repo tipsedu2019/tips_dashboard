@@ -35,7 +35,7 @@ test("ordered migration chain selects the additive annual RPC definition", () =>
   assert.deepEqual(definitions.map(({ name }) => name), [baselineName, draftName]);
   assert.equal(final.name, draftName);
   assert.match(final.body, /^create or replace function/);
-  assert.equal(final.sql.replace(/^--.*\n/gm, "").trim(), final.body);
+  assert.equal(final.sql.replace(/^--.*\n/gm, "").trim(), `set lock_timeout = '1s';\nset statement_timeout = '5s';\n\n${final.body}`);
 });
 
 test("annual read draft preserves every original expression outside the inclusive range projection", () => {
