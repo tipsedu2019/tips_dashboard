@@ -1,0 +1,50 @@
+{
+  "implementationSha": "bc23e412408e1340db171673661e634012e88209",
+  "baseSha": "afddea0ea5534fe435e95d121758fc74559cf927",
+  "sourceHashes": {
+    "scripts/qa/class-resource-catalog-browser.mjs": "dfe2c48245c7ceea4bd219e80104902c42d99b530b76da3b487790e3c715ab2b",
+    "src/features/management/management-page.tsx": "bbcbc77f27664e85e0fc5ea3e4888c97f08b2e80f95f55672d42e750c114030d",
+    "src/features/management/management-service.js": "45a89b6ee988d092ae17b3b9fa652697ac1c0694257ac461e19eeb388c69f01f",
+    "src/features/management/use-management-records.ts": "4ee5c9537f6ee65d371d0f41d5ae2d4d8b39e58562fe082663d575930553f2a6",
+    "tests/helpers/management-detail-fixture.mjs": "537d050f0706da8ed5f6b8cc6140251d03d6321cccff9c34c455f662825c52e7",
+    "tests/management-class-form-references.test.mjs": "15bb23b753996d5cdfab43b90431cdf831b888a02aaa7f292b8312e477d15175",
+    "tests/management-class-student-roster.test.mjs": "2c1edee4221f6a3c3d34bad750240477a5d68f1f0230f9855678f887414d064e",
+    "tests/management-detail-race.test.mjs": "75e28bbbcac5159739f7a1ce109295332ac0c9b037960105160399f16b4203bb",
+    "tests/management-numbered-pagination.test.mjs": "5f1984ba67230d495ad37f336728e08fbc86750ce757273a0432fdde8302c55a",
+    "tests/science-class-taxonomy.test.mjs": "6c506e8411de4ac23922b49d553e321fcb245f975e90209b17adf3c5a83af886"
+  },
+  "checks": {
+    "linux": {
+      "tests": 402,
+      "pass": 402,
+      "fail": 0,
+      "node": "22.18.0",
+      "network": "none",
+      "sourceMount": "read-only"
+    },
+    "typescript": {
+      "exitCode": 0
+    },
+    "productionBuild": {
+      "exitCode": 0
+    },
+    "freeTierGuard": {
+      "command": "node scripts/verify-free-tier-query-contracts.mjs --surface all --base afddea0ea5534fe435e95d121758fc74559cf927 --worktree",
+      "exitCode": 0,
+      "initialMissingBaselineObject": "fad56ae59f6b5ec6999e3232bbe68e4c1d26b101",
+      "resolution": "Fetched this object read-only, then existing unmodified guard passed"
+    },
+    "independentReview": {
+      "sha": "bc23e412408e1340db171673661e634012e88209",
+      "remainingP1P2": 0,
+      "directTestsPassed": 8
+    }
+  },
+  "boundaries": {
+    "productionAccess": false,
+    "productionMutations": false,
+    "databaseChanges": false,
+    "permissionChanges": false,
+    "deploy": false
+  }
+}
