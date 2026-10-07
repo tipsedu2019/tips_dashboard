@@ -647,6 +647,7 @@ export type UseManagementRecordsOptions = {
   pageSize: ManagementListPageSize;
   enabled: boolean;
   authorizationScope?: string;
+  classFormOpen?: boolean;
   page?: number;
   sort?: ManagementNumberedSort;
   onQueryChange?: (query: ManagementNumberedQuery) => void;
@@ -790,7 +791,7 @@ function listRowToSource(kind: ManagementKind, row: Record<string, unknown>) {
 export function useManagementRecords(
   kind: ManagementKind,
   requestedFilters?: ManagementListFilters,
-  { pageSize, enabled, authorizationScope = "", page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
+  { pageSize, enabled, authorizationScope = "", classFormOpen = false, page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
 ) {
   // Native history updates are transitions, while size preferences/measurements
   // are urgent. Reconcile the request pair before effects can issue a query.
@@ -807,7 +808,10 @@ export function useManagementRecords(
     });
   }
   const [stats, setStats] = useState<ManagementStat[]>([]);
-  const [classFormReferences, setClassFormReferences] = useState<{ owner: string; references: ClassFormReferences } | null>(null);
+  const [classFormReferences, setClassFormReferences] = useState<{
+    owner: string; status: "loading" | "ready" | "error"; references: ClassFormReferences;
+  } | null>(null);
+  const [classFormReferenceRetry, setClassFormReferenceRetry] = useState(0);
   const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
@@ -830,6 +834,32 @@ export function useManagementRecords(
   if (classFormReferences && classFormReferences.owner !== owner) {
     setClassFormReferences(null);
   }
+  useEffect(() => {
+    if (!enabled || kind !== "classes") {
+      setClassFormReferences(null);
+      return;
+    }
+    // Existing bulk edits also consume the last complete catalogs for this actor.
+    // Closing cancels the request; reopening always refreshes before form edits.
+    if (!classFormOpen) return;
+    const controller = new AbortController();
+    setClassFormReferences((current) => ({ owner, status: "loading", references: current?.owner === owner ? current.references : EMPTY_CLASS_FORM_REFERENCES }));
+    const load = async () => {
+      try {
+        if (!readService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
+        const references = await readService.loadClassFormReferences({ signal: controller.signal });
+        if (!controller.signal.aborted) setClassFormReferences({ owner, status: "ready", references });
+      } catch {
+        if (!controller.signal.aborted) setClassFormReferences((current) => ({ owner, status: "error", references: current?.owner === owner ? current.references : EMPTY_CLASS_FORM_REFERENCES }));
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [classFormOpen, classFormReferenceRetry, enabled, kind, owner, readService]);
+  const retryClassFormReferences = useCallback(() => {
+    setClassFormReferences((current) => current ? { ...current, status: "loading" } : null);
+    setClassFormReferenceRetry((value) => value + 1);
+  }, []);
   useEffect(() => {
     const authorization = { owner };
     detailAuthorizationRef.current = authorization;
@@ -920,18 +950,8 @@ export function useManagementRecords(
     if (detailAuthorizationRef.current !== authorization) return null;
     const sourceRow = detailToSourceRow(kind, detail);
     if (!sourceRow) return null;
-    if (kind === "classes") {
-      setClassFormReferences({
-        owner,
-        references: {
-          teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
-          classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
-          scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
-        },
-      });
-    }
     return normalizeManagementRows(kind, [sourceRow])[0] || null;
-  }, [kind, owner, readService, setClassFormReferences]);
+  }, [kind, owner, readService]);
 
   const loadRelationPage = useCallback(async ({
     id,
@@ -1008,6 +1028,8 @@ export function useManagementRecords(
     loading,
     error,
     classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
+    classFormReferencesStatus: classFormReferences?.owner === owner ? classFormReferences.status : "loading",
+    retryClassFormReferences,
     filterOptions: metadataOwner === owner ? filterOptions : {},
     page: displayed?.page || 1,
     pageSize: displayed?.totalCount !== null && displayed ? displayed.pageSize : pageSize,

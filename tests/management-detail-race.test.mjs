@@ -1138,6 +1138,29 @@ test("reopening the same class creates a separate editing lifetime", async t => 
   assert.equal(ui.time(), "19:00");
 });
 
+test("pending catalogs prevent schedule edits from losing normalized resource IDs", async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    fixture.records.classFormReferencesStatus = "loading";
+    fixture.records.classFormReferences = { teacherCatalogs: [], classroomCatalogs: [], scienceSubjectAreas: [] };
+  } });
+  await ui.click("A 영어반");
+  assert.equal(document.getElementById("classes-detail-subject").disabled, true);
+  const controls = [...document.querySelectorAll('[data-testid="class-schedule-slot-editor"] button, [data-testid="class-schedule-slot-editor"] input')];
+  assert.ok(controls.length > 5);
+  assert.ok(controls.every(control => control.disabled));
+  // Even a dispatched event cannot change the draft while its catalogs are pending.
+  await ui.editTime("18:30");
+  await ui.resolve(0, defaultsFor("09:00", 7));
+  assert.equal(ui.time(), "09:00");
+  ui.records.classFormReferencesStatus = "ready";
+  ui.records.classFormReferences = createManagementDetailFixture().records.classFormReferences;
+  await ui.navigate("classId=a");
+  await ui.editTime("18:30");
+  await ui.click("기본 시간표 저장");
+  assert.equal(ui.requests[1].input.slots[0].teacherCatalogId, "teacher-1");
+  assert.equal(ui.requests[1].input.slots[0].classroomCatalogId, "room-1");
+});
+
 test("typing before the initial defaults arrive retains the draft and catalog IDs", async t => {
   const ui = await setup(t);
   await ui.click("A 영어반");

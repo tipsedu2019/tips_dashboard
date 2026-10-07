@@ -22,6 +22,8 @@ export function createManagementDetailFixture() {
     auth: { user: { id: "staff-a" }, role: "admin", canManageAll: true, loading: false },
     records: {
       rows, stats: [], loading: false, error: null,
+      classFormReferencesStatus: "ready",
+      retryClassFormReferences() {},
       classFormReferences: {
         teacherCatalogs: [{ id: "teacher-1", name: "영어교사", subject: "영어" }],
         classroomCatalogs: [{ id: "room-1", name: "본관 2강", subject: "영어" }], scienceSubjectAreas: [],

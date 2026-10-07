@@ -141,7 +141,7 @@ test("legacy science resources stay readable but science subject changes clear i
   assert.equal(legacy.raw.teacher, "기존 담당자");
   assert.equal(legacy.raw.classroom, "기존 강의실");
   assert.match(pageSource, /return value && !options\.includes\(value\) \? \[value, \.\.\.options\] : options/);
-  assert.match(pageSource, /const enforceExactScienceCandidates = isScienceClassSubject\(nextSubject\)/);
+  assert.match(pageSource, /const enforceExactCandidates = true/);
   assert.match(pageSource, /scienceClassCandidateSelectionBlocked/);
   assert.match(pageSource, /candidateMembershipContext: classFormReferences/);
   assert.doesNotMatch(pageSource, /slot\.teacher && teacherOptions\.length > 0 && !teacherOptions\.includes\(slot\.teacher\)/);

@@ -1,0 +1,14 @@
+[
+  {
+    "file": "src/features/management/management-service.js",
+    "baselineCount": 71,
+    "candidateCount": 71,
+    "added": []
+  },
+  {
+    "file": "src/features/management/use-management-records.ts",
+    "baselineCount": 11,
+    "candidateCount": 11,
+    "added": []
+  }
+]
