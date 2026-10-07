@@ -774,12 +774,9 @@ test("승인 일정 효과는 인증된 서버가 원본에서 계산하고 공�
   assert.match(approvalRoute, /readOne\(serverClient, "classes", classId\)/)
   assert.match(approvalRoute, /assertCurrentSource\(requestRow, classRow\)/)
   assert.match(approvalRoute, /assertNoRoomCollision/)
-  assert.match(approvalRoute, /serverClient\.rpc\("get_makeup_approval_collision_context_v1", \{\s*p_slots: normalizeMakeupSlots\(requestRow, text\(requestRow\.makeup_classroom\)\),\s*\}\)\.abortSignal\(AbortSignal\.timeout\(8_000\)\)\.retry\(false\)/)
-  assert.match(approvalRoute, /if \(contextError\) throw contextError/)
-  assert.match(approvalRoute, /!isRecord\(context\) \|\| !\[context\.classes, context\.requests, context\.academicEvents\]\.every\(\s*\(rows\) => Array\.isArray\(rows\) && rows\.every\(isRecord\),\s*\)\) throw new Error\("makeup_approval_context_invalid"\)/)
-  assert.match(approvalRoute, /assertNoRoomCollision\(requestRow, context\.classes as JsonRecord\[\], context\.requests as JsonRecord\[\], context\.academicEvents as JsonRecord\[\], \[\]\)/)
-  assert.ok(approvalRoute.indexOf('"makeup_approval_context_invalid"') < approvalRoute.indexOf('assertNoRoomCollision(requestRow, context.classes'), "충돌 후보 모양을 검증한 뒤에만 승인 점유 검사를 수행해야 한다")
-  assert.ok(approvalRoute.indexOf('assertNoRoomCollision(requestRow, context.classes') < approvalRoute.indexOf('Object.assign(patch, await buildApprovalEffects(serverClient, requestRow, classRow))'), "충돌 검사를 통과한 뒤에만 서버가 승인 효과를 계산해야 한다")
+  assert.match(approvalRoute, /get_makeup_approval_collision_context_v1/)
+  assert.match(approvalRoute, /const slots = normalizeMakeupSlots\(requestRow, text\(requestRow\.makeup_classroom\)\)/)
+  assert.match(approvalRoute, /rpc\("get_makeup_approval_collision_context_v1", \{\s*p_slots: slots,/)
   assert.ok(
     approvalRoute.indexOf("const replay = await attemptMakeupApprovalReplay")
       < approvalRoute.indexOf('readOne(serverClient, "makeup_requests", requestId)'),

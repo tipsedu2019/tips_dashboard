@@ -1,6 +1,12 @@
 {
   "$schema": "https://openapi.vercel.sh/vercel.json",
   "framework": "nextjs",
+  "git": {
+    "deploymentEnabled": {
+      "codex/annual-board-range-current-main-20261006": false,
+      "codex/academic-calendar-range-20261007": false
+    }
+  },
   "installCommand": "pnpm install --frozen-lockfile",
   "buildCommand": "pnpm run build"
 }

@@ -33,7 +33,7 @@ const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
 const fixtureRoots = new Set()
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "cad749d41fac3d9642ebd1e5fd3227353f39040ea92fdeaf80bd7ab72fe5db85"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "f88217121896e8c9e8b078e63c056d7db4097b13421d9db6266df2ccc52c05ef"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -62,6 +62,8 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
   "supabase/tests/academic_scoped_reads_test.sql",
+  "supabase/tests/operations_annual_board_range_test.sql",
+  "supabase/tests/operations_calendar_inclusive_range_test.sql",
   "supabase/tests/timetable_continuous_class_scope_test.sql",
   "supabase/tests/timetable_guard_aggregation_test.sql",
   "supabase/tests/timetable_legacy_content_preservation_test.sql",
@@ -82,6 +84,8 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
   "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
+  "supabase/tests/makeup_numbered_pages_test.sql",
+  "supabase/tests/makeup_numbered_optional_keys_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",
@@ -144,6 +148,7 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
+  "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",
   "tests/probe-signup-identity-concurrency.mjs",
@@ -1405,9 +1410,9 @@ test("prepare ACL migration만 science 이후 protected function 참조로 허�
 test("approved manual production workflow requires its exact path and complete reviewed bytes", async () => {
   const workflowDir = join(repoRoot, ".github", "workflows")
   for (const [name, expectedHash] of [
-    ["free-tier-guardrails.yml", "4e7fd2bd74424d2e8e7bdc2b5a13638b07a65b738f594cba775d4537ff9e8d5c"],
+    ["free-tier-guardrails.yml", "19cb38ab601a313963f89aa247c66115a2d5decba2137fcccad58d09240cd09b"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "e67344ba368a57afe379909bf2910e021787345b4483f70d92d4952903cfba07"],
+    ["supabase-sql-review.yml", "d3188700fe9859985b544ea04e986ac07aa08dddd9395e6af7a425c31b106c83"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2349,7 +2354,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 })
 
-test("isolated main·PR는 동일한 SQL 88개·probe 17개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 92개·probe 18개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {

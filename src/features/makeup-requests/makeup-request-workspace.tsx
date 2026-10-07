@@ -27,6 +27,7 @@ import { normalizePage } from "@/lib/numbered-pagination"
 import { readMakeupNumberedPage, readMakeupDetail, readMakeupReservationContext, type MakeupNumberedFilters, type MakeupNumberedPage, type MakeupReservationContext } from "./makeup-numbered-service"
 
 import { Badge } from "@/components/ui/badge"
+import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { WorkspaceTabs, WorkspaceTabsList, WorkspaceTabsTrigger, WorkspaceTabsPanel } from "@/components/ui/workspace-tabs"
 import { DatePickerControl, TimePickerControl } from "@/components/ui/date-time-picker"
@@ -614,8 +615,31 @@ function getMakeupRequestCardValue(request: MakeupRequest, columnKey: MakeupRequ
   return getMakeupRequestTableValue(request, columnKey)
 }
 
-function hasMakeupRequestRoomCollision(request: MakeupRequest, data: MakeupRequestWorkspaceData) {
-  return getRequestSlots(request).some((slot) => {
+export function hasMakeupRequestRoomCollision(request: MakeupRequest, workspaceData: MakeupRequestWorkspaceData) {
+  let data = workspaceData
+  const context = data.reservationContext
+  const completedReservation = context?.reservations.find((item) => item.id === request.id && item.status === "completed")
+  const effectiveSchedule = context?.effectiveSchedule
+  const requestSlots = getRequestSlots(request)
+  if (request.status === "completed" && request.id && request.classId && completedReservation && effectiveSchedule) {
+    const ownLessonPrefix = `legacy-session:${request.classId}:makeup-request:${request.id}:`
+    const occupancies = effectiveSchedule.occupancies.filter((row) => {
+      if (row.classId !== request.classId || row.uncertain !== false || row.allRooms !== false
+        || typeof row.id !== "string" || !row.id.startsWith(ownLessonPrefix)
+        || typeof row.startMinute !== "number" || typeof row.endMinute !== "number") return true
+      const index = row.id.slice(ownLessonPrefix.length)
+      if (!/^(0|[1-9]\d*)$/.test(index) || !Number.isSafeInteger(Number(index))) return true
+      const slot = requestSlots[Number(index)]
+      const day = Date.parse(`${row.date}T00:00:00+09:00`)
+      // Only the completed request's exact bound lesson is its own reservation.
+      // Keep other classes, uncertain rows, and changed lesson metadata visible.
+      return !slot || row.classroom !== (slot.classroom || request.makeupClassroom)
+        || Date.parse(slot.startAt || "") !== day + row.startMinute * 60_000
+        || Date.parse(slot.endAt || "") !== day + row.endMinute * 60_000
+    })
+    data = { ...data, reservationContext: { ...context, effectiveSchedule: { ...effectiveSchedule, occupancies } } }
+  }
+  return requestSlots.some((slot) => {
     const formSlot = toFormSlot({ ...slot, classroom: slot.classroom || request.makeupClassroom })
     return Boolean(getSlotRoomCollisionState(formSlot, data, request.id, request.subject)?.collisions.length)
   })
@@ -1494,6 +1518,7 @@ function getSlotRoomAvailability(
     subject,
     ignoreOrphanedMakeupEvents: data.reservationContext ? true : canIgnoreOrphanedMakeupEvents,
     activeEventRequestIds: data.reservationContext?.activeEventRequestIds,
+    effectiveSchedule: data.reservationContext?.effectiveSchedule,
   }).map((room) => data.collisionContextReady === false ? { ...room, available: false } : room)
 }
 
@@ -1701,6 +1726,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
   const [saving, setSaving] = useState(false)
   const savingRef = useRef(false)
   const [message, setMessage] = useState("")
+  const [notificationWarning, setNotificationWarning] = useState("")
   const [error, setError] = useState("")
   const [dialogError, setDialogError] = useState("")
   const [approvalRequest, setApprovalRequest] = useState<MakeupRequest | null>(null)
@@ -2143,6 +2169,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     setSaving(true)
     setDialogError("")
     setMessage("")
+    setNotificationWarning("")
     try {
       const payload = {
         ...input,
@@ -2152,13 +2179,15 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
         approverTeacherCatalogId: submissionApproverTeacherCatalogId,
       }
       if (editingRequestId) {
-        await resubmitMakeupRequest(editingRequestId, payload, currentUserId)
+        const saved = await resubmitMakeupRequest(editingRequestId, payload, currentUserId)
         if (!lifetime.current) return
         setMessage("휴보강 신청서를 재상신했습니다.")
+        setNotificationWarning(saved.notificationWarning || "")
       } else {
-        await createMakeupRequest(payload, currentUserId, { signal: createLifetimeAbort.current?.signal })
+        const saved = await createMakeupRequest(payload, currentUserId, { signal: createLifetimeAbort.current?.signal })
         if (!lifetime.current) return
         setMessage("휴보강 신청서를 상신했습니다.")
+        setNotificationWarning(saved.notificationWarning || "")
       }
       setView("approvalPending")
       resetForm()
@@ -2173,16 +2202,18 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
     }
   }, [currentUserId, data.teachers, data.collisionContextReady, formCatalogReady, editingRequest?.createdAt, editingRequestId, input, isManager, patchInput, refresh, resetForm, selectedClass, selectedRoomHasCollision, setView])
 
-  const runAction = useCallback(async (action: () => Promise<unknown>, successMessage: string) => {
+  const runAction = useCallback(async (action: () => Promise<MakeupRequest>, successMessage: string) => {
     if (!lifetime.current || savingRef.current) return false
     savingRef.current = true
     setSaving(true)
     setDialogError("")
     setMessage("")
+    setNotificationWarning("")
     try {
-      await action()
+      const saved = await action()
       if (!lifetime.current) return false
       setMessage(successMessage)
+      setNotificationWarning(saved.notificationWarning || "")
       await refresh()
       return lifetime.current
     } catch (actionError) {
@@ -2367,7 +2398,7 @@ function MakeupRequestWorkspaceContent({ actorScope }: { actorScope: string }) {
       </div>
 
       <WorkspaceTabsPanel className="flex flex-col gap-4">
-      {message ? <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
+      {message ? notificationWarning ? <Alert variant="destructive"><AlertDescription>{message} {notificationWarning}</AlertDescription></Alert> : <div role="status" className="rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-sm text-primary">{message}</div> : null}
       {pageState.error ? <div role="alert" className="flex flex-wrap items-center gap-2 text-sm text-destructive">{getMakeupActionErrorMessage(pageState.error, "목록을 불러오지 못했습니다.")}{pageState.totalCount !== null ? ` 이전 조회 결과: ${acceptedCriteriaLabel}` : ""}<Button variant="outline" onClick={() => { workspaceRef.current?.querySelector<HTMLInputElement>('input[type="search"]')?.focus(); void controllerRef.current?.retry() }}>다시 시도</Button></div> : null}
       {contextState.scope === contextScope && contextState.error ? <div role="alert" className="flex items-center gap-2 text-sm text-destructive">{contextState.error}<Button variant="outline" onClick={() => setCatalogGeneration((generation) => generation + 1)}>예약 다시 확인</Button></div> : !data.collisionContextReady ? <div role="status" className="text-sm text-muted-foreground">예약 충돌 정보 확인 중</div> : null}
       {error ? (

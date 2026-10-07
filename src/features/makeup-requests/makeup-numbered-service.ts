@@ -2,7 +2,8 @@
 
 import { supabase } from "@/lib/supabase"
 import { validatePageSize, type DataTablePageSize, type NumberedPage } from "@/lib/numbered-pagination"
-import { normalizeMakeupSlots } from "./makeup-request-model.js"
+import { normalizeMakeupSlots, type MakeupEffectiveSchedule } from "./makeup-request-model.js"
+import { readMakeupEffectiveSchedule } from "./makeup-effective-occupancy"
 import type { MakeupRequest, MakeupSlotInput } from "./makeup-request-service"
 
 export const MAKEUP_NUMBERED_COLUMNS = ["status", "className", "subject", "teacher", "requester", "reason", "cancelDate", "makeupAt", "makeupRoom", "approver", "submittedAt", "revisionRequestedAt", "approvedAt", "rejectedAt", "canceledAt", "returnedReason", "rejectedReason", "finalNote", "canceledNote"] as const
@@ -19,7 +20,7 @@ export type MakeupNumberedPage = NumberedPage<MakeupRequest> & {
   subjectOptions: MakeupFilterOption[]; teacherOptions: MakeupFilterOption[]
 }
 export type MakeupReservation = Pick<MakeupRequest, "id" | "status" | "className" | "makeupStartAt" | "makeupEndAt" | "makeupClassroom" | "makeupSlots">
-export type MakeupReservationContext = { reservations: MakeupReservation[]; activeEventRequestIds: string[] }
+export type MakeupReservationContext = { reservations: MakeupReservation[]; activeEventRequestIds: string[]; effectiveSchedule?: MakeupEffectiveSchedule | null }
 
 const views = ["mine", "approvalPending", "makeupPending", "refundPending", "closed"]
 const statuses = ["approval_pending", "revision_requested", "rejected", "manager_pending", "makeup_pending", "refund_pending", "completed", "canceled"]
@@ -124,5 +125,9 @@ export async function readMakeupReservationContext({ slots, eventRequestIds, sig
     || !Array.isArray(data.activeEventRequestIds) || !data.activeEventRequestIds.every((id) => uuid(id) && eventRequestIds.some((requested) => requested.toLowerCase() === id.toLowerCase()))
     || !uniqueIds(data.activeEventRequestIds)
     || !uniqueIds(data.reservations.map((row) => row.id))) throw invalid("makeup_reservation_response_invalid")
-  return { reservations: (data.reservations as MakeupReservation[]).map(normalizeWireSlots), activeEventRequestIds: data.activeEventRequestIds }
+  const effectiveSchedule = await readMakeupEffectiveSchedule({ slots, signal: combined,
+    readBatch: (batch) => supabase!.rpc("get_makeup_effective_occupancy_v1", { p_slots: batch }).abortSignal(combined).retry(false),
+  })
+  return { reservations: (data.reservations as MakeupReservation[]).map(normalizeWireSlots), activeEventRequestIds: data.activeEventRequestIds,
+    effectiveSchedule }
 }

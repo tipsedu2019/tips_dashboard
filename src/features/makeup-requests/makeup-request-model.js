@@ -525,6 +525,40 @@ function buildRegularClassCollisions(classes, targetSlots) {
   return collisions;
 }
 
+export function isEffectiveMakeupSchedule(value) {
+  const minute = v => v === null || Number.isInteger(v) && v >= 0 && v <= 1440;
+  const date = v => typeof v === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(v)
+    && Number.isFinite(Date.parse(`${v}T00:00:00Z`)) && new Date(`${v}T00:00:00Z`).toISOString().slice(0, 10) === v;
+  return value?.version === 1 && Array.isArray(value.occupancies) && value.occupancies.every(row => row && typeof row === 'object'
+    && typeof row.classId === 'string' && typeof row.className === 'string' && date(row.date)
+    && (row.classroom === null || typeof row.classroom === 'string')
+    && typeof row.uncertain === 'boolean' && typeof row.allRooms === 'boolean'
+    && minute(row.startMinute) && minute(row.endMinute)
+    && (row.startMinute === null || row.endMinute === null || row.startMinute < row.endMinute));
+}
+
+function buildEffectiveClassCollisions(context, targetSlots, roomNames) {
+  const result = [];
+  const label = minutes => minutes === null ? '미정' : `${String(Math.floor(minutes / 60)).padStart(2, '0')}:${String(minutes % 60).padStart(2, '0')}`;
+  for (const target of targetSlots) {
+    const start = Date.parse(target.startAt), end = Date.parse(target.endAt);
+    for (const row of context.occupancies) {
+      const day = Date.parse(`${row.date}T00:00:00+09:00`);
+      const knownBounds = row.startMinute !== null && row.endMinute !== null;
+      const rowStart = day + (knownBounds ? row.startMinute : 0) * 60_000;
+      const rowEnd = day + (knownBounds ? row.endMinute : 1440) * 60_000;
+      if (!(start < rowEnd && rowStart < end)) continue;
+      const rooms = row.allRooms ? roomNames : [normalizeRoomName(row.classroom)];
+      for (const classroom of rooms.filter(Boolean)) result.push({
+        id: row.id || `${row.classId}:${row.date}`, source: 'regular_class', title: row.className, classroom,
+        startLabel: label(row.startMinute), endLabel: label(row.endMinute),
+        detail: `${row.date} ${label(row.startMinute)}-${label(row.endMinute)}${row.uncertain ? ' · 정보 미정' : ''}`,
+      });
+    }
+  }
+  return result;
+}
+
 function buildMakeupRequestCollisions(requests, targetSlots, currentRequestId) {
   const collisions = [];
 
@@ -636,6 +670,7 @@ export function buildRoomAvailability({
   subject = "",
   ignoreOrphanedMakeupEvents = false,
   activeEventRequestIds,
+  effectiveSchedule,
 } = {}) {
   const selectedSubject = text(subject);
   const roomNames = buildRoomOptions(classrooms, classes, { subject: selectedSubject });
@@ -650,7 +685,9 @@ export function buildRoomAvailability({
     addRoomName(roomNames, slot.classroom);
   }
   const collisions = [
-    ...buildRegularClassCollisions(classes, targetSlots),
+    ...(effectiveSchedule?.version === 1
+      ? buildEffectiveClassCollisions(effectiveSchedule, targetSlots, roomNames)
+      : buildRegularClassCollisions(classes, targetSlots)),
     ...buildMakeupRequestCollisions(requests, targetSlots, currentRequestId),
     ...buildAcademicEventCollisions(academicEvents, targetSlots, currentRequestId, activeRequestIds),
   ];

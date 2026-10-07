@@ -84,7 +84,7 @@ export async function snapshotAiSource(root=ROOT){
   closure.push({path,sha256:hash(contents),bytes:contents.length});
  }
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
- assert.equal(manifest.orderedNewMigrations.length,147,'AI canonical manifest inventory');
+ assert.equal(manifest.orderedNewMigrations.length,153,'AI canonical manifest inventory');
  assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
@@ -140,6 +140,8 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
   "supabase/tests/academic_scoped_reads_test.sql",
+  "supabase/tests/operations_annual_board_range_test.sql",
+  "supabase/tests/operations_calendar_inclusive_range_test.sql",
   "supabase/tests/timetable_continuous_class_scope_test.sql",
   "supabase/tests/timetable_guard_aggregation_test.sql",
   "supabase/tests/timetable_legacy_content_preservation_test.sql",
@@ -160,6 +162,8 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
   "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
+  "supabase/tests/makeup_numbered_pages_test.sql",
+  "supabase/tests/makeup_numbered_optional_keys_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",
@@ -216,13 +220,14 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_credentials_test.sql",
   "supabase/tests/ai_agent_requests_authz_test.sql",
   "supabase/tests/ai_agent_requests_transition_test.sql",
-  "supabase/tests/ai_agent_space_policy_test.sql",
+  "supabase/tests/ai_agent_space_policy_test.sql"
 ]);
 
 export const AI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
+  "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",
   "tests/probe-signup-identity-concurrency.mjs",
@@ -236,5 +241,5 @@ export const AI_PROBES = Object.freeze([
   "tests/probe-ai-agent-claim-concurrency.mjs",
   "tests/probe-ai-agent-space-policy-concurrency.mjs",
   "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
-  "tests/probe-ai-agent-http-producer.mjs",
+  "tests/probe-ai-agent-http-producer.mjs"
 ]);

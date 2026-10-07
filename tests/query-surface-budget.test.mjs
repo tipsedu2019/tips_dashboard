@@ -1493,6 +1493,23 @@ test("makeup numbered RPC permits only final-proven sizes and exact detail/reser
   assert.ok(inspect("list_makeup_numbered_page_v1", "{p_page_size:10}", ".abortSignal(AbortSignal.timeout(8000))").includes("list_retry_false_missing"))
 })
 
+test("makeup effective occupancy permits only the exact SQL-bounded RPC and preserves transport controls", () => {
+  const inspect = (name, suffix = ".abortSignal(AbortSignal.timeout(8000)).retry(false)", args = "{p_slots:request.slots}") => inspectQuerySurfaceSource({
+    surface: "tasks", file: "src/features/makeup-requests/occupancy-fixture.ts",
+    source: `async function read(client, request) { return client.rpc(${name}, ${args})${suffix} }`,
+  }).map((item) => item.reason)
+  const exact = '"get_makeup_effective_occupancy_v1"'
+  assert.deepEqual(inspect(exact), [])
+  for (const name of ['"get_makeup_effective_occupancy_v2"', '"get_makeup_effective_occupancy_v1_other"', "request.rpcName"]) {
+    assert.deepEqual(inspect(name), ["rpc_page_limit_missing"])
+  }
+  assert.deepEqual(inspect(exact, ".retry(false)"), ["list_abort_signal_missing"])
+  assert.deepEqual(inspect(exact, ".abortSignal(AbortSignal.timeout(8000))"), ["list_retry_false_missing"])
+  assert.deepEqual(inspect(exact, ".abortSignal(AbortSignal.timeout(9000)).retry(false)"), ["list_abort_signal_missing"])
+  assert.deepEqual(inspect(exact, ".abortSignal(AbortSignal.timeout(8000)).retry(true)"), ["list_retry_false_missing"])
+  assert.deepEqual(inspect(exact, undefined, "{...request,p_slots:request.slots}"), ["rpc_page_limit_unresolved"])
+})
+
 test("actual makeup numbered adapter keeps bounded literal RPCs and cancellation", async () => {
   const file = "src/features/makeup-requests/makeup-numbered-service.ts"
   assert.deepEqual(inspectQuerySurfaceSource({ surface: "tasks", file, source: await readFile(new URL(`../${file}`, import.meta.url), "utf8") }), [])

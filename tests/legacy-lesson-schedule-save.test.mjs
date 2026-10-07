@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { buildSchedulePlanForSave, normalizeSchedulePlan, applyCalendarDateSubstitution } from '../src/lib/class-schedule-planner.js';
 import { effectiveOperatingSlots } from '../src/features/academic/timetable-conflicts.ts';
 import * as legacyValidation from '../src/features/operations/schedule-only-plan.ts';
+import './legacy-effective-schedule.test.mjs';
 
 const occupancy = { startTime: '19:20', endTime: '21:20', teacherCatalogId: 'teacher', classroomCatalogId: 'room' };
 const plan = { selectedDays: [2, 0], billingPeriods: [{ id: 'oct', month: 10, startDate: '2026-09-29', endDate: '2026-10-27' }], sessionStates: {

@@ -274,7 +274,7 @@ function prepareAnnualBoardImageExport(element: HTMLElement, width: number) {
   };
 }
 
-function formatOneDate(value?: string | null, options: { weekday?: boolean } = {}) {
+function formatOneDate(value?: string | null, options: { weekday?: boolean; year?: boolean } = {}) {
   const raw = text(value);
   const match = raw.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) {
@@ -283,12 +283,17 @@ function formatOneDate(value?: string | null, options: { weekday?: boolean } = {
 
   const month = Number(match[2]);
   const day = Number(match[3]);
+  const date = new Date(`${raw}T00:00:00.000Z`);
+  if (Number.isNaN(date.getTime()) || date.toISOString().slice(0, 10) !== raw) {
+    return "";
+  }
+  const label = `${options.year ? `${match[1]}/` : ""}${month}/${day}`;
   if (!options.weekday) {
-    return `${month}/${day}`;
+    return label;
   }
 
-  const weekday = WEEKDAY_LABELS[new Date(Number(match[1]), month - 1, day).getDay()];
-  return `${month}/${day}(${weekday})`;
+  const weekday = WEEKDAY_LABELS[date.getUTCDay()];
+  return `${label}(${weekday})`;
 }
 
 function splitDateRange(value?: string | null) {
@@ -296,8 +301,8 @@ function splitDateRange(value?: string | null) {
   if (!normalized) {
     return { start: "", end: "" };
   }
-  if (normalized.includes(" ~ ")) {
-    const [start, end] = normalized.split(" ~ ");
+  if (normalized.includes("~")) {
+    const [start, end] = normalized.split("~");
     return { start: text(start), end: text(end) || text(start) };
   }
   return { start: normalized, end: normalized };
@@ -308,13 +313,18 @@ function formatRangeLabel(entry?: AcademicAnnualBoardEntry | null, options: { co
     return "—";
   }
 
-  const range = splitDateRange(entry.dateLabel || [entry.start, entry.end].filter(Boolean).join(" ~ "));
-  const start = formatOneDate(range.start, { weekday: !options.compact });
-  const end = formatOneDate(range.end, { weekday: !options.compact });
+  // RPC dates are authoritative; dateLabel supports older label-only entries.
+  const range = text(entry.start)
+    ? { start: text(entry.start), end: text(entry.end) || text(entry.start) }
+    : splitDateRange(entry.dateLabel);
+  const validEnd = formatOneDate(range.end) && range.end >= range.start;
+  const showYear = Boolean(validEnd && range.start.slice(0, 4) !== range.end.slice(0, 4));
+  const start = formatOneDate(range.start, { weekday: !options.compact, year: showYear });
+  const end = validEnd ? formatOneDate(range.end, { weekday: !options.compact, year: showYear }) : "";
   if (!start) {
     return "—";
   }
-  if (!end || start === end) {
+  if (!end || range.start === range.end) {
     return start;
   }
   return options.compact ? `${start}~${end}` : `${start} ~ ${end}`;
@@ -325,16 +335,19 @@ function formatSubjectDateLabel(entry?: AcademicAnnualBoardEntry | null, options
     return "—";
   }
 
-  const directDate = formatOneDate(entry.dateLabel, { weekday: !options.compact });
-  if (directDate) {
-    return directDate;
+  // Subject summaries and material fallbacks inherit a parent period, not an exam range.
+  if (!entry.subjectSummary && entry.sourceKind !== "academic_event_material_fallback") {
+    const directRange = formatRangeLabel(entry, options);
+    if (directRange !== "—") {
+      return directRange;
+    }
   }
-  const examDate = formatOneDate(entry.examDateLabel, { weekday: !options.compact });
-  if (examDate) {
-    return examDate;
+  const examRange = formatRangeLabel({ ...entry, start: "", end: "", dateLabel: entry.examDateLabel || "" }, options);
+  if (examRange !== "—") {
+    return examRange;
   }
   const fallback = text(entry.examDateLabel);
-  if (fallback && fallback !== "시험일 미입력") {
+  if (fallback && fallback !== "시험일 미입력" && !/^\d{4}-/.test(fallback)) {
     return fallback;
   }
   return "시험일 미입력";

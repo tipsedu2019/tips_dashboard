@@ -39,6 +39,8 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
   "supabase/tests/academic_scoped_reads_test.sql",
+  "supabase/tests/operations_annual_board_range_test.sql",
+  "supabase/tests/operations_calendar_inclusive_range_test.sql",
   "supabase/tests/timetable_continuous_class_scope_test.sql",
   "supabase/tests/timetable_guard_aggregation_test.sql",
   "supabase/tests/timetable_legacy_content_preservation_test.sql",
@@ -59,6 +61,8 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/performance_catalog_taxonomy_test.sql",
   "supabase/tests/makeup_approval_collision_candidates_test.sql",
   "supabase/tests/makeup_legacy_approval_occupancy_test.sql",
+  "supabase/tests/makeup_numbered_pages_test.sql",
+  "supabase/tests/makeup_numbered_optional_keys_test.sql",
   "supabase/tests/textbook_stock_count_atomic_test.sql",
   "supabase/tests/textbook_purchase_lifecycle_atomic_test.sql",
   "supabase/tests/textbook_workflow_numbered_reads_test.sql",
@@ -121,6 +125,7 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
+  "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",
   "tests/probe-signup-identity-concurrency.mjs",
@@ -159,9 +164,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "cad749d41fac3d9642ebd1e5fd3227353f39040ea92fdeaf80bd7ab72fe5db85"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "f88217121896e8c9e8b078e63c056d7db4097b13421d9db6266df2ccc52c05ef"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "e67344ba368a57afe379909bf2910e021787345b4483f70d92d4952903cfba07"
+  "d3188700fe9859985b544ea04e986ac07aa08dddd9395e6af7a425c31b106c83"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -173,7 +178,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "4e7fd2bd74424d2e8e7bdc2b5a13638b07a65b738f594cba775d4537ff9e8d5c"],
+  ["free-tier-guardrails.yml", "19cb38ab601a313963f89aa247c66115a2d5decba2137fcccad58d09240cd09b"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
@@ -1215,7 +1220,7 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   reject(!equalJson(lines.slice(lines.indexOf("jobs:")+1).filter((line) => /^ {2}[A-Za-z0-9_-]+:$/.test(line)).map((line) => line.trim().slice(0,-1)), expectedJobs), "isolated_ci_job_inventory_mismatch")
   const runtimeSteps = isolatedJob.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.slice(14))
   const runtimeName = kind === "main" ? "Run isolated migration and schema contracts" : "Run isolated schema contracts"
-  reject(!equalJson(runtimeSteps,["Checkout","Setup Node","Setup Supabase CLI","Install producer parity dependencies",runtimeName,"Test cached PostgreSQL fixture contracts"]), "isolated_ci_runtime_step_inventory_mismatch")
+  reject(!equalJson(runtimeSteps,["Checkout","Setup Node","Setup Supabase CLI","Install producer parity dependencies","Cache isolated annual RPC HTTP fixture image",runtimeName,"Test cached PostgreSQL fixture contracts"]), "isolated_ci_runtime_step_inventory_mismatch")
   const directStep = runtimeText.split(/^ {6}- name: /m).find((step) => step.startsWith(runtimeName + "\n")) || ""
   const directBody = directStep.split(/\n\s*run: \|\n/)[1]?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) || []
   reject(directBody.length !== 2 || directBody[0] !== "set -euo pipefail" || !directBody[1].startsWith('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs '), "isolated_ci_direct_execute_body_mismatch")
