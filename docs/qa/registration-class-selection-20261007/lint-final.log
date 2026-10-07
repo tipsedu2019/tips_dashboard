@@ -1,0 +1,8 @@
+
+/Users/hyunjun/Documents/Codex/2026-10-07/task/tips-registration-fix/src/features/tasks/ops-task-service.ts
+  1075:10  warning  'embeddedTaskRows' is defined but never used                             @typescript-eslint/no-unused-vars
+  1229:16  warning  'readTaskScopedTable' is defined but never used                          @typescript-eslint/no-unused-vars
+  2007:10  warning  'resolveRegistrationTrackSummariesForParents' is defined but never used  @typescript-eslint/no-unused-vars
+
+✖ 3 problems (0 errors, 3 warnings)
+

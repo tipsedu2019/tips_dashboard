@@ -1403,7 +1403,7 @@ test("multiple enrollment textbooks survive save hydration while legacy and expl
   assert.deepEqual(applyRegistrationEnrollmentClassSelection(saved, {
     classItem: { id: "eng-b", textbookIds: ["book-c", "book-d"] },
     availableTextbookIds: ["book-a", "book-b", "book-c", "book-d"],
-  }).textbookIds, ["book-c"])
+  }).textbookIds, ["book-c", "book-d"])
 })
 
 test("every selected textbook must be available and linked to the enrollment class", () => {

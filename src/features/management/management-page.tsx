@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { formatStudentContact } from "@/lib/student-contact-display";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
 import {
+  ACADEMIC_SUBJECTS,
   ACADEMIC_SUBJECT_VALUES,
   isScienceGrade,
   parseAcademicSubject,
@@ -1698,7 +1699,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       subject: uniqueSortedOptions(buildClassSubjectOptions(rawRows), [...ACADEMIC_SUBJECT_VALUES]),
       grade: isScienceClassSubject(selectedClassSubject)
         ? ["고1", "고2", "고3"]
-        : uniqueSortedOptions(rawRows.map((raw) => text(raw.grade))),
+        : uniqueSortedOptions([
+          ...(ACADEMIC_SUBJECTS.find((subject) => subject.value === selectedClassSubject)?.grades || ACADEMIC_SUBJECTS[0].grades),
+          ...rawRows.map((raw) => text(raw.grade)),
+        ], [...ACADEMIC_SUBJECTS[0].grades]),
       teacher: getClassTeacherOptionsForSubject(rawRows, selectedClassSubject),
       classroom: getClassClassroomOptionsForSubject(rawRows, selectedClassSubject),
     } satisfies Record<string, string[]>;

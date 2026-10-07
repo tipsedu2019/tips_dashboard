@@ -1,0 +1,144 @@
+[
+  {
+    "width": 1440,
+    "unhandled": [],
+    "errors": [],
+    "controls": [
+      {
+        "name": null,
+        "id": "classes-form-status",
+        "text": "수강"
+      },
+      {
+        "name": null,
+        "id": "classes-form-subject",
+        "text": "선택 안 함"
+      },
+      {
+        "name": null,
+        "id": "classes-form-grade",
+        "text": "선택 안 함"
+      },
+      {
+        "name": null,
+        "id": "classes-form-teacher",
+        "text": "선택 안 함"
+      },
+      {
+        "name": null,
+        "id": "classes-form-classroom",
+        "text": "선택 안 함"
+      }
+    ],
+    "grades": {
+      "영어": [
+        "선택 안 함",
+        "초1",
+        "초2",
+        "초3",
+        "초4",
+        "초5",
+        "초6",
+        "중1",
+        "중2",
+        "중3",
+        "고1",
+        "고2",
+        "고3"
+      ],
+      "수학": [
+        "선택 안 함",
+        "초1",
+        "초2",
+        "초3",
+        "초4",
+        "초5",
+        "초6",
+        "중1",
+        "중2",
+        "중3",
+        "고1",
+        "고2",
+        "고3"
+      ],
+      "과학": [
+        "선택 안 함",
+        "고1",
+        "고2",
+        "고3"
+      ]
+    },
+    "passed": true
+  },
+  {
+    "width": 390,
+    "unhandled": [],
+    "errors": [],
+    "controls": [
+      {
+        "name": null,
+        "id": "classes-form-status",
+        "text": "수강"
+      },
+      {
+        "name": null,
+        "id": "classes-form-subject",
+        "text": "선택 안 함"
+      },
+      {
+        "name": null,
+        "id": "classes-form-grade",
+        "text": "선택 안 함"
+      },
+      {
+        "name": null,
+        "id": "classes-form-teacher",
+        "text": "선택 안 함"
+      },
+      {
+        "name": null,
+        "id": "classes-form-classroom",
+        "text": "선택 안 함"
+      }
+    ],
+    "grades": {
+      "영어": [
+        "선택 안 함",
+        "초1",
+        "초2",
+        "초3",
+        "초4",
+        "초5",
+        "초6",
+        "중1",
+        "중2",
+        "중3",
+        "고1",
+        "고2",
+        "고3"
+      ],
+      "수학": [
+        "선택 안 함",
+        "초1",
+        "초2",
+        "초3",
+        "초4",
+        "초5",
+        "초6",
+        "중1",
+        "중2",
+        "중3",
+        "고1",
+        "고2",
+        "고3"
+      ],
+      "과학": [
+        "선택 안 함",
+        "고1",
+        "고2",
+        "고3"
+      ]
+    },
+    "passed": true
+  }
+]

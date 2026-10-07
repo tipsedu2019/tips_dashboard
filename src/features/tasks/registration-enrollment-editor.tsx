@@ -18,6 +18,8 @@ import { Textarea } from "@/components/ui/textarea"
 
 import { RegistrationAdmissionChecklist } from "./registration-admission-progress"
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationClassSelect } from "./registration-class-select"
+import { registrationDefaultTextbookIds } from "./registration-class-options"
 import { RegistrationTextbookSelect } from "./registration-textbook-select"
 import { RegistrationSaveButton } from "./registration-save-button"
 
@@ -75,6 +77,7 @@ type PersistedRegistrationEnrollmentDraft = {
   rows: RegistrationEnrollmentDraft[]
   baseline: string
   canonicalKey: string
+  textbookDefaultOwners: [string, string][]
 }
 
 const persistedRegistrationEnrollmentDrafts = new Map<string, PersistedRegistrationEnrollmentDraft>()
@@ -362,6 +365,7 @@ export function RegistrationEnrollmentEditor({
   const observationDefaultEligibleClientKeysRef = useRef(new Set(
     canonicalRowsHavePersistedOwnership ? [] : canonicalDraftRows.map((row) => row.clientKey),
   ))
+  const textbookDefaultOwnersRef = useRef(new Map<string, string>(cachedEnrollmentDraft?.textbookDefaultOwners || []))
   const [classDetailById, setClassDetailById] = useState<Record<string, OpsRegistrationClassDetail | null>>({})
   const [loadingClassIds, setLoadingClassIds] = useState<Set<string>>(() => new Set())
   const [classDetailRetryToken, setClassDetailRetryToken] = useState(0)
@@ -433,10 +437,12 @@ export function RegistrationEnrollmentEditor({
       rows: draftRows.map((row) => ({ ...row })),
       baseline: initialDraftRowsRef.current,
       canonicalKey: canonicalKeyRef.current,
+      textbookDefaultOwners: [...textbookDefaultOwnersRef.current],
     })
   }, [draftRows, enrollmentDraftScopeKey, rowsDirty])
 
   useEffect(() => {
+    textbookDefaultOwnersRef.current = new Map(cachedEnrollmentDraft?.textbookDefaultOwners || [])
     observationDefaultEligibleClientKeysRef.current = new Set(
       canonicalRowsHavePersistedOwnership ? [] : canonicalDraftRows.map((row) => row.clientKey),
     )
@@ -531,18 +537,15 @@ export function RegistrationEnrollmentEditor({
       let changed = false
       const next = current.map((row) => {
         const detail = row.classId ? classDetailById[row.classId] : null
-        if (!detail || row.textbookIds.length > 0 || row.textbookExplicitlyCleared) return row
-        const withDefault = applyRegistrationEnrollmentClassSelection(row, {
-          classItem: detail,
-          availableTextbookIds: textbookIds,
-        })
-        if (!withDefault.textbookId) return row
+        if (!detail || textbookDefaultOwnersRef.current.get(row.clientKey) !== row.classId) return row
+        const defaults = registrationDefaultTextbookIds(detail, textbooks)
+        if (JSON.stringify(defaults) === JSON.stringify(row.textbookIds)) return row
         changed = true
-        return { ...row, textbookId: withDefault.textbookId, textbookIds: withDefault.textbookIds }
+        return { ...row, textbookId: defaults[0] || "", textbookIds: defaults }
       })
       return changed ? next : current
     })
-  }, [classDetailById, textbookIds])
+  }, [classDetailById, textbooks, selectedClassIdsKey])
 
   const validScheduleSessionKeysByClassId = useMemo(() => Object.fromEntries(
     selectedClassIds.map((classId) => {
@@ -598,13 +601,16 @@ export function RegistrationEnrollmentEditor({
   function selectClass(clientKey: string, classId: string) {
     const classItem = subjectClasses.find((item) => item.id === classId) || null
     const previous = draftRows.find((row) => row.clientKey === clientKey)
+    if (!canEditRows || previous?.classId === classId) return
+    if (classId) textbookDefaultOwnersRef.current.set(clientKey, classId)
+    else textbookDefaultOwnersRef.current.delete(clientKey)
     if (previous?.classId && previous.classId !== classId) {
       observationDefaultEligibleClientKeysRef.current.delete(clientKey)
     }
     const eligibleClientKeys = [...observationDefaultEligibleClientKeysRef.current]
     setDraftRows((current) => {
       const selectedRows = current.map((row) => row.clientKey === clientKey
-        ? applyRegistrationEnrollmentClassSelection(row, { classItem, availableTextbookIds: textbookIds })
+        ? applyRegistrationEnrollmentClassSelection(row, { classItem, availableTextbookIds: [] })
         : row)
       const observationOption = getRegistrationEnrollmentStartOptions({
         regularSessions: [],
@@ -681,8 +687,13 @@ export function RegistrationEnrollmentEditor({
     }
   }
 
+  const textbookDefaultsPending = draftRows.some((row) => (
+    textbookDefaultOwnersRef.current.get(row.clientKey) === row.classId
+    && !classDetailById[row.classId]
+  ))
+
   async function saveRows() {
-    if (!canEditRows || saving) return
+    if (!canEditRows || saving || textbookDefaultsPending) return
     if (blockers.length > 0) {
       const message = blockers[0]?.message || "수업 정보를 확인하세요."
       setRowsValidationError(message)
@@ -701,6 +712,7 @@ export function RegistrationEnrollmentEditor({
     onWarning("")
     try {
       const saved = await saveRegistrationEnrollmentDetails({ trackId: track.id, rows, requestKey })
+      textbookDefaultOwnersRef.current.clear()
       setExternalReconciliationRequired(saved.externalReconciliationRequired)
       initialDraftRowsRef.current = JSON.stringify(draftRows)
       persistedRegistrationEnrollmentDrafts.delete(enrollmentDraftScopeKey)
@@ -797,26 +809,19 @@ export function RegistrationEnrollmentEditor({
         const linkedTextbookIds = detail?.textbookIds
           || subjectClasses.find((classItem) => classItem.id === row.classId)?.textbookIds
           || []
-        const linkedTextbooks = linkedTextbookIds
+        const linkedTextbooks = [...new Set(linkedTextbookIds)]
           .map((id) => textbooks.find((textbook) => textbook.id === id))
           .filter((textbook): textbook is OpsTextbookOption => Boolean(textbook))
         const rowBlockers = blockers.filter((blocker) => blocker.rowId === row.clientKey)
         return (
           <article key={row.clientKey} data-enrollment-row={row.clientKey} className="grid gap-3 rounded-md border p-3 sm:grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,1.25fr)_auto] sm:items-end">
-            <Label className="grid gap-1.5">
-              <span>수업 {index + 1}</span>
-              <RegistrationSelect
-                aria-label={`${track.subject} 수업 ${index + 1} 선택`}
-                value={row.classId}
-                placeholder="수업 선택"
-                options={[
-                  { value: "", label: "수업 선택" },
-                  ...subjectClasses.map((classItem) => ({ value: classItem.id, label: classItem.label })),
-                ]}
-                onValueChange={(value) => { setRowsValidationError(""); selectClass(row.clientKey, value) }}
-                disabled={!canEditRows || saving}
-              />
-            </Label>
+            <RegistrationClassSelect
+              label={`${track.subject} 수업 ${index + 1} 선택`}
+              value={row.classId}
+              classes={subjectClasses}
+              onValueChange={(value) => { setRowsValidationError(""); selectClass(row.clientKey, value) }}
+              disabled={!canEditRows || saving}
+            />
             <div className="grid min-w-0 gap-1.5">
               <Label htmlFor={`registration-textbooks-${row.clientKey}`}>교재</Label>
               <RegistrationTextbookSelect
@@ -825,6 +830,7 @@ export function RegistrationEnrollmentEditor({
                 values={row.textbookIds}
                 options={linkedTextbooks}
                 onValuesChange={(values) => {
+                  textbookDefaultOwnersRef.current.delete(row.clientKey)
                   setRowsValidationError("")
                   updateRow(row.clientKey, {
                     textbookId: values[0] || "",
@@ -903,7 +909,7 @@ export function RegistrationEnrollmentEditor({
             data-registration-primary-action={`${track.subject}:enrollment-row-save`}
             dirty={rowsDirty}
             saving={saving}
-            blocked={rowsRefreshPending || draftRows.length === 0}
+            blocked={rowsRefreshPending || textbookDefaultsPending || draftRows.length === 0}
             actionLabel="등록 정보 저장"
             cleanLabel={draftRows.some((row) => row.classId) ? "저장됨" : "수업을 선택하세요"}
             aria-label={`${track.subject} 등록 정보 저장`}

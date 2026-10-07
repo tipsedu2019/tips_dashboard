@@ -1,0 +1,24 @@
+{
+  "base": "bd7905b7d066f319ff424824314526c660142b6b",
+  "sourceSHA256": {
+    "src/features/management/management-page.tsx": "8b16e5891b2d75c778eb31b0f37c0fecd24767bb7c40f47aefb4982415acc867",
+    "src/features/tasks/ops-task-service.ts": "38ecb3bfa2f398ec903c8ce9f4d3c8cd4a6c1513b8e5fb9ad1249ee6cde33da5",
+    "src/features/tasks/registration-enrollment-editor.tsx": "52a1fd46a1c44a1a67a78b16ecbb90fb2d7392e319a26dacc8eac3e802bfe913",
+    "src/features/tasks/registration-observation-editor.tsx": "7532b753978b319eac83fc3163d7723c14ea1073ed6c3316d7e3d41aa611af72",
+    "src/features/tasks/registration-select.tsx": "c543ac62116aca19dd33ed06dd76f5dbb54be32d7bf571de82c1500abdc4c43b",
+    "src/features/tasks/registration-track-editor.tsx": "9c7b3aecfab100fcda9041ec497864b69595b2aeae163a7c876f10c8d0b84e65",
+    "src/features/tasks/registration-track-model.js": "c287047dcc4f7f16893e19ffc39fae16cacbdbc0f8022fb69f699f60faa226d5",
+    "tests/ops-task-service-loading.test.mjs": "02ffe6de80d4e11590e9593a130fb7afe41eb0730ecdbfe5c752667eb428ac94",
+    "tests/registration-track-model.test.mjs": "2d1dbe2062622a198a001590b502dead1cc7f1b26643b8fcf126c4074f375639",
+    "tests/registration-track-workspace.test.mjs": "ed183835326ff43bb03187848ba7e5bf00f3c6debfc81d58fb2a750b167d0c14",
+    "src/features/tasks/registration-class-options.ts": "d7633a92e8af444274d4eb84eb873fbe6b88160072d878905b28e335bd767917",
+    "src/features/tasks/registration-class-select.tsx": "120b1db42ba0bb059f5272bd0184602680c924608a6aac20cbd4aa9b1b884717",
+    "tests/registration-class-selection.test.mjs": "dc2380cadbe9826958c95fe381c70fded0ac4a092cef1f7633388b191b5c2ccc"
+  },
+  "linuxImage": "public.ecr.aws/supabase/studio:2026.08.17-sha-0c1da8f",
+  "linuxNode": "22.18.0",
+  "hostNode": "24.19.0",
+  "network": "Linux --network none; browser external/API/mutation requests intercepted; synthetic Supabase URL for build",
+  "productionWrites": 0,
+  "githubActions": "not run; explicit no-charge instruction"
+}
