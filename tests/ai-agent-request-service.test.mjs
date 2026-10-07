@@ -41,3 +41,19 @@ for(const stage of ['session','fetch','json'])test(`dispose and remount keep the
  assert.equal((await ui.service.list({page:1,pageSize:10,scope:'own'})).total,1);
  ui.service.dispose();await assert.rejects(ui.service.list({page:1,pageSize:10,scope:'own'}),/actor_changed/);
 });
+
+test('idempotent mount does not invalidate an active read awaiting its session',async()=>{
+ const pending=Promise.withResolvers();const ui=setup({getSession:()=>pending.promise});
+ const read=ui.service.list({page:1,pageSize:10,scope:'own'});
+ assert.equal(ui.service.mount(),true);
+ pending.resolve({user:{id:actor.userId},access_token:'synthetic'});
+ assert.equal((await read).total,1);
+});
+test('layout activation waits for the committed actor without adopting another identity',async()=>{
+ const ui=setup();ui.service.dispose();ui.switchActor({...actor,role:'teacher'});
+ assert.equal(ui.service.mount(),false);
+ await assert.rejects(ui.service.list({page:1,pageSize:10,scope:'own'}),/actor_changed/);
+ ui.switchActor(actor);
+ assert.equal((await ui.service.list({page:1,pageSize:10,scope:'own'})).total,1);
+ assert.equal(ui.calls.length,1);
+});

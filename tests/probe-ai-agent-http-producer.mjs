@@ -236,7 +236,20 @@ const parsed=JSON.parse(capture.slice('AI_HTTP_CAPTURE:'.length));assert.equal(p
 assert.equal(parsed.captures.find(row=>row.name==='historyLast').data.messages.at(-1).seq,'56');
 assert.deepEqual(Object.keys(parsed.captures.find(row=>row.name==='minimalEndedDoneReplay').data.request).sort(),['id','status','version']);
 assert.ok(!capture.includes(credentialHash));assert.ok(!capture.includes(nonceHash));
-console.log(capture);
+// Capture actual canonical personal SQL producers privately in this same run.
+for (const [field,path,prefix] of [
+ ['personalCredential','supabase/tests/ai_agent_personal_owner_test.sql','AI_PERSONAL_CREDENTIAL_CAPTURE:'],
+ ['personalRead','supabase/tests/agent_personal_dashboard_read_test.sql','AGENT_PERSONAL_DASHBOARD_READ_CAPTURE:'],
+]) {
+ const source=await readFile(path,'utf8');
+ const output=await query("set app.ai_personal_capture='on';\n"+source);
+ const lines=output.split('\n'),plans=lines.filter(line=>/^1\.\.[0-9]+$/.test(line)),passed=lines.filter(line=>/^ok [0-9]+(?:\s|$)/.test(line));
+ assert.equal(plans.length,1);assert.equal(passed.length,Number(plans[0].slice(3)));
+ assert.ok(!lines.some(line=>/^(not ok|Bail out!)/i.test(line)||/#\s*(SKIP|TODO)\b/i.test(line)),'personal producer TAP must pass');
+ const captures=lines.filter(line=>line.startsWith(prefix));assert.equal(captures.length,1);
+ parsed[field]=JSON.parse(captures[0].slice(prefix.length));
+}
+console.log('AI_HTTP_CAPTURE:'+JSON.stringify(parsed));
 
 } finally {
 // BEGIN GENERATED AI PROBE CLEANUP

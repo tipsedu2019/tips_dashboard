@@ -48,7 +48,9 @@ export function createAiAgentRequestService({ actor, getCurrentActor, getSession
   const requestPath = (id: string) => `requests/${z.uuid().parse(id)}`;
   return {
     actor, active,
-    mount() { lifecycle++; disposed = !sameAiRequestActor(actor, getCurrentActor()); return !disposed; },
+    // Disposal advances the generation. Mount only restores component lifetime:
+    // authorization is always checked against the committed actor by active().
+    mount() { disposed = false; return active(); },
     dispose() { lifecycle++; disposed = true; },
     list(input: AiRequestListQuery, signal?: AbortSignal) {
       const query = aiRequestListQuerySchema.parse(input);

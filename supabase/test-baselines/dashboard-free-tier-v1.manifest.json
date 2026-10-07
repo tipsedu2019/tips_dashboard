@@ -769,6 +769,16 @@
       "fileName": "20261007013509_operations_calendar_inclusive_range.sql",
       "status": "final",
       "sha256": "63840ecfd7146b82a4664a808dec993012f9809f3bc16a5543adaef2e34576e7"
+    },
+    {
+      "fileName": "20261007062153_ai_agent_personal_owner.sql",
+      "sha256": "f4da9fadd2d2d95a230904e5aacf8fe188f71bbbb93ddba3f4312dc2b74277d6",
+      "status": "final"
+    },
+    {
+      "fileName": "20261007062159_agent_personal_dashboard_read.sql",
+      "sha256": "5e5b70e4a4af19de10764f8b47b221010e25924588cdb69d76b1402300b60a90",
+      "status": "final"
     }
   ]
 }

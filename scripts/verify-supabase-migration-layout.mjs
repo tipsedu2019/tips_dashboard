@@ -120,6 +120,8 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_requests_authz_test.sql",
   "supabase/tests/ai_agent_requests_transition_test.sql",
   "supabase/tests/ai_agent_space_policy_test.sql",
+  "supabase/tests/ai_agent_personal_owner_test.sql",
+  "supabase/tests/agent_personal_dashboard_read_test.sql",
 ])
 const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -140,9 +142,15 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-ai-agent-space-policy-concurrency.mjs",
   "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
   "tests/probe-ai-agent-http-producer.mjs",
+  "tests/probe-ai-agent-personal-integration.mjs",
 ])
 
 const AI_STATIC_TESTS = Object.freeze([
+  "tests/ai-agent-personal-credential-service.test.mjs",
+  "tests/ai-agent-personal-credential-workspace.test.mjs",
+  "tests/ai-agent-personal-owner-concurrency.test.mjs",
+  "tests/agent-personal-dashboard-read.test.mjs",
+
   "tests/ai-agent-credential-service.test.mjs",
   "tests/ai-agent-credential-workspace.test.mjs",
   "tests/ai-agent-local-db-runner.test.mjs",
@@ -164,9 +172,9 @@ const AI_STATIC_TESTS = Object.freeze([
 
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "f88217121896e8c9e8b078e63c056d7db4097b13421d9db6266df2ccc52c05ef"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "26436a34d7ffad142488cc56086a4e05ed6067eabdb4bdaa276200459b5a4196"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "d3188700fe9859985b544ea04e986ac07aa08dddd9395e6af7a425c31b106c83"
+  "91e34376ae83031736f52520c0c19616b9e8172a3fb63f5e697cfff2fec6abe6"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.

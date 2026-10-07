@@ -76,6 +76,8 @@ const SCHEMA_FINGERPRINT_SQL = `select md5(coalesce(jsonb_agg(to_jsonb(objects) 
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-ai-agent-http-producer.mjs": ["supabase/tests/ai_agent_personal_owner_test.sql","supabase/tests/agent_personal_dashboard_read_test.sql"],
+  "tests/probe-ai-agent-personal-integration.mjs": ["tests/probe-ai-agent-deadline-concurrency.mjs","tests/helpers/ai-personal-probe-runtime.mjs","scripts/lib/ai-agent-probe-runtime.mjs","tests/probe-ai-agent-personal-owner-concurrency.mjs","tests/probe-agent-personal-dashboard-read-concurrency.mjs","supabase/tests/agent_personal_dashboard_read_test.sql"],
   "tests/probe-agent-calendar-dto.mjs": ["src/features/agent-api/server/calendar-compiler.mjs", "src/features/operations/academic-event-utils.js", "src/app/admin/calendar/utils/calendar-grid.js", "tests/probe-muse-calendar-consumer.py", "integrations/muse/calendar-client/bin/tips-cal", "integrations/muse/calendar-client/bin/dynamic_credentials.py"],
   "tests/probe-agent-class-edit-dto.mjs": ["src/features/agent-api/server/class-edit-compiler.mjs", "src/lib/class-schedule-planner.js"],
   "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
@@ -1086,11 +1088,11 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         env: { ...cleanEnvironment, TASK_AI_RECEIPT: receiptPath, TASK_AI_CAPTURE_DIRECTORY: aiDirectory,
           TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt) } }, { executeProcess });
       // Raw producer credentials and private attestation values never enter logs.
-      if (consumers.code !== 0 || !/(?:#|ℹ) tests 2(?:\r?\n)/u.test(consumers.stdout)
-        || !/(?:#|ℹ) pass 2(?:\r?\n)/u.test(consumers.stdout)
+      if (consumers.code !== 0 || !/(?:#|ℹ) tests 3(?:\r?\n)/u.test(consumers.stdout)
+        || !/(?:#|ℹ) pass 3(?:\r?\n)/u.test(consumers.stdout)
         || !/(?:#|ℹ) skipped 0(?:\r?\n)/u.test(consumers.stdout)) fail("isolated_ai_consumers_failed");
       if (canonical(await snapshotAiSource(root)) !== canonical(after)) fail("isolated_ai_consumer_source_drift");
-      producerParity = { tests: 2, pass: 2, skipped: 0, sourceHead: after.sourceHead, closure: after.closure, captures: receipt.captures, migrations: receipt.migrations, credentialPrefix: receipt.credentialPrefix };
+      producerParity = { tests: 3, pass: 3, skipped: 0, sourceHead: after.sourceHead, closure: after.closure, captures: receipt.captures, migrations: receipt.migrations, credentialPrefix: receipt.credentialPrefix };
       log(JSON.stringify({ event: "isolated_ai_producer_parity_passed", ...producerParity }));
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath },

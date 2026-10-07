@@ -31,8 +31,8 @@ function parityArguments({tests,probes}){
   ...tests.flatMap(path=>['--test',path]),...probes.flatMap(path=>['--probe',path])];
 }
 test('both isolated workflows retain the exact full parity inventory including legacy approval occupancy',async()=>{
- assert.equal(AI_SQL_TESTS.length,88);
- assert.equal(AI_PROBES.length,17);
+ assert.equal(AI_SQL_TESTS.length,94);
+ assert.equal(AI_PROBES.length,19);
  assert.equal(AI_SQL_TESTS.filter(path=>path===legacyOccupancyTest).length,1);
  assert.equal(AI_SQL_TESTS[AI_SQL_TESTS.indexOf('supabase/tests/makeup_approval_collision_candidates_test.sql')+1],legacyOccupancyTest);
  for(const name of isolatedWorkflows){
@@ -82,7 +82,7 @@ test('independent attestation rejects stale run/source, migration, closure, inve
 
 test('actual root consumers fail without a current capture and receipt; no optional skips',()=>{
  const result=spawnSync(process.execPath,['--test','--experimental-strip-types','tests/ai-agent-http-producer-parity.test.mjs','tests/ai-agent-chat-runtime-parity.test.mjs'],{encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C',LC_ALL:'C'}});
- assert.equal(result.status,1);assert.match(result.stdout,/(?:#|ℹ) tests 2\n/u);assert.match(result.stdout,/(?:#|ℹ) pass 0\n/u);assert.match(result.stdout,/(?:#|ℹ) skipped 0\n/u);
+ assert.equal(result.status,1);assert.match(result.stdout,/(?:#|ℹ) tests 3\n/u);assert.match(result.stdout,/(?:#|ℹ) pass 0\n/u);assert.match(result.stdout,/(?:#|ℹ) skipped 0\n/u);
  assert.match(result.stdout,/current-run capture receipt required/);
 });
 
@@ -141,7 +141,7 @@ test('source closure rejects a side-effect import separated by a line comment',a
 
 test('current migration identity preserves the six accepted pins and rejects canonical/source drift',async()=>{
  assert.equal(ACCEPTED_AI_MIGRATIONS.length,6);
- assert.equal(CURRENT_AI_MIGRATIONS.length,7);
+ assert.equal(CURRENT_AI_MIGRATIONS.length,9);
  assert.deepEqual(CURRENT_AI_MIGRATIONS.slice(0,6),ACCEPTED_AI_MIGRATIONS);
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-migration-drift-'));
  try{
@@ -155,8 +155,8 @@ test('current migration identity preserves the six accepted pins and rejects can
    m=>m.orderedNewMigrations.pop(),
    m=>m.orderedNewMigrations.push({...CURRENT_AI_MIGRATIONS[6],fileName:'20990101000000_ai_agent_unreviewed.sql'}),
    m=>m.orderedNewMigrations.at(-1).sha256='0'.repeat(64),
-   m=>m.orderedNewMigrations.at(-7).sha256='0'.repeat(64),
-   m=>[m.orderedNewMigrations[140],m.orderedNewMigrations[141]]=[m.orderedNewMigrations[141],m.orderedNewMigrations[140]],
+   m=>m.orderedNewMigrations.find(row=>row.fileName===CURRENT_AI_MIGRATIONS[0].fileName).sha256='0'.repeat(64),
+   m=>{const a=m.orderedNewMigrations.findIndex(row=>row.fileName===CURRENT_AI_MIGRATIONS[0].fileName),b=m.orderedNewMigrations.findIndex(row=>row.fileName===CURRENT_AI_MIGRATIONS[1].fileName);[m.orderedNewMigrations[a],m.orderedNewMigrations[b]]=[m.orderedNewMigrations[b],m.orderedNewMigrations[a]]},
   ]){
    const changed=structuredClone(original);mutate(changed);await writeFile(manifestPath,JSON.stringify(changed));
    await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/);

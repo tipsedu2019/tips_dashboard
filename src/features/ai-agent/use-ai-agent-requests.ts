@@ -39,7 +39,10 @@ export function useAiAgentRequestActorBoundary() {
 export type AiRequestBoundary = ReturnType<typeof useAiAgentRequestActorBoundary>;
 export function useAiAgentRequestService(boundary: AiRequestBoundary, actor: AiRequestActor) {
     const service = useMemo(() => createAiAgentRequestService({ actor, getCurrentActor: boundary.getCurrentActor, getSession: boundary.getSession }), [actor, boundary.getCurrentActor, boundary.getSession]);
-    useEffect(() => { service.mount(); return () => service.dispose(); }, [service]);
+    // Activate before descendant passive reads, including StrictMode replay.
+    // The outer boundary publishes the committed actor later in this layout
+    // phase; each service operation still checks that live actor itself.
+    useLayoutEffect(() => { service.mount(); return () => service.dispose(); }, [service]);
     return service;
 }
 export function useAiAgentRequests({ service, page, pageSize, scope, status, search, ready }: {

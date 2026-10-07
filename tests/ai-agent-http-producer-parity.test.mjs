@@ -62,3 +62,30 @@ test('actual disposable DB producers pass real strict parsers and HTTP handlers'
  assert.equal(get('notification').request.status,'done');assert.equal(get('notification').notification.reason,'space_permission_revoked');
  assert.equal(get('policyMissing').revision,'0');assert.equal(get('policySet').revision,'1');
 });
+
+test('current canonical personal SQL DTOs pass strict issuance consumers and actual read HTTP handlers',async()=>{
+ const captured=await readCurrentAiCapture('http');
+ const {loadNotificationComponent}=await import('./helpers/notification-component-loader.mjs');
+ const consumer=loadNotificationComponent('src/features/ai-agent/ai-agent-personal-credential-service.ts');
+ const data=captured.personalCredential;
+ for(const [key,schema] of [['firstIssue',consumer.personalCredentialIssueSchema],['replayIssue',consumer.personalCredentialIssueSchema],['list',consumer.personalCredentialListSchema],['owners',consumer.personalCredentialOwnersSchema]])assert.equal(schema.safeParse(data[key]).success,true,'real personal '+key+' strict schema');
+ const first=data.firstIssue;assert.ok(first.token);assert.equal(data.replayIssue.token,null);assert.notEqual(first.ownerProfileId,first.issuerProfileId);
+ assert.deepEqual({...first,token:null},data.replayIssue);assert.ok(data.list.items.some(row=>row.id===first.id));assert.ok(data.owners.items.some(row=>row.name===null));
+ const actor={userId:first.issuerProfileId,role:'admin'},calls=[];
+ const service=consumer.createAiAgentPersonalCredentialService({actor,getCurrentActor:()=>actor,rpc:async(name,args)=>{assert.equal(name,'ai_agent_personal_credential_api_v1');calls.push(args);return {data:args.p_action==='list'?data.list:args.p_action==='owners'?data.owners:calls.length===1?first:data.replayIssue,error:null};}});
+ const input={label:first.label,ownerProfileId:first.ownerProfileId,scopes:first.scopes,grant:first.grant,expiresAt:first.expiresAt};
+ await service.create(input,key);await service.create(input,key);await service.list(1,10);await service.owners(1,20);
+ assert.deepEqual(calls[0],calls[1]);
+ const {personalDashboardReadProducerSchema,createPersonalDashboardReadHandler}=await import('../src/features/agent-api/server/personal-dashboard-read.ts');
+ for(const kind of ['class','calendar','schools']) {
+  const dto=captured.personalRead[kind];assert.equal(personalDashboardReadProducerSchema.safeParse({...dto.data,kind}).success,true,'real personal '+kind+' producer');
+  const resource=dto.data.resource;
+  const path=kind==='class'?['classes',resource.id]:kind==='calendar'?['calendar','schools',resource.id]:['calendar','schools'];
+  const query=kind==='class'?'from=2099-10-01&to=2099-10-07':kind==='calendar'?'schoolYear=2099':'page=1';
+  let count=0;const handler=createPersonalDashboardReadHandler({enabled:()=>true,rpc:async(name,args)=>{assert.equal(name,'agent_personal_dashboard_read_v1');assert.equal(args.p_action,kind==='class'?'class_context':kind==='calendar'?'calendar_context':'schools');count++;return{data:dto,error:null};}});
+  const response=await handler(new Request('https://synthetic.invalid/api/agent/v2/'+path.join('/')+'?'+query,{headers:{authorization:'Bearer tips_dashboard_personal_'+'d'.repeat(64)}}),path);
+  assert.equal(response.status,200);assert.match(response.headers.get('cache-control'),/no-store/);const output=await response.json();assert.ok(output.data);assert.equal(count,1);assert.ok(!JSON.stringify(output).includes('PRIVATE_'));
+  if(kind!=='schools')assert.equal(output.data.capabilities.readOnly,true);
+ }
+ assert.ok(captured.personalRead.class.data.context.weeklySlots.length>0);assert.ok(captured.personalRead.class.data.context.sessions.length>0);assert.ok(captured.personalRead.calendar.data.context.events.length>0);assert.ok(captured.personalRead.schools.data.context.items.length>0);
+});

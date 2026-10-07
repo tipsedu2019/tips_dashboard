@@ -212,7 +212,7 @@ function PersonalCredentialWorkspace({ actor, boundary }: { actor: AiRequestActo
           <TableCell className={settingsTableCellClass}>{row.scopes.includes('ai-agent:requests:claim') ? '본인 요청 처리' : '본인 요청 읽기'}</TableCell>
           <TableCell className={settingsTableCellClass}>{row.grant.spaceKeys?.map(key => catalog?.items.find(space => space.key === key)?.label ?? key).join(' · ') || '없음'}</TableCell>
           <TableCell className={settingsTableCellClass}>{dateLabel(row.expiresAt)}</TableCell>
-          <TableCell className={settingsTableCellClass}>{row.revokedAt ? '폐기' : usable ? '사용 가능' : '만료'}</TableCell>
+          <TableCell className={settingsTableCellClass}>{row.revokedAt ? '폐기' : usable ? '유효기간 내' : '만료'}</TableCell>
           <TableCell className={settingsTableActionCellClass}><Button variant="outline" size="sm" disabled={!usable || busy} aria-label={`${row.label} 개인 요청 키 폐기`} onClick={() => { setError(''); setRevokeTarget(row); }}>폐기</Button></TableCell>
         </TableRow>;
       })}

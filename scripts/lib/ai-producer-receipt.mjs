@@ -42,6 +42,20 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'src/features/chat/server/chat-runtime-configuration.ts',
  'src/features/chat/server/chat-space-catalog.ts',
  'src/features/chat/server/google-chat-transport.ts',
+ 'supabase/tests/ai_agent_personal_owner_test.sql',
+ 'supabase/tests/agent_personal_dashboard_read_test.sql',
+ 'src/features/ai-agent/ai-agent-personal-credential-service.ts',
+ 'src/features/agent-api/server/personal-dashboard-read.ts',
+ 'src/features/agent-api/server/http.ts',
+ 'src/features/agent-api/server/openapi.ts',
+ 'src/features/agent-api/server/calendar-compiler.mjs',
+ 'src/features/agent-api/server/calendar-contract.ts',
+ 'src/features/agent-api/server/class-edit-compiler.mjs',
+ 'src/features/agent-api/server/class-edit-contract.ts',
+ 'src/lib/auth-utils.ts',
+ 'src/lib/class-schedule-planner.js',
+ 'src/features/operations/academic-event-utils.js',
+ 'src/app/admin/calendar/utils/calendar-grid.js',
 ].sort());
 export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
  {"fileName": "20261003084028_ai_agent_requests.sql", "sha256": "5f4657b2e9835617caec86d7ff17bdd2bf94f664d8001e564031385cf85ea249", "status": "final"},
@@ -56,6 +70,8 @@ export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
 // prior receipts remain historical.
 export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
+ {"fileName": "20261007062153_ai_agent_personal_owner.sql", "sha256": "f4da9fadd2d2d95a230904e5aacf8fe188f71bbbb93ddba3f4312dc2b74277d6", "status": "final"},
+ {"fileName": "20261007062159_agent_personal_dashboard_read.sql", "sha256": "5e5b70e4a4af19de10764f8b47b221010e25924588cdb69d76b1402300b60a90", "status": "final"},
 ]);
 export function extractAiCapture(stdout,identity){
  const producer=AI_PRODUCERS[identity];assert.ok(producer,'unknown capture producer');
@@ -84,8 +100,8 @@ export async function snapshotAiSource(root=ROOT){
   closure.push({path,sha256:hash(contents),bytes:contents.length});
  }
  const manifest=JSON.parse(await readFile(join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json')));
- assert.equal(manifest.orderedNewMigrations.length,153,'AI canonical manifest inventory');
- assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
+ assert.equal(manifest.orderedNewMigrations.length,155,'AI canonical manifest inventory');
+ assert.deepEqual(manifest.orderedNewMigrations.filter(m=>m.fileName.includes('_ai_agent_') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read') || m.fileName.includes('_agent_personal_dashboard_read')),CURRENT_AI_MIGRATIONS,'current migration manifest drift');
  for(const m of CURRENT_AI_MIGRATIONS)assert.equal(hash(await readFile(join(root,'supabase/migrations',m.fileName))),m.sha256,'accepted migration source drift');
  const sourceHead=execFileSync('git',['rev-parse','HEAD'],{cwd:root,encoding:'utf8',env:{PATH:process.env.PATH,LANG:'C'}}).trim();
  assert.match(sourceHead,/^[a-f0-9]{40}$/u);
@@ -220,7 +236,9 @@ export const AI_SQL_TESTS = Object.freeze([
   "supabase/tests/ai_agent_credentials_test.sql",
   "supabase/tests/ai_agent_requests_authz_test.sql",
   "supabase/tests/ai_agent_requests_transition_test.sql",
-  "supabase/tests/ai_agent_space_policy_test.sql"
+  "supabase/tests/ai_agent_space_policy_test.sql",
+  "supabase/tests/ai_agent_personal_owner_test.sql",
+  "supabase/tests/agent_personal_dashboard_read_test.sql",
 ]);
 
 export const AI_PROBES = Object.freeze([
@@ -241,5 +259,6 @@ export const AI_PROBES = Object.freeze([
   "tests/probe-ai-agent-claim-concurrency.mjs",
   "tests/probe-ai-agent-space-policy-concurrency.mjs",
   "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
-  "tests/probe-ai-agent-http-producer.mjs"
+  "tests/probe-ai-agent-http-producer.mjs",
+  "tests/probe-ai-agent-personal-integration.mjs",
 ]);

@@ -303,6 +303,6 @@ select is(pg_get_functiondef('public.agent_api_v2(text,text,jsonb)'::regprocedur
 select is(pg_get_functiondef('public.agent_calendar_api_v1(text,text,jsonb)'::regprocedure),(select calendar_definition from pd_unchanged),'central calendar API definition remains unchanged');
 -- Authorized local harness may privately consume these three safe real-producer
 -- snapshots. They contain no digest/token/credential grant, only synthetic IDs.
-select 'AGENT_PERSONAL_DASHBOARD_READ_CAPTURE:'||jsonb_build_object('class',(select v from pd_evidence where k='class'),'calendar',(select v from pd_evidence where k='calendar'),'schools',(select v from pd_evidence where k='schools'))::text;
+select 'AGENT_PERSONAL_DASHBOARD_READ_CAPTURE:'||jsonb_build_object('class',(select v from pd_evidence where k='class'),'calendar',(select v from pd_evidence where k='calendar'),'schools',(select v from pd_evidence where k='schools'))::text where current_setting('app.ai_personal_capture',true)='on';
 select * from finish();
 rollback;

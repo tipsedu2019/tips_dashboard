@@ -295,6 +295,6 @@ select ok(not exists(select 1 from dashboard_private.ai_agent_request_actions wh
 select is((select count(*) from dashboard_private.chat_delivery_attempts where outbox_id=(select (v->>'id')::uuid from po_evidence where k='own_outbox') and kind='started'),1::bigint,'replay tests created exactly one synthetic attempt');
 -- Capture contains only synthetic credentials. The authorized harness consumes this
 -- marker in private memory and must never persist/print its token-bearing payload.
-select 'AI_PERSONAL_CREDENTIAL_CAPTURE:'||jsonb_build_object('firstIssue',(select v from po_evidence where k='personal2'),'replayIssue',(select v from po_evidence where k='issue_replay'),'list',(select v from po_evidence where k='nullable_list'),'owners',(select v from po_evidence where k='owners'))::text;
+select 'AI_PERSONAL_CREDENTIAL_CAPTURE:'||jsonb_build_object('firstIssue',(select v from po_evidence where k='personal2'),'replayIssue',(select v from po_evidence where k='issue_replay'),'list',(select v from po_evidence where k='nullable_list'),'owners',(select v from po_evidence where k='owners'))::text where current_setting('app.ai_personal_capture',true)='on';
 select * from finish();
 rollback;
