@@ -21,10 +21,28 @@ export async function personalProbeRuntime() {
   query(sql){return core.query('set search_path=public,extensions;\n'+sql);},
   session(timeoutMs){const client=core.session(timeoutMs);client.write('set search_path=public,extensions;\n');return client;},
   requireComplete(result){assert.equal(result.code,0,'owned personal SQL session failed');assert.equal(result.signal,null);},
-  async waitForLock(writer,blocker) {
+  async waitForLock(writer,blocker,{observer,deadlineAt=Date.now()+15000}={}) {
    assert.ok([writer,blocker].every(n=>Number.isSafeInteger(n)&&n>0)&&writer!==blocker);
-   const deadline=Date.now()+15000;
-   while(Date.now()<deadline){if(await core.query(`select ${blocker}=any(pg_blocking_pids(${writer})) and exists(select 1 from pg_stat_activity where pid=${writer} and wait_event_type='Lock');`)==='t')return true;await new Promise(r=>setTimeout(r,25));}
+   const predicate=`${blocker}=any(pg_blocking_pids(${writer})) and exists(select 1 from pg_stat_activity where pid=${writer} and wait_event_type='Lock')`;
+   while(Date.now()<deadlineAt){
+    let waiting;
+    if(observer){
+     const marker='LOCK_'+randomUUID().replaceAll('-','')+':';
+     // Separate statements guarantee the transaction-cached statistics are
+     // discarded before observing the writer's actual downstream lock wait.
+     observer.write(`select pg_stat_clear_snapshot();select '${marker}'||(${predicate})::text;\n`);
+     waiting=(await lineBefore(observer,new RegExp('^'+marker+'(true|false)$','mu'),deadlineAt))[1]==='true';
+    }else waiting=await core.query(`select ${predicate};`)==='t';
+    assert.ok(Date.now()<deadlineAt,'lock observation exceeded writer deadline');
+    if(waiting)return true;await new Promise(r=>setTimeout(r,25));
+   }
    throw Error('personal_lock_wait_unobserved');
   },async finish(){await core.finishRuntime();return{ownedChildrenReaped:true,ownedPostgresSessionsAbsent:true};}};
+}
+
+export async function lineBefore(session,pattern,deadlineAt) {
+ assert.ok(Date.now()<deadlineAt,'writer deadline elapsed');
+ let timer;
+ try{return await Promise.race([session.line(pattern),new Promise((_,reject)=>{timer=setTimeout(()=>reject(Error('personal_writer_deadline_elapsed')),Math.max(1,deadlineAt-Date.now()));})]);}
+ finally{clearTimeout(timer);}
 }

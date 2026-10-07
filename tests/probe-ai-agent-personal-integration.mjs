@@ -21,5 +21,14 @@ try {
  console.log(JSON.stringify({suite:'personal_dashboard_read',...read}));
 } finally {await runtime.finish();}
 
+const deadlines=[];
+for(const deadline of ['credential','grant']) {
+ runtime=await personalProbeRuntime();
+ try {const result=await runDeadlineConcurrency(runtime,parsePersonalTap,deadline);deadlines.push(...result.cases);console.log(JSON.stringify({suite:'deadline_'+deadline,...result}));}
+ finally {await runtime.finish();}
+}
+assert.deepEqual(deadlines.map(x=>x.deadline+':'+x.operation).sort(),['credential','grant'].flatMap(deadline=>['claim','claim_replay','done_replay','done_fk','prepare_budget','prepare_replay'].map(operation=>deadline+':'+operation)).sort());
+console.log(JSON.stringify({suite:'deadline',status:'passed',cases:12,completeOperationDeadlineMatrix:true,providerSend:false}));
 runtime=await personalProbeRuntime();
-try {console.log(JSON.stringify({suite:"deadline",...await runDeadlineConcurrency(runtime,parsePersonalTap)}));console.log(JSON.stringify({suite:'central_domain_deadline',...await runCentralDomainDeadlineConcurrency(runtime,parsePersonalTap)}));} finally {await runtime.finish();}
+try {console.log(JSON.stringify({suite:'central_domain_deadline',...await runCentralDomainDeadlineConcurrency(runtime,parsePersonalTap)}));}
+finally {await runtime.finish();}

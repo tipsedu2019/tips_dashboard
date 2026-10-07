@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
 import {readFile} from 'node:fs/promises';
+import {lineBefore} from './helpers/ai-personal-probe-runtime.mjs';
 const q=x=>"'"+String(x).replaceAll("'","''")+"'",j=x=>q(JSON.stringify(x))+'::jsonb';
 export async function runPersonalInstallGuardProbe(runtime,parseTap) {
  const source=await readFile('supabase/migrations/20261007062153_ai_agent_personal_owner.sql','utf8');
@@ -41,14 +42,15 @@ select is((select count(*) from pg_constraint where connamespace='dashboard_priv
 select * from finish();rollback;`);
  return {status:'passed',tap:parseTap(output),canonicalGuardSha256:createHash('sha256').update(blocks[0][0]).digest('hex'),fixtureTransactionRolledBack:true,providerSend:false};
 }
-export async function runDeadlineConcurrency(runtime,parseTap) {
+export async function runDeadlineConcurrency(runtime,parseTap,deadline) {
+ assert.ok(['credential','grant'].includes(deadline));
  const issuer=randomUUID(),claimHash=createHash('sha256').update(randomUUID()).digest('hex');
  const employee=id=>`select set_config('request.jwt.claim.sub',${q(id)},true);set local role authenticated;`;
  const last=async sql=>(await runtime.query(sql)).split('\n').at(-1);
  const call=(hash,family,action,input)=>`public.ai_agent_${family}_api_v1(${q(hash)},${q(action)},${j(input)})`;
  await runtime.query(`insert into auth.users(id,instance_id,aud,role,email) values(${q(issuer)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(issuer+'@test.invalid')});insert into public.profiles(id,role,name) values(${q(issuer)},'admin','Synthetic expiry issuer') on conflict(id) do update set role=excluded.role,name=excluded.name;update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/EXPIRY_FIXTURE',public_origin='https://synthetic.invalid' where space_key='space_2';`);
  const proof=[];
- for(const operation of ['claim','claim_replay','done_replay','done_fk','prepare_budget','prepare_replay'])for(const deadline of ['credential','grant']) {
+ for(const operation of ['claim','claim_replay','done_replay','done_fk','prepare_budget','prepare_replay']) {
   const owner=randomUUID(),cid=randomUUID(),hash=createHash('sha256').update(randomUUID()).digest('hex');
   await runtime.query(`insert into auth.users(id,instance_id,aud,role,email) values(${q(owner)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(owner+'@test.invalid')});insert into public.profiles(id,role,name) values(${q(owner)},'teacher','Synthetic expiry owner') on conflict(id) do update set role=excluded.role,name=excluded.name;insert into dashboard_private.chat_user_space_permissions(user_id,space_keys,revision,configured_by) values(${q(owner)},array['space_2'],1,${q(issuer)});`);
   await runtime.query(`insert into dashboard_private.ai_agent_credentials(id,created_by,owner_profile_id,credential_kind,label,token_hash,scopes,expires_at) values(${q(cid)},${q(issuer)},${q(owner)},'personal','Synthetic expiry key',${q(hash)},array['ai-agent:requests:read','ai-agent:requests:claim','ai-agent:requests:update','chat:outbox:read','chat:send'],clock_timestamp()+interval '1 day');insert into dashboard_private.ai_agent_credential_grants(credential_id,queues,actions,expires_at) values(${q(cid)},array['employee_requests'],array['read','claim','renew','progress','question','done'],clock_timestamp()+interval '1 day');insert into dashboard_private.chat_credential_space_grants(credential_id,space_keys,purposes,expires_at) values(${q(cid)},array['space_2'],array['ai_completion'],clock_timestamp()+interval '1 day');`);
@@ -83,28 +85,33 @@ export async function runDeadlineConcurrency(runtime,parseTap) {
    'usage',(select jsonb_build_array(rate_count,rate_window,last_used_at) from dashboard_private.ai_agent_credentials where id=${q(cid)}),
    'global',(select to_jsonb(x) from dashboard_private.chat_send_global_budget x where singleton),
    'space',(select to_jsonb(x) from dashboard_private.chat_space_send_budgets x where space_key='space_2'))::text;`);
-  const before=await snapshot(),first=runtime.session(),second=runtime.session();
+  const before=await snapshot(),first=runtime.session(),second=runtime.session(),armer=runtime.session();
   try {
+   first.write("select 'FIRST_READY:'||pg_backend_pid();\n");second.write("select 'SECOND_READY:'||pg_backend_pid();\n");armer.write("select 'ARMER_READY:'||pg_backend_pid();\n");
+   await first.line(/^FIRST_READY:(\d+)$/mu);await second.line(/^SECOND_READY:(\d+)$/mu);await armer.line(/^ARMER_READY:(\d+)$/mu);
    first.write(`begin;${block}select 'LOCKED:'||pg_backend_pid();\n`);const blocker=Number((await first.line(/^LOCKED:(\d+)$/mu))[1]);
    // Only this selected deadline expires. Other authority remains current.
-   await runtime.query(`update dashboard_private.${table} set expires_at=clock_timestamp()+interval '2 seconds' where ${column}=${q(cid)};`);
+   armer.write(`begin;update dashboard_private.${table} set expires_at=clock_timestamp()+interval '2 seconds' where ${column}=${q(cid)};commit;select 'ARMED:'||(expires_at>clock_timestamp())::text from dashboard_private.${table} where ${column}=${q(cid)};\n`);
+   assert.equal((await armer.line(/^ARMED:(true|false)$/mu))[1],'true','deadline must be current after committed arm');
+   const until=Date.now()+3500;
    second.write(`begin;select 'WRITER:'||pg_backend_pid();create function pg_temp.expiry_call() returns text language plpgsql as $$begin perform ${expr};return '00000';exception when others then return SQLSTATE||':'||SQLERRM;end$$;create temp table expiry_outcome(v text);grant all on expiry_outcome to service_role;set local role service_role;insert into expiry_outcome values(pg_temp.expiry_call());select 'OUTCOME:'||v from expiry_outcome;set local role postgres;select plan(1);select is(v,${q(deadline==='credential'?'28000:ai_agent_unauthorized':'42501:ai_agent_grant_forbidden')},'expired after observed downstream wait') from expiry_outcome;select * from finish();\n`);
-   const writer=Number((await second.line(/^WRITER:(\d+)$/mu))[1]);assert.equal(await runtime.waitForLock(writer,blocker),true);
-   let expired=false;const until=Date.now()+3500;
+   const writer=Number((await second.line(/^WRITER:(\d+)$/mu))[1]);assert.equal(await runtime.waitForLock(writer,blocker,{observer:first,deadlineAt:until}),true);
+   let expired=false;
    for(let n=0;Date.now()<until;n++) {
     const marker=`EXPIRED_${n}:`;
     first.write(`select ${q(marker)}||(expires_at<=clock_timestamp())::text from dashboard_private.${table} where ${column}=${q(cid)};\n`);
-    expired=(await first.line(new RegExp('^'+marker+'(true|false)$','mu')))[1]==='true';if(expired)break;
+    expired=(await lineBefore(first,new RegExp('^'+marker+'(true|false)$','mu'),until))[1]==='true';if(expired)break;
     await new Promise(r=>setTimeout(r,30));
    }
+   assert.ok(Date.now()<until,'release remains bounded from writer start');
    assert.equal(expired,true,'database clock must prove expiry before releasing blocker');first.end('commit;\n');runtime.requireComplete(await first.complete);
    const expected=deadline==='credential'?'28000:ai_agent_unauthorized':'42501:ai_agent_grant_forbidden';assert.equal((await second.line(/^OUTCOME:(.*)$/mu))[1],expected);
    second.end('commit;\n');const result=await second.complete;runtime.requireComplete(result);const tap=parseTap(result.stdout);
    assert.equal(await snapshot(),before,'denial must roll back every request/receipt/dispatch/accounting effect');
    proof.push({operation,deadline,lockWaitObserved:true,expiryObserved:true,sqlstate:expected.split(':')[0],effectsUnchanged:true,tap});
-  } finally {await runtime.closeSessions(first,second);}
+  } finally {await runtime.closeSessions(first,second,armer);}
  }
- assert.equal(proof.length,12);return{status:'passed',cases:proof,providerSend:false};
+ assert.equal(proof.length,6);return{status:'passed',cases:proof,providerSend:false};
 }
 
 // Central domain dispatch also waits inside an adapter's permission callback.
@@ -122,7 +129,10 @@ export async function runCentralDomainDeadlineConcurrency(runtime,parseTap) {
   const snapshot=`jsonb_build_object('request',(select to_jsonb(x) from dashboard_private.ai_agent_requests x where id=${q(rid)}),'claim',(select to_jsonb(x) from dashboard_private.ai_agent_request_claims x where request_id=${q(rid)}),'actions',(select jsonb_agg(to_jsonb(x) order by id) from dashboard_private.ai_agent_request_actions x where request_id=${q(rid)}),'events',(select jsonb_agg(to_jsonb(x) order by action_id,seq) from dashboard_private.ai_agent_action_events x where action_id in(select id from dashboard_private.ai_agent_request_actions where request_id=${q(rid)})),'receipts',(select jsonb_agg(to_jsonb(x) order by operation,idempotency_key) from dashboard_private.ai_agent_request_receipts x where principal_id=${q(cid)}),'usage',(select jsonb_build_array(rate_count,rate_window,last_used_at) from dashboard_private.ai_agent_credentials where id=${q(cid)}))`;
   const blocker=runtime.session(),writer=runtime.session();
   try {
+   blocker.write("select 'BLOCKER_READY:'||pg_backend_pid();\n");writer.write("select 'WRITER_READY:'||pg_backend_pid();\n");
+   await blocker.line(/^BLOCKER_READY:(\d+)$/mu);await writer.line(/^WRITER_READY:(\d+)$/mu);
    blocker.write(`begin;select pg_advisory_xact_lock(${lockKey});select 'BLOCKER:'||pg_backend_pid();\n`);const blockerPid=Number((await blocker.line(/^BLOCKER:(\d+)$/mu))[1]);
+   const until=Date.now()+3500;
    writer.write(`begin;select 'WRITER:'||pg_backend_pid();
 insert into auth.users(id,instance_id,aud,role,email) values(${q(issuer)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(issuer+'@test.invalid')}),(${q(owner)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(owner+'@test.invalid')});
 insert into public.profiles(id,role,name) values(${q(issuer)},'admin','Synthetic central issuer'),(${q(owner)},'staff','Synthetic central requester') on conflict(id) do update set role=excluded.role,name=excluded.name;
@@ -149,10 +159,10 @@ select 'OUTCOME:'||(v#>>'{}') from central_state where k='outcome';select plan(2
 select is((select v#>>'{}' from central_state where k='outcome'),'42501:ai_agent_action_forbidden','domain expires inside observed callback wait');
 select is(${snapshot},(select v from central_state where k='before'),'denial rolls back action, journal, receipts, claim and rate');select * from finish();\n`);
    const writerPid=Number((await writer.line(/^WRITER:(\d+)$/mu))[1]);const expiry=(await writer.line(/^EXPIRY:([0-9]+(?:\.[0-9]+)?)$/mu))[1];
-   assert.equal(await runtime.waitForLock(writerPid,blockerPid),true);
-   let expired=false;const until=Date.now()+3500;
-   for(let n=0;Date.now()<until;n++) {const marker=`CLOCK_${n}:`;blocker.write(`select ${q(marker)}||(clock_timestamp()>=to_timestamp(${expiry}))::text;\n`);expired=(await blocker.line(new RegExp('^'+marker+'(true|false)$','mu')))[1]==='true';if(expired)break;await new Promise(r=>setTimeout(r,30));}
-   assert.equal(expired,true);blocker.end('commit;\n');runtime.requireComplete(await blocker.complete);
+   assert.equal(await runtime.waitForLock(writerPid,blockerPid,{observer:blocker,deadlineAt:until}),true);
+   let expired=false;
+   for(let n=0;Date.now()<until;n++) {const marker=`CLOCK_${n}:`;blocker.write(`select ${q(marker)}||(clock_timestamp()>=to_timestamp(${expiry}))::text;\n`);expired=(await lineBefore(blocker,new RegExp('^'+marker+'(true|false)$','mu'),until))[1]==='true';if(expired)break;await new Promise(r=>setTimeout(r,30));}
+   assert.ok(Date.now()<until,'central release remains bounded from writer start');assert.equal(expired,true);blocker.end('commit;\n');runtime.requireComplete(await blocker.complete);
    assert.equal((await writer.line(/^OUTCOME:(.*)$/mu))[1],'42501:ai_agent_action_forbidden');writer.end('rollback;\n');const done=await writer.complete;runtime.requireComplete(done);
    results.push({operation,replay,callbackLockWaitObserved:true,expiryObserved:true,sqlstate:'42501',tap:parseTap(done.stdout)});
   } finally {await runtime.closeSessions(blocker,writer);}

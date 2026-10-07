@@ -127,13 +127,21 @@ export async function runPersonalDashboardReadConcurrencyProbes({ runtime, parse
     if (output.split('\n').at(-1)!=='t') fail('concurrency_expiry_cleanup_invalid');
     expirySeedAttempted=false;
   }
-  async function race(name, firstSql, expression, state, code, direct = false, beforeRelease) {
+  async function race(name, firstSql, expression, state, code, direct = false, beforeRelease, initialSql = '') {
     requireRunning();
     const first = runtime.session(), second = runtime.session();
-    let primaryFailure;
+    let primaryFailure, initialExpiry;
     try {
-      first.write(`begin;set local role postgres;${firstSql}${snapshotSql.replace('select jsonb_build_object(', "select 'HELD_SNAPSHOT:'||jsonb_build_object(")}::text;select 'LOCKED:'||pg_backend_pid();\n`);
+      first.write("select 'FIRST_READY:'||pg_backend_pid();\n");
+      second.write("select 'SECOND_READY:'||pg_backend_pid();\n");
+      await first.line(/^FIRST_READY:([1-9][0-9]*)$/mu);
+      await second.line(/^SECOND_READY:([1-9][0-9]*)$/mu);
+      first.write(`${initialSql}begin;set local role postgres;${firstSql}${snapshotSql.replace('select jsonb_build_object(', "select 'HELD_SNAPSHOT:'||jsonb_build_object(")}::text;select 'LOCKED:'||pg_backend_pid();\n`);
       const blockerPid = Number((await first.line(/^LOCKED:([1-9][0-9]*)$/mu))[1]);
+      if (initialSql) {
+        initialExpiry=parseExpiryState((await first.line(/^INITIAL_EXPIRY:(.*)$/mu))[1]);
+        if(initialExpiry.expired) fail('concurrency_expiry_fixture_already_expired');
+      }
       if (firstSql.includes('FIRST:')) {
         const firstLine = (await first.line(/^FIRST:(.*)$/mu))[1];
         let firstOutcome; try { firstOutcome = JSON.parse(firstLine); } catch { fail('concurrency_first_outcome_invalid'); }
@@ -143,7 +151,7 @@ export async function runPersonalDashboardReadConcurrencyProbes({ runtime, parse
       const callbackStartedAt=Date.now();
       second.write(`begin;set local role postgres;select 'WRITER:'||pg_backend_pid();create temp table pd_probe_outcome(v jsonb);grant all on pd_probe_outcome to service_role;${exercise(expression,direct)}${direct ? '' : 'set local role service_role;'}insert into pd_probe_outcome values(pg_temp.pd_exercise());select 'OUTCOME:'||v::text from pd_probe_outcome;select plan(2);select is(v->>'sqlstate',${literal(state)},'waited dashboard read exact SQLSTATE') from pd_probe_outcome;select is(v->>'code',${code === null ? 'null::text' : literal(code)},'waited dashboard read exact domain result') from pd_probe_outcome;select * from finish();\n`);
       const writerPid = Number((await second.line(/^WRITER:([1-9][0-9]*)$/mu))[1]);
-      if (await runtime.waitForLock(writerPid,blockerPid) !== true) fail('concurrency_lock_wait_unobserved');
+      if (await runtime.waitForLock(writerPid,blockerPid,{observer:first,...(beforeRelease ? {deadlineAt:callbackStartedAt+3500} : {})}) !== true) fail('concurrency_lock_wait_unobserved');
       const releaseProof=beforeRelease ? await beforeRelease({first,callbackStartedAt}) : undefined;
       first.end('commit;\n');
       runtime.requireComplete(await first.complete,'concurrency_first_commit_failed');
@@ -157,7 +165,7 @@ export async function runPersonalDashboardReadConcurrencyProbes({ runtime, parse
       if (tap.tests !== 2 || tap.pass !== 2 || tap.fail !== 0 || tap.skipped !== 0 || tap.todo !== 0) fail('concurrency_tap_count_invalid');
       const after = await snapshot();
       same(held,after);
-      return { name,lockWaitObserved:true,waitEventType:'Lock',blockingPidMembershipObserved:true,firstCommittedBeforeSecond:true,outcome:actual,tap,held,after,backendPairSha256:digest(`${blockerPid}:${writerPid}`),...(releaseProof ? { releaseProof } : {}) };
+      return { name,lockWaitObserved:true,waitEventType:'Lock',blockingPidMembershipObserved:true,firstCommittedBeforeSecond:true,outcome:actual,tap,held,after,backendPairSha256:digest(`${blockerPid}:${writerPid}`),...(releaseProof ? { releaseProof } : {}),...(initialExpiry ? {initialExpiry} : {}) };
     } catch (error) {
       primaryFailure=error;
       throw error;
@@ -211,10 +219,9 @@ export async function runPersonalDashboardReadConcurrencyProbes({ runtime, parse
     // Commit before owner FOR UPDATE: an uncommitted credential would be
     // invisible to the callback, and a later INSERT would wait on its owner FK.
     expirySeedAttempted=true;
-    await runtime.query(`begin;set local role postgres;insert into dashboard_private.agent_personal_dashboard_credentials(id,created_by,owner_profile_id,label,token_hash,scopes,class_ids,school_ids,expires_at) values(${literal(id(709))},${literal(id(1))},${literal(owner)},${literal(expiryLabel)},${literal(credentialHash(709))},array['calendar:read'],'{}',array[${literal(id(501))}::uuid],clock_timestamp()+interval '3 seconds');commit;`);
-    const initialExpiry=await expiryState();
-    if (initialExpiry.expired) fail('concurrency_expiry_fixture_already_expired');
-    const expired=await race('credential_expiry_during_waited_owner_authorization',`select id from public.profiles where id=${literal(owner)} for update;`,expiryRead,'28000','agent_unauthorized',false,waitForExpiry);
+    const seed=`begin;set local role postgres;insert into dashboard_private.agent_personal_dashboard_credentials(id,created_by,owner_profile_id,label,token_hash,scopes,class_ids,school_ids,expires_at) values(${literal(id(709))},${literal(id(1))},${literal(owner)},${literal(expiryLabel)},${literal(credentialHash(709))},array['calendar:read'],'{}',array[${literal(id(501))}::uuid],clock_timestamp()+interval '3 seconds');${expiryStateQuery('INITIAL_EXPIRY:')};commit;`;
+    const expired=await race('credential_expiry_during_waited_owner_authorization',`select id from public.profiles where id=${literal(owner)} for update;`,expiryRead,'28000','agent_unauthorized',false,waitForExpiry,seed);
+    const initialExpiry=expired.initialExpiry;
     const finalExpiry=await expiryState();
     if (!finalExpiry.expired || expired.releaseProof?.dbClockExpiredBeforeRelease!==true) fail('concurrency_expiry_clock_unobserved');
     same(initialExpiry.accounting,finalExpiry.accounting,'concurrency_expiry_accounting_changed');
