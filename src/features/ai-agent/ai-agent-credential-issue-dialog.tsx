@@ -46,7 +46,7 @@ function CredentialWorkspace({ actor, boundary }: {
     const [page, setPage] = useState(1), [revision, setRevision] = useState(0), [loading, setLoading] = useState(true), [loadError, setLoadError] = useState(''), [message, setMessage] = useState('');
     const { pageSize, ready, setPreference } = useDataTablePageSize('settings:ai-agent-credentials');
     const [open, setOpen] = useState(false), [secret, setSecret] = useState(''), [error, setError] = useState(''), [revokeTarget, setRevokeTarget] = useState<AiCredential | null>(null);
-    const [label, setLabel] = useState('뮤즈AI'), [preset, setPreset] = useState('read'), [days, setDays] = useState('1'), [chat, setChat] = useState(false), [spaces, setSpaces] = useState<string[]>([]), [purposes, setPurposes] = useState<string[]>([]), [source, setSource] = useState('');
+    const [label, setLabel] = useState('AI 에이전트'), [preset, setPreset] = useState('read'), [days, setDays] = useState('1'), [chat, setChat] = useState(false), [spaces, setSpaces] = useState<string[]>([]), [purposes, setPurposes] = useState<string[]>([]), [source, setSource] = useState('');
     const opener = useRef<HTMLButtonElement>(null), generation = useRef(0);
     const createAttempt = getAiRequestAttempt<AiCredentialCreate>(actor, 'credential:create');
     const revokeAttempt = getAiRequestAttempt<{

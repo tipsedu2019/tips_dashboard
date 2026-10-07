@@ -15,7 +15,12 @@ export async function personalProbeRuntime() {
  const config=await readFile('supabase/config.toml','utf8'),project=config.match(/^project_id = "(tips_supabase_db_qa_[a-f0-9]{12})"/mu)?.[1];
  assert.ok(project);assert.ok(config.includes(`[db]\nport = ${url.port}\n`));
  const core=createAiAgentProbeRuntime({assert,spawn,randomUUID});core.configureContainer(`supabase_db_${project}`);core.startDeadline();
- return {...core,requireComplete(result){assert.equal(result.code,0,'owned personal SQL session failed');assert.equal(result.signal,null);},
+ try {await core.query('create extension if not exists pgtap with schema extensions;');}
+ catch(error){await core.finishRuntime();throw error;}
+ return {...core,
+  query(sql){return core.query('set search_path=public,extensions;\n'+sql);},
+  session(timeoutMs){const client=core.session(timeoutMs);client.write('set search_path=public,extensions;\n');return client;},
+  requireComplete(result){assert.equal(result.code,0,'owned personal SQL session failed');assert.equal(result.signal,null);},
   async waitForLock(writer,blocker) {
    assert.ok([writer,blocker].every(n=>Number.isSafeInteger(n)&&n>0)&&writer!==blocker);
    const deadline=Date.now()+15000;

@@ -242,7 +242,7 @@ for (const [field,path,prefix] of [
  ['personalRead','supabase/tests/agent_personal_dashboard_read_test.sql','AGENT_PERSONAL_DASHBOARD_READ_CAPTURE:'],
 ]) {
  const source=await readFile(path,'utf8');
- const output=await query("set app.ai_personal_capture='on';\n"+source);
+ const output=await query("create extension if not exists pgtap with schema extensions;set search_path=public,extensions;set app.ai_personal_capture='on';\n"+source);
  const lines=output.split('\n'),plans=lines.filter(line=>/^1\.\.[0-9]+$/.test(line)),passed=lines.filter(line=>/^ok [0-9]+(?:\s|$)/.test(line));
  assert.equal(plans.length,1);assert.equal(passed.length,Number(plans[0].slice(3)));
  assert.ok(!lines.some(line=>/^(not ok|Bail out!)/i.test(line)||/#\s*(SKIP|TODO)\b/i.test(line)),'personal producer TAP must pass');
