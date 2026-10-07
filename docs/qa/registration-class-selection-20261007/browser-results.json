@@ -1,0 +1,28 @@
+[
+  {
+    "width": 1440,
+    "blocked": [],
+    "errors": [],
+    "gradeOptions": [
+      "전체 학년",
+      "중1",
+      "중2",
+      "고3",
+      "학년 미지정"
+    ],
+    "passed": true
+  },
+  {
+    "width": 390,
+    "blocked": [],
+    "errors": [],
+    "gradeOptions": [
+      "전체 학년",
+      "중1",
+      "중2",
+      "고3",
+      "학년 미지정"
+    ],
+    "passed": true
+  }
+]

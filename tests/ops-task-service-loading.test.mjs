@@ -1647,3 +1647,28 @@ for (const [code, message, reuseRequest] of [
       "definitive rejection clears the attempt; uncertain/retryable failure preserves it");
   });
 }
+
+test("registration service transports usage dates and textbook status into default selection", async () => {
+  const { registrationDefaultTextbookIds } = await import("../src/features/tasks/registration-class-options.ts");
+  const helpers = {
+    text: (value) => String(value || "").trim(),
+    numberValue: (value) => Number(value || 0),
+    recordValue: (value) => value && typeof value === "object" ? value : null,
+    normalizeIdList: (value) => Array.isArray(value) ? value : [],
+    optionMeta: (values) => values.filter(Boolean).join(" · "),
+  };
+  const mapper = transpileAndLoad(sourceBetween("function mapOpsClassOption", "async function readOpsTaskWorkspaceOptionData"), ["mapOpsClassOption", "buildOpsTaskWorkspaceOptionData"], helpers);
+  const raw = { id: "class-current", name: "합성 수업", textbook_ids: ["active", "upper", "inactive", "expired"], textbook_usage: { expired: { endDate: "2026-10-06" } } };
+  const loadDetail = loadSelectedRegistrationClassDetailWithMocks({
+    ...helpers, mapOpsClassOption: mapper.mapOpsClassOption, isMissingColumnError: () => false,
+    supabase: { from(table) { assert.equal(table, "classes"); return { select(columns) { assert.ok(columns.includes("textbook_usage")); return { eq(key, id) { assert.equal(key, "id"); assert.equal(id, raw.id); return this; }, async limit() { return { data: [raw], error: null }; } }; } }; } },
+  });
+  const detail = await loadDetail(raw.id, { viewerId: "fixture-viewer" });
+  const catalog = mapper.buildOpsTaskWorkspaceOptionData([], [], [], [
+    { id: "active", title: "현재", status: "active" },
+    { id: "upper", title: "기존 상태", status: "ACTIVE" },
+    { id: "inactive", title: "미사용", status: "inactive" },
+    { id: "expired", title: "기간 종료", status: "active" },
+  ], []);
+  assert.deepEqual(registrationDefaultTextbookIds(detail, catalog.textbooks, "2026-10-07"), ["active", "upper"]);
+});

@@ -1831,6 +1831,7 @@ export function RegistrationApplication({
                 ?? activeObservationDetail.currentObservation?.appointmentNotificationRevision
                 ?? null}
               detail={activeObservationDetail}
+              classCatalog={classOptions}
               deepLinkedAttempt={activeDeepLinkedAttempt}
               actions={registrationObservationActions}
               onSaved={handleObservationSaved}

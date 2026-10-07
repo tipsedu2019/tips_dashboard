@@ -22,6 +22,7 @@ export type RegistrationSelectOption = {
 export type RegistrationSelectProps = {
   value: string
   placeholder: ReactNode
+  selectedLabel?: ReactNode
   options: RegistrationSelectOption[]
   disabled?: boolean
   required?: boolean
@@ -31,6 +32,7 @@ export type RegistrationSelectProps = {
 export function RegistrationSelect({
   value,
   placeholder,
+  selectedLabel,
   options,
   disabled,
   required,
@@ -52,7 +54,7 @@ export function RegistrationSelect({
     >
       <SelectTrigger className={cn("w-full min-w-0", className)} {...triggerProps}>
         <SelectValue placeholder={placeholder}>
-          {value === "" && !hasEmptyOption ? placeholder : undefined}
+          {selectedLabel ?? (value === "" && !hasEmptyOption ? placeholder : undefined)}
         </SelectValue>
       </SelectTrigger>
       <SelectContent>

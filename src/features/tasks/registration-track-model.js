@@ -546,7 +546,7 @@ export function applyRegistrationEnrollmentClassSelection(row, input = {}) {
     ...row,
     classId: enrollmentText(input.classItem?.id),
     textbookId: linkedTextbookIds.find((id) => availableTextbookIds.has(id)) || "",
-    textbookIds: linkedTextbookIds.filter((id) => availableTextbookIds.has(id)).slice(0, 1),
+    textbookIds: [...new Set(linkedTextbookIds.filter((id) => availableTextbookIds.has(id)))],
     textbookExplicitlyCleared: false,
     classStartDate: "",
     classStartSessionKey: "",

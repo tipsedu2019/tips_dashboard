@@ -1,0 +1,32 @@
+[
+  {
+    "width": 1440,
+    "blocked": [],
+    "errors": [],
+    "gradeControlCount": 0,
+    "classOptions": [
+      "수업 선택",
+      "영어 10반",
+      "영어 2반",
+      "고등 심화반",
+      "학년 공통반"
+    ],
+    "defaultBooks": "합성 교재 a",
+    "passed": true
+  },
+  {
+    "width": 390,
+    "blocked": [],
+    "errors": [],
+    "gradeControlCount": 0,
+    "classOptions": [
+      "수업 선택",
+      "영어 10반",
+      "영어 2반",
+      "고등 심화반",
+      "학년 공통반"
+    ],
+    "defaultBooks": "합성 교재 a",
+    "passed": true
+  }
+]

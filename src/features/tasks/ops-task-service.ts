@@ -106,11 +106,13 @@ export type OpsClassOption = OpsLinkedOption & {
   studentIds: string[]
   waitlistIds: string[]
   textbookIds: string[]
+  textbookUsage?: Record<string, { startDate?: string; endDate?: string }>
 }
 
 export type OpsRegistrationClassDetail = OpsClassOption
 
 export type OpsTextbookOption = OpsLinkedOption & {
+  status?: string
   publisher: string
   subject: string
 }
@@ -492,6 +494,7 @@ const OPS_REGISTRATION_CLASS_COLUMN_CANDIDATES = [
   "id,name,subject,grade,teacher,room",
 ] as const
 const OPS_REGISTRATION_CLASS_DETAIL_COLUMN_CANDIDATES = [
+  "id,name,subject,grade,teacher,room,schedule,schedule_plan,textbook_ids,textbook_usage,schedule_storage_mode",
   "id,name,subject,grade,teacher,room,schedule,schedule_plan,textbook_ids,schedule_storage_mode",
   "id,name,subject,grade,teacher,room,schedule,schedule_plan,textbook_ids",
   "id,name,subject,grade,teacher,room,schedule,schedule_plan",
@@ -1602,6 +1605,7 @@ function mapOpsClassOption(row: Row): OpsClassOption {
     studentIds: normalizeIdList(row.student_ids),
     waitlistIds: normalizeIdList(row.waitlist_ids),
     textbookIds: normalizeIdList(row.textbook_ids),
+    textbookUsage: recordValue(row.textbook_usage) as OpsClassOption["textbookUsage"],
   }
 }
 
@@ -1648,6 +1652,7 @@ function buildOpsTaskWorkspaceOptionData(
     classes: classRows.map(mapOpsClassOption),
     textbooks: textbookRows.map((row) => ({
       id: text(row.id),
+      status: text(row.status),
       label: text(row.title) || text(row.name) || text(row.id),
       meta: optionMeta([row.publisher, row.subject]),
       publisher: text(row.publisher),
@@ -1684,7 +1689,7 @@ async function readOpsTaskWorkspaceOptionData(
       readTable("profiles", "id,name,email,role,login_id", true),
       readTableWithFallback("students", "id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids", "id,name,grade,school,contact,parent_contact,status", true),
       readOpsClassRows(options.taskType),
-      readTable("textbooks", "id,title,name,publisher,subject", true),
+      readTableWithFallback("textbooks", "id,title,name,publisher,subject,status", "id,title,name,publisher,subject", true),
       readTableWithFallback("teacher_catalogs", "id,name,subjects,is_visible,sort_order,profile_id,account_email", "id,name,subjects,is_visible,sort_order", true),
     ])
 
