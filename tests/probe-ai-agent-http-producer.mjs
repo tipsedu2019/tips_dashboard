@@ -237,15 +237,15 @@ assert.equal(parsed.captures.find(row=>row.name==='historyLast').data.messages.a
 assert.deepEqual(Object.keys(parsed.captures.find(row=>row.name==='minimalEndedDoneReplay').data.request).sort(),['id','status','version']);
 assert.ok(!capture.includes(credentialHash));assert.ok(!capture.includes(nonceHash));
 // Capture actual canonical personal SQL producers privately in this same run.
-const profileFingerprintSql="select encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(p) order by id),'[]'::jsonb)::text,'UTF8')),'hex') from public.profiles p;";
+const fixtureFingerprintSql="select encode(sha256(convert_to(jsonb_build_object('profiles',(select coalesce(jsonb_agg(to_jsonb(p) order by id),'[]'::jsonb) from public.profiles p),'requests',(select coalesce(jsonb_agg(to_jsonb(r) order by id),'[]'::jsonb) from dashboard_private.ai_agent_requests r))::text,'UTF8')),'hex');";
 for (const [field,path,prefix] of [
  ['personalCredential','supabase/tests/ai_agent_personal_owner_test.sql','AI_PERSONAL_CREDENTIAL_CAPTURE:'],
  ['personalRead','supabase/tests/agent_personal_dashboard_read_test.sql','AGENT_PERSONAL_DASHBOARD_READ_CAPTURE:'],
 ]) {
  const source=await readFile(path,'utf8');
- const profilesBefore=await query(profileFingerprintSql);
+ const fixturesBefore=await query(fixtureFingerprintSql);
  const output=await query("create extension if not exists pgtap with schema extensions;set search_path=public,extensions;set app.ai_personal_capture='on';\n"+source);
- assert.equal(await query(profileFingerprintSql),profilesBefore,'personal producer transaction must restore every profile row');
+ assert.equal(await query(fixtureFingerprintSql),fixturesBefore,'personal producer transaction must restore every profile and request row');
  const lines=output.split('\n'),plans=lines.filter(line=>/^1\.\.[0-9]+$/.test(line)),passed=lines.filter(line=>/^ok [0-9]+(?:\s|$)/.test(line));
  // Emit only bounded assertion numbers, never TAP values or captured DTOs.
  const failedIds=lines.flatMap(line=>{const match=line.match(/^not ok ([0-9]+)(?:\s|$)/);return match?[Number(match[1])]:[];});
