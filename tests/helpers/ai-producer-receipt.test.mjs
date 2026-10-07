@@ -89,7 +89,7 @@ test('actual root consumers fail without a current capture and receipt; no optio
 test('source snapshot rejects undeclared local imports, missing source and canonical migration drift',async()=>{
  const root=await mkdtemp(join(tmpdir(),'ai-receipt-negative-'));
  try{
-  // Only relevant source allowlist and seven migrations, no dependency/app copy.
+  // Only the source allowlist and nine AI migrations, no dependency/app copy.
   const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
   for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
    await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
@@ -151,10 +151,17 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
+  assert.equal(original.orderedNewMigrations.length,156);
+  assert.equal(original.orderedNewMigrations.at(-1).fileName,'20261007135140_textbook_latest_count_read_aggregation.sql');
   for(const mutate of [
    m=>m.orderedNewMigrations.pop(),
    m=>m.orderedNewMigrations.push({...CURRENT_AI_MIGRATIONS[6],fileName:'20990101000000_ai_agent_unreviewed.sql'}),
    m=>m.orderedNewMigrations.at(-1).sha256='0'.repeat(64),
+   m=>m.orderedNewMigrations.at(-1).status='draft',
+   m=>m.orderedNewMigrations.at(-1).fileName='20990101000000_unreviewed.sql',
+   m=>m.orderedNewMigrations[0].sha256='0'.repeat(64),
+   m=>m.orderedNewMigrations[0]=m.orderedNewMigrations[1],
+   m=>[m.orderedNewMigrations[0],m.orderedNewMigrations[1]]=[m.orderedNewMigrations[1],m.orderedNewMigrations[0]],
    m=>m.orderedNewMigrations.find(row=>row.fileName===CURRENT_AI_MIGRATIONS[0].fileName).sha256='0'.repeat(64),
    m=>{const a=m.orderedNewMigrations.findIndex(row=>row.fileName===CURRENT_AI_MIGRATIONS[0].fileName),b=m.orderedNewMigrations.findIndex(row=>row.fileName===CURRENT_AI_MIGRATIONS[1].fileName);[m.orderedNewMigrations[a],m.orderedNewMigrations[b]]=[m.orderedNewMigrations[b],m.orderedNewMigrations[a]]},
   ]){
@@ -162,6 +169,12 @@ test('current migration identity preserves the six accepted pins and rejects can
    await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/);
   }
   await writeFile(manifestPath,JSON.stringify(original));
+  const mainMigration=join(root,'supabase/migrations/'+original.orderedNewMigrations.at(-1).fileName);
+  const mainSource=await readFile(mainMigration);
+  await writeFile(mainMigration,Buffer.concat([mainSource,Buffer.from('\n-- drift\n')]));
+  await assert.rejects(snapshotAiSource(root),/reviewed main migration source drift/);
+  await rm(mainMigration);await assert.rejects(snapshotAiSource(root),/ENOENT/);
+  await writeFile(mainMigration,mainSource);
   const newest=join(root,'supabase/migrations/'+CURRENT_AI_MIGRATIONS[6].fileName);
   await writeFile(newest,(await readFile(newest))+'\n-- drift\n');
   await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);
