@@ -724,6 +724,11 @@
       "fileName": "20261006160956_makeup_numbered_optional_display_keys.sql",
       "status": "final",
       "sha256": "838b107a906454ee6238c428821611324459917e62c7206ff6083eedd512889a"
+    },
+    {
+      "fileName": "20261006183148_operations_annual_board_range.sql",
+      "status": "final",
+      "sha256": "5db3afed53be6fa97ef85135e24625e95c7e06115d1974360c4f2a238dce0311"
     }
   ]
 }
