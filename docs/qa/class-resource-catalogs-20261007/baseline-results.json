@@ -1,0 +1,30 @@
+[
+  {
+    "width": 1440,
+    "unhandled": [],
+    "errors": [],
+    "reads": [],
+    "checks": [],
+    "english": [
+      "선택 안 함",
+      "이전 교사"
+    ],
+    "scienceTeacherTag": "INPUT",
+    "scienceRoomTag": "INPUT",
+    "passed": true
+  },
+  {
+    "width": 390,
+    "unhandled": [],
+    "errors": [],
+    "reads": [],
+    "checks": [],
+    "english": [
+      "선택 안 함",
+      "이전 교사"
+    ],
+    "scienceTeacherTag": "INPUT",
+    "scienceRoomTag": "INPUT",
+    "passed": true
+  }
+]

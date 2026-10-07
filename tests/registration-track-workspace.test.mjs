@@ -1,3 +1,4 @@
+import { registrationDefaultTextbookIds } from "../src/features/tasks/registration-class-options.ts"
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
@@ -286,6 +287,8 @@ async function loadMountedRegistrationEnrollmentEditor({
     ["@/components/ui/textarea", { Textarea }],
     ["./registration-admission-progress", { RegistrationAdmissionChecklist: Wrapper }],
     ["./registration-select", { RegistrationSelect }],
+    ["./registration-class-select", { RegistrationClassSelect: (props) => RegistrationSelect({ ...props, "aria-label": props.label }) }],
+    ["./registration-class-options", { registrationDefaultTextbookIds }],
     ["./registration-textbook-select", { RegistrationTextbookSelect: Wrapper }],
     ["./registration-save-button", { RegistrationSaveButton }],
     ["./ops-task-service", { loadOpsRegistrationClassDetails: loadClassDetails }],
@@ -1526,7 +1529,7 @@ test("registration enrollment controls stay responsive without truncated labels"
 
   assert.doesNotMatch(enrollmentSource, /className="min-w-0 flex-1 truncate">\{classItem\?\.label/);
   assert.match(enrollmentSource, /sm:grid-cols-\[minmax\(0,1\.4fr\)_minmax\(0,1fr\)_minmax\(0,1\.25fr\)_auto\]/);
-  assert.match(enrollmentSource, /<RegistrationSelect[\s\S]*?aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/);
+  assert.match(enrollmentSource, /<RegistrationClassSelect[\s\S]*?label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/);
 });
 
 test("selected visit consultation card shows the canonical appointment time and place", async () => {
@@ -4001,7 +4004,7 @@ test("mounted observation first lesson suggestion fails closed in the permission
     hookHarness.flushEffects()
     findMountedRegistrationElement(
       view,
-      (element) => element.props["aria-label"] === "영어 수업 1 선택",
+      (element) => element.props.label === "영어 수업 1 선택",
       "first class selection",
     ).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
     view = hookHarness.render(RegistrationEnrollmentEditor, managedProps)
@@ -4084,7 +4087,7 @@ test("mounted observation first lesson defaults only the newly added initiating 
     hookHarness.flushEffects()
     const classSelections = findMountedRegistrationElements(
       view,
-      (element) => String(element.props["aria-label"] || "").match(/^영어 수업 \d+ 선택$/),
+      (element) => String(element.props.label || "").match(/^영어 수업 \d+ 선택$/),
     )
     assert.equal(classSelections.length, 2)
     classSelections[1].props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
@@ -4129,7 +4132,7 @@ test("mounted observation first lesson keeps a regular override through refresh 
     hookHarness.flushEffects()
     findMountedRegistrationElement(
       view,
-      (element) => element.props["aria-label"] === "영어 수업 1 선택",
+      (element) => element.props.label === "영어 수업 1 선택",
       "first class selection",
     ).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
     view = hookHarness.render(RegistrationEnrollmentEditor, initialProps)
@@ -4251,7 +4254,7 @@ test("mounted observation first lesson ignores an old-track delayed completion",
     hookHarness.flushEffects()
     findMountedRegistrationElement(
       view,
-      (element) => element.props["aria-label"] === "영어 수업 1 선택",
+      (element) => element.props.label === "영어 수업 1 선택",
       "current-track class selection",
     ).props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
     view = hookHarness.render(RegistrationEnrollmentEditor, secondTrackProps)
@@ -4633,7 +4636,7 @@ test("committed enrollment saves recover refresh without resubmitting mutations"
 test("registered add-class starts empty and cannot submit an empty draft list", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
   assert.match(source, /track\.status === "enrollment_decided"[\s\S]*createRegistrationEnrollmentDraft/)
-  assert.match(source, /<RegistrationSaveButton[\s\S]*?dirty=\{rowsDirty\}[\s\S]*?blocked=\{rowsRefreshPending \|\| draftRows\.length === 0\}/)
+  assert.match(source, /<RegistrationSaveButton[\s\S]*?dirty=\{rowsDirty\}[\s\S]*?blocked=\{rowsRefreshPending \|\| textbookDefaultsPending \|\| draftRows\.length === 0\}/)
   assert.match(source, /if \(blockers\.length > 0\)[\s\S]*?\.focus\(\)/)
   assert.match(source, /row\.id === null && draftRows\.length === 1 && track\.status === "enrollment_decided"/)
 })
@@ -4701,7 +4704,7 @@ test("admission panel leaves provider recovery timing to the shared dialog", asy
 
 test("enrollment saves lock after a committed refresh failure", async () => {
   const source = await readFile(new URL("../src/features/tasks/registration-enrollment-editor.tsx", import.meta.url), "utf8")
-  assert.match(source, /<RegistrationSaveButton[\s\S]*?blocked=\{rowsRefreshPending \|\| draftRows\.length === 0\}/)
+  assert.match(source, /<RegistrationSaveButton[\s\S]*?blocked=\{rowsRefreshPending \|\| textbookDefaultsPending \|\| draftRows\.length === 0\}/)
   assert.doesNotMatch(source, /batchRefreshPending|messageRefreshPending/)
 })
 
@@ -4815,7 +4818,7 @@ test("subject-owned controls name their subject and keep mobile primary actions 
 
   assert.match(consultation, /aria-label=\{`\$\{subject\} 상담 결과 저장`\}/)
   assert.match(appointment, /aria-label=\{`\$\{track\?\.subject \|\| "과목"\} 레벨테스트 결과 링크`\}/)
-  assert.match(enrollmentRows, /aria-label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/)
+  assert.match(enrollmentRows, /label=\{`\$\{track\.subject\} 수업 \$\{index \+ 1\} 선택`\}/)
   assert.ok(consultation.indexOf("outcome") < consultation.indexOf("상담 결과 저장"))
   assert.ok(enrollmentRows.indexOf("draftRows.map") < enrollmentRows.indexOf("등록 정보 저장"))
 })
@@ -5174,7 +5177,7 @@ test("mounted enrollment editor saves multiple textbooks and retains them after 
   const save = (view) => findMountedRegistrationElement(view, (el) => el.props["aria-label"] === "영어 등록 정보 저장", "save")
   try {
     let view = render(); hookHarness.flushEffects()
-    findMountedRegistrationElement(view, (el) => el.props["aria-label"] === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
+    findMountedRegistrationElement(view, (el) => el.props.label === "영어 수업 1 선택", "class").props.onValueChange(MOUNTED_REGISTRATION_CLASS_ID)
     view = render(); hookHarness.flushEffects(); await flushMountedRegistrationWork()
     view = render(); hookHarness.flushEffects(); view = render()
     select(view).props.onValuesChange(books)

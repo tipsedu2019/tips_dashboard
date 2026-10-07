@@ -779,6 +779,11 @@
       "fileName": "20261007062159_agent_personal_dashboard_read.sql",
       "sha256": "28a40477e01001d664d716ab4ab8be550db295ea2300822bb3ff009531341954",
       "status": "final"
+    },
+    {
+      "fileName": "20261007135140_textbook_latest_count_read_aggregation.sql",
+      "status": "final",
+      "sha256": "1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23"
     }
   ]
 }

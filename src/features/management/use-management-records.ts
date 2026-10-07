@@ -1,5 +1,6 @@
 "use client";
 
+import { withReadDeadline } from "../../lib/read-deadline.ts";
 import { DEFAULT_STUDENT_STATUS_FILTER } from "./student-enrollment-status.js";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -647,6 +648,7 @@ export type UseManagementRecordsOptions = {
   pageSize: ManagementListPageSize;
   enabled: boolean;
   authorizationScope?: string;
+  classFormOpen?: boolean;
   page?: number;
   sort?: ManagementNumberedSort;
   onQueryChange?: (query: ManagementNumberedQuery) => void;
@@ -790,7 +792,7 @@ function listRowToSource(kind: ManagementKind, row: Record<string, unknown>) {
 export function useManagementRecords(
   kind: ManagementKind,
   requestedFilters?: ManagementListFilters,
-  { pageSize, enabled, authorizationScope = "", page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
+  { pageSize, enabled, authorizationScope = "", classFormOpen = false, page = 1, sort, onQueryChange }: UseManagementRecordsOptions = { pageSize: 20, enabled: true },
 ) {
   // Native history updates are transitions, while size preferences/measurements
   // are urgent. Reconcile the request pair before effects can issue a query.
@@ -807,7 +809,10 @@ export function useManagementRecords(
     });
   }
   const [stats, setStats] = useState<ManagementStat[]>([]);
-  const [classFormReferences, setClassFormReferences] = useState<{ owner: string; references: ClassFormReferences } | null>(null);
+  const [classFormReferences, setClassFormReferences] = useState<{
+    owner: string; status: "loading" | "ready" | "error"; references: ClassFormReferences;
+  } | null>(null);
+  const [classFormReferenceRetry, setClassFormReferenceRetry] = useState(0);
   const detailAuthorizationRef = useRef<{ owner: string } | null>(null);
   const [filterOptions, setFilterOptions] = useState<Record<string, unknown>>({});
   const [metadataFailure, setMetadataFailure] = useState<{ owner: string; error: string } | null>(null);
@@ -831,6 +836,32 @@ export function useManagementRecords(
     setClassFormReferences(null);
   }
   useEffect(() => {
+    if (!enabled || kind !== "classes") {
+      setClassFormReferences(null);
+      return;
+    }
+    // Existing bulk edits also consume the last complete catalogs for this actor.
+    // Closing cancels the request; reopening always refreshes before form edits.
+    if (!classFormOpen) return;
+    const controller = new AbortController();
+    setClassFormReferences((current) => ({ owner, status: "loading", references: current?.owner === owner ? current.references : EMPTY_CLASS_FORM_REFERENCES }));
+    const load = async () => {
+      try {
+        if (!readService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
+        const references = await readService.loadClassFormReferences({ signal: controller.signal });
+        if (!controller.signal.aborted) setClassFormReferences({ owner, status: "ready", references });
+      } catch {
+        if (!controller.signal.aborted) setClassFormReferences((current) => ({ owner, status: "error", references: current?.owner === owner ? current.references : EMPTY_CLASS_FORM_REFERENCES }));
+      }
+    };
+    void load();
+    return () => controller.abort();
+  }, [classFormOpen, classFormReferenceRetry, enabled, kind, owner, readService]);
+  const retryClassFormReferences = useCallback(() => {
+    setClassFormReferences((current) => current ? { ...current, status: "loading" } : null);
+    setClassFormReferenceRetry((value) => value + 1);
+  }, []);
+  useEffect(() => {
     const authorization = { owner };
     detailAuthorizationRef.current = authorization;
     return () => {
@@ -848,6 +879,7 @@ export function useManagementRecords(
     const controller = createNumberedPageController<ManagementRow>({
       loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal }) => {
         if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
+        const client = supabase;
         const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
         const effectiveFilters = request.filters;
         const metadataKey = JSON.stringify(effectiveFilters);
@@ -855,12 +887,12 @@ export function useManagementRecords(
           invalidateMetadata();
           const entry = { key: metadataKey, controller: new AbortController(), expiresAt: Infinity };
           metadata = entry;
-          const metadataSignal = AbortSignal.any([entry.controller.signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
+          const deadline = AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS);
           setMetadataFailure(null);
-          void Promise.all([
-            supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(metadataSignal).retry(false),
-            supabase.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(metadataSignal).retry(false),
-          ]).then(([statsResult, optionsResult]) => {
+          void withReadDeadline((metadataSignal) => Promise.all([
+            client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(AbortSignal.any([metadataSignal, deadline])).retry(false).then((result) => { if (result.error) throw result.error; return result; }),
+            client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(AbortSignal.any([metadataSignal, deadline])).retry(false).then((result) => { if (result.error) throw result.error; return result; }),
+          ]), { signal: entry.controller.signal, deadline }).then(([statsResult, optionsResult]) => {
             if (!active || metadata !== entry || entry.controller.signal.aborted) return;
             if (statsResult.error || optionsResult.error) throw statsResult.error || optionsResult.error;
             entry.expiresAt = Date.now() + 30_000;
@@ -920,18 +952,8 @@ export function useManagementRecords(
     if (detailAuthorizationRef.current !== authorization) return null;
     const sourceRow = detailToSourceRow(kind, detail);
     if (!sourceRow) return null;
-    if (kind === "classes") {
-      setClassFormReferences({
-        owner,
-        references: {
-          teacherCatalogs: Array.isArray(sourceRow.available_teacher_catalogs) ? sourceRow.available_teacher_catalogs as Record<string, unknown>[] : [],
-          classroomCatalogs: Array.isArray(sourceRow.available_classroom_catalogs) ? sourceRow.available_classroom_catalogs as Record<string, unknown>[] : [],
-          scienceSubjectAreas: Array.isArray(sourceRow.available_science_subject_areas) ? sourceRow.available_science_subject_areas as Record<string, unknown>[] : [],
-        },
-      });
-    }
     return normalizeManagementRows(kind, [sourceRow])[0] || null;
-  }, [kind, owner, readService, setClassFormReferences]);
+  }, [kind, owner, readService]);
 
   const loadRelationPage = useCallback(async ({
     id,
@@ -1008,6 +1030,8 @@ export function useManagementRecords(
     loading,
     error,
     classFormReferences: classFormReferences?.owner === owner ? classFormReferences.references : EMPTY_CLASS_FORM_REFERENCES,
+    classFormReferencesStatus: classFormReferences?.owner === owner ? classFormReferences.status : "loading",
+    retryClassFormReferences,
     filterOptions: metadataOwner === owner ? filterOptions : {},
     page: displayed?.page || 1,
     pageSize: displayed?.totalCount !== null && displayed ? displayed.pageSize : pageSize,

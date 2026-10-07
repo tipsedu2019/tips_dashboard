@@ -1,0 +1,1806 @@
+TAP version 13
+# Subtest: the root registry keeps three stable subjects
+ok 1 - the root registry keeps three stable subjects
+  ---
+  duration_ms: 1.065959
+  type: 'test'
+  ...
+# Subtest: subject aliases normalize while sorting and serialization fail closed
+ok 2 - subject aliases normalize while sorting and serialization fail closed
+  ---
+  duration_ms: 0.299708
+  type: 'test'
+  ...
+# Subtest: science stays high-school-only and out of English-only workflows
+ok 3 - science stays high-school-only and out of English-only workflows
+  ---
+  duration_ms: 0.348333
+  type: 'test'
+  ...
+# Subtest: word-retest expected time uses explicit Seoul conversion and the narrow cache-invalidating RPC
+ok 4 - word-retest expected time uses explicit Seoul conversion and the narrow cache-invalidating RPC
+  ---
+  duration_ms: 0.714833
+  type: 'test'
+  ...
+# Subtest: task pages never wait for the independently loaded aggregate supplement
+ok 5 - task pages never wait for the independently loaded aggregate supplement
+  ---
+  duration_ms: 28.441292
+  type: 'test'
+  ...
+# Subtest: registration list keeps successful page rows when the optional runtime probe fails
+ok 6 - registration list keeps successful page rows when the optional runtime probe fails
+  ---
+  duration_ms: 6.1165
+  type: 'test'
+  ...
+# Subtest: registration list resolves before optional stats and runtime probes settle
+ok 7 - registration list resolves before optional stats and runtime probes settle
+  ---
+  duration_ms: 5.110875
+  type: 'test'
+  ...
+# Subtest: task page fallback combines caller cancellation with each bounded timeout
+ok 8 - task page fallback combines caller cancellation with each bounded timeout
+  ---
+  duration_ms: 5.781584
+  type: 'test'
+  ...
+# Subtest: task stats supplement combines caller cancellation with the exact bounded timeout
+ok 9 - task stats supplement combines caller cancellation with the exact bounded timeout
+  ---
+  duration_ms: 6.944958
+  type: 'test'
+  ...
+# Subtest: withdrawal status changes only after the selected class is the student's final live roster
+ok 10 - withdrawal status changes only after the selected class is the student's final live roster
+  ---
+  duration_ms: 1.7165
+  type: 'test'
+  ...
+# Subtest: registration parent and exact class reads expose named cache/query-count measures
+ok 11 - registration parent and exact class reads expose named cache/query-count measures
+  ---
+  duration_ms: 4.873667
+  type: 'test'
+  ...
+# Subtest: registration class reads use the lightweight registration projection
+ok 12 - registration class reads use the lightweight registration projection
+  ---
+  duration_ms: 7.245416
+  type: 'test'
+  ...
+# Subtest: registration class reads retry once without textbook_ids when that column is missing
+ok 13 - registration class reads retry once without textbook_ids when that column is missing
+  ---
+  duration_ms: 8.763791
+  type: 'test'
+  ...
+# Subtest: non-registration class reads retain the full class projection
+ok 14 - non-registration class reads retain the full class projection
+  ---
+  duration_ms: 6.3215
+  type: 'test'
+  ...
+# Subtest: selected registration class detail is an exact-id query isolated from the all-class projection
+ok 15 - selected registration class detail is an exact-id query isolated from the all-class projection
+  ---
+  duration_ms: 0.153834
+  type: 'test'
+  ...
+# Subtest: selected registration class detail shares only the same viewer and class request and retries failures
+ok 16 - selected registration class detail shares only the same viewer and class request and retries failures
+  ---
+  duration_ms: 12.4385
+  type: 'test'
+  ...
+# Subtest: three enrollment rows with two class IDs hydrate exactly two selected details
+ok 17 - three enrollment rows with two class IDs hydrate exactly two selected details
+  ---
+  duration_ms: 1.992958
+  type: 'test'
+  ...
+# Subtest: registration option enrichment delegates to the focused four-read loader without re-reading tasks
+ok 18 - registration option enrichment delegates to the focused four-read loader without re-reading tasks
+  ---
+  duration_ms: 0.108708
+  type: 'test'
+  ...
+# Subtest: registration option enrichment uses four concurrent reads and never reads students
+ok 19 - registration option enrichment uses four concurrent reads and never reads students
+  ---
+  duration_ms: 13.474083
+  type: 'test'
+  ...
+# Subtest: generic option cache remains shared per viewer, isolated across viewers, and retries failures
+ok 20 - generic option cache remains shared per viewer, isolated across viewers, and retries failures
+  ---
+  duration_ms: 24.152583
+  type: 'test'
+  ...
+# Subtest: same-key concurrent workspace loads share one in-flight query wave
+ok 21 - same-key concurrent workspace loads share one in-flight query wave
+  ---
+  duration_ms: 7.657042
+  type: 'test'
+  ...
+# Subtest: caller-owned registration loads replace an abortable in-flight wave
+ok 22 - caller-owned registration loads replace an abortable in-flight wave
+  ---
+  duration_ms: 6.0655
+  type: 'test'
+  ...
+# Subtest: registration cold load keeps track summaries inside the page row
+ok 23 - registration cold load keeps track summaries inside the page row
+  ---
+  duration_ms: 13.210333
+  type: 'test'
+  ...
+# Subtest: registration cold load does not start a second workspace track-summary read
+ok 24 - registration cold load does not start a second workspace track-summary read
+  ---
+  duration_ms: 6.298
+  type: 'test'
+  ...
+# Subtest: registration parent loading preserves one page row with every embedded subject track
+ok 25 - registration parent loading preserves one page row with every embedded subject track
+  ---
+  duration_ms: 6.1735
+  type: 'test'
+  ...
+# Subtest: ready registration summaries use child rows per parent and fall back only for a parent with zero children
+ok 26 - ready registration summaries use child rows per parent and fall back only for a parent with zero children
+  ---
+  duration_ms: 2.35075
+  type: 'test'
+  ...
+# Subtest: registration task shape and selected detail use explicit observation-aware read boundaries
+ok 27 - registration task shape and selected detail use explicit observation-aware read boundaries
+  ---
+  duration_ms: 0.438542
+  type: 'test'
+  ...
+# Subtest: different registration and transfer cache keys use independent query waves
+ok 28 - different registration and transfer cache keys use independent query waves
+  ---
+  duration_ms: 9.134125
+  type: 'test'
+  ...
+# Subtest: workspace task caches are isolated by viewer identity
+ok 29 - workspace task caches are isolated by viewer identity
+  ---
+  duration_ms: 6.881167
+  type: 'test'
+  ...
+# Subtest: registration core data uses a viewer-scoped session cache for instant reloads
+ok 30 - registration core data uses a viewer-scoped session cache for instant reloads
+  ---
+  duration_ms: 0.069583
+  type: 'test'
+  ...
+# Subtest: persisted registration data renders immediately but still revalidates and invalidates after mutations
+ok 31 - persisted registration data renders immediately but still revalidates and invalidates after mutations
+  ---
+  duration_ms: 9.148292
+  type: 'test'
+  ...
+# Subtest: successful settle reuses the same-key TTL cache on a third load
+ok 32 - successful settle reuses the same-key TTL cache on a third load
+  ---
+  duration_ms: 4.297583
+  type: 'test'
+  ...
+# Subtest: an invalidated old promise cannot overwrite or delete its replacement cache state
+ok 33 - an invalidated old promise cannot overwrite or delete its replacement cache state
+  ---
+  duration_ms: 4.211625
+  type: 'test'
+  ...
+# Subtest: a forced replacement keeps cache ownership after the old promise settles
+ok 34 - a forced replacement keeps cache ownership after the old promise settles
+  ---
+  duration_ms: 4.151708
+  type: 'test'
+  ...
+# Subtest: task list reads use a bounded RPC page and selected detail stays exact-id scoped
+ok 35 - task list reads use a bounded RPC page and selected detail stays exact-id scoped
+  ---
+  duration_ms: 0.197291
+  type: 'test'
+  ...
+# Subtest: task page SQL embeds only the selected subtype and registration track summary
+ok 36 - task page SQL embeds only the selected subtype and registration track summary
+  ---
+  duration_ms: 0.152375
+  type: 'test'
+  ...
+# Subtest: task page stats expose authoritative sibling counts metrics and bounded filter facets
+ok 37 - task page stats expose authoritative sibling counts metrics and bounded filter facets
+  ---
+  duration_ms: 0.20325
+  type: 'test'
+  ...
+# Subtest: registration page membership owner search and representative order come from matching track summaries
+ok 38 - registration page membership owner search and representative order come from matching track summaries
+  ---
+  duration_ms: 0.064875
+  type: 'test'
+  ...
+# Subtest: registration all-track search stays inside the selected workflow and consultation owner
+ok 39 - registration all-track search stays inside the selected workflow and consultation owner
+  ---
+  duration_ms: 0.036125
+  type: 'test'
+  ...
+# Subtest: task facets emit filterable manual word-retest values and include secondary assignees
+ok 40 - task facets emit filterable manual word-retest values and include secondary assignees
+  ---
+  duration_ms: 0.061125
+  type: 'test'
+  ...
+# Subtest: conflict producer 23514 preserves the correct request-id recovery contract
+ok 41 - conflict producer 23514 preserves the correct request-id recovery contract
+  ---
+  duration_ms: 16.757917
+  type: 'test'
+  ...
+# Subtest: conflict producer 40001 preserves the correct request-id recovery contract
+ok 42 - conflict producer 40001 preserves the correct request-id recovery contract
+  ---
+  duration_ms: 6.013958
+  type: 'test'
+  ...
+# Subtest: conflict producer network failure preserves the correct request-id recovery contract
+ok 43 - conflict producer network failure preserves the correct request-id recovery contract
+  ---
+  duration_ms: 8.345166
+  type: 'test'
+  ...
+# Subtest: registration service transports usage dates and textbook status into default selection
+ok 44 - registration service transports usage dates and textbook status into default selection
+  ---
+  duration_ms: 22.781916
+  type: 'test'
+  ...
+# Subtest: grade options preserve multi-grade and missing-grade classes, with school and natural name order
+ok 45 - grade options preserve multi-grade and missing-grade classes, with school and natural name order
+  ---
+  duration_ms: 1.800167
+  type: 'test'
+  ...
+# Subtest: all current active textbooks default once each, with inclusive usage dates and no inferred books
+ok 46 - all current active textbooks default once each, with inclusive usage dates and no inferred books
+  ---
+  duration_ms: 3.011291
+  type: 'test'
+  ...
+# Subtest: late class response cannot overwrite a newer class; authoritative detail selects all current books
+ok 47 - late class response cannot overwrite a newer class; authoritative detail selects all current books
+  ---
+  duration_ms: 1933.487501
+  type: 'test'
+  ...
+# Subtest: manual subset and explicit clear survive later catalog updates and cached class return
+ok 48 - manual subset and explicit clear survive later catalog updates and cached class return
+  ---
+  duration_ms: 194.381792
+  type: 'test'
+  ...
+# Subtest: persisted ["c"] remains untouched by class detail
+ok 49 - persisted ["c"] remains untouched by class detail
+  ---
+  duration_ms: 101.441958
+  type: 'test'
+  ...
+# Subtest: persisted [] remains untouched by class detail
+ok 50 - persisted [] remains untouched by class detail
+  ---
+  duration_ms: 94.569292
+  type: 'test'
+  ...
+# Subtest: manual choice while detail is loading owns the draft
+ok 51 - manual choice while detail is loading owns the draft
+  ---
+  duration_ms: 130.112208
+  type: 'test'
+  ...
+# Subtest: pending default ownership survives an unsaved editor remount
+ok 52 - pending default ownership survives an unsaved editor remount
+  ---
+  duration_ms: 126.565333
+  type: 'test'
+  ...
+# Subtest: booking: actual child reports a draft to navigation and cancellation preserves its value
+ok 53 - booking: actual child reports a draft to navigation and cancellation preserves its value
+  ---
+  duration_ms: 914.053042
+  type: 'test'
+  ...
+# Subtest: decision: actual child reports a draft to navigation and cancellation preserves its value
+ok 54 - decision: actual child reports a draft to navigation and cancellation preserves its value
+  ---
+  duration_ms: 401.644167
+  type: 'test'
+  ...
+# Subtest: booking: failed save keeps the draft and accepted retry clears its ownership
+ok 55 - booking: failed save keeps the draft and accepted retry clears its ownership
+  ---
+  duration_ms: 559.576875
+  type: 'test'
+  ...
+# Subtest: decision: failed save keeps the draft and accepted retry clears its ownership
+ok 56 - decision: failed save keeps the draft and accepted retry clears its ownership
+  ---
+  duration_ms: 445.090292
+  type: 'test'
+  ...
+# Subtest: booking: a former child's response cannot clear the next child's draft
+ok 57 - booking: a former child's response cannot clear the next child's draft
+  ---
+  duration_ms: 541.524459
+  type: 'test'
+  ...
+# Subtest: decision: a former child's response cannot clear the next child's draft
+ok 58 - decision: a former child's response cannot clear the next child's draft
+  ---
+  duration_ms: 381.33025
+  type: 'test'
+  ...
+# Subtest: waiting message readiness follows the manual workflow source contract
+ok 59 - waiting message readiness follows the manual workflow source contract
+  ---
+  duration_ms: 1.26275
+  type: 'test'
+  ...
+# Subtest: waiting details stay empty until an operator stores them
+ok 60 - waiting details stay empty until an operator stores them
+  ---
+  duration_ms: 0.562
+  type: 'test'
+  ...
+# Subtest: waiting detail columns restore the operator's saved values
+ok 61 - waiting detail columns restore the operator's saved values
+  ---
+  duration_ms: 0.101375
+  type: 'test'
+  ...
+# Subtest: allowed actions are returned as a fresh view of the authoritative status matrix
+ok 62 - allowed actions are returned as a fresh view of the authoritative status matrix
+  ---
+  duration_ms: 0.097583
+  type: 'test'
+  ...
+# Subtest: shared appointment cancellation requires a currently cancellable scheduled participant
+ok 63 - shared appointment cancellation requires a currently cancellable scheduled participant
+  ---
+  duration_ms: 7.244042
+  type: 'test'
+  ...
+# Subtest: replace remaining tab scope keeps immutable participants while scheduled draft subjects change
+ok 64 - replace remaining tab scope keeps immutable participants while scheduled draft subjects change
+  ---
+  duration_ms: 0.46725
+  type: 'test'
+  ...
+# Subtest: visit appointment tab scope reports only the live scheduled draft
+ok 65 - visit appointment tab scope reports only the live scheduled draft
+  ---
+  duration_ms: 0.122625
+  type: 'test'
+  ...
+# Subtest: 현재반 대기 수업은 활성 waitlisted claim에서만 복원한다
+ok 66 - 현재반 대기 수업은 활성 waitlisted claim에서만 복원한다
+  ---
+  duration_ms: 0.136458
+  type: 'test'
+  ...
+# Subtest: new enrollment rows keep stable keys and selecting a class defaults its linked textbook
+ok 67 - new enrollment rows keep stable keys and selecting a class defaults its linked textbook
+  ---
+  duration_ms: 0.719333
+  type: 'test'
+  ...
+# Subtest: serialized enrollment rows retain the normalized lesson-session UUID
+ok 68 - serialized enrollment rows retain the normalized lesson-session UUID
+  ---
+  duration_ms: 0.513292
+  type: 'test'
+  ...
+# Subtest: matching fit observation is injected before future first lesson sessions with exact normalized identity
+ok 69 - matching fit observation is injected before future first lesson sessions with exact normalized identity
+  ---
+  duration_ms: 0.25875
+  type: 'test'
+  ...
+# Subtest: regular first lesson options remain unchanged when there is no matching observation
+ok 70 - regular first lesson options remain unchanged when there is no matching observation
+  ---
+  duration_ms: 0.0605
+  type: 'test'
+  ...
+# Subtest: legacy observation first lesson preserves its historical key, hash, dates, and times
+ok 71 - legacy observation first lesson preserves its historical key, hash, dates, and times
+  ---
+  duration_ms: 0.05675
+  type: 'test'
+  ...
+# Subtest: first lesson observation eligibility excludes every incomplete or mismatched decision fact
+ok 72 - first lesson observation eligibility excludes every incomplete or mismatched decision fact
+  ---
+  duration_ms: 0.067583
+  type: 'test'
+  ...
+# Subtest: observation first lesson defaults only the first explicitly owned blank matching row
+ok 73 - observation first lesson defaults only the first explicitly owned blank matching row
+  ---
+  duration_ms: 0.148541
+  type: 'test'
+  ...
+# Subtest: class changes and regular first lesson overrides clear the observation source and serialize DB null
+ok 74 - class changes and regular first lesson overrides clear the observation source and serialize DB null
+  ---
+  duration_ms: 0.075333
+  type: 'test'
+  ...
+# Subtest: persisted historical observation first lessons restore and serialize outside future regular filtering
+ok 75 - persisted historical observation first lessons restore and serialize outside future regular filtering
+  ---
+  duration_ms: 0.08375
+  type: 'test'
+  ...
+# Subtest: persisted null textbook restores as an explicit already-owned choice
+ok 76 - persisted null textbook restores as an explicit already-owned choice
+  ---
+  duration_ms: 0.052583
+  type: 'test'
+  ...
+# Subtest: enrollment serialization preserves only real persisted UUIDs
+ok 77 - enrollment serialization preserves only real persisted UUIDs
+  ---
+  duration_ms: 0.056041
+  type: 'test'
+  ...
+# Subtest: saved enrollment rows merge authoritative IDs without changing local keys
+ok 78 - saved enrollment rows merge authoritative IDs without changing local keys
+  ---
+  duration_ms: 0.122625
+  type: 'test'
+  ...
+# Subtest: enrollment blockers are row-specific and reject duplicate or cross-subject classes
+ok 79 - enrollment blockers are row-specific and reject duplicate or cross-subject classes
+  ---
+  duration_ms: 0.144666
+  type: 'test'
+  ...
+# Subtest: released enrollment history does not block re-enrollment in the same class
+ok 80 - released enrollment history does not block re-enrollment in the same class
+  ---
+  duration_ms: 0.046625
+  type: 'test'
+  ...
+# Subtest: a roster-active enrolled class blocks a new draft for the same class
+ok 81 - a roster-active enrolled class blocks a new draft for the same class
+  ---
+  duration_ms: 0.128958
+  type: 'test'
+  ...
+# Subtest: admission processing validates selected schedule and optional textbook per row
+ok 82 - admission processing validates selected schedule and optional textbook per row
+  ---
+  duration_ms: 0.069709
+  type: 'test'
+  ...
+# Subtest: draft enrollment permits no schedule but rejects partial or stale provided schedules
+ok 83 - draft enrollment permits no schedule but rejects partial or stale provided schedules
+  ---
+  duration_ms: 0.137166
+  type: 'test'
+  ...
+# Subtest: a globally valid textbook is still blocked when it is not linked to the selected class
+ok 84 - a globally valid textbook is still blocked when it is not linked to the selected class
+  ---
+  duration_ms: 0.049458
+  type: 'test'
+  ...
+# Subtest: each admission revision derives its own ordered checklist
+ok 85 - each admission revision derives its own ordered checklist
+  ---
+  duration_ms: 0.090166
+  type: 'test'
+  ...
+# Subtest: completed admission progress remains visible until a new revision is pending
+ok 86 - completed admission progress remains visible until a new revision is pending
+  ---
+  duration_ms: 0.15275
+  type: 'test'
+  ...
+# Subtest: planned enrollment cancellation never asks for a track destination
+ok 87 - planned enrollment cancellation never asks for a track destination
+  ---
+  duration_ms: 0.048042
+  type: 'test'
+  ...
+# Subtest: planned siblings do not keep the last roster-active enrollment registered
+ok 88 - planned siblings do not keep the last roster-active enrollment registered
+  ---
+  duration_ms: 0.55775
+  type: 'test'
+  ...
+# Subtest: another roster-active enrolled row avoids destination routing
+ok 89 - another roster-active enrolled row avoids destination routing
+  ---
+  duration_ms: 0.037542
+  type: 'test'
+  ...
+# Subtest: released enrolled history makes a new batch an add-class revision
+ok 90 - released enrolled history makes a new batch an add-class revision
+  ---
+  duration_ms: 0.072542
+  type: 'test'
+  ...
+# Subtest: stale admission selections never enable a new unselected add-class row
+ok 91 - stale admission selections never enable a new unselected add-class row
+  ---
+  duration_ms: 0.055583
+  type: 'test'
+  ...
+# Subtest: admission recovery delay reaches zero after exactly fifteen fake minutes
+ok 92 - admission recovery delay reaches zero after exactly fifteen fake minutes
+  ---
+  duration_ms: 0.046042
+  type: 'test'
+  ...
+# Subtest: admission application state follows eligible child tracks and active message truth
+ok 93 - admission application state follows eligible child tracks and active message truth
+  ---
+  duration_ms: 0.095583
+  type: 'test'
+  ...
+# Subtest: admission application remains sendable after enrollment processing starts
+ok 94 - admission application remains sendable after enrollment processing starts
+  ---
+  duration_ms: 0.085334
+  type: 'test'
+  ...
+# Subtest: manual enrollment status and persisted planned rows make admission actionable without legacy pipeline routing
+ok 95 - manual enrollment status and persisted planned rows make admission actionable without legacy pipeline routing
+  ---
+  duration_ms: 0.040417
+  type: 'test'
+  ...
+# Subtest: admission application targets decided and unbatched add-class tracks exactly once
+ok 96 - admission application targets decided and unbatched add-class tracks exactly once
+  ---
+  duration_ms: 0.046833
+  type: 'test'
+  ...
+# Subtest: admission application excludes released history and batched or canceled add-class rows
+ok 97 - admission application excludes released history and batched or canceled add-class rows
+  ---
+  duration_ms: 0.03675
+  type: 'test'
+  ...
+# Subtest: shared level-test scheduling ignores workflow status while keeping results independent
+ok 98 - shared level-test scheduling ignores workflow status while keeping results independent
+  ---
+  duration_ms: 0.057792
+  type: 'test'
+  ...
+# Subtest: appointment eligibility excludes an active activity elsewhere but keeps the current scheduled selection
+ok 99 - appointment eligibility excludes an active activity elsewhere but keeps the current scheduled selection
+  ---
+  duration_ms: 0.041166
+  type: 'test'
+  ...
+# Subtest: a shared test can schedule any subject without an active test elsewhere
+ok 100 - a shared test can schedule any subject without an active test elsewhere
+  ---
+  duration_ms: 0.02925
+  type: 'test'
+  ...
+# Subtest: visit appointment eligibility ignores workflow status but excludes an active appointment elsewhere
+ok 101 - visit appointment eligibility ignores workflow status but excludes an active appointment elsewhere
+  ---
+  duration_ms: 0.03225
+  type: 'test'
+  ...
+# Subtest: appointment details remain editable after any activity outcome
+ok 102 - appointment details remain editable after any activity outcome
+  ---
+  duration_ms: 0.026375
+  type: 'test'
+  ...
+# Subtest: a mounted appointment transition submits only still-scheduled children on the current appointment
+ok 103 - a mounted appointment transition submits only still-scheduled children on the current appointment
+  ---
+  duration_ms: 0.042417
+  type: 'test'
+  ...
+# Subtest: historical absent or canceled attempts cannot expose actions after a newer attempt exists
+ok 104 - historical absent or canceled attempts cannot expose actions after a newer attempt exists
+  ---
+  duration_ms: 0.043167
+  type: 'test'
+  ...
+# Subtest: track statuses map one-to-one to the six registration tabs
+ok 105 - track statuses map one-to-one to the six registration tabs
+  ---
+  duration_ms: 0.038667
+  type: 'test'
+  ...
+# Subtest: tab counts count one application case even when multiple subjects match a view
+ok 106 - tab counts count one application case even when multiple subjects match a view
+  ---
+  duration_ms: 0.159792
+  type: 'test'
+  ...
+# Subtest: phone consultation completion requires an outcome and advances atomically
+ok 107 - phone consultation completion requires an outcome and advances atomically
+  ---
+  duration_ms: 0.084167
+  type: 'test'
+  ...
+# Subtest: level-test completion advances only a completed subject
+ok 108 - level-test completion advances only a completed subject
+  ---
+  duration_ms: 0.037125
+  type: 'test'
+  ...
+# Subtest: waiting to enrollment requires an explicit retake decision
+ok 109 - waiting to enrollment requires an explicit retake decision
+  ---
+  duration_ms: 0.02525
+  type: 'test'
+  ...
+# Subtest: level-test appointment completes only after every attempt is terminal
+ok 110 - level-test appointment completes only after every attempt is terminal
+  ---
+  duration_ms: 0.045125
+  type: 'test'
+  ...
+# Subtest: parent stays open for tracks or admission batches still in progress
+ok 111 - parent stays open for tracks or admission batches still in progress
+  ---
+  duration_ms: 0.061833
+  type: 'test'
+  ...
+# Subtest: illegal cross-stage actions are blocked instead of silently jumping stages
+ok 112 - illegal cross-stage actions are blocked instead of silently jumping stages
+  ---
+  duration_ms: 0.024208
+  type: 'test'
+  ...
+# Subtest: UI action permissions mirror the database mutation matrix
+ok 113 - UI action permissions mirror the database mutation matrix
+  ---
+  duration_ms: 0.097125
+  type: 'test'
+  ...
+# Subtest: registration case editing is limited to admin and staff roles
+ok 114 - registration case editing is limited to admin and staff roles
+  ---
+  duration_ms: 0.024375
+  type: 'test'
+  ...
+# Subtest: active consultation selection follows persisted activity instead of the legacy pipeline status
+ok 115 - active consultation selection follows persisted activity instead of the legacy pipeline status
+  ---
+  duration_ms: 17.470958
+  type: 'test'
+  ...
+# Subtest: consultation outcome save state distinguishes persisted, changed, and unauthorized views
+ok 116 - consultation outcome save state distinguishes persisted, changed, and unauthorized views
+  ---
+  duration_ms: 0.232709
+  type: 'test'
+  ...
+# Subtest: a second admission batch cannot start while another batch is open
+ok 117 - a second admission batch cannot start while another batch is open
+  ---
+  duration_ms: 0.07475
+  type: 'test'
+  ...
+# Subtest: admission processing does not depend on admission-form message delivery
+ok 118 - admission processing does not depend on admission-form message delivery
+  ---
+  duration_ms: 0.050334
+  type: 'test'
+  ...
+# Subtest: identity editing ignores message history but retains active mutation locks
+ok 119 - identity editing ignores message history but retains active mutation locks
+  ---
+  duration_ms: 0.115209
+  type: 'test'
+  ...
+# Subtest: canceling an add-class batch restores a track that still has enrolled classes
+ok 120 - canceling an add-class batch restores a track that still has enrolled classes
+  ---
+  duration_ms: 0.060833
+  type: 'test'
+  ...
+# Subtest: multiple enrollment textbooks survive save hydration while legacy and explicit empty selections remain distinct
+ok 121 - multiple enrollment textbooks survive save hydration while legacy and explicit empty selections remain distinct
+  ---
+  duration_ms: 0.206167
+  type: 'test'
+  ...
+# Subtest: every selected textbook must be available and linked to the enrollment class
+ok 122 - every selected textbook must be available and linked to the enrollment class
+  ---
+  duration_ms: 0.137
+  type: 'test'
+  ...
+# Subtest: registration application shell separates waiting and registration in fixed process order
+ok 123 - registration application shell separates waiting and registration in fixed process order
+  ---
+  duration_ms: 16.527125
+  type: 'test'
+  ...
+# Subtest: registration progress supports consultation to waiting to registration and direct registration
+ok 124 - registration progress supports consultation to waiting to registration and direct registration
+  ---
+  duration_ms: 0.521708
+  type: 'test'
+  ...
+# Subtest: registration start schedule calendar keeps past lessons available for delayed enrollment notice
+ok 125 - registration start schedule calendar keeps past lessons available for delayed enrollment notice
+  ---
+  duration_ms: 0.633875
+  type: 'test'
+  ...
+# Subtest: waiting and registration summaries omit unexplained duplicate fields
+ok 126 - waiting and registration summaries omit unexplained duplicate fields
+  ---
+  duration_ms: 0.756291
+  type: 'test'
+  ...
+# Subtest: saved registration keeps the status selector and uses progress only for section navigation
+ok 127 - saved registration keeps the status selector and uses progress only for section navigation
+  ---
+  duration_ms: 0.911791
+  type: 'test'
+  ...
+# Subtest: new registration owns only the inquiry subject picker before subject journeys begin
+ok 128 - new registration owns only the inquiry subject picker before subject journeys begin
+  ---
+  duration_ms: 1.151208
+  type: 'test'
+  ...
+# Subtest: new registration saves inquiry basics only and starts every subject at registration inquiry
+ok 129 - new registration saves inquiry basics only and starts every subject at registration inquiry
+  ---
+  duration_ms: 3.53025
+  type: 'test'
+  ...
+# Subtest: registration selects use the shared dashboard select and disabled gray treatment
+ok 130 - registration selects use the shared dashboard select and disabled gray treatment
+  ---
+  duration_ms: 2.605292
+  type: 'test'
+  ...
+# Subtest: top progress and actionable editors replace duplicate read-only detail fields
+ok 131 - top progress and actionable editors replace duplicate read-only detail fields
+  ---
+  duration_ms: 1.184834
+  type: 'test'
+  ...
+# Subtest: saved detail exposes automatic history from a header clock popover only
+ok 132 - saved detail exposes automatic history from a header clock popover only
+  ---
+  duration_ms: 22.014083
+  type: 'test'
+  ...
+# Subtest: create and detail share the approved subject-first inquiry controls
+ok 133 - create and detail share the approved subject-first inquiry controls
+  ---
+  duration_ms: 2.483334
+  type: 'test'
+  ...
+# Subtest: inquiry fact inputs stay editable without catalog, grade, identity, or completion gates
+ok 134 - inquiry fact inputs stay editable without catalog, grade, identity, or completion gates
+  ---
+  duration_ms: 0.905667
+  type: 'test'
+  ...
+# Subtest: saved subject tabs fit mobile without truncating the active subject while root-subject controls stay dense
+ok 135 - saved subject tabs fit mobile without truncating the active subject while root-subject controls stay dense
+  ---
+  duration_ms: 0.866083
+  type: 'test'
+  ...
+# Subtest: science director UI consumes only the configured capability profile and every teacher remains read-only
+ok 136 - science director UI consumes only the configured capability profile and every teacher remains read-only
+  ---
+  duration_ms: 2.254
+  type: 'test'
+  ...
+# Subtest: consultation outcomes do not load a separate class catalog
+ok 137 - consultation outcomes do not load a separate class catalog
+  ---
+  duration_ms: 0.791959
+  type: 'test'
+  ...
+# Subtest: registration create mounts the shared application with only actionable intake fields
+ok 138 - registration create mounts the shared application with only actionable intake fields
+  ---
+  duration_ms: 3.256666
+  type: 'test'
+  ...
+# Subtest: saved appointments expose the two canonical places as direct choices
+ok 139 - saved appointments expose the two canonical places as direct choices
+  ---
+  duration_ms: 1.410083
+  type: 'test'
+  ...
+# Subtest: registration detail keeps every workflow section visible in one continuous workspace
+ok 140 - registration detail keeps every workflow section visible in one continuous workspace
+  ---
+  duration_ms: 0.664458
+  type: 'test'
+  ...
+# Subtest: registration detail owns a booking-only observation slot and guards generic workflow changes
+ok 141 - registration detail owns a booking-only observation slot and guards generic workflow changes
+  ---
+  duration_ms: 0.5995
+  type: 'test'
+  ...
+# Subtest: registration detail uses a wide document surface with a compact subject and status header
+ok 142 - registration detail uses a wide document surface with a compact subject and status header
+  ---
+  duration_ms: 3.983334
+  type: 'test'
+  ...
+# Subtest: empty saved sections show a quiet empty state instead of an outlined blank frame
+ok 143 - empty saved sections show a quiet empty state instead of an outlined blank frame
+  ---
+  duration_ms: 1.268042
+  type: 'test'
+  ...
+# Subtest: registration create keeps actionable scheduling fields in approved order
+ok 144 - registration create keeps actionable scheduling fields in approved order
+  ---
+  duration_ms: 1.095209
+  type: 'test'
+  ...
+# Subtest: registration create owns one accurate inquiry lock reason without a duplicate runtime note
+ok 145 - registration create owns one accurate inquiry lock reason without a duplicate runtime note
+  ---
+  duration_ms: 0.514958
+  type: 'test'
+  ...
+# Subtest: registration create keeps only actionable fields visible and controls dashboard selects for their full lifetime
+ok 146 - registration create keeps only actionable fields visible and controls dashboard selects for their full lifetime
+  ---
+  duration_ms: 0.783042
+  type: 'test'
+  ...
+# Subtest: waiting and registration track panels keep unique ids under one subject switcher
+ok 147 - waiting and registration track panels keep unique ids under one subject switcher
+  ---
+  duration_ms: 0.744791
+  type: 'test'
+  ...
+# Subtest: case list renders one keyed application row in each responsive surface
+ok 148 - case list renders one keyed application row in each responsive surface
+  ---
+  duration_ms: 0.703
+  type: 'test'
+  ...
+# Subtest: case list makes the whole visible row a keyboard-accessible entry point
+ok 149 - case list makes the whole visible row a keyboard-accessible entry point
+  ---
+  duration_ms: 0.437084
+  type: 'test'
+  ...
+# Subtest: case projection retains canonical phone and visit dates
+ok 150 - case projection retains canonical phone and visit dates
+  ---
+  duration_ms: 3.510958
+  type: 'test'
+  ...
+# Subtest: canonical registration deletion is admin-only and allowed only during registration inquiry
+ok 151 - canonical registration deletion is admin-only and allowed only during registration inquiry
+  ---
+  duration_ms: 0.139
+  type: 'test'
+  ...
+# Subtest: one parent application remains one list item while retaining every subject
+ok 152 - one parent application remains one list item while retaining every subject
+  ---
+  duration_ms: 0.459625
+  type: 'test'
+  ...
+# Subtest: one application can appear in different views without duplicating a view row
+ok 153 - one application can appear in different views without duplicating a view row
+  ---
+  duration_ms: 0.213542
+  type: 'test'
+  ...
+# Subtest: application search narrows the selected view by student, phone, subject, director, and place
+ok 154 - application search narrows the selected view by student, phone, subject, director, and place
+  ---
+  duration_ms: 0.334916
+  type: 'test'
+  ...
+# Subtest: phone consultation applications are oldest-first without reordering other views
+ok 155 - phone consultation applications are oldest-first without reordering other views
+  ---
+  duration_ms: 0.367708
+  type: 'test'
+  ...
+# Subtest: case list renders application-scoped desktop and mobile rows
+ok 156 - case list renders application-scoped desktop and mobile rows
+  ---
+  duration_ms: 1.08975
+  type: 'test'
+  ...
+# Subtest: level-test list uses only active canonical appointment values
+ok 157 - level-test list uses only active canonical appointment values
+  ---
+  duration_ms: 0.549959
+  type: 'test'
+  ...
+# Subtest: consultation-requested list uses only an active phone or visit reservation
+ok 158 - consultation-requested list uses only an active phone or visit reservation
+  ---
+  duration_ms: 0.380792
+  type: 'test'
+  ...
+# Subtest: waiting list shows the manual workflow entry time instead of the legacy pipeline time
+ok 159 - waiting list shows the manual workflow entry time instead of the legacy pipeline time
+  ---
+  duration_ms: 0.540375
+  type: 'test'
+  ...
+# Subtest: desktop application rows provide one table cell for each column while mobile cards stay shared
+ok 160 - desktop application rows provide one table cell for each column while mobile cards stay shared
+  ---
+  duration_ms: 0.438167
+  type: 'test'
+  ...
+# Subtest: registration enrollment controls stay responsive without truncated labels
+ok 161 - registration enrollment controls stay responsive without truncated labels
+  ---
+  duration_ms: 0.5685
+  type: 'test'
+  ...
+# Subtest: selected visit consultation card shows the canonical appointment time and place
+ok 162 - selected visit consultation card shows the canonical appointment time and place
+  ---
+  duration_ms: 0.861
+  type: 'test'
+  ...
+# Subtest: selected phone consultation card shows active readiness without a stage fallback
+ok 163 - selected phone consultation card shows active readiness without a stage fallback
+  ---
+  duration_ms: 1.207459
+  type: 'test'
+  ...
+# Subtest: unbatched enrollment drafts may omit a schedule without gating the admission checklist
+ok 164 - unbatched enrollment drafts may omit a schedule without gating the admission checklist
+  ---
+  duration_ms: 0.573458
+  type: 'test'
+  ...
+# Subtest: case list keeps the Notion-like workflow status editable in place without a parallel quick-action path
+ok 165 - case list keeps the Notion-like workflow status editable in place without a parallel quick-action path
+  ---
+  duration_ms: 2.417917
+  type: 'test'
+  ...
+# Subtest: workspace derives tab counts from application cases before filtering the selected view
+ok 166 - workspace derives tab counts from application cases before filtering the selected view
+  ---
+  duration_ms: 4.071291
+  type: 'test'
+  ...
+# Subtest: registration deep links preserve task, track, and appointment ids and clear them on close
+ok 167 - registration deep links preserve task, track, and appointment ids and clear them on close
+  ---
+  duration_ms: 2.581458
+  type: 'test'
+  ...
+# Subtest: inline status changes reload the list after the optimistic interaction boundary
+ok 168 - inline status changes reload the list after the optimistic interaction boundary
+  ---
+  duration_ms: 2.792083
+  type: 'test'
+  ...
+# Subtest: track editor shows common information once and subject-scoped navigation
+ok 169 - track editor shows common information once and subject-scoped navigation
+  ---
+  duration_ms: 0.807541
+  type: 'test'
+  ...
+# Subtest: canonical detail uses one progressively filled registration application
+ok 170 - canonical detail uses one progressively filled registration application
+  ---
+  duration_ms: 23.809125
+  type: 'test'
+  ...
+# Subtest: one application keeps subject navigation and actionable stage controls without duplicate summaries
+ok 171 - one application keeps subject navigation and actionable stage controls without duplicate summaries
+  ---
+  duration_ms: 3.375167
+  type: 'test'
+  ...
+# Subtest: two tracks at different statuses expose both current sections and actions in one saved application
+ok 172 - two tracks at different statuses expose both current sections and actions in one saved application
+  ---
+  duration_ms: 1.093
+  type: 'test'
+  ...
+# Subtest: inquiry subject conflicts keep independent facts and submit the opened subject snapshot
+ok 173 - inquiry subject conflicts keep independent facts and submit the opened subject snapshot
+  ---
+  duration_ms: 5.373
+  type: 'test'
+  ...
+# Subtest: Notion-style inquiry facts and subjects save independently without history or capability locks
+ok 174 - Notion-style inquiry facts and subjects save independently without history or capability locks
+  ---
+  duration_ms: 1.372083
+  type: 'test'
+  ...
+# Subtest: all subjects share one case-level admission checklist without target badges
+ok 175 - all subjects share one case-level admission checklist without target badges
+  ---
+  duration_ms: 0.636417
+  type: 'test'
+  ...
+# Subtest: saved and create applications share the intake shell while saved detail owns later stages
+ok 176 - saved and create applications share the intake shell while saved detail owns later stages
+  ---
+  duration_ms: 9.036292
+  type: 'test'
+  ...
+# Subtest: saved application keeps exception actions in their owning sections
+ok 177 - saved application keeps exception actions in their owning sections
+  ---
+  duration_ms: 1.109208
+  type: 'test'
+  ...
+# Subtest: registration application threads the exact deep-linked attempt into the real observation editor mount
+ok 178 - registration application threads the exact deep-linked attempt into the real observation editor mount
+  ---
+  duration_ms: 0.745708
+  type: 'test'
+  ...
+# Subtest: mounted registration application accepts only its canonical observation booking target
+ok 179 - mounted registration application accepts only its canonical observation booking target
+  ---
+  duration_ms: 58.266834
+  type: 'test'
+  ...
+# Subtest: legacy observation status selector resolves to its decoupled manual target
+ok 180 - legacy observation status selector resolves to its decoupled manual target
+  ---
+  duration_ms: 40.005917
+  type: 'test'
+  ...
+# Subtest: mounted consultation status selector never starts an observation process
+ok 181 - mounted consultation status selector never starts an observation process
+  ---
+  duration_ms: 27.932375
+  type: 'test'
+  ...
+# Subtest: mounted teacher registration detail keeps every mutation surface read-only
+ok 182 - mounted teacher registration detail keeps every mutation surface read-only
+  ---
+  duration_ms: 26.486375
+  type: 'test'
+  ...
+# Subtest: mounted pre-observation detail exposes an empty booking table independently of status
+ok 183 - mounted pre-observation detail exposes an empty booking table independently of status
+  ---
+  duration_ms: 24.301875
+  type: 'test'
+  ...
+# Subtest: mounted terminal deep links preserve exact feedback role and status rules
+    # Subtest: completed decisions keep read-only history without reopening feedback input
+    ok 1 - completed decisions keep read-only history without reopening feedback input
+      ---
+      duration_ms: 70.993125
+      type: 'test'
+      ...
+    # Subtest: undecided completed and no-show attempts keep admin and staff decisions only
+    ok 2 - undecided completed and no-show attempts keep admin and staff decisions only
+      ---
+      duration_ms: 132.045875
+      type: 'test'
+      ...
+    # Subtest: canceled attempts keep every feedback action closed
+    ok 3 - canceled attempts keep every feedback action closed
+      ---
+      duration_ms: 60.3465
+      type: 'test'
+      ...
+    1..3
+ok 184 - mounted terminal deep links preserve exact feedback role and status rules
+  ---
+  duration_ms: 263.778334
+  type: 'test'
+  ...
+# Subtest: mounted observation child loads reject A-B-A and passive overwrites
+    # Subtest: manager detail commits only the newest A-B-A request
+    ok 1 - manager detail commits only the newest A-B-A request
+      ---
+      duration_ms: 22.199042
+      type: 'test'
+      ...
+    # Subtest: forced post-save feedback outranks an older passive refresh
+    ok 2 - forced post-save feedback outranks an older passive refresh
+      ---
+      duration_ms: 21.771875
+      type: 'test'
+      ...
+    1..2
+ok 185 - mounted observation child loads reject A-B-A and passive overwrites
+  ---
+  duration_ms: 44.272959
+  type: 'test'
+  ...
+# Subtest: canonical track detail may recommend directors but persists only an explicit nullable selection
+ok 186 - canonical track detail may recommend directors but persists only an explicit nullable selection
+  ---
+  duration_ms: 5.140541
+  type: 'test'
+  ...
+# Subtest: common information conflicts retain the attempted draft when latest-data reload fails
+ok 187 - common information conflicts retain the attempted draft when latest-data reload fails
+  ---
+  duration_ms: 0.899458
+  type: 'test'
+  ...
+# Subtest: canonical registration mutation closures fail closed outside management roles
+ok 188 - canonical registration mutation closures fail closed outside management roles
+  ---
+  duration_ms: 1.449666
+  type: 'test'
+  ...
+# Subtest: bounded execution windows never lock factual or status editing and only fence incomplete process collections
+ok 189 - bounded execution windows never lock factual or status editing and only fence incomplete process collections
+  ---
+  duration_ms: 2.057
+  type: 'test'
+  ...
+# Subtest: mounted incomplete execution windows lock only their process sections
+ok 190 - mounted incomplete execution windows lock only their process sections
+  ---
+  duration_ms: 20.169
+  type: 'test'
+  ...
+# Subtest: level-test and consultation editors pass the manager-only lock into every mutation boundary
+ok 191 - level-test and consultation editors pass the manager-only lock into every mutation boundary
+  ---
+  duration_ms: 0.981333
+  type: 'test'
+  ...
+# Subtest: mounted registration detail makes level-test, visit-consultation, and mode controls read-only for teachers and assistants
+ok 192 - mounted registration detail makes level-test, visit-consultation, and mode controls read-only for teachers and assistants
+  ---
+  duration_ms: 79.138291
+  type: 'test'
+  ...
+# Subtest: ordinary tracks expose one explicit nullable director fact editor
+ok 193 - ordinary tracks expose one explicit nullable director fact editor
+  ---
+  duration_ms: 3.171875
+  type: 'test'
+  ...
+# Subtest: consultation editor restores phone and visit choice with one shared save action
+ok 194 - consultation editor restores phone and visit choice with one shared save action
+  ---
+  duration_ms: 1.323166
+  type: 'test'
+  ...
+# Subtest: phone and visit facts save even when the related director save is incomplete
+ok 195 - phone and visit facts save even when the related director save is incomplete
+  ---
+  duration_ms: 0.995
+  type: 'test'
+  ...
+# Subtest: consultation outcome editor saves facts without admission or workflow execution
+ok 196 - consultation outcome editor saves facts without admission or workflow execution
+  ---
+  duration_ms: 0.706083
+  type: 'test'
+  ...
+# Subtest: registration section state keeps the workflow model's current and upcoming steps
+ok 197 - registration section state keeps the workflow model's current and upcoming steps
+  ---
+  duration_ms: 1.023167
+  type: 'test'
+  ...
+# Subtest: case managers can correct an existing consultation outcome
+ok 198 - case managers can correct an existing consultation outcome
+  ---
+  duration_ms: 0.984417
+  type: 'test'
+  ...
+# Subtest: 레벨테스트 결과는 안전한 URL만 새 탭 링크로 연다
+ok 199 - 레벨테스트 결과는 안전한 URL만 새 탭 링크로 연다
+  ---
+  duration_ms: 0.593375
+  type: 'test'
+  ...
+# Subtest: operational detail omits the internal subject event log
+ok 200 - operational detail omits the internal subject event log
+  ---
+  duration_ms: 1.100583
+  type: 'test'
+  ...
+# Subtest: 대기 상세은 저장한 값이 없으면 비어 있는 입력 상태로 연다
+ok 201 - 대기 상세은 저장한 값이 없으면 비어 있는 입력 상태로 연다
+  ---
+  duration_ms: 0.962459
+  type: 'test'
+  ...
+# Subtest: migration review remains an attribution tool without blocking ordinary fact editors
+ok 202 - migration review remains an attribution tool without blocking ordinary fact editors
+  ---
+  duration_ms: 1.209875
+  type: 'test'
+  ...
+# Subtest: subject removal is routed through the history-aware RPC
+ok 203 - subject removal is routed through the history-aware RPC
+  ---
+  duration_ms: 0.85875
+  type: 'test'
+  ...
+# Subtest: migration resolution keeps typed inputs separate and sends one canonical JSON payload
+ok 204 - migration resolution keeps typed inputs separate and sends one canonical JSON payload
+  ---
+  duration_ms: 0.739458
+  type: 'test'
+  ...
+# Subtest: inquiry decisions are subject-scoped and never fake a phone reservation
+ok 205 - inquiry decisions are subject-scoped and never fake a phone reservation
+  ---
+  duration_ms: 1.170041
+  type: 'test'
+  ...
+# Subtest: waiting details save separately from the status selector
+ok 206 - waiting details save separately from the status selector
+  ---
+  duration_ms: 1.337792
+  type: 'test'
+  ...
+# Subtest: level-test result saves separately from the status selector
+ok 207 - level-test result saves separately from the status selector
+  ---
+  duration_ms: 0.3745
+  type: 'test'
+  ...
+# Subtest: terminal subject outcomes can be deliberately reopened from the same application
+ok 208 - terminal subject outcomes can be deliberately reopened from the same application
+  ---
+  duration_ms: 0.993333
+  type: 'test'
+  ...
+# Subtest: new appointments start with the active subject selected
+ok 209 - new appointments start with the active subject selected
+  ---
+  duration_ms: 1.318084
+  type: 'test'
+  ...
+# Subtest: subject removal is a plain editable fact without a history-block UI
+ok 210 - subject removal is a plain editable fact without a history-block UI
+  ---
+  duration_ms: 1.01
+  type: 'test'
+  ...
+# Subtest: workspace preloads the unified editor while canonical subject detail data loads
+ok 211 - workspace preloads the unified editor while canonical subject detail data loads
+  ---
+  duration_ms: 4.001084
+  type: 'test'
+  ...
+# Subtest: canonical detail renders before option catalogs begin loading
+ok 212 - canonical detail renders before option catalogs begin loading
+  ---
+  duration_ms: 2.913958
+  type: 'test'
+  ...
+# Subtest: new registration always creates one fact-only row without runtime, workflow, or notification gates
+ok 213 - new registration always creates one fact-only row without runtime, workflow, or notification gates
+  ---
+  duration_ms: 5.456375
+  type: 'test'
+  ...
+# Subtest: registration director options resolve science as its own subject
+ok 214 - registration director options resolve science as its own subject
+  ---
+  duration_ms: 2.644458
+  type: 'test'
+  ...
+# Subtest: appointment editor keeps one simple level-test result link action per subject
+ok 215 - appointment editor keeps one simple level-test result link action per subject
+  ---
+  duration_ms: 0.543292
+  type: 'test'
+  ...
+# Subtest: consultation reservation renders before the consultation result
+ok 216 - consultation reservation renders before the consultation result
+  ---
+  duration_ms: 0.498292
+  type: 'test'
+  ...
+# Subtest: all-terminal appointment results keep details editable while preserving participant integrity
+ok 217 - all-terminal appointment results keep details editable while preserving participant integrity
+  ---
+  duration_ms: 0.758583
+  type: 'test'
+  ...
+# Subtest: appointment save and cancellation hand off facts without any automatic provider dispatch
+ok 218 - appointment save and cancellation hand off facts without any automatic provider dispatch
+  ---
+  duration_ms: 0.667875
+  type: 'test'
+  ...
+# Subtest: committed appointment and result mutations cannot be resubmitted when refresh degrades
+ok 219 - committed appointment and result mutations cannot be resubmitted when refresh degrades
+  ---
+  duration_ms: 0.607875
+  type: 'test'
+  ...
+# Subtest: track editor keeps level-test and visit editors open for the active subject
+ok 220 - track editor keeps level-test and visit editors open for the active subject
+  ---
+  duration_ms: 1.3065
+  type: 'test'
+  ...
+# Subtest: appointment editors have no separate expand or close action
+ok 221 - appointment editors have no separate expand or close action
+  ---
+  duration_ms: 0.814125
+  type: 'test'
+  ...
+# Subtest: phone and visit consultation completion share one inline subject outcome editor
+ok 222 - phone and visit consultation completion share one inline subject outcome editor
+  ---
+  duration_ms: 1.623333
+  type: 'test'
+  ...
+# Subtest: registration stage selects have subject-specific accessible names
+ok 223 - registration stage selects have subject-specific accessible names
+  ---
+  duration_ms: 0.790625
+  type: 'test'
+  ...
+# Subtest: appointment editors are part of the form without open-state scrolling
+ok 224 - appointment editors are part of the form without open-state scrolling
+  ---
+  duration_ms: 0.852708
+  type: 'test'
+  ...
+# Subtest: active subject resolves its existing appointments without an expand state
+ok 225 - active subject resolves its existing appointments without an expand state
+  ---
+  duration_ms: 0.598
+  type: 'test'
+  ...
+# Subtest: subject tabs own appointment membership without an inner subject picker
+ok 226 - subject tabs own appointment membership without an inner subject picker
+  ---
+  duration_ms: 0.731542
+  type: 'test'
+  ...
+# Subtest: appointment participant report helper keeps its TypeScript contract
+ok 227 - appointment participant report helper keeps its TypeScript contract
+  ---
+  duration_ms: 0.427333
+  type: 'test'
+  ...
+# Subtest: phone completion does not call the visit reservation notification helper
+ok 228 - phone completion does not call the visit reservation notification helper
+  ---
+  duration_ms: 0.58025
+  type: 'test'
+  ...
+# Subtest: enrollment editor supports stable repeated subject rows and exact class detail hydration
+ok 229 - enrollment editor supports stable repeated subject rows and exact class detail hydration
+  ---
+  duration_ms: 1.324916
+  type: 'test'
+  ...
+# Subtest: observation first lesson UI renders the approved compact copy before the picker and clears source on regular override
+ok 230 - observation first lesson UI renders the approved compact copy before the picker and clears source on regular override
+  ---
+  duration_ms: 0.739167
+  type: 'test'
+  ...
+# Subtest: mounted observation first lesson suggestion fails closed in the permission downgrade commit
+ok 231 - mounted observation first lesson suggestion fails closed in the permission downgrade commit
+  ---
+  duration_ms: 35.991
+  type: 'test'
+  ...
+# Subtest: mounted observation first lesson defaults only the newly added initiating row
+ok 232 - mounted observation first lesson defaults only the newly added initiating row
+  ---
+  duration_ms: 18.0825
+  type: 'test'
+  ...
+# Subtest: mounted observation first lesson keeps a regular override through refresh and saves DB null
+ok 233 - mounted observation first lesson keeps a regular override through refresh and saves DB null
+  ---
+  duration_ms: 17.872458
+  type: 'test'
+  ...
+# Subtest: mounted observation first lesson ignores an old-track delayed completion
+ok 234 - mounted observation first lesson ignores an old-track delayed completion
+  ---
+  duration_ms: 16.447708
+  type: 'test'
+  ...
+# Subtest: observation first lesson editor keeps async ownership wiring and React state updaters pure
+ok 235 - observation first lesson editor keeps async ownership wiring and React state updaters pure
+  ---
+  duration_ms: 0.897167
+  type: 'test'
+  ...
+# Subtest: observation first lesson async ownership rejects old track completions and released generations
+ok 236 - observation first lesson async ownership rejects old track completions and released generations
+  ---
+  duration_ms: 0.0735
+  type: 'test'
+  ...
+# Subtest: stale observation first lesson save errors stay private and keep a stable Korean recovery message
+ok 237 - stale observation first lesson save errors stay private and keep a stable Korean recovery message
+  ---
+  duration_ms: 0.119917
+  type: 'test'
+  ...
+# Subtest: enrollment save rejection uses the private stale-source message without replacing the draft
+ok 238 - enrollment save rejection uses the private stale-source message without replacing the draft
+  ---
+  duration_ms: 0.528084
+  type: 'test'
+  ...
+# Subtest: enrollment workspace delegates workflow status changes to the subject status selector
+ok 239 - enrollment workspace delegates workflow status changes to the subject status selector
+  ---
+  duration_ms: 0.480708
+  type: 'test'
+  ...
+# Subtest: enrollment workspace keeps status routing out of the enrollment form
+ok 240 - enrollment workspace keeps status routing out of the enrollment form
+  ---
+  duration_ms: 0.548875
+  type: 'test'
+  ...
+# Subtest: appointment editor keeps an unchanged or empty reservation quiet until a field changes
+ok 241 - appointment editor keeps an unchanged or empty reservation quiet until a field changes
+  ---
+  duration_ms: 0.4945
+  type: 'test'
+  ...
+# Subtest: admission processing keeps five freely editable checklist rows beside an explicit message action
+ok 242 - admission processing keeps five freely editable checklist rows beside an explicit message action
+  ---
+  duration_ms: 2.095459
+  type: 'test'
+  ...
+# Subtest: admission preview is independent of checklist edits and unavailable to read-only viewers
+ok 243 - admission preview is independent of checklist edits and unavailable to read-only viewers
+  ---
+  duration_ms: 15.477958
+  type: 'test'
+  ...
+# Subtest: registration-completed may be checked while every earlier checklist item is unchecked
+ok 244 - registration-completed may be checked while every earlier checklist item is unchecked
+  ---
+  duration_ms: 6.542958
+  type: 'test'
+  ...
+# Subtest: the legacy registration detail does not render a second dependent admission checklist
+ok 245 - the legacy registration detail does not render a second dependent admission checklist
+  ---
+  duration_ms: 3.145084
+  type: 'test'
+  ...
+# Subtest: browser fixture mirrors message-independent identity editing locks
+ok 246 - browser fixture mirrors message-independent identity editing locks
+  ---
+  duration_ms: 0.951708
+  type: 'test'
+  ...
+# Subtest: unified track editor and workspace mount subject rows plus one case-level admission panel
+ok 247 - unified track editor and workspace mount subject rows plus one case-level admission panel
+  ---
+  duration_ms: 3.056125
+  type: 'test'
+  ...
+# Subtest: canonical registration editors keep messaging outside the admission checklist
+ok 248 - canonical registration editors keep messaging outside the admission checklist
+  ---
+  duration_ms: 1.713083
+  type: 'test'
+  ...
+# Subtest: always-open appointment and enrollment editors use disjoint React key namespaces
+ok 249 - always-open appointment and enrollment editors use disjoint React key namespaces
+  ---
+  duration_ms: 0.685167
+  type: 'test'
+  ...
+# Subtest: enrollment stages show the real work surface without a redundant placeholder or director row
+ok 250 - enrollment stages show the real work surface without a redundant placeholder or director row
+  ---
+  duration_ms: 0.837625
+  type: 'test'
+  ...
+# Subtest: committed enrollment saves recover refresh without resubmitting mutations
+ok 251 - committed enrollment saves recover refresh without resubmitting mutations
+  ---
+  duration_ms: 0.624417
+  type: 'test'
+  ...
+# Subtest: registered add-class starts empty and cannot submit an empty draft list
+ok 252 - registered add-class starts empty and cannot submit an empty draft list
+  ---
+  duration_ms: 0.536417
+  type: 'test'
+  ...
+# Subtest: persisted planned rows cancel explicitly and class detail failures can be retried
+ok 253 - persisted planned rows cancel explicitly and class detail failures can be retried
+  ---
+  duration_ms: 0.691375
+  type: 'test'
+  ...
+# Subtest: enrollment cancellation UI consumes the canonical history classifier
+ok 254 - enrollment cancellation UI consumes the canonical history classifier
+  ---
+  duration_ms: 0.560125
+  type: 'test'
+  ...
+# Subtest: an unrelated subject open batch does not block registered draft editing
+ok 255 - an unrelated subject open batch does not block registered draft editing
+  ---
+  duration_ms: 1.11275
+  type: 'test'
+  ...
+# Subtest: persisted null textbooks remain explicitly cleared after editor remount
+ok 256 - persisted null textbooks remain explicitly cleared after editor remount
+  ---
+  duration_ms: 0.398083
+  type: 'test'
+  ...
+# Subtest: read-only admission viewers see checklist status without mutation buttons
+ok 257 - read-only admission viewers see checklist status without mutation buttons
+  ---
+  duration_ms: 2.30425
+  type: 'test'
+  ...
+# Subtest: admission panel leaves provider recovery timing to the shared dialog
+ok 258 - admission panel leaves provider recovery timing to the shared dialog
+  ---
+  duration_ms: 0.635541
+  type: 'test'
+  ...
+# Subtest: enrollment saves lock after a committed refresh failure
+ok 259 - enrollment saves lock after a committed refresh failure
+  ---
+  duration_ms: 0.694834
+  type: 'test'
+  ...
+# Subtest: enrollment form contains no secondary decision-routing controls
+ok 260 - enrollment form contains no secondary decision-routing controls
+  ---
+  duration_ms: 0.362083
+  type: 'test'
+  ...
+# Subtest: registration application owns the exact stable dirty-key aggregates
+ok 261 - registration application owns the exact stable dirty-key aggregates
+  ---
+  duration_ms: 1.561542
+  type: 'test'
+  ...
+# Subtest: every local registration editor reports dirty state through its owner
+ok 262 - every local registration editor reports dirty state through its owner
+  ---
+  duration_ms: 2.015959
+  type: 'test'
+  ...
+# Subtest: sibling canonical reloads preserve editor drafts and dirty membership
+ok 263 - sibling canonical reloads preserve editor drafts and dirty membership
+  ---
+  duration_ms: 1.09975
+  type: 'test'
+  ...
+# Subtest: inline consultation completion exposes the locked Task 6 interface and recovery copy
+ok 264 - inline consultation completion exposes the locked Task 6 interface and recovery copy
+  ---
+  duration_ms: 0.599667
+  type: 'test'
+  ...
+# Subtest: section validation is local, Korean, and focuses its first invalid control
+ok 265 - section validation is local, Korean, and focuses its first invalid control
+  ---
+  duration_ms: 1.583917
+  type: 'test'
+  ...
+# Subtest: consultation detail stays compact and omits explanatory card copy already implied by the controls
+ok 266 - consultation detail stays compact and omits explanatory card copy already implied by the controls
+  ---
+  duration_ms: 0.849542
+  type: 'test'
+  ...
+# Subtest: waiting and enrollment facts stay directly editable during legacy attribution review
+ok 267 - waiting and enrollment facts stay directly editable during legacy attribution review
+  ---
+  duration_ms: 0.785459
+  type: 'test'
+  ...
+# Subtest: subject-owned controls name their subject and keep mobile primary actions after inputs
+ok 268 - subject-owned controls name their subject and keep mobile primary actions after inputs
+  ---
+  duration_ms: 1.372833
+  type: 'test'
+  ...
+# Subtest: catalog failures retain a local retry without blocking an explicit nullable director edit
+ok 269 - catalog failures retain a local retry without blocking an explicit nullable director edit
+  ---
+  duration_ms: 0.977583
+  type: 'test'
+  ...
+# Subtest: committed refresh failures clear only their dirty owner and lock mutation replay
+ok 270 - committed refresh failures clear only their dirty owner and lock mutation replay
+  ---
+  duration_ms: 1.95375
+  type: 'test'
+  ...
+# Subtest: common revision conflicts show attempted and latest values before an explicit choice
+ok 271 - common revision conflicts show attempted and latest values before an explicit choice
+  ---
+  duration_ms: 0.342333
+  type: 'test'
+  ...
+# Subtest: manual director revision conflicts compare the attempted and latest director before retry
+ok 272 - manual director revision conflicts compare the attempted and latest director before retry
+  ---
+  duration_ms: 0.512709
+  type: 'test'
+  ...
+# Subtest: migration review revision conflicts preserve a comparable draft behind an explicit choice
+ok 273 - migration review revision conflicts preserve a comparable draft behind an explicit choice
+  ---
+  duration_ms: 1.585
+  type: 'test'
+  ...
+# Subtest: migration director and review drafts keep separate dirty and refresh owners
+ok 274 - migration director and review drafts keep separate dirty and refresh owners
+  ---
+  duration_ms: 0.505667
+  type: 'test'
+  ...
+# Subtest: enrollment rows and persisted cancellations report and recover separate owners
+ok 275 - enrollment rows and persisted cancellations report and recover separate owners
+  ---
+  duration_ms: 1.429375
+  type: 'test'
+  ...
+# Subtest: level-test result saving retains its draft until the mutation commits
+ok 276 - level-test result saving retains its draft until the mutation commits
+  ---
+  duration_ms: 0.392292
+  type: 'test'
+  ...
+# Subtest: appointment save confirmation stays visible inside the registration detail modal
+ok 277 - appointment save confirmation stays visible inside the registration detail modal
+  ---
+  duration_ms: 0.745416
+  type: 'test'
+  ...
+# Subtest: enrollment cancellation validation is local and focuses subject-owned controls
+ok 278 - enrollment cancellation validation is local and focuses subject-owned controls
+  ---
+  duration_ms: 0.402542
+  type: 'test'
+  ...
+# Subtest: remaining subject-owned mutation controls expose their subject in accessible names
+ok 279 - remaining subject-owned mutation controls expose their subject in accessible names
+  ---
+  duration_ms: 1.5775
+  type: 'test'
+  ...
+# Subtest: ops task workspace uses the registration application aggregate in the host close guard
+ok 280 - ops task workspace uses the registration application aggregate in the host close guard
+  ---
+  duration_ms: 2.531
+  type: 'test'
+  ...
+# Subtest: registration create and canonical detail share one explicit application host
+ok 281 - registration create and canonical detail share one explicit application host
+  ---
+  duration_ms: 6.062292
+  type: 'test'
+  ...
+# Subtest: registration host owns dirty close protection and clears every application deep link
+ok 282 - registration host owns dirty close protection and clears every application deep link
+  ---
+  duration_ms: 3.398125
+  type: 'test'
+  ...
+# Subtest: saved detail owns one unified inquiry draft and removes duplicate inquiry summaries
+ok 283 - saved detail owns one unified inquiry draft and removes duplicate inquiry summaries
+  ---
+  duration_ms: 1.0455
+  type: 'test'
+  ...
+# Subtest: saved detail keeps every operational frame available without repeating shell lock copy
+ok 284 - saved detail keeps every operational frame available without repeating shell lock copy
+  ---
+  duration_ms: 0.714375
+  type: 'test'
+  ...
+# Subtest: saved-detail descendants use shared dashboard controls instead of native controls
+ok 285 - saved-detail descendants use shared dashboard controls instead of native controls
+  ---
+  duration_ms: 1.631333
+  type: 'test'
+  ...
+# Subtest: mounted enrollment editor saves multiple textbooks and retains them after a failed save
+ok 286 - mounted enrollment editor saves multiple textbooks and retains them after a failed save
+  ---
+  duration_ms: 15.769333
+  type: 'test'
+  ...
+# Subtest: class subject options always include registry subjects before a science class exists
+ok 287 - class subject options always include registry subjects before a science class exists
+  ---
+  duration_ms: 0.735209
+  type: 'test'
+  ...
+# Subtest: science class payload normalizes aliases and requires a high grade with an area
+ok 288 - science class payload normalizes aliases and requires a high grade with an area
+  ---
+  duration_ms: 2.92125
+  type: 'test'
+  ...
+# Subtest: science class candidates require exact team and root classroom memberships
+ok 289 - science class candidates require exact team and root classroom memberships
+  ---
+  duration_ms: 0.20925
+  type: 'test'
+  ...
+# Subtest: science class payload rejects selections outside provided exact candidate context
+ok 290 - science class payload rejects selections outside provided exact candidate context
+  ---
+  duration_ms: 1.082375
+  type: 'test'
+  ...
+# Subtest: legacy science resources stay readable but science subject changes clear invalid selections
+ok 291 - legacy science resources stay readable but science subject changes clear invalid selections
+  ---
+  duration_ms: 6.445291
+  type: 'test'
+  ...
+# Subtest: class area keys survive management and academic record normalization
+ok 292 - class area keys survive management and academic record normalization
+  ---
+  duration_ms: 3.031291
+  type: 'test'
+  ...
+# Subtest: class form loads active areas and subject-aware teacher and classroom catalogs
+ok 293 - class form loads active areas and subject-aware teacher and classroom catalogs
+  ---
+  duration_ms: 1.695708
+  type: 'test'
+  ...
+# Subtest: science class and textbook migration uses mapped composite area references and write guards
+ok 294 - science class and textbook migration uses mapped composite area references and write guards
+  ---
+  duration_ms: 3.099708
+  type: 'test'
+  ...
+1..294
+# tests 299
+# suites 0
+# pass 299
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 5201.576503

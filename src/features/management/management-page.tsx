@@ -38,6 +38,7 @@ import { cn } from "@/lib/utils";
 import { formatStudentContact } from "@/lib/student-contact-display";
 import { formatScheduleTimeRange } from "@/lib/schedule-time-display";
 import {
+  ACADEMIC_SUBJECTS,
   ACADEMIC_SUBJECT_VALUES,
   isScienceGrade,
   parseAcademicSubject,
@@ -530,17 +531,8 @@ function createContinuousScheduleRequestKey(): string {
   return globalThis.crypto.randomUUID();
 }
 
-function getClassSubjectValue(raw: Record<string, unknown> = {}) {
-  const subject = text(raw.subject);
-  return parseAcademicSubject(subject) || subject;
-}
-
 function isScienceClassSubject(value: unknown) {
   return parseAcademicSubject(value) === "과학";
-}
-
-function getClassTeacherValues(raw: Record<string, unknown> = {}) {
-  return splitOptionValues(raw.teacher || raw.teacher_name || raw.teacherName);
 }
 
 function getClassTeacherCatalogRows(rawRows: Record<string, unknown>[]) {
@@ -569,7 +561,7 @@ function isClassTeacherCatalogForSubject(catalog: Record<string, unknown>, subje
 
 function getClassTeacherCatalogOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
   return getClassTeacherCatalogRows(rawRows)
-    .filter((catalog) => catalog.is_visible !== false && isClassTeacherCatalogForSubject(catalog, subject))
+    .filter((catalog) => catalog.is_visible !== false && isClassTeacherCatalogForSubject(catalog, subject) && catalog.isVisible !== false)
     .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0) || text(left.name).localeCompare(text(right.name), "ko", { numeric: true }))
     .map((catalog) => text(catalog.name))
     .filter(Boolean);
@@ -577,27 +569,15 @@ function getClassTeacherCatalogOptionsForSubject(rawRows: Record<string, unknown
 
 function getClassTeacherOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
   const selectedSubject = parseAcademicSubject(subject) || text(subject);
-  const subjectRows = selectedSubject
-    ? rawRows.filter((raw) => getClassSubjectValue(raw) === selectedSubject)
-    : rawRows;
-  const sourceRows = subjectRows.length > 0 ? subjectRows : rawRows;
   const catalogOptions = getClassTeacherCatalogOptionsForSubject(rawRows, selectedSubject);
-  if (isScienceClassSubject(selectedSubject)) {
-    return uniqueSortedOptions(catalogOptions, catalogOptions);
-  }
-  return uniqueSortedOptions(
-    [
-      ...catalogOptions,
-      ...sourceRows.flatMap((raw) => getClassTeacherValues(raw)),
-    ],
-    catalogOptions,
-  );
+  return uniqueSortedOptions(catalogOptions, catalogOptions);
 }
 
 function getClassTeacherCatalogIdForSubject(rawRows: Record<string, unknown>[], subject: string, name: string) {
   const selectedName = text(name);
   return text(getClassTeacherCatalogRows(rawRows).find((catalog) => (
     catalog.is_visible !== false
+    && catalog.isVisible !== false
     && isClassTeacherCatalogForSubject(catalog, subject)
     && text(catalog.name) === selectedName
   ))?.id) || null;
@@ -624,31 +604,19 @@ function getClassClassroomCatalogRows(rawRows: Record<string, unknown>[]) {
 
 function getClassClassroomOptionsForSubject(rawRows: Record<string, unknown>[], subject: string) {
   const selectedSubject = parseAcademicSubject(subject) || text(subject);
-  const subjectRows = selectedSubject
-    ? rawRows.filter((raw) => getClassSubjectValue(raw) === selectedSubject)
-    : rawRows;
-  const sourceRows = subjectRows.length > 0 ? subjectRows : rawRows;
   const catalogOptions = getClassClassroomCatalogRows(rawRows)
-    .filter((catalog) => catalog.is_visible !== false && isClassroomCatalogForClassSubject(catalog, selectedSubject))
+    .filter((catalog) => catalog.is_visible !== false && isClassroomCatalogForClassSubject(catalog, selectedSubject) && catalog.isVisible !== false)
     .sort((left, right) => Number(left.sort_order || left.sortOrder || 0) - Number(right.sort_order || right.sortOrder || 0) || text(left.name).localeCompare(text(right.name), "ko", { numeric: true }))
     .map((catalog) => text(catalog.name))
     .filter(Boolean);
-  if (isScienceClassSubject(selectedSubject)) {
-    return uniqueSortedOptions(catalogOptions, catalogOptions);
-  }
-  return uniqueSortedOptions(
-    [
-      ...catalogOptions,
-      ...sourceRows.flatMap((raw) => splitOptionValues(raw.classroom || raw.room)),
-    ],
-    catalogOptions,
-  );
+  return uniqueSortedOptions(catalogOptions, catalogOptions);
 }
 
 function getClassClassroomCatalogIdForSubject(rawRows: Record<string, unknown>[], subject: string, name: string) {
   const selectedName = text(name);
   return text(getClassClassroomCatalogRows(rawRows).find((catalog) => (
     catalog.is_visible !== false
+    && catalog.isVisible !== false
     && isClassroomCatalogForClassSubject(catalog, subject)
     && text(catalog.name) === selectedName
   ))?.id) || null;
@@ -1342,12 +1310,15 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     setPreference(value);
     changeNumberedQuery({ ...readManagementNumberedQuery(kind, window.location.search, savedSort?.value), page: 1 });
   }, [changeNumberedQuery, kind, savedSort, setPreference]);
+  const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const {
     rows,
     stats,
     loading,
     error,
     classFormReferences,
+    classFormReferencesStatus,
+    retryClassFormReferences,
     filterOptions,
     page,
     pageSize: displayedPageSize,
@@ -1365,12 +1336,12 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     enabled: pageSizeReady && savedSort?.kind === kind && !authLoading && Boolean(user?.id),
     pageSize: pageSizeState.pageSize,
     authorizationScope: JSON.stringify([user?.id || null, role]),
+    classFormOpen: dialogMode !== null,
     page: numberedQuery.page,
     sort: numberedQuery.sort,
     onQueryChange: changeNumberedQuery,
   });
   const canMutateRows = canManageAll;
-  const [dialogMode, setDialogMode] = useState<"create" | "detail" | null>(null);
   const [selectedRow, setSelectedRow] = useState<ManagementRow | null>(null);
   const [form, setForm] = useState<FormState>(() => initialForm(kind));
   const [validationAttempted, setValidationAttempted] = useState(false);
@@ -1698,7 +1669,10 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       subject: uniqueSortedOptions(buildClassSubjectOptions(rawRows), [...ACADEMIC_SUBJECT_VALUES]),
       grade: isScienceClassSubject(selectedClassSubject)
         ? ["고1", "고2", "고3"]
-        : uniqueSortedOptions(rawRows.map((raw) => text(raw.grade))),
+        : uniqueSortedOptions([
+          ...(ACADEMIC_SUBJECTS.find((subject) => subject.value === selectedClassSubject)?.grades || ACADEMIC_SUBJECTS[0].grades),
+          ...rawRows.map((raw) => text(raw.grade)),
+        ], [...ACADEMIC_SUBJECTS[0].grades]),
       teacher: getClassTeacherOptionsForSubject(rawRows, selectedClassSubject),
       classroom: getClassClassroomOptionsForSubject(rawRows, selectedClassSubject),
     } satisfies Record<string, string[]>;
@@ -1709,6 +1683,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       !hasExactClassResourceSelection(form.teacher, classSelectOptions.teacher || [])
       || !hasExactClassResourceSelection(form.classroom, classSelectOptions.classroom || [])
     );
+  const classFormReferencesBlocked = kind === "classes" && classFormReferencesStatus !== "ready";
   const studentSchoolCategory = getStudentSchoolCategoryFromForm(form);
   const studentSelectOptions = useMemo(() => {
     if (kind !== "students") {
@@ -2068,13 +2043,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
       const rawRows = classResourceRows;
       const teacherOptions = getClassTeacherOptionsForSubject(rawRows, normalizedValue);
       const classroomOptions = getClassClassroomOptionsForSubject(rawRows, normalizedValue);
-      const enforceExactScienceCandidates = isScienceClassSubject(nextSubject);
+      // A subject change must clear incompatible resources even when its catalog is empty.
+      const enforceExactCandidates = true;
       const nextSlots = (classScheduleSlots.length > 0 ? classScheduleSlots : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom)).map((slot) => ({
         ...slot,
-        teacher: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactScienceCandidates) ? "" : slot.teacher,
-        teacherCatalogId: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactScienceCandidates) ? null : slot.teacherCatalogId,
-        classroom: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactScienceCandidates) ? "" : slot.classroom,
-        classroomCatalogId: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactScienceCandidates) ? null : slot.classroomCatalogId,
+        teacher: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactCandidates) ? "" : slot.teacher,
+        teacherCatalogId: shouldClearClassResourceSelection(slot.teacher, teacherOptions, enforceExactCandidates) ? null : slot.teacherCatalogId,
+        classroom: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactCandidates) ? "" : slot.classroom,
+        classroomCatalogId: shouldClearClassResourceSelection(slot.classroom, classroomOptions, enforceExactCandidates) ? null : slot.classroomCatalogId,
       }));
       const formattedSlots = formatClassScheduleSlots(nextSlots);
       setClassScheduleSlots(nextSlots);
@@ -2086,11 +2062,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           next.subjectAreaKey = "";
         }
         // Legacy narrowing contract: if (next.teacher && teacherOptions.length > 0 && !teacherOptions.includes(next.teacher))
-        if (shouldClearClassResourceSelection(next.teacher, teacherOptions, enforceExactScienceCandidates)) {
+        if (shouldClearClassResourceSelection(next.teacher, teacherOptions, enforceExactCandidates)) {
           next.teacher = "";
         }
         // Legacy narrowing contract: if (next.classroom && classroomOptions.length > 0 && !classroomOptions.includes(next.classroom)) {
-        if (shouldClearClassResourceSelection(next.classroom, classroomOptions, enforceExactScienceCandidates)) {
+        if (shouldClearClassResourceSelection(next.classroom, classroomOptions, enforceExactCandidates)) {
           next.classroom = "";
         }
         return next;
@@ -2132,6 +2108,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     ? classScheduleSlots
     : parseClassScheduleSlots(form.schedule, form.teacher, form.classroom);
   const syncClassScheduleSlots = (slots: ClassScheduleSlot[]) => {
+    if (classFormReferencesBlocked) return;
     scheduleEditRevisionRef.current += 1;
     setScheduleDefaultsRequestKey("");
     const nextSlots = (slots.length > 0 ? slots : [createEmptyClassScheduleSlot()]).map((slot) => (
@@ -2223,7 +2200,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
     }
   };
   const handleClassScheduleDefaultsSave = async () => {
-    if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || !classScheduleDefaultsDirty) return;
+    if (!selectedRow || !normalizedScheduleDefaults || !canMutateRows || classFormReferencesBlocked || !classScheduleDefaultsDirty) return;
     const classId = selectedRow.id;
     if (scheduleDefaultsPendingRef.current.has(classId)) return;
     const requestKey = scheduleDefaultsRequestKey || createContinuousScheduleRequestKey();
@@ -2305,7 +2282,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 		                  <Select
 		                    value={slot.day || "__none__"}
 		                    onValueChange={(value) => updateClassScheduleSlot(index, { day: value === "__none__" ? "" : value })}
-		                    disabled={!canMutateRows}
+		                    disabled={!canMutateRows || classFormReferencesBlocked}
 	                  >
 	                    <SelectTrigger id={`${rowId}-day`} className="w-full min-w-0">
 	                      <SelectValue placeholder="요일" />
@@ -2326,14 +2303,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                      onChange={(value) => updateClassScheduleSlot(index, { startTime: value })}
 	                      placeholder="시작"
 	                      ariaLabel={`수업시간 ${index + 1} 시작시각`}
-	                      disabled={!canMutateRows}
+	                      disabled={!canMutateRows || classFormReferencesBlocked}
 	                      className={cn("min-w-0", slot.startTime ? "pr-14" : "")}
 	                    />
                     <FieldClearButton
                       aria-label={`수업시간 ${index + 1} 시작시각 초기화`}
                       show={Boolean(slot.startTime)}
                       onClick={() => updateClassScheduleSlot(index, { startTime: "" })}
-                      disabled={!canMutateRows}
+                      disabled={!canMutateRows || classFormReferencesBlocked}
                     />
                   </div>
 	                </div>
@@ -2345,14 +2322,14 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 	                      onChange={(value) => updateClassScheduleSlot(index, { endTime: value })}
 	                      placeholder="종료"
 	                      ariaLabel={`수업시간 ${index + 1} 종료시각`}
-	                      disabled={!canMutateRows}
+	                      disabled={!canMutateRows || classFormReferencesBlocked}
 	                      className={cn("min-w-0", slot.endTime ? "pr-14" : "")}
 	                    />
                     <FieldClearButton
                       aria-label={`수업시간 ${index + 1} 종료시각 초기화`}
                       show={Boolean(slot.endTime)}
                       onClick={() => updateClassScheduleSlot(index, { endTime: "" })}
-                      disabled={!canMutateRows}
+                      disabled={!canMutateRows || classFormReferencesBlocked}
                     />
                   </div>
 	                </div>
@@ -2369,7 +2346,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                               : null,
                           });
                         }}
-	                    disabled={!canMutateRows}
+	                    disabled={!canMutateRows || classFormReferencesBlocked}
 	                  >
 	                    <SelectTrigger id={`${rowId}-teacher`} className="w-full min-w-0">
 	                      <SelectValue placeholder="선생님" />
@@ -2395,7 +2372,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                               : null,
                           });
                         }}
-	                    disabled={!canMutateRows}
+	                    disabled={!canMutateRows || classFormReferencesBlocked}
 	                  >
 	                    <SelectTrigger id={`${rowId}-classroom`} className="w-full min-w-0">
 	                      <SelectValue placeholder="강의실" />
@@ -2415,7 +2392,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     size="icon"
                     className="h-10 w-10"
                     onClick={() => removeClassScheduleSlot(index)}
-                    disabled={!canMutateRows || slots.length <= 1}
+                    disabled={!canMutateRows || classFormReferencesBlocked || slots.length <= 1}
                     aria-label="시간표 행 삭제"
                     title="시간표 행 삭제"
                   >
@@ -2432,7 +2409,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           size="sm"
           className="h-9"
           onClick={addClassScheduleSlot}
-          disabled={!canMutateRows}
+          disabled={!canMutateRows || classFormReferencesBlocked}
         >
           <Plus className="mr-1.5 size-4" aria-hidden="true" />
           시간 추가
@@ -2450,7 +2427,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 type="button"
                 size="form"
                 onClick={() => void handleClassScheduleDefaultsSave()}
-                disabled={!canMutateRows || !classScheduleDefaultsDirty || scheduleDefaultsSaving}
+                disabled={!canMutateRows || classFormReferencesBlocked || !classScheduleDefaultsDirty || scheduleDefaultsSaving}
               >
                 {scheduleDefaultsSaving ? "기본 시간표 저장 중" : "기본 시간표 저장"}
               </Button>
@@ -2492,6 +2469,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
           const invalid = validationAttempted && Boolean(field.required) && !text(value);
           const errorId = `${id}-error`;
           const selectOptions = getEditableFieldOptions(field.name, value);
+          const isClassResource = kind === "classes" && ["teacher", "classroom"].includes(field.name);
           const fieldWrapperClassName = cn(
             "space-y-2",
             field.multiline || (kind === "classes" && scope === "detail" && field.name === "name")
@@ -2510,7 +2488,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   <Select
                     value={value || "__none__"}
                     onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
-                    disabled={fieldsDisabled || scienceSubjectAreaOptions.length === 0}
+                    disabled={fieldsDisabled || classFormReferencesBlocked || scienceSubjectAreaOptions.length === 0}
                   >
                     <SelectTrigger id={id} className="w-full" aria-label="과학 영역" aria-required={field.required || undefined} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
                       <SelectValue placeholder={field.placeholder} />
@@ -2555,11 +2533,11 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   disabled={fieldsDisabled}
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
-              ) : selectOptions.length > 0 ? (
+              ) : selectOptions.length > 0 || isClassResource ? (
                 <Select
                   value={value || "__none__"}
                   onValueChange={(nextValue) => handleEditableFieldChange(field.name, nextValue)}
-                  disabled={fieldsDisabled}
+                  disabled={fieldsDisabled || (kind === "classes" && field.name === "subject" && classFormReferencesBlocked) || (isClassResource && (classFormReferencesBlocked || selectOptions.length === 0))}
                 >
                   <SelectTrigger id={id} className="w-full" aria-required={field.required || undefined} aria-invalid={invalid || undefined} aria-describedby={invalid ? errorId : undefined}>
                     <SelectValue placeholder={field.placeholder || `${field.label} 선택`} />
@@ -2590,6 +2568,9 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                   onChange={(event) => setForm((current) => ({ ...current, [field.name]: event.target.value }))}
                 />
               )}
+              {isClassResource && !classFormReferencesBlocked && selectOptions.length === 0 ? (
+                <p className="text-xs text-muted-foreground">이 과목에 선택 가능한 {field.label === "강의실" ? "강의실이" : "교사가"} 없습니다.</p>
+              ) : null}
               {invalid && field.name !== "subjectAreaKey" ? (
                 <p id={errorId} role="alert" className="text-xs text-destructive">{field.label} 항목을 입력하세요.</p>
               ) : null}
@@ -2943,6 +2924,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
   const handleSubmit = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    if (classFormReferencesBlocked) return;
     if (!canMutateRows) {
       setOperationError("등록 권한이 없습니다.");
       return;
@@ -3020,6 +3002,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
 
   const handleDetailSave = async () => {
     if (!selectedRow) return;
+    if (classFormReferencesBlocked) return;
     if (!canMutateRows) {
       setOperationError("수정 권한이 없습니다.");
       return;
@@ -3753,6 +3736,18 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
             ) : null}
           </DialogHeader>
 
+          {kind === "classes" && classFormReferencesStatus === "loading" ? (
+            <p role="status" className="text-sm text-muted-foreground">교사·강의실 목록을 불러오는 중입니다.</p>
+          ) : null}
+          {kind === "classes" && classFormReferencesStatus === "error" ? (
+            <Alert variant="destructive" role="alert">
+              <AlertDescription>
+                교사·강의실 목록을 불러오지 못했습니다.
+                <Button type="button" variant="outline" size="sm" onClick={retryClassFormReferences}>다시 시도</Button>
+              </AlertDescription>
+            </Alert>
+          ) : null}
+
           {operationError && !(isDetail && selectedRow && kind === "classes") ? (
             <Alert variant="destructive">
               <AlertDescription>{operationError}</AlertDescription>
@@ -3808,7 +3803,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                 <span role="status" className="sr-only">{saving ? "수업 정보 저장 중" : saveNotice}</span>
                 {renderSaveStatus()}
                 <Button type="button" size="form" variant="outline" onClick={() => handleDialogOpenChange(false)} disabled={saving}>닫기</Button>
-                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
+                <Button type="button" size="form" data-testid="class-detail-save" onClick={handleDetailSave} disabled={saving || !canMutateRows || classFormReferencesBlocked || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "저장"}</Button>
               </DialogFooter>
             </div>
           ) : isDetail && selectedRow ? (
@@ -3906,7 +3901,7 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
                     기본 시간표 초기화 다시 시도
                   </Button>
                 ) : (
-                  <Button type="submit" size={kind === "classes" ? "form" : "default"} disabled={saving || !canMutateRows || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
+                  <Button type="submit" size={kind === "classes" ? "form" : "default"} disabled={saving || !canMutateRows || classFormReferencesBlocked || scienceClassCandidateSelectionBlocked}>{saving ? "저장 중" : "등록 저장"}</Button>
                 )}
               </DialogFooter>
             </form>

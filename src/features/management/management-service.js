@@ -1,3 +1,4 @@
+import { withReadDeadline } from "../../lib/read-deadline.ts";
 import { createTimetableOperationalMutation } from "../academic/timetable-operational-service.ts";
 import { buildClassTextbookUsage } from "./class-textbook-usage.ts";
 import { supabase as sharedSupabase, supabaseConfigError } from "../../lib/supabase.ts";
@@ -233,13 +234,12 @@ export function createManagementReadService(options = {}) {
     assertManagementFilters(kind, filters);
     assertManagementListLimit(limit);
     const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
-    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
     const scopeHash = await managementScopeHash(kind, filters);
     if (cursor !== null && (!cursor || typeof cursor !== "object" || cursor.scopeHash !== scopeHash
       || typeof cursor.sortKey !== "string" || typeof cursor.id !== "string")) {
       throw managementReadError("management_cursor_mismatch");
     }
-    const { data, error } = await client.rpc("list_management_page_v1", {
+    const { data, error } = await withReadDeadline((readSignal) => client.rpc("list_management_page_v1", {
         p_kind: kind,
         p_filters: filters,
         p_cursor_sort_key: cursor?.sortKey || null,
@@ -248,8 +248,7 @@ export function createManagementReadService(options = {}) {
         // Numbered 10/15/20-row UI reads use management-numbered-service.ts.
         p_limit: 30,
       })
-      .abortSignal(requestSignal)
-      .retry(false);
+      .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false), { signal, deadline });
     if (error) throw error;
     const received = Array.isArray(data) ? data : [];
     const rows = received.slice(0, limit).map((row) => row?.row_data || row);
@@ -263,13 +262,12 @@ export function createManagementReadService(options = {}) {
 
   const loadMetadata = ({ kind, filters, signal }) => {
     const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
-    const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
-    return Promise.all([
+    return withReadDeadline((readSignal) => Promise.all([
       client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: filters })
-        .abortSignal(requestSignal).retry(false),
+        .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false).then((result) => { if (result.error) throw result.error; return result; }),
       client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: filters })
-        .abortSignal(requestSignal).retry(false),
-    ])
+        .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false).then((result) => { if (result.error) throw result.error; return result; }),
+    ]), { signal, deadline })
       .then(([statsResult, filterOptionsResult]) => {
         if (statsResult.error) throw statsResult.error;
         if (filterOptionsResult.error) throw filterOptionsResult.error;
@@ -350,9 +348,8 @@ export function createManagementReadService(options = {}) {
         }
         const initialPromise = (async () => {
           const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
-          const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
-          const { data, error } = await client.rpc("get_management_default_class_period_v1")
-            .abortSignal(requestSignal).retry(false);
+          const { data, error } = await withReadDeadline((readSignal) => client.rpc("get_management_default_class_period_v1")
+            .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false), { signal, deadline });
           if (error) throw error;
           const periodId = trimText(unwrapRpcObject(data)?.periodId);
           if (!periodId) throw managementReadError("management_default_period_unavailable");
@@ -390,11 +387,57 @@ export function createManagementReadService(options = {}) {
       return { ...result, canonicalReplayToken: null };
     },
     loadNextPage: readListPage,
+    async loadClassFormReferences({ signal } = {}) {
+      const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+      return withReadDeadline(async (operationSignal) => {
+        const requestSignal = AbortSignal.any([operationSignal, deadline]);
+        requestSignal.throwIfAborted();
+        // Like the resource master editor, publish only a complete, bounded-page catalog.
+        const readCatalog = async (table) => {
+          const rows = [];
+          const seenIds = new Set();
+          for (let offset = 0; ; offset += 30) {
+            requestSignal.throwIfAborted();
+            const { data, error } = await client.from(table)
+              .select("id, name, subjects, is_visible, sort_order")
+              .eq("is_visible", true)
+              .range(offset, offset + 29).limit(30)
+              .order("sort_order", { ascending: true })
+              .order("name", { ascending: true })
+              .order("id", { ascending: true })
+              .abortSignal(requestSignal).retry(false);
+            requestSignal.throwIfAborted();
+            if (error) throw error;
+            if (!Array.isArray(data) || data.length > 30) throw managementReadError("class_catalog_page_invalid");
+            for (const row of data) {
+              const id = trimText(row?.id);
+              if (!id || seenIds.has(id)) throw managementReadError("class_catalog_page_changed");
+              seenIds.add(id);
+              rows.push(row);
+            }
+            if (data.length < 30) return rows;
+          }
+        };
+        const readScienceAreas = async () => {
+          const { data, error } = await client.rpc("list_active_science_subject_areas_v1")
+            .abortSignal(requestSignal).retry(false);
+          requestSignal.throwIfAborted();
+          if (error) throw error;
+          if (!Array.isArray(data)) throw managementReadError("science_subject_areas_invalid");
+          return data;
+        };
+        const [teacherCatalogs, classroomCatalogs, scienceSubjectAreas] = await Promise.all([
+          readCatalog("teacher_catalogs"), readCatalog("classroom_catalogs"), readScienceAreas(),
+        ]);
+        return { teacherCatalogs, classroomCatalogs, scienceSubjectAreas };
+      }, { signal, deadline });
+    },
     async loadDetail({ kind, id }) {
       assertManagementKind(kind);
       if (!trimText(id)) throw managementReadError("management_detail_id_invalid");
-      const { data, error } = await client.rpc("get_management_detail_v1", { p_kind: kind, p_id: id })
-        .abortSignal(AbortSignal.timeout(8_000)).retry(false);
+      const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+      const { data, error } = await withReadDeadline((readSignal) => client.rpc("get_management_detail_v1", { p_kind: kind, p_id: id })
+        .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false), { deadline });
       if (error) throw error;
       return withOpaqueDetailRelationCursors(unwrapRpcObject(data), kind, id);
     },
@@ -412,12 +455,13 @@ export function createManagementReadService(options = {}) {
       if (!MANAGEMENT_RELATIONS[kind].has(relationKind) || !trimText(id) || limit !== MANAGEMENT_RELATION_PAGE_SIZE) {
         throw managementReadError("management_relation_invalid");
       }
+      const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
       const decoded = cursor === null ? { sortValue: null, id: null } : decodeManagementRelationCursor(cursor, {
         kind,
         entityId: id,
         relationKind,
       });
-      const { data, error } = await client.rpc("list_management_detail_relation_page_v1", {
+      const { data, error } = await withReadDeadline((readSignal) => client.rpc("list_management_detail_relation_page_v1", {
           p_kind: kind,
           p_id: id,
           p_relation_kind: relationKind,
@@ -425,8 +469,7 @@ export function createManagementReadService(options = {}) {
           p_cursor_id: decoded.id,
           p_limit: 30,
         })
-        .abortSignal(AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS))
-        .retry(false);
+        .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false), { deadline });
       if (error) throw error;
       const response = unwrapRpcObject(data);
       return {
@@ -459,6 +502,7 @@ export function createManagementReadService(options = {}) {
         throw managementReadError("management_textbook_picker_invalid");
       }
       const safeFilters = Object.fromEntries(Object.entries(filters).map(([key, value]) => [key, trimText(value)]));
+      const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
       const scopeHash = await managementScopeHash("textbooks", {
         surface: "class_textbook_picker",
         classId: safeClassId,
@@ -469,7 +513,7 @@ export function createManagementReadService(options = {}) {
         || typeof cursor.sortKey !== "string" || typeof cursor.id !== "string")) {
         throw managementReadError("management_cursor_mismatch");
       }
-      const { data, error } = await client.rpc("list_management_class_textbook_candidates_v1", {
+      const { data, error } = await withReadDeadline((readSignal) => client.rpc("list_management_class_textbook_candidates_v1", {
           p_class_id: safeClassId,
           p_search: safeSearch,
           p_filters: safeFilters,
@@ -477,8 +521,7 @@ export function createManagementReadService(options = {}) {
           p_cursor_id: cursor?.id || null,
           p_limit: 30,
         })
-        .abortSignal(AbortSignal.timeout(8_000))
-        .retry(false);
+        .abortSignal(AbortSignal.any([readSignal, deadline])).retry(false), { deadline });
       if (error) throw error;
       const received = Array.isArray(data) ? data : [];
       const rows = received.slice(0, limit).map((row) => row?.row_data || row);

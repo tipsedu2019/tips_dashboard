@@ -15,6 +15,8 @@ import {
 import { Label } from "@/components/ui/label"
 
 import { RegistrationSelect } from "./registration-select"
+import { RegistrationClassSelect } from "./registration-class-select"
+import type { OpsClassOption } from "./ops-task-service"
 import { RegistrationObservationChatActions } from "./registration-observation-chat-actions"
 import type {
   RegistrationObservationAttempt,
@@ -525,6 +527,7 @@ export type RegistrationObservationEditorProps = {
   observationRevision: number | null
   appointmentNotificationRevision: number | null
   detail: RegistrationObservationManagerDetail
+  classCatalog?: readonly OpsClassOption[]
   deepLinkedAttempt?: RegistrationObservationAttempt | null
   actions: RegistrationObservationActions
   onSaved: (result: RegistrationObservationMutationResult) => void | Promise<void>
@@ -566,6 +569,7 @@ export function RegistrationObservationEditor({
   observationRevision,
   appointmentNotificationRevision,
   detail,
+  classCatalog = [],
   deepLinkedAttempt = null,
   actions,
   onSaved,
@@ -682,7 +686,12 @@ export function RegistrationObservationEditor({
   useEffect(() => { dirtyCallbackRef.current = onDirtyChange }, [onDirtyChange])
   useEffect(() => { onDirtyChange?.(navigationDirty) }, [navigationDirty, onDirtyChange])
   useEffect(() => () => { dirtyCallbackRef.current?.(false) }, [])
-  const classOptions = detail.classes.map((classItem) => ({ value: classItem.id, label: classItem.name }))
+  // The manager response remains the authority for eligible observation classes.
+  const classOptions = detail.classes.map((classItem) => ({
+    id: classItem.id,
+    label: classItem.name,
+    grade: classCatalog.find((item) => item.id === classItem.id)?.grade || "",
+  }))
   const sessionOptions = sessions.map((session) => ({ value: sessionValue(session), label: sessionLabel(session) }))
 
   useEffect(() => {
@@ -859,13 +868,10 @@ export function RegistrationObservationEditor({
       {canBook ? (
         <div className="grid gap-3">
           <div className="grid gap-1.5">
-            <Label htmlFor={`registration-observation-class-${trackId}`}>반</Label>
-            <RegistrationSelect
-              id={`registration-observation-class-${trackId}`}
-              aria-label="청강 반"
+            <RegistrationClassSelect
+              label="청강 반"
               value={classId}
-              placeholder="반 선택"
-              options={classOptions}
+              classes={classOptions}
               disabled={saving || mutationCommitted}
               onValueChange={(value) => {
                 setClassId(value)

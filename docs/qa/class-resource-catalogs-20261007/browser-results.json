@@ -1,0 +1,130 @@
+[
+  {
+    "width": 1440,
+    "unhandled": [],
+    "errors": [],
+    "reads": [
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc"
+    ],
+    "checks": [
+      "subject transitions; active without classes; inactive excluded; exact science membership; natural room order; manual selection",
+      "failure blocks save; explicit retry preserves draft",
+      "successful empty remains disabled select, with empty-state text",
+      "loading blocks premature subject changes; ready catalog uses latest subject",
+      "legacy edit selection preserved; stale detail catalog cannot overwrite authoritative candidates"
+    ],
+    "options": {
+      "영어": {
+        "teacher": [
+          "선택 안 함",
+          "영어 미배정 교사",
+          "공통 교사"
+        ],
+        "classroom": [
+          "선택 안 함",
+          "공통실",
+          "영어 2실",
+          "영어 10실"
+        ]
+      },
+      "수학": {
+        "teacher": [
+          "선택 안 함",
+          "수학 미배정 교사",
+          "공통 교사"
+        ],
+        "classroom": [
+          "선택 안 함",
+          "공통실",
+          "수학 미배정실"
+        ]
+      },
+      "과학": {
+        "teacher": [
+          "선택 안 함",
+          "과학 미배정 교사"
+        ],
+        "classroom": [
+          "선택 안 함",
+          "과학 미배정실"
+        ]
+      }
+    },
+    "passed": true
+  },
+  {
+    "width": 390,
+    "unhandled": [],
+    "errors": [],
+    "reads": [
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/teacher_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc",
+      "/rest/v1/classroom_catalogs?select=id%2Cname%2Csubjects%2Cis_visible%2Csort_order&is_visible=eq.true&offset=0&limit=30&order=sort_order.asc%2Cname.asc%2Cid.asc"
+    ],
+    "checks": [
+      "subject transitions; active without classes; inactive excluded; exact science membership; natural room order; manual selection",
+      "failure blocks save; explicit retry preserves draft",
+      "successful empty remains disabled select, with empty-state text",
+      "loading blocks premature subject changes; ready catalog uses latest subject",
+      "legacy edit selection preserved; stale detail catalog cannot overwrite authoritative candidates"
+    ],
+    "options": {
+      "영어": {
+        "teacher": [
+          "선택 안 함",
+          "영어 미배정 교사",
+          "공통 교사"
+        ],
+        "classroom": [
+          "선택 안 함",
+          "공통실",
+          "영어 2실",
+          "영어 10실"
+        ]
+      },
+      "수학": {
+        "teacher": [
+          "선택 안 함",
+          "수학 미배정 교사",
+          "공통 교사"
+        ],
+        "classroom": [
+          "선택 안 함",
+          "공통실",
+          "수학 미배정실"
+        ]
+      },
+      "과학": {
+        "teacher": [
+          "선택 안 함",
+          "과학 미배정 교사"
+        ],
+        "classroom": [
+          "선택 안 함",
+          "과학 미배정실"
+        ]
+      }
+    },
+    "passed": true
+  }
+]

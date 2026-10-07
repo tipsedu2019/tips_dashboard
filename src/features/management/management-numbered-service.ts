@@ -1,3 +1,4 @@
+import { withReadDeadline } from "../../lib/read-deadline.ts";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { validatePageSize, type DataTablePageSize, type NumberedPage } from "../../lib/numbered-pagination.ts";
 import type { ManagementListFilters } from "./use-management-records";
@@ -122,11 +123,9 @@ export function createManagementNumberedReadService({ supabase }: { supabase: Pi
       validateRequest(request);
       request.signal?.throwIfAborted();
       const deadline = AbortSignal.timeout(8_000);
-      const signal = request.signal ? AbortSignal.any([request.signal, deadline]) : deadline;
-      const { data, error } = await supabase.rpc("list_management_numbered_page_v1", {
+      const { data, error } = await withReadDeadline((signal) => supabase.rpc("list_management_numbered_page_v1", {
         p_kind: request.kind, p_filters: request.filters, p_page: request.page, p_page_size: request.pageSize, p_sort: request.sort,
-      }).abortSignal(signal).retry(false);
-      signal.throwIfAborted();
+      }).abortSignal(AbortSignal.any([signal, deadline])).retry(false), { signal: request.signal, deadline });
       if (error) {
         if (error.code === "PGRST202" || error.code === "42883") {
           throw Object.assign(readError("management_numbered_rpc_unavailable"), { cause: error });

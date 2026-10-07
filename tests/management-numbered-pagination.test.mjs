@@ -11,6 +11,8 @@ import ts from "typescript";
 import { normalizeStudentManagementRecord } from "../src/features/management/records.js";
 import { normalizeStudentStatusFilter } from "../src/features/management/student-enrollment-status.js";
 
+import { createManagementReadService, getAssignedClassTextbookIds } from "../src/features/management/management-service.js";
+
 const require = createRequire(import.meta.url);
 globalThis.IS_REACT_ACT_ENVIRONMENT = true;
 const rootPath = path.resolve(import.meta.dirname, "..");
@@ -569,52 +571,77 @@ test("metadata failure stays visible without discarding a successful numbered pa
   await act(async () => root.unmount());
 });
 
-test("authorized detail catalogs remain available through metadata failure and clear on role or logout", async (t) => {
+test("form catalogs load independently and ignore closed, old-role and late detail responses", async (t) => {
   const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
   globalThis.window = dom.window; globalThis.document = dom.window.document;
-  t.after(() => dom.window.close());
   const { supabase } = transport();
-  const rpc = supabase.rpc, details = [];
+  const rpc = supabase.rpc, details = [], catalogs = [];
   supabase.rpc = (name, args) => name === "get_management_stats_v1" ? {
     abortSignal() { return this; }, retry: () => Promise.resolve({ data: null, error: new Error("stats unavailable") }),
   } : name === "get_management_detail_v1" ? {
     abortSignal() { return this; }, retry: () => new Promise((resolve) => details.push({ args, resolve })),
   } : rpc(name, args);
-  const { useManagementRecords } = loadHook(supabase);
+  const { useManagementRecords } = loadHook(supabase, undefined, {
+    "./management-service.js": { getAssignedClassTextbookIds, createManagementReadService: options => ({
+      ...createManagementReadService(options),
+      loadClassFormReferences: ({ signal }) => new Promise((resolve, reject) => catalogs.push({ signal, resolve, reject })),
+    }) },
+  });
   let state;
-  const classFilters = { kind: "classes", search: "", periodId: "period", status: "수강", subject: null, grade: null, teacher: null, classroom: null };
-  function Probe({ actor = "A", role = "admin" }) {
-    const result = useManagementRecords("classes", classFilters, { pageSize: 10, enabled: Boolean(actor), authorizationScope: JSON.stringify([actor, role]) });
+  const classFilters = { kind: "classes", search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null };
+  function Probe({ actor = "A", role = "admin", open = true, page = 1 }) {
+    const result = useManagementRecords("classes", classFilters, { pageSize: 10, enabled: Boolean(actor), classFormOpen: open, page, authorizationScope: JSON.stringify([actor, role]) });
     useEffect(() => { state = result; }, [result]);
     return null;
   }
-  function resolveDetail(index, teacher) {
-    details[index].resolve({ error: null, data: { kind: "classes", record: { id: details[index].args.p_id, name: "Class", subject: "수학", status: "수강" },
-      formReferences: { teacherCatalogs: [{ id: teacher, name: teacher }], classroomCatalogs: [{ id: "room", name: "room" }], scienceSubjectAreas: [{ key: "physics", label: "물리" }] } } });
-  }
+  const refs = name => ({ teacherCatalogs: [{ id: name, name }], classroomCatalogs: [{ id: "room", name: "room" }], scienceSubjectAreas: [] });
   const root = createRoot(document.getElementById("root"));
-  t.after(async () => { await act(async () => root.unmount()); });
-  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe))));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  const render = props => act(async () => root.render(createElement(StrictMode, null, createElement(Probe, props))));
+  await render({ open: false });
+  assert.equal(catalogs.length, 0, "listing does not fetch form catalogs");
+  await render({});
+  assert.equal(state.classFormReferencesStatus, "loading");
+  await act(async () => catalogs.at(-1).resolve(refs("active-with-no-class")));
+  assert.equal(state.classFormReferencesStatus, "ready");
+  assert.equal(state.classFormReferences.teacherCatalogs[0].name, "active-with-no-class");
+  assert.equal(state.error, "stats unavailable");
+  const count = catalogs.length;
+  await render({ page: 2 });
+  assert.equal(catalogs.length, count, "pagination does not change form catalogs");
+  const oldLoadDetail = state.loadDetail;
   let detail;
   await act(async () => { detail = state.loadDetail("outside-page"); });
-  await act(async () => { resolveDetail(0, "teacher-A"); await detail; });
-  assert.equal(state.classFormReferences.teacherCatalogs.length, 1);
-  assert.equal(state.classFormReferences.classroomCatalogs.length, 1);
-  assert.equal(state.classFormReferences.scienceSubjectAreas.length, 1);
-  assert.equal(state.error, "stats unavailable");
-  const oldLoadDetail = state.loadDetail;
-  let staleDetail;
-  await act(async () => { staleDetail = state.loadDetail("stale-A"); });
-  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe, { role: "teacher" }))));
+  await act(async () => {
+    details[0].resolve({ data: { kind: "classes", record: { id: "outside-page", name: "Class", subject: "수학" }, formReferences: refs("stale-detail") } });
+    await detail;
+  });
+  assert.equal(state.classFormReferences.teacherCatalogs[0].name, "active-with-no-class");
+  await render({ role: "teacher" });
   assert.equal(state.classFormReferences.teacherCatalogs.length, 0);
-  await act(async () => { detail = state.loadDetail("current-role"); });
-  await act(async () => { resolveDetail(2, "teacher-current-role"); await detail; });
-  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "teacher-current-role");
-  await act(async () => { resolveDetail(1, "stale-teacher-A"); await staleDetail; });
-  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "teacher-current-role", "late old-role detail must not erase the current catalogs");
-  await act(async () => { void oldLoadDetail("old-callback"); });
-  assert.equal(details.length, 3, "old-role detail callback must not issue a request in the new authorization scope");
-  await act(async () => root.render(createElement(StrictMode, null, createElement(Probe, { actor: null, role: "viewer" }))));
+  const oldRole = catalogs.at(-1);
+  await render({ role: "staff" });
+  assert.equal(oldRole.signal.aborted, true);
+  await act(async () => catalogs.at(-1).resolve(refs("staff-catalog")));
+  await act(async () => oldRole.resolve(refs("late-teacher-catalog")));
+  assert.equal(state.classFormReferences.teacherCatalogs[0].name, "staff-catalog");
+  await act(async () => { await oldLoadDetail("old-callback"); });
+  assert.equal(details.length, 1, "old-role detail callback issues no request");
+  await render({ role: "staff", open: false });
+  assert.equal(state.classFormReferences.teacherCatalogs[0].name, "staff-catalog", "closing preserves the last complete context for existing bulk edits");
+  await render({ role: "staff" });
+  const closed = catalogs.at(-1);
+  await render({ role: "staff", open: false });
+  assert.equal(closed.signal.aborted, true);
+  await render({ role: "staff" });
+  await act(async () => catalogs.at(-1).reject(new Error("offline")));
+  assert.equal(state.classFormReferencesStatus, "error");
+  await act(async () => state.retryClassFormReferences());
+  assert.equal(state.classFormReferencesStatus, "loading");
+  await act(async () => catalogs.at(-1).resolve(refs("manual-retry")));
+  await act(async () => closed.resolve(refs("closed-form-response")));
+  assert.equal(state.classFormReferences.teacherCatalogs[0].name, "manual-retry");
+  await render({ actor: null, role: "viewer" });
   assert.equal(state.classFormReferences.teacherCatalogs.length, 0);
 });
 
@@ -748,4 +775,61 @@ test("metadata survives paging cancellation, expires and invalidates on filter, 
   await act(async () => metadata[6].resolve({ data: { total: 999 }, error: null }));
   await act(async () => metadata[7].resolve({ data: { secret: true }, error: null }));
   assert.deepEqual(state.filterOptions, {});
+});
+
+test("auth-blocked metadata and catalogs leave loading, require explicit retry and reject late values", async t => {
+  const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", ms => {
+    assert.equal(ms, 8000);
+    const controller = new AbortController(); deadlines.push(controller); return controller.signal;
+  });
+  const io = transport(), rpc = io.supabase.rpc, held = [], catalogCalls = [];
+  let fresh = false;
+  const refs = [{ id: "fresh", name: "새 후보", subjects: ["영어팀"], is_visible: true, sort_order: 0 }];
+  function query(name) {
+    const pending = Promise.withResolvers(), request = { name, ...pending };
+    held.push(request);
+    return { abortSignal(signal) { request.signal = signal; return this; }, retry() { return fresh ? Promise.resolve({ data: name === "get_management_stats_v1" ? { total: 1 } : name === "list_management_filter_options_v1" ? { schools: ["새 학교"] } : [] }) : pending.promise; } };
+  }
+  io.supabase.rpc = (name, args) => name === "list_management_numbered_page_v1" ? rpc(name, args) : query(name);
+  io.supabase.from = name => {
+    catalogCalls.push(name);
+    const pending = Promise.withResolvers(), request = { name, ...pending }; held.push(request);
+    return { select() { return this; }, eq() { return this; }, range() { return this; }, limit() { return this; }, order() { return this; }, abortSignal(signal) { request.signal = signal; return this; }, retry() { return fresh ? Promise.resolve({ data: refs }) : pending.promise; } };
+  };
+  const { useManagementRecords } = loadHook(io.supabase, undefined, { "./management-service.js": {
+    getAssignedClassTextbookIds, createManagementReadService: () => createManagementReadService({ supabase: io.supabase }),
+  } });
+  let state;
+  function Probe({ tick = 0 }) {
+    const result = useManagementRecords("classes", { kind: "classes", search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null }, {
+      enabled: true, pageSize: 10, page: 1, authorizationScope: "fixture:admin", classFormOpen: true,
+    });
+    useEffect(() => { state = result; }); return createElement("span", null, tick);
+  }
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  await act(async () => root.render(createElement(Probe)));
+  await act(async () => io.finish(0, 1));
+  const initialCalls = held.length;
+  await act(async () => { for (const timer of deadlines) timer.abort(new DOMException("timeout", "TimeoutError")); });
+  assert.equal(state.loading, false);
+  assert.equal(state.rows.length, 1, "successful rows survive metadata timeout");
+  assert.equal(state.classFormReferencesStatus, "error");
+  assert.match(state.error, /서버 연결이 지연/);
+  for (let tick = 1; tick <= 25; tick++) await act(async () => root.render(createElement(Probe, { tick })));
+  assert.equal(held.length, initialCalls, "error re-renders never retry automatically");
+  const old = held.slice(); fresh = true;
+  await act(async () => { state.retryClassFormReferences(); void state.refresh(); });
+  await act(async () => io.finish(1, 1));
+  assert.equal(state.classFormReferencesStatus, "ready");
+  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "fresh");
+  assert.deepEqual(state.filterOptions, { schools: ["새 학교"] });
+  assert.equal(state.error, null);
+  await act(async () => { for (const request of old) request.resolve({ data: request.name === "get_management_stats_v1" ? { total: 999 } : request.name === "list_management_filter_options_v1" ? { schools: ["오래된 학교"] } : [{ id: "late", name: "늦은 후보" }] }); });
+  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "fresh");
+  assert.deepEqual(state.filterOptions, { schools: ["새 학교"] });
+  assert.equal(catalogCalls.length, 4, "one initial pair plus one manual retry pair");
 });

@@ -1,0 +1,20 @@
+ok 1 - final helper retains stable invoker and fixed search path
+ok 2 - helper ACL remains authenticated only
+b7200000-0000-4000-8000-000000000901
+ok 3 - same latest date as prior contract: b7200000-0000-4000-8000-000000000800
+ok 4 - same latest date as prior contract: B7200000-0000-4000-8000-000000000800
+ok 5 - same latest date as prior contract: b7200000-0000-4000-8000-000000000801
+ok 6 - same latest date as prior contract: b7200000-0000-4000-8000-000000000899
+ok 7 - same latest date as prior contract:
+ok 8 - same latest date as prior contract: invalid
+ok 9 - same latest date as prior contract: NULL
+ok 10 - ties, both copy scopes, infinities, future dates, no count and inactive audit statuses remain unchanged
+ok 11 - all-locations context never borrows a dated or unassigned count
+b7200000-0000-4000-8000-000000000902
+ok 12 - staff can read
+b7200000-0000-4000-8000-000000000903
+ok 13 - teacher remains denied
+
+ok 14 - missing identity remains denied
+ok 15 - anon execute remains denied
+1..15
