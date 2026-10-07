@@ -8,7 +8,7 @@
   Running TypeScript ...
   Collecting page data using 9 workers ...
   Generating static pages using 9 workers (0/80) ...
-  Generating static pages using 9 workers (20/80) 
+  Generating static pages using 9 workers (20/80)
 public_classes_read_failed {
   event: 'public_classes_read_failed',
   phase: 'query',
@@ -45,8 +45,8 @@ public_classes_read_failed {
   kind: 'network',
   durationMs: 5
 }
-  Generating static pages using 9 workers (40/80) 
-  Generating static pages using 9 workers (60/80) 
+  Generating static pages using 9 workers (40/80)
+  Generating static pages using 9 workers (60/80)
 ✓ Generating static pages using 9 workers (80/80) in 266.8ms
   Finalizing page optimization ...
   Collecting build traces ...
@@ -167,4 +167,3 @@ Route (app)
 
 ○  (Static)   prerendered as static content
 ƒ  (Dynamic)  server-rendered on demand
-
