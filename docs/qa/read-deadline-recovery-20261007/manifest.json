@@ -1,0 +1,72 @@
+{
+  "baseSha": "3dac9307732b1d66fddf95b62ed4ed08c1d70ed1",
+  "sourceSha256": {
+    "src/lib/read-deadline.ts": "ec4cce96dddbe1ed865d288a541cf3c519b9eee699a1d7a39e9cea24006751d3",
+    "src/features/management/management-service.js": "d61ea4548173e968116b46af20455241ce9d3e44eb4054394ba0138425fe94ba",
+    "src/features/management/management-numbered-service.ts": "cb1d06f2cd2fc77a6278465594c4f15f3d275acf9dbdefcc6f2dbc6abf39b41d",
+    "src/features/management/use-management-records.ts": "79d37226b171c389e879ff22f4c2d11dbf6021c423abc7c91814e336534cae91",
+    "tests/read-deadline.test.mjs": "c1a43e905c68dc14da9415c11339703c15ce01151a318345f37957ae41a04c74",
+    "tests/management-numbered-pagination.test.mjs": "dd6e924be5f7550d5ef6daec6ecb90d3b06cefe2060f8e062a70c5fae64e3f7c",
+    "tests/management-progressive-loading.test.mjs": "c4998540ae464c76d016c99f19f3851946312297b6ac39f5882d661d47163175",
+    "scripts/qa/class-resource-catalog-browser.mjs": "45b8f51008dc605fe40493378d5f4159ca97349537c0aee95241db2247eb7499"
+  },
+  "sdkVersion": "2.103.1",
+  "checks": {
+    "linux": {
+      "tests": 362,
+      "pass": 362,
+      "fail": 0,
+      "node": "22.18.0",
+      "network": "none",
+      "readOnlyMounts": true
+    },
+    "focusedTests": {
+      "tests": 77,
+      "pass": 77
+    },
+    "build": {
+      "exitCode": 0
+    },
+    "typescript": {
+      "exitCode": 0
+    },
+    "eslint": {
+      "errors": 0,
+      "existingWarnings": 1
+    },
+    "freeTierGuard": {
+      "exitCode": 0,
+      "baseSha": "3dac9307732b1d66fddf95b62ed4ed08c1d70ed1",
+      "policyChanged": false
+    },
+    "browser": {
+      "widths": [
+        1440,
+        390
+      ],
+      "passed": true,
+      "unhandledRequests": 0,
+      "pageErrors": 0,
+      "authRecoveryMs": [
+        5388,
+        5364
+      ],
+      "sharedRefreshesPerScenario": 1,
+      "lateCatalogRequestsBeforeManualRetry": 0
+    },
+    "independent": {
+      "syntheticPassed": 5,
+      "directRegressionPassed": 42,
+      "followupPassed": 5,
+      "remainingP1P2": 0,
+      "productHashesMatch": true
+    }
+  },
+  "boundaries": {
+    "productionMutations": false,
+    "dbMigrations": false,
+    "permissionChanges": false,
+    "workerChanges": false,
+    "deploy": false
+  }
+}
