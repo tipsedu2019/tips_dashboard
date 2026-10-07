@@ -39,6 +39,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/curriculum_scheduling_textbook_usage_test.sql",
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
   "supabase/tests/academic_scoped_reads_test.sql",
+  "supabase/tests/operations_annual_board_range_test.sql",
   "supabase/tests/timetable_continuous_class_scope_test.sql",
   "supabase/tests/timetable_guard_aggregation_test.sql",
   "supabase/tests/timetable_legacy_content_preservation_test.sql",
@@ -117,6 +118,7 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
   "tests/probe-agent-calendar-dto.mjs",
   "tests/probe-curriculum-scheduling-dto.mjs",
+  "tests/probe-operations-annual-board-http.mjs",
   "tests/probe-makeup-approval-collision-dto.mjs",
   "tests/probe-textbook-stock-count-concurrency.mjs",
   "tests/probe-signup-identity-concurrency.mjs",
@@ -129,9 +131,9 @@ const ISOLATED_PROBES = Object.freeze([
 ])
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "69d6f72ccf67f7819f8008c73c9aa6d794b155444dd0279645d89637875b0277"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "9405575d71d74a481f5b7f2f94e409ff3e0430bebe46b7a745ebcc09de79fab9"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "79e6f7eb065b4fbca4b4b7c7ba5a905fe036b9b1ec33d3f94394a0495520b4d2"
+  "df7a3a115518be70b910dd197eb39c151921f09caf779d5d5d451681cd7f2d30"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -143,7 +145,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "4e7fd2bd74424d2e8e7bdc2b5a13638b07a65b738f594cba775d4537ff9e8d5c"],
+  ["free-tier-guardrails.yml", "631862dd5520e3d70effb10bea9af92317e4b81af5978400df3460985ca29450"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],

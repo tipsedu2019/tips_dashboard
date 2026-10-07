@@ -74,6 +74,13 @@ jobs:
         run: node --test --experimental-strip-types tests/class-textbook-usage.test.mjs tests/class-textbook-picker-model.test.mjs tests/schedule-only-plan.test.mjs tests/legacy-lesson-schedule-save.test.mjs tests/curriculum-filter-panel.test.mjs tests/class-schedule-draft-navigation.test.mjs tests/lesson-design-page.test.mjs tests/management-class-student-roster.test.mjs
       - name: Verify calendar read recovery and accessible editing
         run: node --test --experimental-strip-types tests/academic-calendar-range-interaction.test.mjs tests/event-form-draft-navigation.test.mjs tests/operations-scoped-reads.test.mjs
+      - name: Verify annual board inclusive ranges and SQL consumer parity
+        run: |
+          node --test --experimental-strip-types \
+            tests/academic-annual-board-rpc-contract.test.mjs \
+            tests/academic-annual-board-range.test.mjs \
+            tests/academic-annual-board-sql-output.test.mjs \
+            tests/probe-operations-annual-board-http.test.mjs
       - name: Verify standalone approvals retirement
         run: node --test --experimental-strip-types tests/standalone-approvals-retirement.test.mjs
       - name: Verify retired custom hotkeys preserve normal controls
