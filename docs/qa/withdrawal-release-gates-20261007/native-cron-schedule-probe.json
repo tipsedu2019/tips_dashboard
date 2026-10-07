@@ -1,0 +1,76 @@
+{
+  "syntheticOnly": true,
+  "purpose": "Native schedule/unschedule API behavior only; not actual withdrawal worker/timing evidence",
+  "startedAt": "2026-10-07T15:09:31.241Z",
+  "inactiveSeed": "Owned cron row set inactive by existing supabase_admin privilege; no ACL grant or function change",
+  "before": {
+    "acl": "{supabase_admin=arwdDxtm/supabase_admin,=r/supabase_admin,postgres=r*/supabase_admin}"
+  },
+  "firstId": "8",
+  "created": [
+    {
+      "jobid": "8",
+      "jobname": "withdrawal-qa-native-schedule-probe",
+      "schedule": "* * * * *",
+      "command": "select 1;",
+      "username": "postgres",
+      "database": "postgres",
+      "active": true
+    }
+  ],
+  "inactive": [
+    {
+      "jobid": "8",
+      "jobname": "withdrawal-qa-native-schedule-probe",
+      "schedule": "* * * * *",
+      "command": "select 1;",
+      "username": "postgres",
+      "database": "postgres",
+      "active": false
+    }
+  ],
+  "secondId": "8",
+  "reactivated": [
+    {
+      "jobid": "8",
+      "jobname": "withdrawal-qa-native-schedule-probe",
+      "schedule": "* * * * *",
+      "command": "select 1;",
+      "username": "postgres",
+      "database": "postgres",
+      "active": false
+    }
+  ],
+  "thirdId": "8",
+  "repeated": [
+    {
+      "jobid": "8",
+      "jobname": "withdrawal-qa-native-schedule-probe",
+      "schedule": "* * * * *",
+      "command": "select 1;",
+      "username": "postgres",
+      "database": "postgres",
+      "active": false
+    }
+  ],
+  "after": {
+    "acl": "{supabase_admin=arwdDxtm/supabase_admin,=r/supabase_admin,postgres=r*/supabase_admin}"
+  },
+  "nativeNamedScheduleDoesNotReactivate": true,
+  "newId": "11",
+  "recreated": [
+    {
+      "jobid": "11",
+      "jobname": "withdrawal-qa-native-schedule-probe",
+      "schedule": "* * * * *",
+      "command": "select 1;",
+      "username": "postgres",
+      "database": "postgres",
+      "active": true
+    }
+  ],
+  "repeatedActiveId": "11",
+  "removed": true,
+  "passed": true,
+  "completedAt": "2026-10-07T15:09:31.261Z"
+}

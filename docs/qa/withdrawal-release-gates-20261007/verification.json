@@ -1,0 +1,50 @@
+{
+  "status": "blocked_pending_direct_user_authorization",
+  "localHead": "8b0ca153835bcf988d74f84428df18a3dc473bd5",
+  "base": "58cefbf4761ede0d3b7f4cf588e2a4daea05b458",
+  "sourceHashes": {
+    "supabase/migrations/20261006080000_withdrawal_chat_last_lesson_wording.sql": "7b6907586c58aa2e29396cead1830cfe4167f610250e8bf0184c48cbba3785ca",
+    "supabase/migrations/20261006090000_withdrawal_last_lesson_release.sql": "b1060906d750280cacb3ff78d043ad5a5cd551c30638f8121920e40226f3733e",
+    "supabase/migrations/20261006091000_withdrawal_future_roster_boundary.sql": "59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009",
+    "supabase/migrations/20261007141548_withdrawal_completion_without_settlement.sql": "221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe",
+    "supabase/tests/withdrawal_completion_without_settlement_test.sql": "21cb75fa55ad69f75f62e41dfecd056c6118ba2ee8a70c9f4e90ad47278d0623",
+    "supabase/tests/withdrawal_last_lesson_release_test.sql": "84c40ea8333174d9bbb632f8a558c6d275dbc4541d8c3e86c9008187b0f42f4a",
+    "src/features/tasks/ops-task-service.ts": "b2bed246252c2085174b68b3692484fe36f55be39ac959ced8d8376ae16890c6",
+    "src/features/tasks/ops-task-workspace.tsx": "b0af46b389a7a856665d11680bf88cee8b9f085fa81166ad870eb37d3433b5ad"
+  },
+  "verification": {
+    "orderedReplay": {
+      "baseHead": "240eff71fe5a997dc641eafadeb701f88d1fd925",
+      "baselineAndPrerequisites": true,
+      "orderedMigrations": 151,
+      "totalFiles": 158,
+      "finalManagerAppliedSeparately": "Exact b106 manager reload only; rest of 900 byte-identical. Not a fresh 8b0ca153 whole-chain replay."
+    },
+    "actualCompletionPgTAP": 96,
+    "actualBoundaryPgTAP": 123,
+    "focusedLinuxNode": 31,
+    "migrationLayoutMac": 45,
+    "migrationLayoutVerifier": "pass",
+    "domainSqlstateVerifier": "pass",
+    "unchangedTypescriptAndLint": "Prior tsc passed; lint errors 0 and 3 existing warnings; TypeScript source remains byte-identical. Not rerun for SQL-only manager fix."
+  },
+  "gates": {
+    "realAutomaticCron": "NOT VERIFIED: fixture COMMIT failed; corrected session identity load blocked by automatic approval review twice.",
+    "browserSaveCompletionSqlE2E": "NOT EXECUTED: isolated DB phase unavailable; no browser DB connections.",
+    "production": "Not attempted: no student writes, operating SQL, sends, cron activation or deployment."
+  },
+  "managerFix": {
+    "before": "Direct cron.job UPDATE failed 42501 under managed extension ACL. cron.alter_job EXECUTE also unavailable.",
+    "after": "Existing allowed cron.schedule/cron.unschedule only; inactive exact job is unscheduled and recreated; disable/remove unschedule and preserve queue. No new grants or owner changes.",
+    "nativeProbe": "Real pg_cron API probe and final SQL 96/123 passed. Automatic ticks remain unverified."
+  },
+  "initialHarnessFailures": "Initial Node container lacked writable /tmp, dependencies, Python; source tests unchanged. Corrected harness passed 31 Linux tests and 45 Mac layout tests.",
+  "remainingBlockers": [
+    "Direct user authorization needed to resume isolated synthetic cron/save verification after 2 automatic approval rejections.",
+    "GitHub PR body and push writes returned server 500 twice; last read remote head 240eff71 must not be installed."
+  ],
+  "rolloutPlan": "rollout-plan.md",
+  "releaseReady": false,
+  "evidenceRecordedAtSource": "8b0ca153835bcf988d74f84428df18a3dc473bd5",
+  "cleanup": "Owned PostgreSQL container, browser idle client and socket volume removed; metadata and absence checks in cleanup.json."
+}

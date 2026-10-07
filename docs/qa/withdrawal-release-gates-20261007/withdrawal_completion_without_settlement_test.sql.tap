@@ -1,0 +1,97 @@
+ok 1 - runtime capability identifies new contract
+ok 2 - absent roster tests have no scheduler
+ok 3 - absent00 completes with absent roster
+ok 4 - absent01 completes with absent roster
+ok 5 - absent10 completes with absent roster
+ok 6 - absent11 completes with absent roster
+ok 7 - withdrawn completes with absent roster
+ok 8 - absent_false_flag completes with absent roster
+ok 9 - absent00 receipt reports already removed roster
+ok 10 - absent01 receipt reports already removed roster
+ok 11 - absent10 receipt reports already removed roster
+ok 12 - absent11 receipt reports already removed roster
+ok 13 - withdrawn receipt reports already removed roster
+ok 14 - absent_false_flag receipt reports already removed roster
+ok 15 - absent00 preserves exact original settlement flags
+ok 16 - absent01 preserves exact original settlement flags
+ok 17 - absent10 preserves exact original settlement flags
+ok 18 - absent11 preserves exact original settlement flags
+ok 19 - withdrawn preserves exact original settlement flags
+ok 20 - absent_false_flag preserves exact original settlement flags
+ok 21 - absent00 does not fabricate roster history
+ok 22 - absent01 does not fabricate roster history
+ok 23 - absent10 does not fabricate roster history
+ok 24 - absent11 does not fabricate roster history
+ok 25 - withdrawn does not fabricate roster history
+ok 26 - absent_false_flag does not fabricate roster history
+ok 27 - absent past/future dates never enqueue or restore roster
+ok 28 - already withdrawn empty student stays withdrawn
+ok 29 - false roster checklist becomes true after absent completion
+ok 30 - completion preserves actual tuition/book balances and batch finance byte-for-byte
+ok 31 - same completion receipt replays without extra effects
+ok 32 - makeedu still required
+ok 33 - missing cutoff remains domain conflict
+ok 34 - four-array asymmetry cannot complete
+ok 35 - source waitlist is not withdrawn as enrolled
+ok 36 - absent arrays with active claim cannot release canonical claim
+ok 37 - claim conflict preserves active ownership
+ok 38 - future existing roster remains live with unpaid flags
+ok 39 - future existing roster schedules immutable release
+ok 40 - past existing roster and exact claim release normally despite unpaid fees
+ok 41 - present_future existing roster completion never marks fees settled
+ok 42 - present_past existing roster completion never marks fees settled
+ok 43 - existing roster completion preserves real balances and sale status
+ok 44 - initial enrollment alone is not mistaken for re-entry
+ok 45 - actual helper remove and restore share transaction timestamp
+ok 46 - old task cannot remove newer re-entry
+ok 47 - re-entry guard preserves reciprocal roster
+ok 48 - present01 completes with existing roster and original fee combination
+ok 49 - present10 completes with existing roster and original fee combination
+ok 50 - present11 completes with existing roster and original fee combination
+ok 51 - present01 preserves fee combination and accepts timetable already true
+ok 52 - present10 preserves fee combination and accepts timetable already true
+ok 53 - present11 preserves fee combination and accepts timetable already true
+ok 54 - present01 future roster remains through cutoff
+ok 55 - present10 future roster remains through cutoff
+ok 56 - present11 past roster removed with true timetable
+ok 57 - scheduled receipt replays exactly after timetable true
+ok 58 - new request cannot complete done task twice
+ok 59 - canceled task remains blocked
+ok 60 - exact UUID target completes with colliding display names
+ok 61 - same-name non-target student/class/task remain untouched
+ok 62 - absent source completes while other class remains
+ok 63 - other enrolled class reciprocal arrays and active student status are preserved
+ok 64 - class-only waitlist asymmetry is blocked
+ok 65 - malformed student array remains blocked
+ok 66 - malformed class array retains final helper invalid-argument SQLSTATE
+ok 67 - fee-only endpoint changes requested check
+ok 68 - only tuition check changes
+ok 69 - same settlement request replays exact receipt
+ok 70 - request reuse for different fee field is rejected
+ok 71 - stale expected fee check has domain conflict
+ok 72 - completed fee endpoint cannot edit makeedu
+ok 73 - unfinished task cannot use completed fee endpoint
+ok 74 - completed fee endpoint cannot edit timetable
+ok 75 - null target check is invalid
+ok 76 - null expected check is invalid
+ok 77 - null request ID is invalid
+ok 78 - already desired check is a no-op with stale expected value
+ok 79 - book check follows up independently
+ok 80 - fee endpoint preserves task/status/completion timestamps byte-for-byte
+ok 81 - fee endpoint preserves reservations byte-for-byte
+ok 82 - fee endpoint preserves all canonical claims byte-for-byte
+ok 83 - fee endpoint preserves tuition/book debt, invoice evidence and payment amounts byte-for-byte
+ok 84 - fee endpoint creates no canonical notification
+ok 85 - fee endpoint creates no fanout job
+ok 86 - fee endpoint creates no delivery
+ok 87 - fee endpoint creates no source notification
+ok 88 - fee RPC exposes only authenticated manager path
+ok 89 - banned manager cannot replay existing fee receipt
+ok 90 - deleted manager cannot follow up fees
+ok 91 - teacher cannot follow up completed fees
+ok 92 - assistant cannot follow up completed fees
+ok 93 - active staff can uncheck one fee field
+ok 94 - null authenticated identity cannot follow up completed fees
+ok 95 - actual authenticated browser role can call authorized fee endpoint
+ok 96 - all authorized and rejected fee attempts preserve actual financial rows
+1..96
