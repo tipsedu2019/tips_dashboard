@@ -237,15 +237,21 @@ assert.equal(parsed.captures.find(row=>row.name==='historyLast').data.messages.a
 assert.deepEqual(Object.keys(parsed.captures.find(row=>row.name==='minimalEndedDoneReplay').data.request).sort(),['id','status','version']);
 assert.ok(!capture.includes(credentialHash));assert.ok(!capture.includes(nonceHash));
 // Capture actual canonical personal SQL producers privately in this same run.
+const profileFingerprintSql="select encode(sha256(convert_to(coalesce(jsonb_agg(to_jsonb(p) order by id),'[]'::jsonb)::text,'UTF8')),'hex') from public.profiles p;";
 for (const [field,path,prefix] of [
  ['personalCredential','supabase/tests/ai_agent_personal_owner_test.sql','AI_PERSONAL_CREDENTIAL_CAPTURE:'],
  ['personalRead','supabase/tests/agent_personal_dashboard_read_test.sql','AGENT_PERSONAL_DASHBOARD_READ_CAPTURE:'],
 ]) {
  const source=await readFile(path,'utf8');
+ const profilesBefore=await query(profileFingerprintSql);
  const output=await query("create extension if not exists pgtap with schema extensions;set search_path=public,extensions;set app.ai_personal_capture='on';\n"+source);
+ assert.equal(await query(profileFingerprintSql),profilesBefore,'personal producer transaction must restore every profile row');
  const lines=output.split('\n'),plans=lines.filter(line=>/^1\.\.[0-9]+$/.test(line)),passed=lines.filter(line=>/^ok [0-9]+(?:\s|$)/.test(line));
- assert.equal(plans.length,1);assert.equal(passed.length,Number(plans[0].slice(3)));
+ // Emit only bounded assertion numbers, never TAP values or captured DTOs.
+ const failedIds=lines.flatMap(line=>{const match=line.match(/^not ok ([0-9]+)(?:\s|$)/);return match?[Number(match[1])]:[];});
+ if(failedIds.length)console.error(JSON.stringify({producer:field,failedCount:failedIds.length,failedIds:failedIds.slice(0,20)}));
  assert.ok(!lines.some(line=>/^(not ok|Bail out!)/i.test(line)||/#\s*(SKIP|TODO)\b/i.test(line)),'personal producer TAP must pass');
+ assert.equal(plans.length,1);assert.equal(passed.length,Number(plans[0].slice(3)));
  const captures=lines.filter(line=>line.startsWith(prefix));assert.equal(captures.length,1);
  parsed[field]=JSON.parse(captures[0].slice(prefix.length));
 }

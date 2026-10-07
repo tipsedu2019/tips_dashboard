@@ -1,6 +1,9 @@
 -- Synthetic-only pgTAP against the final seven AI functions plus the reviewed personal-owner DRAFT.
 -- Run exclusively inside an authorized isolated fixture; the entire suite rolls back.
 begin;
+-- The owner picker intentionally lists every active teacher. Earlier isolated
+-- probes may retain unrelated synthetic teachers; restore them with ROLLBACK.
+update public.profiles set role='viewer' where role='teacher';
 select plan(125);
 select is((select count(*) from pg_constraint where connamespace='dashboard_private'::regnamespace and convalidated and conname in('ai_agent_credential_owner_fk','ai_agent_credential_owner_kind_check','ai_agent_event_owner_fk','ai_agent_action_owner_fk','chat_attempt_owner_fk')),5::bigint,'complete personal migration chain validates all owner constraints');
 create function pg_temp.po_id(n integer) returns uuid language sql immutable as $$select ('aa050000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
