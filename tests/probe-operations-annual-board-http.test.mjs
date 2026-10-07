@@ -96,6 +96,22 @@ test("HTTP probe rejects external, unlabeled or dual-network DB containers and h
   const unpublished = structuredClone(db);
   unpublished.NetworkSettings.Ports = {};
   assert.equal(validateDockerBoundary(target, unpublished, network, route).dbIp, "172.18.0.2");
+  unpublished.NetworkSettings.Ports = { "5432/tcp": [] };
+  assert.equal(validateDockerBoundary(target, unpublished, network, route).dbIp, "172.18.0.2");
+  for (const mutate of [
+    value => { value.HostConfig.PortBindings = {}; },
+    value => { value.HostConfig.PortBindings["5432/tcp"] = []; },
+    value => { value.HostConfig.PortBindings["5432/tcp"][0].HostIp = "0.0.0.0"; },
+    value => { value.HostConfig.PortBindings["5432/tcp"][0].HostPort = "5432"; },
+    value => { value.NetworkSettings.Ports = { "5432/tcp": null }; },
+    value => { value.NetworkSettings.Ports = { "5432/tcp": [], "3000/tcp": [] }; },
+  ]) {
+    const changed = structuredClone(unpublished);
+    mutate(changed);
+    assert.throws(() => validateDockerBoundary(target, changed, network, route), /annual_http_db_ports_invalid/u);
+  }
+  assert.throws(() => validateDockerBoundary(target, unpublished, { ...network, Internal: false }, route), /annual_http_internal_network_required/u);
+  assert.throws(() => validateDockerBoundary(target, unpublished, network, `${route}eth0 00000000 010011AC 0003 0 0 0 00000000 0 0 0\n`), /annual_http_default_route_forbidden/u);
 });
 
 test("PostgREST sidecar rejects missing publication metadata, foreign members and mounts", () => {

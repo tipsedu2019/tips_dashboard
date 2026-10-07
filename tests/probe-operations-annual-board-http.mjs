@@ -87,12 +87,18 @@ export function validateDockerBoundary(target, db, network, routes) {
         && Number(binding.HostPort) === Number(target.url.port)), "db_ports_invalid");
   }
   for (const [key, bindings] of Object.entries(published)) {
-    requireCondition(key === "5432/tcp" && Array.isArray(bindings) && bindings.length > 0
+    requireCondition(key === "5432/tcp" && Array.isArray(bindings)
       && bindings.every(binding => ["127.0.0.1", "::1"].includes(binding.HostIp)
         && Number(binding.HostPort) === Number(target.url.port)), "db_ports_invalid");
   }
-  // A concrete empty publication map is supported by the official runner's
-  // owned loopback relay on internal Linux bridges; no broad binding is accepted.
+  // The official runner supports an owned loopback relay when internal
+  // bridges publish nothing: either {} or {"5432/tcp": []}. An empty entry
+  // is accepted only with the exact requested test port; all real bindings
+  // remain loopback-only. HTTP uses the independently verified internal sidecar.
+  if (Object.hasOwn(published, "5432/tcp") && published["5432/tcp"].length === 0) {
+    requireCondition(Object.keys(requested).length === 1 && Array.isArray(requested["5432/tcp"])
+      && requested["5432/tcp"].length > 0, "db_ports_invalid");
+  }
   requireCondition(Object.keys(requested).length <= 1 && Object.keys(published).length <= 1, "db_ports_invalid");
   const lines = String(routes).trim().split(/\r?\n/u);
   requireCondition(/^Iface\s+Destination\s+Gateway\s+Flags\b/u.test(lines[0] || "") && lines.length > 1, "route_invalid");
