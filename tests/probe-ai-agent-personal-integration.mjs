@@ -3,7 +3,7 @@ import {readFile} from 'node:fs/promises';
 import {personalProbeRuntime,parsePersonalTap} from './helpers/ai-personal-probe-runtime.mjs';
 import {runPersonalOwnerConcurrencyProbes} from './probe-ai-agent-personal-owner-concurrency.mjs';
 import {runPersonalDashboardReadConcurrencyProbes} from './probe-agent-personal-dashboard-read-concurrency.mjs';
-import {runDeadlineConcurrency} from './probe-ai-agent-deadline-concurrency.mjs';
+import {runDeadlineConcurrency,runCentralDomainDeadlineConcurrency} from './probe-ai-agent-deadline-concurrency.mjs';
 const requireRunning=()=>assert.notEqual(process.exitCode,1,'personal probe interrupted');
 let runtime=await personalProbeRuntime();
 try {
@@ -21,4 +21,4 @@ try {
 } finally {await runtime.finish();}
 
 runtime=await personalProbeRuntime();
-try {console.log(JSON.stringify({suite:"deadline",...await runDeadlineConcurrency(runtime,parsePersonalTap)}));} finally {await runtime.finish();}
+try {console.log(JSON.stringify({suite:"deadline",...await runDeadlineConcurrency(runtime,parsePersonalTap)}));console.log(JSON.stringify({suite:'central_domain_deadline',...await runCentralDomainDeadlineConcurrency(runtime,parsePersonalTap)}));} finally {await runtime.finish();}

@@ -4,7 +4,7 @@ begin;
 select plan(124);
 create function pg_temp.po_id(n integer) returns uuid language sql immutable as $$select ('aa050000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
 insert into auth.users(id,instance_id,aud,role,email) select pg_temp.po_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','personal-owner-'||n||'@test.invalid' from generate_series(1,8)n;
-insert into public.profiles(id,role,name) select pg_temp.po_id(n),case n when 1 then 'admin' when 4 then 'staff' when 5 then 'viewer' else 'teacher' end,'Synthetic personal owner '||n from generate_series(1,8)n on conflict(id) do update set role=excluded.role;
+insert into public.profiles(id,role,name) select pg_temp.po_id(n),case n when 1 then 'admin' when 4 then 'staff' when 5 then 'viewer' else 'teacher' end,'Synthetic personal owner '||n from generate_series(1,8)n on conflict(id) do update set role=excluded.role,name=excluded.name;
 update auth.users set banned_until=clock_timestamp()+interval '1 day' where id=pg_temp.po_id(7);
 update auth.users set deleted_at=clock_timestamp() where id=pg_temp.po_id(8);
 update public.profiles set name=null where id=pg_temp.po_id(6);
@@ -71,7 +71,7 @@ reset role;
 update auth.users set deleted_at=null where id=pg_temp.po_id(1);
 -- More than twenty eligible synthetic teachers exercise real bounded pagination.
 insert into auth.users(id,instance_id,aud,role,email) select pg_temp.po_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','personal-selector-'||n||'@test.invalid' from generate_series(50,70)n;
-insert into public.profiles(id,role,name) select pg_temp.po_id(n),'teacher','Selector fixture '||lpad(n::text,2,'0') from generate_series(50,70)n;
+insert into public.profiles(id,role,name) select pg_temp.po_id(n),'teacher','Selector fixture '||lpad(n::text,2,'0') from generate_series(50,70)n on conflict(id) do update set role=excluded.role,name=excluded.name;
 set local role authenticated;
 insert into po_evidence values('owners_page1',public.ai_agent_personal_credential_api_v1('owners','{"page":1,"pageSize":10}')),('owners_page2',public.ai_agent_personal_credential_api_v1('owners','{"page":2,"pageSize":10}')),('owners_page3',public.ai_agent_personal_credential_api_v1('owners','{"page":3,"pageSize":10}'));
 select is((select v->>'total' from po_evidence where k='owners_page1'),'24','owner picker total counts the same eligible population as pages');

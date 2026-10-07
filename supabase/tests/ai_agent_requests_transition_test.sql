@@ -164,9 +164,32 @@ set local role authenticated;
 select is(pg_temp.user_op('cancel',70,'2',91)->>'status','cancelled','request cancellation ends execution');
 reset role;
 select is((select state from dashboard_private.ai_agent_request_actions where request_id=pg_temp.ai_id(70)),'started','cancellation preserves dispatched evidence');
+create function pg_temp.late_snapshot() returns jsonb language sql as $$select jsonb_build_object('ai_agent_requests',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_requests x),'ai_agent_request_claims',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_claims x),'ai_agent_request_events',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_events x),'ai_agent_request_messages',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_messages x),'ai_agent_request_actions',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_actions x),'ai_agent_action_events',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_action_events x),'chat_delivery_outbox',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_delivery_outbox x),'chat_delivery_attempts',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_delivery_attempts x),'ai_agent_request_receipts',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_receipts x),'chat_send_global_budget',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_send_global_budget x),'chat_space_send_budgets',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_space_send_budgets x),'usage',(select jsonb_build_array(rate_count,rate_window,last_used_at) from dashboard_private.ai_agent_credentials where id=pg_temp.ai_id(20)))$$;
+create temp table late_deadlines as
+select 'credential'::text k,expires_at from dashboard_private.ai_agent_credentials where id=pg_temp.ai_id(20)
+union all select 'queue',expires_at from dashboard_private.ai_agent_credential_grants where credential_id=pg_temp.ai_id(20)
+union all select 'domain',expires_at from dashboard_private.ai_agent_domain_action_grants where credential_id=pg_temp.ai_id(20) and kind='synthetic_fixture';
+update dashboard_private.ai_agent_credentials set expires_at=clock_timestamp()-interval '1 second' where id=pg_temp.ai_id(20);
+update dashboard_private.ai_agent_credential_grants set expires_at=clock_timestamp()-interval '1 second' where credential_id=pg_temp.ai_id(20);
+update dashboard_private.ai_agent_domain_action_grants set expires_at=clock_timestamp()-interval '1 second' where credential_id=pg_temp.ai_id(20) and kind='synthetic_fixture';
+insert into ev values('late_denial_before',pg_temp.late_snapshot());
+set local role service_role;
+select throws_ok($q$select pg_temp.action_it('record_action',70,92,(select (v->>'id')::uuid from ev where k='action'),'2','{"state":"succeeded","evidence":{"resourceName":"fixture/item/1"}}')$q$,'28000','ai_agent_unauthorized','credential expiry blocks central late result');
+reset role;
+select is(pg_temp.late_snapshot(),(select v from ev where k='late_denial_before'),'expired credential leaves all action and dispatch state unchanged');
+update dashboard_private.ai_agent_credentials set expires_at=(select expires_at from late_deadlines where k='credential') where id=pg_temp.ai_id(20);
 set local role service_role;
 insert into ev values('late',pg_temp.action_it('record_action',70,92,(select (v->>'id')::uuid from ev where k='action'),'2','{"state":"succeeded","evidence":{"resourceName":"fixture/item/1"}}'));
 select is((select v->>'state' from ev where k='late'),'succeeded','late result can append existing registered action after cancel/expiry');
+reset role;
+insert into ev values('late_replay_before',pg_temp.late_snapshot());
+set local role service_role;
+select is(pg_temp.action_it('record_action',70,92,(select (v->>'id')::uuid from ev where k='action'),'2','{"state":"succeeded","evidence":{"resourceName":"fixture/item/1"}}'),(select v from ev where k='late'),'central late-result replay works with expired queue and domain grants');
+reset role;
+select is(pg_temp.late_snapshot(),(select v from ev where k='late_replay_before'),'late-result replay adds no effects or usage');
+update dashboard_private.ai_agent_credential_grants set expires_at=(select expires_at from late_deadlines where k='queue') where credential_id=pg_temp.ai_id(20);
+update dashboard_private.ai_agent_domain_action_grants set expires_at=(select expires_at from late_deadlines where k='domain') where credential_id=pg_temp.ai_id(20) and kind='synthetic_fixture';
+set local role service_role;
 select throws_ok($q$select pg_temp.register_it(70,93)$q$,'55000','ai_agent_terminal','late credential cannot register a new effect');
 reset role;
 select is((select status from dashboard_private.ai_agent_requests where id=pg_temp.ai_id(70)),'cancelled','late result does not change request');

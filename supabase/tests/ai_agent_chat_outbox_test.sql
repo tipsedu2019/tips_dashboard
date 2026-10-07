@@ -128,13 +128,33 @@ select is(public.ai_agent_chat_api_v1(repeat('e',64),'get',jsonb_build_object('i
 select is(pg_temp.prepare('expired',325,'2')->'outbox'->>'state','delivery_unknown','explicit recovery records unknown without redispatch');
 reset role;
 select is((select count(*) from dashboard_private.chat_delivery_attempts where outbox_id=(select (v->>'id')::uuid from ev where k='expired')),2::bigint,'recovery adds append-only lease-expired event');
+create function pg_temp.late_snapshot() returns jsonb language sql as $$select jsonb_build_object('ai_agent_requests',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_requests x),'ai_agent_request_claims',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_claims x),'ai_agent_request_events',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_events x),'ai_agent_request_messages',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_messages x),'ai_agent_request_actions',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_actions x),'ai_agent_action_events',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_action_events x),'chat_delivery_outbox',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_delivery_outbox x),'chat_delivery_attempts',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_delivery_attempts x),'ai_agent_request_receipts',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.ai_agent_request_receipts x),'chat_send_global_budget',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_send_global_budget x),'chat_space_send_budgets',(select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.chat_space_send_budgets x),'usage',(select jsonb_build_array(rate_count,rate_window,last_used_at) from dashboard_private.ai_agent_credentials where id=pg_temp.ai_id(3)))$$;
+create temp table late_deadlines as
+select 'credential'::text k,expires_at from dashboard_private.ai_agent_credentials where id=pg_temp.ai_id(3)
+union all select 'chat',expires_at from dashboard_private.chat_credential_space_grants where credential_id=pg_temp.ai_id(3);
+update dashboard_private.ai_agent_credentials set expires_at=clock_timestamp()-interval '1 second' where id=pg_temp.ai_id(3);
+update dashboard_private.chat_credential_space_grants set expires_at=clock_timestamp()-interval '1 second' where credential_id=pg_temp.ai_id(3);
 update dashboard_private.chat_credential_space_grants set revoked_at=clock_timestamp() where credential_id=pg_temp.ai_id(3);
 update dashboard_private.chat_space_configuration set configured=false,resource_name=null where space_key='space_1';
+insert into ev values('late_denial_before',pg_temp.late_snapshot());
 set local role service_role;
-select is(pg_temp.record('expired_sending',326,'sent','200','{"messageName":"spaces/fixture_space/messages/late","threadName":"spaces/fixture_space/threads/human_fixture"}')->'outbox'->>'state','sent','late registered result can append after grant/config removal');
+select throws_ok($q$select pg_temp.record('expired_sending',326,'sent','200','{"messageName":"spaces/fixture_space/messages/late","threadName":"spaces/fixture_space/threads/human_fixture"}')$q$,'28000','ai_agent_unauthorized','credential expiry blocks central Chat late result');
+reset role;
+select is(pg_temp.late_snapshot(),(select v from ev where k='late_denial_before'),'denied central Chat late result leaves all state unchanged');
+update dashboard_private.ai_agent_credentials set expires_at=(select expires_at from late_deadlines where k='credential') where id=pg_temp.ai_id(3);
+set local role service_role;
+insert into ev values('late_sent',pg_temp.record('expired_sending',326,'sent','200','{"messageName":"spaces/fixture_space/messages/late","threadName":"spaces/fixture_space/threads/human_fixture"}'));
+select is((select v->'outbox'->>'state' from ev where k='late_sent'),'sent','late registered result can append after grant/config removal');
+reset role;
+insert into ev values('late_replay_before',pg_temp.late_snapshot());
+set local role service_role;
+select is(pg_temp.record('expired_sending',326,'sent','200','{"messageName":"spaces/fixture_space/messages/late","threadName":"spaces/fixture_space/threads/human_fixture"}'),(select v from ev where k='late_sent'),'central Chat late-result replay works with expired and revoked Chat grant');
+reset role;
+select is(pg_temp.late_snapshot(),(select v from ev where k='late_replay_before'),'central Chat result replay adds no journal, receipt, usage or dispatch effects');
+set local role service_role;
 select throws_ok($q$select pg_temp.bridge(repeat('e',64),'event-denied',327)$q$,'42501','ai_agent_grant_forbidden','revoked grant cannot create a new intent');
 reset role;
-update dashboard_private.chat_credential_space_grants set revoked_at=null where credential_id=pg_temp.ai_id(3);
+update dashboard_private.chat_credential_space_grants set revoked_at=null,expires_at=(select expires_at from late_deadlines where k='chat') where credential_id=pg_temp.ai_id(3);
 update dashboard_private.chat_space_configuration set configured=true,public_origin='https://dashboard.test.invalid',resource_name='spaces/fixture_space' where space_key='space_1';
 set local role service_role;
 insert into ev values('incident',pg_temp.bridge(repeat('e',64),'event-incident',330));

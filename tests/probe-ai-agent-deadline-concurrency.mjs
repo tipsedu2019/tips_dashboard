@@ -36,6 +36,7 @@ export async function runDeadlineConcurrency(runtime,parseTap) {
    'messages',(select jsonb_agg(to_jsonb(x) order by x.id) from dashboard_private.ai_agent_request_messages x where request_id=${q(rid)}),
    'events',(select jsonb_agg(to_jsonb(x) order by x.id) from dashboard_private.ai_agent_request_events x where request_id=${q(rid)}),
    'actions',(select jsonb_agg(to_jsonb(x) order by x.id) from dashboard_private.ai_agent_request_actions x where request_id=${q(rid)}),
+   'actionEvents',(select jsonb_agg(to_jsonb(x) order by x.action_id,x.seq) from dashboard_private.ai_agent_action_events x where action_id in(select id from dashboard_private.ai_agent_request_actions where request_id=${q(rid)})),
    'outbox',(select jsonb_agg(to_jsonb(x) order by x.id) from dashboard_private.chat_delivery_outbox x where request_id=${q(rid)}),
    'attempts',(select jsonb_agg(to_jsonb(x) order by x.id) from dashboard_private.chat_delivery_attempts x where credential_id=${q(cid)}),
    'receipts',(select jsonb_agg(to_jsonb(x) order by x.operation,x.idempotency_key) from dashboard_private.ai_agent_request_receipts x where principal_id=${q(cid)}),
@@ -64,4 +65,57 @@ export async function runDeadlineConcurrency(runtime,parseTap) {
   } finally {await runtime.closeSessions(first,second);}
  }
  assert.equal(proof.length,12);return{status:'passed',cases:proof,providerSend:false};
+}
+
+// Central domain dispatch also waits inside an adapter's permission callback.
+// Each registry/grant/action fixture is transaction-local and rolled back.
+export async function runCentralDomainDeadlineConcurrency(runtime,parseTap) {
+ const results=[];
+ for(const operation of ['register_action','start_action'])for(const replay of [false,true]) {
+  const issuer=randomUUID(),owner=randomUUID(),cid=randomUUID(),rid=randomUUID();
+  const hash=createHash('sha256').update(randomUUID()).digest('hex'),claimHash=createHash('sha256').update(randomUUID()).digest('hex'),payloadHash=createHash('sha256').update('{}').digest('hex');
+  const lockKey=Number.parseInt(randomUUID().slice(0,7),16)+1;
+  const registry='synthetic_deadline_'+randomUUID().replaceAll('-',''),target='synthetic/deadline';
+  const call=(action,input)=>`public.ai_agent_bot_api_v1(${q(hash)},${q(action)},${input})`;
+  const registered=call('register_action',j({id:rid,idempotencyKey:randomUUID(),claimTokenHash:claimHash,claimGeneration:'1',actionKey:randomUUID(),stepKey:'deadline-step',kind:registry,target,payload:{},payloadHash}));
+  const started=call('start_action',`jsonb_build_object('id',${q(rid)},'actionId',(select v->>'id' from central_state where k='registered'),'revision','1','idempotencyKey',${q(randomUUID())},'claimTokenHash',${q(claimHash)},'claimGeneration','1','target',${q(target)},'payloadHash',${q(payloadHash)})`);
+  const snapshot=`jsonb_build_object('request',(select to_jsonb(x) from dashboard_private.ai_agent_requests x where id=${q(rid)}),'claim',(select to_jsonb(x) from dashboard_private.ai_agent_request_claims x where request_id=${q(rid)}),'actions',(select jsonb_agg(to_jsonb(x) order by id) from dashboard_private.ai_agent_request_actions x where request_id=${q(rid)}),'events',(select jsonb_agg(to_jsonb(x) order by action_id,seq) from dashboard_private.ai_agent_action_events x where action_id in(select id from dashboard_private.ai_agent_request_actions where request_id=${q(rid)})),'receipts',(select jsonb_agg(to_jsonb(x) order by operation,idempotency_key) from dashboard_private.ai_agent_request_receipts x where principal_id=${q(cid)}),'usage',(select jsonb_build_array(rate_count,rate_window,last_used_at) from dashboard_private.ai_agent_credentials where id=${q(cid)}))`;
+  const blocker=runtime.session(),writer=runtime.session();
+  try {
+   blocker.write(`begin;select pg_advisory_xact_lock(${lockKey});select 'BLOCKER:'||pg_backend_pid();\n`);const blockerPid=Number((await blocker.line(/^BLOCKER:(\d+)$/mu))[1]);
+   writer.write(`begin;select 'WRITER:'||pg_backend_pid();
+insert into auth.users(id,instance_id,aud,role,email) values(${q(issuer)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(issuer+'@test.invalid')}),(${q(owner)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(owner+'@test.invalid')});
+insert into public.profiles(id,role,name) values(${q(issuer)},'admin','Synthetic central issuer'),(${q(owner)},'staff','Synthetic central requester') on conflict(id) do update set role=excluded.role,name=excluded.name;
+insert into dashboard_private.ai_agent_credentials(id,created_by,label,token_hash,scopes,expires_at) values(${q(cid)},${q(issuer)},'Synthetic central deadline',${q(hash)},array['ai-agent:requests:read','ai-agent:requests:claim','ai-agent:requests:update'],clock_timestamp()+interval '1 day');
+insert into dashboard_private.ai_agent_credential_grants(credential_id,queues,actions,expires_at) values(${q(cid)},array['employee_requests'],array['read','claim','renew','progress','question','done'],clock_timestamp()+interval '1 day');
+create temp table central_wait(enabled boolean);insert into central_wait values(false);
+create function pg_temp.deadline_domain_permission(u uuid,t text,h text) returns boolean language plpgsql as $$begin
+ if u is distinct from ${q(owner)}::uuid or t is distinct from ${q(target)} or h is distinct from ${q(payloadHash)} then return false;end if;
+ if (select enabled from central_wait) then perform pg_advisory_xact_lock(${lockKey});end if;return true;end$$;
+insert into dashboard_private.ai_agent_action_registry(kind,permission_function,enabled) values(${q(registry)},'pg_temp.deadline_domain_permission(uuid,text,text)'::regprocedure,true);
+insert into dashboard_private.ai_agent_domain_action_grants(credential_id,kind,target,payload_hash,expires_at) values(${q(cid)},${q(registry)},${q(target)},${q(payloadHash)},clock_timestamp()+interval '1 day');
+insert into dashboard_private.ai_agent_requests(id,requester_id,title,body) values(${q(rid)},${q(owner)},'Synthetic domain deadline','No external action');
+create temp table central_state(k text primary key,v jsonb);grant all on central_state to service_role;
+set local role service_role;select ${call('claim',j({id:rid,version:'1',idempotencyKey:randomUUID(),claimTokenHash:claimHash}))} is not null;
+${operation==='start_action'||replay?`insert into central_state values('registered',${registered});`:''}
+${operation==='start_action'&&replay?`select ${started} is not null;`:''}
+set local role postgres;update central_wait set enabled=true;
+update dashboard_private.ai_agent_domain_action_grants set expires_at=clock_timestamp()+interval '2 seconds' where credential_id=${q(cid)};
+select 'EXPIRY:'||extract(epoch from expires_at)::text from dashboard_private.ai_agent_domain_action_grants where credential_id=${q(cid)};
+insert into central_state values('before',${snapshot});
+create function pg_temp.central_expiry_call() returns text language plpgsql as $$begin perform ${operation==='register_action'?registered:started};return '00000';exception when others then return SQLSTATE||':'||SQLERRM;end$$;
+set local role service_role;insert into central_state values('outcome',to_jsonb(pg_temp.central_expiry_call()));set local role postgres;
+select 'OUTCOME:'||(v#>>'{}') from central_state where k='outcome';select plan(2);
+select is((select v#>>'{}' from central_state where k='outcome'),'42501:ai_agent_action_forbidden','domain expires inside observed callback wait');
+select is(${snapshot},(select v from central_state where k='before'),'denial rolls back action, journal, receipts, claim and rate');select * from finish();\n`);
+   const writerPid=Number((await writer.line(/^WRITER:(\d+)$/mu))[1]);const expiry=(await writer.line(/^EXPIRY:([0-9]+(?:\.[0-9]+)?)$/mu))[1];
+   assert.equal(await runtime.waitForLock(writerPid,blockerPid),true);
+   let expired=false;const until=Date.now()+3500;
+   for(let n=0;Date.now()<until;n++) {const marker=`CLOCK_${n}:`;blocker.write(`select ${q(marker)}||(clock_timestamp()>=to_timestamp(${expiry}))::text;\n`);expired=(await blocker.line(new RegExp('^'+marker+'(true|false)$','mu')))[1]==='true';if(expired)break;await new Promise(r=>setTimeout(r,30));}
+   assert.equal(expired,true);blocker.end('commit;\n');runtime.requireComplete(await blocker.complete);
+   assert.equal((await writer.line(/^OUTCOME:(.*)$/mu))[1],'42501:ai_agent_action_forbidden');writer.end('rollback;\n');const done=await writer.complete;runtime.requireComplete(done);
+   results.push({operation,replay,callbackLockWaitObserved:true,expiryObserved:true,sqlstate:'42501',tap:parseTap(done.stdout)});
+  } finally {await runtime.closeSessions(blocker,writer);}
+ }
+ assert.equal(results.length,4);return {status:'passed',cases:results,providerSend:false,fixtureTransactionsRolledBack:true};
 }
