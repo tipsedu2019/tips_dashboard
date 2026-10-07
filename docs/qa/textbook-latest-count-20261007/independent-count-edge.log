@@ -1,0 +1,2 @@
+{"check": "active schema contract", "stable": true, "invoker": true, "anon_execute": false, "public_execute": false, "counted_at_type": "date", "counted_at_not_null": true, "authenticated_execute": true, "candidate_aggregation_present": true}
+{"cases": 48, "check": "VALUES old lateral versus grouped max", "contexts": ["all", "invalid", "null", "other", "selected", "unknown", "upper", "whitespace"], "mismatches": 0}

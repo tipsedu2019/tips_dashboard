@@ -1,0 +1,111 @@
+{
+  "baseSha": "69e978b2b3c6d448d3f25a7a700cfb154aad091b",
+  "migrationSha256": "1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23",
+  "environment": {
+    "image": "public.ecr.aws/supabase/postgres:17.6.1.159",
+    "architecture": "arm64",
+    "network": "none",
+    "exposedPorts": 0,
+    "role": "authenticated/admin synthetic JWT subject",
+    "jit": "off",
+    "books": 400,
+    "moves": 10000,
+    "stockCounts": 20000,
+    "measurement": "server clock_timestamp; 1 warmup + 5 runs per RPC; median milliseconds; same container and data, no production input"
+  },
+  "largeFixture": [
+    {
+      "rpc": "inventory_list",
+      "beforeMedianMs": 210.135,
+      "afterMedianMs": 26.743,
+      "improvementPercent": 87.3,
+      "sameJsonMd5": "a24da4f0fd23a6891140f9581d6754b9"
+    },
+    {
+      "rpc": "inventory_summary",
+      "beforeMedianMs": 230.558,
+      "afterMedianMs": 47.66,
+      "improvementPercent": 79.3,
+      "sameJsonMd5": "d3e9dce5e07fec706e283d54cd126469"
+    },
+    {
+      "rpc": "keys_all",
+      "beforeMedianMs": 201.736,
+      "afterMedianMs": 17.481,
+      "improvementPercent": 91.3,
+      "sameJsonMd5": "807e23c4dbe325716abee7edda73eed4"
+    },
+    {
+      "rpc": "keys_location",
+      "beforeMedianMs": 201.593,
+      "afterMedianMs": 17.963,
+      "improvementPercent": 91.1,
+      "sameJsonMd5": "abb80dc3e9cebc9a88d6f197cf78d33b"
+    },
+    {
+      "rpc": "master_list",
+      "beforeMedianMs": 208.847,
+      "afterMedianMs": 23.966,
+      "improvementPercent": 88.5,
+      "sameJsonMd5": "e8da62277863596b195c8acf03f81d7a"
+    },
+    {
+      "rpc": "master_summary",
+      "beforeMedianMs": 229.279,
+      "afterMedianMs": 42.816,
+      "improvementPercent": 81.3,
+      "sameJsonMd5": "ac5af8c8ec318bf9cdf9a2bf99497772"
+    }
+  ],
+  "emptyCountFixture": [
+    {
+      "rpc": "inventory_list",
+      "beforeMedianMs": 24.747,
+      "afterMedianMs": 25.225,
+      "sameJsonMd5": "81dd583ff87e70d70da3fc6583b70a27"
+    },
+    {
+      "rpc": "inventory_summary",
+      "beforeMedianMs": 44.818,
+      "afterMedianMs": 44.715,
+      "sameJsonMd5": "d3e9dce5e07fec706e283d54cd126469"
+    },
+    {
+      "rpc": "keys_all",
+      "beforeMedianMs": 16.75,
+      "afterMedianMs": 16.652,
+      "sameJsonMd5": "807e23c4dbe325716abee7edda73eed4"
+    },
+    {
+      "rpc": "keys_location",
+      "beforeMedianMs": 16.35,
+      "afterMedianMs": 15.656,
+      "sameJsonMd5": "904892b848e039ab754bde0c42cf0768"
+    },
+    {
+      "rpc": "master_list",
+      "beforeMedianMs": 24.447,
+      "afterMedianMs": 25.949,
+      "sameJsonMd5": "e8da62277863596b195c8acf03f81d7a"
+    },
+    {
+      "rpc": "master_summary",
+      "beforeMedianMs": 44.697,
+      "afterMedianMs": 44.521,
+      "sameJsonMd5": "ac5af8c8ec318bf9cdf9a2bf99497772"
+    }
+  ],
+  "validation": {
+    "baselineOrderedMigrations": 146,
+    "additiveFinalMigration": 1,
+    "pgTap": {
+      "latest_count": 15,
+      "inventory_numbered_reads": 198,
+      "stored_taxonomy": 12
+    },
+    "linuxConsumerTests": 265,
+    "freshSqlDtoConsumerCases": 10,
+    "independentEdgeCases": 48,
+    "allPassed": true
+  }
+}

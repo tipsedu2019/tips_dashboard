@@ -1,0 +1,7 @@
+b7100000-0000-4000-8000-000000900001
+{"md5": "a24da4f0fd23a6891140f9581d6754b9", "runs": 5, "label": "inventory_list", "max_ms": 208.018000, "min_ms": 205.760000, "median_ms": 206.376, "stable_digest": true}
+{"md5": "d3e9dce5e07fec706e283d54cd126469", "runs": 5, "label": "inventory_summary", "max_ms": 229.397000, "min_ms": 226.718000, "median_ms": 228.023, "stable_digest": true}
+{"md5": "807e23c4dbe325716abee7edda73eed4", "runs": 5, "label": "keys_all", "max_ms": 198.854000, "min_ms": 196.432000, "median_ms": 197.497, "stable_digest": true}
+{"md5": "abb80dc3e9cebc9a88d6f197cf78d33b", "runs": 5, "label": "keys_location", "max_ms": 200.180000, "min_ms": 197.039000, "median_ms": 197.707, "stable_digest": true}
+{"md5": "e8da62277863596b195c8acf03f81d7a", "runs": 5, "label": "master_list", "max_ms": 205.793000, "min_ms": 203.280000, "median_ms": 204.189, "stable_digest": true}
+{"md5": "ac5af8c8ec318bf9cdf9a2bf99497772", "runs": 5, "label": "master_summary", "max_ms": 226.612000, "min_ms": 224.578000, "median_ms": 225.661, "stable_digest": true}
