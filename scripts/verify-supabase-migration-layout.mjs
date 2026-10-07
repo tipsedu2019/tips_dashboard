@@ -40,6 +40,7 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/academic_curriculum_unscoped_period_test.sql",
   "supabase/tests/academic_scoped_reads_test.sql",
   "supabase/tests/operations_annual_board_range_test.sql",
+  "supabase/tests/operations_calendar_inclusive_range_test.sql",
   "supabase/tests/timetable_continuous_class_scope_test.sql",
   "supabase/tests/timetable_guard_aggregation_test.sql",
   "supabase/tests/timetable_legacy_content_preservation_test.sql",
@@ -131,9 +132,9 @@ const ISOLATED_PROBES = Object.freeze([
 ])
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "9405575d71d74a481f5b7f2f94e409ff3e0430bebe46b7a745ebcc09de79fab9"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "46e9459ff562913b04f3237570cc8669ab8223aa0d4e40c9ffcff2d7c46c3d28"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "df7a3a115518be70b910dd197eb39c151921f09caf779d5d5d451681cd7f2d30"
+  "8301b2ff263f88e27eeeebfd7254511419668caea1b056562c90b09bebb158ea"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -145,7 +146,7 @@ const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW = "approved-inheritance-hotfix-pr
 const APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256 =
   "7405183339ea4f8de97e7c7660ad0a9a5552820b32da2bae88217f20fe852f5f"
 const ALLOWED_WORKFLOW_HASHES = Object.freeze([
-  ["free-tier-guardrails.yml", "631862dd5520e3d70effb10bea9af92317e4b81af5978400df3460985ca29450"],
+  ["free-tier-guardrails.yml", "19cb38ab601a313963f89aa247c66115a2d5decba2137fcccad58d09240cd09b"],
   [REQUIRED_DB_PUSH_WORKFLOW, REQUIRED_DB_PUSH_WORKFLOW_SHA256],
   [REQUIRED_SQL_REVIEW_WORKFLOW, REQUIRED_SQL_REVIEW_WORKFLOW_SHA256],
   [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],

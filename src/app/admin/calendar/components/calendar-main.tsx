@@ -358,7 +358,10 @@ export function CalendarMain({
 
     filteredEvents.forEach((event) => {
       const { start, end } = getEventRange(event)
-      eachDayOfInterval({ start, end }).forEach((day) => {
+      const visibleStart = new Date(Math.max(start.getTime(), calendarRange.start.getTime()))
+      const visibleEnd = new Date(Math.min(end.getTime(), calendarRange.end.getTime()))
+      if (visibleStart > visibleEnd) return
+      eachDayOfInterval({ start: visibleStart, end: visibleEnd }).forEach((day) => {
         const key = format(day, "yyyy-MM-dd")
         const existingGroup = groupedEvents.get(key)
         if (existingGroup) {
@@ -375,7 +378,7 @@ export function CalendarMain({
         ...group,
         events: sortEventsForCalendarDay(group.events, group.date),
       }))
-  }, [filteredEvents])
+  }, [calendarRange, filteredEvents])
 
   const mobileMonthEventGroups = useMemo(
     () => listEventGroups.filter((group) => isSameMonth(group.date, currentDate)),

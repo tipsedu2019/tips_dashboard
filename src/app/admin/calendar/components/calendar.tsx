@@ -175,11 +175,18 @@ export function Calendar({
   )
   const visibleEventDates = useMemo(() => {
     const counts = new Map<string, { date: Date; count: number }>()
+    const first = new Date(visibleSelectedDate.getFullYear(), visibleSelectedDate.getMonth(), 1, 12)
+    const last = new Date(visibleSelectedDate.getFullYear(), visibleSelectedDate.getMonth() + 1, 0, 12)
+    first.setDate(first.getDate() - first.getDay())
+    last.setDate(last.getDate() + 6 - last.getDay())
+    const rangeStart = recoveryRange ? new Date(`${recoveryRange.dateFrom}T12:00:00`) : first
+    const rangeEnd = recoveryRange ? new Date(`${recoveryRange.dateTo}T12:00:00`) : last
     visibleEvents.forEach((event) => {
       const start = new Date(event.date)
       const end = new Date(event.endDate || event.date)
-      const cursor = new Date(start)
-      while (cursor.getTime() <= end.getTime()) {
+      const cursor = new Date(Math.max(start.getTime(), rangeStart.getTime()))
+      const lastDay = Math.min(end.getTime(), rangeEnd.getTime())
+      while (cursor.getTime() <= lastDay) {
         const key = `${cursor.getFullYear()}-${String(cursor.getMonth() + 1).padStart(2, "0")}-${String(cursor.getDate()).padStart(2, "0")}`
         const existing = counts.get(key)
         if (existing) {
@@ -191,7 +198,7 @@ export function Calendar({
       }
     })
     return [...counts.values()].sort((left, right) => left.date.getTime() - right.date.getTime())
-  }, [visibleEvents])
+  }, [recoveryRange, visibleEvents, visibleSelectedDate])
 
   const nextInitialDateKey = toCalendarDayKey(initialDate)
   useEffect(() => {
