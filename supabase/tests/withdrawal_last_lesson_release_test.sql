@@ -7,7 +7,7 @@ set local timezone='UTC';
 -- Synthetic identities only. The actual final gateways, roster helpers, queue
 -- guards and source triggers stay installed; no business function is replaced.
 insert into auth.users(id,email) values('a0600000-0000-4000-8000-000000000001','withdrawal-boundary-fixture@example.invalid');
-insert into public.profiles(id,role,name) values('a0600000-0000-4000-8000-000000000001','admin','경계 검증 관리자');
+insert into public.profiles(id,role,name) values('a0600000-0000-4000-8000-000000000001','admin','경계 검증 관리자') on conflict(id) do update set role=excluded.role,name=excluded.name;
 select set_config('request.jwt.claims','{"sub":"a0600000-0000-4000-8000-000000000001","role":"authenticated"}',true);
 select set_config('request.jwt.claim.sub','a0600000-0000-4000-8000-000000000001',true);
 select set_config('request.jwt.claim.role','authenticated',true);
@@ -131,6 +131,8 @@ create function pg_temp.withdrawal_claim(p_label text) returns void language plp
 declare c withdrawal_cases%rowtype;v_parent uuid:=gen_random_uuid();v_track uuid:=gen_random_uuid();v_batch uuid:=gen_random_uuid();v_claim uuid:=gen_random_uuid();
 begin
  select * into strict c from withdrawal_cases where label=p_label;
+ perform dashboard_private.with_continuous_class_schedule_audit_context_v1(c.class_id,'a0600000-0000-4000-8000-000000000001','withdrawal_completion_fixture');
+ update public.classes set schedule_storage_mode='legacy',schedule_plan=jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('date',(c.last_date-10)::text,'sessionNumber',1,'scheduleState','active')))where id=c.class_id;
  insert into public.ops_tasks(id,type,status,title,requested_by) values(v_parent,'registration','requested','합성 등록 부모','a0600000-0000-4000-8000-000000000001');
  insert into public.ops_registration_details(task_id) values(v_parent);
  insert into public.ops_registration_subject_tracks(id,task_id,subject,pipeline_status,workflow_status) values(v_track,v_parent,'영어','registered','registered');
@@ -217,7 +219,7 @@ select ok(q.status='pending' and q.attempt_count=1 and q.last_error_code='23514'
 select ok(s.class_ids?c.class_id::text and cl.student_ids?c.student_id::text,'failed worker applies no partial physical removal') from withdrawal_cases c join public.students s on s.id=c.student_id join public.classes cl on cl.id=c.class_id where label='status_failure';
 
 select set_config('request.jwt.claims','{"sub":"a0600000-0000-4000-8000-000000000001","role":"authenticated"}',true),set_config('request.jwt.claim.sub','a0600000-0000-4000-8000-000000000001',true),set_config('request.jwt.claim.role','authenticated',true);
-insert into public.academic_schools(id,name,category) values('a0600000-0000-4000-8000-000000000031','합성 경계 학교','고등학교');
+insert into public.academic_schools(id,name,category) values('a0600000-0000-4000-8000-000000000031','합성 경계 학교','high');
 update public.students set school='합성 경계 학교',grade='고1' where id=(select student_id from withdrawal_cases where label='today');
 update public.classes set schedule_plan=jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('date',c.last_date,'state','active'),jsonb_build_object('date',c.last_date+1,'state','active'))) from withdrawal_cases c where public.classes.id=c.class_id and c.label='today';
 insert into public.academic_exam_days(id,school_id,grade,subject,exam_date)
@@ -250,12 +252,13 @@ select is(public.complete_ops_withdrawal_roster_transition_v3(task_id,request_id
 update public.profiles set role='admin' where id='a0600000-0000-4000-8000-000000000001';
 select public.manage_withdrawal_roster_release_scheduler_v1('disable');
 select ok(not dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'disabled scheduler is not ready');
+select is((select count(*) from cron.job where jobname='tips-withdrawal-roster-release-v1'),0::bigint,'disable unschedules the job without direct table UPDATE');
 select public.manage_withdrawal_roster_release_scheduler_v1('install');
-select ok(dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'exact disabled scheduler can be enabled explicitly');
-update cron.job set command='select 1;' where jobname='tips-withdrawal-roster-release-v1';
+select ok(dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'stopped scheduler can be installed explicitly');
+select cron.schedule('tips-withdrawal-roster-release-v1','* * * * *','select 1;');
 select throws_ok($$select public.manage_withdrawal_roster_release_scheduler_v1('install')$$,'55000','withdrawal_release_scheduler_drift','scheduler drift has exact configuration SQLSTATE');
 select ok(not dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'drifted scheduler blocks readiness');
-update cron.job set command='set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();' where jobname='tips-withdrawal-roster-release-v1';
+select cron.schedule('tips-withdrawal-roster-release-v1','* * * * *','set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();');
 select ok(dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'bounded pure SQL command matches final readiness contract');
 select ok((select count(*)=1 from cron.job where jobname='tips-withdrawal-roster-release-v1' and schedule='* * * * *' and command='set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'),'scheduler contains one bounded database-only command');
 select ok(pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::regprocedure) like '%withdrawal_cutoffs as materialized%' and pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::regprocedure) not like '%withdrawal_roster_includes_date_v1%','final statistics materializes bounded candidate set once');

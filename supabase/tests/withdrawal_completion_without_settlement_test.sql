@@ -1,14 +1,14 @@
 -- Local synthetic pgTAP only. Run after the ordered migration chain with
 -- pgTAP and transaction-safe pg_cron metadata available. Scheduler install/remove
 -- follows withdrawal_last_lesson_release_test.sql and rolls back with this test;
--- the isolated evidence runner uses record-only cron helpers and no network.
+-- automatic cron ticks are verified separately in an isolated no-network fixture.
 -- All identities and amounts below are fictional. Business RPCs/helpers and
 -- active source/projection guards remain installed; no business function is stubbed.
 begin;
 select no_plan();
 set local statement_timeout='30s';set local lock_timeout='5s';set local timezone='UTC';
 insert into auth.users(id,email)values('a0700000-0000-4000-8000-000000000001','withdrawal-unpaid-fixture@example.invalid');
-insert into public.profiles(id,role,name)values('a0700000-0000-4000-8000-000000000001','admin','합성 퇴원 검증 관리자');
+insert into public.profiles(id,role,name)values('a0700000-0000-4000-8000-000000000001','admin','합성 퇴원 검증 관리자') on conflict(id) do update set role=excluded.role,name=excluded.name;
 select set_config('request.jwt.claims','{"sub":"a0700000-0000-4000-8000-000000000001","role":"authenticated"}',true),set_config('request.jwt.claim.sub','a0700000-0000-4000-8000-000000000001',true),set_config('request.jwt.claim.role','authenticated',true);
 create temp table completion_cases(label text primary key,task_id uuid,student_id uuid,class_id uuid,request_id uuid,last_date date,original_fee boolean,original_book boolean,response jsonb);
 create function pg_temp.completion_case(p_label text,p_date date,p_mode text default 'removed',p_status text default '재원',p_fee boolean default false,p_book boolean default false,p_timetable boolean default true,p_makeedu boolean default true)returns void language plpgsql as $$
@@ -25,6 +25,8 @@ create function pg_temp.completion_claim(p_label text)returns void language plpg
 declare c completion_cases%rowtype;p uuid:=gen_random_uuid();t uuid:=gen_random_uuid();b uuid:=gen_random_uuid();e uuid:=gen_random_uuid();
 begin
  select * into strict c from completion_cases where label=p_label;
+ perform dashboard_private.with_continuous_class_schedule_audit_context_v1(c.class_id,'a0700000-0000-4000-8000-000000000001','withdrawal_completion_fixture');
+ update public.classes set schedule_storage_mode='legacy',schedule_plan=jsonb_build_object('sessions',jsonb_build_array(jsonb_build_object('date',(c.last_date-10)::text,'sessionNumber',1,'scheduleState','active')))where id=c.class_id;
  insert into public.ops_tasks(id,type,status,title,requested_by)values(p,'registration','requested','합성 등록 부모','a0700000-0000-4000-8000-000000000001');
  insert into public.ops_registration_details(task_id)values(p);
  insert into public.ops_registration_subject_tracks(id,task_id,subject,pipeline_status,workflow_status)values(t,p,'영어','registered','registered');

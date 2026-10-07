@@ -270,12 +270,14 @@ revoke all on function dashboard_private.process_due_withdrawal_roster_releases_
 -- would not reliably restart the calling statement's timeout timer.
 create function public.manage_withdrawal_roster_release_scheduler_v1(p_action text default 'inspect')
 returns jsonb language plpgsql security definer set search_path='' set lock_timeout='5s' as $$
-declare v_job_id bigint; v_jobs jsonb; v_count integer; v_matches boolean;
+declare v_job_id bigint; v_jobs jsonb; v_count integer; v_matches boolean; v_active boolean;
 begin
   if p_action is null or p_action not in('inspect','install','disable','remove') then
     raise exception 'withdrawal_release_scheduler_action_invalid' using errcode='22023';
   end if;
-  if pg_catalog.to_regclass('cron.job') is null or pg_catalog.to_regprocedure('cron.schedule(text,text,text)') is null then
+  if pg_catalog.to_regclass('cron.job') is null
+    or pg_catalog.to_regprocedure('cron.schedule(text,text,text)') is null
+    or pg_catalog.to_regprocedure('cron.unschedule(bigint)') is null then
     if p_action='inspect' then return pg_catalog.jsonb_build_object('available',false,'ready',false); end if;
     raise exception 'withdrawal_release_scheduler_unavailable' using errcode='55000';
   end if;
@@ -286,19 +288,24 @@ begin
     if v_count=1 then
       execute $query$select bool_and(schedule='* * * * *'
         and command='set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'
-        and username='postgres' and database=pg_catalog.current_database())
-        from cron.job where jobname='tips-withdrawal-roster-release-v1'$query$ into v_matches;
+        and username='postgres' and database=pg_catalog.current_database()), bool_and(active), min(jobid)
+        from cron.job where jobname='tips-withdrawal-roster-release-v1'$query$ into v_matches, v_active, v_job_id;
       if v_matches is distinct from true then
         raise exception 'withdrawal_release_scheduler_drift' using errcode='55000';
       end if;
-      execute 'update cron.job set active=true where jobname=$1' using 'tips-withdrawal-roster-release-v1';
-    else
-      execute 'select cron.schedule($1,$2,$3)' into v_job_id using 'tips-withdrawal-roster-release-v1','* * * * *',
-        'set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();';
+      -- Named schedule preserves an existing job's active flag. Recreate an
+      -- inactive exact job so activation needs no additional extension grants.
+      if v_active is distinct from true then
+        execute 'select cron.unschedule($1)' using v_job_id;
+      end if;
     end if;
-  elsif p_action='disable' then
-    execute 'update cron.job set active=false where jobname=$1' using 'tips-withdrawal-roster-release-v1';
-  elsif p_action='remove' then
+    -- Named schedule creates or refreshes only this owner's exact job. Managed
+    -- Supabase may deny postgres direct cron.job UPDATE and cron.alter_job.
+    execute 'select cron.schedule($1,$2,$3)' into v_job_id using 'tips-withdrawal-roster-release-v1','* * * * *',
+      'set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();';
+  elsif p_action in('disable','remove') then
+    -- Stopping unschedules the job; it preserves pending reservations and does
+    -- not cancel an in-flight worker. A later install may return a new job ID.
     for v_job_id in execute 'select jobid from cron.job where jobname=$1' using 'tips-withdrawal-roster-release-v1'
     loop execute 'select cron.unschedule($1)' using v_job_id; end loop;
   end if;

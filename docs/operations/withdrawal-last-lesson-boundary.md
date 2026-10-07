@@ -24,7 +24,9 @@
 
 마이그레이션은 알림을 보내거나 cron을 활성화하지 않는다. 새 앱의 퇴원 완료와 완료 후 비용 확인은 `withdrawal_completion_without_settlement_v2` capability를 요구한다. 완료는 V3 완료 RPC를 사용하며, 구버전 즉시 제외 RPC나 직접 배열 수정으로 fallback하지 않는다. 등록 런타임의 유지보수 차단도 유지한다.
 
-이미 제외된 요청의 완료에는 예약 준비가 필요하지 않다. 명단이 남아 있는 당일·미래 요청의 예약 생성은 `tips-withdrawal-roster-release-v1` 작업이 정확한 명령·1분 주기·활성 상태·현재 DB·postgres 실행자로 준비되어 있을 때만 허용한다. 준비되지 않은 경우 `55000 / withdrawal_release_scheduler_not_ready`로 실패한다. `manage_withdrawal_roster_release_scheduler_v1`의 `inspect`, `install`, `disable`, `remove`는 service role 전용이다. 활성화는 별도 운영 승인을 받은 릴리스 작업이며 이번 변경 작성과 합성 검증에서는 수행하지 않는다.
+이미 제외된 요청의 완료에는 예약 준비가 필요하지 않다. 명단이 남아 있는 당일·미래 요청의 예약 생성은 `tips-withdrawal-roster-release-v1` 작업이 정확한 명령·1분 주기·활성 상태·현재 DB·postgres 실행자로 준비되어 있을 때만 허용한다. 준비되지 않은 경우 `55000 / withdrawal_release_scheduler_not_ready`로 실패한다. `manage_withdrawal_roster_release_scheduler_v1`의 `inspect`, `install`, `disable`, `remove`는 service role 전용이다. 운영 활성화는 별도 승인을 받은 릴리스 작업이다. 합성 환경의 설치·자동 tick 검증과 운영 활성화를 구분한다.
+
+관리 함수는 확장의 `cron.schedule`과 `cron.unschedule`을 사용한다. 확장 소유자가 supabase_admin인 환경에서 postgres의 cron.job 직접 UPDATE나 cron.alter_job 호출 권한을 추가하지 않는다. `disable`과 `remove`는 모두 해당 job을 unschedule하고 pending 예약을 보존한다. 이미 실행 중인 worker는 취소하지 않는다. `install`은 내용이 일치하는 활성 job을 유지하며 비활성 job은 제거 후 재생성하므로 job ID가 바뀔 수 있다. 내용이 다른 job은 계속 거부한다.
 
 cron 명령은 처리 SELECT 전에 `statement_timeout = '30s'`를 설정한다. 처리 함수의 잠금 대기는 5초, 한 배치는 최대 100건이며 동시 처리기는 advisory lock으로 중복 실행을 건너뛴다. 전체 SQL 문과 개별 잠금 대기의 제한은 [PostgreSQL 17 timeout 계약](https://www.postgresql.org/docs/17/runtime-config-client.html#GUC-STATEMENT-TIMEOUT)을 따른다. 실제 pg_cron 실행 모드에서 제한이 적용되는지는 별도 릴리스 검증 대상이다.
 

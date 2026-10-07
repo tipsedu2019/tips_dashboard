@@ -718,7 +718,7 @@
     {
       "fileName": "20261006090000_withdrawal_last_lesson_release.sql",
       "status": "final",
-      "sha256": "d326f20a4e3112f67de9f2b1e86dc922863f9877b91462bd439f7ff4310a207a"
+      "sha256": "b1060906d750280cacb3ff78d043ad5a5cd551c30638f8121920e40226f3733e"
     },
     {
       "fileName": "20261006091000_withdrawal_future_roster_boundary.sql",
