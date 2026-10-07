@@ -390,6 +390,49 @@ export function createManagementReadService(options = {}) {
       return { ...result, canonicalReplayToken: null };
     },
     loadNextPage: readListPage,
+    async loadClassFormReferences({ signal } = {}) {
+      const deadline = AbortSignal.timeout(MANAGEMENT_READ_TIMEOUT_MS);
+      const requestSignal = signal ? AbortSignal.any([signal, deadline]) : deadline;
+      requestSignal.throwIfAborted();
+      // Like the resource master editor, publish only a complete, bounded-page catalog.
+      const readCatalog = async (table) => {
+        const rows = [];
+        const seenIds = new Set();
+        for (let offset = 0; ; offset += 30) {
+          requestSignal.throwIfAborted();
+          const { data, error } = await client.from(table)
+            .select("id, name, subjects, is_visible, sort_order")
+            .eq("is_visible", true)
+            .range(offset, offset + 29).limit(30)
+            .order("sort_order", { ascending: true })
+            .order("name", { ascending: true })
+            .order("id", { ascending: true })
+            .abortSignal(requestSignal).retry(false);
+          requestSignal.throwIfAborted();
+          if (error) throw error;
+          if (!Array.isArray(data) || data.length > 30) throw managementReadError("class_catalog_page_invalid");
+          for (const row of data) {
+            const id = trimText(row?.id);
+            if (!id || seenIds.has(id)) throw managementReadError("class_catalog_page_changed");
+            seenIds.add(id);
+            rows.push(row);
+          }
+          if (data.length < 30) return rows;
+        }
+      };
+      const readScienceAreas = async () => {
+        const { data, error } = await client.rpc("list_active_science_subject_areas_v1")
+          .abortSignal(requestSignal).retry(false);
+        requestSignal.throwIfAborted();
+        if (error) throw error;
+        if (!Array.isArray(data)) throw managementReadError("science_subject_areas_invalid");
+        return data;
+      };
+      const [teacherCatalogs, classroomCatalogs, scienceSubjectAreas] = await Promise.all([
+        readCatalog("teacher_catalogs"), readCatalog("classroom_catalogs"), readScienceAreas(),
+      ]);
+      return { teacherCatalogs, classroomCatalogs, scienceSubjectAreas };
+    },
     async loadDetail({ kind, id }) {
       assertManagementKind(kind);
       if (!trimText(id)) throw managementReadError("management_detail_id_invalid");

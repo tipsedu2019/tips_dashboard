@@ -510,13 +510,13 @@ test("class detail shares one reachable save area across desktop and mobile", as
   assert.doesNotMatch(pageSource, /renderClassMobileActionBar|class-detail-mobile-save|pb-28 md:pb-0/);
   assert.match(actions, /\{renderSaveStatus\(\)\}/);
   assert.match(actions, /onClick=\{handleDetailSave\}/);
-  assert.match(actions, /disabled=\{saving \|\| !canMutateRows \|\| scienceClassCandidateSelectionBlocked\}/);
+  assert.match(actions, /disabled=\{saving \|\| !canMutateRows \|\| classFormReferencesBlocked \|\| scienceClassCandidateSelectionBlocked\}/);
   assert.match(actions, /onClick=\{\(\) => handleDialogOpenChange\(false\)\}/);
   assert.match(styleSource, /\.class-sheet-actions\s*\{[^}]*position: sticky;[^}]*bottom: 0;/);
   assert.doesNotMatch(actions, /md:hidden|hidden md:/);
   // Schedule defaults retain a separate save contract.
   assert.match(pageSource, /onClick=\{\(\) => void handleClassScheduleDefaultsSave\(\)\}/);
-  assert.match(pageSource, /disabled=\{!canMutateRows \|\| !classScheduleDefaultsDirty \|\| scheduleDefaultsSaving\}/);
+  assert.match(pageSource, /disabled=\{!canMutateRows \|\| classFormReferencesBlocked \|\| !classScheduleDefaultsDirty \|\| scheduleDefaultsSaving\}/);
 });
 
 test("class official detail dialog stacks above sticky database headers", async () => {
@@ -768,7 +768,6 @@ test("class schedule classroom choices are narrowed by the selected subject", as
   const pageSource = await readFile(new URL("src/features/management/management-page.tsx", root), "utf8");
 
   assert.match(pageSource, /function getClassClassroomOptionsForSubject\(rawRows: Record<string, unknown>\[\], subject: string\)/);
-  assert.match(pageSource, /const sourceRows = subjectRows\.length > 0 \? subjectRows : rawRows/);
   assert.match(pageSource, /classroom: getClassClassroomOptionsForSubject\(rawRows, selectedClassSubject\)/);
   assert.match(pageSource, /const classroomOptions = getClassClassroomOptionsForSubject\(rawRows, normalizedValue\)/);
   assert.match(pageSource, /if \(next\.classroom && classroomOptions\.length > 0 && !classroomOptions\.includes\(next\.classroom\)\) \{/);
@@ -958,13 +957,10 @@ test("class teacher choices are narrowed by the selected subject", async () => {
   const tableSource = await readFile(new URL("src/features/management/management-data-table.tsx", root), "utf8");
 
   assert.match(pageSource, /function getClassTeacherOptionsForSubject\(rawRows: Record<string, unknown>\[\], subject: string\)/);
-  assert.match(hookSource, /readOptionalTable\("teacher_catalogs", "id,name,subjects,is_visible,sort_order"\)/);
-  assert.match(hookSource, /available_teacher_catalogs: teacherCatalogs/);
+  assert.match(hookSource, /readService.loadClassFormReferences/);
+  assert.doesNotMatch(pageSource, /sourceRows\.flatMap/);
   assert.match(pageSource, /function getClassTeacherCatalogOptionsForSubject/);
   assert.match(pageSource, /catalog\.is_visible !== false && isClassTeacherCatalogForSubject\(catalog, subject\)/);
-  assert.match(pageSource, /\.\.\.catalogOptions,[\s\S]*\.\.\.sourceRows\.flatMap\(\(raw\) => getClassTeacherValues\(raw\)\)/);
-  assert.match(pageSource, /const subjectRows = selectedSubject[\s\S]*rawRows\.filter\(\(raw\) => getClassSubjectValue\(raw\) === selectedSubject\)/);
-  assert.match(pageSource, /const sourceRows = subjectRows\.length > 0 \? subjectRows : rawRows/);
   assert.match(pageSource, /teacher: getClassTeacherOptionsForSubject\(rawRows, selectedClassSubject\)/);
   assert.match(pageSource, /const selectedClassSubject = kind === "classes" \? text\(form\.subject\) : ""/);
   assert.match(pageSource, /if \(kind === "classes" && fieldName === "subject"\)/);
