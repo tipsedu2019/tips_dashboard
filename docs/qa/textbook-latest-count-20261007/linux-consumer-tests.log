@@ -1,0 +1,1601 @@
+TAP version 13
+# Subtest: purchase cost business labels remove ECMAScript whitespace without compatibility normalization
+ok 1 - purchase cost business labels remove ECMAScript whitespace without compatibility normalization
+  ---
+  duration_ms: 1.264667
+  type: 'test'
+  ...
+# Subtest: purchase display parents pair only the base case, preserve cross-order members and student primary
+ok 2 - purchase display parents pair only the base case, preserve cross-order members and student primary
+  ---
+  duration_ms: 74.19225
+  type: 'test'
+  ...
+# Subtest: purchase source ordering preserves microseconds, timezone equivalence, equal-ID ties and nulls last
+ok 3 - purchase source ordering preserves microseconds, timezone equivalence, equal-ID ties and nulls last
+  ---
+  duration_ms: 0.57425
+  type: 'test'
+  ...
+# Subtest: 101 purchase display parents retain a complete pair at the tenth-row boundary and every raw identity
+ok 4 - 101 purchase display parents retain a complete pair at the tenth-row boundary and every raw identity
+  ---
+  duration_ms: 1.457834
+  type: 'test'
+  ...
+# Subtest: purchase source timestamps reject malformed values, preserve infinity endpoints and leave inputs untouched
+ok 5 - purchase source timestamps reject malformed values, preserve infinity endpoints and leave inputs untouched
+  ---
+  duration_ms: 0.368834
+  type: 'test'
+  ...
+# Subtest: raw purchase filtering precedes pairing and inactive versus missing references remain distinct
+ok 6 - raw purchase filtering precedes pairing and inactive versus missing references remain distinct
+  ---
+  duration_ms: 1.094375
+  type: 'test'
+  ...
+# Subtest: purchase lookup retains ID, exact alias, normalized then compact precedence and revised editions
+ok 7 - purchase lookup retains ID, exact alias, normalized then compact precedence and revised editions
+  ---
+  duration_ms: 0.200042
+  type: 'test'
+  ...
+# Subtest: sale history counts complete month/class/textbook parents across source sales, not raw lines
+ok 8 - sale history counts complete month/class/textbook parents across source sales, not raw lines
+  ---
+  duration_ms: 0.525209
+  type: 'test'
+  ...
+# Subtest: empty raw sale status inherits sale only in history while process grouping trims line alone
+ok 9 - empty raw sale status inherits sale only in history while process grouping trims line alone
+  ---
+  duration_ms: 0.399917
+  type: 'test'
+  ...
+# Subtest: workflow SQL oracle keeps raw history, process grouping and purchase order-first status distinct
+ok 10 - workflow SQL oracle keeps raw history, process grouping and purchase order-first status distinct
+  ---
+  duration_ms: 0.430083
+  type: 'test'
+  ...
+# Subtest: canonical catalog identity ties do not promote active matches over inactive exact aliases
+ok 11 - canonical catalog identity ties do not promote active matches over inactive exact aliases
+  ---
+  duration_ms: 0.129125
+  type: 'test'
+  ...
+# Subtest: global duplicate title quality survives search/page boundaries but ignores inactive duplicates
+ok 12 - global duplicate title quality survives search/page boundaries but ignores inactive duplicates
+  ---
+  duration_ms: 6.353417
+  type: 'test'
+  ...
+# Subtest: master quality scoring and inventory filters preserve zero, negative and low/surplus boundaries
+ok 13 - master quality scoring and inventory filters preserve zero, negative and low/surplus boundaries
+  ---
+  duration_ms: 0.190625
+  type: 'test'
+  ...
+# Subtest: all-time ledger quantities feed inventory audit without slicing old moves or teacher quantities
+ok 14 - all-time ledger quantities feed inventory audit without slicing old moves or teacher quantities
+  ---
+  duration_ms: 13.63
+  type: 'test'
+  ...
+# Subtest: closing still uses the real complete ledger movement classes, costs, margins and review rule
+ok 15 - closing still uses the real complete ledger movement classes, costs, margins and review rule
+  ---
+  duration_ms: 0.598292
+  type: 'test'
+  ...
+# Subtest: fractional preview opening follows the actual ledger without weakening stored integer fields
+ok 16 - fractional preview opening follows the actual ledger without weakening stored integer fields
+  ---
+  duration_ms: 75.493875
+  type: 'test'
+  ...
+# Subtest: closing preview/detail preserve full totals, zero-default cash and original rounded mismatch
+ok 17 - closing preview/detail preserve full totals, zero-default cash and original rounded mismatch
+  ---
+  duration_ms: 1.41875
+  type: 'test'
+  ...
+# Subtest: listTextbookClosingPage reads direct page 11 without preceding pages, strict count and complete original rows
+ok 18 - listTextbookClosingPage reads direct page 11 without preceding pages, strict count and complete original rows
+  ---
+  duration_ms: 0.564208
+  type: 'test'
+  ...
+# Subtest: listTextbookClosingMovementPage reads direct page 11 without preceding pages, strict count and complete original rows
+ok 19 - listTextbookClosingMovementPage reads direct page 11 without preceding pages, strict count and complete original rows
+  ---
+  duration_ms: 0.476833
+  type: 'test'
+  ...
+# Subtest: closing pages reject rows outside their echoed saved or searched movement scope
+ok 20 - closing pages reject rows outside their echoed saved or searched movement scope
+  ---
+  duration_ms: 0.383583
+  type: 'test'
+  ...
+# Subtest: history DTO identities and source option scopes cannot invent physical keys
+ok 21 - history DTO identities and source option scopes cannot invent physical keys
+  ---
+  duration_ms: 0.579
+  type: 'test'
+  ...
+# Subtest: sale authoritative raw status rejects inadmissible database states
+ok 22 - sale authoritative raw status rejects inadmissible database states
+  ---
+  duration_ms: 1.047334
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage directly loads page 11 with exact transport and full count
+ok 23 - listTextbookMasterPage directly loads page 11 with exact transport and full count
+  ---
+  duration_ms: 0.534667
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage preserves empty/out-of-range and all strict sizes
+ok 24 - listTextbookMasterPage preserves empty/out-of-range and all strict sizes
+  ---
+  duration_ms: 0.365583
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"page":0} before RPC
+ok 25 - listTextbookMasterPage rejects input {"page":0} before RPC
+  ---
+  duration_ms: 0.915667
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"page":1.5} before RPC
+ok 26 - listTextbookMasterPage rejects input {"page":1.5} before RPC
+  ---
+  duration_ms: 0.189292
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"page":2147483648} before RPC
+ok 27 - listTextbookMasterPage rejects input {"page":2147483648} before RPC
+  ---
+  duration_ms: 0.074667
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"pageSize":25} before RPC
+ok 28 - listTextbookMasterPage rejects input {"pageSize":25} before RPC
+  ---
+  duration_ms: 0.049041
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"pageSize":"10"} before RPC
+ok 29 - listTextbookMasterPage rejects input {"pageSize":"10"} before RPC
+  ---
+  duration_ms: 0.100625
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"sort":"unknown"} before RPC
+ok 30 - listTextbookMasterPage rejects input {"sort":"unknown"} before RPC
+  ---
+  duration_ms: 0.0555
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"filters":{}} before RPC
+ok 31 - listTextbookMasterPage rejects input {"filters":{}} before RPC
+  ---
+  duration_ms: 0.04275
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects input {"filters":{"search":"교재","subject":"all","schoolLevel":"all","gradeLevel":"all","subSubject":"all","quality":"all","inventory":"all","surprise":true}} before RPC
+ok 32 - listTextbookMasterPage rejects input {"filters":{"search":"교재","subject":"all","schoolLevel":"all","gradeLevel":"all","subSubject":"all","quality":"all","inventory":"all","surprise":true}} before RPC
+  ---
+  duration_ms: 0.072667
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope null
+ok 33 - listTextbookMasterPage rejects malformed or inconsistent envelope null
+  ---
+  duration_ms: 0.097166
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {}
+ok 34 - listTextbookMasterPage rejects malformed or inconsistent envelope {}
+  ---
+  duration_ms: 0.124
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+ok 35 - listTextbookMasterPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+  ---
+  duration_ms: 0.066292
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"totalCount":-1}
+ok 36 - listTextbookMasterPage rejects malformed or inconsistent envelope {"totalCount":-1}
+  ---
+  duration_ms: 0.080625
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"page":10}
+ok 37 - listTextbookMasterPage rejects malformed or inconsistent envelope {"page":10}
+  ---
+  duration_ms: 0.172709
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"pageSize":15}
+ok 38 - listTextbookMasterPage rejects malformed or inconsistent envelope {"pageSize":15}
+  ---
+  duration_ms: 0.072042
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"rows":[]}
+ok 39 - listTextbookMasterPage rejects malformed or inconsistent envelope {"rows":[]}
+  ---
+  duration_ms: 0.051958
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+ok 40 - listTextbookMasterPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+  ---
+  duration_ms: 0.181458
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000101","title":"교재 101"
+ok 41 - listTextbookMasterPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000101","title":"교재 101"
+  ---
+  duration_ms: 0.054583
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage rejects malformed or inconsistent envelope {"extra":true}
+ok 42 - listTextbookMasterPage rejects malformed or inconsistent envelope {"extra":true}
+  ---
+  duration_ms: 0.06
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage PGRST202 fails once without fallback
+ok 43 - listTextbookMasterPage PGRST202 fails once without fallback
+  ---
+  duration_ms: 0.228583
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage 42883 fails once without fallback
+ok 44 - listTextbookMasterPage 42883 fails once without fallback
+  ---
+  duration_ms: 0.057209
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage 42501 fails once without fallback
+ok 45 - listTextbookMasterPage 42501 fails once without fallback
+  ---
+  duration_ms: 0.108791
+  type: 'test'
+  ...
+# Subtest: listTextbookMasterPage 22023 fails once without fallback
+ok 46 - listTextbookMasterPage 22023 fails once without fallback
+  ---
+  duration_ms: 0.045
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage directly loads page 11 with exact transport and full count
+ok 47 - listTextbookInventoryPage directly loads page 11 with exact transport and full count
+  ---
+  duration_ms: 0.24975
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage preserves empty/out-of-range and all strict sizes
+ok 48 - listTextbookInventoryPage preserves empty/out-of-range and all strict sizes
+  ---
+  duration_ms: 0.087667
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"page":0} before RPC
+ok 49 - listTextbookInventoryPage rejects input {"page":0} before RPC
+  ---
+  duration_ms: 0.049583
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"page":1.5} before RPC
+ok 50 - listTextbookInventoryPage rejects input {"page":1.5} before RPC
+  ---
+  duration_ms: 0.113875
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"page":2147483648} before RPC
+ok 51 - listTextbookInventoryPage rejects input {"page":2147483648} before RPC
+  ---
+  duration_ms: 0.074958
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"pageSize":25} before RPC
+ok 52 - listTextbookInventoryPage rejects input {"pageSize":25} before RPC
+  ---
+  duration_ms: 0.068125
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"pageSize":"10"} before RPC
+ok 53 - listTextbookInventoryPage rejects input {"pageSize":"10"} before RPC
+  ---
+  duration_ms: 0.037542
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"sort":"unknown"} before RPC
+ok 54 - listTextbookInventoryPage rejects input {"sort":"unknown"} before RPC
+  ---
+  duration_ms: 0.051
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"filters":{}} before RPC
+ok 55 - listTextbookInventoryPage rejects input {"filters":{}} before RPC
+  ---
+  duration_ms: 0.056291
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects input {"filters":{"search":"교재","subject":"all","schoolLevel":"all","gradeLevel":"all","subSubject":"all","quality":"all","inventory":"all","locationId":"a2000000-0000-4000-8000-000000000900","audit":"all","surprise":true}} before RPC
+ok 56 - listTextbookInventoryPage rejects input {"filters":{"search":"교재","subject":"all","schoolLevel":"all","gradeLevel":"all","subSubject":"all","quality":"all","inventory":"all","locationId":"a2000000-0000-4000-8000-000000000900","audit":"all","surprise":true}} before RPC
+  ---
+  duration_ms: 0.040333
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope null
+ok 57 - listTextbookInventoryPage rejects malformed or inconsistent envelope null
+  ---
+  duration_ms: 0.046792
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {}
+ok 58 - listTextbookInventoryPage rejects malformed or inconsistent envelope {}
+  ---
+  duration_ms: 0.098875
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+ok 59 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+  ---
+  duration_ms: 0.047875
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"totalCount":-1}
+ok 60 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"totalCount":-1}
+  ---
+  duration_ms: 0.041875
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"page":10}
+ok 61 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"page":10}
+  ---
+  duration_ms: 0.057458
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"pageSize":15}
+ok 62 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"pageSize":15}
+  ---
+  duration_ms: 0.045209
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"rows":[]}
+ok 63 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"rows":[]}
+  ---
+  duration_ms: 0.042583
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+ok 64 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+  ---
+  duration_ms: 0.081791
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"rows":[{"source":{"id":"a2000000-0000-4000-8000-000000000101","title
+ok 65 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"rows":[{"source":{"id":"a2000000-0000-4000-8000-000000000101","title
+  ---
+  duration_ms: 0.072375
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage rejects malformed or inconsistent envelope {"extra":true}
+ok 66 - listTextbookInventoryPage rejects malformed or inconsistent envelope {"extra":true}
+  ---
+  duration_ms: 0.050291
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage PGRST202 fails once without fallback
+ok 67 - listTextbookInventoryPage PGRST202 fails once without fallback
+  ---
+  duration_ms: 0.041625
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage 42883 fails once without fallback
+ok 68 - listTextbookInventoryPage 42883 fails once without fallback
+  ---
+  duration_ms: 0.235583
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage 42501 fails once without fallback
+ok 69 - listTextbookInventoryPage 42501 fails once without fallback
+  ---
+  duration_ms: 0.053666
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryPage 22023 fails once without fallback
+ok 70 - listTextbookInventoryPage 22023 fails once without fallback
+  ---
+  duration_ms: 0.059125
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage directly loads page 11 with exact transport and full count
+ok 71 - listTextbookInventoryHistoryPage directly loads page 11 with exact transport and full count
+  ---
+  duration_ms: 0.205083
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage preserves empty/out-of-range and all strict sizes
+ok 72 - listTextbookInventoryHistoryPage preserves empty/out-of-range and all strict sizes
+  ---
+  duration_ms: 0.085625
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"page":0} before RPC
+ok 73 - listTextbookInventoryHistoryPage rejects input {"page":0} before RPC
+  ---
+  duration_ms: 0.096709
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"page":1.5} before RPC
+ok 74 - listTextbookInventoryHistoryPage rejects input {"page":1.5} before RPC
+  ---
+  duration_ms: 0.078292
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"page":2147483648} before RPC
+ok 75 - listTextbookInventoryHistoryPage rejects input {"page":2147483648} before RPC
+  ---
+  duration_ms: 0.059208
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"pageSize":25} before RPC
+ok 76 - listTextbookInventoryHistoryPage rejects input {"pageSize":25} before RPC
+  ---
+  duration_ms: 0.055708
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"pageSize":"10"} before RPC
+ok 77 - listTextbookInventoryHistoryPage rejects input {"pageSize":"10"} before RPC
+  ---
+  duration_ms: 0.132167
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"sort":"unknown"} before RPC
+ok 78 - listTextbookInventoryHistoryPage rejects input {"sort":"unknown"} before RPC
+  ---
+  duration_ms: 0.081041
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"filters":{}} before RPC
+ok 79 - listTextbookInventoryHistoryPage rejects input {"filters":{}} before RPC
+  ---
+  duration_ms: 0.061375
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects input {"filters":{"textbookId":null,"locationId":null,"surprise":true}} before RPC
+ok 80 - listTextbookInventoryHistoryPage rejects input {"filters":{"textbookId":null,"locationId":null,"surprise":true}} before RPC
+  ---
+  duration_ms: 0.087208
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope null
+ok 81 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope null
+  ---
+  duration_ms: 0.075541
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {}
+ok 82 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {}
+  ---
+  duration_ms: 0.070041
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+ok 83 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+  ---
+  duration_ms: 0.060625
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"totalCount":-1}
+ok 84 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"totalCount":-1}
+  ---
+  duration_ms: 0.084167
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"page":10}
+ok 85 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"page":10}
+  ---
+  duration_ms: 0.073542
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"pageSize":15}
+ok 86 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"pageSize":15}
+  ---
+  duration_ms: 0.085417
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"rows":[]}
+ok 87 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"rows":[]}
+  ---
+  duration_ms: 0.066583
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+ok 88 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+  ---
+  duration_ms: 0.061125
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"count-a2000000-0000-4000-8000-000000000101","kind":"co
+ok 89 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"count-a2000000-0000-4000-8000-000000000101","kind":"co
+  ---
+  duration_ms: 0.075208
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"extra":true}
+ok 90 - listTextbookInventoryHistoryPage rejects malformed or inconsistent envelope {"extra":true}
+  ---
+  duration_ms: 0.05825
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage PGRST202 fails once without fallback
+ok 91 - listTextbookInventoryHistoryPage PGRST202 fails once without fallback
+  ---
+  duration_ms: 0.078125
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage 42883 fails once without fallback
+ok 92 - listTextbookInventoryHistoryPage 42883 fails once without fallback
+  ---
+  duration_ms: 0.085292
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage 42501 fails once without fallback
+ok 93 - listTextbookInventoryHistoryPage 42501 fails once without fallback
+  ---
+  duration_ms: 0.067875
+  type: 'test'
+  ...
+# Subtest: listTextbookInventoryHistoryPage 22023 fails once without fallback
+ok 94 - listTextbookInventoryHistoryPage 22023 fails once without fallback
+  ---
+  duration_ms: 0.052375
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage directly loads page 11 with exact transport and full count
+ok 95 - listTextbookSaleHistoryPage directly loads page 11 with exact transport and full count
+  ---
+  duration_ms: 0.187208
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage preserves empty/out-of-range and all strict sizes
+ok 96 - listTextbookSaleHistoryPage preserves empty/out-of-range and all strict sizes
+  ---
+  duration_ms: 0.085417
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"page":0} before RPC
+ok 97 - listTextbookSaleHistoryPage rejects input {"page":0} before RPC
+  ---
+  duration_ms: 0.052875
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"page":1.5} before RPC
+ok 98 - listTextbookSaleHistoryPage rejects input {"page":1.5} before RPC
+  ---
+  duration_ms: 0.10025
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"page":2147483648} before RPC
+ok 99 - listTextbookSaleHistoryPage rejects input {"page":2147483648} before RPC
+  ---
+  duration_ms: 0.053709
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"pageSize":25} before RPC
+ok 100 - listTextbookSaleHistoryPage rejects input {"pageSize":25} before RPC
+  ---
+  duration_ms: 0.065083
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"pageSize":"10"} before RPC
+ok 101 - listTextbookSaleHistoryPage rejects input {"pageSize":"10"} before RPC
+  ---
+  duration_ms: 0.048916
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"sort":"unknown"} before RPC
+ok 102 - listTextbookSaleHistoryPage rejects input {"sort":"unknown"} before RPC
+  ---
+  duration_ms: 0.058417
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"filters":{}} before RPC
+ok 103 - listTextbookSaleHistoryPage rejects input {"filters":{}} before RPC
+  ---
+  duration_ms: 0.052833
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects input {"filters":{"search":"","year":"all","month":"all","classId":"all","surprise":true}} before RPC
+ok 104 - listTextbookSaleHistoryPage rejects input {"filters":{"search":"","year":"all","month":"all","classId":"all","surprise":true}} before RPC
+  ---
+  duration_ms: 0.050417
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope null
+ok 105 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope null
+  ---
+  duration_ms: 0.09525
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {}
+ok 106 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {}
+  ---
+  duration_ms: 0.062792
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+ok 107 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"totalCount":"101"}
+  ---
+  duration_ms: 0.045917
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"totalCount":-1}
+ok 108 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"totalCount":-1}
+  ---
+  duration_ms: 0.058667
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"page":10}
+ok 109 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"page":10}
+  ---
+  duration_ms: 0.043917
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"pageSize":15}
+ok 110 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"pageSize":15}
+  ---
+  duration_ms: 0.047875
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"rows":[]}
+ok 111 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"rows":[]}
+  ---
+  duration_ms: 0.190583
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+ok 112 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+  ---
+  duration_ms: 0.129
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"2026-08:a2000000-0000-4000-8000-000000000800:a2000000-
+ok 113 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"rows":[{"id":"2026-08:a2000000-0000-4000-8000-000000000800:a2000000-
+  ---
+  duration_ms: 0.047083
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"extra":true}
+ok 114 - listTextbookSaleHistoryPage rejects malformed or inconsistent envelope {"extra":true}
+  ---
+  duration_ms: 0.056209
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage PGRST202 fails once without fallback
+ok 115 - listTextbookSaleHistoryPage PGRST202 fails once without fallback
+  ---
+  duration_ms: 0.068625
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage 42883 fails once without fallback
+ok 116 - listTextbookSaleHistoryPage 42883 fails once without fallback
+  ---
+  duration_ms: 0.043583
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage 42501 fails once without fallback
+ok 117 - listTextbookSaleHistoryPage 42501 fails once without fallback
+  ---
+  duration_ms: 0.039292
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage 22023 fails once without fallback
+ok 118 - listTextbookSaleHistoryPage 22023 fails once without fallback
+  ---
+  duration_ms: 0.039208
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage directly loads page 11 with exact transport and full count
+ok 119 - listTextbookPurchasePage directly loads page 11 with exact transport and full count
+  ---
+  duration_ms: 0.433334
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage preserves empty/out-of-range and all strict sizes
+ok 120 - listTextbookPurchasePage preserves empty/out-of-range and all strict sizes
+  ---
+  duration_ms: 0.094
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"page":0} before RPC
+ok 121 - listTextbookPurchasePage rejects input {"page":0} before RPC
+  ---
+  duration_ms: 0.05225
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"page":1.5} before RPC
+ok 122 - listTextbookPurchasePage rejects input {"page":1.5} before RPC
+  ---
+  duration_ms: 0.742958
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"page":2147483648} before RPC
+ok 123 - listTextbookPurchasePage rejects input {"page":2147483648} before RPC
+  ---
+  duration_ms: 0.045958
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"pageSize":25} before RPC
+ok 124 - listTextbookPurchasePage rejects input {"pageSize":25} before RPC
+  ---
+  duration_ms: 0.043584
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"pageSize":"10"} before RPC
+ok 125 - listTextbookPurchasePage rejects input {"pageSize":"10"} before RPC
+  ---
+  duration_ms: 0.043333
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"sort":"unknown"} before RPC
+ok 126 - listTextbookPurchasePage rejects input {"sort":"unknown"} before RPC
+  ---
+  duration_ms: 0.039667
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"filters":{}} before RPC
+ok 127 - listTextbookPurchasePage rejects input {"filters":{}} before RPC
+  ---
+  duration_ms: 0.046292
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects input {"filters":{"mode":"request","search":"","boardScope":"all","requestFilter":"all","orderFilter":"all","surprise":true}} before RPC
+ok 128 - listTextbookPurchasePage rejects input {"filters":{"mode":"request","search":"","boardScope":"all","requestFilter":"all","orderFilter":"all","surprise":true}} before RPC
+  ---
+  duration_ms: 0.036333
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope null
+ok 129 - listTextbookPurchasePage rejects malformed or inconsistent envelope null
+  ---
+  duration_ms: 0.041
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {}
+ok 130 - listTextbookPurchasePage rejects malformed or inconsistent envelope {}
+  ---
+  duration_ms: 0.0415
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"totalCount":"101"}
+ok 131 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"totalCount":"101"}
+  ---
+  duration_ms: 0.047083
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"totalCount":-1}
+ok 132 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"totalCount":-1}
+  ---
+  duration_ms: 0.03725
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"page":10}
+ok 133 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"page":10}
+  ---
+  duration_ms: 0.042042
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"pageSize":15}
+ok 134 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"pageSize":15}
+  ---
+  duration_ms: 0.037458
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"rows":[]}
+ok 135 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"rows":[]}
+  ---
+  duration_ms: 0.591083
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+ok 136 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+  ---
+  duration_ms: 0.056916
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"rows":[{"id":"requested||a2000000-0000-4000-8000-000000000101||a2000
+ok 137 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"rows":[{"id":"requested||a2000000-0000-4000-8000-000000000101||a2000
+  ---
+  duration_ms: 0.065292
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage rejects malformed or inconsistent envelope {"extra":true}
+ok 138 - listTextbookPurchasePage rejects malformed or inconsistent envelope {"extra":true}
+  ---
+  duration_ms: 0.046792
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage PGRST202 fails once without fallback
+ok 139 - listTextbookPurchasePage PGRST202 fails once without fallback
+  ---
+  duration_ms: 0.147292
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage 42883 fails once without fallback
+ok 140 - listTextbookPurchasePage 42883 fails once without fallback
+  ---
+  duration_ms: 0.062375
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage 42501 fails once without fallback
+ok 141 - listTextbookPurchasePage 42501 fails once without fallback
+  ---
+  duration_ms: 0.037875
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage 22023 fails once without fallback
+ok 142 - listTextbookPurchasePage 22023 fails once without fallback
+  ---
+  duration_ms: 0.0325
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage directly loads page 11 with exact transport and full count
+ok 143 - listTextbookSalePage directly loads page 11 with exact transport and full count
+  ---
+  duration_ms: 0.146
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage preserves empty/out-of-range and all strict sizes
+ok 144 - listTextbookSalePage preserves empty/out-of-range and all strict sizes
+  ---
+  duration_ms: 0.057416
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"page":0} before RPC
+ok 145 - listTextbookSalePage rejects input {"page":0} before RPC
+  ---
+  duration_ms: 0.036
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"page":1.5} before RPC
+ok 146 - listTextbookSalePage rejects input {"page":1.5} before RPC
+  ---
+  duration_ms: 0.038708
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"page":2147483648} before RPC
+ok 147 - listTextbookSalePage rejects input {"page":2147483648} before RPC
+  ---
+  duration_ms: 0.030959
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"pageSize":25} before RPC
+ok 148 - listTextbookSalePage rejects input {"pageSize":25} before RPC
+  ---
+  duration_ms: 0.029125
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"pageSize":"10"} before RPC
+ok 149 - listTextbookSalePage rejects input {"pageSize":"10"} before RPC
+  ---
+  duration_ms: 0.077875
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"sort":"unknown"} before RPC
+ok 150 - listTextbookSalePage rejects input {"sort":"unknown"} before RPC
+  ---
+  duration_ms: 0.031292
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"filters":{}} before RPC
+ok 151 - listTextbookSalePage rejects input {"filters":{}} before RPC
+  ---
+  duration_ms: 0.027709
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects input {"filters":{"search":"","status":"all","surprise":true}} before RPC
+ok 152 - listTextbookSalePage rejects input {"filters":{"search":"","status":"all","surprise":true}} before RPC
+  ---
+  duration_ms: 0.02725
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope null
+ok 153 - listTextbookSalePage rejects malformed or inconsistent envelope null
+  ---
+  duration_ms: 0.031917
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {}
+ok 154 - listTextbookSalePage rejects malformed or inconsistent envelope {}
+  ---
+  duration_ms: 0.044542
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"totalCount":"101"}
+ok 155 - listTextbookSalePage rejects malformed or inconsistent envelope {"totalCount":"101"}
+  ---
+  duration_ms: 0.033958
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"totalCount":-1}
+ok 156 - listTextbookSalePage rejects malformed or inconsistent envelope {"totalCount":-1}
+  ---
+  duration_ms: 0.034125
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"page":10}
+ok 157 - listTextbookSalePage rejects malformed or inconsistent envelope {"page":10}
+  ---
+  duration_ms: 0.032542
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"pageSize":15}
+ok 158 - listTextbookSalePage rejects malformed or inconsistent envelope {"pageSize":15}
+  ---
+  duration_ms: 0.04925
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"rows":[]}
+ok 159 - listTextbookSalePage rejects malformed or inconsistent envelope {"rows":[]}
+  ---
+  duration_ms: 0.03175
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+ok 160 - listTextbookSalePage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000001"}]}
+  ---
+  duration_ms: 0.030875
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000400","line":{"id":"a2
+ok 161 - listTextbookSalePage rejects malformed or inconsistent envelope {"rows":[{"id":"a2000000-0000-4000-8000-000000000400","line":{"id":"a2
+  ---
+  duration_ms: 0.030417
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage rejects malformed or inconsistent envelope {"extra":true}
+ok 162 - listTextbookSalePage rejects malformed or inconsistent envelope {"extra":true}
+  ---
+  duration_ms: 0.028875
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage PGRST202 fails once without fallback
+ok 163 - listTextbookSalePage PGRST202 fails once without fallback
+  ---
+  duration_ms: 0.026375
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage 42883 fails once without fallback
+ok 164 - listTextbookSalePage 42883 fails once without fallback
+  ---
+  duration_ms: 0.028625
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage 42501 fails once without fallback
+ok 165 - listTextbookSalePage 42501 fails once without fallback
+  ---
+  duration_ms: 0.031916
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage 22023 fails once without fallback
+ok 166 - listTextbookSalePage 22023 fails once without fallback
+  ---
+  duration_ms: 0.036
+  type: 'test'
+  ...
+# Subtest: caller cancellation and eight-second deadline reject even a resolved transport response
+ok 167 - caller cancellation and eight-second deadline reject even a resolved transport response
+  ---
+  duration_ms: 0.319375
+  type: 'test'
+  ...
+# Subtest: inventory wire null roundtrips to Infinity, while date-only and finite signed elapsed days survive
+ok 168 - inventory wire null roundtrips to Infinity, while date-only and finite signed elapsed days survive
+  ---
+  duration_ms: 0.15025
+  type: 'test'
+  ...
+# Subtest: strict stock quantities reject fractional/non-safe values and quality fields reject malformed flags
+ok 169 - strict stock quantities reject fractional/non-safe values and quality fields reject malformed flags
+  ---
+  duration_ms: 0.252458
+  type: 'test'
+  ...
+# Subtest: legacy invalid count date restores Infinity without changing its recommended status or invalid-date labels
+ok 170 - legacy invalid count date restores Infinity without changing its recommended status or invalid-date labels
+  ---
+  duration_ms: 0.081333
+  type: 'test'
+  ...
+# Subtest: strict master validates required locationQuantities, including nested inventory source
+ok 171 - strict master validates required locationQuantities, including nested inventory source
+  ---
+  duration_ms: 0.159
+  type: 'test'
+  ...
+# Subtest: strict master validates required studentLocationQuantities, including nested inventory source
+ok 172 - strict master validates required studentLocationQuantities, including nested inventory source
+  ---
+  duration_ms: 0.183875
+  type: 'test'
+  ...
+# Subtest: strict master validates required teacherLocationQuantities, including nested inventory source
+ok 173 - strict master validates required teacherLocationQuantities, including nested inventory source
+  ---
+  duration_ms: 0.138166
+  type: 'test'
+  ...
+# Subtest: strict master validates required totalQuantity, including nested inventory source
+ok 174 - strict master validates required totalQuantity, including nested inventory source
+  ---
+  duration_ms: 0.140792
+  type: 'test'
+  ...
+# Subtest: strict master validates required studentQuantity, including nested inventory source
+ok 175 - strict master validates required studentQuantity, including nested inventory source
+  ---
+  duration_ms: 0.125375
+  type: 'test'
+  ...
+# Subtest: strict master validates required teacherQuantity, including nested inventory source
+ok 176 - strict master validates required teacherQuantity, including nested inventory source
+  ---
+  duration_ms: 0.143083
+  type: 'test'
+  ...
+# Subtest: strict master validates required stockValue, including nested inventory source
+ok 177 - strict master validates required stockValue, including nested inventory source
+  ---
+  duration_ms: 0.135833
+  type: 'test'
+  ...
+# Subtest: strict master validates required qualityIssues, including nested inventory source
+ok 178 - strict master validates required qualityIssues, including nested inventory source
+  ---
+  duration_ms: 0.124083
+  type: 'test'
+  ...
+# Subtest: strict master validates required qualityScore, including nested inventory source
+ok 179 - strict master validates required qualityScore, including nested inventory source
+  ---
+  duration_ms: 0.107875
+  type: 'test'
+  ...
+# Subtest: strict master validates required locationSummary, including nested inventory source
+ok 180 - strict master validates required locationSummary, including nested inventory source
+  ---
+  duration_ms: 0.106667
+  type: 'test'
+  ...
+# Subtest: inventory rejects malformed fields {"daysSinceLatestCount":"Infinity"}
+ok 181 - inventory rejects malformed fields {"daysSinceLatestCount":"Infinity"}
+  ---
+  duration_ms: 0.068667
+  type: 'test'
+  ...
+# Subtest: inventory rejects malformed fields {"daysSinceLatestCount":null}
+ok 182 - inventory rejects malformed fields {"daysSinceLatestCount":null}
+  ---
+  duration_ms: 0.04475
+  type: 'test'
+  ...
+# Subtest: inventory rejects malformed fields {"daysSinceLatestCount":1.5}
+ok 183 - inventory rejects malformed fields {"daysSinceLatestCount":1.5}
+  ---
+  duration_ms: 0.074542
+  type: 'test'
+  ...
+# Subtest: inventory rejects malformed fields {"latestCountAt":"2026-02-30"}
+ok 184 - inventory rejects malformed fields {"latestCountAt":"2026-02-30"}
+  ---
+  duration_ms: 0.046459
+  type: 'test'
+  ...
+# Subtest: inventory rejects malformed fields {"status":"all"}
+ok 185 - inventory rejects malformed fields {"status":"all"}
+  ---
+  duration_ms: 0.037459
+  type: 'test'
+  ...
+# Subtest: inventory rejects malformed fields {"isRecommended":1}
+ok 186 - inventory rejects malformed fields {"isRecommended":1}
+  ---
+  duration_ms: 0.035584
+  type: 'test'
+  ...
+# Subtest: history retains count and adjustment identities plus raw actor presentation seam
+ok 187 - history retains count and adjustment identities plus raw actor presentation seam
+  ---
+  duration_ms: 0.151208
+  type: 'test'
+  ...
+# Subtest: listTextbookSaleHistoryPage cancels before/after transport and applies the eight second deadline
+ok 188 - listTextbookSaleHistoryPage cancels before/after transport and applies the eight second deadline
+  ---
+  duration_ms: 0.153417
+  type: 'test'
+  ...
+# Subtest: listTextbookPurchasePage cancels before/after transport and applies the eight second deadline
+ok 189 - listTextbookPurchasePage cancels before/after transport and applies the eight second deadline
+  ---
+  duration_ms: 0.094875
+  type: 'test'
+  ...
+# Subtest: listTextbookSalePage cancels before/after transport and applies the eight second deadline
+ok 190 - listTextbookSalePage cancels before/after transport and applies the eight second deadline
+  ---
+  duration_ms: 0.0775
+  type: 'test'
+  ...
+# Subtest: getTextbookPurchaseSummary validates its complete workflow DTO and exact transport
+ok 191 - getTextbookPurchaseSummary validates its complete workflow DTO and exact transport
+  ---
+  duration_ms: 0.20225
+  type: 'test'
+  ...
+# Subtest: getTextbookPurchaseSummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+ok 192 - getTextbookPurchaseSummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+  ---
+  duration_ms: 0.141834
+  type: 'test'
+  ...
+# Subtest: getTextbookPurchaseSummary observes caller cancellation and eight second transport deadline
+ok 193 - getTextbookPurchaseSummary observes caller cancellation and eight second transport deadline
+  ---
+  duration_ms: 0.173625
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleSummary validates its complete workflow DTO and exact transport
+ok 194 - getTextbookSaleSummary validates its complete workflow DTO and exact transport
+  ---
+  duration_ms: 0.101167
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleSummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+ok 195 - getTextbookSaleSummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+  ---
+  duration_ms: 0.085416
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleSummary observes caller cancellation and eight second transport deadline
+ok 196 - getTextbookSaleSummary observes caller cancellation and eight second transport deadline
+  ---
+  duration_ms: 0.053167
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleHistorySummary validates its complete workflow DTO and exact transport
+ok 197 - getTextbookSaleHistorySummary validates its complete workflow DTO and exact transport
+  ---
+  duration_ms: 0.046833
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleHistorySummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+ok 198 - getTextbookSaleHistorySummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+  ---
+  duration_ms: 0.179584
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleHistorySummary observes caller cancellation and eight second transport deadline
+ok 199 - getTextbookSaleHistorySummary observes caller cancellation and eight second transport deadline
+  ---
+  duration_ms: 0.066958
+  type: 'test'
+  ...
+# Subtest: getTextbookOperationsSummary validates its complete workflow DTO and exact transport
+ok 200 - getTextbookOperationsSummary validates its complete workflow DTO and exact transport
+  ---
+  duration_ms: 0.069708
+  type: 'test'
+  ...
+# Subtest: getTextbookOperationsSummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+ok 201 - getTextbookOperationsSummary rejects missing/extra fields and never falls back on unavailable or denied RPC
+  ---
+  duration_ms: 0.079042
+  type: 'test'
+  ...
+# Subtest: getTextbookOperationsSummary observes caller cancellation and eight second transport deadline
+ok 202 - getTextbookOperationsSummary observes caller cancellation and eight second transport deadline
+  ---
+  duration_ms: 0.049959
+  type: 'test'
+  ...
+# Subtest: getTextbookPurchaseDetail validates its complete workflow DTO and exact transport
+ok 203 - getTextbookPurchaseDetail validates its complete workflow DTO and exact transport
+  ---
+  duration_ms: 0.216209
+  type: 'test'
+  ...
+# Subtest: getTextbookPurchaseDetail rejects missing/extra fields and never falls back on unavailable or denied RPC
+ok 204 - getTextbookPurchaseDetail rejects missing/extra fields and never falls back on unavailable or denied RPC
+  ---
+  duration_ms: 0.099417
+  type: 'test'
+  ...
+# Subtest: getTextbookPurchaseDetail observes caller cancellation and eight second transport deadline
+ok 205 - getTextbookPurchaseDetail observes caller cancellation and eight second transport deadline
+  ---
+  duration_ms: 0.06125
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleDetail validates its complete workflow DTO and exact transport
+ok 206 - getTextbookSaleDetail validates its complete workflow DTO and exact transport
+  ---
+  duration_ms: 0.064458
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleDetail rejects missing/extra fields and never falls back on unavailable or denied RPC
+ok 207 - getTextbookSaleDetail rejects missing/extra fields and never falls back on unavailable or denied RPC
+  ---
+  duration_ms: 0.069917
+  type: 'test'
+  ...
+# Subtest: getTextbookSaleDetail observes caller cancellation and eight second transport deadline
+ok 208 - getTextbookSaleDetail observes caller cancellation and eight second transport deadline
+  ---
+  duration_ms: 0.0515
+  type: 'test'
+  ...
+# Subtest: purchase detail uses any real member identity, validates nested source and isolates teacher request DTO
+ok 209 - purchase detail uses any real member identity, validates nested source and isolates teacher request DTO
+  ---
+  duration_ms: 1.875084
+  type: 'test'
+  ...
+# Subtest: returned purchase DTOs preserve an active parent without reclassifying the member
+ok 210 - returned purchase DTOs preserve an active parent without reclassifying the member
+  ---
+  duration_ms: 0.149917
+  type: 'test'
+  ...
+# Subtest: workflow summaries reject inconsistent full totals and sale detail rejects wrong real identity
+ok 211 - workflow summaries reject inconsistent full totals and sale detail rejects wrong real identity
+  ---
+  duration_ms: 0.272041
+  type: 'test'
+  ...
+# Subtest: sale wire decimal amount is authoritative while real amount and event mismatches are rejected
+ok 212 - sale wire decimal amount is authoritative while real amount and event mismatches are rejected
+  ---
+  duration_ms: 0.162541
+  type: 'test'
+  ...
+# Subtest: purchase display key and event are reconciled to the complete student-primary member
+ok 213 - purchase display key and event are reconciled to the complete student-primary member
+  ---
+  duration_ms: 0.2335
+  type: 'test'
+  ...
+# Subtest: workflow raw source temporal fields reject malformed DTO values before display use
+ok 214 - workflow raw source temporal fields reject malformed DTO values before display use
+  ---
+  duration_ms: 0.127667
+  type: 'test'
+  ...
+# Subtest: sale history summary is authoritative and separate from requested page, preserving off-page options
+ok 215 - sale history summary is authoritative and separate from requested page, preserving off-page options
+  ---
+  duration_ms: 0.071167
+  type: 'test'
+  ...
+# Subtest: sale history rejects operations search and inconsistent raw history totals before downstream use
+ok 216 - sale history rejects operations search and inconsistent raw history totals before downstream use
+  ---
+  duration_ms: 0.201625
+  type: 'test'
+  ...
+# Subtest: sale history distinguishes empty source from empty filter and resolves stale month to all
+ok 217 - sale history distinguishes empty source from empty filter and resolves stale month to all
+  ---
+  duration_ms: 0.072916
+  type: 'test'
+  ...
+# Subtest: getTextbookMasterSummary uses a separate purpose-specific complete contract
+ok 218 - getTextbookMasterSummary uses a separate purpose-specific complete contract
+  ---
+  duration_ms: 0.190333
+  type: 'test'
+  ...
+# Subtest: getTextbookMasterSummary rejects absent, partial and fake page envelopes
+ok 219 - getTextbookMasterSummary rejects absent, partial and fake page envelopes
+  ---
+  duration_ms: 0.071083
+  type: 'test'
+  ...
+# Subtest: getTextbookInventorySummary uses a separate purpose-specific complete contract
+ok 220 - getTextbookInventorySummary uses a separate purpose-specific complete contract
+  ---
+  duration_ms: 0.083041
+  type: 'test'
+  ...
+# Subtest: getTextbookInventorySummary rejects absent, partial and fake page envelopes
+ok 221 - getTextbookInventorySummary rejects absent, partial and fake page envelopes
+  ---
+  duration_ms: 0.059084
+  type: 'test'
+  ...
+# Subtest: getTextbookMasterDetail uses a separate purpose-specific complete contract
+ok 222 - getTextbookMasterDetail uses a separate purpose-specific complete contract
+  ---
+  duration_ms: 0.079459
+  type: 'test'
+  ...
+# Subtest: getTextbookMasterDetail rejects absent, partial and fake page envelopes
+ok 223 - getTextbookMasterDetail rejects absent, partial and fake page envelopes
+  ---
+  duration_ms: 0.05125
+  type: 'test'
+  ...
+# Subtest: getTextbookInventoryBalance uses a separate purpose-specific complete contract
+ok 224 - getTextbookInventoryBalance uses a separate purpose-specific complete contract
+  ---
+  duration_ms: 0.140792
+  type: 'test'
+  ...
+# Subtest: getTextbookInventoryBalance rejects absent, partial and fake page envelopes
+ok 225 - getTextbookInventoryBalance rejects absent, partial and fake page envelopes
+  ---
+  duration_ms: 0.053583
+  type: 'test'
+  ...
+# Subtest: checkTextbookMasterDuplicate uses a separate purpose-specific complete contract
+ok 226 - checkTextbookMasterDuplicate uses a separate purpose-specific complete contract
+  ---
+  duration_ms: 0.095791
+  type: 'test'
+  ...
+# Subtest: checkTextbookMasterDuplicate rejects absent, partial and fake page envelopes
+ok 227 - checkTextbookMasterDuplicate rejects absent, partial and fake page envelopes
+  ---
+  duration_ms: 0.086542
+  type: 'test'
+  ...
+# Subtest: balance rejects partial, duplicate, unknown-ID and wrong-location coverage
+ok 228 - balance rejects partial, duplicate, unknown-ID and wrong-location coverage
+  ---
+  duration_ms: 0.23175
+  type: 'test'
+  ...
+# Subtest: duplicate preview has max10 with full count, and null detail is explicit
+ok 229 - duplicate preview has max10 with full count, and null detail is explicit
+  ---
+  duration_ms: 0.158
+  type: 'test'
+  ...
+# Subtest: UUID context coverage compares canonical identities without rejecting uppercase input or allowing case-duplicate IDs
+ok 230 - UUID context coverage compares canonical identities without rejecting uppercase input or allowing case-duplicate IDs
+  ---
+  duration_ms: 0.105625
+  type: 'test'
+  ...
+# Subtest: summary retains full-filter price/location/subject totals and rejects incomplete or conflicting aggregates
+ok 231 - summary retains full-filter price/location/subject totals and rejects incomplete or conflicting aggregates
+  ---
+  duration_ms: 0.205583
+  type: 'test'
+  ...
+# Subtest: getTextbookMasterSummary reconciles signed decimal cancellation without changing authoritative amounts
+ok 232 - getTextbookMasterSummary reconciles signed decimal cancellation without changing authoritative amounts
+  ---
+  duration_ms: 0.193042
+  type: 'test'
+  ...
+# Subtest: getTextbookMasterSummary rejects genuine amount discrepancies despite cancellation or overflow
+ok 233 - getTextbookMasterSummary rejects genuine amount discrepancies despite cancellation or overflow
+  ---
+  duration_ms: 0.145667
+  type: 'test'
+  ...
+# Subtest: getTextbookInventorySummary reconciles signed decimal cancellation without changing authoritative amounts
+ok 234 - getTextbookInventorySummary reconciles signed decimal cancellation without changing authoritative amounts
+  ---
+  duration_ms: 0.131708
+  type: 'test'
+  ...
+# Subtest: getTextbookInventorySummary rejects genuine amount discrepancies despite cancellation or overflow
+ok 235 - getTextbookInventorySummary rejects genuine amount discrepancies despite cancellation or overflow
+  ---
+  duration_ms: 0.121584
+  type: 'test'
+  ...
+# Subtest: final SQL wire provenance binds immutable migration, pgTAP and all eight methods
+ok 236 - final SQL wire provenance binds immutable migration, pgTAP and all eight methods
+  ---
+  duration_ms: 1.83325
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 1 replays verbatim through listTextbookMasterPage
+ok 237 - final authenticated SQL DTO 1 replays verbatim through listTextbookMasterPage
+  ---
+  duration_ms: 0.154792
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 2 replays verbatim through listTextbookInventoryPage
+ok 238 - final authenticated SQL DTO 2 replays verbatim through listTextbookInventoryPage
+  ---
+  duration_ms: 0.098625
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 3 replays verbatim through listTextbookInventoryPage
+ok 239 - final authenticated SQL DTO 3 replays verbatim through listTextbookInventoryPage
+  ---
+  duration_ms: 0.083708
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 4 replays verbatim through listTextbookInventoryHistoryPage
+ok 240 - final authenticated SQL DTO 4 replays verbatim through listTextbookInventoryHistoryPage
+  ---
+  duration_ms: 0.086209
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 5 replays verbatim through getTextbookMasterSummary
+ok 241 - final authenticated SQL DTO 5 replays verbatim through getTextbookMasterSummary
+  ---
+  duration_ms: 0.096584
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 6 replays verbatim through getTextbookInventorySummary
+ok 242 - final authenticated SQL DTO 6 replays verbatim through getTextbookInventorySummary
+  ---
+  duration_ms: 0.068584
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 7 replays verbatim through getTextbookMasterDetail
+ok 243 - final authenticated SQL DTO 7 replays verbatim through getTextbookMasterDetail
+  ---
+  duration_ms: 0.059834
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 8 replays verbatim through getTextbookInventoryBalance
+ok 244 - final authenticated SQL DTO 8 replays verbatim through getTextbookInventoryBalance
+  ---
+  duration_ms: 0.074709
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 9 replays verbatim through checkTextbookMasterDuplicate
+ok 245 - final authenticated SQL DTO 9 replays verbatim through checkTextbookMasterDuplicate
+  ---
+  duration_ms: 0.124583
+  type: 'test'
+  ...
+# Subtest: final authenticated SQL DTO 10 replays verbatim through listTextbookInventoryPage
+ok 246 - final authenticated SQL DTO 10 replays verbatim through listTextbookInventoryPage
+  ---
+  duration_ms: 0.071416
+  type: 'test'
+  ...
+# Subtest: final workflow SQL wire provenance binds immutable migration, pgTAP, actors and all nine methods
+ok 247 - final workflow SQL wire provenance binds immutable migration, pgTAP, actors and all nine methods
+  ---
+  duration_ms: 1.559083
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 1 replays verbatim through listTextbookPurchasePage
+ok 248 - final authenticated workflow SQL DTO 1 replays verbatim through listTextbookPurchasePage
+  ---
+  duration_ms: 0.277625
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 2 replays verbatim through getTextbookPurchaseSummary
+ok 249 - final authenticated workflow SQL DTO 2 replays verbatim through getTextbookPurchaseSummary
+  ---
+  duration_ms: 0.086
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 3 replays verbatim through getTextbookPurchaseDetail
+ok 250 - final authenticated workflow SQL DTO 3 replays verbatim through getTextbookPurchaseDetail
+  ---
+  duration_ms: 0.656875
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 4 replays verbatim through listTextbookSalePage
+ok 251 - final authenticated workflow SQL DTO 4 replays verbatim through listTextbookSalePage
+  ---
+  duration_ms: 0.132291
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 5 replays verbatim through getTextbookSaleSummary
+ok 252 - final authenticated workflow SQL DTO 5 replays verbatim through getTextbookSaleSummary
+  ---
+  duration_ms: 0.05275
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 6 replays verbatim through getTextbookSaleDetail
+ok 253 - final authenticated workflow SQL DTO 6 replays verbatim through getTextbookSaleDetail
+  ---
+  duration_ms: 0.062541
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 7 replays verbatim through listTextbookSaleHistoryPage
+ok 254 - final authenticated workflow SQL DTO 7 replays verbatim through listTextbookSaleHistoryPage
+  ---
+  duration_ms: 0.096792
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 8 replays verbatim through getTextbookSaleHistorySummary
+ok 255 - final authenticated workflow SQL DTO 8 replays verbatim through getTextbookSaleHistorySummary
+  ---
+  duration_ms: 0.048541
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 9 replays verbatim through getTextbookOperationsSummary
+ok 256 - final authenticated workflow SQL DTO 9 replays verbatim through getTextbookOperationsSummary
+  ---
+  duration_ms: 0.032667
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 10 replays verbatim through listTextbookPurchasePage
+ok 257 - final authenticated workflow SQL DTO 10 replays verbatim through listTextbookPurchasePage
+  ---
+  duration_ms: 0.141709
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 11 replays verbatim through getTextbookPurchaseSummary
+ok 258 - final authenticated workflow SQL DTO 11 replays verbatim through getTextbookPurchaseSummary
+  ---
+  duration_ms: 0.104417
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 12 replays verbatim through getTextbookPurchaseDetail
+ok 259 - final authenticated workflow SQL DTO 12 replays verbatim through getTextbookPurchaseDetail
+  ---
+  duration_ms: 0.129042
+  type: 'test'
+  ...
+# Subtest: final authenticated workflow SQL DTO 13 replays verbatim through getTextbookPurchaseDetail
+ok 260 - final authenticated workflow SQL DTO 13 replays verbatim through getTextbookPurchaseDetail
+  ---
+  duration_ms: 0.028292
+  type: 'test'
+  ...
+# Subtest: final purchase-cost SQL wire provenance binds additive final migration and regression TAP
+ok 261 - final purchase-cost SQL wire provenance binds additive final migration and regression TAP
+  ---
+  duration_ms: 1.045916
+  type: 'test'
+  ...
+# Subtest: final purchase-cost SQL DTO 1 preserves literal pricing and raw business label
+ok 262 - final purchase-cost SQL DTO 1 preserves literal pricing and raw business label
+  ---
+  duration_ms: 0.163958
+  type: 'test'
+  ...
+# Subtest: final purchase-cost SQL DTO 2 preserves literal pricing and raw business label
+ok 263 - final purchase-cost SQL DTO 2 preserves literal pricing and raw business label
+  ---
+  duration_ms: 0.115
+  type: 'test'
+  ...
+# Subtest: final purchase-cost SQL DTO 3 preserves literal pricing and raw business label
+ok 264 - final purchase-cost SQL DTO 3 preserves literal pricing and raw business label
+  ---
+  duration_ms: 0.10675
+  type: 'test'
+  ...
+# Subtest: final purchase-cost SQL DTO 4 preserves literal pricing and raw business label
+ok 265 - final purchase-cost SQL DTO 4 preserves literal pricing and raw business label
+  ---
+  duration_ms: 0.099792
+  type: 'test'
+  ...
+1..265
+# tests 265
+# suites 0
+# pass 265
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 217.255167
+{"pass":10,"source":"fresh final PostgreSQL RPC output","methods":["listTextbookMasterPage","listTextbookInventoryPage","listTextbookInventoryHistoryPage","getTextbookMasterSummary","getTextbookInventorySummary","getTextbookMasterDetail","getTextbookInventoryBalance","checkTextbookMasterDuplicate"]}
