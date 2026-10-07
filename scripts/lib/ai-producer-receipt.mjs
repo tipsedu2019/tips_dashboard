@@ -107,12 +107,28 @@ export async function snapshotAiSource(root=ROOT){
  assert.match(sourceHead,/^[a-f0-9]{40}$/u);
  return {sourceHead,closure,migrations:CURRENT_AI_MIGRATIONS};
 }
+// Database setup and unrelated probes do not create captured DTOs. Keep the
+// original run identity and start the unchanged freshness window exactly once,
+// immediately before the first producer is allowed to execute.
+export async function beginAiCapturePhase(phase,readSource,now=Date.now) {
+ if(phase.captureStartedAt!==null){
+  assert.ok(Number.isSafeInteger(phase.captureStartedAt)&&phase.captureStartedAt>=phase.startedAt,'capture phase timestamp invalid');
+  return phase.captureStartedAt;
+ }
+ assert.deepEqual(await readSource(),phase.before,'capture phase source drift');
+ const started=now();
+ assert.ok(Number.isSafeInteger(started)&&Number.isSafeInteger(phase.startedAt)&&phase.startedAt>0&&started>=phase.startedAt,'capture phase timestamp invalid');
+ phase.captureStartedAt=started;
+ return started;
+}
 export function validateAiReceipt(receipt,{expected,source,raw,identity,now=Date.now()}){
  assert.equal(receipt?.version,1,'receipt version');
  assert.match(expected?.runId??'',/^[a-f0-9]{32}$/u);assert.match(expected?.nonce??'',/^[a-f0-9]{64}$/u);
  assert.equal(receipt.runId,expected.runId,'receipt stale run');assert.equal(receipt.nonce,expected.nonce,'receipt stale nonce');
  assert.equal(receipt.startedAt,expected.startedAt,'receipt stale start');
- assert.ok(receipt.startedAt<=receipt.finishedAt && receipt.finishedAt<=now && now-receipt.startedAt<900_000,'receipt time window');
+ assert.equal(receipt.captureStartedAt,expected.captureStartedAt,'receipt stale capture start');
+ assert.ok([receipt.startedAt,receipt.captureStartedAt,receipt.finishedAt,now].every(value=>Number.isSafeInteger(value)&&value>0),'receipt timestamp invalid');
+ assert.ok(receipt.startedAt<=receipt.captureStartedAt && receipt.captureStartedAt<=receipt.finishedAt && receipt.finishedAt<=now && now-receipt.captureStartedAt<900_000,'receipt time window');
  assert.deepEqual(receipt.before,source,'receipt stale source');assert.deepEqual(receipt.after,source,'receipt closure drift');
  assert.deepEqual(receipt.sqlTests,AI_SQL_TESTS,'receipt SQL inventory');
  assert.deepEqual(receipt.probes,AI_PROBES,'receipt probe inventory');
@@ -138,7 +154,7 @@ export async function readCurrentAiCapture(identity,env=process.env,root=ROOT){
  for(const name of Object.keys(AI_PRODUCERS)){
   const rawPath=join(directory,AI_PRODUCERS[name].file),rawStat=await lstat(rawPath);assert.ok(rawStat.isFile());assert.equal(rawStat.mode&0o777,0o600);
   const raw=await readFile(rawPath);
-  validateAiReceipt(receipt,{expected:{runId:env.TASK_AI_RUN_ID,nonce:env.TASK_AI_RUN_NONCE,startedAt:Number(env.TASK_AI_STARTED_AT)},source,raw,identity:name});
+  validateAiReceipt(receipt,{expected:{runId:env.TASK_AI_RUN_ID,nonce:env.TASK_AI_RUN_NONCE,startedAt:Number(env.TASK_AI_STARTED_AT),captureStartedAt:Number(env.TASK_AI_CAPTURE_STARTED_AT)},source,raw,identity:name});
   payloads[name]=raw;
  }
  return JSON.parse(payloads[identity].toString());
