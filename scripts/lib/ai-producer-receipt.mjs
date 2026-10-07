@@ -29,6 +29,8 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'tests/probe-ai-agent-http-producer.mjs',
  'tests/probe-ai-agent-chat-runtime-concurrency.mjs',
  ...AI_CONSUMERS,
+ 'tests/ai-agent-http-producer-assertions.mjs',
+ 'tests/ai-agent-chat-runtime-assertions.mjs',
  'tests/helpers/notification-component-loader.mjs',
  'src/features/ai-agent/ai-agent-credential-service.ts',
  'src/features/ai-agent/ai-agent-request-access.ts',
