@@ -1,0 +1,246 @@
+{
+  "assertions": 52,
+  "passed": 52,
+  "failed": [],
+  "results": [
+    {
+      "name": "server uses private Unix socket with zero network listeners",
+      "passed": true,
+      "detail": {
+        "version": "PostgreSQL 17.11 on aarch64-unknown-linux-musl, compiled by gcc (Alpine 15.2.0) 15.2.0, 64-bit",
+        "database": "withdrawal_wording_fixture",
+        "listen_addresses": "",
+        "port": "5432",
+        "socket_dir": "/var/run/postgresql"
+      }
+    },
+    {
+      "name": "k_submitted_management: exact schedule wording replaced and surrounding content retained",
+      "passed": true
+    },
+    {
+      "name": "k_submitted_management: version max+1, revision+1, immutable system attribution",
+      "passed": true
+    },
+    {
+      "name": "k_submitted_management: content contract conformant with zero violations",
+      "passed": true,
+      "detail": {
+        "compliance": "conformant",
+        "violations": "[]"
+      }
+    },
+    {
+      "name": "k_submitted_management: title and payload/content versions preserved",
+      "passed": true
+    },
+    {
+      "name": "k_completed_management: exact schedule wording replaced and surrounding content retained",
+      "passed": true
+    },
+    {
+      "name": "k_completed_management: version max+1, revision+1, immutable system attribution",
+      "passed": true
+    },
+    {
+      "name": "k_completed_management: content contract conformant with zero violations",
+      "passed": true,
+      "detail": {
+        "compliance": "conformant",
+        "violations": "[]"
+      }
+    },
+    {
+      "name": "k_completed_management: title and payload/content versions preserved",
+      "passed": true
+    },
+    {
+      "name": "k_completed_subject: exact schedule wording replaced and surrounding content retained",
+      "passed": true
+    },
+    {
+      "name": "k_completed_subject: version max+1, revision+1, immutable system attribution",
+      "passed": true
+    },
+    {
+      "name": "k_completed_subject: content contract conformant with zero violations",
+      "passed": true,
+      "detail": {
+        "compliance": "conformant",
+        "violations": "[]"
+      }
+    },
+    {
+      "name": "k_completed_subject: title and payload/content versions preserved",
+      "passed": true
+    },
+    {
+      "name": "raw_submitted_management: exact schedule wording replaced and surrounding content retained",
+      "passed": true
+    },
+    {
+      "name": "raw_submitted_management: version max+1, revision+1, immutable system attribution",
+      "passed": true
+    },
+    {
+      "name": "raw_submitted_management: content contract conformant with zero violations",
+      "passed": true,
+      "detail": {
+        "compliance": "conformant",
+        "violations": "[]"
+      }
+    },
+    {
+      "name": "raw_submitted_management: title and payload/content versions preserved",
+      "passed": true
+    },
+    {
+      "name": "raw_completed_management: exact schedule wording replaced and surrounding content retained",
+      "passed": true
+    },
+    {
+      "name": "raw_completed_management: version max+1, revision+1, immutable system attribution",
+      "passed": true
+    },
+    {
+      "name": "raw_completed_management: content contract conformant with zero violations",
+      "passed": true,
+      "detail": {
+        "compliance": "conformant",
+        "violations": "[]"
+      }
+    },
+    {
+      "name": "raw_completed_management: title and payload/content versions preserved",
+      "passed": true
+    },
+    {
+      "name": "raw_completed_subject: exact schedule wording replaced and surrounding content retained",
+      "passed": true
+    },
+    {
+      "name": "raw_completed_subject: version max+1, revision+1, immutable system attribution",
+      "passed": true
+    },
+    {
+      "name": "raw_completed_subject: content contract conformant with zero violations",
+      "passed": true,
+      "detail": {
+        "compliance": "conformant",
+        "violations": "[]"
+      }
+    },
+    {
+      "name": "raw_completed_subject: title and payload/content versions preserved",
+      "passed": true
+    },
+    {
+      "name": "custom_user: active template and revision preserved",
+      "passed": true
+    },
+    {
+      "name": "near_match_system: active template and revision preserved",
+      "passed": true
+    },
+    {
+      "name": "nonchat: active template and revision preserved",
+      "passed": true
+    },
+    {
+      "name": "nonwithdrawal: active template and revision preserved",
+      "passed": true
+    },
+    {
+      "name": "unrelated_event: active template and revision preserved",
+      "passed": true
+    },
+    {
+      "name": "exactly six active system Chat templates promoted",
+      "passed": true
+    },
+    {
+      "name": "all historical templates remain byte-identical",
+      "passed": true
+    },
+    {
+      "name": "all historical compliance audits remain byte-identical",
+      "passed": true
+    },
+    {
+      "name": "rule enabled, audiences, schedules, creation attribution and all non-version fields preserved",
+      "passed": true
+    },
+    {
+      "name": "notification_audit_logs: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_deliveries: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_dispatch_ownership_claims: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_event_fanout_jobs: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_events: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_request_ledger: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_rule_content_contracts: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_rule_reconciliation_jobs: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_runtime_flags: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_settings_ui_registry: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_target_reconciliation_jobs: zero change",
+      "passed": true
+    },
+    {
+      "name": "notification_worker_heartbeats: zero change",
+      "passed": true
+    },
+    {
+      "name": "cron_job: zero change",
+      "passed": true
+    },
+    {
+      "name": "catalog: zero change",
+      "passed": true
+    },
+    {
+      "name": "functions: zero change",
+      "passed": true
+    },
+    {
+      "name": "all template checksums match real helper output",
+      "passed": true
+    },
+    {
+      "name": "second migration execution is a complete data/catalog no-op",
+      "passed": true
+    },
+    {
+      "name": "real final violations helper independently returns [] for all six new active templates",
+      "passed": true
+    }
+  ]
+}

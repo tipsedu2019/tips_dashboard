@@ -1,0 +1,123 @@
+ok 1 - queue is private
+ok 2 - worker is not browser callable
+ok 3 - service API cannot call worker helper
+ok 4 - scheduler manager is service only
+ok 5 - browser cannot manage scheduler
+ok 6 - invalid batch has exact domain SQLSTATE
+ok 7 - invalid manager action has exact SQLSTATE
+ok 8 - missing last lesson has domain SQLSTATE
+ok 9 - completion requires verified scheduler readiness
+ok 10 - blocked scheduling writes no queue
+ok 11 - explicit local scheduler install satisfies metadata readiness
+ok 12 - early completion reserves removal
+ok 13 - today completion reserves removal
+ok 14 - early receipt keeps fixed last lesson
+ok 15 - today receipt keeps fixed last lesson
+ok 16 - early retains student status through KST D
+ok 17 - today retains student status through KST D
+ok 18 - early keeps reciprocal enrolled arrays
+ok 19 - today keeps reciprocal enrolled arrays
+ok 20 - early queue captures original date
+ok 21 - today queue captures original date
+ok 22 - early task completion is recorded
+ok 23 - today task completion is recorded
+ok 24 - early roster checklist is recorded
+ok 25 - today roster checklist is recorded
+ok 26 - early exact retry returns same receipt
+ok 27 - today exact retry returns same receipt
+ok 28 - late exact retry returns same receipt
+ok 29 - receipt retry creates no additional queue
+ok 30 - past date completion removes final enrollment immediately
+ok 31 - past date removes both reciprocal arrays
+ok 32 - early worker does not release on or before KST D
+ok 33 - today worker does not release on or before KST D
+ok 34 - immutable cutoff cannot drift
+ok 35 - reservation cannot be deleted
+ok 36 - same pair/generation duplicate has domain SQLSTATE
+ok 37 - completed withdrawal keeps existing reopen guard
+ok 38 - D+1 worker releases without user JWT
+ok 39 - due queue becomes terminal applied
+ok 40 - due final enrollment updates student status
+ok 41 - worker removes reciprocal arrays
+ok 42 - worker exact retry is no-op
+ok 43 - worker writes one physical roster history
+ok 44 - worker adds no canonical notification
+ok 45 - worker adds no fanout job
+ok 46 - worker adds no delivery
+ok 47 - worker adds no source notification event
+ok 48 - applied reservation cannot reopen
+ok 49 - authenticated readers can access only scalar cutoff
+ok 50 - anonymous readers cannot call cutoff
+ok 51 - service readers cannot call cutoff DTO helper
+ok 52 - early current generation has immutable cutoff
+ok 53 - today current generation has immutable cutoff
+ok 54 - last lesson date remains included
+ok 55 - next lesson date is excluded
+ok 56 - session timezone cannot release KST D early
+ok 57 - UTC+14 session still respects KST D
+ok 58 - terminal queue exposes no cutoff
+ok 59 - null auth fails with exact SQLSTATE
+ok 60 - null auth DTO helper fails with exact SQLSTATE
+ok 61 - manual remove/restore invalidates old cutoff generation
+ok 62 - manual remove and restore produce real generation history
+ok 63 - new generation may reserve while old pending becomes superseded
+ok 64 - old generation becomes superseded
+ok 65 - superseded snapshot cutoff is still immutable
+ok 66 - new generation owns its own cutoff
+ok 67 - existing canceled-state guard remains exact
+ok 68 - canceled then reopened requested task may complete
+ok 69 - completion preserves active canonical claim
+ok 70 - reservation captures exact claim owner
+ok 71 - claimed queue fences deletion of source task
+ok 72 - exact claimed generation exposes cutoff
+ok 73 - claimed source task deletion is fenced by foreign key
+ok 74 - claimed due worker succeeds without JWT
+ok 75 - worker releases exact claim preserving canonical enrollment history
+ok 76 - claimed worker writes one v2 system audit event
+ok 77 - claimed worker adds no canonical notification
+ok 78 - claimed worker adds no fanout job
+ok 79 - claimed worker adds no delivery
+ok 80 - claimed worker adds no source notification event
+ok 81 - past-date second task cannot bypass pending current generation
+ok 82 - past-date duplicate leaves current roster and status unchanged
+ok 83 - original receipt still replays after duplicate rejection
+ok 84 - one class releases while other enrolled/waitlisted classes remain
+ok 85 - remaining enrolled and waitlist projections keep student active
+ok 86 - other classes keep reciprocal enrolled/waitlist projections
+ok 87 - due old generation never removes manual restoration
+ok 88 - superseded due reservation preserves restored reciprocal roster
+ok 89 - worker status conflict has exact domain SQLSTATE
+ok 90 - batch records failing due reservation without aborting
+ok 91 - worker failure remains pending with bounded retry evidence
+ok 92 - failed worker applies no partial physical removal
+ok 93 - actual authenticated statistics includes only last lesson exam conflict
+ok 94 - actual statistics conflict date is D
+ok 95 - actual authenticated home RPC supplies visible nonempty cutoff DTO
+ok 96 - home DTO contains only three allowed fields
+ok 97 - actual browser role cannot execute worker
+ok 98 - actual browser role cannot install scheduler
+ok 99 - pending claimed FK cannot be cleared independently
+ok 100 - applied queue clears only temporary source deletion fence
+ok 101 - actual applied claim history still fences its source task deletion
+ok 102 - banned manager cannot complete
+ok 103 - deleted manager cannot complete
+ok 104 - nonmanager cannot complete
+ok 105 - active staff can replay its exact receipt
+ok 106 - disabled scheduler is not ready
+ok 107 - exact disabled scheduler can be enabled explicitly
+ok 108 - scheduler drift has exact configuration SQLSTATE
+ok 109 - drifted scheduler blocks readiness
+ok 110 - bounded pure SQL command matches final readiness contract
+ok 111 - scheduler contains one bounded database-only command
+ok 112 - final statistics materializes bounded candidate set once
+ok 113 - changed claim owner/generation exposes no old cutoff
+ok 114 - restored new generation with past cutoff may complete immediately
+ok 115 - superseded claimed reservation clears temporary source fence
+ok 116 - new past-date generation removes final live roster immediately
+ok 117 - old receipt is stable after new generation completion
+ok 118 - superseded claimed snapshot cannot be retargeted
+ok 119 - superseded source task may delete when no canonical claim references it
+ok 120 - historical queue remains after deleting superseded source task
+ok 121 - actual final roster helper has ordered domain SQLSTATE patch
+ok 122 - actual final helper expected-mode conflict has exact domain SQLSTATE
+1..122

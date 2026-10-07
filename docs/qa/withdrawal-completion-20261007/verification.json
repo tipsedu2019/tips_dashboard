@@ -1,0 +1,70 @@
+{
+  "baseMain": "58cefbf4761ede0d3b7f4cf588e2a4daea05b458",
+  "originalVerificationBase": "69e978b2b3c6d448d3f25a7a700cfb154aad091b",
+  "linuxNode": "22.23.2",
+  "linuxPostgreSQL": "17.11 aarch64 Alpine",
+  "nodeTests": {
+    "focused": 358,
+    "additionalCacheAndService": 39,
+    "failures": 0,
+    "skips": 0,
+    "timezone": "Asia/Seoul"
+  },
+  "pgTAP": {
+    "completion": 96,
+    "inheritedBoundary": 122,
+    "actualCompletionConcurrency": 2,
+    "actualSettlementConcurrency": 1,
+    "finalGuards": 4,
+    "isolation": 6
+  },
+  "wordingSqlAssertions": 52,
+  "typescript": "pass",
+  "eslint": {
+    "errors": 0,
+    "preexistingWarnings": 3
+  },
+  "forwardManifestEntries": 151,
+  "sources": {
+    "scripts/verify-domain-sqlstate-contract.mjs": "e1dcf0adb1400b7f3df358445071ea08bd9aeb1d3d4755801e8b4655b80cf2a3",
+    "src/features/dashboard/metrics.js": "9033870ae06b58ff3a07156fedb16c4d327e31e04ef906291c53be27ab4a6c20",
+    "src/features/dashboard/snapshot-sources.d.ts": "96023911758f4a1451564da7861253d46a750e443389475a45a40e611869798f",
+    "src/features/dashboard/snapshot-sources.js": "01ee57e86267e8637fc283f870ff497786c4bb9cbef1733a7f622f252c13df83",
+    "src/features/tasks/ops-task-service.ts": "b2bed246252c2085174b68b3692484fe36f55be39ac959ced8d8376ae16890c6",
+    "src/features/tasks/ops-task-workspace.tsx": "b0af46b389a7a856665d11680bf88cee8b9f085fa81166ad870eb37d3433b5ad",
+    "src/hooks/use-tips-dashboard-metrics.ts": "c149bde3b5a88a3ed98c000e319d2c27193466b5ff539dd1ffa6dfb336c2ca6f",
+    "supabase/migrations/20261006080000_withdrawal_chat_last_lesson_wording.sql": "7b6907586c58aa2e29396cead1830cfe4167f610250e8bf0184c48cbba3785ca",
+    "supabase/migrations/20261006090000_withdrawal_last_lesson_release.sql": "d326f20a4e3112f67de9f2b1e86dc922863f9877b91462bd439f7ff4310a207a",
+    "supabase/migrations/20261006091000_withdrawal_future_roster_boundary.sql": "59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009",
+    "supabase/migrations/20261007141548_withdrawal_completion_without_settlement.sql": "221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe",
+    "supabase/tests/withdrawal_completion_without_settlement_test.sql": "a8de74409292025199e3e3e8e91246c38239dc89cf10bcf889cf56e68cac4650",
+    "supabase/tests/withdrawal_last_lesson_release_test.sql": "e2d56675e89ac9046e6f6f2eff4bb69e78e63012099e3dd1665bf89765b99032",
+    "tests/dashboard-snapshot-cache.test.mjs": "260615c61f32a1217dabea4674762db7e4428e5808f0cc582a2e9f0d6384a2ed",
+    "tests/dashboard-withdrawal-roster-cutoffs.test.mjs": "744293931ae5ccaa3f143331aa0e0168271289150ad40b519e19c341fa3b311f",
+    "tests/notification-transfer-withdrawal-adapters.test.mjs": "50ff9dc83bf8ac265c48fded2578fb59f7bff4a46a91e93d7e7b57ad072ec9d4",
+    "tests/notification-withdrawal-last-lesson-wording.test.mjs": "f2678a23965f0ff721bd2a67f8d81539f48ae75b634bcc0f9534d95ce57f33d9",
+    "tests/ops-task-service-loading.test.mjs": "d0397fe696c9b38da043815a457cb1ac472da6b6a2bd6d36118ffa5fc941e9f1",
+    "tests/ops-task-workspace.test.mjs": "1232f26e2d04734799f52a50d71c526da9bf4502d4dafb8f4a65cf58ad719136",
+    "tests/public-classes-cache-mutation-boundaries.test.mjs": "6294856706cda31bbbda0dca632cc429c47becacabdd7194c9993c1e4b9a4745",
+    "tests/registration-service-hardening.test.mjs": "9919a03f90a5211f794de146e355fc7789d02cf84dc5fa24efacee1bd7db3933",
+    "tests/retryable-sqlstate-contract.test.mjs": "a0684771cad795c5e279375b6e4baf5672ca1bdd2ab2dcc72b125a013a556af6",
+    "tests/withdrawal-completion-without-settlement.test.mjs": "194f74015bdbf983cb2a8d518d5bb74f27c1bd5fcb23cdc89ba1a0b4ea8c51ae",
+    "tests/withdrawal-last-lesson-lifecycle.test.mjs": "746bfbe47ab05960d1d1919c03eec25055308b37ec30b14f832be5b7dd1d832b"
+  },
+  "browser": {
+    "route": "/admin/withdrawal",
+    "candidateCases": 4,
+    "baselineCases": 4,
+    "latestSourceHashes": {
+      "src/features/tasks/ops-task-service.ts": {
+        "previousTestedSha256": "b2bed246252c2085174b68b3692484fe36f55be39ac959ced8d8376ae16890c6",
+        "finalSha256": "b2bed246252c2085174b68b3692484fe36f55be39ac959ced8d8376ae16890c6"
+      },
+      "src/features/tasks/ops-task-workspace.tsx": {
+        "previousTestedSha256": "3b6338b18491c01331f85ed7ca2829cbf6205fcfb3920da2a561ce3af3dd91b2",
+        "finalSha256": "b0af46b389a7a856665d11680bf88cee8b9f085fa81166ad870eb37d3433b5ad"
+      }
+    },
+    "scope": "Synthetic read-only completed-list rendering and permissions; no browser mutation E2E."
+  }
+}

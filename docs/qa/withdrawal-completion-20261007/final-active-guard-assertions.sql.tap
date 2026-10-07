@@ -1,0 +1,5 @@
+1..4
+ok 1 - retired director AFTER capture remains absent in final ordered chain
+ok 2 - actual collaboration guard is enabled BEFORE INSERT on task events
+ok 3 - actual final task projection guard is enabled BEFORE UPDATE
+ok 4 - actual final details projection guard is enabled BEFORE UPDATE

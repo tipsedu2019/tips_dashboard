@@ -1,0 +1,36 @@
+{
+  "at": "2026-10-07T14:33:11.903385+00:00",
+  "worktree": "/Users/hyunjun/Documents/Codex/2026-10-06/task-2/withdrawal-completion-unpaid",
+  "source": [
+    {
+      "file": "supabase/migrations/20261006080000_withdrawal_chat_last_lesson_wording.sql",
+      "sha256": "7b6907586c58aa2e29396cead1830cfe4167f610250e8bf0184c48cbba3785ca",
+      "lines": 81
+    },
+    {
+      "file": "supabase/migrations/20261006090000_withdrawal_last_lesson_release.sql",
+      "sha256": "d326f20a4e3112f67de9f2b1e86dc922863f9877b91462bd439f7ff4310a207a",
+      "lines": 406
+    },
+    {
+      "file": "supabase/migrations/20261006091000_withdrawal_future_roster_boundary.sql",
+      "sha256": "59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009",
+      "lines": 240
+    },
+    {
+      "file": "supabase/migrations/20261007141548_withdrawal_completion_without_settlement.sql",
+      "sha256": "221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe",
+      "lines": 304
+    },
+    {
+      "file": "supabase/tests/withdrawal_completion_without_settlement_test.sql",
+      "sha256": "a8de74409292025199e3e3e8e91246c38239dc89cf10bcf889cf56e68cac4650",
+      "lines": 189
+    },
+    {
+      "file": "supabase/tests/withdrawal_last_lesson_release_test.sql",
+      "sha256": "e2d56675e89ac9046e6f6f2eff4bb69e78e63012099e3dd1665bf89765b99032",
+      "lines": 292
+    }
+  ]
+}

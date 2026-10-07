@@ -1,0 +1,7 @@
+1..6
+ok 1 - owned Linux PostgreSQL has no TCP listener
+ok 2 - provider worker wakeup function is not installed
+ok 3 - provider fanout wakeup trigger is not installed
+ok 4 - retired director AFTER capture is absent
+ok 5 - actual final collaboration BEFORE guard is installed
+ok 6 - no provider network or real scheduling extension is installed
