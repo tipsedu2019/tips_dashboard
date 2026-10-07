@@ -729,6 +729,11 @@
       "fileName": "20261006183148_operations_annual_board_range.sql",
       "status": "final",
       "sha256": "5db3afed53be6fa97ef85135e24625e95c7e06115d1974360c4f2a238dce0311"
+    },
+    {
+      "fileName": "20261007013509_operations_calendar_inclusive_range.sql",
+      "status": "final",
+      "sha256": "63840ecfd7146b82a4664a808dec993012f9809f3bc16a5543adaef2e34576e7"
     }
   ]
 }

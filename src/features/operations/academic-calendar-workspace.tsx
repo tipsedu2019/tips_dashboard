@@ -218,8 +218,11 @@ export function AcademicCalendarWorkspace() {
       }));
       const counts = new Map<string, number>();
       for (const event of events) {
-        const cursor = new Date(event.date);
-        while (cursor <= event.endDate) {
+        const visibleStart = new Date(`${(acceptedRange || visibleRange).dateFrom}T12:00:00`);
+        const visibleEnd = new Date(`${(acceptedRange || visibleRange).dateTo}T12:00:00`);
+        const cursor = new Date(Math.max(event.date.getTime(), visibleStart.getTime()));
+        const lastDay = Math.min(event.endDate.getTime(), visibleEnd.getTime());
+        while (cursor.getTime() <= lastDay) {
           const key = toDateKey(cursor);
           counts.set(key, (counts.get(key) || 0) + 1);
           cursor.setDate(cursor.getDate() + 1);
@@ -227,7 +230,7 @@ export function AcademicCalendarWorkspace() {
       }
       return { events, eventDates: [...counts].map(([key, count]) => ({ date: new Date(`${key}T12:00:00`), count })) };
     },
-    [activeScienceAreas, calendarRows],
+    [acceptedRange, activeScienceAreas, calendarRows, visibleRange],
   );
 
   const handleNavigationDateChange = useCallback((date: Date) => {
