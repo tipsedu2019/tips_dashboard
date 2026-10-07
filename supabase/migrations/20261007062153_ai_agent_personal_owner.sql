@@ -7,18 +7,45 @@ begin;
 set local lock_timeout='5s';
 set local statement_timeout='120s';
 
+-- This release installs AI support for the first time. Do not silently use this
+-- atomic index rollout to upgrade a populated installation. Locks retain the
+-- verified empty state; the five-second timeout aborts behind another writer.
+do $ai_personal_first_install$
+declare enabled boolean;
+begin
+ select issuance_enabled into enabled from dashboard_private.ai_agent_chat_support where singleton for share;
+ if enabled is distinct from false then
+  raise exception using errcode='55000',message='ai_agent_personal_install_issuance_not_disabled';
+ end if;
+ lock table dashboard_private.ai_agent_credentials,dashboard_private.ai_agent_request_events,
+  dashboard_private.ai_agent_action_events,dashboard_private.chat_delivery_attempts in access exclusive mode;
+ if exists(select 1 from dashboard_private.ai_agent_credentials)
+  or exists(select 1 from dashboard_private.ai_agent_request_events)
+  or exists(select 1 from dashboard_private.ai_agent_action_events)
+  or exists(select 1 from dashboard_private.chat_delivery_attempts) then
+  raise exception using errcode='55000',message='ai_agent_personal_install_not_empty';
+ end if;
+end
+$ai_personal_first_install$;
+
 alter table dashboard_private.ai_agent_credentials
  add column credential_kind text not null default 'central',
- add column owner_profile_id uuid references public.profiles(id),
+ add column owner_profile_id uuid,
+ add constraint ai_agent_credential_owner_fk foreign key(owner_profile_id) references public.profiles(id) not valid,
  add constraint ai_agent_credential_owner_kind_check check (
   (credential_kind='central' and owner_profile_id is null) or
-  (credential_kind='personal' and owner_profile_id is not null));
+  (credential_kind='personal' and owner_profile_id is not null)) not valid;
+-- The guard above enforces an empty table and retains its lock through COMMIT.
+-- squawk-ignore require-concurrent-index-creation
 create index ai_agent_credentials_personal_owner_created
  on dashboard_private.ai_agent_credentials(owner_profile_id,created_at desc,id)
  where credential_kind='personal';
-alter table dashboard_private.ai_agent_request_events add column owner_profile_id uuid references public.profiles(id);
-alter table dashboard_private.ai_agent_action_events add column owner_profile_id uuid references public.profiles(id);
-alter table dashboard_private.chat_delivery_attempts add column owner_profile_id uuid references public.profiles(id);
+alter table dashboard_private.ai_agent_request_events add column owner_profile_id uuid,
+ add constraint ai_agent_event_owner_fk foreign key(owner_profile_id) references public.profiles(id) not valid;
+alter table dashboard_private.ai_agent_action_events add column owner_profile_id uuid,
+ add constraint ai_agent_action_owner_fk foreign key(owner_profile_id) references public.profiles(id) not valid;
+alter table dashboard_private.chat_delivery_attempts add column owner_profile_id uuid,
+ add constraint chat_attempt_owner_fk foreign key(owner_profile_id) references public.profiles(id) not valid;
 
 create function dashboard_private.ai_agent_personal_identity_v1() returns trigger
 language plpgsql set search_path='' as $$

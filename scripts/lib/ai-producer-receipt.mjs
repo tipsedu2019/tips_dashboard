@@ -70,8 +70,8 @@ export const ACCEPTED_AI_MIGRATIONS=Object.freeze([
 // prior receipts remain historical.
 export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261004030228_ai_agent_request_notification_optin.sql", "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01", "status": "final"},
- {"fileName": "20261007062153_ai_agent_personal_owner.sql", "sha256": "f4da9fadd2d2d95a230904e5aacf8fe188f71bbbb93ddba3f4312dc2b74277d6", "status": "final"},
- {"fileName": "20261007062159_agent_personal_dashboard_read.sql", "sha256": "5e5b70e4a4af19de10764f8b47b221010e25924588cdb69d76b1402300b60a90", "status": "final"},
+ {"fileName": "20261007062153_ai_agent_personal_owner.sql", "sha256": "3ba31674ad33d258e70e39a2048ad1d28508cde3473bc7e61d5f9cc6213a1fad", "status": "final"},
+ {"fileName": "20261007062159_agent_personal_dashboard_read.sql", "sha256": "28a40477e01001d664d716ab4ab8be550db295ea2300822bb3ff009531341954", "status": "final"},
 ]);
 export function extractAiCapture(stdout,identity){
  const producer=AI_PRODUCERS[identity];assert.ok(producer,'unknown capture producer');

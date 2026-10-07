@@ -1,6 +1,46 @@
 import assert from 'node:assert/strict';
 import {randomUUID,createHash} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
 const q=x=>"'"+String(x).replaceAll("'","''")+"'",j=x=>q(JSON.stringify(x))+'::jsonb';
+export async function runPersonalInstallGuardProbe(runtime,parseTap) {
+ const source=await readFile('supabase/migrations/20261007062153_ai_agent_personal_owner.sql','utf8');
+ const blocks=[...source.matchAll(/^do \$ai_personal_first_install\$([\s\S]*?)^\$ai_personal_first_install\$;/gmu)];
+ assert.equal(blocks.length,1,'exercise the exact canonical first-install guard');
+ const guard='create function pg_temp.actual_install_guard() returns void language plpgsql as $ai_personal_first_install$'+blocks[0][1]+'$ai_personal_first_install$;';
+ const tables=['ai_agent_credentials','ai_agent_request_events','ai_agent_action_events','chat_delivery_attempts'];
+ const truncate='truncate '+tables.map(t=>'dashboard_private.'+t).join(',')+' cascade;';
+ const actor=randomUUID(),rid=randomUUID(),cid=randomUUID(),hash=createHash('sha256').update(randomUUID()).digest('hex');
+ const state="jsonb_build_object("+[...tables,'ai_agent_chat_support'].map(t=>q(t)+', (select jsonb_agg(to_jsonb(x) order by to_jsonb(x)::text) from dashboard_private.'+t+' x)').join(',')+")";
+ // The complete guard experiment is one rollback-only transaction, restoring
+ // every earlier synthetic producer/concurrency fixture, including cascades.
+ const output=await runtime.query(`begin;select plan(10);${truncate}
+update dashboard_private.ai_agent_chat_support set issuance_enabled=false where singleton;
+${guard}
+create temp table guard_before(v jsonb);insert into guard_before values(${state});
+select lives_ok('select pg_temp.actual_install_guard()','disabled empty first installation is accepted');
+select is(${state},(select v from guard_before),'successful guard performs no data mutation');
+update dashboard_private.ai_agent_chat_support set issuance_enabled=true where singleton;
+select throws_ok('select pg_temp.actual_install_guard()','55000','ai_agent_personal_install_issuance_not_disabled','enabled issuance prevents installation');
+delete from dashboard_private.ai_agent_chat_support where singleton;
+select throws_ok('select pg_temp.actual_install_guard()','55000','ai_agent_personal_install_issuance_not_disabled','missing singleton prevents installation');
+insert into dashboard_private.ai_agent_chat_support(singleton,issuance_enabled) values(true,false);
+insert into auth.users(id,instance_id,aud,role,email) values(${q(actor)},'00000000-0000-0000-0000-000000000000','authenticated','authenticated',${q(actor+'@test.invalid')});
+insert into public.profiles(id,role,name) values(${q(actor)},'admin','Synthetic installation guard') on conflict(id) do update set role=excluded.role,name=excluded.name;
+insert into dashboard_private.ai_agent_credentials(id,created_by,label,token_hash,scopes,expires_at) values(${q(cid)},${q(actor)},'Synthetic guard key',${q(hash)},array['ai-agent:requests:read'],clock_timestamp()+interval '1 day');
+update guard_before set v=${state};
+select throws_ok('select pg_temp.actual_install_guard()','55000','ai_agent_personal_install_not_empty','existing credential prevents first-install shortcut');
+select is(${state},(select v from guard_before),'denied credential case preserves all existing state');
+${truncate}
+insert into dashboard_private.ai_agent_requests(id,requester_id,title,body) values(${q(rid)},${q(actor)},'Synthetic user-only event','No credential or provider');
+insert into dashboard_private.ai_agent_request_events(request_id,event_seq,kind,actor_kind,actor_id,requester_id,next_status,version) values(${q(rid)},1,'created','user',${q(actor)},${q(actor)},'pending',1);
+select is((select count(*) from dashboard_private.ai_agent_credentials),0::bigint,'event-only case has no credential');
+update guard_before set v=${state};
+select throws_ok('select pg_temp.actual_install_guard()','55000','ai_agent_personal_install_not_empty','user-only event prevents first-install shortcut');
+select is(${state},(select v from guard_before),'denied event case preserves all existing state');
+select is((select count(*) from pg_constraint where connamespace='dashboard_private'::regnamespace and convalidated and conname in('ai_agent_credential_owner_fk','ai_agent_credential_owner_kind_check','ai_agent_event_owner_fk','ai_agent_action_owner_fk','chat_attempt_owner_fk')),5::bigint,'complete chain validates all owner constraints');
+select * from finish();rollback;`);
+ return {status:'passed',tap:parseTap(output),canonicalGuardSha256:createHash('sha256').update(blocks[0][0]).digest('hex'),fixtureTransactionRolledBack:true,providerSend:false};
+}
 export async function runDeadlineConcurrency(runtime,parseTap) {
  const issuer=randomUUID(),claimHash=createHash('sha256').update(randomUUID()).digest('hex');
  const employee=id=>`select set_config('request.jwt.claim.sub',${q(id)},true);set local role authenticated;`;

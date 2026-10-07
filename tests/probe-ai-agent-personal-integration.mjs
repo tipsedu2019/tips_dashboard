@@ -3,10 +3,11 @@ import {readFile} from 'node:fs/promises';
 import {personalProbeRuntime,parsePersonalTap} from './helpers/ai-personal-probe-runtime.mjs';
 import {runPersonalOwnerConcurrencyProbes} from './probe-ai-agent-personal-owner-concurrency.mjs';
 import {runPersonalDashboardReadConcurrencyProbes} from './probe-agent-personal-dashboard-read-concurrency.mjs';
-import {runDeadlineConcurrency,runCentralDomainDeadlineConcurrency} from './probe-ai-agent-deadline-concurrency.mjs';
+import {runDeadlineConcurrency,runCentralDomainDeadlineConcurrency,runPersonalInstallGuardProbe} from './probe-ai-agent-deadline-concurrency.mjs';
 const requireRunning=()=>assert.notEqual(process.exitCode,1,'personal probe interrupted');
 let runtime=await personalProbeRuntime();
 try {
+ console.log(JSON.stringify({suite:'personal_install_guard',...await runPersonalInstallGuardProbe(runtime,parsePersonalTap)}));
  const owner=await runPersonalOwnerConcurrencyProbes({runtime,parseTap:parsePersonalTap,requireRunning});
  console.log(JSON.stringify({suite:'personal_owner',...owner}));
 } finally {await runtime.finish();}

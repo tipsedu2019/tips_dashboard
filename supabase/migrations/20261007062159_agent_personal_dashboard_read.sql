@@ -6,6 +6,13 @@ begin;
 set local lock_timeout='5s';
 set local statement_timeout='120s';
 
+-- Validate after the owner-column migration has committed and released its ADD locks.
+alter table dashboard_private.ai_agent_credentials validate constraint ai_agent_credential_owner_fk;
+alter table dashboard_private.ai_agent_credentials validate constraint ai_agent_credential_owner_kind_check;
+alter table dashboard_private.ai_agent_request_events validate constraint ai_agent_event_owner_fk;
+alter table dashboard_private.ai_agent_action_events validate constraint ai_agent_action_owner_fk;
+alter table dashboard_private.chat_delivery_attempts validate constraint chat_attempt_owner_fk;
+
 create function dashboard_private.agent_personal_dashboard_uuid_grant_v1(p_ids uuid[]) returns boolean
 language sql immutable set search_path='' as $$
  select p_ids is not null and coalesce(array_ndims(p_ids),1)=1 and cardinality(p_ids)<=50 and array_position(p_ids,null) is null and cardinality(p_ids)=(select count(distinct id) from unnest(p_ids) id)
