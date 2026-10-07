@@ -5,7 +5,7 @@ ok 3 - same latest date as prior contract: b7200000-0000-4000-8000-000000000800
 ok 4 - same latest date as prior contract: B7200000-0000-4000-8000-000000000800
 ok 5 - same latest date as prior contract: b7200000-0000-4000-8000-000000000801
 ok 6 - same latest date as prior contract: b7200000-0000-4000-8000-000000000899
-ok 7 - same latest date as prior contract: 
+ok 7 - same latest date as prior contract:
 ok 8 - same latest date as prior contract: invalid
 ok 9 - same latest date as prior contract: NULL
 ok 10 - ties, both copy scopes, infinities, future dates, no count and inactive audit statuses remain unchanged
