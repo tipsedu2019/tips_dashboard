@@ -776,3 +776,60 @@ test("metadata survives paging cancellation, expires and invalidates on filter, 
   await act(async () => metadata[7].resolve({ data: { secret: true }, error: null }));
   assert.deepEqual(state.filterOptions, {});
 });
+
+test("auth-blocked metadata and catalogs leave loading, require explicit retry and reject late values", async t => {
+  const dom = new JSDOM("<div id='root'></div>", { url: "https://test.invalid" });
+  globalThis.window = dom.window; globalThis.document = dom.window.document;
+  const deadlines = [];
+  t.mock.method(AbortSignal, "timeout", ms => {
+    assert.equal(ms, 8000);
+    const controller = new AbortController(); deadlines.push(controller); return controller.signal;
+  });
+  const io = transport(), rpc = io.supabase.rpc, held = [], catalogCalls = [];
+  let fresh = false;
+  const refs = [{ id: "fresh", name: "새 후보", subjects: ["영어팀"], is_visible: true, sort_order: 0 }];
+  function query(name) {
+    const pending = Promise.withResolvers(), request = { name, ...pending };
+    held.push(request);
+    return { abortSignal(signal) { request.signal = signal; return this; }, retry() { return fresh ? Promise.resolve({ data: name === "get_management_stats_v1" ? { total: 1 } : name === "list_management_filter_options_v1" ? { schools: ["새 학교"] } : [] }) : pending.promise; } };
+  }
+  io.supabase.rpc = (name, args) => name === "list_management_numbered_page_v1" ? rpc(name, args) : query(name);
+  io.supabase.from = name => {
+    catalogCalls.push(name);
+    const pending = Promise.withResolvers(), request = { name, ...pending }; held.push(request);
+    return { select() { return this; }, eq() { return this; }, range() { return this; }, limit() { return this; }, order() { return this; }, abortSignal(signal) { request.signal = signal; return this; }, retry() { return fresh ? Promise.resolve({ data: refs }) : pending.promise; } };
+  };
+  const { useManagementRecords } = loadHook(io.supabase, undefined, { "./management-service.js": {
+    getAssignedClassTextbookIds, createManagementReadService: () => createManagementReadService({ supabase: io.supabase }),
+  } });
+  let state;
+  function Probe({ tick = 0 }) {
+    const result = useManagementRecords("classes", { kind: "classes", search: "", periodId: null, status: "수강", subject: null, grade: null, teacher: null, classroom: null }, {
+      enabled: true, pageSize: 10, page: 1, authorizationScope: "fixture:admin", classFormOpen: true,
+    });
+    useEffect(() => { state = result; }); return createElement("span", null, tick);
+  }
+  const root = createRoot(document.getElementById("root"));
+  t.after(async () => { await act(async () => root.unmount()); dom.window.close(); });
+  await act(async () => root.render(createElement(Probe)));
+  await act(async () => io.finish(0, 1));
+  const initialCalls = held.length;
+  await act(async () => { for (const timer of deadlines) timer.abort(new DOMException("timeout", "TimeoutError")); });
+  assert.equal(state.loading, false);
+  assert.equal(state.rows.length, 1, "successful rows survive metadata timeout");
+  assert.equal(state.classFormReferencesStatus, "error");
+  assert.match(state.error, /서버 연결이 지연/);
+  for (let tick = 1; tick <= 25; tick++) await act(async () => root.render(createElement(Probe, { tick })));
+  assert.equal(held.length, initialCalls, "error re-renders never retry automatically");
+  const old = held.slice(); fresh = true;
+  await act(async () => { state.retryClassFormReferences(); void state.refresh(); });
+  await act(async () => io.finish(1, 1));
+  assert.equal(state.classFormReferencesStatus, "ready");
+  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "fresh");
+  assert.deepEqual(state.filterOptions, { schools: ["새 학교"] });
+  assert.equal(state.error, null);
+  await act(async () => { for (const request of old) request.resolve({ data: request.name === "get_management_stats_v1" ? { total: 999 } : request.name === "list_management_filter_options_v1" ? { schools: ["오래된 학교"] } : [{ id: "late", name: "늦은 후보" }] }); });
+  assert.equal(state.classFormReferences.teacherCatalogs[0].id, "fresh");
+  assert.deepEqual(state.filterOptions, { schools: ["새 학교"] });
+  assert.equal(catalogCalls.length, 4, "one initial pair plus one manual retry pair");
+});

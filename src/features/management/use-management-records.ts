@@ -1,5 +1,6 @@
 "use client";
 
+import { withReadDeadline } from "../../lib/read-deadline.ts";
 import { DEFAULT_STUDENT_STATUS_FILTER } from "./student-enrollment-status.js";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
@@ -878,6 +879,7 @@ export function useManagementRecords(
     const controller = createNumberedPageController<ManagementRow>({
       loadPage: async ({ scope: requestScope, page: requestedPage, pageSize: requestedSize, signal }) => {
         if (!supabase || !numberedService) throw new Error("Supabase 연결 설정을 확인해 주세요.");
+        const client = supabase;
         const request = JSON.parse(requestScope) as { filters: ManagementListFilters; sort: ManagementNumberedSort };
         const effectiveFilters = request.filters;
         const metadataKey = JSON.stringify(effectiveFilters);
@@ -885,12 +887,12 @@ export function useManagementRecords(
           invalidateMetadata();
           const entry = { key: metadataKey, controller: new AbortController(), expiresAt: Infinity };
           metadata = entry;
-          const metadataSignal = AbortSignal.any([entry.controller.signal, AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS)]);
+          const deadline = AbortSignal.timeout(MANAGEMENT_TABLE_TIMEOUT_MS);
           setMetadataFailure(null);
-          void Promise.all([
-            supabase.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(metadataSignal).retry(false),
-            supabase.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(metadataSignal).retry(false),
-          ]).then(([statsResult, optionsResult]) => {
+          void withReadDeadline((metadataSignal) => Promise.all([
+            client.rpc("get_management_stats_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(AbortSignal.any([metadataSignal, deadline])).retry(false).then((result) => { if (result.error) throw result.error; return result; }),
+            client.rpc("list_management_filter_options_v1", { p_kind: kind, p_filters: effectiveFilters }).abortSignal(AbortSignal.any([metadataSignal, deadline])).retry(false).then((result) => { if (result.error) throw result.error; return result; }),
+          ]), { signal: entry.controller.signal, deadline }).then(([statsResult, optionsResult]) => {
             if (!active || metadata !== entry || entry.controller.signal.aborted) return;
             if (statsResult.error || optionsResult.error) throw statsResult.error || optionsResult.error;
             entry.expiresAt = Date.now() + 30_000;

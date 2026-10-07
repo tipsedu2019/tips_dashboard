@@ -1,0 +1,46 @@
+{
+  "at": "2026-10-07T13:18:35.192Z",
+  "sourceHead": "3dac9307732b1d66fddf95b62ed4ed08c1d70ed1",
+  "sourceSha256": {
+    "src/lib/read-deadline.ts": "ec4cce96dddbe1ed865d288a541cf3c519b9eee699a1d7a39e9cea24006751d3",
+    "src/features/management/management-service.js": "d61ea4548173e968116b46af20455241ce9d3e44eb4054394ba0138425fe94ba",
+    "src/features/management/management-numbered-service.ts": "cb1d06f2cd2fc77a6278465594c4f15f3d275acf9dbdefcc6f2dbc6abf39b41d",
+    "src/features/management/use-management-records.ts": "79d37226b171c389e879ff22f4c2d11dbf6021c423abc7c91814e336534cae91"
+  },
+  "network": "none; SDK uses injected fetch and synthetic getSession",
+  "results": [
+    {
+      "check": "one caller cancellation preserves another consumer of shared getSession",
+      "sessionCalls": 2,
+      "fetchEntries": 2,
+      "transportWork": 1,
+      "passed": true
+    },
+    {
+      "check": "metadata resolved error cancels sibling before deadline and preserves error",
+      "failedRpc": "get_management_stats_v1",
+      "requests": 3,
+      "siblingAborted": true,
+      "errorCode": "57014",
+      "passed": true
+    },
+    {
+      "check": "metadata resolved error cancels sibling before deadline and preserves error",
+      "failedRpc": "list_management_filter_options_v1",
+      "requests": 3,
+      "siblingAborted": true,
+      "errorCode": "57014",
+      "passed": true
+    },
+    {
+      "check": "shared deadline uses no additional timer and callback starts synchronously",
+      "timerCalls": 0,
+      "passed": true
+    },
+    {
+      "check": "already expired shared deadline preserves normalized error and never starts read",
+      "calls": 0,
+      "passed": true
+    }
+  ]
+}

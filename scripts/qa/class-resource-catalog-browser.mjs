@@ -27,13 +27,19 @@ for (const width of [1440, 390]) {
   const token = Buffer.from(JSON.stringify({ alg: 'HS256', typ: 'JWT' })).toString('base64url') + '.' + Buffer.from(JSON.stringify({ sub: user.id, exp: 2000000000, role: 'authenticated' })).toString('base64url') + '.fixture';
   await context.addInitScript(({ user, token }) => localStorage.setItem('sb-tips-internal-fixture-auth-token', JSON.stringify({ access_token: token, refresh_token: 'fixture-only', token_type: 'bearer', expires_in: 3600, expires_at: 2000000000, user })), { user, token });
   const report = { width, unhandled: [], errors: [], reads: [], checks: [] };
-  let mode = 'normal', releaseCatalog;
+  let mode = 'normal', releaseCatalog, releaseAuth;
+  let authRefreshes = 0;
   await context.routeWebSocket(/.*/, socket => socket.close());
   await context.route('**/*', async route => {
     const req = route.request(), url = new URL(req.url());
     if (url.hostname === 'tips-internal-fixture.supabase.co' || url.pathname.startsWith('/api/')) {
       let args = {}; try { args = req.postDataJSON() || {}; } catch {}
       let data;
+      if (url.pathname.endsWith('/auth/v1/token') && process.env.QA_AUTH_DEADLINE === '1') {
+        authRefreshes++;
+        if (mode === 'auth-blocked') await new Promise(resolve => { releaseAuth = resolve; });
+        return route.fulfill({ json: { access_token: token, refresh_token: 'fixture-only', token_type: 'bearer', expires_in: 3600, expires_at: 2000000000, user } }).catch(() => {});
+      }
       if (/\/(teacher_catalogs|classroom_catalogs)$/.test(url.pathname)) {
         assert.equal(req.method(), 'GET');
         report.reads.push(url.pathname + url.search);
@@ -165,6 +171,42 @@ for (const width of [1440, 390]) {
       await pick('선생님', '영어 미배정 교사');
       assert.match(await page.locator('#class-schedule-slot-0-teacher').innerText(), /영어 미배정 교사/);
       report.checks.push('legacy edit selection preserved; stale detail catalog cannot overwrite authoritative candidates');
+      if (process.env.QA_AUTH_DEADLINE === '1') {
+        await page.goto(base + '/admin/classes');
+        await page.getByRole('button', { name: '수업 등록', exact: true }).waitFor();
+        await page.waitForFunction(() => document.body.innerText.includes('합성 기존반'));
+        mode = 'auth-blocked';
+        await page.evaluate(() => {
+          const key = 'sb-tips-internal-fixture-auth-token';
+          const session = JSON.parse(localStorage.getItem(key));
+          session.expires_at = 1;
+          localStorage.setItem(key, JSON.stringify(session));
+        });
+        const initialReads = report.reads.length, initialRefreshes = authRefreshes;
+        const started = Date.now();
+        await page.getByRole('button', { name: '수업 등록', exact: true }).click();
+        await page.locator('#classes-form-name').fill('인증 지연 중 초안');
+        await dialog.getByRole('button', { name: '다시 시도', exact: true }).waitFor({ timeout: 12000 });
+        const elapsedMs = Date.now() - started;
+        assert.ok(elapsedMs < 10000, `recovery exceeded the eight-second budget plus UI tolerance: ${elapsedMs}`);
+        assert.equal(authRefreshes - initialRefreshes, 1, 'one shared refresh while catalogs wait for authentication');
+        assert.equal(report.reads.length, initialReads, 'no catalog HTTP request before auth completes');
+        assert.equal(await dialog.getByRole('button', { name: '등록 저장', exact: true }).isDisabled(), true);
+        await page.screenshot({ path: `${out}/auth-timeout-${width}.png` });
+        mode = 'normal'; releaseAuth();
+        await page.waitForTimeout(250);
+        assert.equal(report.reads.length, initialReads, 'expired reads stay cancelled after late auth completion');
+        await dialog.getByRole('button', { name: '다시 시도', exact: true }).click();
+        await ready();
+        assert.equal(await page.locator('#classes-form-name').inputValue(), '인증 지연 중 초안');
+        await pick('선생님', '영어 미배정 교사');
+        await page.waitForTimeout(100);
+        assert.match(await page.locator('#classes-form-teacher').innerText(), /영어 미배정 교사/);
+        assert.equal(report.reads.length - initialReads, 2, 'only the explicitly retried teacher/room pair reaches HTTP');
+        report.authDeadline = { elapsedMs, refreshes: authRefreshes - initialRefreshes, catalogReads: report.reads.length - initialReads };
+        report.checks.push('real SDK refresh blocked before REST; error within read budget (SDK lock errors may settle sooner); late auth cannot dispatch expired reads; manual retry preserves draft and selection');
+        await page.screenshot({ path: `${out}/auth-recovered-${width}.png` });
+      }
       assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
       report.passed = true;
     }

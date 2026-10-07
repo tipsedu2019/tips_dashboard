@@ -235,11 +235,9 @@ test("management initial reads return rows before metadata and cancel every quer
   assert.ok(calls.filter(([name]) => name === "abortSignal").every(([, signal]) => signal.aborted));
   statsGate.resolve({ data: { total: 37, byStatus: { "재원": 37 } }, error: null });
   filterOptionsGate.resolve({ data: { school: ["팁스중"] }, error: null });
-  assert.deepEqual(await result.metadata, {
-    ok: true,
-    stats: { total: 37, byStatus: { "재원": 37 } },
-    filterOptions: { school: ["팁스중"] },
-  });
+  const cancelledMetadata = await result.metadata;
+  assert.equal(cancelledMetadata.ok, false, "late metadata must not become a successful snapshot after cancellation");
+  assert.equal(cancelledMetadata.error.name, "AbortError");
 });
 
 test("management metadata failures settle without discarding a loaded page", async () => {
@@ -318,14 +316,14 @@ test("same-scope class reads with different caller signals keep independent in-f
   ].includes(name));
   assert.equal(primarySignals.length, 6);
 
+  const firstCancelled = assert.rejects(first, { name: "AbortError" });
   firstController.abort();
+  await firstCancelled;
   assert.equal(primarySignals.filter(({ signal }) => signal.aborted).length, 3);
   assert.equal(primarySignals.filter(({ signal }) => !signal.aborted).length, 3);
-  secondController.abort();
-  assert.ok(primarySignals.every(({ signal }) => signal.aborted));
-
   for (const gate of listGates) gate.resolve();
-  await Promise.all([first, second]);
+  const current = await second;
+  assert.deepEqual(current.page.rows, [{ id: "class-2" }], "one cancelled consumer must not cancel another");
 });
 
 test("canonical class replay gives a new caller independently cancellable metadata", async () => {
@@ -693,4 +691,27 @@ test("management hook and UI keep list reads bounded while details and relation 
   assert.match(serviceSource, /\.select\("id,name,subject,grade,status,schedule,teacher,room"\)/);
   assert.match(serviceSource, /\.select\("id,name,school,grade,status,recent_issue"\)/);
   assert.match(serviceSource, /\.limit\(30\)[\s\S]*?\.abortSignal\(AbortSignal\.timeout\(8_000\)\)[\s\S]*?\.retry\(false\)/);
+});
+
+
+test("metadata SQL error settles immediately and aborts a stalled sibling without losing loaded rows", async () => {
+  const calls = [], sibling = deferred(), signals = [];
+  const failure = { code: "57014", message: "synthetic statement timeout" };
+  const client = { rpc(name) {
+    const result = name === "list_management_page_v1" ? { data: [{ id: "student", row_data: { id: "student" } }] }
+      : { error: failure };
+    return { abortSignal(signal) { signals.push({ name, signal }); return this; }, retry(value) {
+      calls.push([name, value]);
+      return name === "list_management_filter_options_v1" ? sibling.promise : Promise.resolve(result);
+    } };
+  } };
+  const result = await createManagementReadService({ supabase: client }).loadPage({ kind: "students", filters: { kind: "students", search: "", status: null, schoolCategory: null, school: null, grade: null }, limit: 10 });
+  const metadata = await result.metadata;
+  assert.equal(metadata.error, failure);
+  assert.deepEqual(result.page.rows, [{ id: "student" }]);
+  assert.equal(signals.find(({ name }) => name === "list_management_filter_options_v1").signal.aborted, true);
+  sibling.resolve({ data: { school: ["late"] } });
+  assert.equal((await result.metadata).error, failure);
+  assert.equal(calls.length, 3);
+  assert.ok(calls.every(([, retry]) => retry === false));
 });

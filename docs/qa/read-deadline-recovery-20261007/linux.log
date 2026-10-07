@@ -1,0 +1,2182 @@
+TAP version 13
+# Subtest: saving a class as closed commits metadata and the existing roster close through one gateway
+ok 1 - saving a class as closed commits metadata and the existing roster close through one gateway
+  ---
+  duration_ms: 2.2305
+  type: 'test'
+  ...
+# Subtest: legacy class archive entry point also uses the atomic close RPC
+ok 2 - legacy class archive entry point also uses the atomic close RPC
+  ---
+  duration_ms: 0.3345
+  type: 'test'
+  ...
+# Subtest: an ambiguous class close retry reuses the same request key
+ok 3 - an ambiguous class close retry reuses the same request key
+  ---
+  duration_ms: 0.593042
+  type: 'test'
+  ...
+# Subtest: a post-close cache refresh retry replays the committed request key
+ok 4 - a post-close cache refresh retry replays the committed request key
+  ---
+  duration_ms: 0.292917
+  type: 'test'
+  ...
+# Subtest: a successful close keeps its receipt key for an outer workflow retry
+ok 5 - a successful close keeps its receipt key for an outer workflow retry
+  ---
+  duration_ms: 0.237042
+  type: 'test'
+  ...
+# Subtest: the detail save flow does not rewrite removed period group memberships
+ok 6 - the detail save flow does not rewrite removed period group memberships
+  ---
+  duration_ms: 9.380708
+  type: 'test'
+  ...
+# Subtest: class creation commits any explicit group memberships through one atomic RPC
+ok 7 - class creation commits any explicit group memberships through one atomic RPC
+  ---
+  duration_ms: 63.951334
+  type: 'test'
+  ...
+# Subtest: class creation accepts no period and sends an empty group list through the same atomic RPC
+ok 8 - class creation accepts no period and sends an empty group list through the same atomic RPC
+  ---
+  duration_ms: 1.131208
+  type: 'test'
+  ...
+# Subtest: explicit class group replacement continues to use the atomic membership RPC
+ok 9 - explicit class group replacement continues to use the atomic membership RPC
+  ---
+  duration_ms: 0.536708
+  type: 'test'
+  ...
+# Subtest: class creation surfaces a failed response without starting a second write
+ok 10 - class creation surfaces a failed response without starting a second write
+  ---
+  duration_ms: 0.57875
+  type: 'test'
+  ...
+# Subtest: count-only class rows load and show the registered roster when the badge opens
+ok 11 - count-only class rows load and show the registered roster when the badge opens
+  ---
+  duration_ms: 330.302292
+  type: 'test'
+  ...
+# Subtest: class form reads all visible catalog pages beyond 200, independent of existing classes
+ok 12 - class form reads all visible catalog pages beyond 200, independent of existing classes
+  ---
+  duration_ms: 2.837292
+  type: 'test'
+  ...
+# Subtest: successful empty catalogs are distinct from read failures
+ok 13 - successful empty catalogs are distinct from read failures
+  ---
+  duration_ms: 1.475875
+  type: 'test'
+  ...
+# Subtest: later-page errors never publish a partial catalog
+ok 14 - later-page errors never publish a partial catalog
+  ---
+  duration_ms: 0.755583
+  type: 'test'
+  ...
+# Subtest: invalid and overlapping pages fail closed
+ok 15 - invalid and overlapping pages fail closed
+  ---
+  duration_ms: 1.805625
+  type: 'test'
+  ...
+# Subtest: closing a form aborts catalog reads even when transport delivers a late success
+ok 16 - closing a form aborts catalog reads even when transport delivers a late success
+  ---
+  duration_ms: 0.201083
+  type: 'test'
+  ...
+# Subtest: class student rosters never use raw UUIDs as display names
+ok 17 - class student rosters never use raw UUIDs as display names
+  ---
+  duration_ms: 41.420125
+  type: 'test'
+  ...
+# Subtest: management roster writes are readiness-gated and use the atomic roster RPC
+ok 18 - management roster writes are readiness-gated and use the atomic roster RPC
+  ---
+  duration_ms: 4.369875
+  type: 'test'
+  ...
+# Subtest: class management accepts legacy class detail tab URLs without rendering detail tabs
+ok 19 - class management accepts legacy class detail tab URLs without rendering detail tabs
+  ---
+  duration_ms: 10.157416
+  type: 'test'
+  ...
+# Subtest: class management keeps progress out while allowing direct textbook links in the detail dialog
+ok 20 - class management keeps progress out while allowing direct textbook links in the detail dialog
+  ---
+  duration_ms: 15.939459
+  type: 'test'
+  ...
+# Subtest: management pickers share labeled compact filter surfaces and textbook candidates omit publisher pills
+ok 21 - management pickers share labeled compact filter surfaces and textbook candidates omit publisher pills
+  ---
+  duration_ms: 13.0285
+  type: 'test'
+  ...
+# Subtest: student class picker shows class subject metadata through the shared combobox
+ok 22 - student class picker shows class subject metadata through the shared combobox
+  ---
+  duration_ms: 8.39075
+  type: 'test'
+  ...
+# Subtest: student class picker narrows by subject first and grade second
+ok 23 - student class picker narrows by subject first and grade second
+  ---
+  duration_ms: 17.978375
+  type: 'test'
+  ...
+# Subtest: class student picker narrows by grade first and school second
+ok 24 - class student picker narrows by grade first and school second
+  ---
+  duration_ms: 4.276125
+  type: 'test'
+  ...
+# Subtest: class textbook picker follows subject-detail then school-grade order and matches the roster selector surface
+ok 25 - class textbook picker follows subject-detail then school-grade order and matches the roster selector surface
+  ---
+  duration_ms: 6.214917
+  type: 'test'
+  ...
+# Subtest: curriculum session summaries preserve per-textbook ranges for official class details
+ok 26 - curriculum session summaries preserve per-textbook ranges for official class details
+  ---
+  duration_ms: 4.51625
+  type: 'test'
+  ...
+# Subtest: class detail ignores lesson-design section targets owned by curriculum planning
+ok 27 - class detail ignores lesson-design section targets owned by curriculum planning
+  ---
+  duration_ms: 5.115125
+  type: 'test'
+  ...
+# Subtest: class detail tab changes preserve only student row targets
+ok 28 - class detail tab changes preserve only student row targets
+  ---
+  duration_ms: 3.746375
+  type: 'test'
+  ...
+# Subtest: class management detail no longer owns lesson-design navigation
+ok 29 - class management detail no longer owns lesson-design navigation
+  ---
+  duration_ms: 6.755625
+  type: 'test'
+  ...
+# Subtest: class student detail tab shows operational roster context and waitlist promotion
+ok 30 - class student detail tab shows operational roster context and waitlist promotion
+  ---
+  duration_ms: 7.131291
+  type: 'test'
+  ...
+# Subtest: class roster student names confirm before opening student detail
+ok 31 - class roster student names confirm before opening student detail
+  ---
+  duration_ms: 3.185541
+  type: 'test'
+  ...
+# Subtest: class detail first screen omits counseling surfaces delegated to MakeEdu
+ok 32 - class detail first screen omits counseling surfaces delegated to MakeEdu
+  ---
+  duration_ms: 3.996458
+  type: 'test'
+  ...
+# Subtest: class detail shows basic information and student management in one continuous screen
+ok 33 - class detail shows basic information and student management in one continuous screen
+  ---
+  duration_ms: 3.537333
+  type: 'test'
+  ...
+# Subtest: class detail close ignores stale classId route state until the URL is cleared
+ok 34 - class detail close ignores stale classId route state until the URL is cleared
+  ---
+  duration_ms: 4.9625
+  type: 'test'
+  ...
+# Subtest: student detail close ignores stale studentId route state until the URL is cleared
+ok 35 - student detail close ignores stale studentId route state until the URL is cleared
+  ---
+  duration_ms: 2.581208
+  type: 'test'
+  ...
+# Subtest: class management no longer renders schedule detail content
+ok 36 - class management no longer renders schedule detail content
+  ---
+  duration_ms: 5.241917
+  type: 'test'
+  ...
+# Subtest: class management shares curriculum summary data without dashboard warning strips
+ok 37 - class management shares curriculum summary data without dashboard warning strips
+  ---
+  duration_ms: 3.057459
+  type: 'test'
+  ...
+# Subtest: class save failure makes preserved data explicit
+ok 38 - class save failure makes preserved data explicit
+  ---
+  duration_ms: 1.801959
+  type: 'test'
+  ...
+# Subtest: class management does not route student issues into dashboard counseling
+ok 39 - class management does not route student issues into dashboard counseling
+  ---
+  duration_ms: 3.630709
+  type: 'test'
+  ...
+# Subtest: class student roster still focuses requested student rows
+ok 40 - class student roster still focuses requested student rows
+  ---
+  duration_ms: 2.7525
+  type: 'test'
+  ...
+# Subtest: class student add control uses one picker and confirms direct enrolled or waitlist actions
+ok 41 - class student add control uses one picker and confirms direct enrolled or waitlist actions
+  ---
+  duration_ms: 3.744375
+  type: 'test'
+  ...
+# Subtest: class detail no longer renders operational warning panels
+ok 42 - class detail no longer renders operational warning panels
+  ---
+  duration_ms: 3.159083
+  type: 'test'
+  ...
+# Subtest: class detail shares one reachable save area across desktop and mobile
+ok 43 - class detail shares one reachable save area across desktop and mobile
+  ---
+  duration_ms: 7.062042
+  type: 'test'
+  ...
+# Subtest: class official detail dialog stacks above sticky database headers
+ok 44 - class official detail dialog stacks above sticky database headers
+  ---
+  duration_ms: 9.738292
+  type: 'test'
+  ...
+# Subtest: class detail summary replaces the visible dialog title and keeps close action sticky
+ok 45 - class detail summary replaces the visible dialog title and keeps close action sticky
+  ---
+  duration_ms: 8.816959
+  type: 'test'
+  ...
+# Subtest: class management database keeps list filters in the URL for cross-view returns
+ok 46 - class management database keeps list filters in the URL for cross-view returns
+  ---
+  duration_ms: 4.711833
+  type: 'test'
+  ...
+# Subtest: class official summary removes redundant identity and state badges
+ok 47 - class official summary removes redundant identity and state badges
+  ---
+  duration_ms: 4.421708
+  type: 'test'
+  ...
+# Subtest: class database groups matching schedule times and stacks multi-value resources
+ok 48 - class database groups matching schedule times and stacks multi-value resources
+  ---
+  duration_ms: 6.278542
+  type: 'test'
+  ...
+# Subtest: class official summary roster count jumps to the student roster section
+ok 49 - class official summary roster count jumps to the student roster section
+  ---
+  duration_ms: 10.050917
+  type: 'test'
+  ...
+# Subtest: class detail basic fields use the requested operator order
+ok 50 - class detail basic fields use the requested operator order
+  ---
+  duration_ms: 14.040583
+  type: 'test'
+  ...
+# Subtest: class detail basic section uses structured schedule slots instead of free-text teacher time room fields
+ok 51 - class detail basic section uses structured schedule slots instead of free-text teacher time room fields
+  ---
+  duration_ms: 6.501583
+  type: 'test'
+  ...
+# Subtest: class schedule slot editor keeps blank added rows and uses the makeup time picker pattern
+ok 52 - class schedule slot editor keeps blank added rows and uses the makeup time picker pattern
+  ---
+  duration_ms: 12.1605
+  type: 'test'
+  ...
+# Subtest: class tuition field edits in ten-thousand won units
+ok 53 - class tuition field edits in ten-thousand won units
+  ---
+  duration_ms: 12.787
+  type: 'test'
+  ...
+# Subtest: class capacity uses the same compact stepper pattern as tuition
+ok 54 - class capacity uses the same compact stepper pattern as tuition
+  ---
+  duration_ms: 4.692375
+  type: 'test'
+  ...
+# Subtest: class roster uses explicit enrollment labels
+ok 55 - class roster uses explicit enrollment labels
+  ---
+  duration_ms: 3.081167
+  type: 'test'
+  ...
+# Subtest: class schedule add copies the previous row and advances only the day
+ok 56 - class schedule add copies the previous row and advances only the day
+  ---
+  duration_ms: 4.484583
+  type: 'test'
+  ...
+# Subtest: class schedule rows keep all five input columns equal to prevent overlap
+ok 57 - class schedule rows keep all five input columns equal to prevent overlap
+  ---
+  duration_ms: 4.521541
+  type: 'test'
+  ...
+# Subtest: class schedule parser does not treat classroom aliases as teachers
+ok 58 - class schedule parser does not treat classroom aliases as teachers
+  ---
+  duration_ms: 0.855292
+  type: 'test'
+  ...
+# Subtest: class schedule classroom choices are narrowed by the selected subject
+ok 59 - class schedule classroom choices are narrowed by the selected subject
+  ---
+  duration_ms: 5.666583
+  type: 'test'
+  ...
+# Subtest: class official summary hides active textbook progress status
+ok 60 - class official summary hides active textbook progress status
+  ---
+  duration_ms: 2.9425
+  type: 'test'
+  ...
+# Subtest: class official summary omits repeated schedule teacher and classroom details
+ok 61 - class official summary omits repeated schedule teacher and classroom details
+  ---
+  duration_ms: 67.76775
+  type: 'test'
+  ...
+# Subtest: class official summary hides next lesson and current session context
+ok 62 - class official summary hides next lesson and current session context
+  ---
+  duration_ms: 4.344208
+  type: 'test'
+  ...
+# Subtest: class official summary omits the counseling decision strip
+ok 63 - class official summary omits the counseling decision strip
+  ---
+  duration_ms: 8.641959
+  type: 'test'
+  ...
+# Subtest: class management ends classes through the status field and keeps audit data off the detail surface
+ok 64 - class management ends classes through the status field and keeps audit data off the detail surface
+  ---
+  duration_ms: 13.247
+  type: 'test'
+  ...
+# Subtest: class counseling view is not rendered in the dashboard
+ok 65 - class counseling view is not rendered in the dashboard
+  ---
+  duration_ms: 6.617875
+  type: 'test'
+  ...
+# Subtest: class records use curriculum textbook count when class textbook ids are missing
+ok 66 - class records use curriculum textbook count when class textbook ids are missing
+  ---
+  duration_ms: 0.405291
+  type: 'test'
+  ...
+# Subtest: class detail hides the official class type from dashboard editing surfaces
+ok 67 - class detail hides the official class type from dashboard editing surfaces
+  ---
+  duration_ms: 12.403375
+  type: 'test'
+  ...
+# Subtest: class teacher choices are narrowed by the selected subject
+ok 68 - class teacher choices are narrowed by the selected subject
+  ---
+  duration_ms: 15.642209
+  type: 'test'
+  ...
+# Subtest: student recent issues stay out of dashboard class counseling surfaces
+ok 69 - student recent issues stay out of dashboard class counseling surfaces
+  ---
+  duration_ms: 14.441167
+  type: 'test'
+  ...
+# Subtest: normalized defaults preserve slot and catalog IDs through the five-column editor
+ok 70 - normalized defaults preserve slot and catalog IDs through the five-column editor
+  ---
+  duration_ms: 1.11725
+  type: 'test'
+  ...
+# Subtest: normalized defaults retain full comma-containing catalog names
+ok 71 - normalized defaults retain full comma-containing catalog names
+  ---
+  duration_ms: 0.16225
+  type: 'test'
+  ...
+# Subtest: legacy schedule consumer retains per-slot teacher and room after normalized save projection
+ok 72 - legacy schedule consumer retains per-slot teacher and room after normalized save projection
+  ---
+  duration_ms: 2.254958
+  type: 'test'
+  ...
+# Subtest: projected mixed resource slots keep assigned and unassigned states in the legacy parser
+ok 73 - projected mixed resource slots keep assigned and unassigned states in the legacy parser
+  ---
+  duration_ms: 0.349042
+  type: 'test'
+  ...
+# Subtest: literal absence labels and former escape tokens remain assigned names
+ok 74 - literal absence labels and former escape tokens remain assigned names
+  ---
+  duration_ms: 0.285625
+  type: 'test'
+  ...
+# Subtest: normalized metadata writes omit schedule-owned legacy columns
+ok 75 - normalized metadata writes omit schedule-owned legacy columns
+  ---
+  duration_ms: 0.211292
+  type: 'test'
+  ...
+# Subtest: management service calls defaults, save, and initialization RPCs with revision and idempotency keys
+ok 76 - management service calls defaults, save, and initialization RPCs with revision and idempotency keys
+  ---
+  duration_ms: 64.448083
+  type: 'test'
+  ...
+# Subtest: a missing defaults RPC keeps legacy class creation available
+ok 77 - a missing defaults RPC keeps legacy class creation available
+  ---
+  duration_ms: 0.442667
+  type: 'test'
+  ...
+# Subtest: actual bulk merged-row save resolves each class mode before status update
+ok 78 - actual bulk merged-row save resolves each class mode before status update
+  ---
+  duration_ms: 1.548792
+  type: 'test'
+  ...
+# Subtest: actual bulk merged-row save resolves each class mode before name update
+ok 79 - actual bulk merged-row save resolves each class mode before name update
+  ---
+  duration_ms: 1.922167
+  type: 'test'
+  ...
+# Subtest: bulk save fails closed if authoritative storage mode cannot be read
+ok 80 - bulk save fails closed if authoritative storage mode cannot be read
+  ---
+  duration_ms: 0.788292
+  type: 'test'
+  ...
+# Subtest: class roster search keeps membership counts and drafts while filtering enrolled and waiting students
+ok 81 - class roster search keeps membership counts and drafts while filtering enrolled and waiting students
+  ---
+  duration_ms: 2006.098876
+  type: 'test'
+  ...
+# Subtest: class save failure appears once beside save, retains the draft, and retries the same intent
+ok 82 - class save failure appears once beside save, retains the draft, and retries the same intent
+  ---
+  duration_ms: 1210.99125
+  type: 'test'
+  ...
+# Subtest: current class loads normalized schedule and saves its own revision and slots
+ok 83 - current class loads normalized schedule and saves its own revision and slots
+  ---
+  duration_ms: 985.540126
+  type: 'test'
+  ...
+# Subtest: normalized schedule rejects same-tick duplicate saves for one class and releases it on failure
+ok 84 - normalized schedule rejects same-tick duplicate saves for one class and releases it on failure
+  ---
+  duration_ms: 485.816541
+  type: 'test'
+  ...
+# Subtest: normalized schedule locks the class across reopening and keeps independent classes writable
+ok 85 - normalized schedule locks the class across reopening and keeps independent classes writable
+  ---
+  duration_ms: 880.972751
+  type: 'test'
+  ...
+# Subtest: autofocused student create form returns to its opening button after discarding
+ok 86 - autofocused student create form returns to its opening button after discarding
+  ---
+  duration_ms: 352.677375
+  type: 'test'
+  ...
+# Subtest: dirty student close keeps the draft until explicit discard and restores focus after continuing
+ok 87 - dirty student close keeps the draft until explicit discard and restores focus after continuing
+  ---
+  duration_ms: 533.524167
+  type: 'test'
+  ...
+# Subtest: unchanged and trim-equivalent student drafts close without confirmation
+ok 88 - unchanged and trim-equivalent student drafts close without confirmation
+  ---
+  duration_ms: 458.637501
+  type: 'test'
+  ...
+# Subtest: dirty student return navigation waits for discard and keeps the draft after cancelling
+ok 89 - dirty student return navigation waits for discard and keeps the draft after cancelling
+  ---
+  duration_ms: 659.622917
+  type: 'test'
+  ...
+# Subtest: opening and closing a detail records its URL immediately while preserving list context
+ok 90 - opening and closing a detail records its URL immediately while preserving list context
+  ---
+  duration_ms: 512.393041
+  type: 'test'
+  ...
+# Subtest: same-document Back and Forward stop before route restoration and require a fresh decision
+ok 91 - same-document Back and Forward stop before route restoration and require a fresh decision
+  ---
+  duration_ms: 477.869584
+  type: 'test'
+  ...
+# Subtest: captured in-app links share the dirty confirmation but modifier clicks remain independent
+ok 92 - captured in-app links share the dirty confirmation but modifier clicks remain independent
+  ---
+  duration_ms: 650.095
+  type: 'test'
+  ...
+# Subtest: application-wide command navigation uses the same draft decision and releases on unmount
+ok 93 - application-wide command navigation uses the same draft decision and releases on unmount
+  ---
+  duration_ms: 751.032334
+  type: 'test'
+  ...
+# Subtest: a failed save keeps discard protection and a successful retry accepts only its submitted draft
+ok 94 - a failed save keeps discard protection and a successful retry accepts only its submitted draft
+  ---
+  duration_ms: 1019.078876
+  type: 'test'
+  ...
+# Subtest: edits typed during an accepted save remain protected as a newer draft
+ok 95 - edits typed during an accepted save remain protected as a newer draft
+  ---
+  duration_ms: 592.716208
+  type: 'test'
+  ...
+# Subtest: pending save coverage belongs to its original detail lifetime, including reopening the same student
+ok 96 - pending save coverage belongs to its original detail lifetime, including reopening the same student
+  ---
+  duration_ms: 576.764542
+  type: 'test'
+  ...
+# Subtest: pending save coverage preserves later student edits, including reverting to 새로운 후속 입력
+ok 97 - pending save coverage preserves later student edits, including reverting to 새로운 후속 입력
+  ---
+  duration_ms: 512.522292
+  type: 'test'
+  ...
+# Subtest: pending save coverage preserves later student edits, including reverting to 김학생
+ok 98 - pending save coverage preserves later student edits, including reverting to 김학생
+  ---
+  duration_ms: 635.6355
+  type: 'test'
+  ...
+# Subtest: pending save coverage locks student creation fields and restores them after failure
+ok 99 - pending save coverage locks student creation fields and restores them after failure
+  ---
+  duration_ms: 429.208667
+  type: 'test'
+  ...
+# Subtest: pending save coverage locks classes creation controls while preserving exit
+ok 100 - pending save coverage locks classes creation controls while preserving exit
+  ---
+  duration_ms: 423.62125
+  type: 'test'
+  ...
+# Subtest: pending save coverage locks textbooks creation controls while preserving exit
+ok 101 - pending save coverage locks textbooks creation controls while preserving exit
+  ---
+  duration_ms: 359.819791
+  type: 'test'
+  ...
+# Subtest: class creation protects free-text schedule drafts before their values can be normalized
+ok 102 - class creation protects free-text schedule drafts before their values can be normalized
+  ---
+  duration_ms: 444.110542
+  type: 'test'
+  ...
+# Subtest: pending save coverage never includes a dirty form in a relation mutation
+ok 103 - pending save coverage never includes a dirty form in a relation mutation
+  ---
+  duration_ms: 377.725709
+  type: 'test'
+  ...
+# Subtest: pending save coverage does not follow a normalized schedule into a reopened class
+ok 104 - pending save coverage does not follow a normalized schedule into a reopened class
+  ---
+  duration_ms: 589.686833
+  type: 'test'
+  ...
+# Subtest: pending save coverage for only a normalized schedule leaves class fields protected
+ok 105 - pending save coverage for only a normalized schedule leaves class fields protected
+  ---
+  duration_ms: 411.303667
+  type: 'test'
+  ...
+# Subtest: pending save coverage preserves later schedule edits, including reverting to 19:00
+ok 106 - pending save coverage preserves later schedule edits, including reverting to 19:00
+  ---
+  duration_ms: 331.661833
+  type: 'test'
+  ...
+# Subtest: pending save coverage preserves later schedule edits, including reverting to 17:00
+ok 107 - pending save coverage preserves later schedule edits, including reverting to 17:00
+  ---
+  duration_ms: 278.174125
+  type: 'test'
+  ...
+# Subtest: pending save coverage for class fields excludes its unsaved normalized schedule
+ok 108 - pending save coverage for class fields excludes its unsaved normalized schedule
+  ---
+  duration_ms: 282.119125
+  type: 'test'
+  ...
+# Subtest: pending save coverage combines separately submitted class fields and schedule
+ok 109 - pending save coverage combines separately submitted class fields and schedule
+  ---
+  duration_ms: 357.897667
+  type: 'test'
+  ...
+# Subtest: pending save coverage compares legacy schedule submissions canonically
+ok 110 - pending save coverage compares legacy schedule submissions canonically
+  ---
+  duration_ms: 264.018
+  type: 'test'
+  ...
+# Subtest: untouched normalized defaults do not become a dirty form after asynchronous normalization
+ok 111 - untouched normalized defaults do not become a dirty form after asynchronous normalization
+  ---
+  duration_ms: 225.15525
+  type: 'test'
+  ...
+# Subtest: normalized schedule saving clears only the schedule draft, preserving unsaved class fields
+ok 112 - normalized schedule saving clears only the schedule draft, preserving unsaved class fields
+  ---
+  duration_ms: 261.139625
+  type: 'test'
+  ...
+# Subtest: saving only the normalized schedule permits a clean close
+ok 113 - saving only the normalized schedule permits a clean close
+  ---
+  duration_ms: 339.800542
+  type: 'test'
+  ...
+# Subtest: saving class information does not clear an unsaved normalized schedule
+ok 114 - saving class information does not clear an unsaved normalized schedule
+  ---
+  duration_ms: 250.989
+  type: 'test'
+  ...
+# Subtest: legacy schedule drafts compare canonical slots and accept a completed general save
+ok 115 - legacy schedule drafts compare canonical slots and accept a completed general save
+  ---
+  duration_ms: 314.639125
+  type: 'test'
+  ...
+# Subtest: new student drafts require explicit discard while untouched creation can close
+ok 116 - new student drafts require explicit discard while untouched creation can close
+  ---
+  duration_ms: 201.900584
+  type: 'test'
+  ...
+# Subtest: late student 저장 success cannot replace the next detail or publish its status
+ok 117 - late student 저장 success cannot replace the next detail or publish its status
+  ---
+  duration_ms: 252.587125
+  type: 'test'
+  ...
+# Subtest: late student 저장 failure cannot replace the next detail or publish its status
+ok 118 - late student 저장 failure cannot replace the next detail or publish its status
+  ---
+  duration_ms: 248.183875
+  type: 'test'
+  ...
+# Subtest: late student 대기 전환 success cannot replace the next detail or publish its status
+ok 119 - late student 대기 전환 success cannot replace the next detail or publish its status
+  ---
+  duration_ms: 237.307125
+  type: 'test'
+  ...
+# Subtest: late student 대기 전환 failure cannot replace the next detail or publish its status
+ok 120 - late student 대기 전환 failure cannot replace the next detail or publish its status
+  ---
+  duration_ms: 259.33325
+  type: 'test'
+  ...
+# Subtest: late student 수강 해제 success cannot replace the next detail or publish its status
+ok 121 - late student 수강 해제 success cannot replace the next detail or publish its status
+  ---
+  duration_ms: 293.970375
+  type: 'test'
+  ...
+# Subtest: late student 수강 해제 failure cannot replace the next detail or publish its status
+ok 122 - late student 수강 해제 failure cannot replace the next detail or publish its status
+  ---
+  duration_ms: 274.75625
+  type: 'test'
+  ...
+# Subtest: late create success cannot close a new detail or publish its status
+ok 123 - late create success cannot close a new detail or publish its status
+  ---
+  duration_ms: 196.989291
+  type: 'test'
+  ...
+# Subtest: late create failure cannot close a new detail or publish its status
+ok 124 - late create failure cannot close a new detail or publish its status
+  ---
+  duration_ms: 198.499
+  type: 'test'
+  ...
+# Subtest: reopening the same student isolates its new draft from the previous save
+ok 125 - reopening the same student isolates its new draft from the previous save
+  ---
+  duration_ms: 193.112167
+  type: 'test'
+  ...
+# Subtest: closing during the saved row refresh prevents publication into the next detail
+ok 126 - closing during the saved row refresh prevents publication into the next detail
+  ---
+  duration_ms: 261.337125
+  type: 'test'
+  ...
+# Subtest: late relation addition keeps the new detail's relation candidate intact
+ok 127 - late relation addition keeps the new detail's relation candidate intact
+  ---
+  duration_ms: 272.738125
+  type: 'test'
+  ...
+# Subtest: late class initialization create finishes its write without closing the next detail
+ok 128 - late class initialization create finishes its write without closing the next detail
+  ---
+  duration_ms: 228.772167
+  type: 'test'
+  ...
+# Subtest: late class initialization retry finishes its write without closing the next detail
+ok 129 - late class initialization retry finishes its write without closing the next detail
+  ---
+  duration_ms: 253.813375
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after account during create
+ok 130 - class creation stops follow-up RPCs after account during create
+  ---
+  duration_ms: 232.115542
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after role during create
+ok 131 - class creation stops follow-up RPCs after role during create
+  ---
+  duration_ms: 246.164542
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after logout during create
+ok 132 - class creation stops follow-up RPCs after logout during create
+  ---
+  duration_ms: 196.130041
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after unmount during create
+ok 133 - class creation stops follow-up RPCs after unmount during create
+  ---
+  duration_ms: 200.145625
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after account during defaults
+ok 134 - class creation stops follow-up RPCs after account during defaults
+  ---
+  duration_ms: 203.284334
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after role during defaults
+ok 135 - class creation stops follow-up RPCs after role during defaults
+  ---
+  duration_ms: 277.877541
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after logout during defaults
+ok 136 - class creation stops follow-up RPCs after logout during defaults
+  ---
+  duration_ms: 305.427666
+  type: 'test'
+  ...
+# Subtest: class creation stops follow-up RPCs after unmount during defaults
+ok 137 - class creation stops follow-up RPCs after unmount during defaults
+  ---
+  duration_ms: 264.574917
+  type: 'test'
+  ...
+# Subtest: student detail save rejects same-tick duplicate and bulk writes, then retries the preserved draft after failure
+ok 138 - student detail save rejects same-tick duplicate and bulk writes, then retries the preserved draft after failure
+  ---
+  duration_ms: 258.440833
+  type: 'test'
+  ...
+# Subtest: bulk update owns the same mutation slot as detail save and can retry after failure
+ok 139 - bulk update owns the same mutation slot as detail save and can retry after failure
+  ---
+  duration_ms: 264.941917
+  type: 'test'
+  ...
+# Subtest: create submit rejects duplicate and competing mutations and releases its slot on failure
+ok 140 - create submit rejects duplicate and competing mutations and releases its slot on failure
+  ---
+  duration_ms: 295.264791
+  type: 'test'
+  ...
+# Subtest: confirmed deletion rejects duplicate confirmation and releases the slot for a new confirmation after failure
+ok 141 - confirmed deletion rejects duplicate confirmation and releases the slot for a new confirmation after failure
+  ---
+  duration_ms: 170.25975
+  type: 'test'
+  ...
+# Subtest: 대기 전환 serializes relation writes with detail save and can retry after failure
+ok 142 - 대기 전환 serializes relation writes with detail save and can retry after failure
+  ---
+  duration_ms: 232.838375
+  type: 'test'
+  ...
+# Subtest: 수강 해제 serializes relation writes with detail save and can retry after failure
+ok 143 - 수강 해제 serializes relation writes with detail save and can retry after failure
+  ---
+  duration_ms: 201.737
+  type: 'test'
+  ...
+# Subtest: confirmed relation addition shares the mutation slot with detail save and preserves the candidate after failure
+ok 144 - confirmed relation addition shares the mutation slot with detail save and preserves the candidate after failure
+  ---
+  duration_ms: 291.604208
+  type: 'test'
+  ...
+# Subtest: the mutation slot stays occupied until the saved row has been reconciled
+ok 145 - the mutation slot stays occupied until the saved row has been reconciled
+  ---
+  duration_ms: 259.136167
+  type: 'test'
+  ...
+# Subtest: a partially failed bulk update holds its slot until the remaining row write settles
+ok 146 - a partially failed bulk update holds its slot until the remaining row write settles
+  ---
+  duration_ms: 163.328292
+  type: 'test'
+  ...
+# Subtest: real management table retries only failed rows and preserves the bulk draft
+ok 147 - real management table retries only failed rows and preserves the bulk draft
+  ---
+  duration_ms: 509.836917
+  type: 'test'
+  ...
+# Subtest: a partially failed bulk deletion holds its slot until the remaining deletion settles
+ok 148 - a partially failed bulk deletion holds its slot until the remaining deletion settles
+  ---
+  duration_ms: 222.878125
+  type: 'test'
+  ...
+# Subtest: class initialization retry rejects same-tick repeats while preserving the created class
+ok 149 - class initialization retry rejects same-tick repeats while preserving the created class
+  ---
+  duration_ms: 443.303042
+  type: 'test'
+  ...
+# Subtest: late A defaults cannot overwrite B edits or B's next save
+ok 150 - late A defaults cannot overwrite B edits or B's next save
+  ---
+  duration_ms: 407.043625
+  type: 'test'
+  ...
+# Subtest: a closed class response cannot populate a new class form
+ok 151 - a closed class response cannot populate a new class form
+  ---
+  duration_ms: 291.381626
+  type: 'test'
+  ...
+# Subtest: late errors from the previous class stay out of the active detail
+ok 152 - late errors from the previous class stay out of the active detail
+  ---
+  duration_ms: 241.764041
+  type: 'test'
+  ...
+# Subtest: out-of-order detail responses keep the latest selected class open
+ok 153 - out-of-order detail responses keep the latest selected class open
+  ---
+  duration_ms: 180.607084
+  type: 'test'
+  ...
+# Subtest: reopening the same class creates a separate editing lifetime
+ok 154 - reopening the same class creates a separate editing lifetime
+  ---
+  duration_ms: 580.604667
+  type: 'test'
+  ...
+# Subtest: pending catalogs prevent schedule edits from losing normalized resource IDs
+ok 155 - pending catalogs prevent schedule edits from losing normalized resource IDs
+  ---
+  duration_ms: 301.958291
+  type: 'test'
+  ...
+# Subtest: typing before the initial defaults arrive retains the draft and catalog IDs
+ok 156 - typing before the initial defaults arrive retains the draft and catalog IDs
+  ---
+  duration_ms: 213.063375
+  type: 'test'
+  ...
+# Subtest: late save success cannot replace newer edits and the next save uses the new revision
+ok 157 - late save success cannot replace newer edits and the next save uses the new revision
+  ---
+  duration_ms: 265.625625
+  type: 'test'
+  ...
+# Subtest: late A save success cannot change B's pending save or status
+ok 158 - late A save success cannot change B's pending save or status
+  ---
+  duration_ms: 513.01175
+  type: 'test'
+  ...
+# Subtest: late A save failure cannot change B's pending save or status
+ok 159 - late A save failure cannot change B's pending save or status
+  ---
+  duration_ms: 311.201708
+  type: 'test'
+  ...
+# Subtest: unchanged failed saves retry their key, edited drafts get a new key
+ok 160 - unchanged failed saves retry their key, edited drafts get a new key
+  ---
+  duration_ms: 274.502042
+  type: 'test'
+  ...
+# Subtest: late reload keeps subsequent typing and updates the save revision
+ok 161 - late reload keeps subsequent typing and updates the save revision
+  ---
+  duration_ms: 364.09725
+  type: 'test'
+  ...
+# Subtest: late reload failure after changing classes stays out of the new detail
+ok 162 - late reload failure after changing classes stays out of the new detail
+  ---
+  duration_ms: 325.027792
+  type: 'test'
+  ...
+# Subtest: an off-page deep link cannot reopen after a newer route request
+ok 163 - an off-page deep link cannot reopen after a newer route request
+  ---
+  duration_ms: 209.8545
+  type: 'test'
+  ...
+# Subtest: removing a deep link while its detail is pending leaves the dialog closed
+ok 164 - removing a deep link while its detail is pending leaves the dialog closed
+  ---
+  duration_ms: 165.864292
+  type: 'test'
+  ...
+# Subtest: an old actor's pending detail cannot start a schedule request after logout
+ok 165 - an old actor's pending detail cannot start a schedule request after logout
+  ---
+  duration_ms: 198.131875
+  type: 'test'
+  ...
+# Subtest: student filter selection stays optimistic until the URL catches up
+ok 166 - student filter selection stays optimistic until the URL catches up
+  ---
+  duration_ms: 13.20025
+  type: 'test'
+  ...
+# Subtest: management refresh keeps existing rows instead of replacing them with short skeletons
+ok 167 - management refresh keeps existing rows instead of replacing them with short skeletons
+  ---
+  duration_ms: 0.271042
+  type: 'test'
+  ...
+# Subtest: student filter URL updates use native history without an RSC navigation
+ok 168 - student filter URL updates use native history without an RSC navigation
+  ---
+  duration_ms: 0.109834
+  type: 'test'
+  ...
+# Subtest: student school category keeps server values and shows Korean labels
+ok 169 - student school category keeps server values and shows Korean labels
+  ---
+  duration_ms: 0.235917
+  type: 'test'
+  ...
+# Subtest: class deep-link search never rewrites URL-owned status or period filters
+ok 170 - class deep-link search never rewrites URL-owned status or period filters
+  ---
+  duration_ms: 0.204125
+  type: 'test'
+  ...
+# Subtest: user-owned search writes once after debounce and stops after the URL catches up
+ok 171 - user-owned search writes once after debounce and stops after the URL catches up
+  ---
+  duration_ms: 0.204625
+  type: 'test'
+  ...
+# Subtest: default period canonicalization preserves URL-owned class search and status
+ok 172 - default period canonicalization preserves URL-owned class search and status
+  ---
+  duration_ms: 0.13575
+  type: 'test'
+  ...
+# Subtest: class period hydration preserves URL-owned values and only defaults an empty period
+ok 173 - class period hydration preserves URL-owned values and only defaults an empty period
+  ---
+  duration_ms: 1.56
+  type: 'test'
+  ...
+# Subtest: class detail route parameters do not change the list filter request scope
+ok 174 - class detail route parameters do not change the list filter request scope
+  ---
+  duration_ms: 1.216334
+  type: 'test'
+  ...
+# Subtest: a cold management visit stays pending through preference hydration until the request settles
+ok 175 - a cold management visit stays pending through preference hydration until the request settles
+  ---
+  duration_ms: 0.356708
+  type: 'test'
+  ...
+# Subtest: management read errors expose retry for both empty and retained-row recovery
+ok 176 - management read errors expose retry for both empty and retained-row recovery
+  ---
+  duration_ms: 0.99675
+  type: 'test'
+  ...
+# Subtest: the hook and page consume the tested loading and retry states
+ok 177 - the hook and page consume the tested loading and retry states
+  ---
+  duration_ms: 20.724417
+  type: 'test'
+  ...
+# Subtest: student classification uses full server counts and preserves legacy write status
+ok 178 - student classification uses full server counts and preserves legacy write status
+  ---
+  duration_ms: 1.289042
+  type: 'test'
+  ...
+# Subtest: student page defaults to enrolled, offers exactly three statuses, and resets to enrolled
+ok 179 - student page defaults to enrolled, offers exactly three statuses, and resets to enrolled
+  ---
+  duration_ms: 6486.009502
+  type: 'test'
+  ...
+# Subtest: student enrollment popover loads on demand, retries and reaches the next relation page
+ok 180 - student enrollment popover loads on demand, retries and reaches the next relation page
+  ---
+  duration_ms: 77.797709
+  type: 'test'
+  ...
+# Subtest: RPC through real hook and table preserves descending titles
+ok 181 - RPC through real hook and table preserves descending titles
+  ---
+  duration_ms: 748.490042
+  type: 'test'
+  ...
+# Subtest: RPC through real hook and table preserves natural numeric titles
+ok 182 - RPC through real hook and table preserves natural numeric titles
+  ---
+  duration_ms: 909.347167
+  type: 'test'
+  ...
+# Subtest: RPC through real hook and table preserves primary teacher and secondary descending titles
+ok 183 - RPC through real hook and table preserves primary teacher and secondary descending titles
+  ---
+  duration_ms: 455.705708
+  type: 'test'
+  ...
+# Subtest: retired class periods stay ignored across refresh, mutation retry and shrink clamp
+ok 184 - retired class periods stay ignored across refresh, mutation retry and shrink clamp
+  ---
+  duration_ms: 353.239459
+  type: 'test'
+  ...
+# Subtest: class page failure is retryable without resolving a default period
+ok 185 - class page failure is retryable without resolving a default period
+  ---
+  duration_ms: 171.954334
+  type: 'test'
+  ...
+# Subtest: initial failed class load keeps visible caption and pager unknown, but true zero stays empty
+ok 186 - initial failed class load keeps visible caption and pager unknown, but true zero stays empty
+  ---
+  duration_ms: 1244.900334
+  type: 'test'
+  ...
+# Subtest: class pages load even when no default period is available
+ok 187 - class pages load even when no default period is available
+  ---
+  duration_ms: 339.289333
+  type: 'test'
+  ...
+# Subtest: late class results after filter changes cannot overwrite the current scope
+ok 188 - late class results after filter changes cannot overwrite the current scope
+  ---
+  duration_ms: 329.593333
+  type: 'test'
+  ...
+# Subtest: late class results after actor changes cannot overwrite the current scope
+ok 189 - late class results after actor changes cannot overwrite the current scope
+  ---
+  duration_ms: 180.840834
+  type: 'test'
+  ...
+# Subtest: late class results after role changes cannot overwrite the current scope
+ok 190 - late class results after role changes cannot overwrite the current scope
+  ---
+  duration_ms: 182.8595
+  type: 'test'
+  ...
+# Subtest: late class results after disabled list changes cannot overwrite the current scope
+ok 191 - late class results after disabled list changes cannot overwrite the current scope
+  ---
+  duration_ms: 159.367416
+  type: 'test'
+  ...
+# Subtest: actual manual size handler never requests old page with the new size during transition URL reset
+ok 192 - actual manual size handler never requests old page with the new size during transition URL reset
+  ---
+  duration_ms: 656.576208
+  type: 'test'
+  ...
+# Subtest: management defaults to fixed 10 rows without an automatic measurement callback
+ok 193 - management defaults to fixed 10 rows without an automatic measurement callback
+  ---
+  duration_ms: 471.037375
+  type: 'test'
+  ...
+# Subtest: actual confirmed deletion has one reconciliation owner (remaining 101)
+ok 194 - actual confirmed deletion has one reconciliation owner (remaining 101)
+  ---
+  duration_ms: 503.778333
+  type: 'test'
+  ...
+# Subtest: actual confirmed deletion has one reconciliation owner (remaining 100)
+ok 195 - actual confirmed deletion has one reconciliation owner (remaining 100)
+  ---
+  duration_ms: 457.407959
+  type: 'test'
+  ...
+# Subtest: actual confirmed deletion retains rows and does not refresh when the mutation fails
+ok 196 - actual confirmed deletion retains rows and does not refresh when the mutation fails
+  ---
+  duration_ms: 439.324125
+  type: 'test'
+  ...
+# Subtest: management hook uses direct server pages, sort resets, refresh and independent detail under StrictMode
+ok 197 - management hook uses direct server pages, sort resets, refresh and independent detail under StrictMode
+  ---
+  duration_ms: 129.981042
+  type: 'test'
+  ...
+# Subtest: URL and saved sorts are sanitized with per-kind defaults and preserve unrelated parameters
+ok 198 - URL and saved sorts are sanitized with per-kind defaults and preserve unrelated parameters
+  ---
+  duration_ms: 16.340042
+  type: 'test'
+  ...
+# Subtest: filter changes reset page atomically, while retired period parameters preserve restore
+ok 199 - filter changes reset page atomically, while retired period parameters preserve restore
+  ---
+  duration_ms: 0.361875
+  type: 'test'
+  ...
+# Subtest: numbered navigation notifies Next history rather than copying its internal bypass marker
+ok 200 - numbered navigation notifies Next history rather than copying its internal bypass marker
+  ---
+  duration_ms: 0.279208
+  type: 'test'
+  ...
+# Subtest: StrictMode mount replay creates a live controller and authorization aborts pending totals
+ok 201 - StrictMode mount replay creates a live controller and authorization aborts pending totals
+  ---
+  duration_ms: 144.739334
+  type: 'test'
+  ...
+# Subtest: retired period URL cleanup issues only one numbered page request
+ok 202 - retired period URL cleanup issues only one numbered page request
+  ---
+  duration_ms: 140.532167
+  type: 'test'
+  ...
+# Subtest: metadata failure stays visible without discarding a successful numbered page
+ok 203 - metadata failure stays visible without discarding a successful numbered page
+  ---
+  duration_ms: 136.121584
+  type: 'test'
+  ...
+# Subtest: form catalogs load independently and ignore closed, old-role and late detail responses
+ok 204 - form catalogs load independently and ignore closed, old-role and late detail responses
+  ---
+  duration_ms: 84.893375
+  type: 'test'
+  ...
+# Subtest: the real table renders server page rows unchanged, routes sort headers and disables derived sorts
+ok 205 - the real table renders server page rows unchanged, routes sort headers and disables derived sorts
+  ---
+  duration_ms: 448.776917
+  type: 'test'
+  ...
+# Subtest: new student enrollment column preserves saved visibility, size and order
+ok 206 - new student enrollment column preserves saved visibility, size and order
+  ---
+  duration_ms: 806.278875
+  type: 'test'
+  ...
+# Subtest: class detail totals remain exact beyond the 30-row relation page and missing totals stay unknown
+ok 207 - class detail totals remain exact beyond the 30-row relation page and missing totals stay unknown
+  ---
+  duration_ms: 126.597917
+  type: 'test'
+  ...
+# Subtest: metadata survives paging cancellation, expires and invalidates on filter, refresh and actor changes
+ok 208 - metadata survives paging cancellation, expires and invalidates on filter, refresh and actor changes
+  ---
+  duration_ms: 125.337791
+  type: 'test'
+  ...
+# Subtest: auth-blocked metadata and catalogs leave loading, require explicit retry and reject late values
+ok 209 - auth-blocked metadata and catalogs leave loading, require explicit retry and reject late values
+  ---
+  duration_ms: 99.393167
+  type: 'test'
+  ...
+# Subtest: students: jumps directly to page 11, preserves DTO and full total
+ok 210 - students: jumps directly to page 11, preserves DTO and full total
+  ---
+  duration_ms: 1.721708
+  type: 'test'
+  ...
+# Subtest: classes: jumps directly to page 11, preserves DTO and full total
+ok 211 - classes: jumps directly to page 11, preserves DTO and full total
+  ---
+  duration_ms: 0.430667
+  type: 'test'
+  ...
+# Subtest: textbooks: jumps directly to page 11, preserves DTO and full total
+ok 212 - textbooks: jumps directly to page 11, preserves DTO and full total
+  ---
+  duration_ms: 1.297208
+  type: 'test'
+  ...
+# Subtest: out-of-range page preserves requested page and full-filter count
+ok 213 - out-of-range page preserves requested page and full-filter count
+  ---
+  duration_ms: 0.365375
+  type: 'test'
+  ...
+# Subtest: zero results and all allowed sizes are accepted without inventing pages
+ok 214 - zero results and all allowed sizes are accepted without inventing pages
+  ---
+  duration_ms: 1.043875
+  type: 'test'
+  ...
+# Subtest: request composes caller cancellation with the eight-second deadline
+ok 215 - request composes caller cancellation with the eight-second deadline
+  ---
+  duration_ms: 1.895292
+  type: 'test'
+  ...
+# Subtest: an already cancelled request makes no RPC
+ok 216 - an already cancelled request makes no RPC
+  ---
+  duration_ms: 0.997833
+  type: 'test'
+  ...
+# Subtest: invalid page, size, filters and sort are rejected before network access
+ok 217 - invalid page, size, filters and sort are rejected before network access
+  ---
+  duration_ms: 1.422
+  type: 'test'
+  ...
+# Subtest: all supported actionable headers can request global server sorting
+ok 218 - all supported actionable headers can request global server sorting
+  ---
+  duration_ms: 1.999291
+  type: 'test'
+  ...
+# Subtest: malformed or scope-mismatched responses fail instead of returning empty success
+ok 219 - malformed or scope-mismatched responses fail instead of returning empty success
+  ---
+  duration_ms: 1.216333
+  type: 'test'
+  ...
+# Subtest: missing numbered RPC is explicit and never falls back to cursor reads
+ok 220 - missing numbered RPC is explicit and never falls back to cursor reads
+  ---
+  duration_ms: 0.436333
+  type: 'test'
+  ...
+# Subtest: other database failures are propagated without retry or partial success
+ok 221 - other database failures are propagated without retry or partial success
+  ---
+  duration_ms: 0.086833
+  type: 'test'
+  ...
+# Subtest: persisted unsupported sorts normalize before request, retaining valid primary/secondary order
+ok 222 - persisted unsupported sorts normalize before request, retaining valid primary/secondary order
+  ---
+  duration_ms: 0.094625
+  type: 'test'
+  ...
+# Subtest: student DTO accepts authoritative 재원 status and both counts
+ok 223 - student DTO accepts authoritative 재원 status and both counts
+  ---
+  duration_ms: 0.21925
+  type: 'test'
+  ...
+# Subtest: student DTO accepts authoritative 대기 status and both counts
+ok 224 - student DTO accepts authoritative 대기 status and both counts
+  ---
+  duration_ms: 0.325042
+  type: 'test'
+  ...
+# Subtest: student DTO accepts authoritative 퇴원 status and both counts
+ok 225 - student DTO accepts authoritative 퇴원 status and both counts
+  ---
+  duration_ms: 0.32675
+  type: 'test'
+  ...
+# Subtest: student DTO fails closed for missing, partial or contradictory enrollment counts
+ok 226 - student DTO fails closed for missing, partial or contradictory enrollment counts
+  ---
+  duration_ms: 1.095666
+  type: 'test'
+  ...
+# Subtest: official class and student databases separate read access from staff-only writes
+ok 227 - official class and student databases separate read access from staff-only writes
+  ---
+  duration_ms: 111070.520385
+  type: 'test'
+  ...
+# Subtest: management scrollport reserves the pager without changing the fixed page size
+ok 228 - management scrollport reserves the pager without changing the fixed page size
+  ---
+  duration_ms: 2.361292
+  type: 'test'
+  ...
+# Subtest: management scrollport height is stable across document scroll positions
+ok 229 - management scrollport height is stable across document scroll positions
+  ---
+  duration_ms: 0.217875
+  type: 'test'
+  ...
+# Subtest: management table keeps one scrollport and observes only stable layout boundaries
+ok 230 - management table keeps one scrollport and observes only stable layout boundaries
+  ---
+  duration_ms: 14.724792
+  type: 'test'
+  ...
+# Subtest: management pagination preserves appends and clamps shrink at an unchanged page size
+ok 231 - management pagination preserves appends and clamps shrink at an unchanged page size
+  ---
+  duration_ms: 0.2335
+  type: 'test'
+  ...
+# Subtest: management sizing accepts only a versioned fixed user preference
+ok 232 - management sizing accepts only a versioned fixed user preference
+  ---
+  duration_ms: 0.588334
+  type: 'test'
+  ...
+# Subtest: management sizing uses a versioned kind-specific storage key
+ok 233 - management sizing uses a versioned kind-specific storage key
+  ---
+  duration_ms: 0.124708
+  type: 'test'
+  ...
+# Subtest: legacy class period links remove only period and retain search, filters, page, sort and detail
+ok 234 - legacy class period links remove only period and retain search, filters, page, sort and detail
+  ---
+  duration_ms: 1905.459251
+  type: 'test'
+  ...
+# Subtest: initial class period cleanup waits for the router history patch before canonical URL restoration
+ok 235 - initial class period cleanup waits for the router history patch before canonical URL restoration
+  ---
+  duration_ms: 610.472334
+  type: 'test'
+  ...
+# Subtest: period URL cleanup preserves selected rows and never restores a configured default period
+ok 236 - period URL cleanup preserves selected rows and never restores a configured default period
+  ---
+  duration_ms: 1290.275
+  type: 'test'
+  ...
+# Subtest: resetting active class filters clears the page while keeping the detail link without a period
+ok 237 - resetting active class filters clears the page while keeping the detail link without a period
+  ---
+  duration_ms: 671.416792
+  type: 'test'
+  ...
+# Subtest: management list publishes primary rows before optional enrichment finishes
+ok 238 - management list publishes primary rows before optional enrichment finishes
+  ---
+  duration_ms: 2.39425
+  type: 'test'
+  ...
+# Subtest: management list publishes a recent memory cache before the fresh query finishes
+ok 239 - management list publishes a recent memory cache before the fresh query finishes
+  ---
+  duration_ms: 0.147458
+  type: 'test'
+  ...
+# Subtest: management primary-row cache expires from module memory
+ok 240 - management primary-row cache expires from module memory
+  ---
+  duration_ms: 0.092583
+  type: 'test'
+  ...
+# Subtest: stale enrichment cannot replace rows from a newer management load
+ok 241 - stale enrichment cannot replace rows from a newer management load
+  ---
+  duration_ms: 0.096542
+  type: 'test'
+  ...
+# Subtest: management list callers expose only 10, 15, or 20 rows while legacy cursor transport stays bounded
+ok 242 - management list callers expose only 10, 15, or 20 rows while legacy cursor transport stays bounded
+  ---
+  duration_ms: 6.181416
+  type: 'test'
+  ...
+# Subtest: management initial reads return rows before metadata and cancel every query with the caller
+ok 243 - management initial reads return rows before metadata and cancel every query with the caller
+  ---
+  duration_ms: 2.496083
+  type: 'test'
+  ...
+# Subtest: management metadata failures settle without discarding a loaded page
+ok 244 - management metadata failures settle without discarding a loaded page
+  ---
+  duration_ms: 1.038916
+  type: 'test'
+  ...
+# Subtest: same-scope class reads with different caller signals keep independent in-flight transports
+ok 245 - same-scope class reads with different caller signals keep independent in-flight transports
+  ---
+  duration_ms: 4.190791
+  type: 'test'
+  ...
+# Subtest: canonical class replay gives a new caller independently cancellable metadata
+ok 246 - canonical class replay gives a new caller independently cancellable metadata
+  ---
+  duration_ms: 2.594625
+  type: 'test'
+  ...
+# Subtest: the first class management bundle resolves and applies the default period before list stats or options
+ok 247 - the first class management bundle resolves and applies the default period before list stats or options
+  ---
+  duration_ms: 2.069417
+  type: 'test'
+  ...
+# Subtest: an explicit refresh bypasses and revokes an overlapping passive default-period bundle
+ok 248 - an explicit refresh bypasses and revokes an overlapping passive default-period bundle
+  ---
+  duration_ms: 2.790125
+  type: 'test'
+  ...
+# Subtest: class textbook candidates use bounded query-scoped continuation and retain unmatched assigned IDs
+ok 249 - class textbook candidates use bounded query-scoped continuation and retain unmatched assigned IDs
+  ---
+  duration_ms: 1.882333
+  type: 'test'
+  ...
+# Subtest: management detail and relation cursors are selection driven and scope bound before the DB call
+ok 250 - management detail and relation cursors are selection driven and scope bound before the DB call
+  ---
+  duration_ms: 1.390667
+  type: 'test'
+  ...
+# Subtest: management migration defines Korean numeric keyset list, separate aggregates, and exact detail RPCs
+ok 251 - management migration defines Korean numeric keyset list, separate aggregates, and exact detail RPCs
+  ---
+  duration_ms: 5.481125
+  type: 'test'
+  ...
+# Subtest: management hook and UI keep list reads bounded while details and relation pickers are selection driven
+ok 252 - management hook and UI keep list reads bounded while details and relation pickers are selection driven
+  ---
+  duration_ms: 7.83025
+  type: 'test'
+  ...
+# Subtest: metadata SQL error settles immediately and aborts a stalled sibling without losing loaded rows
+ok 253 - metadata SQL error settles immediately and aborts a stalled sibling without losing loaded rows
+  ---
+  duration_ms: 1.183708
+  type: 'test'
+  ...
+# Subtest: a newer management scope aborts and invalidates the previous ticket
+ok 254 - a newer management scope aborts and invalidates the previous ticket
+  ---
+  duration_ms: 1.390583
+  type: 'test'
+  ...
+# Subtest: cleanup aborts the current management request
+ok 255 - cleanup aborts the current management request
+  ---
+  duration_ms: 0.077541
+  type: 'test'
+  ...
+# Subtest: a newer initial scope aborts the caller signal from the previous request
+ok 256 - a newer initial scope aborts the caller signal from the previous request
+  ---
+  duration_ms: 2.51625
+  type: 'test'
+  ...
+# Subtest: the initial page publishes before deferred metadata
+ok 257 - the initial page publishes before deferred metadata
+  ---
+  duration_ms: 2.469
+  type: 'test'
+  ...
+# Subtest: metadata from an invalidated initial ticket never publishes
+ok 258 - metadata from an invalidated initial ticket never publishes
+  ---
+  duration_ms: 0.2455
+  type: 'test'
+  ...
+# Subtest: a deferred continuation cannot merge after its initial ticket is invalidated
+ok 259 - a deferred continuation cannot merge after its initial ticket is invalidated
+  ---
+  duration_ms: 0.287041
+  type: 'test'
+  ...
+# Subtest: AbortError is silent
+ok 260 - AbortError is silent
+  ---
+  duration_ms: 0.156
+  type: 'test'
+  ...
+# Subtest: a real error uses the error path without a row-clearing callback
+ok 261 - a real error uses the error path without a row-clearing callback
+  ---
+  duration_ms: 0.180166
+  type: 'test'
+  ...
+# Subtest: ready management roster assignment returns only the committed atomic RPC projection
+ok 262 - ready management roster assignment returns only the committed atomic RPC projection
+  ---
+  duration_ms: 6.418333
+  type: 'test'
+  ...
+# Subtest: ready management roster rejects an incomplete or mismatched committed projection
+ok 263 - ready management roster rejects an incomplete or mismatched committed projection
+  ---
+  duration_ms: 0.466041
+  type: 'test'
+  ...
+# Subtest: maintenance management roster controls fail closed before any table or RPC write
+ok 264 - maintenance management roster controls fail closed before any table or RPC write
+  ---
+  duration_ms: 0.153708
+  type: 'test'
+  ...
+# Subtest: ready management roster removal returns the committed removed projection
+ok 265 - ready management roster removal returns the committed removed projection
+  ---
+  duration_ms: 0.219542
+  type: 'test'
+  ...
+# Subtest: a missing ready management roster RPC invalidates readiness instead of falling back
+ok 266 - a missing ready management roster RPC invalidates readiness instead of falling back
+  ---
+  duration_ms: 0.173542
+  type: 'test'
+  ...
+# Subtest: ready student and class saves strip canonical roster fields and direct student status
+ok 267 - ready student and class saves strip canonical roster fields and direct student status
+  ---
+  duration_ms: 26.450584
+  type: 'test'
+  ...
+# Subtest: student physical deletion checks reverse roster links and immutable history
+ok 268 - student physical deletion checks reverse roster links and immutable history
+  ---
+  duration_ms: 2.012375
+  type: 'test'
+  ...
+# Subtest: teacher catalog saves ignore unchanged rows before audit-triggering upserts
+ok 269 - teacher catalog saves ignore unchanged rows before audit-triggering upserts
+  ---
+  duration_ms: 0.366791
+  type: 'test'
+  ...
+# Subtest: teacher catalog saves do not update linked profiles when profile fields are unchanged
+ok 270 - teacher catalog saves do not update linked profiles when profile fields are unchanged
+  ---
+  duration_ms: 0.652042
+  type: 'test'
+  ...
+# Subtest: student upserts retry without optional counseling fields when the live schema is stale
+ok 271 - student upserts retry without optional counseling fields when the live schema is stale
+  ---
+  duration_ms: 0.444791
+  type: 'test'
+  ...
+# Subtest: class metadata updates retry without optional class type while preserving operation fields
+ok 272 - class metadata updates retry without optional class type while preserving operation fields
+  ---
+  duration_ms: 0.557792
+  type: 'test'
+  ...
+# Subtest: student class relation changes update only canonical roster arrays
+ok 273 - student class relation changes update only canonical roster arrays
+  ---
+  duration_ms: 0.311833
+  type: 'test'
+  ...
+# Subtest: student class relation changes roll back the student side if the class write fails
+ok 274 - student class relation changes roll back the student side if the class write fails
+  ---
+  duration_ms: 0.222625
+  type: 'test'
+  ...
+# Subtest: student detail uses linked selects for school category, school, and grade
+ok 275 - student detail uses linked selects for school category, school, and grade
+  ---
+  duration_ms: 13.14275
+  type: 'test'
+  ...
+# Subtest: changing student school category resets incompatible school and grade values
+ok 276 - changing student school category resets incompatible school and grade values
+  ---
+  duration_ms: 7.004542
+  type: 'test'
+  ...
+# Subtest: student select fields use the shared select renderer instead of plain inputs
+ok 277 - student select fields use the shared select renderer instead of plain inputs
+  ---
+  duration_ms: 6.318916
+  type: 'test'
+  ...
+# Subtest: student detail keeps only actionable student fields
+ok 278 - student detail keeps only actionable student fields
+  ---
+  duration_ms: 4.730542
+  type: 'test'
+  ...
+# Subtest: student fields keep natural DOM order across the three, two, and one-column layouts
+ok 279 - student fields keep natural DOM order across the three, two, and one-column layouts
+  ---
+  duration_ms: 8.359583
+  type: 'test'
+  ...
+# Subtest: student detail uses student-specific labels without redundant badges
+ok 280 - student detail uses student-specific labels without redundant badges
+  ---
+  duration_ms: 7.623958
+  type: 'test'
+  ...
+# Subtest: student management derives status while preserving the legacy write contract
+ok 281 - student management derives status while preserving the legacy write contract
+  ---
+  duration_ms: 19.2775
+  type: 'test'
+  ...
+# Subtest: class relation removal can clear orphaned student references
+ok 282 - class relation removal can clear orphaned student references
+  ---
+  duration_ms: 4.030416
+  type: 'test'
+  ...
+# Subtest: student row actions hand off to the withdrawal workflow while classes end through status edits only
+ok 283 - student row actions hand off to the withdrawal workflow while classes end through status edits only
+  ---
+  duration_ms: 9.688625
+  type: 'test'
+  ...
+# Subtest: student detail loads class and textbook history
+ok 284 - student detail loads class and textbook history
+  ---
+  duration_ms: 11.65225
+  type: 'test'
+  ...
+# Subtest: student detail class cards open the official class detail with return context
+ok 285 - student detail class cards open the official class detail with return context
+  ---
+  duration_ms: 3.802792
+  type: 'test'
+  ...
+# Subtest: class detail student rows open the official student detail with return context
+ok 286 - class detail student rows open the official student detail with return context
+  ---
+  duration_ms: 3.191125
+  type: 'test'
+  ...
+# Subtest: class toolbar uses the shared class filter panel
+ok 287 - class toolbar uses the shared class filter panel
+  ---
+  duration_ms: 8.845542
+  type: 'test'
+  ...
+# Subtest: class toolbar removes the secondary result summary strip under filters
+ok 288 - class toolbar removes the secondary result summary strip under filters
+  ---
+  duration_ms: 2.067625
+  type: 'test'
+  ...
+# Subtest: student management exposes lifecycle status alongside school filters
+ok 289 - student management exposes lifecycle status alongside school filters
+  ---
+  duration_ms: 3.300584
+  type: 'test'
+  ...
+# Subtest: student management keeps search and school filters in the URL for cross-view returns
+ok 290 - student management keeps search and school filters in the URL for cross-view returns
+  ---
+  duration_ms: 2.407709
+  type: 'test'
+  ...
+# Subtest: student management renders school category choices in Korean
+ok 291 - student management renders school category choices in Korean
+  ---
+  duration_ms: 3.673541
+  type: 'test'
+  ...
+# Subtest: student management opens with active students before withdrawn records
+ok 292 - student management opens with active students before withdrawn records
+  ---
+  duration_ms: 4.6415
+  type: 'test'
+  ...
+# Subtest: student edit dialog optimizes first entry and phone fields
+ok 293 - student edit dialog optimizes first entry and phone fields
+  ---
+  duration_ms: 2.180125
+  type: 'test'
+  ...
+# Subtest: management list search exposes the current data type to operators
+ok 294 - management list search exposes the current data type to operators
+  ---
+  duration_ms: 1.377208
+  type: 'test'
+  ...
+# Subtest: management table empty state stays compact and action-first
+ok 295 - management table empty state stays compact and action-first
+  ---
+  duration_ms: 1.635375
+  type: 'test'
+  ...
+# Subtest: class-only column filters never access missing student or textbook columns
+ok 296 - class-only column filters never access missing student or textbook columns
+  ---
+  duration_ms: 2.414
+  type: 'test'
+  ...
+# Subtest: student counts use the same trigger as class counts and a paginated relation reader
+ok 297 - student counts use the same trigger as class counts and a paginated relation reader
+  ---
+  duration_ms: 3.492
+  type: 'test'
+  ...
+# Subtest: student name cells do not repeat school and grade subtitle
+ok 298 - student name cells do not repeat school and grade subtitle
+  ---
+  duration_ms: 1.960625
+  type: 'test'
+  ...
+# Subtest: editable management titles expose pointer, hover, and focus feedback
+ok 299 - editable management titles expose pointer, hover, and focus feedback
+  ---
+  duration_ms: 3.805333
+  type: 'test'
+  ...
+# Subtest: management table disables TanStack render-time auto reset queues
+ok 300 - management table disables TanStack render-time auto reset queues
+  ---
+  duration_ms: 1.781084
+  type: 'test'
+  ...
+# Subtest: management table defers heavy global filtering while typing
+ok 301 - management table defers heavy global filtering while typing
+  ---
+  duration_ms: 2.467042
+  type: 'test'
+  ...
+# Subtest: management search preserves Korean IME composition before syncing URL filters
+ok 302 - management search preserves Korean IME composition before syncing URL filters
+  ---
+  duration_ms: 3.962417
+  type: 'test'
+  ...
+# Subtest: management table exposes resize handles with a clear reset action
+ok 303 - management table exposes resize handles with a clear reset action
+  ---
+  duration_ms: 1.424667
+  type: 'test'
+  ...
+# Subtest: class teacher and classroom cells render multiple values on separate rows
+ok 304 - class teacher and classroom cells render multiple values on separate rows
+  ---
+  duration_ms: 3.077625
+  type: 'test'
+  ...
+# Subtest: class schedule omits repeated teacher and classroom details
+ok 305 - class schedule omits repeated teacher and classroom details
+  ---
+  duration_ms: 1.990958
+  type: 'test'
+  ...
+# Subtest: class enrollment status cell does not repeat capacity text
+ok 306 - class enrollment status cell does not repeat capacity text
+  ---
+  duration_ms: 1.962334
+  type: 'test'
+  ...
+# Subtest: class table caption uses the authoritative server aggregate instead of the loaded page
+ok 307 - class table caption uses the authoritative server aggregate instead of the loaded page
+  ---
+  duration_ms: 1.693083
+  type: 'test'
+  ...
+# Subtest: class management uses mobile cards instead of a clipped wide table
+ok 308 - class management uses mobile cards instead of a clipped wide table
+  ---
+  duration_ms: 2.723375
+  type: 'test'
+  ...
+# Subtest: student management uses mobile cards instead of a clipped wide table
+ok 309 - student management uses mobile cards instead of a clipped wide table
+  ---
+  duration_ms: 2.590416
+  type: 'test'
+  ...
+# Subtest: class weekly hours count compact Korean weekday groups
+ok 310 - class weekly hours count compact Korean weekday groups
+  ---
+  duration_ms: 0.821958
+  type: 'test'
+  ...
+# Subtest: student and class tables expose bulk edit and delete actions for selected rows
+ok 311 - student and class tables expose bulk edit and delete actions for selected rows
+  ---
+  duration_ms: 7.37925
+  type: 'test'
+  ...
+# Subtest: management deletes use an in-app confirmation dialog
+ok 312 - management deletes use an in-app confirmation dialog
+  ---
+  duration_ms: 5.413708
+  type: 'test'
+  ...
+# Subtest: management table keeps filter and search actions visible and reversible
+ok 313 - management table keeps filter and search actions visible and reversible
+  ---
+  duration_ms: 3.456542
+  type: 'test'
+  ...
+# Subtest: management databases restore list scroll after opening a record
+ok 314 - management databases restore list scroll after opening a record
+  ---
+  duration_ms: 2.03925
+  type: 'test'
+  ...
+# Subtest: detail-only route changes preserve list scroll, selection and the active search field
+ok 315 - detail-only route changes preserve list scroll, selection and the active search field
+  ---
+  duration_ms: 1842.614918
+  type: 'test'
+  ...
+# Subtest: list query and page changes still update search and reset the list scroll
+ok 316 - list query and page changes still update search and reset the list scroll
+  ---
+  duration_ms: 778.75675
+  type: 'test'
+  ...
+# Subtest: a search write preserves the latest detail and unrelated URL parameters
+ok 317 - a search write preserves the latest detail and unrelated URL parameters
+  ---
+  duration_ms: 1239.006
+  type: 'test'
+  ...
+# Subtest: selected class detail preserves assigned textbook IDs before an ordinary save
+ok 318 - selected class detail preserves assigned textbook IDs before an ordinary save
+  ---
+  duration_ms: 9.338708
+  type: 'test'
+  ...
+# Subtest: management invoker RPCs inline exact filter validation and authenticated pgTAP executes them
+ok 319 - management invoker RPCs inline exact filter validation and authenticated pgTAP executes them
+  ---
+  duration_ms: 4.365458
+  type: 'test'
+  ...
+# Subtest: student enrollment pages merge direct roster arrays with registration enrollments
+ok 320 - student enrollment pages merge direct roster arrays with registration enrollments
+  ---
+  duration_ms: 1.465333
+  type: 'test'
+  ...
+# Subtest: retired period parameters are removed without dropping other requested filters
+ok 321 - retired period parameters are removed without dropping other requested filters
+  ---
+  duration_ms: 4.424667
+  type: 'test'
+  ...
+# Subtest: bounded list rows preserve every currently rendered scalar field
+ok 322 - bounded list rows preserve every currently rendered scalar field
+  ---
+  duration_ms: 33.875541
+  type: 'test'
+  ...
+# Subtest: membership and ordering mutations reconcile page one stats and options
+ok 323 - membership and ordering mutations reconcile page one stats and options
+  ---
+  duration_ms: 2.621042
+  type: 'test'
+  ...
+# Subtest: detail relation continuation is exposed by the hook and appended by the UI
+ok 324 - detail relation continuation is exposed by the hook and appended by the UI
+  ---
+  duration_ms: 5.13225
+  type: 'test'
+  ...
+# Subtest: search query state is debounced before URL and RPC scope changes
+ok 325 - search query state is debounced before URL and RPC scope changes
+  ---
+  duration_ms: 1.812083
+  type: 'test'
+  ...
+# Subtest: bounded textbook reads never inspect the lessons JSONB payload
+ok 326 - bounded textbook reads never inspect the lessons JSONB payload
+  ---
+  duration_ms: 2.771708
+  type: 'test'
+  ...
+# Subtest: class textbook picker keeps one controlled query for input results and cursor scope
+ok 327 - class textbook picker keeps one controlled query for input results and cursor scope
+  ---
+  duration_ms: 4.186959
+  type: 'test'
+  ...
+# Subtest: relation payloads match roster contacts and student history renderer labels
+ok 328 - relation payloads match roster contacts and student history renderer labels
+  ---
+  duration_ms: 1.738042
+  type: 'test'
+  ...
+# Subtest: relation paging and fallback clients use canonical class columns while normalizing aliases
+ok 329 - relation paging and fallback clients use canonical class columns while normalizing aliases
+  ---
+  duration_ms: 6.254292
+  type: 'test'
+  ...
+# Subtest: roster mutations read exact targeted projections and never full collections
+ok 330 - roster mutations read exact targeted projections and never full collections
+  ---
+  duration_ms: 1.173166
+  type: 'test'
+  ...
+# Subtest: direct page 11 never loads pages 2 through 10; pending/error retains displayed envelope
+ok 331 - direct page 11 never loads pages 2 through 10; pending/error retains displayed envelope
+  ---
+  duration_ms: 72.292666
+  type: 'test'
+  ...
+# Subtest: stale completions cannot publish rows, totals, errors, or settlements
+ok 332 - stale completions cannot publish rows, totals, errors, or settlements
+  ---
+  duration_ms: 0.589167
+  type: 'test'
+  ...
+# Subtest: refresh keeps valid page and deletion clamps to the final page once
+ok 333 - refresh keeps valid page and deletion clamps to the final page once
+  ---
+  duration_ms: 0.460459
+  type: 'test'
+  ...
+# Subtest: concurrent shrink does not loop and leaves a retriable prior snapshot
+ok 334 - concurrent shrink does not loop and leaves a retriable prior snapshot
+  ---
+  duration_ms: 0.919709
+  type: 'test'
+  ...
+# Subtest: dispose aborts and prevents publications, including ignored abort transports
+ok 335 - dispose aborts and prevents publications, including ignored abort transports
+  ---
+  duration_ms: 0.361125
+  type: 'test'
+  ...
+# Subtest: canonical scope pins retries before failure without relabeling prior successful rows
+ok 336 - canonical scope pins retries before failure without relabeling prior successful rows
+  ---
+  duration_ms: 1.137458
+  type: 'test'
+  ...
+# Subtest: canonical scope reaches clamp but a settled first-read callback cannot rewrite its scope
+ok 337 - canonical scope reaches clamp but a settled first-read callback cannot rewrite its scope
+  ---
+  duration_ms: 0.295667
+  type: 'test'
+  ...
+# Subtest: canonical scope rejects callbacks from superseded and disposed requests
+ok 338 - canonical scope rejects callbacks from superseded and disposed requests
+  ---
+  duration_ms: 0.357792
+  type: 'test'
+  ...
+# Subtest: canonical scope is already closed when a failed-read snapshot is published
+ok 339 - canonical scope is already closed when a failed-read snapshot is published
+  ---
+  duration_ms: 0.569083
+  type: 'test'
+  ...
+# Subtest: withPromiseTimeout rejects a never-settling operation with a stable code
+ok 340 - withPromiseTimeout rejects a never-settling operation with a stable code
+  ---
+  duration_ms: 6.16025
+  type: 'test'
+  ...
+# Subtest: withPromiseTimeout returns an on-time resolution unchanged
+ok 341 - withPromiseTimeout returns an on-time resolution unchanged
+  ---
+  duration_ms: 1.192916
+  type: 'test'
+  ...
+# Subtest: withPromiseTimeout preserves the original rejection
+ok 342 - withPromiseTimeout preserves the original rejection
+  ---
+  duration_ms: 0.126584
+  type: 'test'
+  ...
+# Subtest: whole read settles at its deadline even if token provider never resolves
+ok 343 - whole read settles at its deadline even if token provider never resolves
+  ---
+  duration_ms: 39.8775
+  type: 'test'
+  ...
+# Subtest: caller cancellation settles an auth-blocked read without waiting for its deadline
+ok 344 - caller cancellation settles an auth-blocked read without waiting for its deadline
+  ---
+  duration_ms: 0.556083
+  type: 'test'
+  ...
+# Subtest: errors abort sibling reads and a late rejection is handled without retry
+ok 345 - errors abort sibling reads and a late rejection is handled without retry
+  ---
+  duration_ms: 0.412167
+  type: 'test'
+  ...
+# Subtest: catalogs: actual SDK token wait times out, then expired requests do no transport work
+ok 346 - catalogs: actual SDK token wait times out, then expired requests do no transport work
+  ---
+  duration_ms: 14.700209
+  type: 'test'
+  ...
+# Subtest: numbered: actual SDK token wait times out, then expired requests do no transport work
+ok 347 - numbered: actual SDK token wait times out, then expired requests do no transport work
+  ---
+  duration_ms: 12.261792
+  type: 'test'
+  ...
+# Subtest: detail: actual SDK token wait times out, then expired requests do no transport work
+ok 348 - detail: actual SDK token wait times out, then expired requests do no transport work
+  ---
+  duration_ms: 11.624708
+  type: 'test'
+  ...
+# Subtest: relations: actual SDK token wait times out, then expired requests do no transport work
+ok 349 - relations: actual SDK token wait times out, then expired requests do no transport work
+  ---
+  duration_ms: 13.158625
+  type: 'test'
+  ...
+# Subtest: textbook candidates: actual SDK token wait times out, then expired requests do no transport work
+ok 350 - textbook candidates: actual SDK token wait times out, then expired requests do no transport work
+  ---
+  duration_ms: 12.672084
+  type: 'test'
+  ...
+# Subtest: legacy page: actual SDK token wait times out, then expired requests do no transport work
+ok 351 - legacy page: actual SDK token wait times out, then expired requests do no transport work
+  ---
+  duration_ms: 12.003834
+  type: 'test'
+  ...
+# Subtest: late non-cooperative catalog response cannot paginate or replace a fresh result
+ok 352 - late non-cooperative catalog response cannot paginate or replace a fresh result
+  ---
+  duration_ms: 0.837209
+  type: 'test'
+  ...
+# Subtest: a deadline that expires before read startup yields the same safe error and starts no read
+ok 353 - a deadline that expires before read startup yields the same safe error and starts no read
+  ---
+  duration_ms: 0.306208
+  type: 'test'
+  ...
+# Subtest: synchronous read failure is preserved without an unhandled cancellation rejection
+ok 354 - synchronous read failure is preserved without an unhandled cancellation rejection
+  ---
+  duration_ms: 0.403542
+  type: 'test'
+  ...
+# Subtest: class subject options always include registry subjects before a science class exists
+ok 355 - class subject options always include registry subjects before a science class exists
+  ---
+  duration_ms: 3.294875
+  type: 'test'
+  ...
+# Subtest: science class payload normalizes aliases and requires a high grade with an area
+ok 356 - science class payload normalizes aliases and requires a high grade with an area
+  ---
+  duration_ms: 1.393709
+  type: 'test'
+  ...
+# Subtest: science class candidates require exact team and root classroom memberships
+ok 357 - science class candidates require exact team and root classroom memberships
+  ---
+  duration_ms: 0.122167
+  type: 'test'
+  ...
+# Subtest: science class payload rejects selections outside provided exact candidate context
+ok 358 - science class payload rejects selections outside provided exact candidate context
+  ---
+  duration_ms: 1.113667
+  type: 'test'
+  ...
+# Subtest: legacy science resources stay readable but science subject changes clear invalid selections
+ok 359 - legacy science resources stay readable but science subject changes clear invalid selections
+  ---
+  duration_ms: 18.534917
+  type: 'test'
+  ...
+# Subtest: class area keys survive management and academic record normalization
+ok 360 - class area keys survive management and academic record normalization
+  ---
+  duration_ms: 3.043958
+  type: 'test'
+  ...
+# Subtest: class form loads active areas and subject-aware teacher and classroom catalogs
+ok 361 - class form loads active areas and subject-aware teacher and classroom catalogs
+  ---
+  duration_ms: 2.430917
+  type: 'test'
+  ...
+# Subtest: science class and textbook migration uses mapped composite area references and write guards
+ok 362 - science class and textbook migration uses mapped composite area references and write guards
+  ---
+  duration_ms: 2.844458
+  type: 'test'
+  ...
+1..362
+# tests 362
+# suites 0
+# pass 362
+# fail 0
+# cancelled 0
+# skipped 0
+# todo 0
+# duration_ms 111872.060719
