@@ -127,6 +127,7 @@ import {
   summarizeOpsTasks,
   updateOpsTask,
   updateOpsTaskStatus,
+  updateWithdrawalSettlementCheck,
   updateWordRetestExpectedAt,
   type OpsTaskAttachment,
   type OpsTaskEvent,
@@ -1483,15 +1484,19 @@ function getUnknownErrorMessage(error: unknown) {
 
 function getOpsTaskActionErrorMessage(error: unknown, fallback: string) {
   const rawMessage = getUnknownErrorMessage(error)
-  const message = rawMessage.includes("dashboard_conflict_task_delete_forbidden")
-    ? "일정 충돌에서 만든 할 일은 삭제 대신 완료 또는 취소해 주세요."
-    : rawMessage.includes("ops_task_delete_forbidden")
-      ? "이 업무를 삭제할 권한이 없습니다."
-      : rawMessage.includes("registration_case_delete_not_allowed")
-        ? "대기 또는 등록이 시작된 신청은 삭제할 수 없습니다."
-        : rawMessage.toLowerCase().includes("upstream request timeout")
-          ? "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요."
-          : rawMessage || fallback
+  const message = rawMessage.includes("withdrawal_settlement_check_conflict")
+    ? "다른 관리자가 비용 확인을 변경했습니다. 새로고침 후 다시 확인해 주세요."
+    : rawMessage.includes("ops_withdrawal_registration_changed")
+      ? "신청 이후 학생의 수업 등록이 바뀌었습니다. 명단을 확인하고 퇴원 신청을 다시 검토해 주세요."
+      : rawMessage.includes("dashboard_conflict_task_delete_forbidden")
+        ? "일정 충돌에서 만든 할 일은 삭제 대신 완료 또는 취소해 주세요."
+        : rawMessage.includes("ops_task_delete_forbidden")
+          ? "이 업무를 삭제할 권한이 없습니다."
+          : rawMessage.includes("registration_case_delete_not_allowed")
+            ? "대기 또는 등록이 시작된 신청은 삭제할 수 없습니다."
+            : rawMessage.toLowerCase().includes("upstream request timeout")
+              ? "서버 응답이 지연되었습니다. 잠시 후 다시 시도해 주세요."
+              : rawMessage || fallback
   const cleanupError = typeof error === "object" && error ? (error as { cleanupError?: unknown }).cleanupError : null
   const cleanupText = getUnknownErrorMessage(cleanupError)
   const cleanupMessage = cleanupText ? `생성 정리 확인 필요: ${cleanupText}` : ""
@@ -1687,8 +1692,6 @@ function isRegistrationPipelineComplete(input: OpsTaskInput) {
 function getMissingWithdrawalCheckLabels(withdrawal?: OpsTaskInput["withdrawal"]) {
   return [
     { checked: Boolean(withdrawal?.makeeduWithdrawalDone), label: "메이크에듀 퇴원처리" },
-    { checked: Boolean(withdrawal?.feeProcessed), label: "수업료 처리" },
-    { checked: Boolean(withdrawal?.textbookFeeProcessed), label: "교재비 처리" },
   ].filter((item) => !item.checked).map((item) => item.label)
 }
 
@@ -2022,26 +2025,29 @@ function getTransferOperationsChecklistValue(transfer?: OpsTask["transfer"]) {
 function WithdrawalOperationsChecklistChips({
   withdrawal,
   editable = false,
+  editableFields,
   disabled = false,
   onChange,
 }: {
   withdrawal?: OpsTask["withdrawal"]
   editable?: boolean
+  editableFields?: readonly WithdrawalChecklistField[]
   disabled?: boolean
   onChange?: (field: WithdrawalChecklistField, checked: boolean) => void
 }) {
   return (
     <div className="flex min-w-0 flex-wrap gap-1">
       {getWithdrawalOperationsChecklist(withdrawal).map((item) => {
+        const canEditItem = editable && (!editableFields || editableFields.includes(item.field))
         const className = [
           "inline-flex h-6 max-w-full items-center gap-1 rounded-md border px-2 text-xs font-medium",
           item.checked
             ? "border-primary/20 bg-primary/10 text-primary"
             : "border-amber-300 bg-amber-50 text-amber-800",
-          editable ? "transition hover:border-primary/40 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-70" : "",
+          canEditItem ? "transition hover:border-primary/40 hover:bg-primary/10 disabled:cursor-not-allowed disabled:opacity-70" : "",
         ].join(" ")
 
-        if (!editable || !onChange) {
+        if (!canEditItem || !onChange) {
           return (
             <span key={item.key} className={className} title={item.detail}>
               {item.checked ? <Check className="size-3 shrink-0" aria-hidden="true" /> : null}
@@ -2250,12 +2256,6 @@ function getRosterCompletionBlockers(
   indexes: OpsTaskOptionIndexes = EMPTY_OPS_TASK_OPTION_INDEXES,
 ) {
   const blockers: string[] = []
-
-  if (input.type === "withdrawal" && input.status === "done" && hasLinkedRecord(input.studentId || input.studentName) && hasLinkedRecord(input.classId || input.className)) {
-    const student = findStudentOptionByReference(students, indexes, input.studentId, input.studentName)
-    const classItem = findClassOptionByReference(classes, indexes, input.classId, input.className)
-    if (student && classItem && !hasRosterLink(student, classItem)) blockers.push("수업 명단")
-  }
 
   if (input.type === "transfer" && input.status === "done") {
     const transfer = input.transfer || {}
@@ -6303,7 +6303,7 @@ function WithdrawalDataTable({
           const canRunStatusAction = canManageWorkflow && Boolean(nextAction)
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const mobileNextActionLabel = getWithdrawalMobileNextActionLabel(task, completionBlockers)
-          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+          const canEditChecklist = canManageWorkflow && (canEditTaskDetails(task) || task.status === "done")
           const progress = getWithdrawalProgressLabel(task)
           const detailAriaLabel = getWithdrawalTaskDetailAriaLabel(task)
 
@@ -6345,6 +6345,7 @@ function WithdrawalDataTable({
                     <WithdrawalOperationsChecklistChips
                       withdrawal={withdrawal}
                       editable={canEditChecklist}
+                      editableFields={task.status === "done" ? ["feeProcessed", "textbookFeeProcessed"] : undefined}
                       disabled={statusActionDisabled}
                       onChange={(field, checked) => onChecklistChange(task, field, checked)}
                     />
@@ -6441,7 +6442,7 @@ function WithdrawalDataTable({
           const completionBlockers = completionBlockersByTaskId.get(task.id) || EMPTY_COMPLETION_BLOCKERS
           const nextActionBlocked = nextAction?.status === "done" && completionBlockers.length > 0
           const blockedActionLabel = getCompletionBlockerActionLabel(completionBlockers)
-          const canEditChecklist = canManageWorkflow && canEditTaskDetails(task)
+          const canEditChecklist = canManageWorkflow && (canEditTaskDetails(task) || task.status === "done")
           const detailAriaLabel = getWithdrawalTaskDetailAriaLabel(task)
 
           return (
@@ -6505,6 +6506,7 @@ function WithdrawalDataTable({
                       <WithdrawalOperationsChecklistChips
                         withdrawal={task.withdrawal}
                         editable={canEditChecklist}
+                        editableFields={task.status === "done" ? ["feeProcessed", "textbookFeeProcessed"] : undefined}
                         disabled={statusActionDisabled}
                         onChange={(field, checked) => onChecklistChange(task, field, checked)}
                       />
@@ -11645,13 +11647,22 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
 
 
   const updateWithdrawalChecklist = async (task: OpsTask, field: WithdrawalChecklistField, checked: boolean) => {
-    if (!canManageWithdrawalWorkflow || !canEditTaskDetails(task)) return
+    const isCompletedSettlementCheck = task.status === "done" && field !== "makeeduWithdrawalDone"
+    if (!canManageWithdrawalWorkflow || (!canEditTaskDetails(task) && !isCompletedSettlementCheck)) return
 
     setSaving(true)
     setMessage("")
     setNotice("")
     setStatusUndo(null)
     try {
+      if (isCompletedSettlementCheck) {
+        await updateWithdrawalSettlementCheck(task.id, field, checked, Boolean(task.withdrawal?.[field]))
+        const syncedTask = await loadOpsTaskById(task.id)
+        replaceTaskInState(syncedTask || { ...task, withdrawal: { ...task.withdrawal, [field]: checked } })
+        await refreshFirstTaskPageAfterMutation()
+        setNotice("비용 처리 확인을 저장했습니다.")
+        return
+      }
       const payload = normalizeFormForSubmit({
         ...formFromTask(task),
         withdrawal: {
@@ -14753,8 +14764,8 @@ function TypeSpecificFields({
 		        </div>
 		        <div className="grid gap-2 md:grid-cols-3">
 		          <CheckField label="메이크에듀 퇴원처리" checked={Boolean(withdrawal.makeeduWithdrawalDone)} onChange={(value) => updateWithdrawal("makeeduWithdrawalDone", value)} />
-		          <CheckField label="수업료 처리" checked={Boolean(withdrawal.feeProcessed)} onChange={(value) => updateWithdrawal("feeProcessed", value)} />
-		          <CheckField label="교재비 처리" checked={Boolean(withdrawal.textbookFeeProcessed)} onChange={(value) => updateWithdrawal("textbookFeeProcessed", value)} />
+		          <CheckField label="수업료 처리 (퇴원 완료와 별도)" checked={Boolean(withdrawal.feeProcessed)} onChange={(value) => updateWithdrawal("feeProcessed", value)} />
+		          <CheckField label="교재비 처리 (퇴원 완료와 별도)" checked={Boolean(withdrawal.textbookFeeProcessed)} onChange={(value) => updateWithdrawal("textbookFeeProcessed", value)} />
 		        </div>
 		      </section>
 		    )

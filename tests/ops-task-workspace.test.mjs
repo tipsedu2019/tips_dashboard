@@ -2617,8 +2617,8 @@ test("withdrawal workspace follows request processing and completed queues", asy
     'label="선생님 의견"',
     'label="미배부 교재"',
     'CheckField label="메이크에듀 퇴원처리"',
-    'CheckField label="수업료 처리"',
-    'CheckField label="교재비 처리"',
+    'CheckField label="수업료 처리 (퇴원 완료와 별도)"',
+    'CheckField label="교재비 처리 (퇴원 완료와 별도)"',
     "help={WITHDRAWAL_UNDISTRIBUTED_TEXTBOOK_HELP}",
   ]);
   assertIncludesAll(withdrawalFormSource, [
@@ -2880,12 +2880,9 @@ test("withdrawal workspace follows request processing and completed queues", asy
   );
   assertIncludesAll(withdrawalCheckBlockerSource, [
     "withdrawal?.makeeduWithdrawalDone",
-    "withdrawal?.feeProcessed",
-    "withdrawal?.textbookFeeProcessed",
     "메이크에듀 퇴원처리",
-    "수업료 처리",
-    "교재비 처리",
   ]);
+  assert.doesNotMatch(withdrawalCheckBlockerSource, /feeProcessed|textbookFeeProcessed/);
   assert.doesNotMatch(withdrawalDetailSource, /TaskTypeBadge|TaskStatusBadge|getTaskPriorityLabel|완료 상태/);
   assert.doesNotMatch(withdrawalDetailSource, /WithdrawalFlowSummary/);
   assert.doesNotMatch(withdrawalDetailSource, /AutoSyncResultSummary/);

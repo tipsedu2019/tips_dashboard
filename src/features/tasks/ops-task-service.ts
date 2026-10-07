@@ -2719,8 +2719,6 @@ function getMissingRegistrationCheckLabels(registration?: OpsRegistrationDetail)
 function getMissingWithdrawalCheckLabels(withdrawal?: OpsWithdrawalDetail) {
   return [
     { checked: Boolean(withdrawal?.makeeduWithdrawalDone), label: "메이크에듀 퇴원처리" },
-    { checked: Boolean(withdrawal?.feeProcessed), label: "수업료 처리" },
-    { checked: Boolean(withdrawal?.textbookFeeProcessed), label: "교재비 처리" },
   ].filter((item) => !item.checked).map((item) => item.label)
 }
 
@@ -2930,7 +2928,6 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
 
     assertResolvedManagementRecord(student, "퇴원 완료 전에 기존 학생을 다시 선택하세요.")
     assertResolvedManagementRecord(classRow, "퇴원 완료 전에 기존 수업을 다시 선택하세요.")
-    assertOpsStudentInClass(student, classRow, "퇴원 완료 전에 학생이 해당 수업 명단에 있는지 확인하세요.")
   }
 
   if (input.type === "transfer" && input.status === "done") {
@@ -3251,10 +3248,30 @@ async function assertWithdrawalLastLessonRuntimeReady() {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const { data, error } = await supabase.rpc("withdrawal_last_lesson_release_runtime_version")
   if (error && !isMissingOpsRosterRpc(error)) throw error
-  if (error || data !== "withdrawal_last_lesson_release_v1") {
+  if (error || data !== "withdrawal_completion_without_settlement_v2") {
     throw new Error("퇴원 기준일을 포함하는 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요.")
   }
   await getOpsRosterRuntimeState()
+}
+
+export async function updateWithdrawalSettlementCheck(
+  taskId: string,
+  field: "feeProcessed" | "textbookFeeProcessed",
+  checked: boolean,
+  expectedChecked: boolean,
+): Promise<void> {
+  if (!text(taskId) || !["feeProcessed", "textbookFeeProcessed"].includes(field)
+    || typeof checked !== "boolean" || typeof expectedChecked !== "boolean") {
+    throw new Error("변경할 비용 처리 확인 항목을 다시 선택하세요.")
+  }
+  await assertWithdrawalLastLessonRuntimeReady()
+  await runIdempotentOpsTaskProducerRpc("update_ops_withdrawal_settlement_check_v1", {
+    p_task_id: taskId,
+    p_field: field,
+    p_checked: checked,
+    p_expected_checked: expectedChecked,
+  })
+  clearOpsTaskWorkspaceDataCache()
 }
 
 async function applyReadyOpsRosterMode(

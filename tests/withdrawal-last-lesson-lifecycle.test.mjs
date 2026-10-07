@@ -8,7 +8,7 @@ import ts from "typescript"
 const source = await readFile(new URL("../src/features/tasks/ops-task-service.ts", import.meta.url), "utf8")
 const parsed = ts.createSourceFile("ops-task-service.ts", source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TS)
 const functions = new Map(parsed.statements.filter(ts.isFunctionDeclaration).map((item) => [item.name?.text, item.getText(parsed)]))
-const runtimeVersion = "withdrawal_last_lesson_release_v1"
+const runtimeVersion = "withdrawal_completion_without_settlement_v2"
 const unavailableMessage = "퇴원 기준일을 포함하는 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요."
 
 function load(names, mocks) {
@@ -83,6 +83,7 @@ test("missing or incompatible date-boundary capability rejects before completion
     { capabilityError: { code: "PGRST202", message: "function missing" } },
     { capabilityError: { code: "42883", message: "function does not exist" } },
     { version: "withdrawal_last_lesson_release_v0" },
+    { version: "withdrawal_last_lesson_release_v1" },
     { version: "" },
   ]) {
     const { calls, mocks } = harness(options)

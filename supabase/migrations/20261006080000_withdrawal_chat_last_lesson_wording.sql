@@ -25,16 +25,16 @@ begin
     join (values
       ('withdrawal.submitted',
        '[일정] {제외일} · {제외회차}부터 제외 예정이에요.',
-       '[일정] {제외일} · {제외회차}까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다.'),
+       '[일정] 퇴원기준일(마지막 수업일): {제외일} · {제외회차}'),
       ('withdrawal.completed',
        '[일정] {제외일} · {제외회차}부터 제외',
-       '[일정] {제외일} · {제외회차}까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다.'),
+       '[일정] 퇴원기준일(마지막 수업일): {제외일} · {제외회차}'),
       ('withdrawal.submitted',
        '[일정] {withdrawal_date} · {withdrawal_round}부터 제외 예정이에요.',
-       '[일정] {withdrawal_date} · {withdrawal_round}까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다.'),
+       '[일정] 퇴원기준일(마지막 수업일): {withdrawal_date} · {withdrawal_round}'),
       ('withdrawal.completed',
        '[일정] {withdrawal_date} · {withdrawal_round}부터 제외',
-       '[일정] {withdrawal_date} · {withdrawal_round}까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다.')
+       '[일정] 퇴원기준일(마지막 수업일): {withdrawal_date} · {withdrawal_round}')
     ) wording(event_key, old_line, new_line)
       on wording.event_key = rule_row.event_key
     where rule_row.workflow_key = 'withdrawal'

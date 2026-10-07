@@ -121,7 +121,7 @@ select is(dashboard_private.withdrawal_roster_cutoff_v1(student_id,class_id),(cl
 
 select pg_temp.withdrawal_case('canceled',(clock_timestamp() at time zone 'Asia/Seoul')::date+1);
 update public.ops_tasks set status='canceled' where id=(select task_id from withdrawal_cases where label='canceled');
-select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'40001','ops_withdrawal_completion_state_conflict','existing canceled-state guard remains exact') from withdrawal_cases where label='canceled';
+select throws_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'23514','ops_withdrawal_completion_state_conflict','existing canceled-state guard remains exact') from withdrawal_cases where label='canceled';
 update public.ops_tasks set status='requested' where id=(select task_id from withdrawal_cases where label='canceled');
 select lives_ok(format('select public.complete_ops_withdrawal_roster_transition_v3(%L,%L)',task_id,request_id),'canceled then reopened requested task may complete') from withdrawal_cases where label='canceled';
 
@@ -266,6 +266,12 @@ select ok(pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,te
 select dashboard_private.apply_student_class_roster_mode(t.student_id,t.class_id,'removed','enrolled',c.claim_id,'synthetic_manual_remove','a0600000-0000-4000-8000-000000000001') from withdrawal_cases t join withdrawal_claims c using(label) where label='claimed';
 update public.ops_registration_enrollments set status='canceled',roster_active=false where id=(select claim_id from withdrawal_claims where label='claimed');
 select dashboard_private.apply_student_class_roster_mode(student_id,class_id,'enrolled','removed',null,'synthetic_manual_restore','a0600000-0000-4000-8000-000000000001') from withdrawal_cases where label='claimed';
+-- This is a valid later request: the synthetic removal/restore happened two
+-- KST days ago, before its last lesson yesterday. The separate completion suite
+-- covers re-entry after the cutoff and equal timestamps in one transaction.
+update public.student_class_enrollment_history h
+set changed_at=((clock_timestamp() at time zone 'Asia/Seoul')::date-2)::timestamp at time zone 'Asia/Seoul'
+from withdrawal_cases c where c.label='claimed' and h.student_id=c.student_id and h.class_id=c.class_id;
 select is(dashboard_private.withdrawal_roster_cutoff_v1(student_id,class_id),null::date,'changed claim owner/generation exposes no old cutoff') from withdrawal_cases where label='claimed';
 insert into public.ops_tasks(id,type,status,title,student_id,class_id,requested_by,subject)
 select 'a0600000-0000-4000-8000-000000000022','withdrawal','requested','새 세대 지난 날짜 합성 요청',student_id,class_id,'a0600000-0000-4000-8000-000000000001','영어' from withdrawal_cases where label='claimed';

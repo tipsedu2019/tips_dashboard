@@ -133,25 +133,6 @@ function loadRegistrationTrackParentResolver() {
   ).resolveRegistrationTrackSummariesForParents;
 }
 
-function loadWithdrawalStudentStatusPolicy() {
-  const source = sourceBetween(
-    "function getWithdrawalStudentStatusAfterClassRemoval",
-    "function hasOpsStudentClassRosterLink",
-  );
-  return transpileAndLoad(
-    source,
-    ["getWithdrawalStudentStatusAfterClassRemoval"],
-    {
-      ACTIVE_STUDENT_STATUS: "재원",
-      WITHDRAWN_STUDENT_STATUS: "퇴원",
-      normalizeIdList(value) {
-        return Array.isArray(value) ? [...new Set(value.map(String).filter(Boolean))] : [];
-      },
-      text: (value) => String(value || "").trim(),
-    },
-  ).getWithdrawalStudentStatusAfterClassRemoval;
-}
-
 function loadOpsTaskPageWithMocks(mocks) {
   const source = sourceBetween(
     "export async function loadOpsTaskPage",
@@ -414,16 +395,10 @@ test("task stats supplement combines caller cancellation with the exact bounded 
   });
 });
 
-test("withdrawal status changes only after the selected class is the student's final live roster", () => {
-  const getStatus = loadWithdrawalStudentStatusPolicy();
-
-  assert.equal(getStatus({ class_ids: ["english"] }, "english"), "퇴원");
-  assert.equal(getStatus({ class_ids: ["english", "math"] }, "english"), "재원");
-  assert.equal(
-    getStatus({ class_ids: ["english"], waitlist_class_ids: ["science"] }, "english"),
-    "재원",
-  );
-});
+// Withdrawal status/other-live-roster preservation is now exercised against the
+// authoritative SQL core in withdrawal_last_lesson_release_test.sql and
+// withdrawal_completion_without_settlement_test.sql. The removed client fallback
+// must not simulate the new completion/queue policy.
 
 function deferred() {
   let resolve;
