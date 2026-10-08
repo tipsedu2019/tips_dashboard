@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { AI_REQUEST_STATUSES, aiCreateRequestSchema, aiRequestListQuerySchema, aiMessageInputSchema, aiDecimalSchema, aiSafeJsonObjectSchema } from '../ai-agent-request-contract.ts';
 import { AiHttpError, authenticateAiAgent, type AiDependencies, type AiPrincipal } from './ai-agent-auth.ts';
 import { executeAiOperation, type AiOperation } from './ai-agent-repository.ts';
+import { createAgentResponseContract } from '../../agent-api/server/response-contract.ts';
 export type AiRoute = {kind:'requests'}|{kind:'request'|'messages'|'resume'|'actions';id:string}|{kind:'action'|'reconcile';id:string;actionId:string};
 const uuid=z.uuid(), hash=z.string().regex(/^[a-f0-9]{64}$/), timestamp=z.iso.datetime({offset:true});
 const text=(max:number)=>z.string().refine(value=>value.trim().length>0 && [...value].length<=max);
@@ -117,7 +118,16 @@ async function selectOperation(request:Request,route:AiRoute,principal:AiPrincip
 }
 export function createAiAgentRouteHandler(dependencies:AiDependencies) {
  return async(request:Request,route:AiRoute):Promise<Response>=>{
-  try {const principal=await authenticateAiAgent(request,dependencies);const {operation,input}=await selectOperation(request,route,principal);return aiResponse(await executeAiOperation(principal,operation,input));}
-  catch(error){return aiErrorResponse(error);}
+  const contract=createAgentResponseContract(request);
+  try {
+   const principal=await authenticateAiAgent(request,dependencies);
+   const {operation,input}=await selectOperation(request,route,principal);
+   if (typeof input.id==='string') contract.result('state',`/api/ai-agent/requests/${input.id}${typeof input.actionId==='string'?`/actions/${input.actionId}`:''}`);
+   const data=await executeAiOperation(principal,operation,input);
+   if (operation==='create' && data && typeof data==='object' && 'id' in data) contract.result('state',`/api/ai-agent/requests/${data.id}`);
+   contract.accepted(principal.kind==='user'?'employee_session':'ai_request');
+   return contract.finish(aiResponse(data),{data,error:null});
+  }
+  catch(error){return contract.finish(aiErrorResponse(error));}
  };
 }

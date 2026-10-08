@@ -3,12 +3,14 @@ import { aiSpaceCatalogSchema, aiSpacePermissionSchema, aiPolicyRevisionSchema, 
 import { AiHttpError, authenticateAiAgent, type AiDependencies } from './ai-agent-auth.ts';
 import { throwAiRpcError } from './ai-agent-repository.ts';
 import { aiErrorResponse, aiJsonBody, aiQuery, aiResponse, aiWriteKey } from './ai-agent-routes.ts';
+import { createAgentResponseContract } from '../../agent-api/server/response-contract.ts';
 const uuid=z.uuid();
 const revision=aiPolicyRevisionSchema;
 const spaces=aiPolicySpaceKeysSchema;
 export type AiSpacePolicyRoute={kind:'spaces'}|{kind:'space-permissions';userId:string};
 export function createAiAgentSpacePolicyHandler(dependencies:AiDependencies) {
  return async(request:Request,route:AiSpacePolicyRoute):Promise<Response>=>{
+  const contract=createAgentResponseContract(request);
   try {
    const principal=await authenticateAiAgent(request,dependencies);
    if(principal.kind!=='user'||route.kind==='space-permissions'&&principal.role!=='admin')throw new AiHttpError(403,'ai_agent_forbidden');
@@ -23,7 +25,8 @@ export function createAiAgentSpacePolicyHandler(dependencies:AiDependencies) {
    }else throw new AiHttpError(405,'method_not_allowed');
    const result=await principal.rpc('ai_agent_space_policy_api_v1',{p_action:operation,p_input:input});if(result.error)throwAiRpcError(result.error);
    const parsed=(operation==='catalog'?aiSpaceCatalogSchema:aiSpacePermissionSchema).safeParse(result.data);if(!parsed.success)throw new AiHttpError(503,'ai_agent_api_unavailable');
-   return aiResponse(parsed.data);
-  }catch(error){return aiErrorResponse(error);}
+   contract.accepted('employee_session');
+   return contract.finish(aiResponse(parsed.data));
+  }catch(error){return contract.finish(aiErrorResponse(error));}
  };
 }
