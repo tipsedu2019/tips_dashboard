@@ -11,6 +11,9 @@ const SCOPE_BINDINGS = new WeakMap()
 const LEXICAL_BINDINGS = new WeakMap()
 const UNKNOWN_LITERAL = Symbol("unknown literal")
 const EXACT_SCALAR_RPC_NAMES = new Set([
+  // 20261007141548: no arguments and one constant TEXT capability version;
+  // transport deadline and retry(false) remain mandatory.
+  "withdrawal_last_lesson_release_runtime_version",
   "get_ops_task_list_stats_v1",
   "get_management_stats_v1",
   "list_management_filter_options_v1",

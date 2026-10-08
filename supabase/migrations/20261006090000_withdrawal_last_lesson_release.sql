@@ -285,7 +285,12 @@ begin
   end if;
   if pg_catalog.to_regclass('cron.job') is null
     or pg_catalog.to_regprocedure('cron.schedule(text,text,text)') is null
-    or pg_catalog.to_regprocedure('cron.unschedule(bigint)') is null then
+    or not exists (
+      select 1 from pg_catalog.pg_proc p
+      join pg_catalog.pg_namespace n on n.oid=p.pronamespace
+      where n.nspname='cron' and p.proname='unschedule' and p.prokind='f'
+        and p.pronargs=1 and p.proargtypes[0]='pg_catalog.text'::regtype
+    ) then
     if p_action='inspect' then return pg_catalog.jsonb_build_object('available',false,'ready',false); end if;
     raise exception 'withdrawal_release_scheduler_unavailable' using errcode='55000';
   end if;
@@ -304,7 +309,7 @@ begin
       -- Named schedule preserves an existing job's active flag. Recreate an
       -- inactive exact job so activation needs no additional extension grants.
       if v_active is distinct from true then
-        execute 'select cron.unschedule($1)' using v_job_id;
+        execute $stop$select cron.unschedule('tips-withdrawal-roster-release-v1')$stop$;
       end if;
     end if;
     -- Named schedule creates or refreshes only this owner's exact job. Managed
@@ -314,8 +319,17 @@ begin
   elsif p_action in('disable','remove') then
     -- Stopping unschedules the job; it preserves pending reservations and does
     -- not cancel an in-flight worker. A later install may return a new job ID.
-    for v_job_id in execute 'select jobid from cron.job where jobname=$1' using 'tips-withdrawal-roster-release-v1'
-    loop execute 'select cron.unschedule($1)' using v_job_id; end loop;
+    if v_count>1 then raise exception 'withdrawal_release_scheduler_ambiguous' using errcode='55000'; end if;
+    if v_count=1 then
+      -- The named API matches the definer's owner and name, but not database.
+      -- Allow stopping a drifted command only within this exact ownership scope.
+      execute $query$select bool_and(username='postgres' and database=pg_catalog.current_database())
+        from cron.job where jobname='tips-withdrawal-roster-release-v1'$query$ into v_matches;
+      if v_matches is distinct from true then
+        raise exception 'withdrawal_release_scheduler_drift' using errcode='55000';
+      end if;
+      execute $stop$select cron.unschedule('tips-withdrawal-roster-release-v1')$stop$;
+    end if;
   end if;
   execute 'select coalesce(jsonb_agg(jsonb_build_object(''jobId'',jobid,''schedule'',schedule,''active'',active) order by jobid),''[]''::jsonb)
     from cron.job where jobname=$1' into v_jobs using 'tips-withdrawal-roster-release-v1';

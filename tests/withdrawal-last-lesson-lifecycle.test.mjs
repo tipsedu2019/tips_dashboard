@@ -28,6 +28,10 @@ function harness(options = {}) {
   const calls = []
   const response = { sourceEventIds: ["synthetic-completion-source"], task: { id: "task-1", status: "done" } }
   const mocks = {
+    AbortSignal: { timeout: (milliseconds) => {
+      calls.push(["deadline", milliseconds])
+      return AbortSignal.timeout(milliseconds)
+    } },
     text: (value) => String(value ?? "").trim(),
     probeRegistrationSubjectTrackRuntime: async () => ({ mode: options.mode || "ready" }),
     resetRegistrationSubjectTrackRuntimeProbe: () => calls.push(["reset-runtime"]),
@@ -39,10 +43,16 @@ function harness(options = {}) {
       return { status: "refreshed" }
     },
     supabase: {
-      rpc: async (name, parameters) => {
+      rpc: (name, parameters) => {
         calls.push(["rpc", name, parameters])
-        if (name === "withdrawal_last_lesson_release_runtime_version") return { data: options.version ?? runtimeVersion, error: options.capabilityError || null }
-        return { data: response, error: options.completionError || null }
+        const result = name === "withdrawal_last_lesson_release_runtime_version"
+          ? { data: options.version ?? runtimeVersion, error: options.capabilityError || null }
+          : { data: response, error: options.completionError || null }
+        return {
+          abortSignal(signal) { calls.push(["abort-signal", signal instanceof AbortSignal]); return this },
+          retry(enabled) { calls.push(["retry", enabled]); return this },
+          then(resolve, reject) { return Promise.resolve(result).then(resolve, reject) },
+        }
       },
       from: (name) => {
         calls.push(["direct-write", name])
@@ -91,6 +101,17 @@ test("missing or incompatible date-boundary capability rejects before completion
     assert.ok(!calls.some(([, name]) => name?.startsWith?.("complete_ops_")))
     assert.ok(!calls.some(([kind]) => ["direct-write", "public-cache"].includes(kind)))
   }
+})
+
+test("capability timeout uses one bounded request and rejects before any downstream write", async () => {
+  const expected = { code: "", message: "TimeoutError: The operation was aborted due to timeout" }
+  const { calls, mocks } = harness({ capabilityError: expected })
+  await assert.rejects(loadCompletion(mocks)("task-1", "withdrawal"), (error) => error === expected)
+  assert.deepEqual(calls.filter(([kind]) => ["deadline", "abort-signal", "retry"].includes(kind)), [
+    ["deadline", 8_000], ["abort-signal", true], ["retry", false],
+  ])
+  assert.equal(calls.filter(([kind]) => kind === "rpc").length, 1)
+  assert.ok(!calls.some(([kind]) => ["producer", "direct-write", "public-cache"].includes(kind)))
 })
 
 test("the existing maintenance guard blocks withdrawal completion, creation, and completed updates", async () => {

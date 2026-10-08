@@ -20,7 +20,7 @@ async function wordingRows() {
     .map(([, eventKey, oldLine, newLine]) => ({ eventKey, oldLine, newLine }))
 }
 
-test("퇴원 Chat의 제출·완료 일정은 기준일을 마지막 수업일로 표시하고 현재 명단 상태를 추정하지 않는다", async () => {
+test("퇴원 Chat은 마지막 수업일과 다음 회차 제외를 안내하고 이미 제외된 상태를 보존한다", async () => {
   const fixture = JSON.parse(await readFile(fixtureUrl, "utf8"))
   const rows = await wordingRows()
   assert.equal(rows.length, 4, "both events must cover Korean and internal variable tokens")
@@ -79,7 +79,9 @@ test("퇴원 Chat의 제출·완료 일정은 기준일을 마지막 수업일�
         const lastLesson = eventKey === "withdrawal.completed" ? "10월 8일(목) · 9회차" : "10월 6일(화) · 8회차"
         const scheduleLine = `[일정] 퇴원기준일(마지막 수업일): ${lastLesson}`
         assert.ok(rendered.renderedBody.split("\n").includes(scheduleLine))
-        assert.doesNotMatch(rendered.renderedBody, /\d+회차부터 제외|제외 예정|\{[^}]+\}/u)
+        const policyLine = "명단에 남아 있는 학생은 퇴원기준일까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다. 이미 제외된 학생은 기존 제외 상태를 유지합니다."
+        assert.ok(rendered.renderedBody.split("\n").includes(policyLine))
+        assert.doesNotMatch(rendered.renderedBody, /\d+회차부터 제외|\{[^}]+\}/u)
         assert.ok(rendered.renderedBody.includes("[수업] 중2 수학 A반"))
         const card = buildGoogleChatCardPayload({
           workflow_key: "withdrawal", rendered_title: rendered.renderedTitle,
@@ -87,6 +89,7 @@ test("퇴원 Chat의 제출·완료 일정은 기준일을 마지막 수업일�
         })
         assert.equal(card.ok, true)
         assert.ok(card.payload.cardsV2[0].card.sections[0].widgets[0].textParagraph.text.includes(scheduleLine))
+        assert.ok(card.payload.cardsV2[0].card.sections[0].widgets[0].textParagraph.text.includes(policyLine))
       }
     }
     assert.equal(trap.attempts.length, 0, "render and card construction must make no external requests")

@@ -748,12 +748,12 @@
     {
       "fileName": "20261006080000_withdrawal_chat_last_lesson_wording.sql",
       "status": "final",
-      "sha256": "7b6907586c58aa2e29396cead1830cfe4167f610250e8bf0184c48cbba3785ca"
+      "sha256": "b33601339abe5ef2f96d553ce0dc1423981225f308be45394a2b81206ce6a30d"
     },
     {
       "fileName": "20261006090000_withdrawal_last_lesson_release.sql",
       "status": "final",
-      "sha256": "6e3cbd2c86cc93dcfc284d9815426807f9f90ea3b879fbb3dde92c300963d05d"
+      "sha256": "4f73f75bbf0aa8f457eb3b1c070281ae3f94dcbf79e20b119f8fb79f0de3e921"
     },
     {
       "fileName": "20261006091000_withdrawal_future_roster_boundary.sql",

@@ -3247,6 +3247,8 @@ async function getOpsRosterRuntimeState() {
 async function assertWithdrawalLastLessonRuntimeReady() {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const { data, error } = await supabase.rpc("withdrawal_last_lesson_release_runtime_version")
+    .abortSignal(AbortSignal.timeout(8_000))
+    .retry(false)
   if (error && !isMissingOpsRosterRpc(error)) throw error
   if (error || data !== "withdrawal_completion_without_settlement_v2") {
     throw new Error("퇴원 기준일을 포함하는 명단 처리 기능이 준비되지 않았습니다. 관리자에게 문의하세요.")

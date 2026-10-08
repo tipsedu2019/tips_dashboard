@@ -1,6 +1,6 @@
 {
   "scope": "Final candidate against main b7f2a7c0bb2b814e7746b3df6ba16e6be8015ef5; earlier main31 checks retained as historical provenance",
-  "migration900Sha256": "6e3cbd2c86cc93dcfc284d9815426807f9f90ea3b879fbb3dde92c300963d05d",
+  "migration900Sha256": "4f73f75bbf0aa8f457eb3b1c070281ae3f94dcbf79e20b119f8fb79f0de3e921",
   "checks": [
     {
       "check": "focused-node-tests",
@@ -45,7 +45,7 @@
     },
     {
       "priorEvidence": "browser",
-      "scope": "Affected withdrawal UI/service and roster-cutoff consumer sources only, compared with frozen536. This is not a browser rerun of the full merged b7 application.",
+      "scope": "Frozen536 browser SQL-save evidence. Final UI/producer business behavior retained; capability transport now adds an 8-second deadline and retry(false). This is not a browser rerun of the complete final app.",
       "comparedSource": "53605f580196413241b592a8d7dd1d40f71629a8",
       "paths": [
         "src/features/tasks",
@@ -54,11 +54,13 @@
         "src/features/dashboard/snapshot-sources.d.ts",
         "src/hooks/use-tips-dashboard-metrics.ts"
       ],
-      "changedPaths": [],
+      "changedPaths": [
+        "src/features/tasks/ops-task-service.ts"
+      ],
       "fullMergedAppBrowserRerun": false
     }
   ],
-  "sqlRuntime": "PASS: final product native timeout/whole rollback/natural retry in two timer contexts; 221 withdrawal and772 related assertions; all owned DB resources removed",
+  "sqlRuntime": "Final b336+4f73: fresh160/167,221 withdrawal pgTAP,52 wording assertions,75 native manager controls passed. Historical772 related SQL and two unchanged native30s rollback/retry proofs retained. All owned isolated DB resources removed.",
   "requiredGitHubChecks": "pending",
   "productionWrites": 0,
   "manualStudentWrites": 0,
@@ -66,7 +68,10 @@
   "freshReplay": {
     "orderedMigrations": 160,
     "filesApplied": 167,
-    "sourceVerifiedAgainstCurrentFiles": true
+    "sourceVerifiedAgainstCurrentFiles": true,
+    "completedAt": "2026-10-08T03:09:32.652800+00:00",
+    "reportSha256": "09c785a4f259c5fb7b6acdaa9db8a94d38b8b9aa96d23fd48edebd89a66dd34e",
+    "scope": "Final b336 wording + 4f73 named manager; original pgTAP test bytes unchanged"
   },
   "pgtap": [
     {
@@ -271,5 +276,153 @@
     "failed": 0,
     "skipped": 0,
     "hashOnlyRepair": true
+  },
+  "historicalRuntimeMigration900Sha256": "6e3cbd2c86cc93dcfc284d9815426807f9f90ea3b879fbb3dde92c300963d05d",
+  "boundedCapabilityAndManagerChecks": [
+    {
+      "check": "final-bounded-capability-tests",
+      "exitCode": 0,
+      "logSha256": "c0ec41794427362b0f65840cf91b0eb47a067c9c194cfb87c73ce68606678d25"
+    },
+    {
+      "check": "final-bounded-types",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "final-bounded-lint",
+      "exitCode": 0,
+      "logSha256": "341af995cd940bcfd2bfa865aa3e77d258eec70019476eab70a236fcc4f9201e"
+    },
+    {
+      "check": "final-bounded-operational-guardrails",
+      "exitCode": 0,
+      "logSha256": "73c4b80e815444afa6d3e265600e92071e9f5c1ff48bd03b7a1a1ae41117912e"
+    },
+    {
+      "check": "final-bounded-free-tier-worktree",
+      "exitCode": 1,
+      "logSha256": "07015909cd0f92f98da4bcd8b774f4c0e743795905b1e7c69ec0f12f80ffbe4a"
+    },
+    {
+      "check": "final-bounded-free-tier-worktree-v2",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "final-bounded-squawk",
+      "exitCode": 0,
+      "logSha256": "2a2656f7f4009245215fa08d35bb26992951ae104a95b5b317411c8a860548eb"
+    },
+    {
+      "check": "final-bounded-layout",
+      "exitCode": 0,
+      "logSha256": "487a77776cd6fe21f8fd3b4a079471a86cb955b03ffda043d43ac7bfa122fcf1"
+    },
+    {
+      "check": "final-bounded-sqlstate",
+      "exitCode": 0,
+      "logSha256": "0d7f013368b8312323a93e3ce3df33f5f2a0a9835cfaf3cbea1cc372675d3ae9"
+    }
+  ],
+  "migration800Sha256": "b33601339abe5ef2f96d553ce0dc1423981225f308be45394a2b81206ce6a30d",
+  "finalWordingChecks": [
+    {
+      "check": "final-wording-render-tests",
+      "exitCode": 0,
+      "logSha256": "c5366b133e67fdadf46c935d7d0969bdc1c5ade115b6fe9390ab71149d33c8bc"
+    },
+    {
+      "check": "final-wording-free-tier-worktree",
+      "exitCode": 0,
+      "logSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+    },
+    {
+      "check": "final-wording-squawk",
+      "exitCode": 0,
+      "logSha256": "2a2656f7f4009245215fa08d35bb26992951ae104a95b5b317411c8a860548eb"
+    },
+    {
+      "check": "final-wording-layout",
+      "exitCode": 0,
+      "logSha256": "487a77776cd6fe21f8fd3b4a079471a86cb955b03ffda043d43ac7bfa122fcf1"
+    }
+  ],
+  "finalPgtap": [
+    {
+      "name": "withdrawal_completion_without_settlement_test.sql",
+      "sha256": "21cb75fa55ad69f75f62e41dfecd056c6118ba2ee8a70c9f4e90ad47278d0623",
+      "assertions": 96,
+      "failed": 0,
+      "plan": "1..96",
+      "passed": true
+    },
+    {
+      "name": "withdrawal_last_lesson_release_test.sql",
+      "sha256": "13d12f8aad0cc72f167ac98c5cc2715fb1c908ae835b4c06769b08cd5ab24683",
+      "assertions": 125,
+      "failed": 0,
+      "plan": "1..125",
+      "passed": true
+    }
+  ],
+  "finalBrowserCapabilityTransport": {
+    "passed": true,
+    "resultSha256": "eb3ed4fb565290fe5068f589885a84c7514dc5cd8d9f18b40107f46401c5feef",
+    "serviceSha256": "730dd568e2663515a1f44db1533fcfaa80b895194677a47fef59b68dd8028ec1",
+    "sdkVersion": "2.108.2",
+    "browserVersion": "148.0.7778.96",
+    "elapsedMs": 8008.600000023842,
+    "capabilityRequests": 1,
+    "additionalObservationMs": 2000,
+    "downstreamHTTPAttempts": 0,
+    "producerCalls": 0,
+    "scope": "Extracted current service capability helper and fee caller + installed SDK in a real Chromium browser. This is not full route/save E2E.",
+    "limits": [
+      "No route/UI interaction, SQL producer, DB, Auth server, JWT verification, or real PostgREST server is exercised.",
+      "Current service functions are copied byte-for-byte from TS AST and transpiled without logic edits; the SDK UMD bytes are the actual installed package.",
+      "Only a native browser HTTP response is deliberately held. Unreached downstream dependencies are fail-closed counters, not business success mocks.",
+      "Historical nine save E2E cases remain frozen at their recorded53605f58 source; this validates only the new browser/SDK transport delta."
+    ],
+    "cleanup": {
+      "at": "2026-10-08T03:11:16.414Z",
+      "ownedBrowserDisconnected": true,
+      "ownedHTTPServerStopped": true,
+      "ownedSocketsRemaining": 0,
+      "databaseConnections": 0,
+      "databaseWrites": 0,
+      "productSourceWrites": 0,
+      "dependencyInstalls": 0,
+      "otherTabsTouched": false,
+      "timedOut": false,
+      "cleanupError": null,
+      "passed": true
+    },
+    "initialAttempt": "Preserved default-sandbox loopback listen EPERM before browser/HTTP/DB execution. Same runner under normal escalation passed."
+  },
+  "finalWordingSql": {
+    "assertions": 52,
+    "passed": 52,
+    "failed": 0,
+    "sourceSha256": "b33601339abe5ef2f96d553ce0dc1423981225f308be45394a2b81206ce6a30d",
+    "resultSha256": "3c403e0ef1834ba1820970d2a3e357ecc013b78654f7893f5174c51b708e314b",
+    "scope": "Isolated synthetic database; actual migration, final real compliance helpers, preserved snapshots and no send"
+  },
+  "finalNativeNamedManager": {
+    "passed": true,
+    "assertions": 75,
+    "sourceSha256": "4f73f75bbf0aa8f457eb3b1c070281ae3f94dcbf79e20b119f8fb79f0de3e921",
+    "resultSha256": "e6432b9a2307c39ef401967fc6d566ff11064cb187fc4aa72b8a16a8e4a29f44",
+    "nativeAPIsMocked": false,
+    "automaticTicks": false,
+    "workerInvoked": false,
+    "scope": "Real pg_cron C unschedule(text) APIs and exact manager security/scope controls; automatic timer evidence remains separately bound to unchanged workers/command."
+  },
+  "finalNamedManagerCleanup": {
+    "completed": true,
+    "containerRemoved": true,
+    "volumeRemoved": true,
+    "pid": 0,
+    "reportSha256": "abe77195909ecad1c8d6f34ad3fdc8d65c2dbf323b23c30f92c297016336e8ae"
   }
 }

@@ -18,7 +18,7 @@
 
 `update_ops_withdrawal_settlement_check_v1`은 활성 관리자·직원의 완료된 퇴원 업무에서 `feeProcessed` 또는 `textbookFeeProcessed` 한 항목만 변경한다. 예상 체크값과 요청 영수증으로 중복·경합을 처리하며 수동 확인 감사 기록을 남긴다. 일반 업무 수정이나 완료 알림 producer는 다시 호출하지 않는다. 체크는 담당자의 처리 확인 정보이며, 청구 금액·미수금·결제 이력·교재 청구를 정산하거나 취소하는 기능이 아니다.
 
-완료 자체는 기존 canonical 완료 알림 경로를 유지하므로 운영에서 실행하면 알림 후속 처리가 발생할 수 있다. 합성 테스트는 provider 경로를 격리한다. Chat의 일정 문구는 `퇴원기준일(마지막 수업일): 날짜 · 회차`로 표시하여 이미 제외된 학생이나 지난 기준일에 미래 제외를 약속하지 않는다. 문구 migration은 일치하는 시스템 템플릿만 새 버전으로 전환하며 기존 발송 snapshot과 사용자 편집 템플릿은 유지한다.
+완료 자체는 기존 canonical 완료 알림 경로를 유지하므로 운영에서 실행하면 알림 후속 처리가 발생할 수 있다. 합성 테스트는 provider 경로를 격리한다. Chat은 `퇴원기준일(마지막 수업일): 날짜 · 회차` 아래에 `명단에 남아 있는 학생은 퇴원기준일까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다. 이미 제외된 학생은 기존 제외 상태를 유지합니다.`를 안내한다. 현재 명단을 알림에서 추정하지 않으면서 마지막 수업과 다음 회차 제외의 관계를 명시한다. 문구 migration은 일치하는 시스템 템플릿만 새 버전으로 전환하며 기존 발송 snapshot과 사용자 편집 템플릿은 유지한다.
 
 ## 실행 준비와 배포 경계
 
@@ -26,7 +26,7 @@
 
 이미 제외된 요청의 완료에는 예약 준비가 필요하지 않다. 명단이 남아 있는 당일·미래 요청의 예약 생성은 `tips-withdrawal-roster-release-v1` 작업이 정확한 명령·1분 주기·활성 상태·현재 DB·postgres 실행자로 준비되어 있을 때만 허용한다. 준비되지 않은 경우 `55000 / withdrawal_release_scheduler_not_ready`로 실패한다. `manage_withdrawal_roster_release_scheduler_v1`의 `inspect`, `install`, `disable`, `remove`는 service role 전용이다. 운영 활성화는 별도 승인을 받은 릴리스 작업이다. 합성 환경의 설치·자동 tick 검증과 운영 활성화를 구분한다.
 
-관리 함수는 확장의 `cron.schedule`과 `cron.unschedule`을 사용한다. 확장 소유자가 supabase_admin인 환경에서 postgres의 cron.job 직접 UPDATE나 cron.alter_job 호출 권한을 추가하지 않는다. `disable`과 `remove`는 모두 해당 job을 unschedule하고 pending 예약을 보존한다. 이미 실행 중인 worker는 취소하지 않는다. `install`은 내용이 일치하는 활성 job을 유지하며 비활성 job은 제거 후 재생성하므로 job ID가 바뀔 수 있다. 내용이 다른 job은 계속 거부한다.
+관리 함수는 확장의 `cron.schedule`과 고정 이름의 `cron.unschedule`을 사용한다. 확장 소유자가 supabase_admin인 환경에서 postgres의 cron.job 직접 UPDATE나 cron.alter_job 호출 권한을 추가하지 않는다. `disable`과 `remove`는 모두 현재 DB·postgres 소유자의 해당 job만 unschedule하고 pending 예약을 보존한다. 이름이 중복되거나 소유자·DB가 다르면 거부하며, 동일 범위의 명령 drift는 중지할 수 있다. 이미 실행 중인 worker는 취소하지 않는다. `install`은 내용이 일치하는 활성 job을 유지하며 비활성 job은 제거 후 재생성하므로 job ID가 바뀔 수 있다. 내용이 다른 job의 설치는 계속 거부한다.
 
 cron은 PostgreSQL 17의 세션별 transaction timeout을 사용한다. 기존 세션에 양수 timeout이 이미 시작되어 있으면 값을 30초로 바꾸는 것만으로 타이머가 다시 시작되지 않으므로, 이 cron 세션에서만 0으로 해제한 뒤 30초를 설정한다. 정확한 명령은 다음과 같다.
 

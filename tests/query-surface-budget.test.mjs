@@ -2330,6 +2330,22 @@ test("mutable, derived, destructured, and computed RPC invocation aliases fail c
   assert.equal(result.violations.some((violation) => violation.reason === "rpc_page_limit_missing"), false)
 })
 
+test("withdrawal capability is exactly scalar and still requires deadline and no-retry controls", async () => {
+  const options = { surface: "tasks", file: "src/features/tasks/ops-task-service.ts" }
+  const bounded = await verifyFixture({ ...options, source: `async function read(client) {
+    return client.rpc("withdrawal_last_lesson_release_runtime_version").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }` })
+  assert.deepEqual(bounded, { ok: true, violations: [] })
+  const unbounded = await verifyFixture({ ...options, source: `async function read(client) {
+    return client.rpc("withdrawal_last_lesson_release_runtime_version")
+  }` })
+  assert.deepEqual(unbounded.violations.map(({ reason }) => reason).sort(), ["list_abort_signal_missing", "list_retry_false_missing"])
+  const unknown = await verifyFixture({ ...options, source: `async function read(client) {
+    return client.rpc("withdrawal_last_lesson_release_runtime_version_unreviewed").abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }` })
+  assert.ok(unknown.violations.some(({ reason }) => reason === "rpc_page_limit_missing"))
+})
+
 test("single-class creation is nonpageable but still requires deadline and no-retry controls", async () => {
   const options = { surface: "management", file: "src/features/management/management-service.js" }
   const bounded = await verifyFixture({ ...options, source: `async function create(client, payload) {
