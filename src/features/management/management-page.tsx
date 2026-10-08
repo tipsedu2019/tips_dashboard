@@ -1512,10 +1512,17 @@ function ManagementPageContent({ kind }: { kind: ManagementKind }) {
   }, [loadClassTextbookCandidatePage, selectedTextbookClassId, textbookCandidateFilters, textbookCandidateQuery, textbookCandidateScopeKey]);
 
   const reconcileManagementPage = useCallback(async (selectedId?: string) => {
+    if (kind === "classes" && selectedId) {
+      // Both reads must settle before the caller releases its mutation lock.
+      const [pageResult, detailResult] = await Promise.allSettled([refresh(), loadDetail(selectedId)]);
+      if (pageResult.status === "rejected") throw pageResult.reason;
+      if (detailResult.status === "rejected") throw detailResult.reason;
+      return detailResult.value;
+    }
     await refresh();
     if (!selectedId) return null;
     return loadDetail(selectedId);
-  }, [loadDetail, refresh]);
+  }, [kind, loadDetail, refresh]);
 
   useEffect(() => {
     if (kind !== "students") return;
