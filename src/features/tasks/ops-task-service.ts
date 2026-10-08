@@ -2066,10 +2066,7 @@ async function readOpsTaskWorkspaceData(
   }
 }
 
-export async function loadOpsTaskById(
-  taskId: string,
-  options: { forWithdrawalCompletion?: boolean } = {},
-): Promise<OpsTask | null> {
+export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
   if (!supabase || !text(taskId)) return null
 
   const taskResult = await supabase
@@ -2086,8 +2083,6 @@ export async function loadOpsTaskById(
 
   const taskRow = taskResult.data as unknown as Row
   const taskType = normalizeType(taskRow.type)
-  // Completion still reads fresh business fields; only display-only data can wait for the full UI refresh.
-  const includePresentation = !options.forWithdrawalCompletion || taskType !== "withdrawal"
   const detailPromise = taskType === "registration"
     ? supabase.from("ops_registration_details")
       .select("task_id,pipeline_status,inquiry_at,school_grade,school_name,parent_phone,student_phone,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,textbook_ready,timetable_roster_updated,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,textbook_billing_issued,request_note")
@@ -2107,13 +2102,13 @@ export async function loadOpsTaskById(
           : Promise.resolve({ data: null, error: null })
   const [detailResult, commentResult, attachmentResult, eventResult] = await Promise.all([
     detailPromise,
-    !includePresentation ? Promise.resolve({ data: [], error: null }) : supabase.from("ops_task_comments")
+    supabase.from("ops_task_comments")
       .select("id,task_id,author_id,body,created_at").eq("task_id", taskId).order("created_at").order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-    !includePresentation ? Promise.resolve({ data: [], error: null }) : supabase.from("ops_task_attachments")
+    supabase.from("ops_task_attachments")
       .select("id,task_id,file_name,file_kind,drive_file_id,drive_link,uploaded_by,uploaded_at").eq("task_id", taskId).order("uploaded_at").order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-    !includePresentation ? Promise.resolve({ data: [], error: null }) : supabase.from("ops_task_events")
+    supabase.from("ops_task_events")
       .select("id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at").eq("task_id", taskId).order("created_at", { ascending: false }).order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
   ])
@@ -2126,10 +2121,6 @@ export async function loadOpsTaskById(
   const commentRows = (commentResult.data || []) as unknown as Row[]
   const attachmentRows = (attachmentResult.data || []) as unknown as Row[]
   const eventRows = (eventResult.data || []) as unknown as Row[]
-  if (!includePresentation) {
-    const withdrawal = singleByTaskId(detailRows.map((row) => ({ taskId: text(row.task_id), ...mapWithdrawal(row)! })))
-    return mapTask(taskRow, new Map(), new Map(), withdrawal, new Map(), new Map(), new Map(), new Map(), new Map())
-  }
   const profileIds = [...new Set([
     taskRow.requested_by, taskRow.assignee_id, taskRow.secondary_assignee_id, taskRow.completed_by,
     ...commentRows.map((row) => row.author_id),
@@ -4569,15 +4560,44 @@ async function updateRegistrationOpsTask(taskId: string, input: OpsTaskInput, ex
   }
 }
 
+async function loadOpsWithdrawalTaskForCompletion(taskId: string): Promise<OpsTask | null> {
+  if (!supabase || !text(taskId)) return null
+
+  const taskResult = await supabase
+    .from("ops_tasks")
+    .select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,student_name,class_id,class_name,textbook_id,textbook_title,campus,subject,start_at,due_at,completed_by,completed_by_label,completed_at,memo,created_at,updated_at")
+    .abortSignal(AbortSignal.timeout(8_000))
+    .eq("id", taskId)
+    .single()
+    .retry(false)
+  if (taskResult.error) {
+    if (isMissingRelationError(taskResult.error) || text(taskResult.error.code) === "PGRST116") return null
+    throw taskResult.error
+  }
+
+  const taskRow = taskResult.data as unknown as Row
+  const taskType = normalizeType(taskRow.type)
+  if (taskType !== "withdrawal") return loadOpsTaskById(taskId)
+
+  const detailResult = await supabase.from("ops_withdrawal_details")
+    .select("task_id,school_grade,teacher_name,withdrawal_date,withdrawal_session,customer_reason,teacher_opinion,undistributed_textbooks,completed_lesson_hours,four_week_lesson_hours,timetable_roster_updated,makeedu_withdrawal_done,fee_processed,textbook_fee_processed")
+    .abortSignal(AbortSignal.timeout(8_000)).eq("task_id", taskId).single().retry(false)
+  if (detailResult.error && text(detailResult.error.code) !== "PGRST116") throw detailResult.error
+  const detailRows = detailResult.data ? [detailResult.data as unknown as Row] : []
+  const withdrawal = singleByTaskId(detailRows.map((row) => ({ taskId: text(row.task_id), ...mapWithdrawal(row)! })))
+  // Display history and actor labels are reloaded by the unchanged full UI reader after commit.
+  return mapTask(taskRow, new Map(), new Map(), withdrawal, new Map(), new Map(), new Map(), new Map(), new Map())
+}
+
 export async function updateOpsTask(
   taskId: string,
   input: OpsTaskInput,
 ): Promise<OpsTaskSourceEventReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
-  const existingTask = await loadOpsTaskById(taskId, {
-    forWithdrawalCompletion: input.type === "withdrawal" && input.status === "done",
-  })
+  const existingTask = input.type === "withdrawal" && input.status === "done"
+    ? await loadOpsWithdrawalTaskForCompletion(taskId)
+    : await loadOpsTaskById(taskId)
   if (!existingTask) throw new Error("업무 데이터를 다시 불러오세요.")
   const scoreSavePlan = getWordRetestScoreSavePlan(existingTask, input)
   input = scoreSavePlan.input as OpsTaskInput
@@ -4895,9 +4915,9 @@ export async function updateOpsTaskStatus(
   let rollbackCompletionSync: OpsCompletionRollback | null = null
   let completionSyncApplied = false
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const currentTask = await loadOpsTaskById(task.id, {
-    forWithdrawalCompletion: task.type === "withdrawal" && status === "done",
-  })
+  const currentTask = task.type === "withdrawal" && status === "done"
+    ? await loadOpsWithdrawalTaskForCompletion(task.id)
+    : await loadOpsTaskById(task.id)
   if (!currentTask) throw new Error("업무 데이터를 다시 불러오세요.")
   assertCompletedOperationStatusTransition(currentTask, status)
 

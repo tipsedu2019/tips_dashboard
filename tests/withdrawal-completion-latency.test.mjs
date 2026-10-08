@@ -35,7 +35,7 @@ function load(source, names, mocks) {
 
 const readerNames = ["text", "numberText", "bool", "normalizeType", "normalizeStatus", "normalizePriority",
   "isMissingRelationError", "profileLabel", "buildProfileLookup", "byTaskId", "singleByTaskId", "mapWithdrawal",
-  "mapComment", "mapAttachment", "mapEvent", "mapTask", "loadOpsTaskById", "inputFromTask"]
+  "mapComment", "mapAttachment", "mapEvent", "mapTask", "loadOpsTaskById", "loadOpsWithdrawalTaskForCompletion", "inputFromTask"]
 
 function readerHarness({ type = "withdrawal", errorTable = "", feeProcessed = false } = {}) {
   const reads = []
@@ -69,7 +69,7 @@ test("withdrawal completion preflight reads 2 resources instead of 6 with identi
     const full = readerHarness({ feeProcessed })
     const lean = readerHarness({ feeProcessed })
     const fullTask = await full.loadOpsTaskById("synthetic-task")
-    const leanTask = await lean.loadOpsTaskById("synthetic-task", { forWithdrawalCompletion: true })
+    const leanTask = await lean.loadOpsWithdrawalTaskForCompletion("synthetic-task")
     assert.deepEqual(JSON.parse(JSON.stringify(lean.inputFromTask(leanTask))), JSON.parse(JSON.stringify(full.inputFromTask(fullTask))))
     assert.equal(leanTask.updatedAt, fullTask.updatedAt)
     assert.equal(leanTask.withdrawal.feeProcessed, feeProcessed)
@@ -84,9 +84,9 @@ test("withdrawal completion preflight reads 2 resources instead of 6 with identi
 
 test("fresh non-withdrawal type retains full presentation despite a stale withdrawal caller", async () => {
   const h = readerHarness({ type: "general" })
-  const result = await h.loadOpsTaskById("synthetic-task", { forWithdrawalCompletion: true })
+  const result = await h.loadOpsWithdrawalTaskForCompletion("synthetic-task")
   assert.equal(result.type, "general")
-  assert.equal(h.reads.length, 5)
+  assert.equal(h.reads.length, 6)
   assert.equal(result.events.length, 1)
   assert.equal(result.requestedByLabel, "Synthetic staff")
 })
@@ -94,7 +94,7 @@ test("fresh non-withdrawal type retains full presentation despite a stale withdr
 test("fresh task and withdrawal detail failures remain fatal before completion writes", async () => {
   for (const errorTable of ["ops_tasks", "ops_withdrawal_details"]) {
     const h = readerHarness({ errorTable })
-    await assert.rejects(h.loadOpsTaskById("synthetic-task", { forWithdrawalCompletion: true }), (error) => error.code === "42501")
+    await assert.rejects(h.loadOpsWithdrawalTaskForCompletion("synthetic-task"), (error) => error.code === "42501")
     assert.ok(h.reads.every((x) => ["ops_tasks", "ops_withdrawal_details"].includes(x.table)))
   }
 })
@@ -112,7 +112,7 @@ test("both completion services stop on a fresh protected read failure without a 
       const h = readerHarness({ errorTable })
       let producers = 0
       const fn = load(service, [entry], {
-        supabase: {}, loadOpsTaskById: h.loadOpsTaskById,
+        supabase: {}, loadOpsTaskById: h.loadOpsTaskById, loadOpsWithdrawalTaskForCompletion: h.loadOpsWithdrawalTaskForCompletion,
         runIdempotentOpsTaskProducerRpc: () => { producers += 1 },
       })[entry]
       const running = entry === "updateOpsTask"
