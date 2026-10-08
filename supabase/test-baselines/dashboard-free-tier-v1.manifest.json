@@ -809,6 +809,11 @@
       "fileName": "20261008113322_withdrawal_completion_optional_request_snapshot.sql",
       "status": "final",
       "sha256": "649a119837bfb55428e835fca4b32de9f066408dd50c37e238782c16877d5b45"
+    },
+    {
+      "fileName": "20261008140556_ai_agent_thread_replies.sql",
+      "sha256": "2b618a4944c4e5bdf573b1335cd146a4eb989fff451ca585f4e55a8c348682c1",
+      "status": "final"
     }
   ]
 }

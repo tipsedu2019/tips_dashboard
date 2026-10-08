@@ -1,0 +1,84 @@
+-- Isolated synthetic fixture only; no provider call, real key or retained data.
+begin;
+select no_plan();
+create function pg_temp.tr_id(n integer) returns uuid language sql immutable as $$select ('af080000-0000-4000-8000-'||lpad(n::text,12,'0'))::uuid$$;
+create temp table tr_ev(k text primary key,v jsonb);grant all on tr_ev to authenticated,service_role;
+insert into auth.users(id,instance_id,aud,role,email) select pg_temp.tr_id(n),'00000000-0000-0000-0000-000000000000','authenticated','authenticated','thread-reply-'||n||'@test.invalid' from generate_series(1,2)n;
+insert into public.profiles(id,role,name) select pg_temp.tr_id(n),case n when 1 then 'admin' else 'teacher' end,'Synthetic reply fixture' from generate_series(1,2)n on conflict(id) do update set role=excluded.role;
+update dashboard_private.ai_agent_chat_support set issuance_enabled=true;
+update dashboard_private.chat_space_configuration set configured=true,resource_name='spaces/THREAD_'||space_key;
+insert into dashboard_private.chat_user_space_permissions(user_id,space_keys,configured_by) values(pg_temp.tr_id(2),array['space_1'],pg_temp.tr_id(1));
+create function pg_temp.tr_issue(n integer,source integer default 90,spaces text[] default array['space_1','space_2']) returns jsonb language sql as $$select public.ai_agent_credential_api_v1('create',jsonb_build_object('label','Synthetic Chat only','scopes',array['chat:send','chat:outbox:read'],'grant',jsonb_build_object('spaceKeys',spaces,'purposes',array['bridge_reply'],'bridgeSourceId',pg_temp.tr_id(source)),'idempotencyKey',pg_temp.tr_id(n)))$$;
+create function pg_temp.tr_hash(k text default 'key1') returns text language sql as $$select encode(sha256(convert_to(v->>'token','UTF8')),'hex') from tr_ev where tr_ev.k=tr_hash.k$$;
+create function pg_temp.tr_chat(action text,input jsonb,k text default 'key1') returns jsonb language sql as $$select public.ai_agent_chat_api_v1(pg_temp.tr_hash(k),action,input)$$;
+create function pg_temp.tr_input(n integer,event text default 'request',space text default 'space_1',body text default 'Synthetic reply') returns jsonb language sql as $$select jsonb_build_object('idempotencyKey',pg_temp.tr_id(n+10000),'bridgeSourceId',pg_temp.tr_id(90),'sourceEventId','spaces/THREAD_'||space||'/messages/'||event,'spaceKey',space,'threadName','spaces/THREAD_'||space||'/threads/existing','text',body,'clientMessageId',pg_temp.tr_id(n))$$;
+create function pg_temp.tr_get(n integer,k text default 'key1') returns jsonb language sql as $$select pg_temp.tr_chat('get',jsonb_build_object('clientMessageId',pg_temp.tr_id(n)),k)$$;
+create function pg_temp.tr_prepare(n integer) returns jsonb language sql as $$select pg_temp.tr_chat('prepare_attempt',jsonb_build_object('id',r->'outbox'->>'id','revision',r->'outbox'->>'revision','idempotencyKey',gen_random_uuid())) from (select pg_temp.tr_get(n) r)x$$;
+create function pg_temp.tr_record(k text,outcome text default 'sent') returns jsonb language sql as $$select pg_temp.tr_chat('record_attempt',jsonb_build_object('id',v->'outbox'->>'id','attemptId',v->'attempt'->>'attemptId','idempotencyKey',gen_random_uuid(),'outcome',outcome,'code',case when outcome='sent' then '200' else 'provider_ambiguous' end)||case when outcome='sent' then jsonb_build_object('messageName',v->'outbox'->>'expectedSpace'||'/messages/confirmed','threadName',v->'outbox'->>'threadName') else '{}'::jsonb end) from tr_ev where tr_ev.k=tr_record.k$$;
+select set_config('request.jwt.claim.sub',pg_temp.tr_id(1)::text,true);set local role authenticated;
+insert into tr_ev values('key1',pg_temp.tr_issue(11)),('rotated',pg_temp.tr_issue(12)),('otherSource',pg_temp.tr_issue(13,91)),('allSlots',pg_temp.tr_issue(14,92,array['space_1','space_2','space_3','space_4','space_5','space_6','space_7']));
+insert into tr_ev values('personal',public.ai_agent_personal_credential_api_v1('create',jsonb_build_object('ownerProfileId',pg_temp.tr_id(2),'label','Synthetic personal','scopes',array['chat:send','chat:outbox:read'],'grant',jsonb_build_object('spaceKeys',array['space_1'],'purposes',array['ai_completion']),'idempotencyKey',pg_temp.tr_id(15))));
+select throws_ok($q$select pg_temp.tr_get(101)$q$,'42501',null,'authenticated cannot call the server Chat RPC');reset role;
+select ok(not exists(select 1 from dashboard_private.ai_agent_credential_grants where credential_id in(select (v->>'id')::uuid from tr_ev where k in('key1','rotated'))),'Chat-only keys have no employee request grants');
+select ok(not exists(select 1 from unnest(array['anon','authenticated','service_role'])role where has_table_privilege(role,'dashboard_private.chat_delivery_outbox','SELECT,INSERT,UPDATE,DELETE')),'private table direct ACL unchanged');
+select ok((select relrowsecurity from pg_class where oid='dashboard_private.chat_delivery_outbox'::regclass),'outbox RLS remains enabled');
+select ok(has_function_privilege('service_role','public.ai_agent_chat_api_v1(text,text,jsonb)','EXECUTE') and not has_function_privilege('anon','public.ai_agent_chat_api_v1(text,text,jsonb)','EXECUTE'),'Chat RPC remains server-only');
+set local role service_role;
+insert into tr_ev values('first',pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101)));
+select is((select v->>'created' from tr_ev where k='first'),'true','first logical message creates one outbox');
+select is(pg_temp.tr_get(101)->'outbox'->>'id',(select v->'outbox'->>'id' from tr_ev where k='first'),'client ID recovers the exact outbox after a lost creation response');
+select is(pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101))->>'created','false','same operation replays without creating');
+select is(pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101)||jsonb_build_object('idempotencyKey',gen_random_uuid()),'rotated')->>'created','false','key rotation and a new HTTP key preserve client identity');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101,'different-event'))$q$,'23514','ai_agent_idempotency_conflict','same client ID cannot change its source event');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101)||'{"text":"changed"}')$q$,'23514','ai_agent_idempotency_conflict','same client ID cannot change text');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101,'request','space_2'))$q$,'23514','ai_agent_idempotency_conflict','same client ID cannot change even an allowed space');
+-- New HTTP keys on the rotated credential exercise source/client uniqueness,
+-- not the original credential's HTTP receipt fingerprint.
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101,'different-event')||jsonb_build_object('idempotencyKey',gen_random_uuid()),'rotated')$q$,'23514','ai_agent_idempotency_conflict','rotated client identity pins source event');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101)||jsonb_build_object('idempotencyKey',gen_random_uuid(),'text','changed'),'rotated')$q$,'23514','ai_agent_idempotency_conflict','rotated client identity pins payload');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101,'request','space_2')||jsonb_build_object('idempotencyKey',gen_random_uuid()),'rotated')$q$,'23514','ai_agent_idempotency_conflict','rotated client identity pins room');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(101)||jsonb_build_object('idempotencyKey',gen_random_uuid(),'threadName','spaces/THREAD_space_1/threads/changed'),'rotated')$q$,'23514','ai_agent_idempotency_conflict','rotated client identity pins thread');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(102))$q$,'55000','ai_agent_effect_unresolved','a fresh client ID cannot bypass a pending message');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(103)||'{"clientMessageId":null}')$q$,'22023','ai_agent_invalid','explicit null is not a new message identity');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(103)-'threadName')$q$,'22023','ai_agent_invalid','new thread creation is not accepted');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(103,'request','space_3'))$q$,'42501','ai_agent_grant_forbidden','configured but ungranted space is forbidden');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(103)||'{"threadName":"spaces/OTHER/threads/existing"}')$q$,'22023','chat_thread_invalid','thread must belong to the exact configured space');
+select throws_ok($q$select pg_temp.tr_get(101,'otherSource')$q$,'P0002','ai_agent_not_found','client lookup cannot read a different bridge source');
+select throws_ok($q$select pg_temp.tr_get(101,'personal')$q$,'42501','ai_agent_grant_forbidden','personal keys cannot recover bridge messages');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(103),'personal')$q$,'42501','ai_agent_grant_forbidden','personal keys cannot create bridge replies');
+select throws_ok($q$select pg_temp.tr_chat('get',jsonb_build_object('id',pg_temp.tr_id(101),'clientMessageId',pg_temp.tr_id(101)))$q$,'22023','ai_agent_invalid','status lookup accepts one identity only');
+insert into tr_ev values('prepared',pg_temp.tr_prepare(101));
+select is(pg_temp.tr_record('prepared')->'outbox'->>'state','sent','synthetic provider evidence commits sent state');
+insert into tr_ev values('second',pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(102,'request','space_1','Synthetic result')));
+select isnt((select v->'outbox'->>'id' from tr_ev where k='second'),(select v->'outbox'->>'id' from tr_ev where k='first'),'another logical reply to the same event has a distinct outbox');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(104)||'{"threadName":"spaces/THREAD_space_1/threads/different"}')$q$,'23514','ai_agent_idempotency_conflict','an observed source event stays in its original thread');
+-- A late contradiction is allowed to append evidence, but blocks the next permit.
+select is(pg_temp.tr_record('prepared')->'outbox'->>'state','incident','late contradictory result marks the prior delivery unresolved');
+select throws_ok($q$select pg_temp.tr_prepare(102)$q$,'55000','ai_agent_effect_unresolved','already-created next message cannot dispatch after a late incident');
+insert into tr_ev values('legacy',pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(201,'legacy')-'clientMessageId'));
+select ok(not((select v->'outbox' from tr_ev where k='legacy') ? 'clientMessageId'),'legacy JSON omits the new field');
+select is(pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(201,'legacy')-'clientMessageId')->>'created','false','legacy source/event replay remains single-message');
+select throws_ok($q$select pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(202,'legacy'))$q$,'55000','ai_agent_effect_unresolved','client ID cannot bypass an unresolved legacy message');
+select is(pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(301,'other-room','space_2'))->>'created','true','one explicit grant can reply in more than one room');
+reset role;
+-- Exercise every unresolved state with no provider calls and restore by rollback.
+do $$declare n integer:=400;st text;begin
+ foreach st in array array['pending','retry_wait','sending','delivery_unknown','incident'] loop
+  n:=n+1;
+  perform pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(n,'state-'||st));
+  update dashboard_private.chat_delivery_outbox set state=st where client_message_id=pg_temp.tr_id(n);
+ end loop;
+end$$;
+set local role service_role;
+select throws_ok(format('select pg_temp.tr_chat(''chat_outbox'',pg_temp.tr_input(%s,%L))',500+n,'state-'||st),'55000','ai_agent_effect_unresolved','new client blocked for '||st) from unnest(array['pending','retry_wait','sending','delivery_unknown','incident']) with ordinality x(st,n);
+select throws_ok(format('select pg_temp.tr_chat(''chat_outbox'',pg_temp.tr_input(%s,%L)-''clientMessageId'')',600+n,'state-'||st),'55000','ai_agent_effect_unresolved','legacy fallback blocked for '||st) from unnest(array['pending','retry_wait','sending','delivery_unknown','incident']) with ordinality x(st,n);
+select is(pg_temp.tr_chat('chat_outbox',pg_temp.tr_input(700+n,'all-slots','space_'||n)||jsonb_build_object('bridgeSourceId',pg_temp.tr_id(92)),'allSlots')->>'created','true','explicit grant supports slot '||n) from generate_series(1,7)n;
+reset role;
+select is((select count(*) from dashboard_private.chat_delivery_attempts where outbox_id=(select (v->'outbox'->>'id')::uuid from tr_ev where k='second')),0::bigint,'blocked follow-up has zero attempts');
+select is((select count(*) from dashboard_private.chat_delivery_outbox where bridge_source_id=pg_temp.tr_id(90) and source_event_id='spaces/THREAD_space_1/messages/request'),2::bigint,'replays and conflicts create no extra messages');
+update dashboard_private.chat_credential_space_grants set revoked_at=clock_timestamp() where credential_id=(select (v->>'id')::uuid from tr_ev where k='key1');
+set local role service_role;
+select throws_ok($q$select pg_temp.tr_get(101)$q$,'42501','ai_agent_grant_forbidden','current grant revocation denies client receipt lookup');
+reset role;
+select * from finish();
+rollback;

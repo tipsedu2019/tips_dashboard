@@ -17,6 +17,28 @@ test('employees, malformed tokens, raw URL/query, extra origin, missing key and 
 const stamp='2026-10-03T12:00:00+00:00',attemptId='33333333-3333-4333-8333-333333333333',credentialId='44444444-4444-4444-8444-444444444444';
 const initial={id,requestId:null,completionEventId:null,bridgeSourceId:key,sourceEventId:'spaces/SYNTHETIC/messages/a.b',purpose:'bridge_reply',spaceKey:'space_1',expectedSpace:'spaces/SYNTHETIC',threadName:'spaces/SYNTHETIC/threads/human',payload:{text:'답변',thread:{name:'spaces/SYNTHETIC/threads/human'}},payloadHash:'c'.repeat(64),upstreamRequestId:id,state:'pending',revision:'9007199254740993',reason:null,attemptCount:0,activeAttemptId:null,leaseExpiresAt:null,readyAt:stamp,createdAt:stamp,updatedAt:stamp};
 const slot={spaceKey:'space_1',resourceName:'spaces/SYNTHETIC',webhookUrl:'https://chat.googleapis.com/v1/spaces/SYNTHETIC/messages?key=synthetic-key&token=synthetic-token'};
+test('client message identity is sent to SQL, bound to payload and never becomes a new-thread request',async()=>{
+ const clientMessageId='AAAAAAAA-AAAA-4AAA-8AAA-AAAAAAAAAAAA',row={...initial,clientMessageId:clientMessageId.toLowerCase()};
+ const inputs=[];let fetches=0;
+ const handler=createChatSendHandler({rpc:async(_name,args)=>{inputs.push(args.p_input);return {data:{outbox:row,created:false},error:null};},resolveSlot:()=>slot,bridgeSourceId:async()=>key,fetch:async()=>{fetches++;throw Error('must not send');}});
+ const req=(client=clientMessageId,extra={})=>{const r=request({space:'space_1',thread:initial.threadName,text:'답변',clientMessageId:client,...extra});r.headers.delete('x-chat-intent-id');r.headers.set('x-bridge-event-id',initial.sourceEventId);return r;};
+ assert.equal((await handler(req())).status,200);assert.equal(inputs[0].clientMessageId,row.clientMessageId);assert.equal(inputs[0].sourceEventId,initial.sourceEventId);
+ assert.equal((await handler(req(key))).status,409);assert.equal(fetches,0);
+ const count=inputs.length;
+ for(const r of [req(null),req(clientMessageId,{thread:undefined}),req(clientMessageId,{mode:'new_thread'})])assert.ok((await handler(r)).status>=400);
+ assert.equal(inputs.length,count);assert.equal(fetches,0);
+});
+test('exact receipt lookup supports outbox and stable client IDs, preserves unknown and projects provider evidence only',async()=>{
+ const clientMessageId='aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa',row={...initial,clientMessageId,state:'sent',activeAttemptId:attemptId};
+ const attempt={id:attemptId,attemptId,outboxId:id,credentialId,seq:'2',kind:'result',outcome:'sent',code:'200',messageName:'spaces/SYNTHETIC/messages/result',threadName:initial.threadName,createdAt:stamp};
+ let state='sent',calls=0,malformed=false;
+ const handler=createChatOutboxHandler({rpc:async(_name,args)=>{calls++;assert.equal(args.p_action,'get');assert.ok(args.p_input.id===id||args.p_input.clientMessageId===clientMessageId);return {data:{outbox:{...row,state},attempts:[{...attempt,threadName:malformed?'spaces/OTHER/threads/wrong':attempt.threadName}]},error:null};}});
+ const req=q=>new Request('https://caller.test/api/chat/outbox?'+q,{headers:{authorization:`Bearer ${token}`}});
+ for(const q of ['id='+id,'clientMessageId='+clientMessageId.toUpperCase()]){const r=await handler(req(q));assert.equal(r.status,200);const result=await r.json();assert.deepEqual(result.data.delivery,{messageName:attempt.messageName,threadName:attempt.threadName});assert.equal('attempts' in result.data,false);assert.equal(JSON.stringify(result).includes(credentialId),false);}
+ state='delivery_unknown';const unknown=await handler(req('clientMessageId='+clientMessageId));assert.equal((await unknown.json()).data.delivery,null);
+ const before=calls;for(const q of ['id='+id+'&clientMessageId='+clientMessageId,'clientMessageId='+clientMessageId+'&status=sent','id=null'])assert.equal((await handler(req(q))).status,400);assert.equal(calls,before);
+ state='sent';malformed=true;assert.equal((await handler(req('id='+id))).status,503);
+});
 function durable(options={}){
  let row=structuredClone(options.row??initial),fetches=0,committed=false,created=false;const keys=new Map(),actions=[];
  const event={id:attemptId,attemptId,outboxId:id,credentialId,seq:'1',kind:'started',outcome:null,code:null,messageName:null,threadName:null,createdAt:stamp};
