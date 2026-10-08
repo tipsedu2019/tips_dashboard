@@ -4560,13 +4560,44 @@ async function updateRegistrationOpsTask(taskId: string, input: OpsTaskInput, ex
   }
 }
 
+async function loadOpsWithdrawalTaskForCompletion(taskId: string): Promise<OpsTask | null> {
+  if (!supabase || !text(taskId)) return null
+
+  const taskResult = await supabase
+    .from("ops_tasks")
+    .select("id,title,type,status,priority,requested_by,requested_team,assignee_id,assignee_team,secondary_assignee_id,student_id,student_name,class_id,class_name,textbook_id,textbook_title,campus,subject,start_at,due_at,completed_by,completed_by_label,completed_at,memo,created_at,updated_at")
+    .abortSignal(AbortSignal.timeout(8_000))
+    .eq("id", taskId)
+    .single()
+    .retry(false)
+  if (taskResult.error) {
+    if (isMissingRelationError(taskResult.error) || text(taskResult.error.code) === "PGRST116") return null
+    throw taskResult.error
+  }
+
+  const taskRow = taskResult.data as unknown as Row
+  const taskType = normalizeType(taskRow.type)
+  if (taskType !== "withdrawal") return loadOpsTaskById(taskId)
+
+  const detailResult = await supabase.from("ops_withdrawal_details")
+    .select("task_id,school_grade,teacher_name,withdrawal_date,withdrawal_session,customer_reason,teacher_opinion,undistributed_textbooks,completed_lesson_hours,four_week_lesson_hours,timetable_roster_updated,makeedu_withdrawal_done,fee_processed,textbook_fee_processed")
+    .abortSignal(AbortSignal.timeout(8_000)).eq("task_id", taskId).single().retry(false)
+  if (detailResult.error && text(detailResult.error.code) !== "PGRST116") throw detailResult.error
+  const detailRows = detailResult.data ? [detailResult.data as unknown as Row] : []
+  const withdrawal = singleByTaskId(detailRows.map((row) => ({ taskId: text(row.task_id), ...mapWithdrawal(row)! })))
+  // Display history and actor labels are reloaded by the unchanged full UI reader after commit.
+  return mapTask(taskRow, new Map(), new Map(), withdrawal, new Map(), new Map(), new Map(), new Map(), new Map())
+}
+
 export async function updateOpsTask(
   taskId: string,
   input: OpsTaskInput,
 ): Promise<OpsTaskSourceEventReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
-  const existingTask = await loadOpsTaskById(taskId)
+  const existingTask = input.type === "withdrawal" && input.status === "done"
+    ? await loadOpsWithdrawalTaskForCompletion(taskId)
+    : await loadOpsTaskById(taskId)
   if (!existingTask) throw new Error("업무 데이터를 다시 불러오세요.")
   const scoreSavePlan = getWordRetestScoreSavePlan(existingTask, input)
   input = scoreSavePlan.input as OpsTaskInput
@@ -4884,7 +4915,9 @@ export async function updateOpsTaskStatus(
   let rollbackCompletionSync: OpsCompletionRollback | null = null
   let completionSyncApplied = false
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const currentTask = await loadOpsTaskById(task.id)
+  const currentTask = task.type === "withdrawal" && status === "done"
+    ? await loadOpsWithdrawalTaskForCompletion(task.id)
+    : await loadOpsTaskById(task.id)
   if (!currentTask) throw new Error("업무 데이터를 다시 불러오세요.")
   assertCompletedOperationStatusTransition(currentTask, status)
 
