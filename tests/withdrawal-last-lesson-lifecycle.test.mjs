@@ -20,7 +20,7 @@ function load(names, mocks) {
   const sandboxModule = { exports: {} }
   vm.runInNewContext(ts.transpileModule(`${snippets.join("\n")}\nmodule.exports = { ${names.join(", ")} }`, {
     compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 },
-  }).outputText, { module: sandboxModule, exports: sandboxModule.exports, ...mocks })
+  }).outputText, { module: sandboxModule, exports: sandboxModule.exports, loadOpsWithdrawalTaskForCompletion: mocks.loadOpsTaskById, ...mocks })
   return sandboxModule.exports
 }
 

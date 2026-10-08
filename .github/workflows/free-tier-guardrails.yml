@@ -119,6 +119,7 @@ jobs:
         run: |
           node --test --experimental-strip-types \
             tests/ops-task-workspace.test.mjs \
+            tests/withdrawal-completion-latency.test.mjs \
             tests/registration-track-history.test.mjs \
             tests/registration-automatic-history-ui.test.mjs \
             tests/registration-case-customer-history.test.mjs \

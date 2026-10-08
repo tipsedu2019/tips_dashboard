@@ -11289,6 +11289,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setNotice("")
     setStatusUndo(null)
     let savedWithRefreshWarning = false
+    let withdrawalCompletionDispatch: Promise<PromiseSettledResult<string[]>[]> | undefined
     const legacyOpsTaskSourceEventIds: string[] = []
     const loadSavedTaskOrFallback = async (taskId: string, input: OpsTaskInput, existing?: OpsTask) => {
       try {
@@ -11481,6 +11482,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           const receipt = await updateOpsTask(editingTask.id, payload)
           publicClassesCacheRefreshPending ||= receipt.publicClassesCacheRefresh?.status === "pending"
           legacyOpsTaskSourceEventIds.push(...receipt.sourceEventIds)
+          if (payload.type === "withdrawal" && payload.status === "done") {
+            // The committed receipt is sufficient for dispatch; full UI reads do not need to precede it.
+            withdrawalCompletionDispatch = Promise.allSettled([
+              dispatchLegacyOpsTaskSources(receipt.sourceEventIds, registrationNotificationSessionToken),
+            ])
+          }
           savedTasks.push(await loadSavedTaskOrFallback(editingTask.id, payload, editingTask))
         }
       } else {
@@ -11558,7 +11565,10 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         setQuery("")
       }
       await refreshFirstTaskPageAfterMutation()
-      if (payload.type !== "registration") {
+      if (withdrawalCompletionDispatch) {
+        const [result] = await withdrawalCompletionDispatch
+        if (result.status === "rejected") throw result.reason
+      } else if (payload.type !== "registration") {
         await dispatchLegacyOpsTaskSources(legacyOpsTaskSourceEventIds, registrationNotificationSessionToken)
       }
       const itemLabel = payload.type === "general" ? "할 일" : getTaskTypeLabel(payload.type)
@@ -11580,6 +11590,8 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
           : getOpsTaskActionErrorMessage(error, "저장하지 못했습니다."),
       )
     } finally {
+      // A failed refresh must neither abandon dispatch nor release the submit lock early.
+      await withdrawalCompletionDispatch
       if (registrationSubmissionStillOwnsWorkspace()) setSaving(false)
     }
   }
@@ -11611,8 +11623,14 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     setMessage("")
     setNotice("")
     setStatusUndo(null)
+    let withdrawalCompletionDispatch: Promise<PromiseSettledResult<string[]>[]> | undefined
     try {
       const receipt = await updateOpsTaskStatus(task, status)
+      if (task.type === "withdrawal" && status === "done") {
+        withdrawalCompletionDispatch = Promise.allSettled([
+          dispatchLegacyOpsTaskSources(receipt.sourceEventIds, registrationNotificationSessionToken),
+        ])
+      }
       const shouldRefreshSyncedTask = status === "done" || task.type === "word_retest"
       const syncedTask = shouldRefreshSyncedTask ? await loadOpsTaskById(task.id) : null
       const changedAt = new Date().toISOString()
@@ -11625,7 +11643,12 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
         })
       }
       await refreshFirstTaskPageAfterMutation()
-      await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, registrationNotificationSessionToken)
+      if (withdrawalCompletionDispatch) {
+        const [result] = await withdrawalCompletionDispatch
+        if (result.status === "rejected") throw result.reason
+      } else {
+        await dispatchLegacyOpsTaskSources(receipt.sourceEventIds, registrationNotificationSessionToken)
+      }
       const canUndoStatusChange = task.type === "general" || status !== "done"
       if (canUndoStatusChange) {
         setStatusUndo({
@@ -11641,6 +11664,7 @@ function OpsTaskWorkspaceSession({ workspace }: { workspace: WorkspaceKey }) {
     } catch (error) {
       setMessage(getOpsTaskActionErrorMessage(error, "진행상태를 바꾸지 못했습니다."))
     } finally {
+      await withdrawalCompletionDispatch
       setSaving(false)
     }
   }

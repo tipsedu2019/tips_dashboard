@@ -2071,7 +2071,7 @@ test("post-commit fact-only registration refresh rejects a viewer generation cha
   assert.doesNotMatch(canonical, /notification|dispatchRegistrationVisit|sendRegistrationVisit/);
   assert.doesNotMatch(submit, /probeRegistrationInitialPersistence|createRegistrationCaseWithInitialWorkflow/);
   assert.match(submit, /\} catch \(error\) \{\s*if \(!registrationSubmissionStillOwnsWorkspace\(\)\) return\s*setMessage/);
-  assert.match(submit, /\} finally \{\s*if \(registrationSubmissionStillOwnsWorkspace\(\)\) setSaving\(false\)\s*\}/);
+  assert.match(submit, /\} finally \{\s*\/\/[^\n]*\n\s*await withdrawalCompletionDispatch\s*if \(registrationSubmissionStillOwnsWorkspace\(\)\) setSaving\(false\)\s*\}/);
 });
 
 test("registration browser-back closure clears canonical state and restores the link when dirty close is canceled", async () => {
@@ -4452,7 +4452,9 @@ test("completed operational tasks cannot be reopened by status alone", async () 
     "task.status === \"done\"",
     "status !== \"done\"",
     "완료된 운영 업무는 관리 데이터가 반영되어 상태만 되돌릴 수 없습니다.",
-    "const currentTask = await loadOpsTaskById(task.id)",
+    'const currentTask = task.type === "withdrawal" && status === "done"',
+    "? await loadOpsWithdrawalTaskForCompletion(task.id)",
+    ": await loadOpsTaskById(task.id)",
     "if (!currentTask) throw new Error(\"업무 데이터를 다시 불러오세요.\")",
     "assertCompletedOperationStatusTransition(currentTask, status)",
     "if (error || !didMutateOpsTask(data))",
