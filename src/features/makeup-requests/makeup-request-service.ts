@@ -565,10 +565,36 @@ async function dispatchLegacyMakeupNotification(sourceEventId: string) {
   }
 }
 
+function mapCommittedMakeupRequest(requestRow: Row, context: MakeupRequestWorkspaceData | MakeupRequest): MakeupRequest {
+  if ("profiles" in context) {
+    return mapRequest(requestRow,
+      new Map(context.profiles.map((profile) => [profile.id, profile])),
+      new Map(context.teachers.map((teacher) => [teacher.id, teacher])),
+    )
+  }
+  // These transitions cannot change participants. Reuse labels from the exact,
+  // authorized detail, but take status, timestamps and schedule data from the receipt.
+  const profilesById = new Map([
+    [context.requesterId, { label: context.requesterLabel }],
+    [context.teacherProfileId, { label: context.teacherLabel }],
+    [context.approverProfileId, { label: context.approverLabel }],
+    [context.approvedBy, { label: context.approvedByLabel }],
+    [context.completedBy, { label: context.completedByLabel }],
+    [context.canceledBy, { label: context.canceledByLabel }],
+  ].filter(([id]) => Boolean(id)) as [string, { label: string }][])
+  const teachersById = new Map([
+    [context.teacherCatalogId, { name: context.teacherLabel }],
+    [context.approverTeacherCatalogId, { name: context.approverLabel }],
+  ])
+  return { ...mapRequest(requestRow, profilesById, teachersById),
+    requesterLabel: context.requesterLabel, teacherLabel: context.teacherLabel, approverLabel: context.approverLabel,
+  }
+}
+
 async function runMakeupMutationRpc(
   name: "create_makeup_request_v2" | "transition_makeup_request_v2" | "delete_makeup_request_v2",
   parameters: Row,
-  workspaceData: MakeupRequestWorkspaceData,
+  context: MakeupRequestWorkspaceData | MakeupRequest,
 ) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const { data: raw, error } = await supabase.rpc(name, parameters)
@@ -580,9 +606,7 @@ async function runMakeupMutationRpc(
   if (!requestId || !sourceEventId) {
     throw new Error("휴보강 저장 결과가 올바르지 않습니다.")
   }
-  const profilesById = new Map(workspaceData.profiles.map((profile) => [profile.id, profile]))
-  const teachersById = new Map(workspaceData.teachers.map((teacher) => [teacher.id, teacher]))
-  const request = mapRequest(requestRow, profilesById, teachersById)
+  const request = mapCommittedMakeupRequest(requestRow, context)
   request.notificationWarning = await dispatchLegacyMakeupNotification(sourceEventId)
   return { request, sourceEventId }
 }
@@ -882,30 +906,15 @@ export async function approveMakeupRequest(requestId: string, actorId: string, n
   if (!text(requestRow.id) || !sourceEventId) {
     throw new Error("휴보강 승인 결과가 올바르지 않습니다.")
   }
-  // Identity labels came from the exact, authorized detail DTO; approval cannot
-  // change its participants. Keep the committed mutation response authoritative.
-  const profilesById = new Map([
-    [request.requesterId, { label: request.requesterLabel }],
-    [request.teacherProfileId, { label: request.teacherLabel }],
-    [request.approverProfileId, { label: request.approverLabel }],
-    [request.approvedBy, { label: request.approvedByLabel }],
-    [request.completedBy, { label: request.completedByLabel }],
-    [request.canceledBy, { label: request.canceledByLabel }],
-  ].filter(([id]) => Boolean(id)) as [string, { label: string }][])
-  const teachersById = new Map([
-    [request.teacherCatalogId, { name: request.teacherLabel }],
-    [request.approverTeacherCatalogId, { name: request.approverLabel }],
-  ])
-  const approvedRequest: MakeupRequest = { ...mapRequest(requestRow, profilesById, teachersById),
-    requesterLabel: request.requesterLabel, teacherLabel: request.teacherLabel, approverLabel: request.approverLabel,
-  }
+  const approvedRequest = mapCommittedMakeupRequest(requestRow, request)
   approvedRequest.notificationWarning = await dispatchLegacyMakeupNotification(sourceEventId)
   return approvedRequest
 }
 
 export async function requestMakeupRequestRevision(requestId: string, actorId: string, note: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const { request, data } = await loadSingleMakeupRequest(requestId)
+  const request = await readMakeupDetail({ id: requestId })
+  if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
   const isActor = request.approverProfileId === actorId
   if (!isActor || request.status !== "approval_pending") {
     throw new Error("보완 요청 권한이 없습니다.")
@@ -918,13 +927,14 @@ export async function requestMakeupRequestRevision(requestId: string, actorId: s
     p_patch: { note: returnedReason },
     p_expected_status: request.status,
     p_request_id: crypto.randomUUID(),
-  }, data)
+  }, request)
   return result.request
 }
 
 export async function rejectMakeupRequest(requestId: string, actorId: string, note: string) {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const { request, data } = await loadSingleMakeupRequest(requestId)
+  const request = await readMakeupDetail({ id: requestId })
+  if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
   const isActor = request.approverProfileId === actorId
   if (!isActor || request.status !== "approval_pending") {
     throw new Error("반려 권한이 없습니다.")
@@ -937,7 +947,7 @@ export async function rejectMakeupRequest(requestId: string, actorId: string, no
     p_patch: { note: rejectedReason },
     p_expected_status: request.status,
     p_request_id: crypto.randomUUID(),
-  }, data)
+  }, request)
   return result.request
 }
 
@@ -1012,8 +1022,8 @@ export async function resubmitMakeupRequest(requestId: string, input: MakeupRequ
 
 export async function cancelCompletedMakeupRequest(requestId: string, actorId: string, note = "") {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const workspaceData = await loadMakeupRequestWorkspaceData()
-  const { request } = await loadSingleMakeupRequest(requestId, workspaceData)
+  const request = await readMakeupDetail({ id: requestId })
+  if (!request) throw new Error("휴보강 신청서를 찾을 수 없습니다.")
 
   if (!canTransitionMakeupRequest(request.status, "canceled", { isApprover: request.approverProfileId === actorId })) {
     throw new Error("승인 취소할 수 없는 상태입니다.")
@@ -1030,7 +1040,7 @@ export async function cancelCompletedMakeupRequest(requestId: string, actorId: s
     p_patch: { note: cancelNote },
     p_expected_status: request.status,
     p_request_id: crypto.randomUUID(),
-  }, workspaceData)
+  }, request)
   return result.request
 }
 

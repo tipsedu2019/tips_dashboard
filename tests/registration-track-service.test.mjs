@@ -3084,6 +3084,124 @@ test("observation-aware detail fails closed when its required summary row is mis
   );
 });
 
+test("observation detail overlaps its required summary with enrollment reads and awaits both", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const enrollments = deferred();
+  const summary = deferred();
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_enrollments") {
+        return enrollments.promise.then(() => detailRows(query.table));
+      }
+      if (query.table === "ops_registration_subject_track_summaries") {
+        return summary.promise.then(() => ({ data: [{
+          ...detailRows("ops_registration_subject_tracks").data[0],
+          ...inertObservationSummaryRow,
+        }], error: null }));
+      }
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const request = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  let settled = false;
+  request.then(() => { settled = true; }, () => { settled = true; });
+  try {
+    await new Promise(setImmediate);
+    assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_enrollments").length, 2);
+    assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 1,
+      "required summary must start before enrollment reads finish");
+    assert.equal(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), request,
+      "same-viewer callers still share the complete in-flight detail");
+    summary.resolve();
+    await new Promise(setImmediate);
+    assert.equal(settled, false, "summary alone must not report a complete detail");
+  } finally {
+    summary.resolve();
+    enrollments.resolve();
+  }
+  const detail = await request;
+  assert.equal(detail.tracks[0].observationSummaryVisible, true);
+  assert.equal(detail.enrollments.length, 1);
+  assert.equal(harness.queries.length, 11);
+  assert.equal(harness.rpcCalls.length, 1);
+});
+
+test("a parallel observation summary failure aborts detail reads without caching partial detail", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const enrollments = deferred();
+  const summaryError = new Error("summary temporarily unavailable");
+  let failing = true;
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_enrollments" && failing) {
+        return enrollments.promise.then(() => detailRows(query.table));
+      }
+      if (query.table === "ops_registration_subject_track_summaries") {
+        return failing ? { data: null, error: summaryError } : { data: [{
+          ...detailRows("ops_registration_subject_tracks").data[0],
+          ...inertObservationSummaryRow,
+        }], error: null };
+      }
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  try {
+    await assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), (error) => error === summaryError);
+    assert.ok(harness.queries.filter(({ table }) => table === "ops_registration_enrollments").every(({ signal }) => signal.aborted));
+  } finally {
+    enrollments.resolve();
+  }
+  failing = false;
+  const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  assert.equal(detail.enrollments.length, 1);
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2);
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 2);
+});
+
+test("an enrollment failure observes a later parallel summary rejection", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const summary = deferred();
+  const enrollmentError = new Error("enrollment read failed");
+  const harness = createClient({
+    queryHandler(query) {
+      if (query.table === "ops_registration_enrollments") return { data: null, error: enrollmentError };
+      if (query.table === "ops_registration_subject_track_summaries") return summary.promise;
+      return detailRows(query.table);
+    },
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), (error) => error === enrollmentError);
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 1);
+  summary.reject(new Error("late summary read failed"));
+  await new Promise(setImmediate);
+});
+
+test("parallel detail loading does not request unnecessary observation summaries", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const scenario of ["generic", "no-tracks", "complete-summary"]) {
+    const harness = createClient({
+      queryHandler(query) {
+        assert.notEqual(query.table, "ops_registration_subject_track_summaries", scenario);
+        if (query.table === "ops_registration_subject_tracks" && scenario !== "generic") {
+          return { data: scenario === "no-tracks" ? [] : [{
+            ...detailRows(query.table).data[0],
+            ...inertObservationSummaryRow,
+          }], error: null };
+        }
+        return detailRows(query.table);
+      },
+    });
+    const service = createRegistrationTrackService(harness.client, readyOptions({
+      probeObservationRuntime: async () => { throw new Error("unnecessary observation runtime probe"); },
+    }));
+    const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: scenario !== "generic" });
+    assert.equal(detail.task.id, "task-1");
+    assert.equal(detail.tracks.length, scenario === "no-tracks" ? 0 : 1);
+  }
+});
+
 test("a stalled case-detail read times out and a forced retry can start fresh", async () => {
   const { createRegistrationTrackService } = await loadFactory({ setTimeout, clearTimeout });
   const stalledEvents = deferred();

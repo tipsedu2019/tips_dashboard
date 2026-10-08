@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { modules, id, row, stamp, transport, servicePath } from './helpers/makeup-numbered-harness.mjs';
+import { actionCases, actionFixture, loadActionService } from './helpers/makeup-action-fixture.mjs';
 
 test('approval reads exact detail and preserves labels without loading workspace tables', async t => {
   const calls = [], sends = [], previous = globalThis.fetch;
@@ -278,3 +279,117 @@ test('completed request display excludes only its exact approved slots', async t
     })[0].available, false, 'API/shared model receives no display-only exclusion');
   });
 });
+
+function setup(t, testCase, options) {
+  const fixture = actionFixture(testCase, options), previous = globalThis.fetch;
+  globalThis.fetch = fixture.fetch;
+  t.after(() => { globalThis.fetch = previous; });
+  const service = loadActionService(fixture.client);
+  return { ...fixture, run: (actor = id(804), note = '  합성 처리 메모  ') => service[testCase.method](id(1), actor, note) };
+}
+const mutations = fixture => fixture.calls.filter(call => call.name === 'transition_makeup_request_v2');
+const notifications = fixture => fixture.calls.filter(call => call.kind === 'notification');
+
+for (const testCase of actionCases) {
+  test(`${testCase.method}: one authorized detail read preserves the committed response and labels`, async t => {
+    const fixture = setup(t, testCase, { detail: { finalNote: '기존 처리 메모' }, committed: {
+      schedule_plan_before: { sessions: [{ id: 'committed-original' }] },
+      schedule_plan_after: { sessions: [{ id: 'committed-makeup' }] },
+      makeup_academic_event_ids: [id(751), id(752)], updated_at: '2026-10-08T16:00:00Z',
+    } });
+    const result = await fixture.run();
+    assert.equal(result.id, id(1)); assert.equal(result.status, testCase.after);
+    assert.deepEqual(fixture.calls.map(call => call.name ?? call.kind), ['get_makeup_detail_v1', 'transition_makeup_request_v2', 'session', 'notification']);
+    assert.equal(fixture.calls[0].retry, false); assert.ok(fixture.calls[0].signal instanceof AbortSignal);
+    assert.deepEqual(fixture.calls[0].args, { p_id: id(1) });
+    const [mutation] = mutations(fixture);
+    assert.equal(mutation.args.p_makeup_request_id, id(1)); assert.equal(mutation.args.p_expected_status, testCase.before);
+    assert.equal(mutation.args.p_command, testCase.command); assert.deepEqual(mutation.args.p_patch, { note: '합성 처리 메모' });
+    assert.match(mutation.args.p_request_id, /^[0-9a-f-]{36}$/);
+    assert.equal(result.requesterLabel, '합성 신청자'); assert.equal(result.teacherLabel, '합성 교사'); assert.equal(result.approverLabel, '합성 결재자');
+    assert.deepEqual(result.schedulePlanBefore, { sessions: [{ id: 'committed-original' }] });
+    assert.deepEqual(result.schedulePlanAfter, { sessions: [{ id: 'committed-makeup' }] });
+    assert.deepEqual(result.makeupAcademicEventIds, [id(751), id(752)]); assert.equal(result.updatedAt, '2026-10-08T16:00:00Z');
+    assert.equal(result.finalNote, '기존 처리 메모', 'these commands do not replace the existing final note');
+    assert.deepEqual(result.events, [], 'mutation receipts retain the existing event contract; stale detail history is not copied');
+    assert.equal(result.notificationWarning, undefined);
+    if (testCase.command === 'approval_canceled') {
+      assert.equal(result.canceledBy, id(804)); assert.equal(result.canceledByLabel, '합성 결재자');
+      assert.equal(result.completedByLabel, '합성 관리자'); assert.equal(result.canceledAt, '2026-10-08T16:00:00Z');
+    }
+  });
+
+  test(`${testCase.method}: fresh ownership/status and detail failures prevent every write and notification`, async t => {
+    for (const options of [
+      { detail: { approverProfileId: id(806) } },
+      { detail: { approverProfileId: '' } },
+      { detail: { status: 'rejected' } },
+      { missing: true },
+      { detail: { id: id(2) } },
+      { detail: { events: null } },
+      { detailError: { code: '42501', message: 'synthetic permission denied' } },
+      { detailError: new DOMException('synthetic canceled read', 'AbortError') },
+      ...(testCase.command === 'approval_canceled' ? [{ detail: { classId: '' } }] : []),
+    ]) {
+      await t.test(JSON.stringify(options), async t => {
+        const fixture = setup(t, testCase, options);
+        await assert.rejects(fixture.run());
+        assert.equal(mutations(fixture).length, 0); assert.equal(notifications(fixture).length, 0);
+        assert.equal(fixture.calls.filter(call => call.kind === 'table').length, 0, 'no broad fallback on denied or malformed detail');
+      });
+    }
+  });
+
+  test(`${testCase.method}: database rejection and invalid mutation receipts remain failures`, async t => {
+    for (const options of [
+      { mutationError: { code: '42501', message: 'synthetic authorization changed' } },
+      { mutationError: { code: '23505', message: 'synthetic duplicate command' } },
+      { mutationError: { code: 'P0001', message: 'synthetic stale state' } },
+      { wire: { request: {}, sourceEventId: id(999) } },
+      { wire: { request: { id: id(1) }, sourceEventId: '' } },
+    ]) {
+      await t.test(JSON.stringify(options), async t => {
+        const fixture = setup(t, testCase, options);
+        await assert.rejects(fixture.run(), options.mutationError ? error => error === options.mutationError : /저장 결과/);
+        assert.equal(mutations(fixture).length, 1); assert.equal(notifications(fixture).length, 0);
+      });
+    }
+  });
+
+  test(`${testCase.method}: notification failures preserve the committed state and existing warning`, async t => {
+    t.mock.method(console, 'warn', () => {});
+    for (const options of [
+      { notificationStatus: 503 }, { notificationThrow: true },
+      { notificationBody: { ok: true, sent: 0, deduped: 0, failed: 1 } },
+      { notificationBody: { ok: true } },
+    ]) {
+      await t.test(JSON.stringify(options), async t => {
+        const fixture = setup(t, testCase, options), result = await fixture.run();
+        assert.equal(result.status, testCase.after); assert.match(result.notificationWarning, /저장은 완료/);
+        assert.equal(mutations(fixture).length, 1); assert.equal(notifications(fixture).length, 1);
+      });
+    }
+  });
+
+  test(`${testCase.method}: a repeated completed action rechecks state before writing`, async t => {
+    const fixture = setup(t, testCase), first = await fixture.run();
+    fixture.detail.status = first.status;
+    await assert.rejects(fixture.run());
+    assert.equal(fixture.calls.filter(call => call.name === 'get_makeup_detail_v1').length, 2);
+    assert.equal(mutations(fixture).length, 1); assert.equal(notifications(fixture).length, 1);
+  });
+
+  test(`${testCase.method}: optional owners and shared profile identities keep display metadata separate`, async t => {
+    for (const detail of [
+      { requesterId: '', teacherProfileId: '', teacherCatalogId: '', approverTeacherCatalogId: '', approvedBy: '', completedBy: '', canceledBy: '' },
+      { requesterId: id(804), teacherProfileId: id(804), teacherCatalogId: '', approverTeacherCatalogId: '' },
+    ]) {
+      await t.test(JSON.stringify(detail), async t => {
+        const fixture = setup(t, testCase, { detail }), result = await fixture.run();
+        assert.equal(result.requesterId, detail.requesterId); assert.equal(result.teacherProfileId, detail.teacherProfileId);
+        assert.equal(result.requesterLabel, '합성 신청자'); assert.equal(result.teacherLabel, '합성 교사'); assert.equal(result.approverLabel, '합성 결재자');
+        assert.equal(result.status, testCase.after);
+      });
+    }
+  });
+}
