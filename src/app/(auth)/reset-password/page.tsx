@@ -1,5 +1,8 @@
+import type { Metadata } from "next"
 import { AuthBrandLink } from "@/components/auth/auth-brand-link"
 import { ResetPasswordForm } from "./components/reset-password-form"
+
+export const metadata: Metadata = { referrer: "no-referrer" }
 
 export default function ResetPasswordPage() {
   return (

@@ -410,21 +410,18 @@ test("forgot-password uses the receivable email reset flow", async () => {
   assert.doesNotMatch(source, /계정 만들기/);
 });
 
-test("reset-password lets a recovery session set a new password", async () => {
-  const [pageSource, formSource] = await Promise.all([
+test("reset-password submits only through the recovery flow", async () => {
+  const [pageSource, formSource, flowSource] = await Promise.all([
     readSource("src/app/(auth)/reset-password/page.tsx"),
-    readSource(
-      "src/app/(auth)/reset-password/components/reset-password-form.tsx",
-    ),
+    readSource("src/app/(auth)/reset-password/components/reset-password-form.tsx"),
+    readSource("src/lib/password-recovery.ts"),
   ]);
-
   assert.match(pageSource, /<ResetPasswordForm \/>/);
-  assert.match(
-    formSource,
-    /supabase\.auth\.updateUser\(\{\s*password: values\.password,\s*\}\)/,
-  );
-  assert.match(formSource, /supabase\.auth\.signOut\(\)/);
-  assert.match(formSource, /router\.replace\("\/sign-in"\)/);
+  assert.match(formSource, /recoveryState !== "ready"/);
+  assert.match(formSource, /flow\.current\.submit\(values\.password\)/);
+  assert.match(flowSource, /auth\.updateUser\(\{ password \}\)/);
+  assert.match(flowSource, /auth\.signOut\(\{ scope: "local" \}\)/);
+  assert.match(formSource, /href="\/sign-in"/);
   assert.match(formSource, /새 비밀번호 설정/);
   assert.match(formSource, /비밀번호 변경/);
 });
