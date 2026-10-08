@@ -67,6 +67,8 @@ export function getRoleCapabilities(role: string | null | undefined) {
 
   return {
     canAccessDashboard: true,
+    canUseAiAgentRequests: ["admin", "staff", "teacher", "assistant"].includes(normalizedRole),
+    canViewAllAiAgentRequests: normalizedRole === "admin",
     canManageAll,
     canEditCurriculumPlanning,
     canEditClassSchedulePlanning,

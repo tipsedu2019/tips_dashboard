@@ -3447,7 +3447,7 @@ test("workspace mounts the real list/editor and exposes create only to fixture m
   assert.match(source, /registrationFixtureEnabled[\s\S]*?<RegistrationApplication/)
   assert.doesNotMatch(source, /legacyNotificationEnabled/)
   assert.doesNotMatch(source, /RegistrationNotificationSettingsDialog/)
-  assert.match(source, /showEmptyCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/)
+  assert.match(source, /showEmptyCreate = !numberedPage\.error && \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\) && !isTodoWorkspace && !loading && !isFilteredEmpty && visibleWorkspaceItemCount === 0/)
   assert.match(source, /showToolbarCreate = \(!isRegistrationWorkspace \|\| canManageRegistrationWorkflow\)/)
   assert.match(source, /canManageRegistrationWorkflow = registrationFixtureEnabled[\s\S]*?\["admin", "staff"\]\.includes/)
   assert.match(source, /resolveRegistrationSubjectTrackFixtureViewer/)

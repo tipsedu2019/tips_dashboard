@@ -706,6 +706,41 @@
       "sha256": "ce52cc855ae3f7ec7816123272690386c2606480fbaec94d6ad131249332ee95"
     },
     {
+      "fileName": "20261003084028_ai_agent_requests.sql",
+      "sha256": "5f4657b2e9835617caec86d7ff17bdd2bf94f664d8001e564031385cf85ea249",
+      "status": "final"
+    },
+    {
+      "fileName": "20261003084048_ai_agent_scoped_credentials.sql",
+      "sha256": "809b8ec2ef1e72184dd8a0fc9933b99ece2698585cab2a9509761feb6f1482d9",
+      "status": "final"
+    },
+    {
+      "fileName": "20261003091944_ai_agent_request_lifecycle.sql",
+      "sha256": "84b57276ead7a30c7a4a51e7cdfa6952dbf7ebc27542f935b634ad7c1921aa87",
+      "status": "final"
+    },
+    {
+      "fileName": "20261003092019_ai_agent_chat_outbox.sql",
+      "sha256": "85a96399907447cf73b2e955dfbe39157fa116be3a49700177c58848ee34f614",
+      "status": "final"
+    },
+    {
+      "fileName": "20261003105447_ai_agent_space_policy.sql",
+      "sha256": "794a67d1daaaf8aecaca81aad3d8d7363b9c9de1bcbecdcec9f219dd34e00692",
+      "status": "final"
+    },
+    {
+      "fileName": "20261003133222_ai_agent_chat_delivery_runtime.sql",
+      "sha256": "a6f0400ec89c95c391d089226deb10e4d74acd847b4b8612ab349bc7b04efffb",
+      "status": "final"
+    },
+    {
+      "fileName": "20261004030228_ai_agent_request_notification_optin.sql",
+      "sha256": "02fcfb01e37cea1d5ddf2030f66b13512217e4441b2ed9cfe64f6b5e1f821b01",
+      "status": "final"
+    },
+    {
       "fileName": "20261004160000_legacy_effective_schedule_inheritance.sql",
       "status": "final",
       "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
@@ -734,6 +769,16 @@
       "fileName": "20261007013509_operations_calendar_inclusive_range.sql",
       "status": "final",
       "sha256": "63840ecfd7146b82a4664a808dec993012f9809f3bc16a5543adaef2e34576e7"
+    },
+    {
+      "fileName": "20261007062153_ai_agent_personal_owner.sql",
+      "sha256": "3ba31674ad33d258e70e39a2048ad1d28508cde3473bc7e61d5f9cc6213a1fad",
+      "status": "final"
+    },
+    {
+      "fileName": "20261007062159_agent_personal_dashboard_read.sql",
+      "sha256": "28a40477e01001d664d716ab4ab8be550db295ea2300822bb3ff009531341954",
+      "status": "final"
     },
     {
       "fileName": "20261007135140_textbook_latest_count_read_aggregation.sql",

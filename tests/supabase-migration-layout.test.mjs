@@ -16,7 +16,7 @@ import {
 import { tmpdir } from "node:os"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"
-import test, { after } from "node:test"
+import test, { after, afterEach } from "node:test"
 
 import * as migrationLayoutVerifier from "../scripts/verify-supabase-migration-layout.mjs"
 import {
@@ -32,8 +32,8 @@ const isolatedRunnerUrl = new URL("../scripts/run-isolated-supabase-db-tests.mjs
 const activeDir = join(repoRoot, "supabase", "migrations")
 const quarantineDir = join(repoRoot, "supabase", "pending-migrations", "notification-cutover")
 const requiredWorkflowPath = join(repoRoot, ".github", "workflows", "supabase-db-push.yml")
-const fixtureRoots = []
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "46e9459ff562913b04f3237570cc8669ab8223aa0d4e40c9ffcff2d7c46c3d28"
+const fixtureRoots = new Set()
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "26436a34d7ffad142488cc56086a4e05ed6067eabdb4bdaa276200459b5a4196"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW = "approved-ai-agent-production-install.yml"
 const APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256 =
   "2cedf3b78913b374b345f00ca77cb5306392df193fe31b51ddc6d63c1a313fb6"
@@ -136,7 +136,15 @@ const EXPECTED_CI_SQL_TESTS = Object.freeze([
   "supabase/tests/agent_past_lesson_state_correction_test.sql",
   "supabase/tests/timetable_default_projection_performance_test.sql",
   "supabase/tests/timetable_save_conflict_details_test.sql",
-  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql"
+  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
+  "supabase/tests/ai_agent_chat_outbox_test.sql",
+  "supabase/tests/ai_agent_chat_runtime_test.sql",
+  "supabase/tests/ai_agent_credentials_test.sql",
+  "supabase/tests/ai_agent_requests_authz_test.sql",
+  "supabase/tests/ai_agent_requests_transition_test.sql",
+  "supabase/tests/ai_agent_space_policy_test.sql",
+  "supabase/tests/ai_agent_personal_owner_test.sql",
+  "supabase/tests/agent_personal_dashboard_read_test.sql",
 ])
 const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -151,7 +159,13 @@ const EXPECTED_CI_PROBES = Object.freeze([
   "tests/probe-dashboard-workload-dto.mjs",
   "tests/probe-registration-subject-snapshot-concurrency.mjs",
   "tests/probe-registration-management-recovery-concurrency.mjs",
-  "tests/probe-registration-visit-cancellation-dto.mjs"
+  "tests/probe-registration-visit-cancellation-dto.mjs",
+  "tests/probe-ai-agent-auth-concurrency.mjs",
+  "tests/probe-ai-agent-claim-concurrency.mjs",
+  "tests/probe-ai-agent-space-policy-concurrency.mjs",
+  "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
+  "tests/probe-ai-agent-http-producer.mjs",
+  "tests/probe-ai-agent-personal-integration.mjs",
 ])
 const PINNED_SUPABASE_CLI_VERSION = "2.115.0"
 const PINNED_SUPABASE_CLI_ARCHIVE_SHA256 =
@@ -265,18 +279,33 @@ async function sha256(path) {
 
 async function createRepoFixture() {
   const fixtureRoot = await mkdtemp(join(tmpdir(), "tips-supabase-migration-layout-"))
-  fixtureRoots.push(fixtureRoot)
-  await Promise.all([
+  fixtureRoots.add(fixtureRoot)
+  const copies = await Promise.allSettled([
     cp(join(repoRoot, ".github"), join(fixtureRoot, ".github"), { recursive: true }),
     cp(join(repoRoot, "supabase"), join(fixtureRoot, "supabase"), { recursive: true }),
     copyFile(join(repoRoot, ".squawk.toml"), join(fixtureRoot, ".squawk.toml")),
   ])
+  for (const copy of copies) {
+    if (copy.status === "rejected") throw copy.reason
+  }
   await mkdir(join(fixtureRoot, "scripts"), { recursive: true })
   await copyFile(
     join(repoRoot, "scripts", "verify-supabase-postdeploy-contract.mjs"),
     join(fixtureRoot, "scripts", "verify-supabase-postdeploy-contract.mjs"),
   )
   return fixtureRoot
+}
+
+async function removeRepoFixture(fixtureRoot) {
+  await rm(fixtureRoot, { force: true, recursive: true })
+  fixtureRoots.delete(fixtureRoot)
+}
+
+async function cleanupRepoFixtures() {
+  const removals = await Promise.allSettled([...fixtureRoots].map(removeRepoFixture))
+  for (const removal of removals) {
+    if (removal.status === "rejected") throw removal.reason
+  }
 }
 
 function assertIncludesErrorCode(errors, code) {
@@ -326,9 +355,8 @@ async function validateWorkflowFixture(source) {
   return validateSupabaseMigrationLayout({ repoRoot: fixtureRoot })
 }
 
-after(async () => {
-  await Promise.all(fixtureRoots.map((fixtureRoot) => rm(fixtureRoot, { force: true, recursive: true })))
-})
+afterEach(cleanupRepoFixtures)
+after(cleanupRepoFixtures)
 
 test("PR97 installer proposal passes all 40 offline safety tests without inherited secrets", async () => {
   const suitePath = join(repoRoot, "tests", "manual-inheritance-hotfix-install.test.py")
@@ -1387,7 +1415,7 @@ test("approved manual production workflow requires its exact path and complete r
   for (const [name, expectedHash] of [
     ["free-tier-guardrails.yml", "19cb38ab601a313963f89aa247c66115a2d5decba2137fcccad58d09240cd09b"],
     ["supabase-db-push.yml", REQUIRED_DB_PUSH_WORKFLOW_SHA256],
-    ["supabase-sql-review.yml", "8301b2ff263f88e27eeeebfd7254511419668caea1b056562c90b09bebb158ea"],
+    ["supabase-sql-review.yml", "91e34376ae83031736f52520c0c19616b9e8172a3fb63f5e697cfff2fec6abe6"],
     [APPROVED_MANUAL_PRODUCTION_WORKFLOW, APPROVED_MANUAL_PRODUCTION_WORKFLOW_SHA256],
     [APPROVED_INHERITANCE_PRODUCTION_WORKFLOW, APPROVED_INHERITANCE_PRODUCTION_WORKFLOW_SHA256],
   ]) {
@@ -2329,7 +2357,7 @@ test("layout verifier pins every semantic predicate in the fixed postdeploy cata
   assert.deepEqual(await validateSupabaseMigrationLayout({ repoRoot: fixtureRoot }), [])
 })
 
-test("isolated main·PR는 동일한 SQL 86개·probe 13개와 필수 PR 검사 이름을 보존한다", async () => {
+test("isolated main·PR는 동일한 SQL 94개·probe 19개와 필수 PR 검사 이름을 보존한다", async () => {
   const main = await readFile(requiredWorkflowPath, "utf8")
   const pr = await readFile(join(repoRoot, ".github/workflows/supabase-sql-review.yml"), "utf8")
   for (const [workflow, kind] of [[main, "main"], [pr, "pr"]]) {
@@ -2389,3 +2417,81 @@ test("calendar와 registration rollback preflight 및 동일 focused SQL을 모�
   ]) assertIncludesErrorCode(validateIsolatedCiWorkflow(source), "isolated_ci_focused_preflight_missing")
   assertIncludesErrorCode(validateIsolatedCiWorkflow(workflow.replace("--transactional-preflight", "")), "isolated_ci_required_flag_missing:--transactional-preflight")
 })
+
+const EXPECTED_AI_STATIC_TESTS = Object.freeze([
+  "tests/ai-agent-personal-credential-service.test.mjs",
+  "tests/ai-agent-personal-credential-workspace.test.mjs",
+  "tests/ai-agent-personal-owner-concurrency.test.mjs",
+  "tests/agent-personal-dashboard-read.test.mjs",
+
+  "tests/ai-agent-credential-service.test.mjs",
+  "tests/ai-agent-credential-workspace.test.mjs",
+  "tests/ai-agent-local-db-runner.test.mjs",
+  "tests/ai-agent-navigation.test.mjs",
+  "tests/ai-agent-probe-process-bounds.test.mjs",
+  "tests/ai-agent-request-access.test.mjs",
+  "tests/ai-agent-request-auth.test.mjs",
+  "tests/ai-agent-request-contract.test.mjs",
+  "tests/ai-agent-request-draft-navigation.test.mjs",
+  "tests/ai-agent-request-recovery.test.mjs",
+  "tests/ai-agent-request-routes.test.mjs",
+  "tests/ai-agent-request-service.test.mjs",
+  "tests/ai-agent-request-workspace.test.mjs",
+  "tests/chat-outbox.test.mjs",
+  "tests/chat-runtime-configuration.test.mjs",
+  "tests/chat-send-route.test.mjs",
+  "tests/google-chat-transport.test.mjs"
+])
+
+test('AI registration semantic guards fail independently of workflow hash pins',async()=>{
+ for(const [file,kind]of [['supabase-db-push.yml','main'],['supabase-sql-review.yml','pr']]){
+  const source=await readFile(join(repoRoot,'.github/workflows',file),'utf8');
+  assert.deepEqual(validateIsolatedCiWorkflow(source,kind),[]);
+  const staticCommand='node --test --experimental-strip-types \\\n';
+  for(const target of EXPECTED_AI_STATIC_TESTS)for(const replacement of ['',target+' '+target,'tests/ai-agent-unreviewed.test.mjs']){
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(target,replacement),kind),'isolated_ci_ai_static_inventory_mismatch');
+  }
+  for(const [mutation,code]of [
+   [source.replace(staticCommand,staticCommand.replace('--test','--test --test-name-pattern=selected')),'isolated_ci_ai_static_inventory_mismatch'],
+   [source.replace('--ai-producer-parity',''),'isolated_ci_required_flag_missing:--ai-producer-parity'],
+   [source.replace('--ai-producer-parity','--ai-producer-parity --filtered'),'isolated_ci_runner_command_mismatch'],
+   [source.replace('run: npm ci --ignore-scripts','run: npm ci'),'isolated_ci_ai_dependency_install_order_invalid'],
+   [source.replace('      - name: Test AI agent and Chat contracts','      - name: Test AI agent and Chat contracts\n        if: success()'),'isolated_ci_conditional_execution_forbidden'],
+   [source+'\n      - run: node scripts/second.mjs --execute\n','isolated_ci_execute_count_mismatch'],
+   [source+'\n      - run: bash scripts/indirect.mjs\n','isolated_ci_indirect_execute_forbidden'],
+   [source.replace('run: npm ci --ignore-scripts','run: echo missing'),'isolated_ci_ai_dependency_install_order_invalid'],
+   [source.replace('      - name: Install producer parity dependencies\n        run: npm ci --ignore-scripts\n\n','')+'\n      - name: Late install\n        run: npm ci --ignore-scripts\n','isolated_ci_ai_dependency_install_order_invalid'],
+  ])assertIncludesErrorCode(validateIsolatedCiWorkflow(mutation,kind),code);
+  // Same command in the wrong job, and a second static command, cannot count as registration.
+  const start=source.indexOf('      - name: Test AI agent and Chat contracts'),end=source.indexOf('\n      - name:',start+8),step=source.slice(start,end);
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,start)+source.slice(end)+step,kind),'isolated_ci_ai_static_inventory_mismatch');
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source+step,kind),'isolated_ci_ai_static_command_count_mismatch');
+  for(const path of EXPECTED_CI_PROBES)for(const value of [`--probe ${path} --probe ${path}`,'--probe tests/probe-unknown.mjs'])
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(`--probe ${path}`,value),kind),'isolated_ci_probe_inventory_mismatch');
+ }
+});
+
+test('AI static step rejects successful early exit and extra run-body commands without workflow hash checks',async()=>{
+ for(const [file,kind]of [['supabase-db-push.yml','main'],['supabase-sql-review.yml','pr']]){
+  const source=await readFile(join(repoRoot,'.github/workflows',file),'utf8');
+  const prefix='      - name: Test AI agent and Chat contracts\n        run: |\n';
+  assert.ok(source.includes(prefix));assert.deepEqual(validateIsolatedCiWorkflow(source,kind),[]);
+  for(const command of ['exit 0','set +e','if false; then','echo skipped; exit 0']){
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.replace(prefix,prefix+'          '+command+'\n'),kind),'isolated_ci_ai_static_body_mismatch');
+  }
+  const start=source.indexOf(prefix),end=source.indexOf('\n      - name:',start+prefix.length);
+  assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,end)+'\n          exit 0\n'+source.slice(end),kind),'isolated_ci_ai_static_body_mismatch');
+ }
+});
+
+test('AI static step rejects a fake run field nested inside env text without workflow hash checks',async()=>{
+ for(const [file,kind]of [['supabase-db-push.yml','main'],['supabase-sql-review.yml','pr']]){
+  const source=await readFile(join(repoRoot,'.github/workflows',file),'utf8');
+  const start=source.indexOf('      - name: Test AI agent and Chat contracts'),end=source.indexOf('\n      - name:',start+8);
+  const fakeBody=source.slice(start,end).split('\n        run: |\n')[1].split('\n').map(line=>line?'    '+line:line).join('\n');
+  for(const realRun of ['        run: exit 0\n','']){
+   const fakeStep='      - name: Test AI agent and Chat contracts\n'+realRun+'        env:\n          FAKE_SCRIPT: |\n            run: |\n'+fakeBody;
+   assertIncludesErrorCode(validateIsolatedCiWorkflow(source.slice(0,start)+fakeStep+source.slice(end),kind),'isolated_ci_ai_static_body_mismatch');
+  }
+ }
+});

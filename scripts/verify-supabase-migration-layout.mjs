@@ -113,7 +113,15 @@ const ISOLATED_SQL_TESTS = Object.freeze([
   "supabase/tests/agent_past_lesson_state_correction_test.sql",
   "supabase/tests/timetable_default_projection_performance_test.sql",
   "supabase/tests/timetable_save_conflict_details_test.sql",
-  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql"
+  "supabase/tests/timetable_unknown_snapshot_reader_fast_path_test.sql",
+  "supabase/tests/ai_agent_chat_outbox_test.sql",
+  "supabase/tests/ai_agent_chat_runtime_test.sql",
+  "supabase/tests/ai_agent_credentials_test.sql",
+  "supabase/tests/ai_agent_requests_authz_test.sql",
+  "supabase/tests/ai_agent_requests_transition_test.sql",
+  "supabase/tests/ai_agent_space_policy_test.sql",
+  "supabase/tests/ai_agent_personal_owner_test.sql",
+  "supabase/tests/agent_personal_dashboard_read_test.sql",
 ])
 const ISOLATED_PROBES = Object.freeze([
   "tests/probe-agent-class-edit-dto.mjs",
@@ -129,12 +137,44 @@ const ISOLATED_PROBES = Object.freeze([
   "tests/probe-registration-subject-snapshot-concurrency.mjs",
   "tests/probe-registration-management-recovery-concurrency.mjs",
   "tests/probe-registration-visit-cancellation-dto.mjs",
+  "tests/probe-ai-agent-auth-concurrency.mjs",
+  "tests/probe-ai-agent-claim-concurrency.mjs",
+  "tests/probe-ai-agent-space-policy-concurrency.mjs",
+  "tests/probe-ai-agent-chat-runtime-concurrency.mjs",
+  "tests/probe-ai-agent-http-producer.mjs",
+  "tests/probe-ai-agent-personal-integration.mjs",
 ])
+
+const AI_STATIC_TESTS = Object.freeze([
+  "tests/ai-agent-personal-credential-service.test.mjs",
+  "tests/ai-agent-personal-credential-workspace.test.mjs",
+  "tests/ai-agent-personal-owner-concurrency.test.mjs",
+  "tests/agent-personal-dashboard-read.test.mjs",
+
+  "tests/ai-agent-credential-service.test.mjs",
+  "tests/ai-agent-credential-workspace.test.mjs",
+  "tests/ai-agent-local-db-runner.test.mjs",
+  "tests/ai-agent-navigation.test.mjs",
+  "tests/ai-agent-probe-process-bounds.test.mjs",
+  "tests/ai-agent-request-access.test.mjs",
+  "tests/ai-agent-request-auth.test.mjs",
+  "tests/ai-agent-request-contract.test.mjs",
+  "tests/ai-agent-request-draft-navigation.test.mjs",
+  "tests/ai-agent-request-recovery.test.mjs",
+  "tests/ai-agent-request-routes.test.mjs",
+  "tests/ai-agent-request-service.test.mjs",
+  "tests/ai-agent-request-workspace.test.mjs",
+  "tests/chat-outbox.test.mjs",
+  "tests/chat-runtime-configuration.test.mjs",
+  "tests/chat-send-route.test.mjs",
+  "tests/google-chat-transport.test.mjs"
+])
+
 // Pin the complete workflow so aliases, multiline expressions, indirection, and
 // step reordering cannot expand the isolated CI execution boundary.
-const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "46e9459ff562913b04f3237570cc8669ab8223aa0d4e40c9ffcff2d7c46c3d28"
+const REQUIRED_DB_PUSH_WORKFLOW_SHA256 = "26436a34d7ffad142488cc56086a4e05ed6067eabdb4bdaa276200459b5a4196"
 const REQUIRED_SQL_REVIEW_WORKFLOW_SHA256 =
-  "8301b2ff263f88e27eeeebfd7254511419668caea1b056562c90b09bebb158ea"
+  "91e34376ae83031736f52520c0c19616b9e8172a3fb63f5e697cfff2fec6abe6"
 const REQUIRED_SQUAWK_CONFIG_SHA256 =
   "faca6a64c8daa98c8ffed72e0cf41c723756cc518e09ff753d754dcc846c4803"
 // This separately reviewed, owner-approved manual release is not isolated CI.
@@ -1161,6 +1201,46 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
     const verifierCount = lines.filter((line) => /^\s*run:\s*node scripts\/verify-supabase-migration-layout\.mjs\s*$/.test(line)).length
     reject(verifierCount !== 1, "layout_verifier_command_count_mismatch")
   }
+  const staticText = staticJob.join("\n").replace(/\\\r?\n\s*/g, " ")
+  const staticCommands = staticText.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " "))
+    .filter((line) => line.startsWith("node --test") && line.includes("tests/ai-agent-"))
+  reject(staticCommands.length !== 1 || staticCommands[0] !== `node --test --experimental-strip-types ${AI_STATIC_TESTS.join(" ")}`,
+    "isolated_ci_ai_static_inventory_mismatch")
+  reject((unfolded.match(/node --test[^\n]*tests\/ai-agent-/g) || []).length !== 1,
+    "isolated_ci_ai_static_command_count_mismatch")
+  const staticStep = staticText.split(/^ {6}- name: /m).find((step) => step.startsWith("Test AI agent and Chat contracts\n")) || ""
+  const staticBody = staticStep.split(/\n {8}run: \|\n/)[1]?.split(/\r?\n/).map((line) => line.trim().replace(/\s+/g, " ")).filter(Boolean) || []
+  reject(!equalJson(staticBody,[`node --test --experimental-strip-types ${AI_STATIC_TESTS.join(" ")}`]),
+    "isolated_ci_ai_static_body_mismatch")
+  for (const [job, target] of [[staticJob, "node --test --experimental-strip-types \\"],
+    [isolatedJob, "node scripts/run-isolated-supabase-db-tests.mjs"]]) {
+    const installations = job.map((line, index) => line.trim() === "run: npm ci --ignore-scripts" ? index : -1).filter((index) => index >= 0)
+    const targetIndex = job.findIndex((line) => line.includes(target))
+    reject(installations.length !== 1 || targetIndex < 0 || installations[0] >= targetIndex,
+      "isolated_ci_ai_dependency_install_order_invalid")
+  }
+  reject((workflow.match(/^\s*run: npm ci --ignore-scripts$/gm) || []).length !== 2,
+    "isolated_ci_ai_dependency_install_count_mismatch")
+  reject(lines.some((line) => /^\s*(?:if|continue-on-error)\s*:/.test(line)),
+    "isolated_ci_conditional_execution_forbidden")
+  const runtimeText = isolatedJob.join("\n").replace(/\\\r?\n\s*/g, " ")
+  const expectedJobs = kind === "main" ? ["db-preflight", "db-isolated-validation"] : ["supabase-sql-review", "supabase-schema-contract"]
+  reject(!equalJson(lines.slice(lines.indexOf("jobs:")+1).filter((line) => /^ {2}[A-Za-z0-9_-]+:$/.test(line)).map((line) => line.trim().slice(0,-1)), expectedJobs), "isolated_ci_job_inventory_mismatch")
+  const runtimeSteps = isolatedJob.filter((line) => /^ {6}- name: /.test(line)).map((line) => line.slice(14))
+  const runtimeName = kind === "main" ? "Run isolated migration and schema contracts" : "Run isolated schema contracts"
+  reject(!equalJson(runtimeSteps,["Checkout","Setup Node","Setup Supabase CLI","Install producer parity dependencies","Cache isolated annual RPC HTTP fixture image",runtimeName,"Test cached PostgreSQL fixture contracts"]), "isolated_ci_runtime_step_inventory_mismatch")
+  const directStep = runtimeText.split(/^ {6}- name: /m).find((step) => step.startsWith(runtimeName + "\n")) || ""
+  const directBody = directStep.split(/\n\s*run: \|\n/)[1]?.split(/\r?\n/).map((line) => line.trim()).filter(Boolean) || []
+  reject(directBody.length !== 2 || directBody[0] !== "set -euo pipefail" || !directBody[1].startsWith('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs '), "isolated_ci_direct_execute_body_mismatch")
+  reject((unfolded.match(/--execute\b/g) || []).length !== 1,
+    "isolated_ci_execute_count_mismatch")
+  reject(runtimeText.split(/\r?\n/).some((line) =>
+    /\b(?:node|bash|sh|zsh|bun|deno)\s+/.test(line)
+    && !line.includes('TASK_SUPABASE_CLI="${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs')
+    && line.trim() !== `run: ${CACHED_POSTGRES_FIXTURE_TEST_COMMAND}`),
+    "isolated_ci_indirect_execute_forbidden")
+  reject(!hasExactRun(staticJob, "node --test tests/helpers/ai-producer-receipt.test.mjs"),
+    "isolated_ci_ai_receipt_tests_missing")
   reject(!isolatedJob.some((line) => line.trim() === `version="${PINNED_SUPABASE_CLI_VERSION}"`)
     || !isolatedJob.some((line) => line.includes(`${PINNED_SUPABASE_CLI_ARCHIVE_SHA256}  \${archive_path}`)
       && line.includes("sha256sum --check --strict")), "isolated_ci_cli_pin_mismatch")
@@ -1178,14 +1258,14 @@ export function validateIsolatedCiWorkflow(workflow, kind = "main") {
   reject(!equalJson(sqlTests, ISOLATED_SQL_TESTS), "isolated_ci_sql_inventory_mismatch")
   reject(!equalJson(probes, ISOLATED_PROBES), "isolated_ci_probe_inventory_mismatch")
   for (const flag of ["--review-head", "--lint", "--require-final", "--execute", "--authorized",
-    "--postdeploy-contract", "--transactional-preflight", "--verify-local-ledger"]) {
+    "--postdeploy-contract", "--transactional-preflight", "--verify-local-ledger", "--ai-producer-parity"]) {
     reject(command.split(/\s+/).filter((part) => part === flag).length !== 1,
       `isolated_ci_required_flag_missing:${flag}`)
   }
   reject(!command.includes(FOCUSED_TRANSACTIONAL_PGTAP)
     || !command.includes("supabase/tests/agent_management_calendar_test.sql"), "isolated_ci_focused_preflight_missing")
   const requestId = `github-${kind === "main" ? "main" : "pr"}-\${GITHUB_RUN_ID}-\${GITHUB_RUN_ATTEMPT}`
-  const expectedPrefix = `TASK_SUPABASE_CLI="\${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs --review-head --lint --require-final --execute --authorized --request-id "${requestId}" --postdeploy-contract --transactional-preflight --verify-local-ledger`
+  const expectedPrefix = `TASK_SUPABASE_CLI="\${RUNNER_TEMP}/supabase-cli/supabase" node scripts/run-isolated-supabase-db-tests.mjs --review-head --lint --require-final --execute --authorized --request-id "${requestId}" --postdeploy-contract --transactional-preflight --verify-local-ledger --ai-producer-parity`
   // Tests and probes are intentionally interleaved in the reviewed command.
   const actualWithoutTargets = command.replace(/ --(?:test|probe) \S+/g, "")
   reject(actualWithoutTargets !== expectedPrefix, "isolated_ci_runner_command_mismatch")

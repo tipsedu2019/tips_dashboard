@@ -49,6 +49,17 @@ For non-trivial UI, React performance, Supabase/Postgres, or quality-guideline w
 - Verify the affected screen against an existing reference with matching data, state, viewport and theme. Include the relevant design-contract checks and browser evidence in the PR; automated tests alone do not prove visual consistency.
 - Specialized calendars, schedules, documents and domain colors may keep their necessary presentation. Document a new exception's reason and scope in `DESIGN.md`; do not copy an existing exception into an unrelated menu. Routine choices within these rules do not require another approval.
 
+## Repository change and release process
+
+These requirements apply even when GitHub does not enforce repository rules.
+
+- Work on feature branches. Update `main` only through reviewed PR merges; do not commit or push directly to `main`, force-push it, or rewrite accepted history. Preserve existing collaborator access.
+- Before merging, require successful `free-tier-guardrails`, `supabase-sql-review`, and `supabase-schema-contract` checks, all applicable suites, and independent review of the exact tested source. Record PR head/base and tested merge SHAs with evidence; source or base changes require current evidence.
+- Missing, failed, errored, cancelled, blocked, or skipped required checks/tests do not satisfy the merge gate. Resolve the blocker; do not weaken assertions, omit required cases, or substitute diagnostic evidence for a passing suite.
+- Before a merge that can trigger release, record the previous `main` SHA, last verified production release, and applicable SQL compatibility/recovery plan as rollback anchors. Verify the actual deployed source, schema state, and affected production flows after release; CI success alone does not prove production success.
+- Secrets, credentials, authentication/permission changes, production SQL, and provider actions retain their separate approval scopes. CI or PR approval does not grant those approvals.
+- Do not manually delete or weaken GitHub rulesets or branch protections to replace platform enforcement. Plan or visibility effects do not authorize additional settings changes.
+
 ## Code Review Rules
 
 - Determine the final active PL/pgSQL definition from the ordered migration chain, not an earlier definition alone.
