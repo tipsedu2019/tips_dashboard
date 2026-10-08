@@ -129,6 +129,7 @@ jobs:
         run: |
           node --test --experimental-strip-types \
             tests/agent-api-http.test.mjs \
+            tests/agent-response-contract.test.mjs \
             tests/agent-class-edit.test.mjs \
             tests/agent-calendar.test.mjs \
             tests/registration-alimtalk-preview-dialog.test.mjs \

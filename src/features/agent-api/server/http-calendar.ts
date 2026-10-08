@@ -3,6 +3,7 @@ import { z } from "zod";
 import { HttpError, record, response, errorStatus, jsonBody, knownCodes, type AgentRpc } from "./http.ts";
 import { calendarChange, calendarYear } from "./calendar-contract.ts";
 import { CalendarError, calendarWorkspace, compileCalendarChange } from "./calendar-compiler.mjs";
+import { createAgentResponseContract } from './response-contract.ts';
 
 const uuid=z.string().uuid();
 const empty=z.object({}).strict();
@@ -19,12 +20,15 @@ function project(action:string,data:Record<string,unknown>) {
 }
 export function createAgentCalendarHandler(dependencies:{enabled:()=>boolean;rpc:AgentRpc}) {
   return async(request:Request,path:string[]):Promise<Response>=>{
+    const contract = createAgentResponseContract(request);
+    const reply = (body: unknown, status = 200) => contract.finish(response(body, status), body);
     try {
       if(!dependencies.enabled()) throw new HttpError(503,'agent_api_disabled');
       const token=/^Bearer (tips_agent_[a-f0-9]{64})$/.exec(request.headers.get('authorization')||'')?.[1];
       if(!token) throw new HttpError(401,'agent_unauthorized');
       const hash=createHash('sha256').update(token).digest('hex');
       const call=async(action:string,input:Record<string,unknown>)=>{
+        if (action === 'commit' || action === 'operation') contract.result('receipt', `/api/v2/calendar/operations/${input.requestKey}`);
         const result=await dependencies.rpc('agent_calendar_api_v1',{p_token_hash:hash,p_action:action,p_input:input});
         const rpcError=record(result.error), envelope=record(result.data), error=rpcError || record(envelope?.error);
         if(error) {
@@ -58,12 +62,14 @@ export function createAgentCalendarHandler(dependencies:{enabled:()=>boolean;rpc
       } else if(request.method==='GET' && path.length===3 && path[0]==='calendar' && path[1]==='operations') {
         empty.parse(raw);action='operation';data=await call(action,{requestKey:uuid.parse(path[2])});
       } else throw new HttpError(404,'route_not_found');
-      return response({data:project(action,data),error:data.state==='failed'?data.error:null},data.state==='failed'&&action==='commit'?errorStatus(String(record(data.error)?.code||'agent_write_failed')):200);
+      const outgoing=project(action,data);
+      contract.accepted('business_connection');
+      return reply({data:outgoing,error:data.state==='failed'?data.error:null},data.state==='failed'&&action==='commit'?errorStatus(String(record(data.error)?.code||'agent_write_failed')):200);
     } catch(error) {
-      if(error instanceof z.ZodError) return response({data:null,error:{code:'invalid_request'}},400);
-      if(error instanceof CalendarError && knownCodes.has(error.message)) return response({data:null,error:{code:error.message}},errorStatus(error.message));
-      if(error instanceof HttpError) return response({data:null,error:{code:error.message}},error.status);
-      return response({data:null,error:{code:'agent_api_unavailable'}},503);
+      if(error instanceof z.ZodError) return reply({data:null,error:{code:'invalid_request'}},400);
+      if(error instanceof CalendarError && knownCodes.has(error.message)) return reply({data:null,error:{code:error.message}},errorStatus(error.message));
+      if(error instanceof HttpError) return reply({data:null,error:{code:error.message}},error.status);
+      return reply({data:null,error:{code:'agent_api_unavailable'}},503);
     }
   };
 }
