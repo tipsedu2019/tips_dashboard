@@ -2126,13 +2126,13 @@ export async function loadOpsTaskById(
   const commentRows = (commentResult.data || []) as unknown as Row[]
   const attachmentRows = (attachmentResult.data || []) as unknown as Row[]
   const eventRows = (eventResult.data || []) as unknown as Row[]
-  const profileIds = [...new Set([
+  const profileIds = !includePresentation ? [] : [...new Set([
     taskRow.requested_by, taskRow.assignee_id, taskRow.secondary_assignee_id, taskRow.completed_by,
     ...commentRows.map((row) => row.author_id),
     ...attachmentRows.map((row) => row.uploaded_by),
     ...eventRows.map((row) => row.actor_id),
   ].map(text).filter(Boolean))]
-  const profileResult = !includePresentation || profileIds.length === 0
+  const profileResult = profileIds.length === 0
     ? { data: [], error: null }
     : await supabase.from("profiles")
       .select("id,name,email,role,login_id").in("id", profileIds).order("id").limit(100)
