@@ -6,6 +6,7 @@ import { classWorkspace } from './class-edit-compiler.mjs';
 import { calendarYear } from './calendar-contract.ts';
 import { calendarWorkspace } from './calendar-compiler.mjs';
 import { HttpError, errorStatus, knownCodes, record, response, type AgentRpc } from './http.ts';
+import { createAgentResponseContract } from './response-contract.ts';
 
 // A separate credential audience: an inbox key never becomes a business key.
 export const PERSONAL_DASHBOARD_READ_KIND = 'personal_dashboard_read' as const;
@@ -61,6 +62,8 @@ export function isPersonalDashboardReadAuthorization(request: Request): boolean 
 
 export function createPersonalDashboardReadHandler(dependencies: { enabled: () => boolean; rpc: AgentRpc }) {
   return async (request: Request, path: string[]): Promise<Response> => {
+    const contract = createAgentResponseContract(request);
+    const reply = (body: unknown, status = 200) => contract.finish(response(body, status), body);
     try {
       if (!dependencies.enabled()) throw new HttpError(503, 'agent_api_disabled');
       const token = /^Bearer (tips_dashboard_personal_[a-f0-9]{64})$/u.exec(request.headers.get('authorization') ?? '')?.[1];
@@ -117,11 +120,12 @@ export function createPersonalDashboardReadHandler(dependencies: { enabled: () =
         outgoing = proof.context;
       }
       // Authenticated private output is uncached; every retry reruns the callback.
-      return response({ data: outgoing, error: null });
+      contract.accepted('personal_dashboard_read');
+      return reply({ data: outgoing, error: null });
     } catch (error) {
-      if (error instanceof z.ZodError) return response({ data: null, error: { code: 'invalid_request' } }, 400);
-      if (error instanceof HttpError) return response({ data: null, error: { code: error.message } }, error.status);
-      return response({ data: null, error: { code: 'agent_api_unavailable' } }, 503);
+      if (error instanceof z.ZodError) return reply({ data: null, error: { code: 'invalid_request' } }, 400);
+      if (error instanceof HttpError) return reply({ data: null, error: { code: error.message } }, error.status);
+      return reply({ data: null, error: { code: 'agent_api_unavailable' } }, 503);
     }
   };
 }

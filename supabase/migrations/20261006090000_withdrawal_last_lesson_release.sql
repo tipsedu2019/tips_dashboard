@@ -17,7 +17,7 @@ create table dashboard_private.withdrawal_roster_release_queue_v1 (
   last_lesson_date date not null,
   actor_id uuid,
   status text not null default 'pending' check (status in ('pending','applied','superseded')),
-  attempt_count integer not null default 0 check (attempt_count >= 0),
+  attempt_count bigint not null default 0 check (attempt_count >= 0),
   next_attempt_at timestamptz not null default pg_catalog.now(),
   last_error_code text,
   created_at timestamptz not null default pg_catalog.now(),
@@ -36,8 +36,8 @@ create unique index withdrawal_roster_release_pending_pair_v1
   on dashboard_private.withdrawal_roster_release_queue_v1(student_id,class_id) where status='pending';
 create index withdrawal_roster_release_due_v1
   on dashboard_private.withdrawal_roster_release_queue_v1(last_lesson_date,next_attempt_at,task_id) where status='pending';
-create index withdrawal_roster_release_history_pair_v1
-  on public.student_class_enrollment_history(student_id,class_id);
+-- History checks use the existing student_id-leading index. Avoid building an
+-- optional pair index inside this transaction on the live enrollment history.
 
 create function dashboard_private.guard_withdrawal_roster_release_snapshot_v1()
 returns trigger language plpgsql security invoker set search_path='' as $$
@@ -68,10 +68,11 @@ create function dashboard_private.withdrawal_roster_release_scheduler_ready_v1()
 returns boolean language plpgsql volatile security definer set search_path='' as $$
 declare v_ready boolean;
 begin
-  if pg_catalog.to_regclass('cron.job') is null then return false; end if;
+  if pg_catalog.current_setting('transaction_timeout',true) is null
+    or pg_catalog.to_regclass('cron.job') is null then return false; end if;
   execute $query$select count(*)=1 and coalesce(bool_and(
     schedule='* * * * *'
-    and command='set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'
+    and command='set transaction_timeout = ''0''; set transaction_timeout = ''30s''; set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'
     and active and username='postgres' and database=pg_catalog.current_database()),false)
     from cron.job where jobname='tips-withdrawal-roster-release-v1'$query$ into v_ready;
   return v_ready;
@@ -266,14 +267,21 @@ revoke all on function dashboard_private.process_due_withdrawal_roster_releases_
 
 -- Installing this migration does not activate the scheduler. An explicit release
 -- operation may install/disable/remove this database-only cron after verification.
--- The cron session bounds the whole SELECT to 30s; a function-local setting
--- would not reliably restart the calling statement's timeout timer.
+-- PostgreSQL 17 starts the transaction timer when this command sets it, even
+-- inside a pg_cron background worker. Reset only this session's inherited timer
+-- first: setting a positive value does not re-arm an already active timer.
+-- Statement timeout alone does not start
+-- that worker's timer. Transaction timeout terminates its session with 25P04
+-- and rolls back the entire batch, including caught per-row failure records.
 create function public.manage_withdrawal_roster_release_scheduler_v1(p_action text default 'inspect')
 returns jsonb language plpgsql security definer set search_path='' set lock_timeout='5s' as $$
 declare v_job_id bigint; v_jobs jsonb; v_count integer; v_matches boolean; v_active boolean;
 begin
   if p_action is null or p_action not in('inspect','install','disable','remove') then
     raise exception 'withdrawal_release_scheduler_action_invalid' using errcode='22023';
+  end if;
+  if p_action='install' and pg_catalog.current_setting('transaction_timeout',true) is null then
+    raise exception 'withdrawal_release_transaction_timeout_unavailable' using errcode='55000';
   end if;
   if pg_catalog.to_regclass('cron.job') is null
     or pg_catalog.to_regprocedure('cron.schedule(text,text,text)') is null
@@ -287,7 +295,7 @@ begin
     if v_count>1 then raise exception 'withdrawal_release_scheduler_ambiguous' using errcode='55000'; end if;
     if v_count=1 then
       execute $query$select bool_and(schedule='* * * * *'
-        and command='set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'
+        and command='set transaction_timeout = ''0''; set transaction_timeout = ''30s''; set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'
         and username='postgres' and database=pg_catalog.current_database()), bool_and(active), min(jobid)
         from cron.job where jobname='tips-withdrawal-roster-release-v1'$query$ into v_matches, v_active, v_job_id;
       if v_matches is distinct from true then
@@ -302,7 +310,7 @@ begin
     -- Named schedule creates or refreshes only this owner's exact job. Managed
     -- Supabase may deny postgres direct cron.job UPDATE and cron.alter_job.
     execute 'select cron.schedule($1,$2,$3)' into v_job_id using 'tips-withdrawal-roster-release-v1','* * * * *',
-      'set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();';
+      'set transaction_timeout = ''0''; set transaction_timeout = ''30s''; set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();';
   elsif p_action in('disable','remove') then
     -- Stopping unschedules the job; it preserves pending reservations and does
     -- not cancel an in-flight worker. A later install may return a new job ID.

@@ -259,8 +259,11 @@ select cron.schedule('tips-withdrawal-roster-release-v1','* * * * *','select 1;'
 select throws_ok($$select public.manage_withdrawal_roster_release_scheduler_v1('install')$$,'55000','withdrawal_release_scheduler_drift','scheduler drift has exact configuration SQLSTATE');
 select ok(not dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'drifted scheduler blocks readiness');
 select cron.schedule('tips-withdrawal-roster-release-v1','* * * * *','set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();');
+select ok(not dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'legacy statement-only timeout command cannot satisfy readiness');
+select throws_ok($$select public.manage_withdrawal_roster_release_scheduler_v1('install')$$,'55000','withdrawal_release_scheduler_drift','legacy unbounded background-worker command requires explicit replacement');
+select cron.schedule('tips-withdrawal-roster-release-v1','* * * * *','set transaction_timeout = ''0''; set transaction_timeout = ''30s''; set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();');
 select ok(dashboard_private.withdrawal_roster_release_scheduler_ready_v1(),'bounded pure SQL command matches final readiness contract');
-select ok((select count(*)=1 from cron.job where jobname='tips-withdrawal-roster-release-v1' and schedule='* * * * *' and command='set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'),'scheduler contains one bounded database-only command');
+select ok((select count(*)=1 from cron.job where jobname='tips-withdrawal-roster-release-v1' and schedule='* * * * *' and command='set transaction_timeout = ''0''; set transaction_timeout = ''30s''; set statement_timeout = ''30s''; select dashboard_private.process_due_withdrawal_roster_releases_v1();'),'scheduler contains one bounded database-only command');
 select ok(pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::regprocedure) like '%withdrawal_cutoffs as materialized%' and pg_get_functiondef('public.get_dashboard_statistics_sources_v1(text,text,text,date,date)'::regprocedure) not like '%withdrawal_roster_includes_date_v1%','final statistics materializes bounded candidate set once');
 
 -- A restored generation owns a new task even if that new task is already late.

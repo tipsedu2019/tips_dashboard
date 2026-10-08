@@ -1,9 +1,10 @@
-import { createHash, randomUUID } from "node:crypto";
+import { createHash } from "node:crypto";
 import { z } from "zod";
 import { HttpError, record, response, errorStatus, jsonBody, knownCodes, type AgentRpc } from "./http.ts";
 import { classEditRequest, editWindow, pastLessonStateCorrectionRequest } from "./class-edit-contract.ts";
 import { classWorkspace, compileClassEdit, compilePastLessonStateCorrection, EditError } from "./class-edit-compiler.mjs";
 import { agentEditOpenApi } from "./openapi-v2.ts";
+import { createAgentResponseContract } from './response-contract.ts';
 
 const uuid = z.string().uuid();
 const empty = z.object({}).strict();
@@ -54,16 +55,19 @@ type SafeFailure = { code: "agent_api_unavailable"; requestId: string; phase: st
 const safeSqlstate = (value: unknown) => typeof value === "string" && /^[0-9A-Z]{5}$/.test(value) ? value : undefined;
 export function createAgentEditApiHandler(dependencies: { enabled: () => boolean; rpc: AgentRpc; refreshPublicCache?: () => void | Promise<void>; logError?: (failure: SafeFailure) => void }) {
   return async (request: Request, path: string[]): Promise<Response> => {
-    const requestId = randomUUID();
+    const contract = createAgentResponseContract(request);
+    const { requestId } = contract;
+    const reply = (body: unknown, status = 200) => contract.finish(response(body, status), body);
     let phase = "request";
     let sqlstate: string | undefined;
     try {
-      if (request.method === "GET" && path.join("/") === "openapi") return response(agentEditOpenApi);
+      if (request.method === "GET" && path.join("/") === "openapi") return reply(agentEditOpenApi);
       if (!dependencies.enabled()) throw new HttpError(503,"agent_api_disabled");
       const token = /^Bearer (tips_agent_[a-f0-9]{64})$/.exec(request.headers.get("authorization") || "")?.[1];
       if (!token) throw new HttpError(401,"agent_unauthorized");
       const hash = createHash("sha256").update(token).digest("hex");
       const call = async (action: string, input: Record<string, unknown>) => {
+        if (action === 'commit' || action === 'operation') contract.result('receipt', `/api/v2/operations/${input.requestKey}`);
         phase = action;
         sqlstate = undefined;
         const result = await dependencies.rpc("agent_api_v2", {p_token_hash:hash,p_action:action,p_input:input});
@@ -127,19 +131,18 @@ export function createAgentEditApiHandler(dependencies: { enabled: () => boolean
         try { if (dependencies.refreshPublicCache) { await dependencies.refreshPublicCache(); state="invalidated"; } } catch { /* Commit is durable regardless of cache failure. */ }
         outgoing={...outgoing,publicCache:{state}};
       }
-      return response({data:outgoing,error:data.state === "failed" ? data.error : null}, data.state === "failed" && action === "commit" ? errorStatus(String(record(data.error)?.code || "agent_write_failed")) : 200);
+      contract.accepted('business_connection');
+      return reply({data:outgoing,error:data.state === "failed" ? data.error : null}, data.state === "failed" && action === "commit" ? errorStatus(String(record(data.error)?.code || "agent_write_failed")) : 200);
     } catch (error) {
-      if (error instanceof z.ZodError) return response({data:null,error:{code:"invalid_request"}},400);
-      if (error instanceof EditError && knownCodes.has(error.message)) return response({data:null,error:{code:error.message}},errorStatus(error.message));
-      if (error instanceof HttpError && error.message !== "agent_api_unavailable") return response({data:null,error:{code:error.message}},error.status);
+      if (error instanceof z.ZodError) return reply({data:null,error:{code:"invalid_request"}},400);
+      if (error instanceof EditError && knownCodes.has(error.message)) return reply({data:null,error:{code:error.message}},errorStatus(error.message));
+      if (error instanceof HttpError && error.message !== "agent_api_unavailable") return reply({data:null,error:{code:error.message}},error.status);
       const state=sqlstate ?? safeSqlstate(record(error)?.code);
       const failure: SafeFailure={code:"agent_api_unavailable",requestId,phase,...(state ? {sqlstate:state} : {})};
       // A transport failure can leave a write uncertain. Correlate only fixed
       // phases and validated SQLSTATEs; never log request or raw error content.
       try { if (dependencies.logError) dependencies.logError(failure); else console.error(failure); } catch { /* Diagnostics never change recovery behavior. */ }
-      const unavailable=response({data:null,error:failure},503);
-      unavailable.headers.set("X-Request-Id",requestId);
-      return unavailable;
+      return reply({data:null,error:failure},503);
     }
   };
 }

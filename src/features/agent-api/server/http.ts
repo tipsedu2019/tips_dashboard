@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { z } from "zod";
 import { agentOpenApi } from "./openapi.ts";
+import { createAgentResponseContract } from './response-contract.ts';
 
 type Result = { data: unknown; error: unknown };
 export type AgentRpc = (name: string, input: Record<string, unknown>) => PromiseLike<Result>;
@@ -41,8 +42,10 @@ export async function jsonBody(request: Request, limit = 8192): Promise<unknown>
 }
 export function createAgentApiHandler(dependencies: { enabled: () => boolean; rpc: AgentRpc; refreshPublicCache?: () => void | Promise<void> }) {
   return async (request: Request, path: string[]): Promise<Response> => {
+    const contract = createAgentResponseContract(request);
+    const reply = (body: unknown, status = 200) => contract.finish(response(body, status), body);
     try {
-      if (path.join("/") === "openapi" && request.method === "GET") return response(agentOpenApi);
+      if (path.join("/") === "openapi" && request.method === "GET") return reply(agentOpenApi);
       if (!dependencies.enabled()) throw new HttpError(503, "agent_api_disabled");
       const token = /^Bearer (tips_agent_[a-f0-9]{64})$/.exec(request.headers.get("authorization") || "")?.[1];
       if (!token) throw new HttpError(401, "agent_unauthorized");
@@ -61,6 +64,7 @@ export function createAgentApiHandler(dependencies: { enabled: () => boolean; rp
       } else if (request.method === "POST" && path.join("/") === "operations") {
         z.object({}).strict().parse(rawQuery); action = "commit"; input = { ...commit.parse(await jsonBody(request)), requestKey: uuid.parse(request.headers.get("idempotency-key")) };
       } else throw new HttpError(404, "route_not_found");
+      if (action === 'commit' || action === 'operation') contract.result('receipt', `/api/v1/operations/${input.requestKey}`);
       const result = await dependencies.rpc("agent_api_v1", { p_token_hash: createHash("sha256").update(token).digest("hex"), p_action: action, p_input: input });
       if (result.error) {
         const err = record(result.error); const message = String(err?.message || "");
@@ -86,14 +90,15 @@ export function createAgentApiHandler(dependencies: { enabled: () => boolean; rp
       }
       const failed = data.state === "failed";
       const failedCode = String(record(data.error)?.code || "agent_write_failed");
+      contract.accepted('business_connection');
       // A known failed operation is persisted and returned with its receipt.
       // GET operation status itself succeeded even when the operation failed.
-      return response({ data: outgoing, error: failed ? record(data.error) : null }, failed && action === "commit" ? errorStatus(failedCode) : 200);
+      return reply({ data: outgoing, error: failed ? record(data.error) : null }, failed && action === "commit" ? errorStatus(failedCode) : 200);
     } catch (e) {
-      if (e instanceof z.ZodError) return response({ data: null, error: { code: "invalid_request" } }, 400);
-      if (e instanceof HttpError) return response({ data: null, error: { code: e.message } }, e.status);
+      if (e instanceof z.ZodError) return reply({ data: null, error: { code: "invalid_request" } }, 400);
+      if (e instanceof HttpError) return reply({ data: null, error: { code: e.message } }, e.status);
       // Never return/log raw database exceptions, credentials or request bodies.
-      return response({ data: null, error: { code: "agent_api_unavailable" } }, 503);
+      return reply({ data: null, error: { code: "agent_api_unavailable" } }, 503);
     }
   };
 }

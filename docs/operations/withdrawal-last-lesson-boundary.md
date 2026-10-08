@@ -28,9 +28,17 @@
 
 관리 함수는 확장의 `cron.schedule`과 `cron.unschedule`을 사용한다. 확장 소유자가 supabase_admin인 환경에서 postgres의 cron.job 직접 UPDATE나 cron.alter_job 호출 권한을 추가하지 않는다. `disable`과 `remove`는 모두 해당 job을 unschedule하고 pending 예약을 보존한다. 이미 실행 중인 worker는 취소하지 않는다. `install`은 내용이 일치하는 활성 job을 유지하며 비활성 job은 제거 후 재생성하므로 job ID가 바뀔 수 있다. 내용이 다른 job은 계속 거부한다.
 
-cron 명령은 처리 SELECT 전에 `statement_timeout = '30s'`를 설정하지만, **이 명령만으로 30초 중단을 보장하지 못한다.** 2026-10-08 격리 Supabase PostgreSQL 17.6.1.159 / pg_cron 1.6.4의 background-worker 모드에서 실제 매분 작업은 7개의 5초 잠금 대기를 처리한 뒤 35.081초에 성공으로 commit했다. `57014`와 전체 rollback은 발생하지 않았다. 이 P1 결함 때문에 운영 릴리스는 보류한다. 운영의 실행 모드는 확인하지 않았다.
+cron은 PostgreSQL 17의 세션별 transaction timeout을 사용한다. 기존 세션에 양수 timeout이 이미 시작되어 있으면 값을 30초로 바꾸는 것만으로 타이머가 다시 시작되지 않으므로, 이 cron 세션에서만 0으로 해제한 뒤 30초를 설정한다. 정확한 명령은 다음과 같다.
 
-처리 함수의 잠금 대기는 5초, 한 배치는 최대 100건이며 동시 처리기는 advisory lock으로 중복 실행을 건너뛴다. [pg_cron 1.6.4 소스](https://github.com/citusdata/pg_cron/blob/v1.6.4/src/pg_cron.c)의 background worker는 SQL 문자열 안의 SET을 실행하기 전에 기존 StatementTimeout으로 타이머를 설정한다. 관측된 실패의 원인 설명은 이 소스에 근거한 추론이며 원인을 유일하게 확정하는 계측이나 운영 모드 확인은 하지 않았다. 같은 소스의 CommandComplete 처리 때문에 실행 이력에 SET 성공이 먼저 나타날 수 있으므로 worker 종료와 최종 상태를 함께 확인해야 한다. 전역 timeout이나 역할·권한을 임의 변경하지 않았으며, 수정 후보는 별도 검토와 실제 중단·rollback 재검증이 필요하다.
+```sql
+set transaction_timeout = '0'; set transaction_timeout = '30s'; set statement_timeout = '30s'; select dashboard_private.process_due_withdrawal_roster_releases_v1();
+```
+
+`transaction_timeout`이 없는 환경은 준비 검사에 실패하며 `install`은 `55000 / withdrawal_release_transaction_timeout_unavailable`로 거부한다. 구 statement-timeout-only 명령도 준비 완료로 인정하지 않는다. 실제 transaction timeout은 `25P04`로 세션을 종료하므로, 해당 transaction에서 기록한 개별 잠금 실패와 attempt_count 증가도 함께 rollback된다. 전역·역할 timeout과 기존 cron 작업은 변경하지 않는다.
+
+처리 함수의 잠금 대기는 5초, 한 배치는 최대 100건이며 동시 처리기는 advisory lock으로 중복 실행을 건너뛴다. [PostgreSQL 17 문서](https://www.postgresql.org/docs/17/runtime-config-client.html#GUC-TRANSACTION-TIMEOUT)와 [17.6 타이머 소스](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/tcop/postgres.c)를 기준으로 구현했다. 실제 종료 시점은 스케줄링과 interrupt 처리에 영향을 받으므로 모든 부하에서 정확히 30,000ms 이내 종료한다고 보장하지 않는다. [pg_cron 1.6.4 소스](https://github.com/citusdata/pg_cron/blob/v1.6.4/src/pg_cron.c)의 CommandComplete 처리 때문에 실행 이력에 SET 성공이 먼저 나타날 수 있으므로 worker 종료와 최종 상태를 함께 확인한다.
+
+이전 statement-timeout-only 후보는 격리 background-worker에서 35.081초에 commit하여 릴리스가 중단됐다. 그 실패 기록은 [기존 검증 기록](../qa/withdrawal-release-gates-20261008/README.md)에 보존한다. 수정한 최종 명령은 같은 격리 PostgreSQL 17.6.1.159 / pg_cron 1.6.4에서 기본 timeout 0초와 상속 timeout 60초 두 조건으로 검증했다. 각각 30.013초·30.007초에 실제 `25P04`로 종료됐고, 일곱 예약의 중간 시도 기록을 포함한 전체 transaction이 rollback된 뒤 다음 실제 분 tick에서 정상 재시도됐다. [수정 검증 기록](../qa/withdrawal-timeout-fix-20261008/README.md)은 운영 서버 검증과 구분한다.
 
 현재 명단과 인원은 실제 제외 처리에 따라 바뀐다. cron 지연·중단이나 처리 실패 시 현재 명단의 제외도 늦어진다. 준비 검사는 실행 성공을 보장하지 않으므로 별도 릴리스에서 실행 이력, 실패 예약, 지연량과 공개 인원 캐시 갱신을 확인해야 한다. 미래 수업의 시험·학생 시간표 충돌 계산은 예약의 고정된 기준일을 적용하므로 기준일 이후 학생을 제외한다.
 
@@ -48,4 +56,4 @@ cron 명령은 처리 SELECT 전에 `statement_timeout = '30s'`를 설정하지�
 
 ## 검증 경계
 
-회귀 검증은 로컬 합성 데이터와 격리 PostgreSQL에서 수행한다. 최초 readiness 모사 검증 이후 사용자의 직접 승인으로 실제 격리 cron 설치·자동 tick·30초 제한·브라우저 저장을 검증했다. 통과한 경계 검증과 실패한 timeout을 [2026-10-08 검증 기록](../qa/withdrawal-release-gates-20261008/README.md)에 구분했다. 실제 학생 데이터, 운영 SQL, 알림 발송·재발송, 배포는 수행하지 않았다. 사용자 첨부 JPEG는 Library materialization 재시도 후 로컬 파일을 확보하지 못하여 픽셀을 확인하지 못했다.
+회귀 검증은 로컬 합성 데이터와 격리 PostgreSQL에서 수행한다. 최초 readiness 모사 검증 이후 사용자의 직접 승인으로 실제 격리 cron 설치·자동 tick·30초 제한·브라우저 저장을 검증했다. 통과한 경계 검증과 최초 실패는 [기존 검증 기록](../qa/withdrawal-release-gates-20261008/README.md)에, timeout 수정·실제 rollback·재시도는 [최종 수정 검증](../qa/withdrawal-timeout-fix-20261008/README.md)에 구분했다. 실제 학생 데이터, 운영 SQL, 알림 발송·재발송, 배포는 수행하지 않았다. 사용자 첨부 JPEG는 Library materialization 재시도 후 로컬 파일을 확보하지 못하여 픽셀을 확인하지 못했다.
