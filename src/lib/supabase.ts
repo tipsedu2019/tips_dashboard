@@ -44,4 +44,33 @@ export const supabaseConfigError =
 
 export const supabase = supabaseConfigError
   ? null
-  : createClient(supabaseUrl, supabaseAnonKey)
+  : createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        // Recovery credentials belong to the isolated recovery client. Never
+        // replace a dashboard login with credentials from a reset link.
+        detectSessionInUrl: typeof window === "undefined" ||
+          window.location.pathname.replace(/\/$/, "") !== "/reset-password",
+      },
+    })
+
+export const PASSWORD_RECOVERY_STORAGE_KEY = "tips-password-recovery-v1"
+
+export function createPasswordRecoveryClient() {
+  if (supabaseConfigError || typeof window === "undefined") return null
+  return createClient(supabaseUrl, supabaseAnonKey, {
+    auth: {
+      detectSessionInUrl: false,
+      autoRefreshToken: false,
+      storageKey: PASSWORD_RECOVERY_STORAGE_KEY,
+      storage: window.sessionStorage,
+    },
+    global: {
+      fetch: (input, init) => fetch(input, {
+        ...init,
+        signal: init?.signal
+          ? AbortSignal.any([init.signal, AbortSignal.timeout(10_000)])
+          : AbortSignal.timeout(10_000),
+      }),
+    },
+  })
+}
