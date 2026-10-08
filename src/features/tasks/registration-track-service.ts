@@ -2611,13 +2611,8 @@ export function createRegistrationTrackService(
           splitChildRows(row, "active_consultations", "consultation_history", "consultations")
         )))
         const trackIds = trackRows.map((row) => text(value(row, "id"))).filter(Boolean)
-        let enrollmentRows: Row[] = []
-        let currentEnrollmentPage: { rows: Row[]; count: number | null } = {
-          rows: [],
-          count: 0,
-        }
-        if (trackIds.length > 0) {
-          const [loadedCurrentEnrollmentPage, enrollmentHistoryRows] = await Promise.all([
+        const enrollmentRequest = trackIds.length > 0
+          ? Promise.all([
             queryCountedRows(
               client.from("ops_registration_enrollments")
                 .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
@@ -2647,9 +2642,26 @@ export function createRegistrationTrackService(
               metrics,
             ),
           ])
-          currentEnrollmentPage = loadedCurrentEnrollmentPage
-          enrollmentRows = mergeRowsById(currentEnrollmentPage.rows, enrollmentHistoryRows)
-        }
+          : Promise.resolve([{ rows: [], count: 0 }, []] as [
+            { rows: Row[]; count: number | null },
+            Row[],
+          ])
+        // Both reads depend only on the phase-one rows; neither needs the other's result.
+        // Keep the summary conditional so generic and complete-summary rows add no reads.
+        const rowsMissingObservationSummary = observationAware
+          && trackRows.some(rowNeedsRegistrationObservationSummary)
+        const [[currentEnrollmentPage, enrollmentHistoryRows], summaryResult] = await Promise.all([
+          enrollmentRequest,
+          rowsMissingObservationSummary
+            ? loadTrackSummarySelection(
+                [safeTaskId],
+                safeViewerId,
+                "observation",
+                { force: loadOptions.force },
+              )
+            : Promise.resolve(null),
+        ])
+        const enrollmentRows = mergeRowsById(currentEnrollmentPage.rows, enrollmentHistoryRows)
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
         const comments = rows(value(parentRow, "ops_task_comments")).map(mapComment)
         const attachments = rows(value(parentRow, "ops_task_attachments")).map(mapAttachment)
@@ -2713,15 +2725,6 @@ export function createRegistrationTrackService(
 
         if (!observationAware) return buildDetail(trackRows.map((row) => mapTrack(row)))
 
-        const rowsMissingObservationSummary = trackRows.some(rowNeedsRegistrationObservationSummary)
-        const summaryResult = rowsMissingObservationSummary
-          ? await loadTrackSummarySelection(
-              [safeTaskId],
-              safeViewerId,
-              "observation",
-              { force: loadOptions.force },
-            )
-          : null
         const summaryByTrackId = new Map(
           (summaryResult?.tracks || []).map((track) => [track.id, track]),
         )
