@@ -756,6 +756,9 @@ export function getClassExamConflictsForDates(
     const examInfo = buildStudentExamLookup(student, academicSchools, detailRows, academicExamDays);
 
     sessionDates.forEach((sessionDate) => {
+      const lastLessonDate = classItem?.withdrawalRosterCutoffs?.[text(student.id)];
+      if (lastLessonDate && sessionDate > lastLessonDate) return;
+
       const sameDaySubjects = examInfo.lookup.get(sessionDate);
       if (sameDaySubjects?.has(subject)) {
         const key = `same-day:${sessionDate}`;
@@ -1304,6 +1307,12 @@ export function buildDashboardConflictRows({
         affectedStudentIds: [studentId],
         now,
       });
+      const nextOccurrenceDate = text(base.nextOccurrenceAt).slice(0, 10);
+      if (involvedClasses.some((classItem) => {
+        const lastLessonDate = classItem.withdrawalRosterCutoffs?.[studentId];
+        return lastLessonDate && nextOccurrenceDate > lastLessonDate;
+      })) return;
+
       const slotTeacherNames = unique([
         ...resolveSlotTeachers(overlap.left, involvedClasses.find((item) => text(item.id) === text(overlap.left.classId))),
         ...resolveSlotTeachers(overlap.right, involvedClasses.find((item) => text(item.id) === text(overlap.right.classId))),

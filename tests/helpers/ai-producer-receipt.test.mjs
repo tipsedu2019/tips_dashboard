@@ -7,7 +7,7 @@ test('capture protocol preserves JSON bytes and rejects missing, duplicate, unkn
  for(const output of ['', 'AI_HTTP_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_UNKNOWN_CAPTURE:{}\nAI_HTTP_CAPTURE:{}\n','AI_HTTP_CAPTURE:{\n'])assert.throws(()=>extractAiCapture(output,'http'));
 });
 
-import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
+import {AI_PRODUCERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,ACCEPTED_AI_MIGRATIONS,CURRENT_AI_MIGRATIONS,CURRENT_WITHDRAWAL_MIGRATIONS,snapshotAiSource,validateAiReceipt,suppressAiCaptures,beginAiCapturePhase} from '../../scripts/lib/ai-producer-receipt.mjs';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawnSync} from 'node:child_process';
 import {writeFile,readFile,rm,mkdir,mkdtemp} from 'node:fs/promises';
@@ -151,14 +151,17 @@ test('current migration identity preserves the six accepted pins and rejects can
   }
   const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
   const original=JSON.parse(await readFile(manifestPath));
-  assert.equal(original.orderedNewMigrations.length,156);
-  assert.equal(original.orderedNewMigrations.at(-1).fileName,'20261007135140_textbook_latest_count_read_aggregation.sql');
+  assert.equal(original.orderedNewMigrations.length,160);
+  const reviewedLegacy=original.orderedNewMigrations.filter(m=>!CURRENT_WITHDRAWAL_MIGRATIONS.some(pin=>pin.fileName===m.fileName));
+  assert.equal(reviewedLegacy.length,156);
+  const mainFileName='20261007135140_textbook_latest_count_read_aggregation.sql';
+  assert.equal(reviewedLegacy.at(-1).fileName,mainFileName);
   for(const mutate of [
-   m=>m.orderedNewMigrations.pop(),
+   m=>m.orderedNewMigrations.splice(m.orderedNewMigrations.findIndex(row=>row.fileName===mainFileName),1),
    m=>m.orderedNewMigrations.push({...CURRENT_AI_MIGRATIONS[6],fileName:'20990101000000_ai_agent_unreviewed.sql'}),
-   m=>m.orderedNewMigrations.at(-1).sha256='0'.repeat(64),
-   m=>m.orderedNewMigrations.at(-1).status='draft',
-   m=>m.orderedNewMigrations.at(-1).fileName='20990101000000_unreviewed.sql',
+   m=>m.orderedNewMigrations.find(row=>row.fileName===mainFileName).sha256='0'.repeat(64),
+   m=>m.orderedNewMigrations.find(row=>row.fileName===mainFileName).status='draft',
+   m=>m.orderedNewMigrations.find(row=>row.fileName===mainFileName).fileName='20990101000000_unreviewed.sql',
    m=>m.orderedNewMigrations[0].sha256='0'.repeat(64),
    m=>m.orderedNewMigrations[0]=m.orderedNewMigrations[1],
    m=>[m.orderedNewMigrations[0],m.orderedNewMigrations[1]]=[m.orderedNewMigrations[1],m.orderedNewMigrations[0]],
@@ -169,7 +172,7 @@ test('current migration identity preserves the six accepted pins and rejects can
    await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/);
   }
   await writeFile(manifestPath,JSON.stringify(original));
-  const mainMigration=join(root,'supabase/migrations/'+original.orderedNewMigrations.at(-1).fileName);
+  const mainMigration=join(root,'supabase/migrations/'+mainFileName);
   const mainSource=await readFile(mainMigration);
   await writeFile(mainMigration,Buffer.concat([mainSource,Buffer.from('\n-- drift\n')]));
   await assert.rejects(snapshotAiSource(root),/reviewed main migration source drift/);
@@ -179,6 +182,55 @@ test('current migration identity preserves the six accepted pins and rejects can
   await writeFile(newest,(await readFile(newest))+'\n-- drift\n');
   await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);
   await rm(newest);await assert.rejects(snapshotAiSource(root),/ENOENT/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});
+
+
+test('reviewed withdrawal pins admit the final ordered chain and reject each manifest/source drift',async()=>{
+ assert.equal(CURRENT_WITHDRAWAL_MIGRATIONS.length,4);
+ const current=await snapshotAiSource();
+ assert.deepEqual(current.migrations,CURRENT_AI_MIGRATIONS,'AI receipt migration protocol stays unchanged');
+ for(const pin of CURRENT_WITHDRAWAL_MIGRATIONS){
+  const path='supabase/migrations/'+pin.fileName;
+  assert.equal(current.closure.find(row=>row.path===path)?.sha256,pin.sha256,'withdrawal SQL is bound into the receipt closure');
+ }
+ const root=await mkdtemp(join(tmpdir(),'ai-receipt-withdrawal-drift-'));
+ try{
+  const {AI_SOURCE_CLOSURE}=await import('../../scripts/lib/ai-producer-receipt.mjs');
+  for(const path of [...AI_SOURCE_CLOSURE,...CURRENT_AI_MIGRATIONS.map(m=>'supabase/migrations/'+m.fileName)]){
+   await mkdir(join(root,path,'..'),{recursive:true});await writeFile(join(root,path),await readFile(path));
+  }
+  const manifestPath=join(root,'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const original=JSON.parse(await readFile(manifestPath));
+  for(const [pinIndex,pin]of CURRENT_WITHDRAWAL_MIGRATIONS.entries()){
+   assert.deepEqual(original.orderedNewMigrations.find(row=>row.fileName===pin.fileName),pin,'exact reviewed withdrawal manifest entry');
+   const index=original.orderedNewMigrations.findIndex(row=>row.fileName===pin.fileName);
+   assert.ok(index>0);
+   for(const [label,mutate]of [
+    ['missing',rows=>rows.splice(index,1)],
+    ['duplicate appended',rows=>rows.push({...rows[index]})],
+    ['same-length duplicate',rows=>rows[index]={...CURRENT_WITHDRAWAL_MIGRATIONS[(pinIndex+1)%4]}],
+    ['reordered',rows=>[rows[index-1],rows[index]]=[rows[index],rows[index-1]]],
+    ['hash drift',rows=>rows[index].sha256='0'.repeat(64)],
+    ['status drift',rows=>rows[index].status='draft'],
+    ['filename drift',rows=>rows[index].fileName='20990101000000_unreviewed_withdrawal.sql'],
+   ]){
+    const changed=structuredClone(original);mutate(changed.orderedNewMigrations);
+    await writeFile(manifestPath,JSON.stringify(changed));
+    await assert.rejects(snapshotAiSource(root),/(?:AI canonical manifest inventory|current migration manifest drift)/,pin.fileName+' '+label);
+   }
+   await writeFile(manifestPath,JSON.stringify(original));
+   const sqlPath=join(root,'supabase/migrations/'+pin.fileName),sql=await readFile(sqlPath);
+   const drift=Buffer.concat([sql,Buffer.from('\n-- source drift\n')]);
+   await writeFile(sqlPath,drift);
+   await assert.rejects(snapshotAiSource(root),/reviewed withdrawal migration source drift/,pin.fileName+' source content drift');
+   const coordinated=structuredClone(original);coordinated.orderedNewMigrations[index].sha256=hash(drift);
+   await writeFile(manifestPath,JSON.stringify(coordinated));
+   await assert.rejects(snapshotAiSource(root),/current migration manifest drift/,pin.fileName+' coordinated manifest and source drift');
+   await writeFile(manifestPath,JSON.stringify(original));
+   await rm(sqlPath);await assert.rejects(snapshotAiSource(root),/ENOENT/,pin.fileName+' missing source');
+   await writeFile(sqlPath,sql);
+  }
  }finally{await rm(root,{recursive:true,force:true});}
 });
 

@@ -746,6 +746,21 @@
       "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"
     },
     {
+      "fileName": "20261006080000_withdrawal_chat_last_lesson_wording.sql",
+      "status": "final",
+      "sha256": "b33601339abe5ef2f96d553ce0dc1423981225f308be45394a2b81206ce6a30d"
+    },
+    {
+      "fileName": "20261006090000_withdrawal_last_lesson_release.sql",
+      "status": "final",
+      "sha256": "4f73f75bbf0aa8f457eb3b1c070281ae3f94dcbf79e20b119f8fb79f0de3e921"
+    },
+    {
+      "fileName": "20261006091000_withdrawal_future_roster_boundary.sql",
+      "status": "final",
+      "sha256": "59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009"
+    },
+    {
       "fileName": "20261006095753_makeup_approval_reference_reuse.sql",
       "status": "final",
       "sha256": "f828177eec981e634650c065d1736c1e08c4bbd61e234e7b0c3bf3b7d607dd4d"
@@ -784,6 +799,11 @@
       "fileName": "20261007135140_textbook_latest_count_read_aggregation.sql",
       "status": "final",
       "sha256": "1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23"
+    },
+    {
+      "fileName": "20261007141548_withdrawal_completion_without_settlement.sql",
+      "status": "final",
+      "sha256": "221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe"
     }
   ]
 }

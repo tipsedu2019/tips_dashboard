@@ -1,0 +1,206 @@
+{
+  "phase": "candidate-final versus preserved baseline",
+  "actualRoute": "/admin/withdrawal",
+  "conditions": "Same synthetic completed rows, role, 1440/390 viewport, light theme, browser and fixture transport as preserved baseline.",
+  "matrix": [
+    {
+      "role": "admin",
+      "width": 1440,
+      "finalChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "baselineChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "finalFeeTags": [
+        "BUTTON"
+      ],
+      "baselineFeeTags": [
+        "SPAN"
+      ],
+      "finalOverflow": {
+        "scroll": 1440,
+        "inner": 1440
+      },
+      "baselineOverflow": {
+        "scroll": 1440,
+        "inner": 1440
+      },
+      "pngArtifactBytesEqual": false,
+      "finalPNGsha256": "1b1d6fb03b2493039965de68cfef82a930d57165403a0b8d9947a181aa576d81",
+      "baselinePNGsha256": "247a8a752a07a80ed0e52f096c0a65b0e69082002c7af16ecc9842c42c42e6ea",
+      "finalDimensions": [
+        1440,
+        1000
+      ],
+      "baselineDimensions": [
+        1440,
+        1000
+      ],
+      "pageErrors": [],
+      "blockedExternalRequests": []
+    },
+    {
+      "role": "admin",
+      "width": 390,
+      "finalChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "baselineChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "finalFeeTags": [
+        "BUTTON"
+      ],
+      "baselineFeeTags": [
+        "SPAN"
+      ],
+      "finalOverflow": {
+        "scroll": 390,
+        "inner": 390
+      },
+      "baselineOverflow": {
+        "scroll": 390,
+        "inner": 390
+      },
+      "pngArtifactBytesEqual": true,
+      "finalPNGsha256": "01b8044b672d8eff1ab9f250e3fab8ec1fbb8abb6537dd82560e4e406f3f7e2e",
+      "baselinePNGsha256": "01b8044b672d8eff1ab9f250e3fab8ec1fbb8abb6537dd82560e4e406f3f7e2e",
+      "finalDimensions": [
+        390,
+        1629
+      ],
+      "baselineDimensions": [
+        390,
+        1629
+      ],
+      "pageErrors": [],
+      "blockedExternalRequests": []
+    },
+    {
+      "role": "teacher",
+      "width": 1440,
+      "finalChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "baselineChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "finalFeeTags": [
+        "SPAN"
+      ],
+      "baselineFeeTags": [
+        "SPAN"
+      ],
+      "finalOverflow": {
+        "scroll": 1440,
+        "inner": 1440
+      },
+      "baselineOverflow": {
+        "scroll": 1440,
+        "inner": 1440
+      },
+      "pngArtifactBytesEqual": false,
+      "finalPNGsha256": "b7070e75a5e4c629baf8f0df1133b28e5550b2fa59bc1fc376dd9ecf211163e2",
+      "baselinePNGsha256": "3b14f32c9930a358472ae57bba6ce9eb4ba7b9c6b1b9de64562d7b176bcbd0fb",
+      "finalDimensions": [
+        1440,
+        1000
+      ],
+      "baselineDimensions": [
+        1440,
+        1000
+      ],
+      "pageErrors": [],
+      "blockedExternalRequests": []
+    },
+    {
+      "role": "teacher",
+      "width": 390,
+      "finalChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "baselineChecks": {
+        "completedTabPresent": true,
+        "feeChipsVisible": true,
+        "feeBehavior": true,
+        "makeeduReadonly": true,
+        "generalEditActionAbsent": true,
+        "noPageOverflow": true,
+        "noPageErrors": true
+      },
+      "finalFeeTags": [
+        "SPAN"
+      ],
+      "baselineFeeTags": [
+        "SPAN"
+      ],
+      "finalOverflow": {
+        "scroll": 390,
+        "inner": 390
+      },
+      "baselineOverflow": {
+        "scroll": 390,
+        "inner": 390
+      },
+      "pngArtifactBytesEqual": true,
+      "finalPNGsha256": "01b8044b672d8eff1ab9f250e3fab8ec1fbb8abb6537dd82560e4e406f3f7e2e",
+      "baselinePNGsha256": "01b8044b672d8eff1ab9f250e3fab8ec1fbb8abb6537dd82560e4e406f3f7e2e",
+      "finalDimensions": [
+        390,
+        1629
+      ],
+      "baselineDimensions": [
+        390,
+        1629
+      ],
+      "pageErrors": [],
+      "blockedExternalRequests": []
+    }
+  ],
+  "allFinalChecksPassed": true,
+  "screenshotsBytesEqualForEveryMatrixEntry": false,
+  "limits": "Visible list display and permission affordances only; status-detail-opening badges excluded from general-edit action test. Fee persistence, completion RPC, detail editor, SQL/backend, production and provider sends untested."
+}

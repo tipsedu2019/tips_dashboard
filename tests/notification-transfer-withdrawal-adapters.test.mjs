@@ -176,14 +176,15 @@ test("체크리스트 저장은 비종료 update RPC만 사용하고 어떤 알�
   assert.match(sql, /'sourceEventIds', v_source_event_ids/)
 })
 
-test("일반 수정·상태 RPC는 전반·퇴원 완료 우회를 막고 신규 화면은 구 DB로 안전하게 폴백한다", async () => {
+test("일반 수정·상태 RPC는 완료 우회를 막고 퇴원은 날짜 경계 RPC를 요구한다", async () => {
   const [sql, service] = await Promise.all([source(migrationUrl), source(serviceUrl)])
   assert.match(sql, /ops_transition_initial_status_invalid/)
   assert.match(sql, /ops_transition_completion_rpc_required/)
   assert.match(sql, /old\.status = 'done'[\s\S]*ops_transition_closed/)
   assert.match(service, /isMissingOpsRosterRpc\(error\)[\s\S]*skipTransitionProducer: true/)
   assert.match(service, /complete_ops_transfer_roster_transition"/)
-  assert.match(service, /complete_ops_withdrawal_roster_transition"/)
+  assert.match(service, /complete_ops_withdrawal_roster_transition_v3"/)
+  assert.doesNotMatch(service, /complete_ops_withdrawal_roster_transition"/)
   assert.match(service, /p_request_key: `ops-\$\{type\}-completion-\$\{taskId\}`/)
   assert.match(service, /transition_ops_task_status_v2[\s\S]*isMissingOpsRosterRpc\(error\)/)
 })

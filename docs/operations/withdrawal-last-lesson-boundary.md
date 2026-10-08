@@ -1,0 +1,59 @@
+# 퇴원 마지막 수업일 경계
+
+퇴원기준일은 마지막 수업일이며 서울 날짜 기준으로 당일을 포함한다. 회차 번호는 정산 주기마다 다시 시작하므로 날짜 경계의 비교 키로 사용하지 않는다.
+
+## 완료와 실제 제외
+
+- 현재 명단에 있는 학생을 기준일 당일 또는 그 전에 완료하면 업무를 완료하고, 고정된 기준일의 제외 예약을 기록한다. 양방향 수업 명단, 등록 claim, 학생 상태는 유지한다. 응답의 `rosterReleaseScheduled: true`는 예약 완료를 의미하며 실제 해제된 등록 ID는 빈 배열이다.
+- 현재 명단에 있고 기준일이 이미 지났다면 기존 원자적 즉시 제외를 수행한다. 선택한 수업만 제외하며 다른 등록·대기 관계가 있으면 학생은 재원으로 유지한다.
+- 예약 처리기는 서울 날짜가 기준일보다 커진 뒤 기존 명단 제거 절차를 적용한다. 완료 RPC와 알림 producer를 다시 호출하지 않는다.
+- 완료 요청 영수증은 예약 실행 전후에 같은 결과를 반환한다. 처리기는 현재 claim과 학생–수업 명단 변경 이력 개수를 재검증하여 수동 해제·복원·재등록 뒤의 새로운 관계를 제거하지 않는다.
+- 이미 양방향 명단에서 제외되었고 해당 수업의 활성 등록 claim이 없다면 날짜와 무관하게 다시 추가하지 않고 완료한다. 제외 예약도 만들지 않는다. 이미 퇴원 상태이고 다른 수업·대기·활성 claim이 없는 학생도 같은 경로로 완료할 수 있다.
+- 미완료 요청의 기존 시간표 체크는 완료를 막지 않는다. 메이크에듀 퇴원처리 확인은 계속 필요하며, 수업료·교재비 체크는 완료 여부와 분리한다. 완료는 이 두 체크를 자동 변경하지 않는다.
+- 완료 전 취소와 취소 후 재개는 기존 계약을 유지한다. 완료된 업무의 일반 수정·취소·재개는 계속 금지한다. 관리자·직원은 완료 목록에서도 수업료·교재비 확인 두 항목만 별도 RPC로 변경할 수 있다.
+
+`timetable_roster_updated`는 조기 완료에서는 제외 예약까지 확정되었다는 의미다. 감사 기록은 이를 `제외 예약`으로 구분하고, 실제 제외 기록은 처리 후에 남긴다. 이 필드의 기존 boolean 계약은 유지한다.
+
+## 비용 확인과 알림
+
+`update_ops_withdrawal_settlement_check_v1`은 활성 관리자·직원의 완료된 퇴원 업무에서 `feeProcessed` 또는 `textbookFeeProcessed` 한 항목만 변경한다. 예상 체크값과 요청 영수증으로 중복·경합을 처리하며 수동 확인 감사 기록을 남긴다. 일반 업무 수정이나 완료 알림 producer는 다시 호출하지 않는다. 체크는 담당자의 처리 확인 정보이며, 청구 금액·미수금·결제 이력·교재 청구를 정산하거나 취소하는 기능이 아니다.
+
+완료 자체는 기존 canonical 완료 알림 경로를 유지하므로 운영에서 실행하면 알림 후속 처리가 발생할 수 있다. 합성 테스트는 provider 경로를 격리한다. Chat은 `퇴원기준일(마지막 수업일): 날짜 · 회차` 아래에 `명단에 남아 있는 학생은 퇴원기준일까지 수업을 진행하고, 그다음 회차부터 수업 명단에서 제외 예정입니다. 이미 제외된 학생은 기존 제외 상태를 유지합니다.`를 안내한다. 현재 명단을 알림에서 추정하지 않으면서 마지막 수업과 다음 회차 제외의 관계를 명시한다. 문구 migration은 일치하는 시스템 템플릿만 새 버전으로 전환하며 기존 발송 snapshot과 사용자 편집 템플릿은 유지한다.
+
+## 실행 준비와 배포 경계
+
+마이그레이션은 알림을 보내거나 cron을 활성화하지 않는다. 새 앱의 퇴원 완료와 완료 후 비용 확인은 `withdrawal_completion_without_settlement_v2` capability를 요구한다. 완료는 V3 완료 RPC를 사용하며, 구버전 즉시 제외 RPC나 직접 배열 수정으로 fallback하지 않는다. 등록 런타임의 유지보수 차단도 유지한다.
+
+이미 제외된 요청의 완료에는 예약 준비가 필요하지 않다. 명단이 남아 있는 당일·미래 요청의 예약 생성은 `tips-withdrawal-roster-release-v1` 작업이 정확한 명령·1분 주기·활성 상태·현재 DB·postgres 실행자로 준비되어 있을 때만 허용한다. 준비되지 않은 경우 `55000 / withdrawal_release_scheduler_not_ready`로 실패한다. `manage_withdrawal_roster_release_scheduler_v1`의 `inspect`, `install`, `disable`, `remove`는 service role 전용이다. 운영 활성화는 별도 승인을 받은 릴리스 작업이다. 합성 환경의 설치·자동 tick 검증과 운영 활성화를 구분한다.
+
+관리 함수는 확장의 `cron.schedule`과 고정 이름의 `cron.unschedule`을 사용한다. 확장 소유자가 supabase_admin인 환경에서 postgres의 cron.job 직접 UPDATE나 cron.alter_job 호출 권한을 추가하지 않는다. `disable`과 `remove`는 모두 현재 DB·postgres 소유자의 해당 job만 unschedule하고 pending 예약을 보존한다. 이름이 중복되거나 소유자·DB가 다르면 거부하며, 동일 범위의 명령 drift는 중지할 수 있다. 이미 실행 중인 worker는 취소하지 않는다. `install`은 내용이 일치하는 활성 job을 유지하며 비활성 job은 제거 후 재생성하므로 job ID가 바뀔 수 있다. 내용이 다른 job의 설치는 계속 거부한다.
+
+cron은 PostgreSQL 17의 세션별 transaction timeout을 사용한다. 기존 세션에 양수 timeout이 이미 시작되어 있으면 값을 30초로 바꾸는 것만으로 타이머가 다시 시작되지 않으므로, 이 cron 세션에서만 0으로 해제한 뒤 30초를 설정한다. 정확한 명령은 다음과 같다.
+
+```sql
+set transaction_timeout = '0'; set transaction_timeout = '30s'; set statement_timeout = '30s'; select dashboard_private.process_due_withdrawal_roster_releases_v1();
+```
+
+`transaction_timeout`이 없는 환경은 준비 검사에 실패하며 `install`은 `55000 / withdrawal_release_transaction_timeout_unavailable`로 거부한다. 구 statement-timeout-only 명령도 준비 완료로 인정하지 않는다. 실제 transaction timeout은 `25P04`로 세션을 종료하므로, 해당 transaction에서 기록한 개별 잠금 실패와 attempt_count 증가도 함께 rollback된다. 전역·역할 timeout과 기존 cron 작업은 변경하지 않는다.
+
+처리 함수의 잠금 대기는 5초, 한 배치는 최대 100건이며 동시 처리기는 advisory lock으로 중복 실행을 건너뛴다. [PostgreSQL 17 문서](https://www.postgresql.org/docs/17/runtime-config-client.html#GUC-TRANSACTION-TIMEOUT)와 [17.6 타이머 소스](https://github.com/postgres/postgres/blob/REL_17_6/src/backend/tcop/postgres.c)를 기준으로 구현했다. 실제 종료 시점은 스케줄링과 interrupt 처리에 영향을 받으므로 모든 부하에서 정확히 30,000ms 이내 종료한다고 보장하지 않는다. [pg_cron 1.6.4 소스](https://github.com/citusdata/pg_cron/blob/v1.6.4/src/pg_cron.c)의 CommandComplete 처리 때문에 실행 이력에 SET 성공이 먼저 나타날 수 있으므로 worker 종료와 최종 상태를 함께 확인한다.
+
+이전 statement-timeout-only 후보는 격리 background-worker에서 35.081초에 commit하여 릴리스가 중단됐다. 그 실패 기록은 [기존 검증 기록](../qa/withdrawal-release-gates-20261008/README.md)에 보존한다. 수정한 최종 명령은 같은 격리 PostgreSQL 17.6.1.159 / pg_cron 1.6.4에서 기본 timeout 0초와 상속 timeout 60초 두 조건으로 검증했다. 각각 30.013초·30.007초에 실제 `25P04`로 종료됐고, 일곱 예약의 중간 시도 기록을 포함한 전체 transaction이 rollback된 뒤 다음 실제 분 tick에서 정상 재시도됐다. [수정 검증 기록](../qa/withdrawal-timeout-fix-20261008/README.md)은 운영 서버 검증과 구분한다.
+
+현재 명단과 인원은 실제 제외 처리에 따라 바뀐다. cron 지연·중단이나 처리 실패 시 현재 명단의 제외도 늦어진다. 준비 검사는 실행 성공을 보장하지 않으므로 별도 릴리스에서 실행 이력, 실패 예약, 지연량과 공개 인원 캐시 갱신을 확인해야 한다. 미래 수업의 시험·학생 시간표 충돌 계산은 예약의 고정된 기준일을 적용하므로 기준일 이후 학생을 제외한다.
+
+홈 요약과 충돌 조회는 서로 다른 캐시 snapshot이며 열린 화면에 주기적 갱신은 없다. 처리 전 명단을 캐시한 뒤 실제 제외 후 충돌 조회가 이루어지면 새로고침 전까지 오래된 명단이 보일 수 있다. 이번 변경은 이 기존 캐시 계약을 실시간 명단 조회로 확장하지 않는다.
+
+## 기존 계약과 미정 예외
+
+활성 claim이 남아 있는데 명단만 비어 있거나 양쪽 명단이 불일치하는 경우, 선택 수업의 대기 관계, 열린 입학 batch, 재등록 충돌은 계속 거부한다. 기존 수동 명단 변경 gateway의 활성 claim 제한을 이번 변경에서 완화하지 않는다. 따라서 이 변경은 모든 활성 claim의 조기 수동 제외를 허용하는 기능이 아니다.
+
+과거 요청이 새 등록 관계를 제거하지 않도록 claim 시작일과 실제 제거 후 재등록 이력을 검사한다. 같은 transaction에서 제거·복원되어 이력 시간이 같은 경우도 보수적으로 거부한다. 누락된 과거 이력을 새로 추정하거나 채우지 않는다.
+
+등록 claim이 있는 완료 업무는 예약 대기 중에 원본 업무 삭제를 막는다. 적용 시에는 기존 claim의 release-source FK가 삭제 제한을 맡으며, 예약이 다른 명단 변경으로 무효화되면 임시 삭제 제약을 해제한다. 불변 예약 snapshot을 이유로 새로운 영구 삭제 금지를 만들지 않는다. claim 없는 완료 업무의 기록 삭제는 허용되며, 삭제가 이미 완료된 퇴원을 되돌리지 않는 기존 의미에 따라 예약은 남는다. 업무 삭제를 퇴원 취소로 해석하지 않는다.
+
+기준일 선택 뒤 휴강·수업 이동·회차 변경에 따라 기준일을 자동 변경하는 정책은 추가하지 않는다. 완료 후 예약 자체의 취소·변경, 학생별 보강의 원수업/실제 보강일 기준, 외부 출석부 및 과거 날짜별 명단은 기존 구현 근거가 없어 별도 정책 확인이 필요하다.
+
+## 검증 경계
+
+회귀 검증은 로컬 합성 데이터와 격리 PostgreSQL에서 수행한다. 최초 readiness 모사 검증 이후 사용자의 직접 승인으로 실제 격리 cron 설치·자동 tick·30초 제한·브라우저 저장을 검증했다. 통과한 경계 검증과 최초 실패는 [기존 검증 기록](../qa/withdrawal-release-gates-20261008/README.md)에, timeout 수정·실제 rollback·재시도는 [최종 수정 검증](../qa/withdrawal-timeout-fix-20261008/README.md)에 구분했다. 실제 학생 데이터, 운영 SQL, 알림 발송·재발송, 배포는 수행하지 않았다. 사용자 첨부 JPEG는 Library materialization 재시도 후 로컬 파일을 확보하지 못하여 픽셀을 확인하지 못했다.

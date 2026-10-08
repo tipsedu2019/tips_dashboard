@@ -151,6 +151,82 @@ test("40001 handlers remain allowed while new 23514 and P0001 domain raises rema
   assert.deepEqual(domainRaiseViolations, [])
 })
 
+async function loadWithdrawalWorkerMigration() {
+  const { WITHDRAWAL_CONCURRENCY_MIGRATION } = await loadDomainSqlstateVerifier()
+  const source = await readFile(new URL(`../${WITHDRAWAL_CONCURRENCY_MIGRATION}`, import.meta.url), "utf8")
+  const start = source.indexOf("create function dashboard_private.apply_scheduled_withdrawal_roster_release_v1(")
+  assert.notEqual(start, -1)
+  const bodyStart = source.indexOf("$$", start)
+  const end = source.indexOf("$$;", bodyStart + 2)
+  assert.notEqual(end, -1)
+  return { file: WITHDRAWAL_CONCURRENCY_MIGRATION, source, worker: source.slice(start, end + 3) }
+}
+
+test("withdrawal worker allows only its two locked-rescan concurrency raises", async () => {
+  const { inspectDomainSqlstateMigration } = await loadDomainSqlstateVerifier()
+  const { file, source } = await loadWithdrawalWorkerMigration()
+  assert.deepEqual(inspectDomainSqlstateMigration({ file, source }), [])
+  // Formatting and comments are not policy: quoted messages and regex content
+  // remain unchanged, while SQL token case and inter-token spaces can vary.
+  const formatted = source
+    .replace("create function dashboard_private.apply_scheduled_withdrawal_roster_release_v1", "CREATE FUNCTION dashboard_private.apply_scheduled_withdrawal_roster_release_v1")
+    .replaceAll("using errcode='40001'", "USING errcode = '40001'")
+    .replace("if v_current_parent_ids is distinct from v_pre_parent_ids then", "IF v_current_parent_ids IS DISTINCT FROM v_pre_parent_ids THEN -- concurrency guard")
+  assert.deepEqual(inspectDomainSqlstateMigration({ file, source: formatted }), [])
+})
+
+test("withdrawal concurrency allowance rejects another file or function declaration", async () => {
+  const { inspectDomainSqlstateMigration } = await loadDomainSqlstateVerifier()
+  const { file, worker } = await loadWithdrawalWorkerMigration()
+  for (const [label, candidateFile, source] of [
+    ["another migration", file.replace("090000", "090001"), worker],
+    ["another directory", `other/${file}`, worker],
+    ["another function", file, worker.replace("apply_scheduled_withdrawal_roster_release_v1", "another_worker")],
+    ["another schema", file, worker.replace("function dashboard_private.", "function public.")],
+    ["another argument", file, worker.replace("(p_task_id uuid)", "(p_other_id uuid)")],
+    ["changed lock timeout", file, worker.replace("lock_timeout='5s'", "lock_timeout='10s'")],
+  ]) {
+    assert.equal(inspectDomainSqlstateMigration({ file: candidateFile, source }).length, 2, label)
+  }
+})
+
+test("withdrawal concurrency allowance rejects changed guards, messages, and domain raises", async () => {
+  const { inspectDomainSqlstateMigration } = await loadDomainSqlstateVerifier()
+  const { file, worker } = await loadWithdrawalWorkerMigration()
+  for (const [label, source] of [
+    ["changed identity comparison", worker.replace("is distinct from v_name_key", "= v_name_key")],
+    ["changed identity regex", worker.replace("elsif pg_catalog.lower(pg_catalog.regexp_replace(coalesce(v_student.name,''),'\\s+'", "elsif pg_catalog.lower(pg_catalog.regexp_replace(coalesce(v_student.name,''),'\\s*'")],
+    ["changed identity row lock", worker.replace("where id=v_release.student_id for update;", "where id=v_release.student_id;")],
+    ["changed parent comparison", worker.replace("v_current_parent_ids is distinct from v_pre_parent_ids", "v_current_parent_ids = v_pre_parent_ids")],
+    ["changed parent scan", worker.replace("into v_current_parent_ids from", "into v_wrong_parent_ids from")],
+    ["changed error message", worker.replace("'registration_workflow_retry_required'", "'registration_invalid_source_state'")],
+    ["unguarded domain conflict", worker.replace("'withdrawal_release_student_status_conflict' using errcode='23514'", "'withdrawal_release_student_status_conflict' using errcode='40001'")],
+    ["unguarded identical retry message", worker.replace("'withdrawal_release_student_status_conflict' using errcode='23514'", "'registration_workflow_retry_required' using errcode='40001'")],
+  ]) {
+    assert.equal(inspectDomainSqlstateMigration({ file, source }).length, 1, label)
+  }
+})
+
+test("withdrawal concurrency contexts cannot be copied outside or repeated inside the worker", async () => {
+  const { inspectDomainSqlstateMigration } = await loadDomainSqlstateVerifier()
+  const { file, worker } = await loadWithdrawalWorkerMigration()
+  const foreignWorker = worker.replace("apply_scheduled_withdrawal_roster_release_v1", "another_worker")
+  assert.equal(inspectDomainSqlstateMigration({ file, source: `${worker}\n${foreignWorker}` }).length, 2)
+  assert.equal(inspectDomainSqlstateMigration({ file, source: `${worker}\n${worker}` }).length, 4)
+  const parentStart = worker.indexOf("  select coalesce(pg_catalog.array_agg", worker.indexOf("raise exception 'registration_workflow_retry_required'"))
+  const parentEnd = worker.indexOf("  end if;", parentStart) + "  end if;".length
+  assert.ok(parentStart > 0 && parentEnd > parentStart)
+  const parentContext = worker.slice(parentStart, parentEnd)
+  const repeated = worker.replace(parentContext, `${parentContext}\n${parentContext}`)
+  assert.equal(inspectDomainSqlstateMigration({ file, source: repeated }).length, 1)
+  const quoted = worker.replace(parentContext, `  perform $guard$${parentContext}$guard$;`)
+  assert.equal(inspectDomainSqlstateMigration({ file, source: quoted }).length, 1)
+  // Dollar-quoted outer SQL is skipped as a whole, so an embedded declaration
+  // in an unrelated function cannot acquire the target function's allowance.
+  const embedded = `create function public.outer_worker() returns void language plpgsql as $outer$\n${worker}\n$outer$;`
+  assert.equal(inspectDomainSqlstateMigration({ file, source: embedded }).length, 2)
+})
+
 test("notification transient classifiers do not retry bare 40001 domain errors", async () => {
   for (const [relativePath, name, recordHelperName] of notificationClassifierModules) {
     const classify = await loadClassifier(relativePath, name, recordHelperName)

@@ -44,7 +44,7 @@ test("ops roster receipts carry post-commit cache refresh state without invalida
   assert.match(service, /completeReadyOpsRosterTransition[\s\S]*?invalidatePublicClassesCacheAfterMutation/);
   assert.match(service, /refreshPublicClassesAfterCommittedOpsChange/);
   assert.match(service, /deleteOpsTask[\s\S]*?publicClassesCacheRefresh/);
-  assert.match(service, /complete_ops_withdrawal_roster_transition_v2/);
+  assert.match(service, /complete_ops_withdrawal_roster_transition_v3/);
   assert.match(service, /complete_ops_transfer_roster_transition_v2/);
   assert.match(workspace, /publicClassesCacheRefresh.*pending/);
   assert.match(workspace, /공개 수업 캐시 갱신 대기 중/);

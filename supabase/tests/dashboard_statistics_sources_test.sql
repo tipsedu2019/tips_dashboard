@@ -406,6 +406,17 @@ create policy dashboard_statistics_fixture_classes_select
 on public.classes for select to authenticated
 using (id <> '86200000-0000-4000-8000-000000000302'::uuid);
 
+-- Authenticated snapshot reads and the later task-link checks share this user.
+insert into auth.users(id, aud, role, email, raw_app_meta_data, raw_user_meta_data)
+values ('86200000-0000-4000-8000-000000000901', 'authenticated', 'authenticated',
+  'statistics-conflict-contract@runtime.invalid', '{}'::jsonb, '{}'::jsonb);
+insert into public.profiles(id, role, name, email)
+values ('86200000-0000-4000-8000-000000000901', 'admin', '통계 계약 검증',
+  'statistics-conflict-contract@runtime.invalid')
+on conflict (id) do update set role = excluded.role;
+select set_config('request.jwt.claim.sub', '86200000-0000-4000-8000-000000000901', true);
+select set_config('request.jwt.claim.role', 'authenticated', true);
+select set_config('request.jwt.claims', '{"sub":"86200000-0000-4000-8000-000000000901","role":"authenticated"}', true);
 set local role authenticated;
 
 select is(
@@ -793,15 +804,6 @@ reset role;
 update public.classes
 set student_ids = '["86200000-0000-4000-8000-000000000001"]'::jsonb
 where id in ('86200000-0000-4000-8000-000000000303', '86200000-0000-4000-8000-000000000304');
-insert into auth.users(id, aud, role, email, raw_app_meta_data, raw_user_meta_data)
-values ('86200000-0000-4000-8000-000000000901', 'authenticated', 'authenticated',
-  'statistics-conflict-contract@runtime.invalid', '{}'::jsonb, '{}'::jsonb);
-insert into public.profiles(id, role, name, email)
-values ('86200000-0000-4000-8000-000000000901', 'admin', '통계 계약 검증',
-  'statistics-conflict-contract@runtime.invalid')
-on conflict (id) do update set role = excluded.role;
-select set_config('request.jwt.claim.sub', '86200000-0000-4000-8000-000000000901', true);
-select set_config('request.jwt.claims', '{"sub":"86200000-0000-4000-8000-000000000901","role":"authenticated"}', true);
 set local role authenticated;
 
 create temporary table quality_conflict_rows as
