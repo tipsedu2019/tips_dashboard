@@ -31,6 +31,7 @@ export const AI_SOURCE_CLOSURE=Object.freeze([
  'supabase/migrations/20261006090000_withdrawal_last_lesson_release.sql',
  'supabase/migrations/20261006091000_withdrawal_future_roster_boundary.sql',
  'supabase/migrations/20261007141548_withdrawal_completion_without_settlement.sql',
+ 'supabase/migrations/20261008113322_withdrawal_completion_optional_request_snapshot.sql',
  'tests/probe-ai-agent-http-producer.mjs',
  'tests/probe-ai-agent-chat-runtime-concurrency.mjs',
  ...AI_CONSUMERS,
@@ -83,7 +84,7 @@ export const CURRENT_AI_MIGRATIONS=Object.freeze([...ACCEPTED_AI_MIGRATIONS,
  {"fileName": "20261007062159_agent_personal_dashboard_read.sql", "sha256": "28a40477e01001d664d716ab4ab8be550db295ea2300822bb3ff009531341954", "status": "final"},
 ]);
 // Preserve the reviewed ac84 inventory and exact main addition.
-// Only the four reviewed withdrawal migrations may extend that inventory.
+// Only the five reviewed withdrawal migrations may extend that inventory.
 // A future migration requires an explicit review of these source-owned pins.
 const REVIEWED_MANIFEST_PREFIX_SHA256='80a6a4d06fe190ef65e9c926392cf187995c07ce1a25c275ac07dc9d72df79c2';
 const MAIN_MIGRATION=Object.freeze({fileName:'20261007135140_textbook_latest_count_read_aggregation.sql',status:'final',sha256:'1491b4b824c343e23dc24b83e1be41214f5fda197813dca012c252a9b541cb23'});
@@ -92,6 +93,7 @@ export const CURRENT_WITHDRAWAL_MIGRATIONS=Object.freeze([
  Object.freeze({"fileName":"20261006090000_withdrawal_last_lesson_release.sql","status":"final","sha256":"4f73f75bbf0aa8f457eb3b1c070281ae3f94dcbf79e20b119f8fb79f0de3e921"}),
  Object.freeze({"fileName":"20261006091000_withdrawal_future_roster_boundary.sql","status":"final","sha256":"59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009"}),
  Object.freeze({"fileName":"20261007141548_withdrawal_completion_without_settlement.sql","status":"final","sha256":"221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe"}),
+ Object.freeze({"fileName":"20261008113322_withdrawal_completion_optional_request_snapshot.sql","status":"final","sha256":"649a119837bfb55428e835fca4b32de9f066408dd50c37e238782c16877d5b45"}),
 ]);
 export function extractAiCapture(stdout,identity){
  const producer=AI_PRODUCERS[identity];assert.ok(producer,'unknown capture producer');
@@ -125,7 +127,7 @@ export async function snapshotAiSource(root=ROOT){
  assert.equal(reviewedLegacy.length,156,'AI canonical manifest inventory');
  assert.deepEqual(reviewedLegacy.at(-1),MAIN_MIGRATION,'current migration manifest drift');
  assert.equal(hash(JSON.stringify(reviewedLegacy.slice(0,-1))),REVIEWED_MANIFEST_PREFIX_SHA256,'current migration manifest drift');
- assert.equal(manifest.orderedNewMigrations.length,160,'AI canonical manifest inventory');
+ assert.equal(manifest.orderedNewMigrations.length,161,'AI canonical manifest inventory');
  const expected=[...reviewedLegacy,...CURRENT_WITHDRAWAL_MIGRATIONS].sort((left,right)=>left.fileName<right.fileName?-1:left.fileName>right.fileName?1:0);
  assert.deepEqual(manifest.orderedNewMigrations,expected,'current migration manifest drift');
  assert.equal(hash(await readFile(join(root,'supabase/migrations',MAIN_MIGRATION.fileName))),MAIN_MIGRATION.sha256,'reviewed main migration source drift');

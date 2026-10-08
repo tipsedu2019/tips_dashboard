@@ -47,6 +47,22 @@ function input(eventKey, payload = {}, requestedContextKeys = [], overrides = {}
   }
 }
 
+test("최초 신청 일정이 없는 완료 알림도 확정된 적용 일정으로 표시한다", async () => {
+  const { buildWithdrawalNotificationPresentation } = await import(presentationUrl)
+  for (const snapshotStatus of ["missing", "incomplete"]) {
+    const value = input("withdrawal.completed", {
+      requested_withdrawal_snapshot_status: snapshotStatus,
+    }, ["withdrawal_date", "withdrawal_round", "progress_line"])
+    delete value.payload.requested_withdrawal_date
+    delete value.payload.requested_withdrawal_round
+    assert.deepEqual(buildWithdrawalNotificationPresentation(value), {
+      withdrawal_date: "8월 31일(월)",
+      withdrawal_round: "8회차",
+      progress_line: "[상태] 다른 과목 수강은 그대로 유지돼요.",
+    })
+  }
+})
+
 test("수강 제외 제출은 선택 과목·반·요청 일정·신청자를 한 메시지에 표시한다", async () => {
   const { buildWithdrawalNotificationPresentation } = await import(presentationUrl)
   const context = buildWithdrawalNotificationPresentation(input(
