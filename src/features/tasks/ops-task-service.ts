@@ -2066,7 +2066,10 @@ async function readOpsTaskWorkspaceData(
   }
 }
 
-export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
+export async function loadOpsTaskById(
+  taskId: string,
+  options: { forWithdrawalCompletion?: boolean } = {},
+): Promise<OpsTask | null> {
   if (!supabase || !text(taskId)) return null
 
   const taskResult = await supabase
@@ -2083,6 +2086,8 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
 
   const taskRow = taskResult.data as unknown as Row
   const taskType = normalizeType(taskRow.type)
+  // Completion still reads fresh business fields; only display-only data can wait for the full UI refresh.
+  const includePresentation = !options.forWithdrawalCompletion || taskType !== "withdrawal"
   const detailPromise = taskType === "registration"
     ? supabase.from("ops_registration_details")
       .select("task_id,pipeline_status,inquiry_at,school_grade,school_name,parent_phone,student_phone,level_test_at,level_test_completed_at,level_test_result,level_test_place,level_test_material_link,counselor,phone_consultation_at,visit_consultation_at,consultation_at,class_start_date,class_start_session,textbook_preparation,visit_consultation_place,textbook_ready,timetable_roster_updated,admission_notice_sent,payment_checked,makeedu_registered,makeedu_invoice_sent,textbook_billing_issued,request_note")
@@ -2102,13 +2107,13 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
           : Promise.resolve({ data: null, error: null })
   const [detailResult, commentResult, attachmentResult, eventResult] = await Promise.all([
     detailPromise,
-    supabase.from("ops_task_comments")
+    !includePresentation ? Promise.resolve({ data: [], error: null }) : supabase.from("ops_task_comments")
       .select("id,task_id,author_id,body,created_at").eq("task_id", taskId).order("created_at").order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-    supabase.from("ops_task_attachments")
+    !includePresentation ? Promise.resolve({ data: [], error: null }) : supabase.from("ops_task_attachments")
       .select("id,task_id,file_name,file_kind,drive_file_id,drive_link,uploaded_by,uploaded_at").eq("task_id", taskId).order("uploaded_at").order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-    supabase.from("ops_task_events")
+    !includePresentation ? Promise.resolve({ data: [], error: null }) : supabase.from("ops_task_events")
       .select("id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at").eq("task_id", taskId).order("created_at", { ascending: false }).order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
   ])
@@ -2127,7 +2132,7 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
     ...attachmentRows.map((row) => row.uploaded_by),
     ...eventRows.map((row) => row.actor_id),
   ].map(text).filter(Boolean))]
-  const profileResult = profileIds.length === 0
+  const profileResult = !includePresentation || profileIds.length === 0
     ? { data: [], error: null }
     : await supabase.from("profiles")
       .select("id,name,email,role,login_id").in("id", profileIds).order("id").limit(100)
@@ -4566,7 +4571,9 @@ export async function updateOpsTask(
 ): Promise<OpsTaskSourceEventReceipt> {
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
   const client = supabase
-  const existingTask = await loadOpsTaskById(taskId)
+  const existingTask = await loadOpsTaskById(taskId, {
+    forWithdrawalCompletion: input.type === "withdrawal" && input.status === "done",
+  })
   if (!existingTask) throw new Error("업무 데이터를 다시 불러오세요.")
   const scoreSavePlan = getWordRetestScoreSavePlan(existingTask, input)
   input = scoreSavePlan.input as OpsTaskInput
@@ -4884,7 +4891,9 @@ export async function updateOpsTaskStatus(
   let rollbackCompletionSync: OpsCompletionRollback | null = null
   let completionSyncApplied = false
   if (!supabase) throw new Error("Supabase 연결 설정이 필요합니다.")
-  const currentTask = await loadOpsTaskById(task.id)
+  const currentTask = await loadOpsTaskById(task.id, {
+    forWithdrawalCompletion: task.type === "withdrawal" && status === "done",
+  })
   if (!currentTask) throw new Error("업무 데이터를 다시 불러오세요.")
   assertCompletedOperationStatusTransition(currentTask, status)
 
