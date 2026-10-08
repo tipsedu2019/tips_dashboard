@@ -1,5 +1,8 @@
 "use client"
 
+import { discardAiRequestRecovery, synchronizeAiRequestRecoveryActor } from "@/features/ai-agent/ai-agent-request-recovery"
+import { resolveAiAgentRequestAccess } from "@/features/ai-agent/ai-agent-request-access"
+
 import {
   createContext,
   useContext,
@@ -54,6 +57,8 @@ type AuthContextValue = {
   authError: string | null
   mustChangePassword: boolean
   canAccessDashboard: boolean
+  canUseAiAgentRequests: boolean
+  canViewAllAiAgentRequests: boolean
   canManageAll: boolean
   canEditCurriculumPlanning: boolean
   canEditClassSchedulePlanning: boolean
@@ -184,6 +189,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       if (!authResolutionRef.current.markResolvedProfile(resolution)) return
       if (timetableActorScopeRef.current) clearTimetableActorRecovery(timetableActorScopeRef.current)
       timetableActorScopeRef.current = null
+      discardAiRequestRecovery()
       activeSessionUserIdRef.current = null
       profileRequestRef.current = { key: "", promise: null }
       setSession(null)
@@ -270,6 +276,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         clearTimetableActorRecovery(timetableActorScopeRef.current)
       }
       timetableActorScopeRef.current = nextActorScope
+      const nextAccess = resolveAiAgentRequestAccess({
+        role: resolvedProfile.user.role,
+        isFallbackRole: resolvedProfile.user.isFallbackRole,
+        loading: false,
+      })
+      synchronizeAiRequestRecoveryActor(nextAccess.canUseRequests
+        ? { userId: resolvedProfile.user.id, role: normalizeDashboardRole(resolvedProfile.user.role) }
+        : null)
       setUser(resolvedProfile.user)
       setAuthError(resolvedProfile.authError)
       setLoading(false)
@@ -294,6 +308,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       const isSameSessionUser = activeSessionUserIdRef.current === nextSession.user.id
+      if (!isSameSessionUser) discardAiRequestRecovery()
       activeSessionUserIdRef.current = nextSession.user.id
       setSession(nextSession)
 
@@ -419,6 +434,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       authError,
       mustChangePassword,
       ...capabilities,
+      canUseAiAgentRequests: resolveAiAgentRequestAccess({ role, isFallbackRole: user?.isFallbackRole, loading }).canUseRequests,
+      canViewAllAiAgentRequests: resolveAiAgentRequestAccess({ role, isFallbackRole: user?.isFallbackRole, loading }).canViewAll,
       login: async (identifier: string, password: string) => {
         if (!supabase) {
           throw new Error(supabaseConfigError || "지금은 Supabase에 연결할 수 없습니다.")
@@ -450,6 +467,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
         if (timetableActorScopeRef.current) clearTimetableActorRecovery(timetableActorScopeRef.current)
         timetableActorScopeRef.current = null
+        discardAiRequestRecovery()
         return true
       },
     }),

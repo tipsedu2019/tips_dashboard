@@ -1,5 +1,7 @@
 # 퇴원 추가 릴리스 검증 — 운영 적용 보류
 
+이 문서는 당시 실행 기록이다. 이후 사용자의 직접 승인으로 수행한 실제 cron·브라우저 저장 결과와 새 P1 timeout 결함은 [2026-10-08 기록](../withdrawal-release-gates-20261008/README.md)을 따른다. 아래의 미실행·승인 차단·원격 head 설명은 현재 상태로 해석하지 않는다.
+
 제품 수정 기준은 `8b0ca153835bcf988d74f84428df18a3dc473bd5`다. 실제 Supabase PostgreSQL 17.6 / pg_cron 1.6.4의 제한된 확장 권한에서 이전 `240eff71`의 scheduler manager가 cron.job 직접 UPDATE로 `42501`을 반환했다. cron.alter_job도 postgres EXECUTE 권한이 없어 단순 치환으로 해결할 수 없었다. 추가 권한 없이 기존 허용 API인 cron.schedule/cron.unschedule만 사용하도록 수정했다.
 
 `disable`과 `remove`는 해당 job을 unschedule하고 pending 예약을 보존한다. 실행 중 worker를 취소하지 않는다. `install`은 일치하는 활성 job을 유지하고 비활성 job은 제거 후 재생성한다. 실제 native probe에서 named schedule 재호출만으로는 active=false가 바뀌지 않음을 확인했으며, 재생성 시 job ID는 바뀔 수 있다. manager 이외 90000 migration의 queue·worker·core·ACL은 기존 후보와 바이트가 같다. TypeScript 앱 코드와 나머지 SQL 3개도 그대로다.

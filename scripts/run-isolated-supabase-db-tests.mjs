@@ -1,6 +1,7 @@
+import {AI_PRODUCERS,AI_CONSUMERS,AI_SQL_TESTS,AI_PROBES,AI_CREDENTIAL_PREFIX,CURRENT_AI_MIGRATIONS,extractAiCapture,suppressAiCaptures,snapshotAiSource,validateAiReceipt,beginAiCapturePhase} from './lib/ai-producer-receipt.mjs';
 import { spawn } from "node:child_process";
 import { createHash, randomBytes as secureRandomBytes } from "node:crypto";
-import { mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdir, readFile, readdir, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -75,6 +76,8 @@ const SCHEMA_FINGERPRINT_SQL = `select md5(coalesce(jsonb_agg(to_jsonb(objects) 
 // Only this audited consumer and its timeout helper are needed by the DTO probe.
 // Do not copy the app, dependency tree, or environment into the isolated DB.
 const PROBE_DEPENDENCIES = Object.freeze({
+  "tests/probe-ai-agent-http-producer.mjs": ["supabase/tests/ai_agent_personal_owner_test.sql","supabase/tests/agent_personal_dashboard_read_test.sql"],
+  "tests/probe-ai-agent-personal-integration.mjs": ["tests/probe-ai-agent-deadline-concurrency.mjs","tests/helpers/ai-personal-probe-runtime.mjs","scripts/lib/ai-agent-probe-runtime.mjs","tests/probe-ai-agent-personal-owner-concurrency.mjs","tests/probe-agent-personal-dashboard-read-concurrency.mjs","supabase/tests/agent_personal_dashboard_read_test.sql"],
   "tests/probe-agent-calendar-dto.mjs": ["src/features/agent-api/server/calendar-compiler.mjs", "src/features/operations/academic-event-utils.js", "src/app/admin/calendar/utils/calendar-grid.js", "tests/probe-muse-calendar-consumer.py", "integrations/muse/calendar-client/bin/tips-cal", "integrations/muse/calendar-client/bin/dynamic_credentials.py"],
   "tests/probe-agent-class-edit-dto.mjs": ["src/features/agent-api/server/class-edit-compiler.mjs", "src/lib/class-schedule-planner.js"],
   "tests/probe-curriculum-scheduling-dto.mjs": ["src/features/academic/academic-read-service.js", "src/lib/numbered-pagination.ts"],
@@ -163,24 +166,54 @@ export function processResult(command, args, options = {}) {
     const stdoutChunks = []; const stderrChunks = [];
     let processError;
     let killTimer;
+    let reapTimer;
     child.stdout.on("data", (chunk) => { stdoutChunks.push(chunk); });
     child.stderr.on("data", (chunk) => { stderrChunks.push(chunk); });
     // AbortError can arrive before the process exits. Reap this owned child
     // before returning to resource cleanup; escalate only that child if needed.
     child.on("error", (error) => {
       processError = error;
-      killTimer ||= setTimeout(() => child.kill("SIGKILL"), 2000);
+      killTimer ||= setTimeout(() => {
+        child.kill("SIGKILL");
+        reapTimer = setTimeout(() => rejectPromise(new Error("isolated_supabase_db_owned_child_reaping_failed")), 2000);
+      }, 2000);
     });
     child.on("close", (code) => {
       clearTimeout(killTimer);
+      clearTimeout(reapTimer);
       if (processError) rejectPromise(processError);
       else resolvePromise({ code, stdout: decodeUtf8ProcessChunks(stdoutChunks), stderr: decodeUtf8ProcessChunks(stderrChunks) });
     });
   });
 }
 
+// Host limits include pre-test imports; Node's per-test timeout cannot bound those.
+export const HOST_PROCESS_DEADLINES = Object.freeze({ aiConsumers: 75_000, stop: 30_000, networkRemove: 10_000 });
+export async function executeProcessWithDeadline(invocation, { timeoutMs = invocation.timeoutMs,
+  executeProcess = (value) => processResult(value.command, value.args, value) } = {}) {
+  if (!Number.isInteger(timeoutMs) || timeoutMs <= 0 || timeoutMs > 300_000) fail("isolated_supabase_db_host_deadline_invalid");
+  const controller = new AbortController();
+  const signal = invocation.signal ? AbortSignal.any([invocation.signal, controller.signal]) : controller.signal;
+  let expired = false;
+  const timer = setTimeout(() => { expired = true; controller.abort(); }, timeoutMs);
+  // processResult waits for close after TERM, then KILL, and fails on unconfirmed reaping.
+  // The outer fallback also prevents a broken injected executor from blocking finally.
+  let fallback;
+  try {
+    const result = await Promise.race([
+      executeProcess({ ...invocation, timeoutMs, signal }),
+      new Promise((_resolve, reject) => { fallback = setTimeout(() => reject(new Error("isolated_supabase_db_owned_child_reaping_failed")), timeoutMs + 5000); }),
+    ]);
+    if (expired) fail("isolated_supabase_db_host_deadline_exceeded");
+    return result;
+  } catch (error) {
+    if (expired && error.message !== "isolated_supabase_db_owned_child_reaping_failed") fail("isolated_supabase_db_host_deadline_exceeded");
+    throw error;
+  } finally { clearTimeout(timer); clearTimeout(fallback); }
+}
+
 export function parseIsolatedDbArguments(argv) {
-  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, transactionalPreflight: false, verifyLocalLedger: false, requestId: null, tests: [], probes: [] };
+  const result = { execute: false, authorized: false, requireFinal: false, reviewHead: false, reviewBaseSha: null, reviewHeadSha: null, lint: false, postdeployContract: false, transactionalPreflight: false, verifyLocalLedger: false, aiProducerParity: false, requestId: null, tests: [], probes: [] };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
     if (value === "--execute") result.execute = true;
@@ -193,6 +226,7 @@ export function parseIsolatedDbArguments(argv) {
     else if (value === "--postdeploy-contract") result.postdeployContract = true;
     else if (value === "--transactional-preflight") result.transactionalPreflight = true;
     else if (value === "--verify-local-ledger") result.verifyLocalLedger = true;
+    else if (value === "--ai-producer-parity") result.aiProducerParity = true;
     else if (value === "--request-id") result.requestId = argv[++index] || null;
     else if (value === "--test") result.tests.push(argv[++index] || "");
     else if (value === "--probe") result.probes.push(argv[++index] || "");
@@ -751,7 +785,16 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (sha256(contents) !== expectedHash) fail("isolated_supabase_db_notification_content_prerequisite_drift");
     notificationContentPrerequisites.push({ fileName, contents });
   }
+  let aiPhase = null;
+  if (args.aiProducerParity) {
+    if (retainTempRoot || !args.reviewHead || !args.lint || !args.postdeployContract || !args.requireFinal || !args.transactionalPreflight || !args.verifyLocalLedger
+      || canonical(args.tests) !== canonical(AI_SQL_TESTS) || canonical(args.probes) !== canonical(AI_PROBES)) fail("isolated_ai_parity_full_run_required");
+    aiPhase = { runId: secureRandomBytes(16).toString("hex"), nonce: secureRandomBytes(32).toString("hex"), startedAt: Date.now(), captureStartedAt: null, before: await snapshotAiSource(root), captures: {} };
+  }
   const requestedTests = await snapshotRequestedFiles(root, args.tests);
+  const credentialPrefixIndex = migrations.findIndex((migration) => migration.fileName === AI_CREDENTIAL_PREFIX.migration);
+  const credentialPrefixTest = credentialPrefixIndex >= 0
+    ? (await snapshotRequestedFiles(root, [AI_CREDENTIAL_PREFIX.test]))[0] : null;
   const preflightTests = args.transactionalPreflight ? await snapshotRequestedFiles(root, TRANSACTIONAL_PREFLIGHT_TESTS) : [];
   const postdeployContract = args.postdeployContract
     ? (await snapshotRequestedFiles(root, [POSTDEPLOY_CONTRACT_PATH]))[0]
@@ -760,6 +803,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   const probeDependencies = await snapshotRequestedFiles(root,
     [...new Set(args.probes.flatMap((path) => PROBE_DEPENDENCIES[path] ?? []))]);
   const runtime = await prepareRuntime({ requestId: args.requestId, randomBytes, allocatePort, log, tempDirectory });
+  const aiDirectory = join(runtime.tempRoot, "ai-private-captures");
   const cleanEnvironment = { PATH: process.env.PATH, LANG: "C", LC_ALL: "C", SUPABASE_TELEMETRY_DISABLED: "1" };
   const supabasePath = injectedSupabasePath || process.env.TASK_SUPABASE_CLI || SUPABASE;
   let networkId;
@@ -810,6 +854,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
   let relay = null;
   let ledgerVerification = null;
   const preflightVerification = [];
+  let credentialPrefixVerification = null;
   let primaryError = null;
   let lastPendingPublication = null;
   const validateContainerBoundary = (value, phase, options) => {
@@ -825,6 +870,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
   };
   try {
+    if (aiPhase) await mkdir(aiDirectory, { mode: 0o700 });
     await invoke(["init", "--workdir", runtime.tempRoot, "--yes"]);
     await mkdir(dirname(runtime.configPath), { recursive: true, mode: 0o700 });
     const temporaryConfig = `${runtime.configPath}.tmp-${process.pid}`;
@@ -950,6 +996,20 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
         log(JSON.stringify({ event: "isolated_supabase_db_transactional_preflight_passed", ...preflightVerification.at(-1) }));
       }
     }
+    if (credentialPrefixTest) {
+      // The rollback preflights above need every forward file. Apply a real,
+      // committed prefix now by withholding only the exact snapshotted suffix.
+      // Preserve each SQL file's own BEGIN/COMMIT and NOT VALID FK boundary.
+      const suffix = migrations.slice(credentialPrefixIndex + 1);
+      for (const migration of suffix) await rm(join(runtime.tempRoot, "supabase/migrations", migration.fileName));
+      await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
+      validateIsolatedMigrationLedger(await localLedger(), { forwardVersions: forwardVersions.slice(0, credentialPrefixIndex + 1) });
+      await stageContents(credentialPrefixTest.contents, join(runtime.tempRoot, credentialPrefixTest.path));
+      await invoke(["test", "db", "--local", "--workdir", runtime.tempRoot, credentialPrefixTest.path]);
+      credentialPrefixVerification = { ...AI_CREDENTIAL_PREFIX, committed: true };
+      log(JSON.stringify({ event: "isolated_ai_credential_committed_prefix_passed", ...credentialPrefixVerification }));
+      for (const migration of suffix) await stageContents(migration.contents, join(runtime.tempRoot, "supabase/migrations", migration.fileName));
+    }
     await invoke(["migration", "up", "--local", "--workdir", runtime.tempRoot, "--include-all"]);
     if (args.verifyLocalLedger) {
       ledgerVerification = validateIsolatedMigrationLedger(await localLedger(), { forwardVersions });
@@ -990,17 +1050,55 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
       const nonce = secureRandomBytes(16).toString("hex");
       const stagedProbe = join(runtime.tempRoot, probe.path);
       await stageContents(probe.contents, stagedProbe);
+      const identity = Object.keys(AI_PRODUCERS).find((name) => AI_PRODUCERS[name].path === probe.path);
+      if (aiPhase && identity) await beginAiCapturePhase(aiPhase, () => snapshotAiSource(root));
       const probeResult = await executeProcess({ command: process.execPath, args: [stagedProbe], cwd: runtime.tempRoot, env: { ...cleanEnvironment, TASK_LOCAL_DB_URL: localDbUrl, TASK_LOCAL_DB_NONCE: nonce } });
+      // Capture BEFORE sanitization/clipping, including failure diagnostics.
+      const diagnosticStdout = suppressAiCaptures(probeResult.stdout);
+      const diagnosticStderr = suppressAiCaptures(probeResult.stderr);
+      if (aiPhase && identity && /AI_[A-Z_]*CAPTURE:/u.test(probeResult.stderr)) fail("isolated_ai_capture_unexpected");
+      if (aiPhase && identity && probeResult.code === 0) {
+        if (aiPhase.captures[identity]) fail("isolated_ai_capture_duplicate");
+        if (sha256(probe.contents) !== aiPhase.before.closure.find((row) => row.path === probe.path).sha256) fail("isolated_ai_staged_producer_drift");
+        let raw;
+        try { raw = extractAiCapture(probeResult.stdout, identity); } catch { fail("isolated_ai_capture_invalid"); }
+        const producer = AI_PRODUCERS[identity];
+        aiPhase.captures[identity] = { producer: producer.path, sourceSha256: aiPhase.before.closure.find((row) => row.path === producer.path).sha256, file: producer.file, sha256: sha256(raw), bytes: raw.length };
+        await writeFile(join(aiDirectory, producer.file), raw, { mode: 0o600, flag: "wx" });
+      } else if (aiPhase && !identity && /AI_[A-Z_]*CAPTURE:/u.test(probeResult.stdout + probeResult.stderr)) fail("isolated_ai_capture_unexpected");
       if (probeResult.code !== 0) {
         log(JSON.stringify({ event: "isolated_supabase_db_probe_failed", probe: probe.path,
-          stdout: sanitizeChildDiagnostic(probeResult.stdout), stderr: sanitizeChildDiagnostic(probeResult.stderr) }));
+          stdout: sanitizeChildDiagnostic(diagnosticStdout), stderr: sanitizeChildDiagnostic(diagnosticStderr) }));
         fail("isolated_supabase_db_probe_failed");
       }
-      log(JSON.stringify({ event: "isolated_supabase_db_probe_passed", probe: probe.path, stdout: sanitizeChildDiagnostic(probeResult.stdout) }));
+      log(JSON.stringify({ event: "isolated_supabase_db_probe_passed", probe: probe.path, stdout: sanitizeChildDiagnostic(diagnosticStdout) }));
+    }
+    let producerParity = null;
+    if (aiPhase) {
+      const after = await snapshotAiSource(root);
+      if (canonical(after) !== canonical(aiPhase.before)) fail("isolated_ai_source_closure_drift");
+      const receipt = { version: 1, ...aiPhase, after, finishedAt: Date.now(), migrations: CURRENT_AI_MIGRATIONS, credentialPrefix: credentialPrefixVerification, sqlTests: args.tests, probes: args.probes };
+      for (const identity of Object.keys(AI_PRODUCERS)) {
+        const raw = await readFile(join(aiDirectory, AI_PRODUCERS[identity].file));
+        try { validateAiReceipt(receipt, { expected: aiPhase, source: after, raw, identity }); } catch { fail("isolated_ai_receipt_invalid"); }
+      }
+      const receiptPath = join(aiDirectory, "receipt.json");
+      await writeFile(receiptPath, JSON.stringify(receipt), { mode: 0o600, flag: "wx" });
+      const consumers = await executeProcessWithDeadline({ command: process.execPath, timeoutMs: HOST_PROCESS_DEADLINES.aiConsumers,
+        args: ["--test", "--test-timeout=60000", "--experimental-strip-types", ...AI_CONSUMERS], cwd: root,
+        env: { ...cleanEnvironment, TASK_AI_RECEIPT: receiptPath, TASK_AI_CAPTURE_DIRECTORY: aiDirectory,
+          TASK_AI_RUN_ID: aiPhase.runId, TASK_AI_RUN_NONCE: aiPhase.nonce, TASK_AI_STARTED_AT: String(aiPhase.startedAt), TASK_AI_CAPTURE_STARTED_AT: String(aiPhase.captureStartedAt) } }, { executeProcess });
+      // Raw producer credentials and private attestation values never enter logs.
+      if (consumers.code !== 0 || !/(?:#|ℹ) tests 3(?:\r?\n)/u.test(consumers.stdout)
+        || !/(?:#|ℹ) pass 3(?:\r?\n)/u.test(consumers.stdout)
+        || !/(?:#|ℹ) skipped 0(?:\r?\n)/u.test(consumers.stdout)) fail("isolated_ai_consumers_failed");
+      if (canonical(await snapshotAiSource(root)) !== canonical(after)) fail("isolated_ai_consumer_source_drift");
+      producerParity = { tests: 3, pass: 3, skipped: 0, sourceHead: after.sourceHead, closure: after.closure, captures: receipt.captures, migrations: receipt.migrations, credentialPrefix: receipt.credentialPrefix };
+      log(JSON.stringify({ event: "isolated_ai_producer_parity_passed", ...producerParity }));
     }
     return { status: "passed", runtime: { ...runtime, configPath: runtime.configPath },
       verification: { internalNetwork: true, sqlTests: args.tests.length, probes: args.probes.length,
-        transactionalPreflights: preflightVerification, localLedger: ledgerVerification } };
+        transactionalPreflights: preflightVerification, credentialPrefix: credentialPrefixVerification, localLedger: ledgerVerification, producerParity } };
   } catch (error) {
     primaryError = error;
     if (relay?.getDiagnostics) log(JSON.stringify({ event: "isolated_supabase_db_relay_diagnostics", ...relay.getDiagnostics() }));
@@ -1021,7 +1119,7 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     if (startAttempted) {
       stopAttempted = true;
       try {
-        const stopResult = await executeProcess({ command: supabasePath, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment });
+        const stopResult = await executeProcessWithDeadline({ command: supabasePath, timeoutMs: HOST_PROCESS_DEADLINES.stop, args: ["stop", "--workdir", runtime.tempRoot, "--project-id", runtime.projectId, "--no-backup", "--yes"], cwd: runtime.tempRoot, env: cleanEnvironment }, { executeProcess });
         stopState = stopResult?.code === 0 ? "succeeded" : "failed";
       } catch {
         stopState = "failed";
@@ -1030,14 +1128,20 @@ export async function runIsolatedSupabaseDbTests({ argv = process.argv.slice(2),
     }
     if (networkCreated) {
       try {
-        const result = await executeNetwork({ command: "docker", args: ["network", "rm", runtime.networkName], cwd: runtime.tempRoot, env: cleanEnvironment });
+        const result = await executeProcessWithDeadline({ command: "docker", timeoutMs: HOST_PROCESS_DEADLINES.networkRemove, args: ["network", "rm", runtime.networkName], cwd: runtime.tempRoot, env: cleanEnvironment }, { executeProcess: executeNetwork });
         networkState = result?.code === 0 ? "succeeded" : "failed";
       } catch { networkState = "failed"; }
       cleanupFailed ||= networkState === "failed";
     }
     if (!retainTempRoot) {
       tempRootCleanupAttempted = true;
-      try { await rm(runtime.tempRoot, { recursive: true, force: true }); } catch {
+      try {
+        await rm(runtime.tempRoot, { recursive: true, force: true });
+        if (aiPhase) {
+          try { await lstat(runtime.tempRoot); fail("isolated_ai_private_cleanup_failed"); }
+          catch (error) { if (error.code !== "ENOENT") throw error; }
+        }
+      } catch {
         tempRootState = "failed";
         cleanupFailed = true;
       }

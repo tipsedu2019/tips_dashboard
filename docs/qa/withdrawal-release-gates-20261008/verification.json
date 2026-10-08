@@ -1,0 +1,172 @@
+{
+  "at": "2026-10-08T01:38:42.681626+00:00",
+  "releaseReady": false,
+  "verificationCompleted": true,
+  "productionSQLOrStudentWrites": false,
+  "providerSends": 0,
+  "deploymentPerformed": false,
+  "source": {
+    "runtimeWithdrawalHead": "53605f580196413241b592a8d7dd1d40f71629a8",
+    "integratedMain": "31a893c4bf1a41ae03301f3ddd9a9ddbed1db709",
+    "nonDocDiffFiles": 26,
+    "allWithdrawalBytesEqualExceptMergedManifest": true,
+    "orderedMigrationCountAfterIntegration": 160,
+    "runtimeOrderedMigrationCount": 151,
+    "integrated160RuntimeVerified": false,
+    "productionAnchorReportedByParent": "31a893c4bf1a41ae03301f3ddd9a9ddbed1db709",
+    "productionAnchorVerifiedHere": false
+  },
+  "blocker": {
+    "priority": "P1",
+    "area": "actual pg_cron background-worker 30-second bound",
+    "passed": false,
+    "jobId": 13,
+    "runId": 8,
+    "pid": 2778,
+    "elapsedMs": 35081.304,
+    "finalStatus": "succeeded",
+    "returnMessage": "SELECT 1",
+    "sqlstate57014Observed": false,
+    "persisted55P03Attempts": 7,
+    "productionModeVerified": false
+  },
+  "verification": {
+    "freshReplay": {
+      "files": 158,
+      "orderedMigrations": 151,
+      "passed": true
+    },
+    "pgTAP": {
+      "passed": 219,
+      "completion": 96,
+      "boundary": 123
+    },
+    "actualMinuteCron": {
+      "passed": 24
+    },
+    "nativeSchedulerControls": {
+      "passed": 18,
+      "additionalExtensionGrants": 0
+    },
+    "separateNaturalRecoveryPassed": true,
+    "browserLogicalCases": 9,
+    "browserActualSQL": true,
+    "browserSingleCleanAttempt": false,
+    "browserDuplicate": {
+      "requestId": "bf40caef-1634-4750-988a-e5d9b4f996a3",
+      "actualSQLCalls": 2,
+      "receiptRows": 1,
+      "auditEffects": 1,
+      "auditRequestIdNull": true,
+      "auditLinkLimit": "Audit lacks request UUID. Exclusive before/after task-level audit delta establishes one effect; exact namespaced UUID is recorded in receipt.",
+      "originalLostAckReceiptPreserved": true,
+      "legalResetReceiptPreserved": true
+    },
+    "financeEntireJSONEqual": true,
+    "registrationParentBatchClaimEqual": true,
+    "existing21SnapshotEqual": true,
+    "existing21BaselineBeforeAllBrowserSaves": false,
+    "existing21BaselineBeforeBrowserCompletions": true,
+    "sourceAndFanoutDeltaFromTwoCompletions": 2,
+    "deliveryAndHTTPCount": 0,
+    "integratedFocusedTests": {
+      "files": 9,
+      "passed": 135,
+      "failed": 0,
+      "skipped": 0
+    },
+    "typecheckPassed": true,
+    "lint": {
+      "errors": 0,
+      "warnings": 7
+    },
+    "migrationLayoutPassed": true,
+    "requiredCIAtFinalIntegratedHead": "not verified; merge gate not satisfied"
+  },
+  "cleanup": {
+    "ownedAppAndBrowserStopped": true,
+    "ownedClientContainerRemoved": true,
+    "ownedServerContainerRemoved": true,
+    "ownedSocketVolumeRemoved": true,
+    "serverPid": 0,
+    "cronRemoved": true,
+    "pendingPreservedBeforeDestroy": 3
+  },
+  "migrationFiles": [
+    {
+      "path": "supabase/migrations/20261006080000_withdrawal_chat_last_lesson_wording.sql",
+      "equalToFrozen": true,
+      "sha256": "7b6907586c58aa2e29396cead1830cfe4167f610250e8bf0184c48cbba3785ca"
+    },
+    {
+      "path": "supabase/migrations/20261006090000_withdrawal_last_lesson_release.sql",
+      "equalToFrozen": true,
+      "sha256": "b1060906d750280cacb3ff78d043ad5a5cd551c30638f8121920e40226f3733e"
+    },
+    {
+      "path": "supabase/migrations/20261006091000_withdrawal_future_roster_boundary.sql",
+      "equalToFrozen": true,
+      "sha256": "59b76d0271adacbddb49896adc272a889314766caa58f61534f7dc45ab71c009"
+    },
+    {
+      "path": "supabase/migrations/20261007141548_withdrawal_completion_without_settlement.sql",
+      "equalToFrozen": true,
+      "sha256": "221a7f214457ea6f02e86b5e2775b749cbfe2dce64708fce3c3e262b202e74fe"
+    }
+  ],
+  "evidence": [
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/actual-cron-result.json",
+      "sha256": "c77249130b65ceed62fd2481f406aab420d806eef84c4ba71f4584d4c9b5972e"
+    },
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/actual-scheduler-controls.json",
+      "sha256": "2a0b8e67c50bc6a9bf18a39a1a37b61de56593b860bbd5a45c1e439d046018b7"
+    },
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/actual-cron-30s-result.json",
+      "sha256": "a2f6561853bd7babcdaaac53fe6d58bd5570bc4ad349ba6eb15929f295a60828"
+    },
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/actual-cron-after-timeout-recovery.json",
+      "sha256": "745b39e94e36488bbba8a0f6009aba675eb7cbd0449caa542755ab78bec01a87"
+    },
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/existing-protection-after-browser.json",
+      "sha256": "394c665a4f9386831515598b2e3b7bedbf44d3fc2bb421afafe91f9c4be54449"
+    },
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/final-catalog-unchanged-quiescent.json",
+      "sha256": "fd400d9e8ea0cb87be4fcdeb8558ba05e27dea1a2eabca41e51483b4588ef2ea"
+    },
+    {
+      "file": "evidence/withdrawal-release-gates-20261008-approved/cleanup.json",
+      "sha256": "d28850f4251121a5e9f93768e5b8f1a8dd811bcabd170b85f20d9abd06b7c447"
+    },
+    {
+      "file": "evidence/withdrawal-e2e-20261008-approved/browser-save/final-save-state-verification.json",
+      "sha256": "0498827d462e09f787128cf02e3e237fb8ac048e440d62b7564ce67d172980e2"
+    },
+    {
+      "file": "evidence/withdrawal-e2e-20261008-approved/browser-save/final-poststate-audit.json",
+      "sha256": "775d8569348a62ef9276a0d33435b346b7d6271f0f17700a50f947f58a4e8f13"
+    },
+    {
+      "file": "evidence/withdrawal-e2e-20261008-approved/browser-save/consumer-owned-cleanup.json",
+      "sha256": "38000920d87d414d528d3703e2c0fdb7f84966c548906b3904f4160643a48dff"
+    },
+    {
+      "file": "evidence/withdrawal-main-integration-20261008/integration-proof.json",
+      "sha256": "32acf2e6a4b9bcc17afece8b909b7a7747d2d35650f71dc6bee528f8920be7ac"
+    }
+  ],
+  "limits": [
+    "Local actual UI/service + fixed authenticated SQL bridge, not JWT signature/Auth service/PostgREST transport.",
+    "AI9 static overlap review and integrated focused checks only; no 160-migration runtime replay.",
+    "No natural midnight rollover or production runtime/cache/provider verification.",
+    "Audit request_id is NULL; duplicate audit effect is the exclusive task-level before/after delta.",
+    "Existing21 full snapshot baseline was captured after early fee writes; before all saves is not claimed. Exact bridge write allowlist contains only seven d071 tasks.",
+    "Original Library JPEG materialization failed after the permitted retry; no original pixel inspection.",
+    "30-second defect remains unfixed and blocks release."
+  ]
+}

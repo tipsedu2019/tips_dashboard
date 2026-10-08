@@ -9,6 +9,7 @@ import { renderToStaticMarkup } from "react-dom/server"
 import ts from "typescript"
 import { withPromiseTimeout } from "../src/lib/promise-timeout.ts"
 import { createRegistrationObservationChatService } from "../src/features/tasks/registration-observation-chat-service.ts"
+import * as registrationClassOptions from "../src/features/tasks/registration-class-options.ts"
 
 const root = new URL("../", import.meta.url)
 const require = createRequire(import.meta.url)
@@ -120,6 +121,7 @@ async function loadMountedObservationEditor() {
     ["@/components/ui/input", { Input }],
     ["@/components/ui/label", { Label }],
     ["./registration-select", { RegistrationSelect }],
+    ["./registration-class-options", registrationClassOptions],
     ["@/lib/promise-timeout", { withPromiseTimeout }],
     ["./registration-observation-chat-service", { createRegistrationObservationChatService }],
   ])
@@ -129,6 +131,22 @@ async function loadMountedObservationEditor() {
     if (local) return local
     throw new Error(`unhandled observation editor runtime import: ${specifier}`)
   }
+  const classSelectFileName = new URL("src/features/tasks/registration-class-select.tsx", root)
+  const classSelectOutput = ts.transpileModule(await readFile(classSelectFileName, "utf8"), {
+    compilerOptions: {
+      esModuleInterop: true,
+      jsx: ts.JsxEmit.ReactJSX,
+      module: ts.ModuleKind.CommonJS,
+      target: ts.ScriptTarget.ES2022,
+    },
+    fileName: classSelectFileName.pathname,
+  }).outputText
+  const classSelectModule = { exports: {} }
+  const classSelectFactory = vm.runInThisContext(`(function(require, module, exports) {${classSelectOutput}\n})`, {
+    filename: classSelectFileName.pathname,
+  })
+  classSelectFactory(runtimeRequire, classSelectModule, classSelectModule.exports)
+  localModules.set("./registration-class-select", classSelectModule.exports)
   const chatFileName = new URL("src/features/tasks/registration-observation-chat-actions.tsx", root)
   const chatOutput = ts.transpileModule(await readFile(chatFileName, "utf8"), {
     compilerOptions: {

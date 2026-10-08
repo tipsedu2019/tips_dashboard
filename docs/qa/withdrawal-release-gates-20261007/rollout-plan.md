@@ -1,5 +1,7 @@
 # PR115 단계 적용 검토안 — 실행하지 않은 운영 계획
 
+**2026-10-08 갱신: 운영 적용 보류.** 실제 격리 background-worker cron에서 30초 timeout이 작동하지 않았다. 아래 단계안은 실행 승인이 아니며 새 결함을 해결한 뒤 다시 검토해야 한다. 최신 기준 main은 `31a893c4bf1a41ae03301f3ddd9a9ddbed1db709`, 검증한 퇴원 파일은 `53605f580196413241b592a8d7dd1d40f71629a8`과 바이트가 같다. 아래 네 SQL의 SHA·ACL·비자동 cron 설치·rollback 범위는 그대로이며 AI9 migration은 설치 대상에 추가하지 않는다. 최신 [검증 기록](../withdrawal-release-gates-20261008/README.md)을 함께 확인한다.
+
 검토 기준: PR115 `240eff71fe5a997dc641eafadeb701f88d1fd925`에 아래 manager 권한 수정과 합성 fixture 수정을 더한 후보, main `58cefbf4761ede0d3b7f4cf588e2a4daea05b458`. 이번 추가 작업은 격리 합성 검증이다. 이 문서 작성은 운영 SQL, 학생 완료, 발송, 배포, scheduler 활성화의 실행 기록이나 승인으로 해석하지 않는다. AI DB 설치 담당 `01a116c5`와 부모 작업의 설치 순서 확인 전 운영 쓰기는 시작하지 않는다.
 
 ## 권고
@@ -8,7 +10,7 @@
 
 이는 런타임 활성화를 나눈 방안이다. 첫 단계에도 queue, worker, 미래 조회 함수와 신규 RPC 권한이 설치되므로 DB 스키마가 작은 문구 전용 변경이라고 설명하면 안 된다. 이미 선택한 “기준일까지 명단 유지” 정책은 두 단계 모두 보존한다.
 
-queue·worker가 아예 없는 별도 완료 수정도 작성할 수 있으나, 오늘·미래 완료를 별도 business guard로 제한해야 한다. 또한 PR115의 함수 생성 및 기존 함수 anchor와 충돌하여 이후 예약 기능을 다른 migration으로 다시 검증해야 한다. 오늘을 위한 새 갈래보다는 검증된 후보를 유지하는 위 방안을 권고한다. 문구만 시급하면 별도 3파일 patch는 적용 가능하지만 완료 차단은 해결하지 않는다.
+queue·worker가 아예 없는 별도 완료 수정도 작성할 수 있으나, 오늘·미래 완료를 별도 business guard로 제한해야 한다. 또한 PR115의 함수 생성 및 기존 함수 anchor와 충돌하여 이후 예약 기능을 다른 migration으로 다시 검증해야 한다. 별도 3파일 문구 patch는 기존 main `58cefbf4` 기준 산출물이며 최신 main `31a893c4` 적용 가능성을 재검증하지 않았다. 이를 최신 통합 후보의 대체 설치안으로 사용하지 않는다. 문구만의 변경으로는 완료 차단이 해결되지 않는다.
 
 ## 단계별 동작
 
@@ -40,7 +42,7 @@ DB를 먼저 적용하는 동안 90000이 기존 공통 core에도 오늘·미�
 
 ## 정확한 DB 진입점과 신규 권한
 
-| 対象 | 역할·변경 |
+| 대상 | 역할·변경 |
 | --- | --- |
 | `dashboard_private.complete_ops_withdrawal_roster_transition_impl(uuid,text)` | 최종 공통 core를 anchor 검증 후 갱신. 기존 owner/ACL 유지 |
 | `public.complete_ops_withdrawal_roster_transition_v3(uuid,uuid)` | 신규. 기존 V2 canonical wrapper에 위임. authenticated만 EXECUTE |

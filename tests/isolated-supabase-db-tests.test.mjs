@@ -3326,6 +3326,74 @@ test("isolated CI runs baseline, both builder preflights and full suite on the o
   }
 });
 
+test("isolated CI commits the credential prefix, tests it before restoring the suffix, and stops on ACL-test or ledger failure", async (t) => {
+  const { runIsolatedSupabaseDbTests, sha256 } = await import(runnerUrl.href);
+  const { AI_CREDENTIAL_PREFIX } = await import('../scripts/lib/ai-producer-receipt.mjs');
+  const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
+  const files = ['20261003084028_prefix_fixture.sql', AI_CREDENTIAL_PREFIX.migration, '20261003091944_suffix_fixture.sql'];
+  const contents = files.map((file) => `begin;\nselect '${file}';\ncommit;\n`);
+  for (const [index, file] of files.entries()) await writeFile(join(root, 'supabase/migrations', file), contents[index]);
+  const manifestPath = join(root, 'supabase/test-baselines/dashboard-free-tier-v1.manifest.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.orderedNewMigrations = files.map((fileName, index) => ({ fileName, status: 'final', sha256: sha256(contents[index]) }));
+  await writeFile(manifestPath, JSON.stringify(manifest)); await activateCanonicalBaseline(root);
+  const prefixSql = await readFile(new URL(`../${AI_CREDENTIAL_PREFIX.test}`, import.meta.url));
+  await writeFile(join(root, AI_CREDENTIAL_PREFIX.test), prefixSql);
+  for (const scenario of ['passed', 'prefix-test-failure', 'prefix-ledger-drift']) {
+    let upCount = 0; let prefixCalled = false; const logs = []; const calls = [];
+    const run = runIsolatedSupabaseDbTests({ root,
+      argv: ['--execute', '--authorized', '--request-id', `credential-prefix-${scenario}`, '--verify-local-ledger'],
+      tempDirectory: await makeRunnerTempDirectory(t), executeNetwork: isolatedNetworkFixture,
+      allocatePort: (() => { let port = 56600; return () => ++port; })(),
+      executeProcess: async (invocation) => {
+        calls.push(invocation);
+        if (invocation.args[0] === 'migration' && invocation.args[1] === 'up') {
+          upCount += 1;
+          const staged = await readdir(join(invocation.cwd, 'supabase/migrations'));
+          if (upCount === 3) {
+            assert.equal(staged.includes(files[0]) && staged.includes(files[1]), true);
+            assert.equal(staged.includes(files[2]), false, 'suffix is withheld from the real prefix apply');
+          }
+          if (upCount === 4) {
+            assert.equal(prefixCalled, true, 'final apply cannot precede the committed-prefix pgTAP call');
+            assert.equal((await readFile(join(invocation.cwd, 'supabase/migrations', files[2]), 'utf8')), contents[2], 'exact suffix snapshot is restored only after prefix success');
+          }
+        }
+        if (invocation.args[0] === 'migration' && invocation.args[1] === 'list') {
+          const rows = Array.from({ length: 7 }, (_, index) => ({ local: String(index).padStart(14, '0'), remote: String(index).padStart(14, '0') }));
+          const applied = upCount >= 4 || scenario === 'prefix-ledger-drift' ? files : files.slice(0, 2);
+          rows.push(...applied.map((file) => ({ local: file.slice(0, 14), remote: file.slice(0, 14) })));
+          return { code: 0, stdout: JSON.stringify({ message: 'Migrations listed', migrations: rows }), stderr: '' };
+        }
+        if (invocation.args[0] === 'test' && invocation.args.includes(AI_CREDENTIAL_PREFIX.test)) {
+          assert.equal(upCount, 3, 'a separate command observes the already committed prefix');
+          assert.equal(invocation.args.includes('--network-id'), true);
+          assert.equal((await readFile(join(invocation.cwd, AI_CREDENTIAL_PREFIX.test))).equals(prefixSql), true);
+          assert.equal((await readdir(join(invocation.cwd, 'supabase/migrations'))).includes(files[2]), false);
+          prefixCalled = true;
+          if (scenario === 'prefix-test-failure') return { code: 1, stdout: 'Result: FAIL\n', stderr: 'synthetic_prefix_acl_regression' };
+          return { code: 0, stdout: 'Files=1, Tests=13, 1 wallclock secs\nResult: PASS\n', stderr: '' };
+        }
+        if (invocation.args[0] === 'status') return { code: 0, stdout: JSON.stringify({ DB_URL: 'postgresql://postgres:postgres@127.0.0.1:56602/postgres' }), stderr: '' };
+        return { code: 0, stdout: '', stderr: '' };
+      }, log: (entry) => logs.push(JSON.parse(entry)),
+    });
+    if (scenario === 'passed') {
+      const result = await run;
+      assert.deepEqual(result.verification.credentialPrefix, { ...AI_CREDENTIAL_PREFIX, committed: true });
+      assert.equal(upCount, 4);
+      assert.deepEqual(logs.find((entry) => entry.event === 'isolated_supabase_db_test_completed' && entry.testFiles.includes(AI_CREDENTIAL_PREFIX.test)).summary, { files: 1, tests: 13, result: 'PASS' });
+    } else {
+      await assert.rejects(run, scenario === 'prefix-test-failure' ? /isolated_supabase_db_child_failed/u : /isolated_supabase_db_ledger_drift/u);
+      assert.equal(upCount, 3, 'neither failed prefix verification can apply the suffix');
+      assert.equal(calls.some((call) => call.args[0] === 'status'), false);
+      assert.equal(logs.some((entry) => entry.event === 'isolated_ai_credential_committed_prefix_passed'), false);
+    }
+    assert.equal(calls.filter((call) => call.args[0] === 'stop').length, 1);
+    assert.deepEqual(logs.at(-1), { cleanup: 'succeeded', stop: 'succeeded', network: 'succeeded', tempRoot: 'removed' });
+  }
+});
+
 test("isolated CI uses an owned loopback relay only when internal Docker ports are unpublished", async (t) => {
   const { runIsolatedSupabaseDbTests } = await import(runnerUrl.href);
   const root = await makeRepo(t); await configureEmptyReviewedRunnerRepo(root);
@@ -3386,4 +3454,47 @@ test("isolated CI abort waits for the owned child to exit before returning to cl
     }), (error) => error.name === "AbortError");
     assert.equal(await readFile(join(root, "owned-child-reaped"), "utf8"), "yes");
   } finally { clearTimeout(timer); }
+});
+
+test('AI producer parity is a fixed sole-execute phase and rejects a thin/retained run before process launch',async()=>{
+ const {parseIsolatedDbArguments,runIsolatedSupabaseDbTests}=await import(runnerUrl.href);
+ assert.equal(parseIsolatedDbArguments(['--ai-producer-parity']).aiProducerParity,true);
+ let launched=0;
+ await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity'],executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
+ assert.equal(launched,0);
+ const {AI_SQL_TESTS,AI_PROBES}=await import('../scripts/lib/ai-producer-receipt.mjs');
+ await assert.rejects(runIsolatedSupabaseDbTests({argv:['--review-head','--execute','--authorized','--request-id','ai-parity-negative-only','--require-final','--ai-producer-parity','--transactional-preflight','--verify-local-ledger',...AI_SQL_TESTS.flatMap(p=>['--test',p]),...AI_PROBES.flatMap(p=>['--probe',p])],retainTempRoot:true,executeProcess:async()=>{launched++;throw Error('must not launch');}}),/isolated_ai_parity_full_run_required/);
+ assert.equal(launched,0);
+});
+
+test('host deadline bounds a real pre-test hang and confirms TERM/KILL reaping', {timeout:6000},async(t)=>{
+ const runner=await import(runnerUrl.href);
+ assert.equal(typeof runner.executeProcessWithDeadline,'function');
+ const root=await makeRunnerTempDirectory(t);
+ const command="import {writeFileSync} from 'node:fs'; writeFileSync('pid',String(process.pid)); process.on('SIGTERM',()=>writeFileSync('term','seen')); setInterval(()=>{},1000);";
+ const started=Date.now();
+ await assert.rejects(runner.executeProcessWithDeadline({command:process.execPath,args:['--input-type=module','-e',command],cwd:root,env:{PATH:process.env.PATH}}, {timeoutMs:250}),/isolated_supabase_db_host_deadline_exceeded/);
+ assert.ok(Date.now()-started<5500,'host hang must have a finite deadline and reaping grace');
+ const pid=Number(await readFile(join(root,'pid'),'utf8'));assert.equal(await readFile(join(root,'term'),'utf8'),'seen');assert.throws(()=>process.kill(pid,0),{code:'ESRCH'});
+});
+
+test('host deadline rejects a late successful executor after cancellation',async()=>{
+ const runner=await import(runnerUrl.href);assert.equal(typeof runner.executeProcessWithDeadline,'function');
+ await assert.rejects(runner.executeProcessWithDeadline({command:'synthetic-no-child',args:[]},{timeoutMs:10,executeProcess:async({signal})=>{await new Promise(resolve=>signal.addEventListener('abort',resolve,{once:true}));return {code:0,stdout:'',stderr:''};}}),/isolated_supabase_db_host_deadline_exceeded/);
+});
+
+test('final stop and network removal get host deadlines while cleanup failure preserves primary error',async(t)=>{
+ const {runIsolatedSupabaseDbTests}=await import(runnerUrl.href);
+ const root=await makeRepo(t);await configureEmptyReviewedRunnerRepo(root);const cleanup=[];const logs=[];
+ await assert.rejects(runIsolatedSupabaseDbTests({root,argv:['--execute','--authorized','--request-id','fix-round1-cleanup-negative'],tempDirectory:await makeRunnerTempDirectory(t),allocatePort:(()=>{let port=56400;return ()=>++port;})(),
+  executeNetwork:async(invocation)=>{if(invocation.args[0]==='network'&&invocation.args[1]==='rm'){cleanup.push(invocation);return {code:1,stdout:'',stderr:''};}const result=await isolatedNetworkFixture(invocation);if(invocation.args[0]==='inspect'){const containers=JSON.parse(result.stdout);containers[0].NetworkSettings.Networks.bridge={NetworkID:'b'.repeat(64)};result.stdout=JSON.stringify(containers);}return result;},
+  executeProcess:async(invocation)=>{if(invocation.args[0]==='stop'){cleanup.push(invocation);return {code:1,stdout:'',stderr:''};}return {code:0,stdout:'',stderr:''};},log:line=>logs.push(JSON.parse(line))}),/container_network_invalid/u);
+ assert.equal(cleanup.length,2);
+ for(const call of cleanup){assert.ok(call.signal instanceof AbortSignal,'cleanup subprocess must have host cancellation');assert.equal(call.timeoutMs,call.args[0]==='stop'?30000:10000);}
+ assert.deepEqual(logs.at(-1),{cleanup:'failed',stop:'failed',network:'failed',tempRoot:'removed'});
+});
+
+test('host deadline fails closed when an injected executor never settles after cancellation',{timeout:7000},async()=>{
+ const {executeProcessWithDeadline}=await import(runnerUrl.href);
+ await assert.rejects(executeProcessWithDeadline({command:'synthetic-no-child',args:[]},{timeoutMs:10,executeProcess:()=>new Promise(()=>{})}),/isolated_supabase_db_owned_child_reaping_failed/);
 });
