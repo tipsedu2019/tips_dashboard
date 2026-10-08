@@ -2126,7 +2126,11 @@ export async function loadOpsTaskById(
   const commentRows = (commentResult.data || []) as unknown as Row[]
   const attachmentRows = (attachmentResult.data || []) as unknown as Row[]
   const eventRows = (eventResult.data || []) as unknown as Row[]
-  const profileIds = !includePresentation ? [] : [...new Set([
+  if (!includePresentation) {
+    const withdrawal = singleByTaskId(detailRows.map((row) => ({ taskId: text(row.task_id), ...mapWithdrawal(row)! })))
+    return mapTask(taskRow, new Map(), new Map(), withdrawal, new Map(), new Map(), new Map(), new Map(), new Map())
+  }
+  const profileIds = [...new Set([
     taskRow.requested_by, taskRow.assignee_id, taskRow.secondary_assignee_id, taskRow.completed_by,
     ...commentRows.map((row) => row.author_id),
     ...attachmentRows.map((row) => row.uploaded_by),
