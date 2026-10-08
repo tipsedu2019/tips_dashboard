@@ -330,7 +330,7 @@ test("registered sign-in explains the next step and viewer accounts can open the
   const [loginSource, authUtilsSource, adminLayoutSource] = await Promise.all([
     readSource("src/app/(auth)/sign-in/components/login-form-1.tsx"),
     readSource("src/lib/auth-utils.ts"),
-    readSource("src/app/admin/layout.tsx"),
+    readSource("src/components/admin-dashboard-layout.tsx"),
   ]);
 
   assert.match(loginSource, /searchParams\.get\("registered"\) === "1"/);
