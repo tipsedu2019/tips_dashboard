@@ -741,6 +741,16 @@
       "status": "final"
     },
     {
+      "fileName": "20261004140438_registration_scheduled_index_online.sql",
+      "status": "final",
+      "sha256": "bc154a3fb519c85ca7f8f21cf8f96e5bc56480f55a254b58a1306bd3e6662916"
+    },
+    {
+      "fileName": "20261004140440_registration_free_recording.sql",
+      "status": "final",
+      "sha256": "68e828b52957d6978fdce64e649302287cc2b5ff8830e402c24db0d7fabc20a7"
+    },
+    {
       "fileName": "20261004160000_legacy_effective_schedule_inheritance.sql",
       "status": "final",
       "sha256": "ca71cf8edc2135723c1a8e527ddbed5c285f6fb72da7a084966d8914597a9eb3"

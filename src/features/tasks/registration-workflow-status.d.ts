@@ -6,6 +6,7 @@ export type RegistrationWorkflowStatus =
   | "waiting_current_class"
   | "waiting_new_class"
   | "waiting_next_opening"
+  | "observation_requested"
   | "enrollment_requested"
   | "payment_in_progress"
   | "registered"

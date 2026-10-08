@@ -36,7 +36,7 @@ test("ops tasks no longer recognize or link the retired feedback marker", async 
   assert.doesNotMatch(source, /피드백 작성/)
 })
 
-test("registration workspace keeps read attendance history and director decisions without feedback writes", async () => {
+test("registration workspace keeps historical facts and retires active attendance and director decisions", async () => {
   const [trackEditor, feedbackPanel] = await Promise.all([
     readFile(trackEditorUrl, "utf8"),
     readFile(feedbackPanelUrl, "utf8"),
@@ -44,8 +44,8 @@ test("registration workspace keeps read attendance history and director decision
 
   assert.doesNotMatch(trackEditor, /submitRegistrationObservationFeedback/)
   assert.doesNotMatch(trackEditor, /correctRegistrationObservationFeedback/)
-  assert.match(trackEditor, /canRecordAttendance=\{!activeDeepLinkedAttemptTerminal[\s\S]*?canManageCase/)
-  assert.match(trackEditor, /canDecide=\{!activeDeepLinkedAttemptCanceled[\s\S]*?canManageCase/)
+  assert.match(trackEditor, /canRecordAttendance=\{false\}/)
+  assert.match(trackEditor, /canDecide=\{false\}/)
   assert.doesNotMatch(feedbackPanel, /submitRegistrationObservationFeedback/)
   assert.doesNotMatch(feedbackPanel, /correctRegistrationObservationFeedback/)
   assert.doesNotMatch(feedbackPanel, /canEditFeedback/)

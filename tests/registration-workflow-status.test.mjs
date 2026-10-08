@@ -27,6 +27,7 @@ test("registration workflow exposes observation statuses and the nine-view order
     "waiting_current_class",
     "waiting_new_class",
     "waiting_next_opening",
+    "observation_requested",
     "enrollment_requested",
     "payment_in_progress",
     "registered",
@@ -34,11 +35,9 @@ test("registration workflow exposes observation statuses and the nine-view order
     "inquiry_only",
   ])
   assert.deepEqual(REGISTRATION_OBSERVATION_TRACK_WORKFLOW_STATUSES, [
-    ...REGISTRATION_WORKFLOW_STATUSES.slice(0, 7),
-    "observation_requested",
+    ...REGISTRATION_WORKFLOW_STATUSES,
     "observation_feedback_pending",
     "observation_completed",
-    ...REGISTRATION_WORKFLOW_STATUSES.slice(7),
   ])
   assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.inquiry, "등록 문의")
   assert.equal(REGISTRATION_WORKFLOW_STATUS_LABELS.payment_in_progress, "입학 진행 중")
@@ -86,6 +85,7 @@ test("workflow status is one property with the same choices for every authorized
     "waiting_current_class",
     "waiting_new_class",
     "waiting_next_opening",
+    "observation_requested",
     "enrollment_requested",
     "payment_in_progress",
     "registered",
@@ -123,26 +123,16 @@ test("workflow status is one property with the same choices for every authorized
   )
 })
 
-test("generic workflow choices never accept observation source or target states", async () => {
-  const {
-    getRegistrationInlineWorkflowStatusOptions,
-    getRegistrationWorkflowStatusOptions,
-    isRegistrationObservationWorkflowStatus,
-  } = await loadWorkflowStatus()
-
+test("manual trial status is selectable and historical trial statuses can be exited", async () => {
+  const { getRegistrationWorkflowStatusOptions, getRegistrationInlineWorkflowStatusOptions } = await loadWorkflowStatus()
   for (const viewerRole of ["admin", "staff"]) {
-    assert.equal(
-      getRegistrationWorkflowStatusOptions({ viewerRole })
-        .some(({ value }) => value.startsWith("observation_")),
-      false,
-    )
+    assert.deepEqual(getRegistrationWorkflowStatusOptions({ viewerRole }).filter(({ value }) => value.startsWith("observation_")).map(({ value }) => value), ["observation_requested"])
+    for (const currentStatus of ["observation_requested", "observation_feedback_pending", "observation_completed"]) {
+      const choices = getRegistrationInlineWorkflowStatusOptions({ viewerRole, currentStatus })
+      assert.equal(choices[0].value, currentStatus)
+      assert.ok(choices.some(({ value }) => value === "registered"))
+    }
   }
-  assert.deepEqual(getRegistrationInlineWorkflowStatusOptions({
-    currentStatus: "observation_requested",
-    viewerRole: "admin",
-  }), [])
-  assert.equal(isRegistrationObservationWorkflowStatus("observation_completed"), true)
-  assert.equal(isRegistrationObservationWorkflowStatus("enrollment_requested"), false)
 })
 
 test("inline status choices retain the current value and expose the full property to authorized writers", async () => {
@@ -164,6 +154,7 @@ test("inline status choices retain the current value and expose the full propert
       "waiting_current_class",
       "waiting_new_class",
       "waiting_next_opening",
+      "observation_requested",
       "payment_in_progress",
       "registered",
       "not_registered",

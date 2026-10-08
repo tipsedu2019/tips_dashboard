@@ -766,7 +766,7 @@ export function normalizeRegistrationObservationFeedbackDetail(
   )
   if (
     !lifecycleValid
-    || (decisionKind !== null && status !== "completed" && status !== "no_show")
+    || (decisionKind !== null && status !== "completed" && status !== "no_show" && status !== "attended_feedback_pending")
   ) invalid(scope)
 
   const observationRevision = revision(row.revision, scope)
@@ -785,8 +785,8 @@ export function normalizeRegistrationObservationFeedbackDetail(
     taskId: uuid(row.taskId, scope),
     trackId: uuid(row.trackId, scope),
     appointmentId: uuid(row.appointmentId, scope),
-    studentName: nonblank(row.studentName, scope),
-    studentGrade: nonblank(row.studentGrade, scope),
+    studentName: row.studentName === null ? "" : stringValue(row.studentName, scope),
+    studentGrade: row.studentGrade === null ? "" : stringValue(row.studentGrade, scope),
     subject: enumValue(row.subject, SUBJECTS, scope),
     classId: uuid(row.classId, scope),
     className: nonblank(row.className, scope),

@@ -113,12 +113,7 @@ test("automatic history opens one read-only timeline with honest actors and time
   const migrated = rows.find((row) => row.textContent.includes("등록 흐름 종료"))
   assert.equal(migrated.querySelector("p").textContent, "마이그레이션 · 시간 확인 불가")
   assert.equal(timeline.querySelectorAll("input, textarea, select, a, [contenteditable]").length, 0)
-  const details = [...timeline.querySelectorAll("button")]
-  assert.deepEqual(details.map((button) => button.textContent), Array(4).fill("상세 보기"))
-  const createdDetails = created.querySelector("button")
-  await flush(() => createdDetails.click())
-  assert.equal(createdDetails.textContent, "상세 닫기")
-  assert.match(created.textContent, /자동 기록의 세부 정보가 보존되어 있습니다/u)
+  assert.equal(timeline.querySelectorAll("button").length, 0, "events without saved detail do not show empty disclosure controls")
   assert.doesNotMatch(timeline.textContent, /PRIVATE_PROVIDER_RECEIPT|notification_delivery|known-actor/u)
 })
 
@@ -145,3 +140,12 @@ test("an empty case opens an explicit empty automatic history without edit or se
   assert.match(view.timeline().textContent, /아직 자동 이력이 없습니다/u)
   assert.equal(view.timeline().querySelectorAll("button, input, textarea, select, a").length, 0)
 })
+
+test("manual state changes show the actual transition without opening a redundant disclosure", async (t) => {
+  const detail = detailFixture();
+  detail.events = [{ id: "manual", eventType: "registration_workflow_status_changed", trackId: "english", subject: "영어", source: "observation_requested", destination: "inquiry_only", actorKind: "user", actorId: "known-actor", occurredAt: "2026-10-04T14:00:00Z", payloadVersion: 2, metadata: {} }];
+  const view = await mount(t, detail);
+  await flush(() => view.trigger.click());
+  assert.match(view.timeline().textContent, /청강 신청 → 문의만/u);
+  assert.equal(view.timeline().querySelectorAll("button").length, 0);
+});

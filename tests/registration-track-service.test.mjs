@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 import ts from "typescript";
+import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
@@ -231,9 +232,9 @@ test("observation summary types are broad while generic mutations stay narrow", 
       PublicGenericDetailStatus,
       OpsRegistrationWorkflowStatus
     >>;
-    type ObservationStatusCannotUseGenericMutation = Assert<Equal<
+    type ManualObservationStatusCanUseGenericMutation = Assert<Equal<
       Extract<"observation_requested", GenericMutationStatus>,
-      never
+      "observation_requested"
     >>;
   `);
 
@@ -1909,7 +1910,7 @@ test("generic summary reads fail closed before observation workflow states reach
       task_id: "task-1",
       subject: "영어",
       pipeline_status: "visit_consultation_scheduled",
-      workflow_status: "observation_requested",
+      workflow_status: "observation_feedback_pending",
       ...inertObservationSummaryRow,
     }], error: null }),
   });
@@ -3017,7 +3018,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
         const track = detailRows("ops_registration_subject_tracks").data[0];
         return { data: [{
           ...track,
-          workflow_status: "observation_requested",
+          workflow_status: "observation_feedback_pending",
           workflow_revision: 5,
           ...inertObservationSummaryRow,
         }], error: null };
@@ -3028,7 +3029,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
           ...result,
           data: result.data.map((row) => ({
             ...row,
-            workflow_status: "observation_requested",
+            workflow_status: "observation_feedback_pending",
             workflow_revision: 5,
             observation_attempt_count: 0,
           })),
@@ -3042,7 +3043,7 @@ test("observation-aware detail is broad while default detail fails closed and ca
   const broad = await service.loadCaseDetail("task-1", "viewer-1", {
     observationAware: true,
   });
-  assert.equal(broad.tracks[0].workflowStatus, "observation_requested");
+  assert.equal(broad.tracks[0].workflowStatus, "observation_feedback_pending");
   assert.equal(broad.tracks[0].workflowRevision, 5);
   assert.equal(broad.tracks[0].observationSummaryVisible, true);
   assert.equal(
@@ -4790,4 +4791,39 @@ test("enrollment detail save sends and hydrates every selected textbook, includi
     requestKey: "legacy-textbook",
   });
   assert.deepEqual(Array.from(legacy.rows[0].textbookIds), [books[0]]);
+});
+
+test("fact audit mapper keeps the saved fact kind without copying private input values", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const result = mapTrackEvent({ id: "event-fact", task_id: "task", actor_id: "staff", event_type: "registration_fact_saved", created_at: "2026-10-04T14:00:00Z", after_value: JSON.stringify({ version: 1, factType: "waiting_details", trackId: "track", payload: { parentPhone: "PRIVATE_SYNTHETIC_PHONE", waitingKind: "current_class" } }) });
+  assert.equal(result.eventType, "registration_fact_saved");
+  assert.equal(result.trackId, "track");
+  assert.equal(result.metadata.factType, "waiting_details");
+  assert.equal(result.actorKind, "user");
+  assert.ok(!JSON.stringify(result).includes("PRIVATE_SYNTHETIC_PHONE"));
+});
+
+
+test("real common v1/contact v2/subject envelopes retain row provenance through the timeline without private payloads", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  const row = (id, type, time, payload, actor = "staff") => ({
+    id, task_id: "task", actor_id: actor, event_type: type, created_at: time,
+    before_value: "PRIVATE_BEFORE", after_value: JSON.stringify(payload),
+  });
+  const events = [
+    row("common-v1", "registration_common_info_updated", "2026-10-04T14:00:00Z", {version: 1, commonRevision: 2, studentName: "PRIVATE_NAME", parentPhone: "PRIVATE_PHONE", requestNote: "PRIVATE_NOTE"}),
+    row("common-v2", "registration_common_info_updated", "2026-10-04T14:02:00Z", {version: 2, commonRevision: 3, parentContactPresent: true, studentContactPresent: false, requestNotePresent: true, changedFields: ["parentContact", "requestNote"], occurredAt: "2026-10-04T14:02:00Z"}),
+    row("subjects", "registration_subjects_synced", "2026-10-04T14:01:00Z", {version: 1, actorId: "staff", subjects: ["영어"], occurredAt: "2026-10-04T14:01:00Z"}),
+    row("removed", "registration_subject_removed", "2026-10-04T14:03:00Z", {version: 1, trackId: "track", subject: "영어", actorId: "staff", directorProfileId: "PRIVATE_DIRECTOR", occurredAt: "2026-10-04T14:03:00Z"}),
+    row("fact", "registration_fact_saved", "2026-10-04T13:00:00Z", {version: 1, factType: "waiting_details", trackId: "track", payload: {parentPhone: "PRIVATE_PHONE"}}),
+    row("unknown", "registration_common_info_updated", null, {version: 1, requestNote: "PRIVATE_NOTE"}, null),
+  ].map(mapTrackEvent);
+  const history = buildRegistrationSubjectHistory({tracks: [{id: "track", subject: "영어"}], events});
+  assert.deepEqual(history.map(item => item.id), ["event:removed", "event:common-v2", "event:subjects", "event:common-v1", "event:fact", "event:unknown"]);
+  assert.deepEqual(history.slice(0, 5).map(item => [item.actorId, item.actorKind, item.timeKind]), Array.from({length: 5}, () => ["staff", "user", "exact"]));
+  assert.equal(history[0].subjects[0], "영어");
+  assert.equal(history[1].occurredAt, "2026-10-04T14:02:00Z");
+  assert.equal(history.at(-1).actorKind, null);
+  assert.equal(history.at(-1).timeKind, "unavailable");
+  assert.doesNotMatch(JSON.stringify({events, history}), /PRIVATE_|parentPhone|requestNotePresent|changedFields/);
 });

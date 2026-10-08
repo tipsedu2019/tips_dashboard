@@ -306,9 +306,19 @@ test("panel source exposes history, attendance, and decisions without feedback f
   assert.match(source, /state\.detail\.feedbackReason/)
   assert.match(source, /recordRegistrationObservationAttendance/)
   assert.match(source, /decideRegistrationObservation/)
-  assert.match(source, /Google Chat/)
+  assert.doesNotMatch(source, /Google Chat/)
   assert.doesNotMatch(source, /SubmitRegistrationObservationFeedbackInput/)
   assert.doesNotMatch(source, /CorrectRegistrationObservationFeedbackInput/)
   assert.doesNotMatch(source, /피드백 저장|피드백 정정/)
   assert.doesNotMatch(source, /<Textarea/)
 })
+
+
+test("undecided historical attempts retain a read-only panel beside a fresh booking", async () => {
+  const { getRegistrationObservationFeedbackMountPlan } = await loadPanelModel();
+  for (const status of ["attended_feedback_pending", "completed", "no_show"]) {
+    const managerDetail = { currentObservation: null, latestDecisionObservation: null, attempts: [{observationId: IDS.observation, status, decisionKind: null}] };
+    assert.deepEqual({...getRegistrationObservationFeedbackMountPlan({managerDetail, canManageObservation: true, canManageCase: true})}, {observationId: IDS.observation, historyOnly: true});
+    assert.equal(getRegistrationObservationFeedbackMountPlan({managerDetail, canManageObservation: false, canManageCase: false}), null);
+  }
+});

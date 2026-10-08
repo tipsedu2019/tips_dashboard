@@ -1560,3 +1560,13 @@ test("malformed feedback mutation responses do not replace a settled detail gene
   );
   assert.strictEqual(loadRegistrationObservationFeedback(client, IDS.observation), settled);
 });
+
+// Historical facts remain readable after active attendance/decision UI retirement.
+test("trial history accepts the final server's decided attendance-only record and blank personal info", () => {
+  const input = { ...exactFeedback, status: "attended_feedback_pending", attendance: "attended", suitabilityResult: null, feedbackReason: null, feedbackSubmittedByName: null, feedbackSubmittedAt: null, proxySubmitted: false, feedbackRevision: 0, decisionKind: "enrollment", studentName: null, studentGrade: "" };
+  const result = normalizeRegistrationObservationFeedbackDetail(input);
+  assert.equal(result.decisionKind, "enrollment");
+  assert.equal(result.studentName, "");
+  assert.equal(result.studentGrade, "");
+  assert.equal(result.suitabilityResult, null);
+});
