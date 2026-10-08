@@ -4,6 +4,7 @@ import "./globals.css"
 
 import ManagementProviders from "@/providers/management-providers"
 import { fontSansClassName } from "@/lib/fonts"
+import { bootstrapRecoveryScript } from "@/lib/bootstrap-recovery"
 
 export const metadata: Metadata = {
   title: "TIPS Dashboard",
@@ -24,6 +25,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="ko" data-scroll-behavior="smooth" className="antialiased">
+      <head><script dangerouslySetInnerHTML={{ __html: bootstrapRecoveryScript }} /></head>
       <body className={fontSansClassName}>
         <ManagementProviders>{children}</ManagementProviders>
       </body>
