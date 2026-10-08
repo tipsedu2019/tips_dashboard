@@ -8,6 +8,7 @@ import { act, createElement } from "react";
 import ts from "typescript";
 import { classRow, createManagementDetailFixture, defaultsFor } from "./helpers/management-detail-fixture.mjs";
 import { requestAppNavigation } from "../src/lib/guarded-navigation.ts";
+import { extractManagementReconcile } from "../scripts/measure-management-refresh.mjs";
 
 const require = createRequire(import.meta.url);
 const repo = new URL("../", import.meta.url);
@@ -281,6 +282,161 @@ function deferServices(fixture, names) {
     };
   }
 }
+
+function deferReconciliationReads(fixture) {
+  fixture.refreshes = [];
+  fixture.reconciliationDetails = [];
+  let captureNextDetail = false;
+  const initialDetail = fixture.records.loadDetail;
+  fixture.records.refresh = () => {
+    const deferred = Promise.withResolvers();
+    fixture.refreshes.push(deferred);
+    captureNextDetail = true;
+    return deferred.promise;
+  };
+  fixture.records.loadDetail = id => {
+    if (!captureNextDetail) return initialDetail(id);
+    captureNextDetail = false;
+    const deferred = Promise.withResolvers();
+    fixture.reconciliationDetails.push({ id, ...deferred });
+    return deferred.promise;
+  };
+}
+
+async function beginClassReconciliation(t) {
+  const ui = await setup(t, { configureFixture(fixture) {
+    deferServices(fixture, ["updateClass"]);
+    deferReconciliationReads(fixture);
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.editField("classes-detail-name", "저장한 수업");
+  await ui.clickTogether("저장", "저장", "검수 일괄 수정");
+  assert.equal(ui.mutations.length, 1, "the same gesture retains the existing mutation lock");
+  await act(async () => ui.mutations[0].resolve({ id: "a" }));
+  assert.equal(ui.refreshes.length, 1);
+  assert.equal(ui.reconciliationDetails.length, 1, "detail starts while the list read is unresolved");
+  assert.equal(ui.reconciliationDetails[0].id, "a");
+  return ui;
+}
+
+test("class reconciliation starts both reads and holds its mutation slot until both succeed", async t => {
+  const ui = await beginClassReconciliation(t);
+  const saveButton = () => document.querySelector('[data-testid="class-detail-save"]');
+  assert.equal(saveButton().disabled, true);
+  await act(async () => ui.reconciliationDetails[0].resolve(classRow("a", "서버 확인 수업")));
+  assert.equal(saveButton().disabled, true, "early detail success cannot release the lock");
+  assert.doesNotMatch(ui.title(), /서버 확인 수업/);
+  await ui.clickTogether("저장 중", "검수 일괄 수정");
+  assert.equal(ui.mutations.length, 1);
+  await act(async () => ui.refreshes[0].resolve(undefined));
+  assert.equal(saveButton().disabled, false);
+  assert.match(ui.title(), /서버 확인 수업/);
+  assert.match(ui.text(), /저장 완료/);
+});
+
+for (const failed of ["list", "detail"]) {
+  test(`class reconciliation ${failed} failure waits for the sibling read before releasing duplicate protection`, async t => {
+    const ui = await beginClassReconciliation(t);
+    const first = failed === "list" ? ui.refreshes[0] : ui.reconciliationDetails[0];
+    const second = failed === "list" ? ui.reconciliationDetails[0] : ui.refreshes[0];
+    await act(async () => first.reject(new Error(`${failed} 합성 조회 실패`)));
+    assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, true);
+    assert.doesNotMatch(ui.text(), /합성 조회 실패/);
+    await ui.clickTogether("저장 중", "검수 일괄 수정");
+    assert.equal(ui.mutations.length, 1);
+    await act(async () => second.resolve(failed === "list" ? classRow("a") : undefined));
+    assert.equal(document.querySelector('[data-testid="class-detail-save"]').disabled, false);
+    assert.match(ui.text(), new RegExp(`${failed} 합성 조회 실패`));
+    await ui.click("저장");
+    assert.equal(ui.mutations.length, 2, "both settled reads release the slot for the next explicit save");
+    await act(async () => ui.mutations[1].reject(new Error("합성 후속 저장 실패")));
+  });
+}
+
+test("class reconciliation preserves list-error priority when detail rejects first", async t => {
+  const ui = await beginClassReconciliation(t);
+  await act(async () => ui.reconciliationDetails[0].reject(new Error("상세 오류 후순위")));
+  await act(async () => ui.refreshes[0].reject(new Error("목록 오류 우선순위")));
+  assert.match(ui.text(), /목록 오류 우선순위/);
+  assert.doesNotMatch(ui.text(), /상세 오류 후순위/);
+});
+
+for (const change of ["account", "role"]) {
+  test(`class reconciliation ignores an early detail result after ${change} changes during list refresh`, async t => {
+    const ui = await beginClassReconciliation(t);
+    await act(async () => ui.reconciliationDetails[0].resolve(classRow("a", "이전 권한 상세 결과")));
+    await ui.actor(change === "account" ? "other-actor" : "staff-a", change === "role" ? "teacher" : "admin");
+    await ui.click("B 영어반");
+    await ui.resolve(1, defaultsFor("18:00"));
+    await act(async () => ui.refreshes[0].resolve(undefined));
+    assert.match(ui.title(), /B 영어반/);
+    assert.doesNotMatch(ui.text(), /이전 권한 상세 결과|저장 완료|조회 실패/);
+    assert.equal(ui.mutations.length, 1);
+  });
+}
+
+test("class reconciliation cannot publish an early detail into a reopened draft while list refresh finishes", async t => {
+  const ui = await beginClassReconciliation(t);
+  await act(async () => ui.reconciliationDetails[0].resolve(classRow("a", "닫힌 상세 결과")));
+  await ui.click("수업 상세 닫기");
+  await ui.click("A 영어반");
+  await ui.resolve(1, defaultsFor("18:00"));
+  await ui.editField("classes-detail-name", "다시 연 초안");
+  await ui.clickTogether("저장 중", "검수 일괄 수정");
+  assert.equal(ui.mutations.length, 1);
+  await act(async () => ui.refreshes[0].resolve(undefined));
+  assert.equal(document.getElementById("classes-detail-name").value, "다시 연 초안");
+  assert.doesNotMatch(ui.text(), /닫힌 상세 결과|저장 완료/);
+});
+
+test("class reconciliation never reads after an atomic mutation fails", async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    deferServices(fixture, ["updateClass"]); deferReconciliationReads(fixture);
+  } });
+  await ui.click("A 영어반");
+  await ui.resolve(0, defaultsFor());
+  await ui.click("저장");
+  await act(async () => ui.mutations[0].reject(new Error("합성 원자 저장 실패")));
+  assert.equal(ui.refreshes.length, 0); assert.equal(ui.reconciliationDetails.length, 0);
+  assert.match(ui.text(), /합성 원자 저장 실패/);
+});
+
+test("class reconciliation without a selected ID retains one list read after bulk mutation", async t => {
+  const ui = await setup(t, { configureFixture(fixture) {
+    deferServices(fixture, ["updateClass"]); deferReconciliationReads(fixture);
+  } });
+  await ui.click("검수 일괄 수정");
+  assert.equal(ui.mutations.length, 2);
+  await act(async () => { ui.mutations[0].resolve({ id: "a" }); ui.mutations[1].resolve({ id: "b" }); });
+  assert.equal(ui.refreshes.length, 1); assert.equal(ui.reconciliationDetails.length, 0);
+  await act(async () => ui.refreshes[0].resolve(undefined));
+});
+
+test("class reconciliation keeps student detail save reads sequential", async t => {
+  const ui = await setup(t, { kind: "students", configureFixture(fixture) {
+    studentFixture(fixture, ["updateStudent"]); deferReconciliationReads(fixture);
+  } });
+  await ui.click("김학생"); await ui.click("저장");
+  await act(async () => ui.mutations[0].resolve({ id: "student-a" }));
+  assert.equal(ui.refreshes.length, 1); assert.equal(ui.reconciliationDetails.length, 0);
+  await act(async () => ui.refreshes[0].resolve(undefined));
+  assert.equal(ui.reconciliationDetails.length, 1);
+  await ui.clickTogether("저장 중", "검수 일괄 수정");
+  assert.equal(ui.mutations.length, 1);
+  await act(async () => ui.reconciliationDetails[0].resolve(ui.rows[0]));
+  assert.match(ui.text(), /저장 완료/);
+});
+
+test("class reconciliation extracted callback preserves textbook ordering and returned payload identity", async () => {
+  const list = Promise.withResolvers(), reads = [], row = { id: "synthetic-textbook", title: "합성 교재" };
+  const callback = extractManagementReconcile().bind({ kind: "textbooks", refresh: () => { reads.push("list"); return list.promise; }, loadDetail: async () => { reads.push("detail"); return row; } });
+  const pending = callback(row.id);
+  assert.deepEqual(reads, ["list"]);
+  list.resolve(undefined);
+  assert.equal(await pending, row);
+  assert.deepEqual(reads, ["list", "detail"]);
+});
 
 test("autofocused student create form returns to its opening button after discarding", async t => {
   const ui = await setup(t, { kind: "students", configureFixture: fixture => studentFixture(fixture, []) });
