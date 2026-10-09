@@ -3622,6 +3622,331 @@ test("observation-aware detail fails closed when its required summary row is mis
   );
 });
 
+function schedulingDetailRows(table) {
+  return table === "ops_registration_subject_track_summaries"
+    ? { data: [{ ...detailRows("ops_registration_subject_tracks").data[0], ...inertObservationSummaryRow }], error: null }
+    : detailRows(table);
+}
+
+function dependentDetailQueries(harness) {
+  return harness.queries.filter(({ table }) => [
+    "ops_registration_enrollments", "ops_registration_subject_track_summaries",
+  ].includes(table));
+}
+
+async function assertReauthorizedCachedDetail(service, harness, expected) {
+  const tableReads = harness.queries.length;
+  const eventReads = harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length;
+  const contactReads = harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length;
+  const cached = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  assert.deepEqual(cached, expected);
+  assert.notStrictEqual(cached, expected, "cached business detail reauthorizes contact and returns a fresh object");
+  assert.equal(harness.queries.length, tableReads);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, eventReads);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, contactReads + 1);
+}
+
+test("detail starts track-dependent reads before unrelated collections finish, but never returns partial detail", async (t) => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const delayed of ["read_registration_contact_events_v1", "ops_registration_messages", "ops_registration_appointments", "ops_registration_admission_batches", "reminders"]) {
+    await t.test(delayed, async () => {
+      const gate = deferred();
+      const harness = createClient({
+        queryHandler: (query) => query.table === delayed
+          ? gate.promise.then(() => schedulingDetailRows(query.table)) : schedulingDetailRows(query.table),
+        ...(delayed === "read_registration_contact_events_v1" ? {
+          eventHandler: () => gate.promise.then(() => eventRpcResult(detailRows("ops_task_events").data)),
+        } : {}),
+        ...(delayed === "reminders" ? { rpcHandler: (name, args) => {
+          assert.equal(name, "get_registration_customer_reminder_summaries_v1");
+          assert.deepEqual({ ...args }, { p_task_id: CONTACT_TASK });
+          return gate.promise.then(() => ({ data: [{
+          appointment_id: "appointment-1", state: "scheduled", scheduled_for: "2026-07-13T01:00:00.000Z",
+          sent_at: null, updated_at: "2026-07-12T02:00:00.000Z",
+          }], error: null }));
+        } } : {}),
+      });
+      const service = createRegistrationTrackService(harness.client, readyOptions());
+      const request = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+      let settled = false;
+      request.then(() => { settled = true; }, () => { settled = true; });
+      try {
+        await new Promise(setImmediate);
+        assert.equal(dependentDetailQueries(harness).length, 3);
+        assert.equal(settled, false);
+        assert.strictEqual(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), request);
+      } finally {
+        gate.resolve();
+      }
+      const detail = await request;
+      assert.equal(detail.enrollments.length, 1);
+      assert.equal(detail.tracks[0].observationSummaryVisible, true);
+      assert.equal(detail.appointments.length, 1);
+      assert.equal(harness.queries.length, 10);
+      assert.equal(harness.rpcCalls.length, 3);
+      assertCaseDetailUsesServerPrivacyFilters(harness);
+    });
+  }
+});
+
+test("detail keeps parent existence, active tracks and ready runtime as prerequisites for dependent reads", async (t) => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const prerequisite of ["ops_tasks", "ops_registration_subject_tracks", "runtime"]) {
+    for (const failing of [false, true]) {
+      await t.test(`${prerequisite}: ${failing ? "reject" : "ready"}`, async () => {
+        const gate = deferred();
+        const failure = Object.assign(new Error("read denied"), { code: "42501" });
+        let observationProbes = 0;
+        const harness = createClient({ queryHandler: (query) => query.table === prerequisite
+          ? gate.promise.then(() => schedulingDetailRows(query.table)) : schedulingDetailRows(query.table) });
+        const service = createRegistrationTrackService(harness.client, readyOptions({
+          ...(prerequisite === "runtime" ? { probeRuntime: () => gate.promise.then(() => ({ mode: "ready", version: 1 })) } : {}),
+          probeObservationRuntime: async () => { observationProbes += 1; return { available: true, runtimeVersion: 1 }; },
+        }));
+        const request = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+        const outcome = request.then((detail) => ({ detail }), (error) => ({ error }));
+        try {
+          await new Promise(setImmediate);
+          assert.equal(dependentDetailQueries(harness).length, 0);
+          assert.equal(observationProbes, 0);
+        } finally {
+          if (failing) gate.reject(failure); else gate.resolve();
+        }
+        const result = await outcome;
+        if (failing) {
+          assert.strictEqual(result.error, failure);
+          assert.equal(dependentDetailQueries(harness).length, 0);
+          assert.equal(observationProbes, 0);
+        } else {
+          assert.equal(result.detail.task.id, CONTACT_TASK);
+          assert.equal(dependentDetailQueries(harness).length, 3);
+        }
+      });
+    }
+  }
+  await t.test("missing parent", async () => {
+    const harness = createClient({ queryHandler: ({ table }) => table === "ops_tasks"
+      ? { data: null, error: null } : schedulingDetailRows(table) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), /등록 업무를 찾을 수 없습니다/);
+    assert.equal(dependentDetailQueries(harness).length, 0);
+  });
+});
+
+test("an already failed initial collection blocks dependent reads after delayed prerequisites resolve", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const parent = deferred();
+  const failure = new Error("initial events failed");
+  const harness = createClient({ queryHandler: ({ table }) => table === "ops_tasks" ? parent.promise : schedulingDetailRows(table),
+    eventHandler: () => ({ data: null, error: failure }) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), (error) => error === failure);
+  parent.resolve(schedulingDetailRows("ops_tasks"));
+  await new Promise(setImmediate);
+  assert.equal(dependentDetailQueries(harness).length, 0);
+});
+
+test("early dependent failures are observed while initial errors retain precedence and failures stay uncached", async (t) => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const initialFails of [false, true]) {
+    await t.test(initialFails ? "initial error wins" : "dependent error surfaces", async () => {
+      const events = deferred();
+      const initialError = new Error("events failed later");
+      const dependentError = new Error("summary failed first");
+      let failing = true;
+      const harness = createClient({ queryHandler: ({ table }) => {
+        if (failing && table === "ops_registration_subject_track_summaries") return Promise.reject(dependentError);
+        return schedulingDetailRows(table);
+      }, eventHandler: () => failing ? events.promise : eventRpcResult(detailRows("ops_task_events").data) });
+      const service = createRegistrationTrackService(harness.client, readyOptions());
+      let settled = false;
+      const outcome = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true })
+        .then((detail) => { settled = true; return { detail }; }, (error) => { settled = true; return { error }; });
+      try {
+        await new Promise(setImmediate);
+        assert.equal(dependentDetailQueries(harness).length, 3);
+        assert.equal(settled, false);
+      } finally {
+        if (initialFails) events.reject(initialError); else events.resolve(eventRpcResult(detailRows("ops_task_events").data));
+      }
+      assert.strictEqual((await outcome).error, initialFails ? initialError : dependentError);
+      assert.ok(dependentDetailQueries(harness).filter(({ table }) => table === "ops_registration_enrollments")
+        .every(({ signal }) => signal.aborted));
+      failing = false;
+      assert.equal((await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true })).enrollments.length, 1);
+      assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2);
+    });
+  }
+});
+
+test("initial schema failure still invalidates and observes late dependent rejections", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const events = deferred();
+  const children = deferred();
+  const missing = { code: "42P01", message: "relation does not exist" };
+  let invalidations = 0;
+  const harness = createClient({ queryHandler: ({ table }) => ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)
+      ? children.promise : schedulingDetailRows(table), eventHandler: () => events.promise });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    invalidateRuntimeAfterReadyFailure(error) { invalidations += 1; throw Object.assign(new Error("integrity"), { cause: error }); },
+  }));
+  const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), (error) => error.cause === missing);
+  await new Promise(setImmediate);
+  assert.equal(dependentDetailQueries(harness).length, 3);
+  events.resolve({ data: null, error: missing });
+  await rejection;
+  children.reject(new Error("late child rejection"));
+  await new Promise(setImmediate);
+  assert.equal(invalidations, 1);
+});
+
+test("detail timeout prevents late prerequisites from starting dependent work or replacing a fresh cache", async (t) => {
+  for (const delayed of ["ops_tasks", "ops_registration_subject_tracks", "runtime"]) {
+    await t.test(delayed, async () => {
+      const timers = [];
+      const { createRegistrationTrackService } = await loadFactory({
+        setTimeout(callback) { timers.push(callback); return callback; }, clearTimeout() {},
+      });
+      const gate = deferred();
+      let stale = true;
+      const harness = createClient({ queryHandler: ({ table }) => {
+        const result = schedulingDetailRows(table);
+        const response = table === "ops_tasks" ? { ...result, data: { ...result.data, title: stale ? "old" : "fresh" } } : result;
+        return stale && table === delayed ? gate.promise.then(() => response) : response;
+      } });
+      const service = createRegistrationTrackService(harness.client, readyOptions({
+        probeRuntime: () => stale && delayed === "runtime" ? gate.promise.then(() => ({ mode: "ready", version: 1 }))
+          : Promise.resolve({ mode: "ready", version: 1 }),
+      }));
+      const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }),
+        (error) => error.code === "REGISTRATION_REQUEST_TIMEOUT");
+      await new Promise(setImmediate);
+      assert.equal(dependentDetailQueries(harness).length, 0);
+      timers[0]();
+      await rejection;
+      stale = false;
+      const fresh = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true, force: true });
+      assert.equal(fresh.task.title, "fresh");
+      assert.equal(dependentDetailQueries(harness).length, 3);
+      gate.resolve();
+      await new Promise(setImmediate);
+      assert.equal(dependentDetailQueries(harness).length, 3, "timed-out prerequisite completion must not start new reads");
+      await assertReauthorizedCachedDetail(service, harness, fresh);
+    });
+  }
+});
+
+test("overlapped child work stays aborted and cannot cache detail after its deadline", async () => {
+  const timers = [];
+  const { createRegistrationTrackService } = await loadFactory({
+    setTimeout(callback) { timers.push(callback); return callback; }, clearTimeout() {},
+  });
+  const events = deferred();
+  const children = deferred();
+  let stale = true;
+  const harness = createClient({ queryHandler: ({ table }) => {
+    if (stale && ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)) {
+      return children.promise.then(() => schedulingDetailRows(table));
+    }
+    const result = schedulingDetailRows(table);
+    return table === "ops_tasks" ? { ...result, data: { ...result.data, title: stale ? "old" : "fresh" } } : result;
+  }, eventHandler: () => stale ? events.promise.then(() => eventRpcResult(detailRows("ops_task_events").data))
+    : eventRpcResult(detailRows("ops_task_events").data) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }),
+    (error) => error.code === "REGISTRATION_REQUEST_TIMEOUT");
+  await new Promise(setImmediate);
+  assert.equal(dependentDetailQueries(harness).length, 3);
+  timers[0]();
+  await rejection;
+  assert.ok(dependentDetailQueries(harness).filter(({ table }) => table === "ops_registration_enrollments")
+    .every(({ signal }) => signal.aborted));
+  stale = false;
+  const fresh = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true, force: true });
+  assert.equal(fresh.task.title, "fresh");
+  events.resolve();
+  children.resolve();
+  await new Promise(setImmediate);
+  await assertReauthorizedCachedDetail(service, harness, fresh);
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2);
+});
+
+test("a completed event read cannot trigger contact access after a timed-out child join", async () => {
+  const timers = [];
+  const { createRegistrationTrackService } = await loadFactory({
+    setTimeout(callback) { timers.push(callback); return callback; }, clearTimeout() {},
+  });
+  const children = deferred();
+  let stale = true;
+  const harness = createClient({ queryHandler: ({ table }) => {
+    const result = schedulingDetailRows(table);
+    const response = table === "ops_tasks" ? { ...result, data: { ...result.data, title: stale ? "old" : "fresh" } } : result;
+    return stale && ["ops_registration_enrollments", "ops_registration_subject_track_summaries"].includes(table)
+      ? children.promise.then(() => response) : response;
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const rejection = assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }),
+    (error) => error.code === "REGISTRATION_REQUEST_TIMEOUT");
+  await new Promise(setImmediate);
+  assert.equal(dependentDetailQueries(harness).length, 3);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 0);
+  timers[0]();
+  await rejection;
+  assert.ok(dependentDetailQueries(harness).filter(({ table }) => table === "ops_registration_enrollments")
+    .every(({ signal }) => signal.aborted));
+  children.resolve();
+  await new Promise(setImmediate);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 0,
+    "late child completion must not authorize a contact read");
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  stale = false;
+  const fresh = await service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+  assert.equal(fresh.task.title, "fresh");
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_tasks").length, 2,
+    "an unforced retry must reload business data instead of using timed-out detail");
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_enrollments").length, 4);
+  assert.equal(harness.queries.filter(({ table }) => table === "ops_registration_subject_track_summaries").length, 1,
+    "the separate successful summary cache remains reusable without publishing timed-out detail");
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("overlapped detail preserves force and clear epochs after old children have already completed", async (t) => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const refresh of ["force", "clear"]) {
+    await t.test(refresh, async () => {
+      const events = [deferred(), deferred()];
+      let eventReads = 0;
+      const counts = new Map();
+      const harness = createClient({ queryHandler: ({ table }) => {
+        const index = counts.get(table) || 0;
+        counts.set(table, index + 1);
+        const result = schedulingDetailRows(table);
+        if (table === "ops_tasks") return { ...result, data: { ...result.data, title: index === 0 ? "old" : "fresh" } };
+        return result;
+      }, eventHandler: () => events[eventReads++].promise.then(() => eventRpcResult(detailRows("ops_task_events").data)) });
+      const service = createRegistrationTrackService(harness.client, readyOptions());
+      const old = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true });
+      await new Promise(setImmediate);
+      assert.equal(dependentDetailQueries(harness).length, 3);
+      if (refresh === "clear") service.clearCaches();
+      const fresh = service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true, force: refresh === "force" });
+      await new Promise(setImmediate);
+      assert.notStrictEqual(old, fresh);
+      assert.strictEqual(service.loadCaseDetail(CONTACT_TASK, "viewer-1", { observationAware: true }), fresh);
+      events[1].resolve();
+      const currentDetail = await fresh;
+      assert.equal(currentDetail.task.title, "fresh");
+      events[0].resolve();
+      assert.equal((await old).task.title, "old");
+      const queriesAfterCompletion = harness.queries.length;
+      await assertReauthorizedCachedDetail(service, harness, currentDetail);
+      assert.equal(harness.queries.length, queriesAfterCompletion);
+    });
+  }
+});
+
 test("observation detail overlaps its required summary with enrollment reads and awaits both", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const enrollments = deferred();
@@ -3781,8 +4106,8 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
   stalledEvents.resolve(eventRpcResult(detailRows("ops_task_events").data));
   await Promise.resolve();
-  assert.deepEqual(await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1"), detail);
-  assert.equal(harness.queries.length, 16);
+  assert.deepEqual(await service.loadCaseDetail(CONTACT_TASK, "viewer-1"), detail);
+  assert.equal(harness.queries.length, 18, "both attempts start the two enrollment reads before the event timeout");
 });
 
 test("a stalled appointment cancellation returns control to the editor", async () => {

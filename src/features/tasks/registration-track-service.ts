@@ -2584,12 +2584,12 @@ export function createRegistrationTrackService(
           .retry(false),
         metrics,
       )
-      const phaseOneRequest = Promise.all([
-        queryOne(
-          client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
-          metrics,
-          signal,
-        ),
+      const parentRowRequest = queryOne(
+        client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
+        metrics,
+        signal,
+      )
+      const otherRowsRequests = [
         loadScheduledAppointmentPage(),
         loadAppointmentHistoryRows(),
         (() => {
@@ -2610,14 +2610,31 @@ export function createRegistrationTrackService(
         queryCustomerReminderSummaries(safeTaskId, metrics),
         loadOpenBatchRows(),
         loadBatchHistoryRows(),
-        loadActiveTrackRows(),
-      ])
+      ]
+      const trackRowsRequest = loadActiveTrackRows()
+      let phaseOneFailure: { error: unknown } | undefined
+      const phaseOneRequest = Promise.all([parentRowRequest, ...otherRowsRequests, trackRowsRequest])
         .then(
           (phaseOne) => ({ ok: true as const, phaseOne }),
-          (error) => ({ ok: false as const, error }),
+          (error) => {
+            phaseOneFailure = { error }
+            return { ok: false as const, error }
+          },
         )
       await requireReadyRuntime()
       try {
+        // Only parent existence, active tracks and runtime readiness gate these reads.
+        // Observe failures immediately, but preserve phase-one error precedence below.
+        const dependentRowsRequest = Promise.all([parentRowRequest, trackRowsRequest])
+          .then(([, trackRows]) => {
+            if (phaseOneFailure) throw phaseOneFailure.error
+            signal?.throwIfAborted()
+            return loadTrackDependentRows(trackRows)
+          })
+          .then(
+            (result) => ({ ok: true as const, result }),
+            (error) => ({ ok: false as const, error }),
+          )
         const phaseOneResult = await phaseOneRequest
         if (!phaseOneResult.ok) throw phaseOneResult.error
         if (signal?.aborted) throw new Error("registration_query_timeout")
@@ -2668,57 +2685,63 @@ export function createRegistrationTrackService(
         const consultationRows = mergeRowsById(...trackRows.map((row) => (
           splitChildRows(row, "active_consultations", "consultation_history", "consultations")
         )))
-        const trackIds = trackRows.map((row) => text(value(row, "id"))).filter(Boolean)
-        const enrollmentRequest = trackIds.length > 0
-          ? Promise.all([
-            queryCountedRows(
-              client.from("ops_registration_enrollments")
-                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
-                .in("track_id", trackIds)
-                .or("status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)")
-                .order("created_at", { ascending: false })
-                .order("id", { ascending: false })
-                .limit(30)
-                .abortSignal(signal
-                  ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-                  : AbortSignal.timeout(8_000))
-                .retry(false),
-              metrics,
-            ),
-            queryRows(
-              client.from("ops_registration_enrollments")
-                .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
-                .in("track_id", trackIds)
-                .or("status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)")
-                .order("updated_at", { ascending: false })
-                .order("id", { ascending: false })
-                .limit(30)
-                .abortSignal(signal
-                  ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-                  : AbortSignal.timeout(8_000))
-                .retry(false),
-              metrics,
-            ),
+        async function loadTrackDependentRows(trackRows: Row[]) {
+          const trackIds = trackRows.map((row) => text(value(row, "id"))).filter(Boolean)
+          const enrollmentRequest = trackIds.length > 0
+            ? Promise.all([
+              queryCountedRows(
+                client.from("ops_registration_enrollments")
+                  .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
+                  .in("track_id", trackIds)
+                  .or("status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)")
+                  .order("created_at", { ascending: false })
+                  .order("id", { ascending: false })
+                  .limit(30)
+                  .abortSignal(signal
+                    ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+                    : AbortSignal.timeout(8_000))
+                  .retry(false),
+                metrics,
+              ),
+              queryRows(
+                client.from("ops_registration_enrollments")
+                  .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
+                  .in("track_id", trackIds)
+                  .or("status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)")
+                  .order("updated_at", { ascending: false })
+                  .order("id", { ascending: false })
+                  .limit(30)
+                  .abortSignal(signal
+                    ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
+                    : AbortSignal.timeout(8_000))
+                  .retry(false),
+                metrics,
+              ),
+            ])
+            : Promise.resolve([{ rows: [], count: 0 }, []] as [
+              { rows: Row[]; count: number | null },
+              Row[],
+            ])
+          // Both reads depend only on active tracks; neither needs the other's result.
+          // Keep the summary conditional so generic and complete-summary rows add no reads.
+          const rowsMissingObservationSummary = observationAware
+            && trackRows.some(rowNeedsRegistrationObservationSummary)
+          return Promise.all([
+            enrollmentRequest,
+            rowsMissingObservationSummary
+              ? loadTrackSummarySelection(
+                  [safeTaskId],
+                  safeViewerId,
+                  "observation",
+                  { force: loadOptions.force },
+                )
+              : Promise.resolve(null),
           ])
-          : Promise.resolve([{ rows: [], count: 0 }, []] as [
-            { rows: Row[]; count: number | null },
-            Row[],
-          ])
-        // Both reads depend only on the phase-one rows; neither needs the other's result.
-        // Keep the summary conditional so generic and complete-summary rows add no reads.
-        const rowsMissingObservationSummary = observationAware
-          && trackRows.some(rowNeedsRegistrationObservationSummary)
-        const [[currentEnrollmentPage, enrollmentHistoryRows], summaryResult] = await Promise.all([
-          enrollmentRequest,
-          rowsMissingObservationSummary
-            ? loadTrackSummarySelection(
-                [safeTaskId],
-                safeViewerId,
-                "observation",
-                { force: loadOptions.force },
-              )
-            : Promise.resolve(null),
-        ])
+        }
+        const dependentRowsResult = await dependentRowsRequest
+        if (!dependentRowsResult.ok) throw dependentRowsResult.error
+        if (signal?.aborted) throw new Error("registration_query_timeout")
+        const [[currentEnrollmentPage, enrollmentHistoryRows], summaryResult] = dependentRowsResult.result
         const enrollmentRows = mergeRowsById(currentEnrollmentPage.rows, enrollmentHistoryRows)
         const contactState = await readContact(safeTaskId, metrics)
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
