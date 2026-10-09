@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 import ts from "typescript";
+import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
@@ -365,6 +366,88 @@ test("historical version-1 null actor stays unknown without current-owner infere
   assert.equal(event.actorKind, null);
   assert.equal(event.systemSource, null);
   assert.equal(event.reasonCode, "guardian_requested_delay");
+});
+
+test("case-created v1 wire payload becomes a safe history entry with recorded actor and time", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  for (const version of [1, "1"]) {
+    const payload = {
+      version, actorId: "recorded-creator", occurredAt: "2026-10-09T01:02:03Z",
+      campus: "PRIVATE_CAMPUS", studentName: "PRIVATE_STUDENT", commonRevision: 1,
+      // Case creation is a separate producer contract, not a track envelope.
+      eventType: "notification_delivery", metadata: { place: "PRIVATE_METADATA" },
+    };
+    for (const afterValue of [JSON.stringify(payload), payload]) {
+      const row = {
+        id: "case-created", task_id: "synthetic-task", event_type: "registration_case_created",
+        actor_id: "current-owner", created_at: "2026-10-09T02:00:00Z", after_value: afterValue,
+      };
+      const before = structuredClone(row);
+      const event = mapTrackEvent(row);
+      const [item] = buildRegistrationSubjectHistory({ events: [event] });
+      assert.equal(event.payloadVersion, 1);
+      assert.equal(event.legacyText, null);
+      assert.equal(item.title, "등록 문의 생성");
+      assert.equal(item.actorKind, "user");
+      assert.equal(item.actorId, "recorded-creator");
+      assert.equal(item.occurredAt, payload.occurredAt);
+      assert.equal(item.timeKind, "exact");
+      assert.equal(item.origin, "canonical");
+      assert.doesNotMatch(JSON.stringify(item), /PRIVATE_|current-owner|notification_delivery/);
+      assert.deepEqual(row, before);
+    }
+  }
+});
+
+test("case-created history never borrows missing actor or occurrence time from other fields", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  for (const missing of [null, undefined, "", {}, "invalid"]) {
+    const event = mapTrackEvent({
+      id: "case-created", event_type: "registration_case_created",
+      actor_id: "current-owner", created_at: "2026-10-09T02:00:00Z",
+      after_value: JSON.stringify({ version: 1, actorId: missing === "invalid" ? null : missing, occurredAt: missing }),
+    });
+    const [item] = buildRegistrationSubjectHistory({ events: [event] });
+    assert.equal(item.title, "등록 문의 생성");
+    assert.equal(item.actorId, null);
+    assert.equal(item.actorKind, null);
+    assert.equal(item.occurredAt, null);
+    assert.equal(item.timeKind, "unavailable");
+    assert.doesNotMatch(JSON.stringify(item), /current-owner|2026-10-09T02/);
+  }
+});
+
+test("unrecognized case payloads use safe titles without promoting unverified actor or time", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  for (const afterValue of [
+    '{"version":1,"campus":"PRIVATE_BROKEN"',
+    JSON.stringify({ version: 3, actorId: "PRIVATE_ACTOR", occurredAt: "2026-10-09T01:00:00Z" }),
+    JSON.stringify(["PRIVATE_ARRAY"]), '"PRIVATE_STRING"', "null", null,
+  ]) {
+    const [item] = buildRegistrationSubjectHistory({ events: [mapTrackEvent({
+      id: "case-created", event_type: "registration_case_created", after_value: afterValue,
+      actor_id: "current-owner", created_at: "2026-10-09T02:00:00Z",
+    })] });
+    assert.equal(item.title, "등록 문의 생성");
+    assert.equal(item.actorId, null);
+    assert.equal(item.actorKind, null);
+    assert.equal(item.occurredAt, null);
+    assert.doesNotMatch(item.title + item.description, /PRIVATE_|current-owner/);
+  }
+});
+
+test("case-created timestamps require a complete valid instant, preserving explicit offsets", async () => {
+  const { mapTrackEvent } = await loadFactory();
+  for (const occurredAt of ["2026", "2026-10-09", "2026-10-09T01:02:03", "2026-02-30T01:02:03Z", "2026-10-09T24:00:00Z", "2026-10-09T01:60:00Z"]) {
+    const event = mapTrackEvent({ event_type: "registration_case_created", after_value: { version: 1, occurredAt } });
+    const [item] = buildRegistrationSubjectHistory({ events: [event] });
+    assert.equal(item.timeKind, "unavailable", occurredAt);
+    assert.equal(item.occurredAt, null);
+  }
+  for (const occurredAt of ["2026-10-09T01:02:03.123456+00:00", "2024-02-29T01:02:03+09:00"]) {
+    const event = mapTrackEvent({ event_type: "registration_case_created", after_value: { version: 1, occurredAt } });
+    assert.equal(event.occurredAt, occurredAt);
+  }
 });
 
 test("migration legacy snapshot follows H2 evidence and ignores unrelated detail text", async () => {

@@ -145,3 +145,38 @@ test("an empty case opens an explicit empty automatic history without edit or se
   assert.match(view.timeline().textContent, /아직 자동 이력이 없습니다/u)
   assert.equal(view.timeline().querySelectorAll("button, input, textarea, select, a").length, 0)
 })
+
+test("safe creation and legacy titles survive repeated details, Escape, and reopen without raw JSON", async (t) => {
+  const detail = detailFixture()
+  detail.events.push(
+    { id: "case", eventType: "registration_case_created", payloadVersion: 1,
+      actorId: "known-actor", actorKind: "user", occurredAt: "2026-10-09T01:02:03Z", metadata: {} },
+    { id: "broken", eventType: "registration_case_created", payloadVersion: null,
+      legacyText: '{"campus":"PRIVATE_BROKEN","actorId":', metadata: {} },
+    { id: "future", eventType: "registration_case_created", payloadVersion: null,
+      legacyText: '{"version":99,"campus":"PRIVATE_FUTURE"}', metadata: {} },
+    { id: "prose", eventType: "track_closed", payloadVersion: null,
+      legacyText: "보호자 요청으로 문의 종료", metadata: {} },
+    { id: "null", eventType: "registration_case_created", payloadVersion: null,
+      legacyText: null, metadata: {} },
+  )
+  const view = await mount(t, detail)
+  for (let cycle = 0; cycle < 3; cycle++) {
+    await flush(() => { view.trigger.focus(); view.trigger.click() })
+    const timeline = view.timeline()
+    assert.ok(timeline)
+    assert.equal(view.document.querySelectorAll('section[aria-label="등록 자동 이력"]').length, 1)
+    const rows = [...timeline.querySelectorAll(":scope > ol > li")]
+    assert.equal(rows.length, 9)
+    const created = rows.find(row => row.querySelector("p").textContent.includes("2026. 10. 09."))
+    assert.equal(created.querySelector("span").textContent, "등록 문의 생성")
+    assert.match(created.querySelector("p").textContent, /담당 직원 · 2026\. 10\. 09\./u)
+    assert.match(timeline.textContent, /보호자 요청으로 문의 종료/u)
+    assert.equal(rows.filter(row => row.querySelector("span").textContent === "등록 문의 생성").length, 5)
+    for (const row of rows) await flush(() => row.querySelector("button").click())
+    assert.doesNotMatch(timeline.textContent, /PRIVATE_|actorId|campus|version|\[object Object\]/u)
+    await flush(() => view.document.activeElement.dispatchEvent(new dom.window.KeyboardEvent("keydown", { key: "Escape", bubbles: true })))
+    assert.equal(view.timeline(), null)
+    assert.ok(view.document.activeElement === view.trigger)
+  }
+})

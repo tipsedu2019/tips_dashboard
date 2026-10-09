@@ -1578,13 +1578,36 @@ function exactRegistrationTrackEventType(input: unknown) {
   return typeof input === "string" ? input : ""
 }
 
+function recordedCaseCreationTime(input: unknown) {
+  if (typeof input !== "string") return ""
+  // The producer writes a complete timestamptz. Date.parse alone accepts year-
+  // only strings, local times and overflowing dates, none of which prove a time.
+  const match = /^(\d{4}-\d{2}-\d{2})T(\d{2}):(\d{2}):(\d{2})(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.exec(input)
+  if (!match || Number(match[2]) > 23 || Number(match[3]) > 59 || Number(match[4]) > 59) return ""
+  const day = new Date(`${match[1]}T00:00:00Z`)
+  if (!Number.isFinite(day.getTime()) || day.toISOString().slice(0, 10) !== match[1]) return ""
+  return Number.isFinite(Date.parse(input)) ? input : ""
+}
+
 function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
   const outerEventType = exactRegistrationTrackEventType(
     value(row, "event_type", "eventType"),
   )
-  const payload = outerEventType === "registration_track_event"
+  const rawPayload = outerEventType === "registration_track_event" || outerEventType === "registration_case_created"
     ? parseJsonRecord(value(row, "after_value", "afterValue"))
     : null
+  // Case creation has its own v1 producer, without an inner eventType/metadata.
+  // Read only its documented audit fields; never expose its student snapshot or
+  // infer a missing creator/time from the current owner or insertion timestamp.
+  const caseCreated = outerEventType === "registration_case_created"
+    && registrationTrackEventPayloadVersion(rawPayload) === 1
+  const caseActorId = caseCreated && typeof rawPayload?.actorId === "string"
+    ? nullableText(rawPayload.actorId)
+    : null
+  const caseOccurredAt = caseCreated ? recordedCaseCreationTime(rawPayload?.occurredAt) : ""
+  const payload = caseCreated
+    ? { version: 1, eventType: outerEventType, actorId: caseActorId, occurredAt: caseOccurredAt }
+    : outerEventType === "registration_track_event" ? rawPayload : null
   const payloadVersion = registrationTrackEventPayloadVersion(payload)
   const versionOne = payloadVersion === 1 ? payload : null
   const versionTwo = payloadVersion === 2 ? payload : null
@@ -1630,11 +1653,13 @@ function mapTrackEvent(row: Row): OpsRegistrationTrackEvent {
       : versionOne
         ? nullableText(versionOne.actorId)
         : nullableText(value(row, "actor_id", "actorId")),
-    actorKind,
+    actorKind: caseCreated ? (caseActorId ? "user" : null) : actorKind,
     systemSource: versionTwo ? nullableText(versionTwo.system_source) : null,
     reasonCode,
     payloadVersion,
-    occurredAt: versionTwo
+    occurredAt: caseCreated
+      ? caseOccurredAt
+      : versionTwo
       ? text(versionTwo.occurred_at) || text(value(row, "created_at", "createdAt"))
       : versionOne
         ? text(versionOne.occurredAt) || text(value(row, "created_at", "createdAt"))
