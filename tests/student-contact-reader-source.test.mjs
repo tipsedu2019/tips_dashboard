@@ -36,13 +36,17 @@ for (const match of draft.matchAll(/\('([^']+)', '([a-f0-9]{64})', '([a-f0-9]{64
   candidates.set(match[1], { body, original: original.body, old: old.values, changed: changed.values })
 }
 
-test("seven exact final ordered definitions and thirteen unique changes are modeled", () => {
+test("eight exact final ordered definitions and fifteen unique changes are modeled", () => {
   assert.deepEqual([...candidates.keys()], STUDENT_CONTACT_READER_SIGNATURES)
-  assert.equal([...candidates.values()].reduce((count, row) => count + row.old.length, 0), 13)
+  assert.equal([...candidates.values()].reduce((count, row) => count + row.old.length, 0), 15)
   assert.ok(finalSources.get(STUDENT_CONTACT_READER_SIGNATURES[5]).sources.includes("20260928021444_registration_numbered_keys_narrow_summary.sql"))
   assert.match(finalSources.get(STUDENT_CONTACT_READER_SIGNATURES[4]).body, /^#variable_conflict use_column\nbegin\n  return query/u)
   assert.match(finalSources.get(STUDENT_CONTACT_READER_SIGNATURES[4]).body, /active_track\.task_id = common\.id/u)
   assert.match(finalSources.get(STUDENT_CONTACT_READER_SIGNATURES[2]).body, /textbook/u)
+  assert.deepEqual(finalSources.get(STUDENT_CONTACT_READER_SIGNATURES[7]).sources, [
+    "20260818083818_optimize_registration_task_stats.sql",
+    "20260928010618_registration_stats_narrow_summary.sql",
+  ])
 })
 
 test("source patch rejects missing/repeated anchors and already-patched replay", () => {
@@ -71,6 +75,12 @@ test("installer source preserves existing function metadata and never changes pr
   assert.match(draft, /student_contact_reader_preimage_drift' using errcode = '55000'/u)
   assert.match(draft, /student_contact_reader_projection_drift' using errcode = '55000'/u)
   assert.match(draft, /execute pg_catalog\.replace\(definition,old_row\.prosrc,candidate_body\)/u)
+  assert.match(draft, /old_row\.prolang is distinct from \(select oid from pg_catalog\.pg_language where lanname='sql'\)/u)
+  assert.match(draft, /old_row\.proargnames is distinct from array\['p_filters'\]::text\[\]/u)
+  assert.match(draft, /old_row\.prorettype is distinct from 'pg_catalog\.jsonb'::pg_catalog\.regtype/u)
+  assert.match(draft, /'TimeZone=Asia\/Seoul' = any\(old_row\.proconfig\)/u)
+  assert.match(draft, /not pg_catalog\.has_function_privilege\('authenticated',target,'EXECUTE'\)/u)
+  for (const role of ["anon", "public"]) assert.ok(draft.includes(`pg_catalog.has_function_privilege('${role}',target,'EXECUTE')`))
   assert.doesNotMatch(draft, /\b(?:grant|revoke|create\s+(?:or\s+replace\s+)?function|alter\s+table|delete\s+from|update\s+public\.)\b/iu)
 })
 
@@ -160,7 +170,7 @@ const opsSource = readFileSync(new URL("../src/features/tasks/ops-task-service.t
 const opsSyntax = ts.createSourceFile("ops-task-service.ts", opsSource, ts.ScriptTarget.Latest, true)
 const declarations = opsSyntax.statements.filter((node) => ts.isFunctionDeclaration(node)).map((node) => node.getText(opsSyntax)).join("\n")
 const runtime = { exports: {} }
-vm.runInNewContext(ts.transpileModule(`${declarations}\nmodule.exports={mapOpsTaskPageRow};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText,
+vm.runInNewContext(ts.transpileModule(`${declarations}\nmodule.exports={mapOpsTaskPageRow,mapOpsTaskPageStatsResult};`, { compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS } }).outputText,
   { module: runtime, exports: runtime.exports, stripRegistrationTaskContact, REGISTRATION_PIPELINE_STATUSES })
 for (const index of [4, 6]) {
   test(`actual ${index === 4 ? "cursor" : "numbered"} registration metadata producer no longer sends phones to its real DTO consumer`, () => {
@@ -184,11 +194,89 @@ test("list search/sort loses phone access while current-open scoped contact read
   const numbered = candidates.get(STUDENT_CONTACT_READER_SIGNATURES[0]).body
   assert.doesNotMatch(numbered, /record\.(?:contact|parent_contact)/u)
   assert.match(numbered, /'uid', \$e\$nullif\(pg_catalog\.btrim\(record\.uid\)/u)
-  for (const index of [4, 5, 6]) assert.doesNotMatch(candidates.get(STUDENT_CONTACT_READER_SIGNATURES[index]).body, /detail\.(?:parent_phone|student_phone)/u)
+  for (const index of [4, 5, 6, 7]) assert.doesNotMatch(candidates.get(STUDENT_CONTACT_READER_SIGNATURES[index]).body, /detail\.(?:parent_phone|student_phone)/u)
   assert.equal([...candidates.keys()].some((name) => name.includes("get_registration_case_contact")), false)
   const lifecycle = readFileSync(new URL("../docs/security/sql/registration-contact-lifecycle-integration-draft.sql", import.meta.url), "utf8")
   assert.match(lifecycle, /get_registration_case_contact_v1/u)
   assert.match(lifecycle, /include_parent/u)
+})
+
+function callArguments(source, marker) {
+  const start = source.indexOf(marker)
+  assert.notEqual(start, -1, `actual SQL call ${marker}`)
+  assert.equal(source.indexOf(marker, start + marker.length), -1, `unique SQL call ${marker}`)
+  let at = start + marker.length, depth = 1, quoted = false
+  const argsAt = at
+  for (; at < source.length; at++) {
+    if (source[at] === "'") {
+      if (quoted && source[at + 1] === "'") { at++; continue }
+      quoted = !quoted
+    } else if (!quoted) {
+      if (source[at] === "(") depth++
+      if (source[at] === ")" && --depth === 0) return splitExpressions(source.slice(argsAt, at))
+    }
+  }
+  assert.fail(`unterminated SQL call ${marker}`)
+}
+
+// This models only the actual scalar concat/search expression, not SQL joins,
+// RLS, counts, query plans or execution. The isolated pgTAP checks those apart.
+function statsSearchMatches(body, environment, search) {
+  assert.ok(body.includes("'[[:space:]-]+'"))
+  const [separator, ...fields] = callArguments(body, "pg_catalog.concat_ws(")
+  assert.equal(readerSqlLiteral(separator).value, " ")
+  const normalize = (value) => value.toLowerCase().replace(/[\s-]+/gu, "")
+  const text = fields.map((field) => evaluate(field, environment)).filter((value) => value != null).join(" ")
+  return normalize(text).includes(normalize(search.trim()))
+}
+
+test("count-only stats removes only known contact fields and preserves narrow membership and business count bytes", () => {
+  const row = candidates.get(STUDENT_CONTACT_READER_SIGNATURES[7])
+  assert.equal(row.old.length, 2)
+  assert.equal(row.body, row.original
+    .replace("      detail.parent_phone,\n      detail.student_phone,\n", "")
+    .replace("        base.parent_phone,\n        base.student_phone,\n", ""))
+  assert.doesNotMatch(row.body, /(?:detail|base)\.(?:parent_phone|student_phone)/u)
+  assert.match(row.body, /where track\.archived_at is null/u)
+  assert.match(row.body, /order by consultation\.created_at desc, consultation\.id desc\s+limit 1/u)
+  assert.match(row.body, /pg_catalog\.jsonb_array_length\(p_filters -> 'statuses'\)/u)
+  assert.match(row.body, /memberships\.director_profile_id::text = p_filters ->> 'consultationOwnerId'/u)
+  const outputMarker = "  select pg_catalog.jsonb_build_object(\n    'total'"
+  assert.notEqual(row.original.indexOf(outputMarker), -1)
+  assert.equal(row.body.slice(row.body.indexOf(outputMarker)), row.original.slice(row.original.indexOf(outputMarker)))
+})
+
+test("actual stats search expression loses both contact aliases and keeps name school subject and visit search", () => {
+  const row = candidates.get(STUDENT_CONTACT_READER_SIGNATURES[7])
+  const environment = {
+    base: { student_name: NAME, title: "등록 합성", parent_phone: PARENT, student_phone: PHONE,
+      school_grade: "중2", school_name: SCHOOL, request_note: "합성 메모" },
+    summary: { subject: "영어", visit_place: "합성 상담 장소" }, director: { name: "합성 담당자" },
+  }
+  for (const phone of [PHONE, PARENT]) {
+    assert.equal(statsSearchMatches(row.original, environment, phone), true)
+    assert.equal(statsSearchMatches(row.body, environment, phone), false)
+  }
+  for (const search of [NAME, SCHOOL, "중2", "영어", "합성 상담 장소", "합성 담당자"]) {
+    assert.equal(statsSearchMatches(row.original, environment, search), true)
+    assert.equal(statsSearchMatches(row.body, environment, search), true)
+  }
+  const views = ["inquiry", "level_test", "consultation_requested", "consultation_completed", "waiting", "observation", "enrollment", "payment", "completed"]
+  for (const search of [PHONE, NAME]) {
+    const total = Number(statsSearchMatches(row.body, environment, search))
+    const wire = { total, byStatus: total ? { requested: total } : {},
+      byView: Object.fromEntries(views.map((view) => [view, view === "inquiry" ? total : 0])),
+      metrics: { consultationMine: 0, consultationAll: 0 }, facets: {} }
+    const normalized = runtime.exports.mapOpsTaskPageStatsResult({ data: wire })
+    assert.deepEqual(JSON.parse(JSON.stringify(normalized)), wire)
+    noPhones(normalized)
+  }
+})
+
+test("stats free-text phone content remains a documented separate boundary", () => {
+  const row = candidates.get(STUDENT_CONTACT_READER_SIGNATURES[7])
+  assert.equal(statsSearchMatches(row.body, { base: { request_note: PHONE }, summary: {}, director: {} }, PHONE), true)
+  assert.match(draft, /Unstructured notes, historical payloads/u)
 })
 
 test("arbitrary notes remain a separate boundary instead of being falsely certified contact-free", () => {

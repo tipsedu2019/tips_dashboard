@@ -16,7 +16,7 @@
     "src/features/tasks/server/registration-customer-message-bundle-source.ts": "165c6ba78411e9d71d27e308923bbfd0eedc75bb92b7ac2534fa126a795ee00e",
     "src/features/tasks/registration-contact-client.ts": "7a87d0f125fc004afb0f77c3dd2cde49b1600c18e1d6cda58c7a940553450b5f",
     "src/features/tasks/registration-contact-message-policy.ts": "089cb11579d25cf006d7014e19326d621d389b1006a782cf3734702d7d37f0db",
-    "docs/security/sql/registration-contact-lifecycle-integration-draft.sql": "e3609d25c445c49afe2aaaec0537756709f28d05127493ad2930c1ef38eedd47",
+    "docs/security/sql/registration-contact-lifecycle-integration-draft.sql": "90620671fddb7f99d235aacdc7576f19ef431e764a6bd02885994356d0e3a85a",
     "docs/security/sql/registration-contact-message-fence-draft.sql": "4cd82b73b8005afe469b450e3ca00bbfaf4d0dfb6150c0f0366689829f2461ae",
     "tests/registration-contact-command-route.test.mjs": "451efbb47937ce6b4708b6f99404ac5f80e29132ab57abec5db3b94e653c41c9",
     "tests/registration-observation-customer-message-route.test.mjs": "c1c5ee60ec21e109af15362d13fc2e4b6696cb030bf4fc5184feaa9f34e5a97c",

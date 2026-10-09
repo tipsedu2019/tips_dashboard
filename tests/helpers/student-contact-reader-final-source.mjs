@@ -10,6 +10,7 @@ export const STUDENT_CONTACT_READER_SIGNATURES = Object.freeze([
   "dashboard_private.ops_task_page_source_v1(text,jsonb)",
   "dashboard_private.ops_task_numbered_keys_v1(text,jsonb)",
   "dashboard_private.ops_task_numbered_project_v1(text,uuid[],uuid[])",
+  "dashboard_private.ops_registration_task_stats_v1(jsonb)",
 ])
 export const readerSourceHash = (value) => createHash("sha256").update(value).digest("hex")
 export function replaceReaderSourceOnce(body, before, after, label) {
@@ -135,6 +136,13 @@ export function readFinalStudentContactReaderSources() {
         const pairs = [...source.matchAll(/definition := pg_catalog\.replace\(definition,\s*('(?:''|[^'])*'),\s*(\$summary\$[\s\S]*?\$summary\$|'(?:''|[^'])*')\);/gu)]
         assert.equal(pairs.length, 3, `${file}: three narrow source replacements`)
         return pairs.reduce((value, pair) => replaceReaderSourceOnce(value, readerSqlLiteral(pair[1]).value, readerSqlLiteral(pair[2]).value, file), body)
+      })
+    }
+    if (file === "20260928010618_registration_stats_narrow_summary.sql") {
+      mutate(STUDENT_CONTACT_READER_SIGNATURES[7], (body) => {
+        const replacement = /body := pg_catalog\.replace\(function_row\.prosrc,\s*('(?:''|[^'])*'),\s*(\$summary\$[\s\S]*?\$summary\$)\);/u.exec(source)
+        assert.ok(replacement, `${file}: exact narrow stats source replacement`)
+        return replaceReaderSourceOnce(body, readerSqlLiteral(replacement[1]).value, readerSqlLiteral(replacement[2]).value, file)
       })
     }
   }

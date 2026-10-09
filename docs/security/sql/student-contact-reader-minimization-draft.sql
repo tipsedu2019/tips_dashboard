@@ -1,13 +1,14 @@
 -- REVIEW CANDIDATE; SOURCE ONLY, NOT INSTALLABLE, NOT AN APPLIED MIGRATION.
--- Source: 90bcd6554e9d77675e4d88d40220ed7ef9284533 (privacy + PR96 + main 4a2cda49).
+-- Source: ed593f4d68ed369bbf5dabdaa60a2b542f531729 (corrected local candidate).
 -- Ordered source reconstruction includes final enrollment/status/count/textbook,
 -- soft-archive, parameter-sensitive custom plans and Sept28 narrow keys patches.
--- Runtime SQL/pgTAP/catalog/ACL/RLS/concurrency/rollback executions: 0 (blocked).
--- Existing seven INVOKER readers only: no new RPC, signatures, grants, policies,
+-- This eight-reader revision still requires isolated SQL/catalog verification.
+-- Existing eight INVOKER readers only: no new RPC, signatures, grants, policies,
 -- roles, columns, historical DML/backfill, provider send or permanent purge.
 -- Master native contact/parent_contact and metadata phone aliases are excluded;
 -- NULL DTO tombstones preserve older consumers. Registration list phone search
--- is removed. Phone-consultation timestamps and all unrelated business data stay.
+-- and count-only phone search are removed. Phone-consultation timestamps and
+-- all unrelated business data stay.
 -- The separate current-open get_registration_case_contact_v1 temporary parent
 -- read and server-private delivery destination are intentionally not changed.
 -- Unstructured notes, historical payloads, existing direct Data API privileges
@@ -71,7 +72,16 @@ $reader_text_21$,
       array[$reader_text_25$'parentPhone', coalesce(detail.parent_phone, ''),
           'studentPhone', coalesce(detail.student_phone, ''),$reader_text_25$],
       array[$reader_text_26$'parentPhone', null,
-          'studentPhone', null,$reader_text_26$])
+          'studentPhone', null,$reader_text_26$]),
+    ('dashboard_private.ops_registration_task_stats_v1(jsonb)', '4aa877d94c21212e7b9f0eae03a0e253cd8318c197fc05e361f35141de6ee12d', '5bdda34ee7b55b2f9730d6293a4c5683d61d514434d31d082e4c9d80c7845e92',
+      array[$reader_text_27$      detail.parent_phone,
+      detail.student_phone,
+$reader_text_27$,
+        $reader_text_28$        base.parent_phone,
+        base.student_phone,
+$reader_text_28$],
+      array[$reader_text_29$$reader_text_29$,
+        $reader_text_30$$reader_text_30$])
   ) changes(signature, before_sha256, after_sha256, old_values, new_values) loop
     target := pg_catalog.to_regprocedure(item.signature);
     if target is null then
@@ -81,6 +91,18 @@ $reader_text_21$,
     if old_row.prosecdef is distinct from false or old_row.provolatile is distinct from 's'
       or not coalesce('search_path=""' = any(old_row.proconfig) or 'search_path=' = any(old_row.proconfig),false)
       or pg_catalog.encode(extensions.digest(old_row.prosrc,'sha256'),'hex') is distinct from item.before_sha256 then
+      raise exception 'student_contact_reader_preimage_drift' using errcode = '55000';
+    end if;
+    if item.signature = 'dashboard_private.ops_registration_task_stats_v1(jsonb)' and (
+      old_row.prolang is distinct from (select oid from pg_catalog.pg_language where lanname='sql')
+      or old_row.proargnames is distinct from array['p_filters']::text[]
+      or old_row.prorettype is distinct from 'pg_catalog.jsonb'::pg_catalog.regtype
+      or old_row.proretset is distinct from false
+      or not coalesce('TimeZone=Asia/Seoul' = any(old_row.proconfig),false)
+      or not pg_catalog.has_function_privilege('authenticated',target,'EXECUTE')
+      or pg_catalog.has_function_privilege('anon',target,'EXECUTE')
+      or pg_catalog.has_function_privilege('public',target,'EXECUTE')
+    ) then
       raise exception 'student_contact_reader_preimage_drift' using errcode = '55000';
     end if;
     if pg_catalog.cardinality(item.old_values) <> pg_catalog.cardinality(item.new_values)

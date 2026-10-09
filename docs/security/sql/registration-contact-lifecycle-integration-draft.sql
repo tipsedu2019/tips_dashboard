@@ -1,6 +1,8 @@
 -- SOURCE-ONLY REVIEW CANDIDATE. Never placed in automatic migrations.
 -- Base f2d308a0e2999a80f37f77f53341286561b92d51 includes exact PR96 replacements.
--- DB/Docker/runtime SQL preparation was denied: this file has NEVER been executed.
+-- Parent alone runs separately authorized owned synthetic DB verification.
+-- Previous candidate installed but whole cancellation failed its original
+-- parent projection guard. This revision preserves that guard and legacy facts.
 -- No historical purge, no new secret/key provisioning. Server HMAC uses the
 -- existing REGISTRATION_SOLAPI_RECIPIENT_HASH_PEPPER through an authenticated
 -- service-role-only HTTP controller; the browser is not a digest authority.
@@ -14,14 +16,18 @@ do $registration_contact_preflight$
 declare item record; target regprocedure;
 begin
   for item in select * from (values
-    ('dashboard_private.create_registration_case_impl(text,text,text,text,text,text,timestamptz,text[],text,text,text)', 'd5ce049f39adef16428b1dc0964ff414'),
-    ('dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamptz,text,text,integer,text)', 'ba45098e855e187262e31102a87c0d46'),
-    ('dashboard_private.save_registration_case_inquiry_v1_impl(uuid,text,text,text,text,text,text,timestamptz,text,text,integer,text[],text[],text)', '5f96e3817673f97d8d803855ef7141d6'),
-    ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)', 'de5e23e2f3662119c832b93ceb17e9e5'),
-    ('dashboard_private.save_registration_waiting_details_v2_impl(uuid,text,uuid,text,text)', 'fcb2a22ab233bf23456e1154a19a58bb'),
-    ('dashboard_private.sync_registration_case_subjects_impl(uuid,text[],text)', '75d1bb204e1597a5a0e0d12cfc2765bd'),
-    ('dashboard_private.update_registration_case_common_with_reminders_v1_impl(uuid,text,text,text,text,text,text,timestamptz,text,text,integer,text)', '0b52417da5059cd844ccad8d2f19de71')
-  ) pins(signature, body_md5) loop
+    ('dashboard_private.create_registration_case_impl(text,text,text,text,text,text,timestamptz,text[],text,text,text)', 'd5ce049f39adef16428b1dc0964ff414','v','jsonb'),
+    ('dashboard_private.update_registration_case_common_impl(uuid,text,text,text,text,text,text,timestamptz,text,text,integer,text)', 'ba45098e855e187262e31102a87c0d46','v','jsonb'),
+    ('dashboard_private.save_registration_case_inquiry_v1_impl(uuid,text,text,text,text,text,text,timestamptz,text,text,integer,text[],text[],text)', '5f96e3817673f97d8d803855ef7141d6','v','jsonb'),
+    ('dashboard_private.set_registration_workflow_status_v1_impl(uuid,text,integer,text)', 'de5e23e2f3662119c832b93ceb17e9e5','v','jsonb'),
+    ('dashboard_private.save_registration_waiting_details_v2_impl(uuid,text,uuid,text,text)', 'fcb2a22ab233bf23456e1154a19a58bb','v','jsonb'),
+    ('dashboard_private.sync_registration_case_subjects_impl(uuid,text[],text)', '75d1bb204e1597a5a0e0d12cfc2765bd','v','jsonb'),
+    ('dashboard_private.update_registration_case_common_with_reminders_v1_impl(uuid,text,text,text,text,text,text,timestamptz,text,text,integer,text)', '0b52417da5059cd844ccad8d2f19de71','v','jsonb'),
+    ('dashboard_private.derive_registration_parent_projection(uuid)','9a9f8076e1ef5c2b5c70dcb7e7e1e254','s','jsonb'),
+    ('public.prevent_completed_operation_reopen()','fcdcaf1f93f4e69cb850e5c322b30d0f','v','trigger'),
+    ('dashboard_private.reopen_registration_track_impl(uuid,text,text,text)','1d6f75da0c146dcfc1c71f45d66ae590','v','jsonb'),
+    ('dashboard_private.bump_registration_customer_message_recipient_revision_v1()','b29b56dd0151a2eecc74fbe2409ebfeb','v','trigger')
+  ) pins(signature, body_md5,volatility,return_type) loop
     target := pg_catalog.to_regprocedure(item.signature);
     if target is null or not exists (
       select 1 from pg_catalog.pg_proc proc
@@ -30,14 +36,14 @@ begin
       where proc.oid=target and pg_catalog.md5(proc.prosrc)=item.body_md5
         and language.lanname='plpgsql' and owner_role.rolname='postgres'
         and proc.prosecdef and not proc.proisstrict and not proc.proleakproof
-        and proc.provolatile='v' and proc.prokind='f' and proc.prorettype='jsonb'::regtype
+        and proc.provolatile::text=item.volatility and proc.prokind='f' and proc.prorettype=pg_catalog.to_regtype(item.return_type)
         and proc.proconfig=array['search_path=""']::text[]
     ) then
       raise exception 'registration_contact_source_preimage_drift' using errcode='55000';
     end if;
   end loop;
   if exists(select 1 from pg_catalog.pg_attribute where attrelid='public.ops_registration_details'::regclass
-      and attname in ('contact_phase','contact_generation','contact_revision','contact_closed_at','contact_closure_reason') and not attisdropped)
+      and attname in ('contact_phase','contact_generation','contact_revision','contact_closed_at','contact_closure_reason','contact_whole_cancel_explicit') and not attisdropped)
     or pg_catalog.to_regclass('dashboard_private.registration_contact_claims_v1') is not null
     or pg_catalog.to_regclass('dashboard_private.registration_contact_receipts_v1') is not null then
     raise exception 'registration_contact_installation_already_present' using errcode='55000';
@@ -52,6 +58,7 @@ alter table public.ops_registration_details
   add column contact_revision bigint not null default 1,
   add column contact_closed_at timestamptz,
   add column contact_closure_reason text,
+  add column contact_whole_cancel_explicit boolean not null default false,
   add constraint registration_contact_counters_v1 check(contact_generation>0 and contact_revision>0),
   add constraint registration_contact_phase_v1 check(
     (contact_phase='open' and contact_closed_at is null and contact_closure_reason is null)
@@ -59,7 +66,9 @@ alter table public.ops_registration_details
       and contact_closure_reason is not null
       and contact_closure_reason in ('all_current_tracks_terminal','whole_case_cancelled','last_current_track_excluded')
       and parent_phone is null and student_phone is null)
-  );
+  ),
+  add constraint registration_contact_explicit_cancel_v1 check(not contact_whole_cancel_explicit
+    or contact_phase='closed' and contact_closure_reason='whole_case_cancelled');
 
 -- This is authorization metadata, never a raw request/contact/key store.
 create table dashboard_private.registration_contact_claims_v1(
@@ -77,6 +86,7 @@ create table dashboard_private.registration_contact_claims_v1(
   close_reason text,
   legacy_replay boolean not null default false,
   lifecycle_applied boolean not null default false,
+  parent_reopen_authorized boolean not null default false,
   primary key(transaction_id,backend_pid)
 );
 create table dashboard_private.registration_contact_receipts_v1(
@@ -88,12 +98,26 @@ create table dashboard_private.registration_contact_receipts_v1(
   response_payload jsonb not null check(pg_catalog.jsonb_typeof(response_payload)='object'),
   primary key(actor_id,request_key)
 );
+-- Narrow capability minted by the parent AFTER-status trigger or validated
+-- actual business-reopen helper. This is
+-- not a request, HMAC or receipt: it permits an exact contact-only projection
+-- transition after all original task guards have accepted the business write.
+create table dashboard_private.registration_contact_projection_claims_v1(
+  transaction_id bigint not null,backend_pid integer not null,task_id uuid not null,
+  actor_id uuid,expected_generation bigint not null check(expected_generation>0),
+  expected_revision bigint not null check(expected_revision>0),
+  direction text not null check(direction in ('close','seal','reopen')),
+  primary key(transaction_id,backend_pid,task_id)
+);
 alter table dashboard_private.registration_contact_claims_v1 owner to postgres;
 alter table dashboard_private.registration_contact_receipts_v1 owner to postgres;
+alter table dashboard_private.registration_contact_projection_claims_v1 owner to postgres;
 alter table dashboard_private.registration_contact_claims_v1 enable row level security;
 alter table dashboard_private.registration_contact_receipts_v1 enable row level security;
+alter table dashboard_private.registration_contact_projection_claims_v1 enable row level security;
 revoke all on dashboard_private.registration_contact_claims_v1 from public,anon,authenticated,service_role;
 revoke all on dashboard_private.registration_contact_receipts_v1 from public,anon,authenticated,service_role;
+revoke all on dashboard_private.registration_contact_projection_claims_v1 from public,anon,authenticated,service_role;
 
 create function dashboard_private.lock_registration_contact_case_v1(p_task_id uuid)
 returns void language plpgsql volatile security definer set search_path='' as $$
@@ -487,14 +511,15 @@ $$;
 create function dashboard_private.guard_registration_contact_detail_write_v1()
 returns trigger language plpgsql volatile security definer set search_path='' as $$
 declare claim dashboard_private.registration_contact_claims_v1%rowtype; protected_change boolean;
+  projection dashboard_private.registration_contact_projection_claims_v1%rowtype;
 begin
   if tg_op='INSERT' then
     protected_change:=new.parent_phone is not null or new.student_phone is not null
       or new.contact_phase<>'open' or new.contact_generation<>1 or new.contact_revision<>1
-      or new.contact_closed_at is not null or new.contact_closure_reason is not null;
+      or new.contact_closed_at is not null or new.contact_closure_reason is not null or new.contact_whole_cancel_explicit;
   else
-    protected_change:=row(new.task_id,new.parent_phone,new.student_phone,new.contact_phase,new.contact_generation,new.contact_revision,new.contact_closed_at,new.contact_closure_reason)
-      is distinct from row(old.task_id,old.parent_phone,old.student_phone,old.contact_phase,old.contact_generation,old.contact_revision,old.contact_closed_at,old.contact_closure_reason);
+    protected_change:=row(new.task_id,new.parent_phone,new.student_phone,new.contact_phase,new.contact_generation,new.contact_revision,new.contact_closed_at,new.contact_closure_reason,new.contact_whole_cancel_explicit)
+      is distinct from row(old.task_id,old.parent_phone,old.student_phone,old.contact_phase,old.contact_generation,old.contact_revision,old.contact_closed_at,old.contact_closure_reason,old.contact_whole_cancel_explicit);
   end if;
   if not protected_change then return new; end if;
   if tg_op='UPDATE' and new.task_id<>old.task_id then
@@ -503,7 +528,45 @@ begin
     where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
       and source.actor_id=(select auth.uid()) and not source.legacy_replay
       and (source.task_id=new.task_id or source.task_id is null and source.command='create');
-  if not found then raise exception 'registration_contact_transition_required' using errcode='42501'; end if;
+  if not found then
+    -- Parent AFTER-status projection can clear/restart contacts only. Every
+    -- business column, case identity and raw value is preserved or set NULL.
+    if tg_op='UPDATE' then
+      select source.* into projection from dashboard_private.registration_contact_projection_claims_v1 source
+        where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
+          and source.actor_id is not distinct from (select auth.uid()) and source.task_id=old.task_id
+          and source.expected_generation=old.contact_generation and source.expected_revision=old.contact_revision;
+      if found and not old.contact_whole_cancel_explicit and not new.contact_whole_cancel_explicit
+        and new.parent_phone is null and new.student_phone is null
+        and new.contact_revision=old.contact_revision+1
+        -- The existing alphabetically earlier recipient trigger derives this
+        -- fence counter from the phone change. Preserve its exact rule; it is
+        -- not an arbitrary allowed business-field edit.
+        and new.customer_message_recipient_revision=old.customer_message_recipient_revision+
+          (case when pg_catalog.regexp_replace(coalesce(new.parent_phone,''),'[^0-9]','','g')
+            is distinct from pg_catalog.regexp_replace(coalesce(old.parent_phone,''),'[^0-9]','','g') then 1 else 0 end)
+        and (pg_catalog.to_jsonb(new)-array['parent_phone','student_phone','contact_phase','contact_generation','contact_revision',
+          'contact_closed_at','contact_closure_reason','contact_whole_cancel_explicit','customer_message_recipient_revision','updated_at']::text[])
+          is not distinct from (pg_catalog.to_jsonb(old)-array['parent_phone','student_phone','contact_phase','contact_generation','contact_revision',
+          'contact_closed_at','contact_closure_reason','contact_whole_cancel_explicit','customer_message_recipient_revision','updated_at']::text[])
+        and ((projection.direction in ('close','seal') and new.contact_generation=old.contact_generation and new.contact_phase='closed'
+          and new.contact_closed_at is not null and new.contact_closure_reason='whole_case_cancelled'
+          and exists(select 1 from public.ops_tasks task where task.id=old.task_id and task.type='registration'
+            and (projection.direction='close' and task.status='canceled' or projection.direction='seal' and task.status<>'canceled')))
+        or (projection.direction='reopen'
+          and exists(select 1 from public.ops_tasks task where task.id=old.task_id and task.type='registration' and task.status in ('requested','in_progress'))
+          and ((new.contact_generation=old.contact_generation+1 and new.contact_phase='open'
+            and new.contact_closed_at is null and new.contact_closure_reason is null)
+          or (new.contact_generation=old.contact_generation and new.contact_phase='closed'
+            and new.contact_closed_at is not null and new.contact_closure_reason='all_current_tracks_terminal'
+            and exists(select 1 from public.ops_registration_subject_tracks track where track.task_id=old.task_id and track.archived_at is null)
+            and not exists(select 1 from public.ops_registration_subject_tracks track where track.task_id=old.task_id and track.archived_at is null
+              and track.workflow_status not in ('registered','not_registered','inquiry_only')))))) then
+        return new;
+      end if;
+    end if;
+    raise exception 'registration_contact_transition_required' using errcode='42501';
+  end if;
   if new.student_phone is not null then raise exception 'registration_student_contact_collection_disabled' using errcode='23514'; end if;
   if tg_op='UPDATE' and (old.contact_generation<>claim.expected_generation or old.contact_revision<>claim.expected_revision)
     and not claim.lifecycle_applied then
@@ -518,12 +581,98 @@ $$;
 create trigger registration_contact_detail_write_v1 before insert or update on public.ops_registration_details
   for each row execute function dashboard_private.guard_registration_contact_detail_write_v1();
 
+-- Only the parentStatus compatibility field is overlaid. Every original
+-- pipeline/roster/checklist/subject projection field remains source-derived.
+-- Live intent is metadata minted by the authenticated driver, never a GUC.
+create function dashboard_private.registration_contact_parent_projection_v1(p_task_id uuid,p_projection jsonb)
+returns jsonb language plpgsql volatile security definer set search_path='' as $$
+declare detail public.ops_registration_details%rowtype;
+  claim dashboard_private.registration_contact_claims_v1%rowtype;
+begin
+  select source.* into detail from public.ops_registration_details source where source.task_id=p_task_id;
+  if not found then return p_projection; end if;
+  select source.* into claim from dashboard_private.registration_contact_claims_v1 source
+    where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
+      and source.actor_id=(select auth.uid()) and source.task_id=p_task_id
+      and not source.legacy_replay and not source.lifecycle_applied
+      and source.expected_generation=detail.contact_generation and source.expected_revision=detail.contact_revision;
+  if found and claim.parent_reopen_authorized and claim.command='reopen' then
+    -- Reopening restores the existing computed business status, not requested
+    -- unconditionally. A canceled raw business projection is rejected by the
+    -- explicit reopen command; a manual selector is never a parent reopen.
+    return p_projection;
+  end if;
+  if found and claim.command='close' and claim.close_reason='whole_case_cancelled'
+    or detail.contact_whole_cancel_explicit and detail.contact_phase='closed'
+      and detail.contact_closure_reason='whole_case_cancelled' then
+    return p_projection||pg_catalog.jsonb_build_object('parentStatus','canceled');
+  end if;
+  return p_projection;
+end;
+$$;
+
+-- Capture the exact current final legacy projection under a new owner-only
+-- name, then wrap the existing two return sites. No historical full definition
+-- is recreated and the original public guard/recompute bodies are untouched.
+do $registration_contact_parent_projection_patch$
+declare target regprocedure:='dashboard_private.derive_registration_parent_projection(uuid)'::regprocedure;
+  prior pg_catalog.pg_proc%rowtype; after_proc pg_catalog.pg_proc%rowtype;
+  definition text; legacy_definition text; anchor text; replacement text;
+begin
+  select source.* into prior from pg_catalog.pg_proc source where source.oid=target;
+  if pg_catalog.md5(prior.prosrc)<>'9a9f8076e1ef5c2b5c70dcb7e7e1e254'
+    or pg_catalog.to_regprocedure('dashboard_private.registration_contact_legacy_parent_projection_v1(uuid)') is not null then
+    raise exception 'registration_contact_parent_source_drift' using errcode='55000'; end if;
+  definition:=pg_catalog.pg_get_functiondef(target);
+  anchor:='CREATE OR REPLACE FUNCTION dashboard_private.derive_registration_parent_projection(';
+  if pg_catalog.length(definition)-pg_catalog.length(pg_catalog.replace(definition,anchor,''))<>pg_catalog.length(anchor) then
+    raise exception 'registration_contact_parent_anchor_drift' using errcode='55000'; end if;
+  legacy_definition:=pg_catalog.replace(definition,anchor,
+    'CREATE OR REPLACE FUNCTION dashboard_private.registration_contact_legacy_parent_projection_v1(');
+  execute legacy_definition;
+  alter function dashboard_private.registration_contact_legacy_parent_projection_v1(uuid) owner to postgres;
+  revoke all on function dashboard_private.registration_contact_legacy_parent_projection_v1(uuid) from public,anon,authenticated,service_role;
+  if not exists(select 1 from pg_catalog.pg_proc proc
+      where proc.oid='dashboard_private.registration_contact_legacy_parent_projection_v1(uuid)'::regprocedure
+        and proc.prosrc=prior.prosrc and proc.proowner=prior.proowner and proc.prosecdef=prior.prosecdef
+        and proc.proconfig is not distinct from prior.proconfig and proc.provolatile=prior.provolatile
+        and proc.prolang=prior.prolang and proc.prorettype=prior.prorettype
+        and not proc.proisstrict and not proc.proleakproof) then
+    raise exception 'registration_contact_parent_legacy_copy_drift' using errcode='55000'; end if;
+  for anchor,replacement in select * from (values
+    ($parent_anchor_1$    return pg_catalog.jsonb_build_object(
+      'taskId', p_task_id,$parent_anchor_1$,
+     $parent_replace_1$    return dashboard_private.registration_contact_parent_projection_v1(p_task_id,pg_catalog.jsonb_build_object(
+      'taskId', p_task_id,$parent_replace_1$),
+    ($parent_anchor_2$      'paymentChecked', false
+    );$parent_anchor_2$,
+     $parent_replace_2$      'paymentChecked', false
+    ));$parent_replace_2$),
+    ($parent_anchor_3$  return v_projection;$parent_anchor_3$,
+     $parent_replace_3$  return dashboard_private.registration_contact_parent_projection_v1(p_task_id,v_projection);$parent_replace_3$)
+  ) patches(anchor,replacement) loop
+    if pg_catalog.length(definition)-pg_catalog.length(pg_catalog.replace(definition,anchor,''))<>pg_catalog.length(anchor) then
+      raise exception 'registration_contact_parent_anchor_drift' using errcode='55000'; end if;
+    definition:=pg_catalog.replace(definition,anchor,replacement);
+  end loop;
+  execute definition;
+  -- The adapter observes live claim writes within the outer command.
+  alter function dashboard_private.derive_registration_parent_projection(uuid) volatile;
+  select source.* into after_proc from pg_catalog.pg_proc source where source.oid=target;
+  if after_proc.oid<>prior.oid or after_proc.proowner<>prior.proowner
+    or after_proc.proacl is distinct from prior.proacl or after_proc.proconfig is distinct from prior.proconfig
+    or after_proc.prosecdef<>prior.prosecdef or after_proc.prolang<>prior.prolang
+    or after_proc.provolatile<>'v' or after_proc.proisstrict<>prior.proisstrict
+    or after_proc.proleakproof<>prior.proleakproof or after_proc.prorettype<>prior.prorettype then
+    raise exception 'registration_contact_parent_security_attribute_drift' using errcode='55000'; end if;
+end $registration_contact_parent_projection_patch$;
+
 -- One outer command advances metadata once. Inquiry's common call cannot close
 -- the old subject set before the same atomic command restores/archives subjects.
 create function dashboard_private.refresh_registration_contact_case_v1(p_task_id uuid,p_scope text)
 returns void language plpgsql volatile security definer set search_path='' as $$
 declare claim dashboard_private.registration_contact_claims_v1%rowtype; detail public.ops_registration_details%rowtype;
-  snapshot jsonb; next_generation bigint; reason text; reopen_now boolean; close_now boolean;
+  snapshot jsonb; next_generation bigint; reason text; reopen_now boolean; close_now boolean; sealed_cancel boolean;
 begin
   select source.* into claim from dashboard_private.registration_contact_claims_v1 source
     where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
@@ -534,13 +683,19 @@ begin
   select source.* into detail from public.ops_registration_details source where source.task_id=p_task_id;
   snapshot:=dashboard_private.registration_case_contact_snapshot_v1(p_task_id,false);
   next_generation:=detail.contact_generation;
+  -- A generic parent repair cannot authorize reuse or remove a cancellation
+  -- seal. Only this typed reopen claim or the validated business-reopen hook
+  -- can clear it; a terminal manual edit cannot relabel it for a later bypass.
+  sealed_cancel:=detail.contact_closure_reason='whole_case_cancelled';
   reopen_now:=claim.before_phase='closed' and (claim.command in ('reopen','set_workflow_status','save_inquiry','unarchive'))
     and not exists(select 1 from public.ops_tasks task where task.id=p_task_id and task.status='canceled')
+    and (not coalesce(sealed_cancel,false) or claim.command='reopen' and claim.parent_reopen_authorized)
     and (snapshot->>'allPhasesClosed')::boolean=false and pg_catalog.jsonb_array_length(snapshot->'currentTrackIds')>0;
-  close_now:=(snapshot->>'allPhasesClosed')::boolean or claim.close_reason is not null
+  close_now:=not reopen_now and ((snapshot->>'allPhasesClosed')::boolean or claim.close_reason is not null
+    or coalesce(sealed_cancel,false)
     or exists(select 1 from public.ops_tasks task where task.id=p_task_id and task.status='canceled')
     or pg_catalog.jsonb_array_length(snapshot->'currentTrackIds')=0 and claim.before_current_track_count>0
-      and claim.command in ('save_inquiry','archive');
+      and claim.command in ('save_inquiry','archive'));
   -- A terminal subject may reopen while the whole case is already open; that
   -- business transition preserves the current generation and open parent contact.
   if claim.command='reopen' and claim.before_phase='closed' and not reopen_now then
@@ -556,8 +711,8 @@ begin
     if next_generation=9223372036854775807 then raise exception 'registration_contact_generation_overflow' using errcode='23514'; end if;
     next_generation:=next_generation+1;
   end if;
-  reason:=case when claim.close_reason is not null then claim.close_reason
-    when exists(select 1 from public.ops_tasks task where task.id=p_task_id and task.status='canceled') then 'whole_case_cancelled'
+  reason:=case when coalesce(sealed_cancel,false) or exists(select 1 from public.ops_tasks task where task.id=p_task_id and task.status='canceled') then 'whole_case_cancelled'
+    when claim.close_reason is not null then claim.close_reason
     when (snapshot->>'allPhasesClosed')::boolean then 'all_current_tracks_terminal'
     when close_now then 'last_current_track_excluded' else detail.contact_closure_reason end;
   update public.ops_registration_details source set
@@ -566,6 +721,9 @@ begin
     contact_phase=case when reopen_now then 'open' when close_now then 'closed' else source.contact_phase end,
     contact_closed_at=case when reopen_now then null when close_now then coalesce(source.contact_closed_at,pg_catalog.clock_timestamp()) else source.contact_closed_at end,
     contact_closure_reason=case when reopen_now then null when close_now then reason else source.contact_closure_reason end,
+    contact_whole_cancel_explicit=case when reopen_now then false
+      when claim.command='close' and claim.close_reason='whole_case_cancelled' then true
+      else source.contact_whole_cancel_explicit end,
     parent_phone=case when reopen_now or close_now or source.contact_phase='closed' then null else source.parent_phone end,
     student_phone=null
     where source.task_id=p_task_id;
@@ -605,6 +763,7 @@ create trigger registration_contact_track_write_v1 before insert or update on pu
 create function dashboard_private.guard_registration_contact_task_cancel_v1()
 returns trigger language plpgsql volatile security definer set search_path='' as $$
 declare claim dashboard_private.registration_contact_claims_v1%rowtype;
+  detail public.ops_registration_details%rowtype; projection jsonb;
 begin
   if (old.type='registration' or new.type='registration') and new.type is distinct from old.type then
     raise exception 'registration_contact_case_type_immutable' using errcode='23514'; end if;
@@ -612,14 +771,166 @@ begin
   select source.* into claim from dashboard_private.registration_contact_claims_v1 source
     where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
       and source.actor_id=(select auth.uid()) and source.task_id=new.id and not source.legacy_replay;
-  if not found or (new.status='canceled' and (claim.command<>'close' or claim.close_reason<>'whole_case_cancelled'))
-    or (old.status='canceled' and (claim.command not in ('reopen','set_workflow_status') or new.status<>'requested')) then
+  if found and ((new.status='canceled' and claim.command='close' and claim.close_reason='whole_case_cancelled')
+    or (old.status='canceled' and claim.command='reopen' and claim.parent_reopen_authorized)) then return new; end if;
+  -- Natural enrollment/admission/withdrawal projections retain their existing
+  -- authorization and exact original guard. They are not explicit whole-cancel
+  -- overrides and cannot unseal a stored explicit cancellation.
+  select source.* into detail from public.ops_registration_details source where source.task_id=new.id;
+  if not found or detail.contact_whole_cancel_explicit then
+    raise exception 'registration_contact_transition_required' using errcode='42501'; end if;
+  projection:=dashboard_private.registration_contact_legacy_parent_projection_v1(new.id);
+  if new.status is distinct from projection->>'parentStatus' then
     raise exception 'registration_contact_transition_required' using errcode='42501'; end if;
   return new;
 end;
 $$;
 create trigger registration_contact_task_cancel_v1 before update on public.ops_tasks
   for each row execute function dashboard_private.guard_registration_contact_task_cancel_v1();
+
+-- After the unchanged parent business guard accepts a natural legacy status
+-- transition, apply only the corresponding contact lifecycle. Parent is already
+-- locked. No track, student, enrollment, settlement, or business field is edited.
+create function dashboard_private.reconcile_registration_contact_parent_projection_v1()
+returns trigger language plpgsql volatile security definer set search_path='' as $$
+declare detail public.ops_registration_details%rowtype; projection_direction text; current_count bigint;
+  all_closed boolean; typed_resume boolean; open_now boolean;
+begin
+  if tg_relid<>'public.ops_tasks'::regclass or tg_op<>'UPDATE' then
+    raise exception 'registration_contact_projection_trigger_invalid' using errcode='23514'; end if;
+  if old.type<>'registration' or new.type<>'registration' or new.status is not distinct from old.status then return null; end if;
+  if exists(select 1 from dashboard_private.registration_contact_claims_v1 claim
+    where claim.transaction_id=pg_catalog.txid_current() and claim.backend_pid=pg_catalog.pg_backend_pid()
+      and claim.actor_id=(select auth.uid()) and claim.task_id=new.id and not claim.legacy_replay) then
+    return null; -- The authenticated outer driver applies exactly once.
+  end if;
+  -- Every accepted cancellation boundary physically seals the current case,
+  -- including a historical default-open row repaired out of canceled. A status
+  -- correction alone must never reexpose its old raw contact values.
+  if new.status<>'canceled' and old.status<>'canceled' then return null; end if;
+  select source.* into detail from public.ops_registration_details source where source.task_id=new.id for update;
+  if not found then raise exception 'registration_detail_required' using errcode='23514'; end if;
+  if detail.contact_whole_cancel_explicit then
+    raise exception 'registration_contact_transition_required' using errcode='42501'; end if;
+  typed_resume:=new.status in ('requested','in_progress') and exists(
+    select 1 from dashboard_private.registration_contact_projection_claims_v1 capability
+      where capability.transaction_id=pg_catalog.txid_current() and capability.backend_pid=pg_catalog.pg_backend_pid()
+        and capability.task_id=new.id and capability.actor_id is not distinct from (select auth.uid())
+        and capability.direction='reopen' and capability.expected_generation=detail.contact_generation
+        and capability.expected_revision=detail.contact_revision);
+  projection_direction:=case when new.status='canceled' then 'close' when typed_resume then 'reopen' else 'seal' end;
+  if projection_direction in ('close','seal') and detail.contact_phase='closed'
+    and detail.contact_closure_reason='whole_case_cancelled' and detail.parent_phone is null and detail.student_phone is null then return null; end if;
+  open_now:=false;
+  if projection_direction='reopen' then
+    select pg_catalog.count(*),coalesce(pg_catalog.bool_and(track.workflow_status in ('registered','not_registered','inquiry_only')),false)
+      into current_count,all_closed from public.ops_registration_subject_tracks track
+      where track.task_id=new.id and track.archived_at is null;
+    if current_count=0 then
+      projection_direction:='seal';
+      update dashboard_private.registration_contact_projection_claims_v1 capability set direction='seal'
+        where capability.transaction_id=pg_catalog.txid_current() and capability.backend_pid=pg_catalog.pg_backend_pid()
+          and capability.task_id=new.id and capability.actor_id is not distinct from (select auth.uid())
+          and capability.direction='reopen' and capability.expected_generation=detail.contact_generation
+          and capability.expected_revision=detail.contact_revision;
+    else
+      open_now:=not all_closed;
+    end if;
+  end if;
+  if open_now and detail.contact_generation=9223372036854775807 then
+    raise exception 'registration_contact_generation_overflow' using errcode='23514'; end if;
+  if detail.contact_revision=9223372036854775807 then
+    raise exception 'registration_contact_revision_overflow' using errcode='23514'; end if;
+  if not typed_resume then
+    insert into dashboard_private.registration_contact_projection_claims_v1(
+      transaction_id,backend_pid,task_id,actor_id,expected_generation,expected_revision,direction)
+    values(pg_catalog.txid_current(),pg_catalog.pg_backend_pid(),new.id,(select auth.uid()),detail.contact_generation,detail.contact_revision,projection_direction);
+  end if;
+  update public.ops_registration_details source set
+    contact_phase=case when open_now then 'open' else 'closed' end,
+    contact_generation=case when open_now then source.contact_generation+1 else source.contact_generation end,
+    contact_revision=source.contact_revision+1,
+    contact_closed_at=case when open_now then null else coalesce(source.contact_closed_at,pg_catalog.clock_timestamp()) end,
+    contact_closure_reason=case when open_now then null when projection_direction='reopen' then 'all_current_tracks_terminal' else 'whole_case_cancelled' end,
+    contact_whole_cancel_explicit=false,parent_phone=null,student_phone=null,updated_at=pg_catalog.now()
+    where source.task_id=new.id;
+  if not open_now then
+    if pg_catalog.to_regprocedure('dashboard_private.retire_registration_contact_dispatch_v1(uuid,bigint)') is null then
+      raise exception 'registration_contact_dispatch_retirement_not_installed' using errcode='55000'; end if;
+    execute 'select dashboard_private.retire_registration_contact_dispatch_v1($1,$2)' using new.id,detail.contact_generation;
+  end if;
+  delete from dashboard_private.registration_contact_projection_claims_v1 source
+    where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
+      and source.task_id=new.id and source.actor_id is not distinct from (select auth.uid());
+  return null;
+end;
+$$;
+create trigger registration_contact_parent_projection_v1 after update of status on public.ops_tasks
+  for each row execute function dashboard_private.reconcile_registration_contact_parent_projection_v1();
+
+-- Typed intent for the existing authenticated business-reopen RPC, after its
+-- exact original input/access/replay/source-state validation. This never grants
+-- contact access to a generic parent recompute or an unauthenticated actor.
+create function dashboard_private.authorize_registration_contact_business_reopen_v1(p_task_id uuid)
+returns void language plpgsql volatile security definer set search_path='' as $$
+declare detail public.ops_registration_details%rowtype; actor uuid:=(select auth.uid());
+begin
+  perform dashboard_private.assert_registration_actor_is_active_manager_v1(actor);
+  perform dashboard_private.assert_registration_mutation_access(p_task_id,null,'reopen_track');
+  select source.* into detail from public.ops_registration_details source where source.task_id=p_task_id for update;
+  if not found then raise exception 'registration_detail_required' using errcode='23514'; end if;
+  insert into dashboard_private.registration_contact_projection_claims_v1(
+    transaction_id,backend_pid,task_id,actor_id,expected_generation,expected_revision,direction)
+  values(pg_catalog.txid_current(),pg_catalog.pg_backend_pid(),p_task_id,actor,detail.contact_generation,detail.contact_revision,'reopen');
+end;
+$$;
+create function dashboard_private.clear_registration_contact_business_reopen_v1(p_task_id uuid)
+returns void language plpgsql volatile security definer set search_path='' as $$
+declare detail public.ops_registration_details%rowtype;
+  capability dashboard_private.registration_contact_projection_claims_v1%rowtype;
+  current_count bigint; all_closed boolean;
+begin
+  select source.* into capability from dashboard_private.registration_contact_projection_claims_v1 source
+    where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
+      and source.task_id=p_task_id and source.actor_id is not distinct from (select auth.uid()) and source.direction='reopen';
+  if found then
+    -- A prior generic repair may already have restored the parent status, so
+    -- recompute need not change it. Only this validated actual-reopen callback,
+    -- with its still-live exact intent, may finish that sealed contact transition.
+    select source.* into detail from public.ops_registration_details source where source.task_id=p_task_id for update;
+    if found and detail.contact_closure_reason='whole_case_cancelled' and not detail.contact_whole_cancel_explicit
+      and exists(select 1 from public.ops_tasks task where task.id=p_task_id and task.type='registration' and task.status in ('requested','in_progress')) then
+      if detail.contact_generation<>capability.expected_generation or detail.contact_revision<>capability.expected_revision then
+        raise exception 'registration_contact_revision_conflict' using errcode='23514'; end if;
+      select pg_catalog.count(*),coalesce(pg_catalog.bool_and(track.workflow_status in ('registered','not_registered','inquiry_only')),false)
+        into current_count,all_closed from public.ops_registration_subject_tracks track
+        where track.task_id=p_task_id and track.archived_at is null;
+      if current_count>0 then
+        if detail.contact_revision=9223372036854775807 then
+          raise exception 'registration_contact_revision_overflow' using errcode='23514'; end if;
+        if not all_closed and detail.contact_generation=9223372036854775807 then
+          raise exception 'registration_contact_generation_overflow' using errcode='23514'; end if;
+        update public.ops_registration_details source set
+          contact_phase=case when all_closed then 'closed' else 'open' end,
+          contact_generation=case when all_closed then source.contact_generation else source.contact_generation+1 end,
+          contact_revision=source.contact_revision+1,
+          contact_closed_at=case when all_closed then coalesce(source.contact_closed_at,pg_catalog.clock_timestamp()) else null end,
+          contact_closure_reason=case when all_closed then 'all_current_tracks_terminal' else null end,
+          parent_phone=null,student_phone=null,updated_at=pg_catalog.now()
+          where source.task_id=p_task_id;
+        if all_closed then
+          if pg_catalog.to_regprocedure('dashboard_private.retire_registration_contact_dispatch_v1(uuid,bigint)') is null then
+            raise exception 'registration_contact_dispatch_retirement_not_installed' using errcode='55000'; end if;
+          execute 'select dashboard_private.retire_registration_contact_dispatch_v1($1,$2)' using p_task_id,detail.contact_generation;
+        end if;
+      end if;
+    end if;
+  end if;
+  delete from dashboard_private.registration_contact_projection_claims_v1 source
+    where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
+      and source.task_id=p_task_id and source.actor_id is not distinct from (select auth.uid()) and source.direction='reopen';
+end;
+$$;
 
 -- Existing writer prefixes call this before their original row locks. Taking
 -- the full order here makes later detail-first legacy locks reentrant.
@@ -657,6 +968,7 @@ declare
   expected_subjects text[]; desired_subjects text[]; current_subjects text[];
   source_track public.ops_registration_subject_tracks%rowtype; source_task public.ops_tasks%rowtype;
   planned_all_closed boolean := false; next_status text; changed boolean := false;
+  legacy_projection jsonb; inherited_status text; inherited_completed_at timestamptz;
 begin
   -- PostgREST ACL plus this server-JWT check, not user-editable metadata.
   if (select auth.role()) is distinct from 'service_role' then
@@ -776,7 +1088,7 @@ begin
           track.id is not null and track.workflow_status in ('registered','not_registered','inquiry_only')),false)
         into planned_all_closed from pg_catalog.unnest(desired_subjects) subject(value)
           left join public.ops_registration_subject_tracks track on track.task_id=p_task_id and track.subject=subject.value;
-        if source_task.status='canceled' or planned_all_closed or pg_catalog.cardinality(desired_subjects)=0 and coalesce(pg_catalog.jsonb_array_length(snapshot->'currentTrackIds'),0)>0 then
+        if source_task.status='canceled' or snapshot->>'closureReason'='whole_case_cancelled' or planned_all_closed or pg_catalog.cardinality(desired_subjects)=0 and coalesce(pg_catalog.jsonb_array_length(snapshot->'currentTrackIds'),0)>0 then
           parent_phone:=null;
         end if;
       elsif not legacy and snapshot->>'phase'='closed' then parent_phone:=null;
@@ -794,32 +1106,41 @@ begin
           p_payload->>'campus',nullif(p_payload->>'inquiryAt','')::timestamptz,p_payload->>'requestNote',p_payload->>'priority',
           (p_payload->>'expectedCommonRevision')::integer,expected_subjects,desired_subjects,p_request_key);
         when 'set_workflow_status' then
-          -- The existing manual selector is an explicit fresh reopening action
-          -- for a canceled parent. Terminal/archived/legacy replay never reopens.
-          if not legacy and source_task.status='canceled' and source_track.archived_at is null
-            and p_payload->>'workflowStatus' in ('inquiry','level_test_requested','consultation_requested','consultation_completed',
-              'waiting_current_class','waiting_new_class','waiting_next_opening','observation_requested','enrollment_requested','payment_in_progress') then
-            update public.ops_tasks source set status='requested',completed_at=null,updated_at=pg_catalog.now() where source.id=p_task_id;
-          end if;
+          -- Owner policy B: manual recording remains independent. A canceled
+          -- parent stays canceled/closed with the same generation and marker.
           result:=dashboard_private.set_registration_workflow_status_v1_impl(
             source_track.id,p_payload->>'workflowStatus',(p_payload->>'expectedWorkflowRevision')::integer,p_request_key);
         when 'waiting_details' then result:=dashboard_private.save_registration_waiting_details_v2_impl(
           source_track.id,nullif(p_payload->>'waitingKind',''),nullif(p_payload->>'classId','')::uuid,
           nullif(p_payload->>'retakeDecision',''),p_request_key);
         when 'reopen' then
-          if source_track.archived_at is not null or source_task.status<>'canceled' and source_track.workflow_status not in ('registered','not_registered','inquiry_only')
+          if source_track.archived_at is not null or source_task.status<>'canceled' and snapshot->>'closureReason' is distinct from 'whole_case_cancelled'
+            and source_track.workflow_status not in ('registered','not_registered','inquiry_only')
             or nullif(pg_catalog.btrim(p_payload->>'reason'),'') is null or p_payload->>'destination' not in ('inquiry','consultation_waiting') then
             raise exception 'registration_contact_reopen_invalid' using errcode='23514'; end if;
           next_status:=case when p_payload->>'destination'='inquiry' then 'inquiry' else 'consultation_requested' end;
-          if source_task.status='canceled' then
-            update public.ops_tasks source set status='requested',completed_at=null,updated_at=pg_catalog.now() where source.id=p_task_id;
+          if source_task.status='canceled' or snapshot->>'closureReason'='whole_case_cancelled' then
+            legacy_projection:=dashboard_private.registration_contact_legacy_parent_projection_v1(p_task_id);
+            inherited_status:=legacy_projection->>'parentStatus';
+            if inherited_status not in ('requested','in_progress') then
+              raise exception 'registration_contact_business_reopen_required' using errcode='23514'; end if;
+            inherited_completed_at:=case when inherited_status='done'
+              then coalesce(source_task.completed_at,pg_catalog.now()) else null end;
+            update dashboard_private.registration_contact_claims_v1 source set parent_reopen_authorized=true
+              where source.transaction_id=pg_catalog.txid_current() and source.backend_pid=pg_catalog.pg_backend_pid()
+                and source.actor_id=(select auth.uid()) and source.task_id=p_task_id and not source.legacy_replay;
+            update public.ops_tasks source set status=inherited_status,completed_at=inherited_completed_at,
+              updated_at=pg_catalog.now() where source.id=p_task_id;
           end if;
           result:=dashboard_private.set_registration_workflow_status_v1_impl(source_track.id,next_status,source_track.workflow_revision,p_request_key);
         when 'close' then
           if p_payload->>'reason' not in ('all_current_tracks_terminal','whole_case_cancelled','last_current_track_excluded') then
             raise exception 'registration_contact_closure_reason_invalid' using errcode='22023'; end if;
           if p_payload->>'reason'='whole_case_cancelled' then
-            update public.ops_tasks source set status='canceled',completed_at=null,updated_at=pg_catalog.now() where source.id=p_task_id;
+            update public.ops_tasks source set status='canceled',
+              completed_at=case when source.status='canceled' and source.completed_at is not null
+                then source.completed_at else pg_catalog.now() end,
+              updated_at=pg_catalog.now() where source.id=p_task_id;
           end if;
           perform dashboard_private.refresh_registration_contact_case_v1(p_task_id,'close');
           result:=pg_catalog.jsonb_build_object('taskId',p_task_id,'changed',true);
@@ -871,6 +1192,44 @@ $$;
 
 -- Patch the FINAL source, never recreate an earlier complete implementation.
 -- Each anchor appears exactly once; any drift aborts the entire transaction.
+-- Preserve the final legacy business-reopen API and every original replay,
+-- access, error and roster predicate; mint contact intent only after validation.
+do $registration_contact_legacy_business_reopen_patch$
+declare target regprocedure:='dashboard_private.reopen_registration_track_impl(uuid,text,text,text)'::regprocedure;
+  prior pg_catalog.pg_proc%rowtype; after_proc pg_catalog.pg_proc%rowtype;
+  definition text; anchor text; replacement text;
+begin
+  select source.* into prior from pg_catalog.pg_proc source where source.oid=target;
+  if pg_catalog.md5(prior.prosrc)<>'1d6f75da0c146dcfc1c71f45d66ae590' then
+    raise exception 'registration_contact_business_reopen_source_drift' using errcode='55000'; end if;
+  definition:=pg_catalog.pg_get_functiondef(target);
+  for anchor,replacement in select * from (values
+    ($business_anchor_1$  -- reopen_track_actor_request_lock$business_anchor_1$,
+     $business_replace_1$  perform dashboard_private.prepare_registration_contact_write_v1(null,p_track_id,p_request_key);
+  -- reopen_track_actor_request_lock$business_replace_1$),
+    ($business_anchor_2$  -- reopen_track_activity_creation$business_anchor_2$,
+     $business_replace_2$  perform dashboard_private.authorize_registration_contact_business_reopen_v1(v_task_id);
+  -- reopen_track_activity_creation$business_replace_2$),
+    ($business_anchor_3$  return v_response;
+end;$business_anchor_3$,
+     $business_replace_3$  perform dashboard_private.clear_registration_contact_business_reopen_v1(v_task_id);
+  return v_response;
+end;$business_replace_3$)
+  ) patches(anchor,replacement) loop
+    if pg_catalog.length(definition)-pg_catalog.length(pg_catalog.replace(definition,anchor,''))<>pg_catalog.length(anchor) then
+      raise exception 'registration_contact_business_reopen_anchor_drift' using errcode='55000'; end if;
+    definition:=pg_catalog.replace(definition,anchor,replacement);
+  end loop;
+  execute definition;
+  select source.* into after_proc from pg_catalog.pg_proc source where source.oid=target;
+  if after_proc.oid<>prior.oid or after_proc.proowner<>prior.proowner
+    or after_proc.proacl is distinct from prior.proacl or after_proc.proconfig is distinct from prior.proconfig
+    or after_proc.prosecdef<>prior.prosecdef or after_proc.prolang<>prior.prolang
+    or after_proc.provolatile<>prior.provolatile or after_proc.proisstrict<>prior.proisstrict
+    or after_proc.proleakproof<>prior.proleakproof or after_proc.prorettype<>prior.prorettype then
+    raise exception 'registration_contact_business_reopen_security_attribute_drift' using errcode='55000'; end if;
+end $registration_contact_legacy_business_reopen_patch$;
+
 do $registration_contact_patch_final_writers$
 declare spec record; target regprocedure; prior pg_catalog.pg_proc%rowtype;
   after_proc pg_catalog.pg_proc%rowtype; definition text; i integer;
@@ -1208,7 +1567,10 @@ begin
       'assert_registration_contact_open_v1','registration_contact_assert_bounded_json_v1','registration_contact_assert_uuid_array_v1',
       'registration_contact_assert_receipt_v1','registration_contact_result_v1','registration_contact_fingerprint_v1',
       'registration_contact_fingerprint_matches_v1','guard_registration_contact_detail_write_v1',
-      'guard_registration_contact_track_write_v1','guard_registration_contact_task_cancel_v1','refresh_registration_contact_case_v1') loop
+      'guard_registration_contact_track_write_v1','guard_registration_contact_task_cancel_v1','refresh_registration_contact_case_v1',
+      'registration_contact_parent_projection_v1','registration_contact_legacy_parent_projection_v1',
+      'reconcile_registration_contact_parent_projection_v1','authorize_registration_contact_business_reopen_v1',
+      'clear_registration_contact_business_reopen_v1') loop
     execute pg_catalog.format('alter function %s owner to postgres',item.signature);
     execute pg_catalog.format('revoke all on function %s from public,anon,authenticated,service_role',item.signature);
   end loop;
