@@ -1,4 +1,10 @@
 import { supabase } from "@/lib/supabase"
+import {
+  createRegistrationDetailObservation,
+  type RegistrationDetailKind,
+  type RegistrationDetailObservationOptions,
+  type RegistrationDetailObserver,
+} from "./registration-detail-observation.ts"
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
 import {
   parseAcademicSubject,
@@ -844,6 +850,12 @@ export type RegistrationMeasure = {
   ok: boolean
 }
 
+type QueryMetrics = {
+  queryCount: number
+  detailObservation?: RegistrationDetailObserver
+  detailSignal?: AbortSignal
+}
+
 type QueryResult = { data: unknown; error: unknown; count?: number | null }
 type QueryBuilder = PromiseLike<QueryResult> & {
   abortSignal: (signal: AbortSignal) => QueryBuilder
@@ -875,6 +887,7 @@ export type RegistrationTrackServiceOptions = {
   invalidateRuntimeAfterReadyFailure?: (error: unknown) => never
   performance?: RegistrationPerformanceSink
   recordMeasure?: (measure: RegistrationMeasure) => void
+  detailObservation?: RegistrationDetailObservationOptions
   now?: () => number
   randomUUID?: () => string
   onMutationSuccess?: () => void
@@ -2071,9 +2084,9 @@ export function createRegistrationTrackService(
   function measure<T>(
     name: string,
     cacheHit: boolean,
-    work: (metrics: { queryCount: number }) => Promise<T>,
+    work: (metrics: QueryMetrics) => Promise<T>,
   ): Promise<T> {
-    const metrics = { queryCount: 0 }
+    const metrics: QueryMetrics = { queryCount: 0 }
     measureSequence += 1
     const startMark = `${name}:start:${measureSequence}`
     const endMark = `${name}:end:${measureSequence}`
@@ -2088,72 +2101,114 @@ export function createRegistrationTrackService(
         options.performance?.mark(endMark)
         options.performance?.measure(name, startMark, endMark)
         options.recordMeasure?.({ name, cacheHit, queryCount: metrics.queryCount, ok })
+        metrics.detailObservation?.finish(ok)
       })
   }
 
   async function queryRows(
     builder: QueryBuilder,
-    metrics: { queryCount: number },
+    metrics: QueryMetrics,
     signal?: AbortSignal,
+    kind?: RegistrationDetailKind,
   ) {
     metrics.queryCount += 1
-    const request = signal && typeof builder.abortSignal === "function"
-      ? builder.abortSignal(signal)
-      : builder
-    const { data, error } = await request
-    if (error) throw error
-    return rows(data)
+    if (kind) metrics.detailObservation?.begin(kind, metrics.detailSignal)
+    let ok = false
+    try {
+      const request = signal && typeof builder.abortSignal === "function"
+        ? builder.abortSignal(signal)
+        : builder
+      const { data, error } = await request
+      if (error) throw error
+      ok = true
+      return rows(data)
+    } finally {
+      if (kind) metrics.detailObservation?.end(kind, ok)
+    }
   }
 
   async function queryCountedRows(
     builder: QueryBuilder,
-    metrics: { queryCount: number },
+    metrics: QueryMetrics,
+    kind?: RegistrationDetailKind,
   ) {
     metrics.queryCount += 1
-    const { data, error, count } = await builder
-    if (error) throw error
-    const resultRows = rows(data)
-    const normalizedCount = Number.isInteger(count) && Number(count) >= resultRows.length
-      ? Number(count)
-      : null
-    return { rows: resultRows, count: normalizedCount }
+    if (kind) metrics.detailObservation?.begin(kind, metrics.detailSignal)
+    let ok = false
+    try {
+      const { data, error, count } = await builder
+      if (error) throw error
+      const resultRows = rows(data)
+      const normalizedCount = Number.isInteger(count) && Number(count) >= resultRows.length
+        ? Number(count)
+        : null
+      ok = true
+      return { rows: resultRows, count: normalizedCount }
+    } finally {
+      if (kind) metrics.detailObservation?.end(kind, ok)
+    }
   }
 
   async function queryOne(
     builder: QueryBuilder,
-    metrics: { queryCount: number },
+    metrics: QueryMetrics,
     signal?: AbortSignal,
+    kind?: RegistrationDetailKind,
   ) {
     metrics.queryCount += 1
-    const request = signal && typeof builder.abortSignal === "function"
-      ? builder.abortSignal(signal)
-      : builder
-    const { data, error } = await request
-    if (error) throw error
-    const row = firstRow(data)
-    if (!row) throw new Error("등록 업무를 찾을 수 없습니다.")
-    return row
+    if (kind) metrics.detailObservation?.begin(kind, metrics.detailSignal)
+    let ok = false
+    try {
+      const request = signal && typeof builder.abortSignal === "function"
+        ? builder.abortSignal(signal)
+        : builder
+      const { data, error } = await request
+      if (error) throw error
+      const row = firstRow(data)
+      if (!row) throw new Error("등록 업무를 찾을 수 없습니다.")
+      ok = true
+      return row
+    } finally {
+      if (kind) metrics.detailObservation?.end(kind, ok)
+    }
   }
 
   async function queryCustomerReminderSummaries(
     taskId: string,
-    metrics: { queryCount: number },
+    metrics: QueryMetrics,
   ) {
     metrics.queryCount += 1
-    const { data, error } = await client.rpc(
-      "get_registration_customer_reminder_summaries_v1",
-      { p_task_id: taskId },
-    )
-    if (error) throw error
-    const byAppointmentId = new Map<string, RegistrationCustomerReminderSummary>()
-    for (const row of rows(data)) {
-      const { appointmentId, summary } = mapRegistrationCustomerReminderSummary(row)
-      if (byAppointmentId.has(appointmentId)) {
-        throw new Error("registration_customer_reminder_summary_duplicate")
-      }
-      byAppointmentId.set(appointmentId, summary)
+    const observation = metrics.detailObservation
+    observation?.begin("reminder_request")
+    let requestOk = false
+    let data: unknown
+    try {
+      const { data: resultData, error } = await client.rpc(
+        "get_registration_customer_reminder_summaries_v1",
+        { p_task_id: taskId },
+      )
+      if (error) throw error
+      data = resultData
+      requestOk = true
+    } finally {
+      observation?.end("reminder_request", requestOk)
     }
-    return byAppointmentId
+    observation?.begin("reminder_decode")
+    let decodeOk = false
+    try {
+      const byAppointmentId = new Map<string, RegistrationCustomerReminderSummary>()
+      for (const row of rows(data)) {
+        const { appointmentId, summary } = mapRegistrationCustomerReminderSummary(row)
+        if (byAppointmentId.has(appointmentId)) {
+          throw new Error("registration_customer_reminder_summary_duplicate")
+        }
+        byAppointmentId.set(appointmentId, summary)
+      }
+      decodeOk = true
+      return byAppointmentId
+    } finally {
+      observation?.end("reminder_decode", decodeOk)
+    }
   }
 
   function invalidateReadyRuntime(error: unknown): never {
@@ -2460,6 +2515,18 @@ export function createRegistrationTrackService(
     const request = measure("registration:case-detail", false, (metrics) => {
       const controller = typeof AbortController === "function" ? new AbortController() : null
       const signal = controller?.signal
+      const observation = options.detailObservation
+        ? createRegistrationDetailObservation(options.detailObservation)
+        : undefined
+      metrics.detailObservation = observation
+      metrics.detailSignal = signal
+      observation?.begin("detail")
+      function boundedDetailSignal(kind: RegistrationDetailKind) {
+        const deadline = AbortSignal.timeout(8_000)
+        const combined = signal ? AbortSignal.any([signal, deadline]) : deadline
+        observation?.watchDeadline(kind, deadline)
+        return combined
+      }
       const detailRequest = (async () => {
       const loadScheduledAppointmentPage = () => queryCountedRows(
         client.from("ops_registration_appointments")
@@ -2470,11 +2537,10 @@ export function createRegistrationTrackService(
           .order("scheduled_at", { ascending: true })
           .order("id", { ascending: true })
           .limit(30)
-          .abortSignal(signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-            : AbortSignal.timeout(8_000))
+          .abortSignal(boundedDetailSignal("appointments_current"))
           .retry(false),
         metrics,
+        "appointments_current",
       )
       const loadAppointmentHistoryRows = () => queryRows(
         client.from("ops_registration_appointments")
@@ -2485,11 +2551,11 @@ export function createRegistrationTrackService(
           .order("updated_at", { ascending: false })
           .order("id", { ascending: false })
           .limit(30)
-          .abortSignal(signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-            : AbortSignal.timeout(8_000))
+          .abortSignal(boundedDetailSignal("appointments_history"))
           .retry(false),
         metrics,
+        undefined,
+        "appointments_history",
       )
       const loadOpenBatchRows = () => queryRows(
         client.from("ops_registration_admission_batches")
@@ -2499,11 +2565,11 @@ export function createRegistrationTrackService(
           .order("revision_number", { ascending: false })
           .order("id", { ascending: false })
           .limit(1)
-          .abortSignal(signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-            : AbortSignal.timeout(8_000))
+          .abortSignal(boundedDetailSignal("batches_current"))
           .retry(false),
         metrics,
+        undefined,
+        "batches_current",
       )
       const loadBatchHistoryRows = () => queryRows(
         client.from("ops_registration_admission_batches")
@@ -2513,11 +2579,11 @@ export function createRegistrationTrackService(
           .order("revision_number", { ascending: false })
           .order("id", { ascending: false })
           .limit(30)
-          .abortSignal(signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-            : AbortSignal.timeout(8_000))
+          .abortSignal(boundedDetailSignal("batches_history"))
           .retry(false),
         metrics,
+        undefined,
+        "batches_history",
       )
       const loadActiveTrackRows = () => queryRows(
         client.from("ops_registration_subject_tracks")
@@ -2543,16 +2609,17 @@ export function createRegistrationTrackService(
           .order("subject", { ascending: true })
           .order("id", { ascending: true })
           .limit(30)
-          .abortSignal(signal
-            ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-            : AbortSignal.timeout(8_000))
+          .abortSignal(boundedDetailSignal("tracks"))
           .retry(false),
         metrics,
+        undefined,
+        "tracks",
       )
       const parentRowRequest = queryOne(
         client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
         metrics,
         signal,
+        "parent",
       )
       const otherRowsRequests = [
         loadScheduledAppointmentPage(),
@@ -2564,6 +2631,7 @@ export function createRegistrationTrackService(
             .eq("registration_task_event_shared_visible", true),
           metrics,
           signal,
+          "events",
         ),
         queryRows(
           client.from("ops_registration_messages")
@@ -2574,6 +2642,7 @@ export function createRegistrationTrackService(
             .limit(1),
           metrics,
           signal,
+          "admission_message",
         ),
         queryCustomerReminderSummaries(safeTaskId, metrics),
         loadOpenBatchRows(),
@@ -2589,19 +2658,37 @@ export function createRegistrationTrackService(
             return { ok: false as const, error }
           },
         )
-      await requireReadyRuntime()
+      observation?.begin("runtime")
+      let runtimeOk = false
+      try {
+        await requireReadyRuntime()
+        runtimeOk = true
+      } finally {
+        observation?.end("runtime", runtimeOk)
+      }
+      let decoding: "initial_decode" | "detail_decode" | null = null
+      let decodeOk = false
       try {
         // Only parent existence, active tracks and runtime readiness gate these reads.
         // Observe failures immediately, but preserve phase-one error precedence below.
+        let dependentRowsStarted = false
         const dependentRowsRequest = Promise.all([parentRowRequest, trackRowsRequest])
           .then(([, trackRows]) => {
             if (phaseOneFailure) throw phaseOneFailure.error
             signal?.throwIfAborted()
+            dependentRowsStarted = true
+            observation?.begin("dependent_rows")
             return loadTrackDependentRows(trackRows)
           })
           .then(
-            (result) => ({ ok: true as const, result }),
-            (error) => ({ ok: false as const, error }),
+            (result) => {
+              if (dependentRowsStarted) observation?.end("dependent_rows", true)
+              return { ok: true as const, result }
+            },
+            (error) => {
+              if (dependentRowsStarted) observation?.end("dependent_rows", false)
+              return { ok: false as const, error }
+            },
           )
         const phaseOneResult = await phaseOneRequest
         if (!phaseOneResult.ok) throw phaseOneResult.error
@@ -2627,6 +2714,8 @@ export function createRegistrationTrackService(
           Row[],
           Row[],
         ]
+        decoding = "initial_decode"
+        observation?.begin(decoding)
         const appointmentRows = mergeRowsById(
           scheduledAppointmentPage.rows,
           appointmentHistoryRows,
@@ -2664,11 +2753,10 @@ export function createRegistrationTrackService(
                   .order("created_at", { ascending: false })
                   .order("id", { ascending: false })
                   .limit(30)
-                  .abortSignal(signal
-                    ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-                    : AbortSignal.timeout(8_000))
+                  .abortSignal(boundedDetailSignal("enrollments_current"))
                   .retry(false),
                 metrics,
+                "enrollments_current",
               ),
               queryRows(
                 client.from("ops_registration_enrollments")
@@ -2678,11 +2766,11 @@ export function createRegistrationTrackService(
                   .order("updated_at", { ascending: false })
                   .order("id", { ascending: false })
                   .limit(30)
-                  .abortSignal(signal
-                    ? AbortSignal.any([signal, AbortSignal.timeout(8_000)])
-                    : AbortSignal.timeout(8_000))
+                  .abortSignal(boundedDetailSignal("enrollments_history"))
                   .retry(false),
                 metrics,
+                undefined,
+                "enrollments_history",
               ),
             ])
             : Promise.resolve([{ rows: [], count: 0 }, []] as [
@@ -2705,8 +2793,12 @@ export function createRegistrationTrackService(
               : Promise.resolve(null),
           ])
         }
+        observation?.end(decoding, true)
+        decoding = null
         const dependentRowsResult = await dependentRowsRequest
         if (!dependentRowsResult.ok) throw dependentRowsResult.error
+        decoding = "detail_decode"
+        observation?.begin(decoding)
         const [[currentEnrollmentPage, enrollmentHistoryRows], summaryResult] = dependentRowsResult.result
         const enrollmentRows = mergeRowsById(currentEnrollmentPage.rows, enrollmentHistoryRows)
         const detailRow = firstRow(value(parentRow, "ops_registration_details")) || {}
@@ -2770,7 +2862,11 @@ export function createRegistrationTrackService(
           }
         }
 
-        if (!observationAware) return buildDetail(trackRows.map((row) => mapTrack(row)))
+        if (!observationAware) {
+          const detail = buildDetail(trackRows.map((row) => mapTrack(row)))
+          decodeOk = true
+          return detail
+        }
 
         const summaryByTrackId = new Map(
           (summaryResult?.tracks || []).map((track) => [track.id, track]),
@@ -2783,17 +2879,24 @@ export function createRegistrationTrackService(
           }
           return mapRegistrationObservationTrackSummary(row, true)
         })
-        return buildDetail(tracks)
+        const detail = buildDetail(tracks)
+        decodeOk = true
+        return detail
       } catch (error) {
         if (missingSchemaError(error)) return invalidateReadyRuntime(error)
         throw error
+      } finally {
+        if (decoding) observation?.end(decoding, decodeOk)
       }
       })()
       return withRegistrationRequestTimeout(
         detailRequest,
         requestTimeoutMs,
         "registration_query_timeout",
-        () => controller?.abort(),
+        () => {
+          observation?.record("detail", "detail_deadline_elapsed")
+          controller?.abort()
+        },
       ).catch((error) => {
         controller?.abort()
         throw error
@@ -4060,6 +4163,10 @@ const defaultRegistrationTrackService = createRegistrationTrackService(
     invalidateRuntimeAfterReadyFailure: invalidateRegistrationSubjectTrackRuntimeAfterReadyFailure,
     invalidatePublicClassesCacheAfterMutation,
     onMutationSuccess: () => registrationTrackMutationCacheInvalidator?.(),
+    detailObservation: typeof performance === "undefined" ? undefined : {
+      now: () => performance.now(),
+      emit: (observations) => console.table(observations),
+    },
     performance: typeof performance === "undefined"
       ? undefined
       : {
