@@ -1,0 +1,46 @@
+{
+  "main": "6a6d7abe4f45e366beccc14efbbcce0534f0370f",
+  "candidateProductCommit": "492acea65dea167323640c4e2adf741af86220b8",
+  "sameIsolatedDatabase": true,
+  "productionActions": 0,
+  "permissionsModified": false,
+  "originalTest": {
+    "main-adapter-original": {
+      "exitCode": 3,
+      "assertions": 20,
+      "failed": [
+        "not ok 14 - 전반은 완료 상태로 바로 생성할 수 없다",
+        "not ok 17 - 퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다"
+      ],
+      "inputSHA256": "15e952c263a5caf7ca69fd1f7dd5e013b72f68e801f55577b2b3083715803588"
+    },
+    "candidate-adapter-original": {
+      "exitCode": 3,
+      "assertions": 20,
+      "failed": [
+        "not ok 14 - 전반은 완료 상태로 바로 생성할 수 없다",
+        "not ok 17 - 퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다"
+      ],
+      "inputSHA256": "15e952c263a5caf7ca69fd1f7dd5e013b72f68e801f55577b2b3083715803588"
+    }
+  },
+  "repairedTest": {
+    "main-adapter-fixture-complete": {
+      "exitCode": 0,
+      "assertions": 47,
+      "failed": [
+        "not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
+      ],
+      "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
+    },
+    "candidate-adapter-fixture-complete": {
+      "exitCode": 0,
+      "assertions": 47,
+      "failed": [
+        "not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
+      ],
+      "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
+    }
+  },
+  "remainingBlocker": "service-role-only legacy dispatch actor predicate is NULL-unsafe; scope approval pending"
+}

@@ -130,6 +130,7 @@ function serviceHarness({
   finalizeError = null,
   planOverrides = {},
   previewValid = true,
+  planError = null,
 }) {
   const calls = []
   return {
@@ -138,6 +139,7 @@ function serviceHarness({
       async rpc(name, parameters) {
         calls.push({ name, parameters })
         if (name === "get_ops_task_legacy_dispatch_plan_v1") {
+          if (planError) return { data: null, error: planError }
           return { data: { items: [{...planItem(eventKey),...planOverrides}] }, error: null }
         }
         if (name === "validate_registration_management_notification_preview_v1") return { data: previewValid, error: null }
@@ -547,4 +549,35 @@ test("subject completion replay does not repeat a provider call or register an e
   assert.equal(result.fetchCalls, 0)
   assert.equal(result.body.deduped, 1)
   assert.equal(harness.calls.some(({ name }) => name === "register_notification_external_attempt_v1"), false)
+})
+
+
+test("NULL actor guard denial stops the real route before intent, claim, webhook or provider", async (t) => {
+  const harness = serviceHarness({
+    eventKey: "transfer.submitted",
+    planError: { code: "42501", message: "ops_task_legacy_dispatch_forbidden" },
+  })
+  let providerCalls = 0
+  let webhookCalls = 0
+  globalThis.__notificationLegacyRouteReadWebhook = async () => {
+    webhookCalls += 1
+    throw new Error("unexpected_webhook_read")
+  }
+  const result = await postWithHarness(t, harness, async () => {
+    providerCalls += 1
+    throw new Error("unexpected_provider_send")
+  }, { registrationScope: false })
+  assert.equal(result.status, 403)
+  assert.equal(result.body.ok, false)
+  assert.deepEqual(result.actorCalls, [{
+    name: "authorize_registration_legacy_dispatch_v1",
+    parameters: { p_source_event_id: IDS.source },
+  }])
+  assert.deepEqual(harness.calls, [{
+    name: "get_ops_task_legacy_dispatch_plan_v1",
+    parameters: { p_source_event_id: IDS.source, p_actor_profile_id: IDS.actor },
+  }])
+  assert.equal(providerCalls, 0)
+  assert.equal(webhookCalls, 0)
+  assert.equal(result.fetchCalls, 0)
 })
