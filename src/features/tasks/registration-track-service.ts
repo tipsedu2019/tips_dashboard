@@ -2175,40 +2175,23 @@ export function createRegistrationTrackService(
 
   async function queryCustomerReminderSummaries(
     taskId: string,
-    metrics: QueryMetrics,
+    metrics: { queryCount: number },
   ) {
     metrics.queryCount += 1
-    const observation = metrics.detailObservation
-    observation?.begin("reminder_request")
-    let requestOk = false
-    let data: unknown
-    try {
-      const { data: resultData, error } = await client.rpc(
-        "get_registration_customer_reminder_summaries_v1",
-        { p_task_id: taskId },
-      )
-      if (error) throw error
-      data = resultData
-      requestOk = true
-    } finally {
-      observation?.end("reminder_request", requestOk)
-    }
-    observation?.begin("reminder_decode")
-    let decodeOk = false
-    try {
-      const byAppointmentId = new Map<string, RegistrationCustomerReminderSummary>()
-      for (const row of rows(data)) {
-        const { appointmentId, summary } = mapRegistrationCustomerReminderSummary(row)
-        if (byAppointmentId.has(appointmentId)) {
-          throw new Error("registration_customer_reminder_summary_duplicate")
-        }
-        byAppointmentId.set(appointmentId, summary)
+    const { data, error } = await client.rpc(
+      "get_registration_customer_reminder_summaries_v1",
+      { p_task_id: taskId },
+    )
+    if (error) throw error
+    const byAppointmentId = new Map<string, RegistrationCustomerReminderSummary>()
+    for (const row of rows(data)) {
+      const { appointmentId, summary } = mapRegistrationCustomerReminderSummary(row)
+      if (byAppointmentId.has(appointmentId)) {
+        throw new Error("registration_customer_reminder_summary_duplicate")
       }
-      decodeOk = true
-      return byAppointmentId
-    } finally {
-      observation?.end("reminder_decode", decodeOk)
+      byAppointmentId.set(appointmentId, summary)
     }
+    return byAppointmentId
   }
 
   function invalidateReadyRuntime(error: unknown): never {
@@ -2521,100 +2504,150 @@ export function createRegistrationTrackService(
       metrics.detailObservation = observation
       metrics.detailSignal = signal
       observation?.begin("detail")
-      function boundedDetailSignal(kind: RegistrationDetailKind) {
-        const deadline = AbortSignal.timeout(8_000)
-        const combined = signal ? AbortSignal.any([signal, deadline]) : deadline
-        observation?.watchDeadline(kind, deadline)
-        return combined
-      }
       const detailRequest = (async () => {
-      const loadScheduledAppointmentPage = () => queryCountedRows(
-        client.from("ops_registration_appointments")
-          .select("id,task_id,kind,scheduled_at,place,status,notification_revision,created_at,updated_at", { count: "exact" })
-          .eq("task_id", safeTaskId)
-          .neq("kind", "observation_class")
-          .in("status", ["scheduled"])
-          .order("scheduled_at", { ascending: true })
-          .order("id", { ascending: true })
-          .limit(30)
-          .abortSignal(boundedDetailSignal("appointments_current"))
-          .retry(false),
-        metrics,
-        "appointments_current",
-      )
-      const loadAppointmentHistoryRows = () => queryRows(
-        client.from("ops_registration_appointments")
-          .select("id,task_id,kind,scheduled_at,place,status,notification_revision,created_at,updated_at")
-          .eq("task_id", safeTaskId)
-          .neq("kind", "observation_class")
-          .in("status", ["completed", "canceled"])
-          .order("updated_at", { ascending: false })
-          .order("id", { ascending: false })
-          .limit(30)
-          .abortSignal(boundedDetailSignal("appointments_history"))
-          .retry(false),
-        metrics,
-        undefined,
-        "appointments_history",
-      )
-      const loadOpenBatchRows = () => queryRows(
-        client.from("ops_registration_admission_batches")
-          .select("id,task_id,revision_number,status,invoice_sent_at,payment_confirmed_at,created_at,updated_at")
-          .eq("task_id", safeTaskId)
-          .in("status", ["draft", "invoiced", "paid"])
-          .order("revision_number", { ascending: false })
-          .order("id", { ascending: false })
-          .limit(1)
-          .abortSignal(boundedDetailSignal("batches_current"))
-          .retry(false),
-        metrics,
-        undefined,
-        "batches_current",
-      )
-      const loadBatchHistoryRows = () => queryRows(
-        client.from("ops_registration_admission_batches")
-          .select("id,task_id,revision_number,status,invoice_sent_at,payment_confirmed_at,created_at,updated_at")
-          .eq("task_id", safeTaskId)
-          .in("status", ["completed", "canceled"])
-          .order("revision_number", { ascending: false })
-          .order("id", { ascending: false })
-          .limit(30)
-          .abortSignal(boundedDetailSignal("batches_history"))
-          .retry(false),
-        metrics,
-        undefined,
-        "batches_history",
-      )
-      const loadActiveTrackRows = () => queryRows(
-        client.from("ops_registration_subject_tracks")
-          .select("id,task_id,subject,pipeline_status,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,updated_at,workflow_status,workflow_revision,workflow_status_entered_at,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,enrollment_detail_rows,observation_return_workflow_status,observation_attempt_count,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name),active_level_tests:ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link),level_test_history:ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link),active_consultations:ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at),consultation_history:ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at)")
-          .eq("task_id", safeTaskId)
-          .is("archived_at", null)
-          .in("active_level_tests.status", ["scheduled", "in_progress"])
-          .in("level_test_history.status", ["completed", "absent", "canceled"])
-          .in("active_consultations.status", ["waiting", "scheduled"])
-          .in("consultation_history.status", ["completed", "canceled"])
-          .order("attempt_number", { ascending: false, referencedTable: "active_level_tests" })
-          .order("id", { ascending: false, referencedTable: "active_level_tests" })
-          .limit(1, { referencedTable: "active_level_tests" })
-          .order("attempt_number", { ascending: false, referencedTable: "level_test_history" })
-          .order("id", { ascending: false, referencedTable: "level_test_history" })
-          .limit(30, { referencedTable: "level_test_history" })
-          .order("created_at", { ascending: false, referencedTable: "active_consultations" })
-          .order("id", { ascending: false, referencedTable: "active_consultations" })
-          .limit(1, { referencedTable: "active_consultations" })
-          .order("updated_at", { ascending: false, referencedTable: "consultation_history" })
-          .order("id", { ascending: false, referencedTable: "consultation_history" })
-          .limit(30, { referencedTable: "consultation_history" })
-          .order("subject", { ascending: true })
-          .order("id", { ascending: true })
-          .limit(30)
-          .abortSignal(boundedDetailSignal("tracks"))
-          .retry(false),
-        metrics,
-        undefined,
-        "tracks",
-      )
+      const loadScheduledAppointmentPage = () => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("appointments_current", deadline)
+        return queryCountedRows(
+          client.from("ops_registration_appointments")
+            .select("id,task_id,kind,scheduled_at,place,status,notification_revision,created_at,updated_at", { count: "exact" })
+            .eq("task_id", safeTaskId)
+            .neq("kind", "observation_class")
+            .in("status", ["scheduled"])
+            .order("scheduled_at", { ascending: true })
+            .order("id", { ascending: true })
+            .limit(30)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          "appointments_current",
+        )
+      }
+      const loadAppointmentHistoryRows = () => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("appointments_history", deadline)
+        return queryRows(
+          client.from("ops_registration_appointments")
+            .select("id,task_id,kind,scheduled_at,place,status,notification_revision,created_at,updated_at")
+            .eq("task_id", safeTaskId)
+            .neq("kind", "observation_class")
+            .in("status", ["completed", "canceled"])
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(30)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          undefined,
+          "appointments_history",
+        )
+      }
+      const loadOpenBatchRows = () => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("batches_current", deadline)
+        return queryRows(
+          client.from("ops_registration_admission_batches")
+            .select("id,task_id,revision_number,status,invoice_sent_at,payment_confirmed_at,created_at,updated_at")
+            .eq("task_id", safeTaskId)
+            .in("status", ["draft", "invoiced", "paid"])
+            .order("revision_number", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(1)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          undefined,
+          "batches_current",
+        )
+      }
+      const loadBatchHistoryRows = () => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("batches_history", deadline)
+        return queryRows(
+          client.from("ops_registration_admission_batches")
+            .select("id,task_id,revision_number,status,invoice_sent_at,payment_confirmed_at,created_at,updated_at")
+            .eq("task_id", safeTaskId)
+            .in("status", ["completed", "canceled"])
+            .order("revision_number", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(30)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          undefined,
+          "batches_history",
+        )
+      }
+      const loadActiveTrackRows = () => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("tracks", deadline)
+        return queryRows(
+          client.from("ops_registration_subject_tracks")
+            .select("id,task_id,subject,pipeline_status,director_profile_id,director_assignment_source,director_assignment_rule_key,waiting_kind,level_test_retake_decision,migration_review_required,stage_entered_at,updated_at,workflow_status,workflow_revision,workflow_status_entered_at,waiting_detail_kind,waiting_detail_class_id,waiting_detail_retake_decision,enrollment_detail_rows,observation_return_workflow_status,observation_attempt_count,director:profiles!ops_registration_subject_tracks_director_profile_id_fkey(id,name),active_level_tests:ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link),level_test_history:ops_registration_level_tests(id,track_id,appointment_id,attempt_number,status,started_at,completed_at,material_link),active_consultations:ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at),consultation_history:ops_registration_consultations(id,track_id,appointment_id,mode,status,director_profile_id,ready_at,ready_source,completed_at,outcome,note,created_at,updated_at)")
+            .eq("task_id", safeTaskId)
+            .is("archived_at", null)
+            .in("active_level_tests.status", ["scheduled", "in_progress"])
+            .in("level_test_history.status", ["completed", "absent", "canceled"])
+            .in("active_consultations.status", ["waiting", "scheduled"])
+            .in("consultation_history.status", ["completed", "canceled"])
+            .order("attempt_number", { ascending: false, referencedTable: "active_level_tests" })
+            .order("id", { ascending: false, referencedTable: "active_level_tests" })
+            .limit(1, { referencedTable: "active_level_tests" })
+            .order("attempt_number", { ascending: false, referencedTable: "level_test_history" })
+            .order("id", { ascending: false, referencedTable: "level_test_history" })
+            .limit(30, { referencedTable: "level_test_history" })
+            .order("created_at", { ascending: false, referencedTable: "active_consultations" })
+            .order("id", { ascending: false, referencedTable: "active_consultations" })
+            .limit(1, { referencedTable: "active_consultations" })
+            .order("updated_at", { ascending: false, referencedTable: "consultation_history" })
+            .order("id", { ascending: false, referencedTable: "consultation_history" })
+            .limit(30, { referencedTable: "consultation_history" })
+            .order("subject", { ascending: true })
+            .order("id", { ascending: true })
+            .limit(30)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          undefined,
+          "tracks",
+        )
+      }
+      const loadCurrentEnrollmentPage = (trackIds: string[]) => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("enrollments_current", deadline)
+        return queryCountedRows(
+          client.from("ops_registration_enrollments")
+            .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
+            .in("track_id", trackIds)
+            .or("status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)")
+            .order("created_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(30)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          "enrollments_current",
+        )
+      }
+      const loadEnrollmentHistoryRows = (trackIds: string[]) => {
+        const deadline = AbortSignal.timeout(8_000)
+        observation?.watchDeadline("enrollments_history", deadline)
+        return queryRows(
+          client.from("ops_registration_enrollments")
+            .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
+            .in("track_id", trackIds)
+            .or("status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)")
+            .order("updated_at", { ascending: false })
+            .order("id", { ascending: false })
+            .limit(30)
+            .abortSignal(signal ? AbortSignal.any([signal, deadline]) : deadline)
+            .retry(false),
+          metrics,
+          undefined,
+          "enrollments_history",
+        )
+      }
+      observation?.begin("initial_rows")
       const parentRowRequest = queryOne(
         client.from("ops_tasks").select(PARENT_DETAIL_COLUMNS).eq("id", safeTaskId).single(),
         metrics,
@@ -2652,8 +2685,12 @@ export function createRegistrationTrackService(
       let phaseOneFailure: { error: unknown } | undefined
       const phaseOneRequest = Promise.all([parentRowRequest, ...otherRowsRequests, trackRowsRequest])
         .then(
-          (phaseOne) => ({ ok: true as const, phaseOne }),
+          (phaseOne) => {
+            observation?.end("initial_rows", true)
+            return { ok: true as const, phaseOne }
+          },
           (error) => {
+            observation?.end("initial_rows", false)
             phaseOneFailure = { error }
             return { ok: false as const, error }
           },
@@ -2745,33 +2782,8 @@ export function createRegistrationTrackService(
           const trackIds = trackRows.map((row) => text(value(row, "id"))).filter(Boolean)
           const enrollmentRequest = trackIds.length > 0
             ? Promise.all([
-              queryCountedRows(
-                client.from("ops_registration_enrollments")
-                  .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at", { count: "exact" })
-                  .in("track_id", trackIds)
-                  .or("status.in.(planned,waitlisted),and(status.eq.enrolled,roster_active.eq.true)")
-                  .order("created_at", { ascending: false })
-                  .order("id", { ascending: false })
-                  .limit(30)
-                  .abortSignal(boundedDetailSignal("enrollments_current"))
-                  .retry(false),
-                metrics,
-                "enrollments_current",
-              ),
-              queryRows(
-                client.from("ops_registration_enrollments")
-                  .select("id,track_id,student_id,admission_batch_id,class_id,textbook_id,textbook_ids,class_start_date,class_start_session_key,class_start_lesson_session_id,class_start_session,class_start_source_observation_id,status,makeedu_registered,roster_active,roster_released_at,roster_release_reason,roster_release_source_task_id,roster_release_kind,sort_order,created_at,updated_at")
-                  .in("track_id", trackIds)
-                  .or("status.eq.canceled,and(status.eq.enrolled,roster_active.eq.false)")
-                  .order("updated_at", { ascending: false })
-                  .order("id", { ascending: false })
-                  .limit(30)
-                  .abortSignal(boundedDetailSignal("enrollments_history"))
-                  .retry(false),
-                metrics,
-                undefined,
-                "enrollments_history",
-              ),
+              loadCurrentEnrollmentPage(trackIds),
+              loadEnrollmentHistoryRows(trackIds),
             ])
             : Promise.resolve([{ rows: [], count: 0 }, []] as [
               { rows: Row[]; count: number | null },

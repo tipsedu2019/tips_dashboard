@@ -1,6 +1,6 @@
 const DETAIL_KINDS = [
   "detail", "runtime", "parent", "appointments_current", "appointments_history",
-  "events", "admission_message", "reminder_request", "reminder_decode",
+  "events", "admission_message", "initial_rows",
   "batches_current", "batches_history", "tracks", "enrollments_current",
   "enrollments_history", "dependent_rows", "initial_decode", "detail_decode",
 ] as const

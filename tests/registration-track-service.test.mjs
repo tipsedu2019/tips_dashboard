@@ -5166,7 +5166,7 @@ test("detail observations keep raw SDK failures private and preserve error ident
   assert.equal(outputs.length, 1, "successful retry and cache hit are silent");
 });
 
-test("detail observations distinguish reminder response from decoding without including its payload", async () => {
+test("detail observations report an initial-group failure without exposing reminder payloads", async () => {
   const { createRegistrationTrackService } = await loadFactory();
   const outputs = [];
   const harness = createClient({
@@ -5178,8 +5178,9 @@ test("detail observations distinguish reminder response from decoding without in
   }));
   await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), /registration_customer_reminder_summary_shape_invalid/);
   assert.equal(outputs.length, 1);
-  assert.ok(outputs[0].some(row => row.kind === "reminder_request" && row.phase === "success"));
-  assert.ok(outputs[0].some(row => row.kind === "reminder_decode" && row.phase === "failure"));
+  assert.ok(outputs[0].some(row => row.kind === "initial_rows" && row.phase === "failure"));
+  assert.equal(outputs[0].some(row => row.kind.startsWith("reminder")), false,
+    "the unchanged legacy RPC is observed only through its initial group");
   assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
 });
 
