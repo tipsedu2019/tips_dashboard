@@ -70,6 +70,18 @@ test('new committed attempt sends once; same key and sent replay fetch zero more
 test('concurrent same intent prepares one attempt and dispatches once',async()=>{
  const d=durable();const result=await Promise.all([d.handler(request()),d.handler(request(undefined,{'idempotency-key':credentialId}))]);assert.deepEqual(result.map(r=>r.status).sort(),[200,409]);assert.equal(d.fetches,1);assert.equal(d.row.attemptCount,1);
 });
+test('sanitized provider rejection is recorded as failed and replay cannot dispatch again',async()=>{
+ const marker='synthetic-private-response-canary';
+ const d=durable({fetch:async()=>Response.json({error:{code:400,status:'INVALID_ARGUMENT',message:marker,details:[{'@type':'type.googleapis.com/google.rpc.BadRequest',fieldViolations:[{field:'message.thread.name',description:marker}]}]}},{status:400})});
+ const first=await d.handler(request());assert.equal(first.status,200);const result=await first.json();
+ assert.equal(result.error,null);assert.equal(result.data.outbox.state,'failed');assert.equal(result.data.outbox.reason,'400.INVALID_ARGUMENT.field_thread_name');
+ assert.equal(d.row.attemptCount,1);assert.equal(d.fetches,1);assert.equal(JSON.stringify(result).includes(marker),false);
+ assert.match(d.row.reason,/^[A-Za-z0-9_.-]{1,100}$/);
+ assert.equal((await d.handler(request())).status,200);assert.equal(d.fetches,1);
+ assert.deepEqual(d.actions,['get','prepare_attempt','record_attempt','get']);
+ const get=createChatOutboxHandler({rpc:d.rpc});const response=await get(new Request('https://caller.test/api/chat/outbox?id='+id,{headers:{authorization:`Bearer ${token}`}}));
+ assert.equal(response.status,200);const receipt=await response.json();assert.equal(receipt.data.outbox.state,'failed');assert.equal(receipt.data.delivery,null);
+});
 test('repeated bridge source including rotated credential/new HTTP key never prepares',async()=>{
  const d=durable();
  const first=request();first.headers.delete('x-chat-intent-id');first.headers.set('x-bridge-event-id',initial.sourceEventId);assert.equal((await d.handler(first)).status,200);
