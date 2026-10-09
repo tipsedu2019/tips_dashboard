@@ -1,0 +1,2 @@
+WARNING:  there is already a transaction in progress
+ERROR:  permission denied for table notification_events

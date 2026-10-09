@@ -2927,7 +2927,7 @@ async function assertManagementSyncRecordsReady(input: OpsTaskInput) {
     assertResolvedManagementRecord(fromClass, "전반 완료 전에 전 수업을 다시 선택하세요.")
     assertResolvedManagementRecord(toClass, "전반 완료 전에 후 수업을 다시 선택하세요.")
     assertDifferentOpsClass(fromClass, toClass, "전반 완료 전에 전 수업과 후 수업을 다르게 선택하세요.")
-    assertOpsStudentInClass(student, fromClass, "전반 완료 전에 학생이 전 수업 명단에 있는지 확인하세요.")
+    // Completion reconciles already removed/enrolled rosters atomically in the RPC.
   }
 
   if (input.type === "word_retest" && input.status === "done") {

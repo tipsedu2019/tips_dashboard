@@ -1,0 +1,54 @@
+ok 1 - Function public.complete_ops_transfer_roster_transition_v2(uuid, uuid) should exist
+ok 2 - Function public.complete_ops_withdrawal_roster_transition_v2(uuid, uuid) should exist
+ok 3 - Function public.complete_ops_transfer_roster_transition(uuid, text) should exist
+ok 4 - Function public.complete_ops_withdrawal_roster_transition(uuid, text) should exist
+ok 5 - Function public.get_ops_task_legacy_dispatch_plan_v1(uuid, uuid) should exist
+ok 6 - Function public.transfer_withdrawal_notification_producers_runtime_version() should exist
+ok 7 - 인증 사용자는 전반 완료 고정 RPC를 실행할 수 있다
+ok 8 - 익명 사용자는 전반 완료 고정 RPC를 실행할 수 없다
+ok 9 - 순차 배포 중 구 화면은 공개 호환 완료 RPC를 실행할 수 있다
+ok 10 - 구 private 전반 완료 구현은 인증 사용자에게 직접 노출되지 않는다
+ok 11 - 구 private 퇴원 완료 구현은 인증 사용자에게 직접 노출되지 않는다
+ok 12 - 서버 역할만 원본 기반 레거시 발송 계획을 조회할 수 있다
+ok 13 - 브라우저 인증 사용자는 레거시 발송 계획을 직접 조회할 수 없다
+{"sub":"72000000-0000-4000-8000-000000000001","role":"authenticated"}
+72000000-0000-4000-8000-000000000001
+ok 14 - 브라우저 역할은 private canonical 테이블을 직접 읽을 수 없다
+ok 15 - 전반 초기 완료는 가장 먼저 실행되는 명단 보호 trigger가 차단한다
+ok 16 - 퇴원은 취소 상태로 바로 생성할 수 없다
+ok 17 - 전반 제출은 업무·원본·canonical 이벤트를 함께 만든다
+ok 18 - 퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다
+ok 19 - 완료 롤백 fixture는 제출 이벤트까지 정상 생성한다
+ok 20 - canonical 실패 시 제출 전체를 롤백한다
+ok 21 - 제출 canonical 실패 뒤 업무가 남지 않는다
+ok 22 - 전반 제출은 전반 canonical 이벤트 하나만 만든다
+ok 23 - 전반 제출은 퇴원 이벤트를 만들지 않는다
+ok 24 - 처리 시작 전이는 processing_started 원본 하나를 반환한다
+ok 25 - 의미 있는 상세 수정은 details_changed 원본 하나를 반환한다
+ok 26 - 취소 전이는 canceled 원본 하나를 반환한다
+ok 27 - 취소 뒤 재개는 reopened 원본 하나를 반환한다
+ok 28 - 일반 상태 RPC로 명단 완료를 우회할 수 없다
+ok 29 - 일반 수정 RPC로 명단 완료를 우회할 수 없다
+ok 30 - 전반 체크리스트 저장은 원본 UUID를 반환하지 않는다
+ok 31 - 체크리스트 저장만으로 어떤 전반 원본도 만들지 않는다
+ok 32 - 전반 명단 전이와 완료 원본을 한 트랜잭션에서 기록한다
+ok 33 - 같은 완료 요청 재실행은 최초 원본 UUID를 반환한다
+ok 34 - 퇴원 명단 전이와 완료 원본을 한 트랜잭션에서 기록한다
+ok 35 - 완료된 전반은 일반 상태 RPC로 다시 열 수 없다
+ok 36 - 구 화면 호환 완료 fixture를 생성한다
+ok 37 - 구 화면 공개 RPC도 명단·완료 원본·canonical을 함께 기록한다
+ok 38 - 구 화면 공개 RPC 재실행은 최초 완료 원본 UUID를 그대로 반환한다
+ok 39 - 완료 canonical 실패 시 명단·상태·원본을 모두 롤백한다
+ok 40 - 완료 canonical 실패 뒤 업무 상태가 완료로 남지 않는다
+ok 41 - 완료 canonical 실패 뒤 명단 체크가 남지 않는다
+ok 42 - 완료 canonical 실패 뒤 완료 원본도 남지 않는다
+ok 43 - 모든 성공 원본 UUID는 canonical source와 occurrence에 정확히 한 번 연결된다
+ok 44 - 각 전반·퇴원 원본은 canonical 이벤트 하나에만 연결된다
+ok 45 - 비전송 processing_started 원본은 정상 계획이지만 공급자 항목은 없다
+ok 46 - 전반 제출 계획은 실제 전반 화면 taskId 딥링크를 반환한다
+not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다
+# Failed test 47: "무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
+#       caught: no exception
+#       wanted: 42501
+1..47
+# Looks like you failed 1 test of 47

@@ -2258,14 +2258,7 @@ function getRosterCompletionBlockers(
 ) {
   const blockers: string[] = []
 
-  if (input.type === "transfer" && input.status === "done") {
-    const transfer = input.transfer || {}
-    if (hasLinkedRecord(input.studentId || input.studentName) && hasLinkedRecord(transfer.fromClassId || transfer.fromClassName)) {
-      const student = findStudentOptionByReference(students, indexes, input.studentId, input.studentName)
-      const fromClass = findClassOptionByReference(classes, indexes, transfer.fromClassId, transfer.fromClassName)
-      if (student && fromClass && !hasRosterLink(student, fromClass)) blockers.push("전 수업 명단")
-    }
-  }
+  // Transfer completion reconciles prior roster edits in the atomic RPC.
 
   if (input.type === "word_retest" && input.status === "done" && hasLinkedRecord(input.studentId || input.studentName || input.wordRetest?.studentName) && hasLinkedRecord(input.classId || input.className || input.wordRetest?.className)) {
     const student = findStudentOptionByReference(students, indexes, input.studentId, input.studentName, input.wordRetest?.studentName)

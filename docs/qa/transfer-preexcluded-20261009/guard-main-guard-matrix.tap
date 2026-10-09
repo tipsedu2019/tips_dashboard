@@ -1,0 +1,62 @@
+{"sub":"73000000-0000-4000-8000-000000000001","role":"authenticated"}
+73000000-0000-4000-8000-000000000001
+ok 1 - service role can call the public wrapper
+ok 2 - anon cannot call the internal helper
+ok 3 - authenticated cannot call the internal helper
+ok 4 - service_role cannot call the internal helper
+ok 5 - anon cannot directly call the public wrapper
+ok 6 - authenticated cannot directly call the public wrapper
+ok 7 - transfer admin preserves an existing allowed relationship and nonempty plan
+ok 8 - transfer assignee preserves an existing allowed relationship and nonempty plan
+ok 9 - transfer requester preserves an existing allowed relationship and nonempty plan
+ok 10 - transfer secondary preserves an existing allowed relationship and nonempty plan
+ok 11 - transfer source_actor preserves an existing allowed relationship and nonempty plan
+ok 12 - transfer staff preserves an existing allowed relationship and nonempty plan
+ok 13 - withdrawal admin preserves an existing allowed relationship and nonempty plan
+ok 14 - withdrawal assignee preserves an existing allowed relationship and nonempty plan
+ok 15 - withdrawal requester preserves an existing allowed relationship and nonempty plan
+ok 16 - withdrawal secondary preserves an existing allowed relationship and nonempty plan
+ok 17 - withdrawal source_actor preserves an existing allowed relationship and nonempty plan
+ok 18 - withdrawal staff preserves an existing allowed relationship and nonempty plan
+not ok 19 - transfer missing_profile is denied
+# Failed test 19: "transfer missing_profile is denied"
+#       caught: no exception
+#       wanted: 42501
+ok 20 - transfer unrelated_nonnull is denied
+not ok 21 - transfer unrelated_null is denied
+# Failed test 21: "transfer unrelated_null is denied"
+#       caught: no exception
+#       wanted: 42501
+not ok 22 - transfer unrelated_one_null is denied
+# Failed test 22: "transfer unrelated_one_null is denied"
+#       caught: no exception
+#       wanted: 42501
+not ok 23 - withdrawal missing_profile is denied
+# Failed test 23: "withdrawal missing_profile is denied"
+#       caught: no exception
+#       wanted: 42501
+ok 24 - withdrawal unrelated_nonnull is denied
+not ok 25 - withdrawal unrelated_null is denied
+# Failed test 25: "withdrawal unrelated_null is denied"
+#       caught: no exception
+#       wanted: 42501
+not ok 26 - withdrawal unrelated_one_null is denied
+# Failed test 26: "withdrawal unrelated_one_null is denied"
+#       caught: no exception
+#       wanted: 42501
+ok 27 - transfer null actor keeps input validation
+ok 28 - withdrawal null actor keeps input validation
+ok 29 - service role cannot bypass the wrapper
+{"sub":"73000000-0000-4000-8000-000000000002","role":"authenticated"}
+73000000-0000-4000-8000-000000000002
+ok 30 - unrelated teacher cannot list these event IDs through RLS
+ok 31 - transfer nonregistration preflight returns false and does not reject the source
+ok 32 - withdrawal nonregistration preflight returns false and does not reject the source
+ok 33 - authenticated direct plan call is rejected before evaluating parameters
+ok 34 - authenticated cannot read canonical plan data directly
+ok 35 - anonymous direct plan call is rejected
+ok 36 - plans create no deliveries
+ok 37 - plans enqueue no external requests
+ok 38 - no scheduler has run
+1..38
+# Looks like you failed 6 tests of 38

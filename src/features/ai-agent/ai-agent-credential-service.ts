@@ -3,15 +3,22 @@ import { type AiRequestActor, sameAiRequestActor } from './ai-agent-request-acce
 const scope = z.enum(['ai-agent:requests:read', 'ai-agent:requests:claim', 'ai-agent:requests:update', 'chat:outbox:read', 'chat:send']);
 const spaces = z.enum(['space_1', 'space_2', 'space_3', 'space_4', 'space_5', 'space_6', 'space_7']);
 export const credentialGrantSchema = z.strictObject({ queues: z.array(z.literal('employee_requests')).optional(), actions: z.array(z.enum(['read', 'claim', 'renew', 'progress', 'question', 'done'])).optional(), spaceKeys: z.array(spaces).optional(), purposes: z.array(z.enum(['ai_completion', 'bridge_reply'])).optional(), bridgeSourceId: z.uuid().optional() });
-const fields = { id: z.uuid(), label: z.string().min(1).max(80), scopes: z.array(scope), grant: credentialGrantSchema, expiresAt: z.iso.datetime({ offset: true }) };
-export const credentialIssueSchema = z.strictObject({ ...fields, token: z.string().regex(/^tips_agent_[a-f0-9]{64}$/).nullable() });
-export const credentialListSchema = z.strictObject({ supportEnabled: z.boolean(), total: z.number().int().nonnegative(), items: z.array(z.strictObject({ ...fields, createdAt: z.iso.datetime({ offset: true }), revokedAt: z.iso.datetime({ offset: true }).nullable(), lastUsedAt: z.iso.datetime({ offset: true }).nullable() })) });
+const fields = { id: z.uuid(), label: z.string().min(1).max(80), scopes: z.array(scope), grant: credentialGrantSchema, expiresAt: z.iso.datetime({ offset: true }).nullable() };
+function validCredentialExpiry(value: { expiresAt: string | null; scopes: string[]; grant: z.infer<typeof credentialGrantSchema> }) {
+    const { grant } = value;
+    return value.expiresAt !== null || (value.scopes.length === 2 && value.scopes.includes('chat:outbox:read') && value.scopes.includes('chat:send')
+        && grant.queues === undefined && grant.actions === undefined && grant.purposes?.length === 1 && grant.purposes[0] === 'bridge_reply'
+        && Boolean(grant.bridgeSourceId) && Boolean(grant.spaceKeys?.length) && new Set(grant.spaceKeys).size === grant.spaceKeys?.length);
+}
+export const credentialIssueSchema = z.strictObject({ ...fields, token: z.string().regex(/^tips_agent_[a-f0-9]{64}$/).nullable() }).refine(validCredentialExpiry);
+export const credentialListSchema = z.strictObject({ supportEnabled: z.boolean(), total: z.number().int().nonnegative(), items: z.array(z.strictObject({ ...fields, createdAt: z.iso.datetime({ offset: true }), revokedAt: z.iso.datetime({ offset: true }).nullable(), lastUsedAt: z.iso.datetime({ offset: true }).nullable() }).refine(validCredentialExpiry)) });
 export type AiCredential = z.infer<typeof credentialListSchema>['items'][number];
 export type AiCredentialCreate = {
     label: string;
     scopes: z.infer<typeof scope>[];
     grant: z.infer<typeof credentialGrantSchema>;
     expiresAt: string | null;
+    nonExpiring?: boolean;
 };
 export class AiCredentialError extends Error {
     constructor(public definite: boolean, message = 'credential_failed') { super(message); }
