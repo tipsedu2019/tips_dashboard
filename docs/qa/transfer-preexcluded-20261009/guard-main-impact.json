@@ -1,0 +1,82 @@
+[
+  {
+    "sub": "73000000-0000-4000-8000-000000000001",
+    "role": "authenticated"
+  },
+  {
+    "sub": "73000000-0000-4000-8000-000000000002",
+    "role": "authenticated"
+  },
+  {
+    "preflight": false,
+    "visibleEvents": 0
+  },
+  {
+    "kind": "transfer",
+    "plan": {
+      "items": [
+        {
+          "href": "/admin/transfer?flow=applicant&taskId=3eeee2df-18c9-489d-9913-a9b4b7863e2e",
+          "ruleId": "73000000-0000-4000-8000-000000000081",
+          "eventId": "8ad24fdb-232b-4c54-a141-0184e5533f75",
+          "eventKey": "transfer.submitted",
+          "targetKey": "connection:google_chat.management",
+          "channelKey": "google_chat",
+          "targetKind": "connection",
+          "templateId": "73000000-0000-4000-8000-000000000091",
+          "audienceKey": "management_team",
+          "renderedBody": "합성 권한 본문",
+          "ruleRevision": "1",
+          "scheduledFor": "2026-10-09T07:59:25.613743+00:00",
+          "connectionKey": "google_chat.management",
+          "occurrenceKey": "77903acb-2c77-49c9-ad2a-184bd8b2c4a3",
+          "renderedTitle": "합성 권한 제목",
+          "targetSnapshot": {
+            "connection_key": "google_chat.management"
+          },
+          "targetProfileId": null,
+          "targetGeneration": "0",
+          "templateChecksum": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "taskId": "3eeee2df-18c9-489d-9913-a9b4b7863e2e",
+      "sourceEventId": "77903acb-2c77-49c9-ad2a-184bd8b2c4a3"
+    },
+    "actor": "73000000-0000-4000-8000-000000000002",
+    "source": "77903acb-2c77-49c9-ad2a-184bd8b2c4a3"
+  },
+  {
+    "kind": "withdrawal",
+    "plan": {
+      "items": [
+        {
+          "href": "/admin/withdrawal?flow=applicant&taskId=54b3dd6a-ce70-4e35-8e36-290c40f56200",
+          "ruleId": "73000000-0000-4000-8000-000000000082",
+          "eventId": "6dc3c35e-feea-4458-8b2b-47666972fe5d",
+          "eventKey": "withdrawal.submitted",
+          "targetKey": "connection:google_chat.management",
+          "channelKey": "google_chat",
+          "targetKind": "connection",
+          "templateId": "73000000-0000-4000-8000-000000000092",
+          "audienceKey": "management_team",
+          "renderedBody": "합성 권한 본문",
+          "ruleRevision": "1",
+          "scheduledFor": "2026-10-09T07:59:25.625747+00:00",
+          "connectionKey": "google_chat.management",
+          "occurrenceKey": "4242acd9-525e-4706-9236-71255e348234",
+          "renderedTitle": "합성 권한 제목",
+          "targetSnapshot": {
+            "connection_key": "google_chat.management"
+          },
+          "targetProfileId": null,
+          "targetGeneration": "0",
+          "templateChecksum": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        }
+      ],
+      "taskId": "54b3dd6a-ce70-4e35-8e36-290c40f56200",
+      "sourceEventId": "4242acd9-525e-4706-9236-71255e348234"
+    },
+    "actor": "73000000-0000-4000-8000-000000000002",
+    "source": "4242acd9-525e-4706-9236-71255e348234"
+  }
+]

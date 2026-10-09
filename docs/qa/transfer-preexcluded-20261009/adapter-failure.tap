@@ -1,0 +1,84 @@
+ok 1 - Function public.complete_ops_transfer_roster_transition_v2(uuid, uuid) should exist
+ok 2 - Function public.complete_ops_withdrawal_roster_transition_v2(uuid, uuid) should exist
+ok 3 - Function public.complete_ops_transfer_roster_transition(uuid, text) should exist
+ok 4 - Function public.complete_ops_withdrawal_roster_transition(uuid, text) should exist
+ok 5 - Function public.get_ops_task_legacy_dispatch_plan_v1(uuid, uuid) should exist
+ok 6 - Function public.transfer_withdrawal_notification_producers_runtime_version() should exist
+ok 7 - 인증 사용자는 전반 완료 고정 RPC를 실행할 수 있다
+ok 8 - 익명 사용자는 전반 완료 고정 RPC를 실행할 수 없다
+ok 9 - 순차 배포 중 구 화면은 공개 호환 완료 RPC를 실행할 수 있다
+ok 10 - 구 private 전반 완료 구현은 인증 사용자에게 직접 노출되지 않는다
+ok 11 - 구 private 퇴원 완료 구현은 인증 사용자에게 직접 노출되지 않는다
+ok 12 - 서버 역할만 원본 기반 레거시 발송 계획을 조회할 수 있다
+ok 13 - 브라우저 인증 사용자는 레거시 발송 계획을 직접 조회할 수 없다
+{"sub":"72000000-0000-4000-8000-000000000001","role":"authenticated"}
+72000000-0000-4000-8000-000000000001
+not ok 14 - 전반은 완료 상태로 바로 생성할 수 없다
+# Failed test 14: "전반은 완료 상태로 바로 생성할 수 없다"
+#       caught: 42501: ops_roster_completion_requires_rpc
+#       wanted: 22023: ops_transition_initial_status_invalid
+ok 15 - 퇴원은 취소 상태로 바로 생성할 수 없다
+ok 16 - 전반 제출은 업무·원본·canonical 이벤트를 함께 만든다
+not ok 17 - 퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다
+# Failed test 17: "퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다"
+#     died: 22023: ops_withdrawal_management_link_required
+#         CONTEXT:
+#             PL/pgSQL function dashboard_private.record_ops_transition_notification_source_v1(public.ops_tasks,text,uuid) line 121 at RAISE
+#             SQL statement "SELECT dashboard_private.record_ops_transition_notification_source_v1(
+#                   v_task, v_task.type || '.submitted', v_request_id
+#                 )"
+#             PL/pgSQL function dashboard_private.write_ops_transition_detail_source_v1() line 36 at PERFORM
+#             SQL statement "insert into public.ops_withdrawal_details(
+#                   task_id, school_grade, teacher_name, withdrawal_date, withdrawal_session,
+#                   customer_reason, teacher_opinion, undistributed_textbooks,
+#                   completed_lesson_hours, four_week_lesson_hours,
+#                   timetable_roster_updated, makeedu_withdrawal_done, fee_processed, textbook_fee_processed
+#                 ) values (
+#                   p_task_id, nullif(p_detail ->> 'school_grade', ''), nullif(p_detail ->> 'teacher_name', ''),
+#                   nullif(p_detail ->> 'withdrawal_date', '')::date,
+#                   nullif(p_detail ->> 'withdrawal_session', ''),
+#                   nullif(p_detail ->> 'customer_reason', ''), nullif(p_detail ->> 'teacher_opinion', ''),
+#                   nullif(p_detail ->> 'undistributed_textbooks', ''),
+#                   nullif(p_detail ->> 'completed_lesson_hours', '')::numeric,
+#                   nullif(p_detail ->> 'four_week_lesson_hours', '')::numeric,
+#                   coalesce((p_detail ->> 'timetable_roster_updated')::boolean, false),
+#                   coalesce((p_detail ->> 'makeedu_withdrawal_done')::boolean, false),
+#                   coalesce((p_detail ->> 'fee_processed')::boolean, false),
+#                   coalesce((p_detail ->> 'textbook_fee_processed')::boolean, false)
+#                 ) on conflict (task_id) do update set
+#                   school_grade = excluded.school_grade,
+#                   teacher_name = excluded.teacher_name,
+#                   withdrawal_date = excluded.withdrawal_date,
+#                   withdrawal_session = excluded.withdrawal_session,
+#                   customer_reason = excluded.customer_reason,
+#                   teacher_opinion = excluded.teacher_opinion,
+#                   undistributed_textbooks = excluded.undistributed_textbooks,
+#                   completed_lesson_hours = excluded.completed_lesson_hours,
+#                   four_week_lesson_hours = excluded.four_week_lesson_hours,
+#                   timetable_roster_updated = excluded.timetable_roster_updated,
+#                   makeedu_withdrawal_done = excluded.makeedu_withdrawal_done,
+#                   fee_processed = excluded.fee_processed,
+#                   textbook_fee_processed = excluded.textbook_fee_processed"
+#             PL/pgSQL function dashboard_private.upsert_ops_task_detail_v2(uuid,text,jsonb) line 134 at SQL statement
+#             SQL statement "SELECT dashboard_private.upsert_ops_task_detail_v2(v_task.id, v_task.type, v_detail)"
+#             PL/pgSQL function dashboard_private.create_ops_task_v2_impl(jsonb,uuid) line 34 at PERFORM
+#             SQL function "create_ops_task_v2" statement 1
+#             SQL statement "
+#               select public.create_ops_task_v2(
+#                 jsonb_build_object(
+#                   'task', jsonb_build_object(
+#                     'type', 'withdrawal', 'title', '퇴원 제출', 'status', 'requested',
+#                     'student_name', '퇴원 학생', 'class_name', '퇴원 수업'
+#                   ),
+#                   'withdrawal', jsonb_build_object(
+#                     'teacher_name', '퇴원 선생님', 'withdrawal_date', '2026-07-31',
+#                     'withdrawal_session', '4회차'
+#                   )
+#                 ),
+#                 '72000000-0000-4000-8000-000000000012'::uuid
+#               )
+#             "
+#             PL/pgSQL function lives_ok(text,text) line 14 at EXECUTE
+ok 18 - 완료 롤백 fixture는 제출 이벤트까지 정상 생성한다
+ok 19 - canonical 실패 시 제출 전체를 롤백한다
+ok 20 - 제출 canonical 실패 뒤 업무가 남지 않는다

@@ -1,0 +1,12 @@
+{"stage":"main","status":202,"actor":"73000000-0000-4000-8000-000000000002","source":"77903acb-2c77-49c9-ad2a-184bd8b2c4a3","rpcs":["get_ops_task_legacy_dispatch_plan_v1","record_legacy_notification_intent_v1","begin_legacy_notification_dispatch_v1"],"providerCalls":0,"fetchCalls":0,"body":{"ok":true,"sent":0,"deduped":1,"failed":0,"eventIds":["8ad24fdb-232b-4c54-a141-0184e5533f75"]}}
+{"stage":"candidate","status":403,"rpcs":["get_ops_task_legacy_dispatch_plan_v1"],"providerCalls":0,"fetchCalls":0}
+✔ main captured unrelated-actor plan reaches intent and ownership; synthetic stop forbids transport (27.67575ms)
+✔ candidate 42501 ends actual route before ownership or transport (0.498042ms)
+ℹ tests 2
+ℹ suites 0
+ℹ pass 2
+ℹ fail 0
+ℹ cancelled 0
+ℹ skipped 0
+ℹ todo 0
+ℹ duration_ms 115.321125

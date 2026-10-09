@@ -814,6 +814,16 @@
       "fileName": "20261008140556_ai_agent_thread_replies.sql",
       "sha256": "2b618a4944c4e5bdf573b1335cd146a4eb989fff451ca585f4e55a8c348682c1",
       "status": "final"
+    },
+    {
+      "fileName": "20261009065550_transfer_completion_preexcluded_rosters.sql",
+      "status": "final",
+      "sha256": "59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099"
+    },
+    {
+      "fileName": "20261009082000_ops_legacy_dispatch_actor_null_guard.sql",
+      "status": "final",
+      "sha256": "191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3"
     }
   ]
 }

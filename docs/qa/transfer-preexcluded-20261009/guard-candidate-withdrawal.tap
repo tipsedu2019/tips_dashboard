@@ -1,0 +1,103 @@
+{"sub":"a0800000-0000-4000-8000-000000000001","role":"authenticated"}|a0800000-0000-4000-8000-000000000001|authenticated
+
+
+
+
+
+
+
+
+
+{"jobs": [{"jobId": 1, "active": true, "schedule": "* * * * *"}], "ready": true, "available": true}
+ok 1 - missing completes through real v3
+ok 2 - empty completes through real v3
+ok 3 - missing_removed completes through real v3
+ok 4 - empty_removed completes through real v3
+ok 5 - partial_round completes through real v3
+ok 6 - partial completes through real v3
+ok 7 - complete completes through real v3
+ok 8 - future completes through real v3
+ok 9 - no_applied_round preserves unpaid flags
+ok 10 - missing preserves unpaid flags
+ok 11 - empty preserves unpaid flags
+ok 12 - missing_removed preserves unpaid flags
+ok 13 - empty_removed preserves unpaid flags
+ok 14 - partial_round preserves unpaid flags
+ok 15 - partial preserves unpaid flags
+ok 16 - complete preserves unpaid flags
+ok 17 - future preserves unpaid flags
+ok 18 - missing records honest historical snapshot availability
+ok 19 - empty records honest historical snapshot availability
+ok 20 - missing_removed records honest historical snapshot availability
+ok 21 - empty_removed records honest historical snapshot availability
+ok 22 - partial_round records honest historical snapshot availability
+ok 23 - partial records honest historical snapshot availability
+ok 24 - complete records honest historical snapshot availability
+ok 25 - future records honest historical snapshot availability
+ok 26 - missing does not fabricate original request values
+ok 27 - empty does not fabricate original request values
+ok 28 - missing_removed does not fabricate original request values
+ok 29 - empty_removed does not fabricate original request values
+ok 30 - future does not fabricate original request values
+ok 31 - partial retains original date
+ok 32 - complete retains original date
+ok 33 - partial history does not acquire an invented round
+ok 34 - complete history retains original round
+ok 35 - complete history retains original round
+ok 36 - round-only history does not acquire an invented date
+ok 37 - missing_removed already removed roster remains removed
+ok 38 - empty_removed already removed roster remains removed
+ok 39 - missing_removed does not fabricate roster history
+ok 40 - empty_removed does not fabricate roster history
+ok 41 - missing notification uses validated applied schedule
+ok 42 - empty notification uses validated applied schedule
+ok 43 - missing_removed notification uses validated applied schedule
+ok 44 - empty_removed notification uses validated applied schedule
+ok 45 - partial_round notification uses validated applied schedule
+ok 46 - partial notification uses validated applied schedule
+ok 47 - complete notification uses validated applied schedule
+ok 48 - future notification uses validated applied schedule
+ok 49 - missing past roster is removed
+ok 50 - empty past roster is removed
+ok 51 - partial past roster is removed
+ok 52 - complete past roster is removed
+ok 53 - incomplete history preserves future roster
+ok 54 - historical snapshot does not change D inclusive / D+1 excluded boundary
+ok 55 - missing exact retry replays receipt
+ok 56 - empty exact retry replays receipt
+ok 57 - missing_removed exact retry replays receipt
+ok 58 - empty_removed exact retry replays receipt
+ok 59 - partial_round exact retry replays receipt
+ok 60 - partial exact retry replays receipt
+ok 61 - complete exact retry replays receipt
+ok 62 - future exact retry replays receipt
+ok 63 - missing completion source remains unique
+ok 64 - empty completion source remains unique
+ok 65 - missing_removed completion source remains unique
+ok 66 - empty_removed completion source remains unique
+ok 67 - partial_round completion source remains unique
+ok 68 - partial completion source remains unique
+ok 69 - complete completion source remains unique
+ok 70 - future completion source remains unique
+ok 71 - missing canonical completion notification remains unique
+ok 72 - empty canonical completion notification remains unique
+ok 73 - missing_removed canonical completion notification remains unique
+ok 74 - empty_removed canonical completion notification remains unique
+ok 75 - partial_round canonical completion notification remains unique
+ok 76 - partial canonical completion notification remains unique
+ok 77 - complete canonical completion notification remains unique
+ok 78 - future canonical completion notification remains unique
+ok 79 - applied round is still mandatory with exact SQLSTATE
+ok 80 - rejected applied snapshot rolls back task and both roster arrays
+ok 81 - all historical task events remain byte-for-byte unchanged
+ok 82 - all historical canonical snapshots remain byte-for-byte unchanged
+ok 83 - synthetic test does not fan out or send
+SNAPSHOT_PAYLOAD {"case": "complete", "payload": {"status": "done", "task_id": "1e926af4-2baa-48db-90ce-39469cabcd35", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 complete", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.438767+00:00", "task_status": "done", "student_name": "합성 학생 complete", "requester_name": "합성 관리자", "selected_class": "합성 수업 complete", "source_event_id": "98208cd6-520f-4e2a-aa89-a333dd2ad0b3", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_date": "2026-06-01", "requested_withdrawal_round": "원래 1회차", "requested_withdrawal_snapshot_status": "complete"}}
+SNAPSHOT_PAYLOAD {"case": "empty", "payload": {"status": "done", "task_id": "52fa0ec4-0db3-4d30-8431-4f0b813631e9", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 empty", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.428699+00:00", "task_status": "done", "student_name": "합성 학생 empty", "requester_name": "합성 관리자", "selected_class": "합성 수업 empty", "source_event_id": "759d40df-c4d5-4365-a65d-d248be9f02b0", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_snapshot_status": "incomplete"}}
+SNAPSHOT_PAYLOAD {"case": "empty_removed", "payload": {"status": "done", "task_id": "a0091156-d0a8-48dc-899b-106564e1d831", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 empty_removed", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.432763+00:00", "task_status": "done", "student_name": "합성 학생 empty_removed", "requester_name": "합성 관리자", "selected_class": "합성 수업 empty_removed", "source_event_id": "5375a97d-a565-4d52-b244-43c42ca4bac9", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_snapshot_status": "incomplete"}}
+SNAPSHOT_PAYLOAD {"case": "future", "payload": {"status": "done", "task_id": "7df5d9bb-374f-4b71-8c7e-aa223794f178", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 future", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.439738+00:00", "task_status": "done", "student_name": "합성 학생 future", "requester_name": "합성 관리자", "selected_class": "합성 수업 future", "source_event_id": "83b63579-e6a3-4758-a974-4e4337af7273", "withdrawal_date": "2026-10-19", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-10-19", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_snapshot_status": "incomplete"}}
+SNAPSHOT_PAYLOAD {"case": "missing", "payload": {"status": "done", "task_id": "eece2d53-8342-4d02-a4b3-436724914e27", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 missing", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.425648+00:00", "task_status": "done", "student_name": "합성 학생 missing", "requester_name": "합성 관리자", "selected_class": "합성 수업 missing", "source_event_id": "6ae4f4da-4e20-4406-9c66-36097c97310f", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_snapshot_status": "missing"}}
+SNAPSHOT_PAYLOAD {"case": "missing_removed", "payload": {"status": "done", "task_id": "2f327653-0e30-48f6-a618-ae5fb7a3ca29", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 missing_removed", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.430935+00:00", "task_status": "done", "student_name": "합성 학생 missing_removed", "requester_name": "합성 관리자", "selected_class": "합성 수업 missing_removed", "source_event_id": "5466873e-42c8-45f1-a368-cdd6b9cf26d0", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_snapshot_status": "missing"}}
+SNAPSHOT_PAYLOAD {"case": "partial", "payload": {"status": "done", "task_id": "5417fd4a-3f64-4946-bde7-dc2deed28b11", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 partial", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.437194+00:00", "task_status": "done", "student_name": "합성 학생 partial", "requester_name": "합성 관리자", "selected_class": "합성 수업 partial", "source_event_id": "08c2c006-0ac7-4e7f-87b3-0da755cadb2b", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_date": "2026-06-01", "requested_withdrawal_snapshot_status": "incomplete"}}
+SNAPSHOT_PAYLOAD {"case": "partial_round", "payload": {"status": "done", "task_id": "f533cc32-77f5-4a2d-b8ec-f25308a37eaf", "subjects": "영어", "actor_name": "합성 관리자", "class_name": "합성 수업 partial_round", "inquiry_at": "", "occurred_at": "2026-10-09T08:00:15.434954+00:00", "task_status": "done", "student_name": "합성 학생 partial_round", "requester_name": "합성 관리자", "selected_class": "합성 수업 partial_round", "source_event_id": "4e0e440e-4b78-4468-a1cd-41f746a318d8", "withdrawal_date": "2026-09-29", "selected_subject": "영어", "withdrawal_round": "확정 3회차", "registration_checked": "", "requester_profile_id": "a0800000-0000-4000-8000-000000000001", "notification_subjects": ["영어"], "other_active_subjects": [], "management_profile_ids": ["a0800000-0000-4000-8000-000000000001"], "applied_withdrawal_date": "2026-09-29", "applied_withdrawal_round": "확정 3회차", "requested_withdrawal_round": "원래 1회차", "requested_withdrawal_snapshot_status": "incomplete"}}
+1..83

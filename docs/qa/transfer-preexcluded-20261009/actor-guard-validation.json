@@ -1,0 +1,126 @@
+{
+  "base": "6a6d7abe4f45e366beccc14efbbcce0534f0370f",
+  "productScope": "Single fail-closed predicate in existing helper; no ACL, role, API, configuration, connection or key changes",
+  "productionActions": 0,
+  "sourceHashes": {
+    "supabase/migrations/20261009082000_ops_legacy_dispatch_actor_null_guard.sql": "191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3",
+    "supabase/tests/ops_legacy_dispatch_actor_guard_test.sql": "c58454c16b35a1fcdf20e244355948ff76fdc83aa9a5d8757343ceec145d60f1",
+    "supabase/tests/notification_transfer_withdrawal_adapters_test.sql": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f",
+    "tests/notification-legacy-retry-storm-route.test.mjs": "4f30a2d75e432032027ecedecba199e0f78035351e509f9b048f5275cad262ae",
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "2f95f61bbd8a4e32cb8fb7d896871f58dea66651e7223f85b484219269239f1a"
+  },
+  "suites": {
+    "main-adapter": {
+      "exitCode": 0,
+      "assertions": 47,
+      "failed": [
+        "not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
+      ],
+      "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f",
+      "gateExitCode": 1
+    },
+    "main-guard-matrix": {
+      "exitCode": 0,
+      "assertions": 38,
+      "failed": [
+        "not ok 19 - transfer missing_profile is denied",
+        "not ok 21 - transfer unrelated_null is denied",
+        "not ok 22 - transfer unrelated_one_null is denied",
+        "not ok 23 - withdrawal missing_profile is denied",
+        "not ok 25 - withdrawal unrelated_null is denied",
+        "not ok 26 - withdrawal unrelated_one_null is denied"
+      ],
+      "inputSHA256": "c58454c16b35a1fcdf20e244355948ff76fdc83aa9a5d8757343ceec145d60f1",
+      "gateExitCode": 1
+    },
+    "candidate-adapter": {
+      "exitCode": 0,
+      "assertions": 47,
+      "failed": [],
+      "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f",
+      "gateExitCode": 0
+    },
+    "candidate-guard-matrix": {
+      "exitCode": 0,
+      "assertions": 38,
+      "failed": [],
+      "inputSHA256": "c58454c16b35a1fcdf20e244355948ff76fdc83aa9a5d8757343ceec145d60f1",
+      "gateExitCode": 0
+    },
+    "candidate-transfer": {
+      "exitCode": 0,
+      "assertions": 194,
+      "failed": [],
+      "inputSHA256": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51",
+      "gateExitCode": 0
+    },
+    "candidate-subject": {
+      "exitCode": 0,
+      "assertions": 39,
+      "failed": [],
+      "inputSHA256": "e45f7a6d0094a53c7779f4d6df6021d4b2839c51a2488a7f0b8845cd7f43a1b4",
+      "gateExitCode": 0
+    },
+    "candidate-withdrawal": {
+      "exitCode": 0,
+      "assertions": 83,
+      "failed": [],
+      "inputSHA256": "8939dfecf9142c77aad8e6e490978f49c5bd99733f67ce9d1b0f978ea3c9702e",
+      "gateExitCode": 0
+    }
+  },
+  "catalog": {
+    "functions": 1108,
+    "changedFromMain": [
+      "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
+      "dashboard_private.record_ops_transition_notification_source_v1(ops_tasks,text,uuid)",
+      "get_ops_task_legacy_dispatch_before_subject_completion_v1(uuid,uuid)"
+    ],
+    "ownersACLSearchPathSecurityVolatilityUnchanged": true,
+    "guardDefinitionIsExactCoalesceOnly": true,
+    "guardBefore": "f3bc28dcde7b2f8a00ba402e1b37ebd7be3602078f357873902fe2d44a3eeaa3",
+    "guardAfter": "ce81a9a868b5658906184fe14f1830bb53a565bce3ca8495409ce5d05f74a400",
+    "rollbackSHA256": "20e46a9efa9e49431ad5d948dc87181d7c701bb7f6d8a9550a25aa3c2c3a9088",
+    "restoredCatalogExact": true,
+    "transferAssertionCountDifference": {
+      "request detail keeps exact dates, rounds, teachers and financial checks": 26
+    }
+  },
+  "nodeRouteAndAdjacent": {
+    "tests": 52,
+    "passed": 52,
+    "failed": 0,
+    "command": "node --test --experimental-strip-types tests/notification-legacy-retry-storm-route.test.mjs tests/notification-transfer-withdrawal-adapters.test.mjs tests/transfer-preexcluded-completion.test.mjs tests/operations-subject-completion-chat.test.mjs"
+  },
+  "capturedPlanRouteDiagnostic": {
+    "tests": 2,
+    "passed": 2,
+    "beforeStatus": 202,
+    "afterStatus": 403,
+    "providerCalls": 0,
+    "fetchCalls": 0,
+    "scope": "Actual route with captured synthetic DB plan; auth, RPC transport and ownership are mocked. Main diagnostic deliberately stops at mocked ownership; no actual claim or send."
+  },
+  "dbLint": {
+    "exitCode": 0,
+    "adapterSuitePassed": true
+  },
+  "static": {
+    "squawkIssues": 0,
+    "eslintExit": 0,
+    "migrationLayoutExit": 0,
+    "domainSQLStateExit": 0
+  },
+  "evidenceHashes": {
+    "guard-main-adapter.tap": "315f9ae215cb719dff16272f7aa2a70bd4253f91c6179226b3064caffbf66359",
+    "guard-main-guard-matrix.tap": "dcb4d85c1e09f7faf5de1570df0812bd39a0341b5d73c71db13e1dac449db6d6",
+    "guard-candidate-adapter.tap": "177b30279f2c7ed5e9b4dbfebb8749f0a9736c98aa2b9d63d05b77e8db4155de",
+    "guard-candidate-guard-matrix.tap": "81e7db32486d7e817dc023c059228a5f78a35d9a7019e4a348fa28a82f8f6c6e",
+    "guard-candidate-transfer.tap": "2db3693c3baf5e768351ca652107821376eea9cfc6c1987da8d045de3cd58b76",
+    "guard-candidate-subject.tap": "1d1dac4808b95050ded64cb1f61fd7d933397821db2e4f74580d57f8456c8f85",
+    "guard-candidate-withdrawal.tap": "44fb41441c1efa3c2800fc7442c8c6e49e906dd96c55c61353053812dee1d4c3",
+    "guard-route-impact.log": "bca518157c6892bb52fc161dc289d411b6c9f76e5749a7ebef6110ee23176851",
+    "guard-main-impact.json": "ad28f2067c2bcb0bf658668b9939004f7bab93eadf9b9dabe7b6cc88074fc516",
+    "actor-guard-rollback-reference.sql": "20e46a9efa9e49431ad5d948dc87181d7c701bb7f6d8a9550a25aa3c2c3a9088"
+  }
+}
