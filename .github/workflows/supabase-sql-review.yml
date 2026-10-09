@@ -44,6 +44,7 @@ jobs:
             tests/ai-agent-personal-owner-concurrency.test.mjs \
             tests/agent-personal-dashboard-read.test.mjs \
             tests/ai-agent-credential-service.test.mjs \
+            tests/ai-agent-nonexpiring-producer-contract.test.mjs \
             tests/ai-agent-credential-workspace.test.mjs \
             tests/ai-agent-local-db-runner.test.mjs \
             tests/ai-agent-navigation.test.mjs \

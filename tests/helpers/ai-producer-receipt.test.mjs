@@ -190,6 +190,12 @@ test('current migration identity preserves the six accepted pins and rejects can
   await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
   await writeFile(manifestPath,JSON.stringify(original));await rm(replyPath);
   await assert.rejects(snapshotAiSource(root),/ENOENT/);await writeFile(replyPath,replyBytes);
+  const neverPath=join(root,'supabase/migrations/'+NONEXPIRING_CHAT_MIGRATION.fileName),neverBytes=await readFile(neverPath);
+  const alteredNever=Buffer.concat([neverBytes,Buffer.from('\n-- drift\n')]);
+  await writeFile(neverPath,alteredNever);await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);
+  const neverManifest=structuredClone(original);neverManifest.orderedNewMigrations.find(row=>row.fileName===NONEXPIRING_CHAT_MIGRATION.fileName).sha256=hash(alteredNever);
+  await writeFile(manifestPath,JSON.stringify(neverManifest));await assert.rejects(snapshotAiSource(root),/current migration manifest drift/);
+  await writeFile(manifestPath,JSON.stringify(original));await rm(neverPath);await assert.rejects(snapshotAiSource(root),/ENOENT/);await writeFile(neverPath,neverBytes);
   const newest=join(root,'supabase/migrations/'+CURRENT_AI_MIGRATIONS[6].fileName);
   await writeFile(newest,(await readFile(newest))+'\n-- drift\n');
   await assert.rejects(snapshotAiSource(root),/accepted migration source drift/);
