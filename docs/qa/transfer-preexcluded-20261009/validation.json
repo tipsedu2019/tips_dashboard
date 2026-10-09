@@ -8,7 +8,8 @@
     "supabase/migrations/20261009065550_transfer_completion_preexcluded_rosters.sql": "59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099",
     "supabase/tests/transfer_preexcluded_completion_test.sql": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51",
     "tests/transfer-preexcluded-completion.test.mjs": "d36512bb6b38a42991b82c15e4a41591180d7299ed82fe598415de703311c985",
-    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "c2e01268908d4fcc2392528f8cc212ec044c09316190de5f14a4983f346e5c4d"
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "c2e01268908d4fcc2392528f8cc212ec044c09316190de5f14a4983f346e5c4d",
+    "supabase/tests/notification_transfer_withdrawal_adapters_test.sql": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
   },
   "baseline": {
     "exitCode": 0,
@@ -35,13 +36,12 @@
     "inputSHA256": "ed4669636ad15aed0786f2e5d4c13fdead5aa288bc1c61106229fd1014e6dee9"
   },
   "adapterFailure": {
-    "exitCode": 3,
-    "assertions": 20,
+    "exitCode": 0,
+    "assertions": 47,
     "failed": [
-      "not ok 14 - 전반은 완료 상태로 바로 생성할 수 없다",
-      "not ok 17 - 퇴원 제출은 업무·원본·canonical 이벤트를 함께 만든다"
+      "not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
     ],
-    "inputSHA256": "d22b2ca77a494468715730a8c6f128eb6adaa6325cd7830e545cacaac8b929e5"
+    "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
   },
   "defaultLint": {
     "exitCode": 0,
@@ -284,5 +284,6 @@
     "free-tier.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
     "layout.log": "487a77776cd6fe21f8fd3b4a079471a86cb955b03ffda043d43ac7bfa122fcf1",
     "sqlstate.log": "0d7f013368b8312323a93e3ce3df33f5f2a0a9835cfaf3cbea1cc372675d3ae9"
-  }
+  },
+  "adapterComparison": "adapter-main-comparison.json"
 }

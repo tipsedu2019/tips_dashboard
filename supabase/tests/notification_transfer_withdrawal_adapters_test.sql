@@ -69,11 +69,53 @@ select ok(
   '브라우저 인증 사용자는 레거시 발송 계획을 직접 조회할 수 없다'
 );
 
+-- Match real Auth profile ownership; no production ACL or trigger is relaxed.
+insert into auth.users(id,email) values
+ ('72000000-0000-4000-8000-000000000001','adapter-admin@example.invalid'),
+ ('72000000-0000-4000-8000-000000000002','adapter-teacher@example.invalid');
+
 insert into public.profiles(id, role)
 values
   ('72000000-0000-4000-8000-000000000001'::uuid, 'admin'),
   ('72000000-0000-4000-8000-000000000002'::uuid, 'teacher')
 on conflict (id) do update set role = excluded.role;
+
+-- Current withdrawal source contract requires real student/class links.
+insert into public.classes(id,name,subject,status,student_ids,waitlist_ids)
+ values('72000000-0000-4000-8000-000000000032','퇴원 수업','영어','진행중',
+ '["72000000-0000-4000-8000-000000000031"]','[]');
+insert into public.students(id,name,status,parent_contact,class_ids,waitlist_class_ids)
+ values('72000000-0000-4000-8000-000000000031','퇴원 학생','재원','00000000000',
+ '["72000000-0000-4000-8000-000000000032"]','[]');
+
+-- This rolled-back synthetic rule makes dispatch-plan assertions non-vacuous.
+-- It creates no connection, credential, delivery or provider request.
+do $adapter_plan_fixture$
+declare v_rule uuid; v_version bigint;
+begin
+ select id into v_rule from dashboard_private.notification_rules
+ where event_key='transfer.submitted' and channel_key='google_chat'
+   and audience_key='management_team' and rule_variant_key='immediate';
+ if v_rule is null then
+  v_rule:='72000000-0000-4000-8000-000000000070';
+  insert into dashboard_private.notification_rules(id,workflow_key,event_key,channel_key,audience_key,rule_variant_key,
+   delivery_mode,enabled,active_template_id,created_actor_kind,updated_actor_kind)
+  values(v_rule,'transfer','transfer.submitted','google_chat','management_team','immediate','immediate',true,
+   '72000000-0000-4000-8000-000000000071','system','system');
+ else
+  update dashboard_private.notification_rules set enabled=true,active_template_id='72000000-0000-4000-8000-000000000071' where id=v_rule;
+ end if;
+ select coalesce(max(version),0)+1 into v_version from dashboard_private.notification_templates where rule_id=v_rule;
+ insert into dashboard_private.notification_templates(id,rule_id,version,title_template,body_template,allowed_variables,
+  payload_schema_version,checksum,created_actor_kind)
+ values('72000000-0000-4000-8000-000000000071',v_rule,v_version,'합성 전반','합성 원본 계획 검증',
+  '[]',1,repeat('b',64),'system');
+ insert into dashboard_private.notification_settings_ui_registry(rule_id,workflow_key,workflow_label,workflow_sort,event_key,
+  event_label,group_label,trigger_description,event_sort,audience_key,audience_label,channel_key,channel_label,cell_sort,initial_enabled)
+ values(v_rule,'transfer','전반',4,'transfer.submitted','신청','전반','신청 시',1,'management_team','관리팀','google_chat','Google Chat',1,true)
+ on conflict do nothing;
+end;
+$adapter_plan_fixture$;
 
 -- 이 어댑터의 트랜잭션 경계를 독립 검증하도록 기존 명단 전이의 외부 도메인 작업은
 -- 동일 서명의 최소 fixture로 바꾼다. 테스트 트랜잭션 롤백으로 원래 함수가 복원된다.
@@ -157,6 +199,9 @@ select pg_catalog.set_config(
 );
 set local role authenticated;
 
+select throws_ok($$select count(*) from dashboard_private.notification_events$$,
+ '42501','permission denied for table notification_events','브라우저 역할은 private canonical 테이블을 직접 읽을 수 없다');
+
 select throws_ok($$
   select public.create_ops_task_v2(
     jsonb_build_object(
@@ -168,7 +213,7 @@ select throws_ok($$
     ),
     '72000000-0000-4000-8000-000000000009'::uuid
   )
-$$, '22023', 'ops_transition_initial_status_invalid', '전반은 완료 상태로 바로 생성할 수 없다');
+$$, '42501', 'ops_roster_completion_requires_rpc', '전반 초기 완료는 가장 먼저 실행되는 명단 보호 trigger가 차단한다');
 
 select throws_ok($$
   select public.create_ops_task_v2(
@@ -204,7 +249,9 @@ select lives_ok($$
     jsonb_build_object(
       'task', jsonb_build_object(
         'type', 'withdrawal', 'title', '퇴원 제출', 'status', 'requested',
-        'student_name', '퇴원 학생', 'class_name', '퇴원 수업'
+        'student_name', '퇴원 학생', 'class_name', '퇴원 수업',
+        'student_id','72000000-0000-4000-8000-000000000031',
+        'class_id','72000000-0000-4000-8000-000000000032','subject','영어'
       ),
       'withdrawal', jsonb_build_object(
         'teacher_name', '퇴원 선생님', 'withdrawal_date', '2026-07-31',
@@ -249,6 +296,8 @@ select is(
   '제출 canonical 실패 뒤 업무가 남지 않는다'
 );
 
+-- Observe private canonical rows as the test owner; RPC calls stay authenticated.
+reset role;
 select is(
   (
     select count(*) from dashboard_private.notification_events event_row
@@ -270,10 +319,13 @@ select is(
   '전반 제출은 퇴원 이벤트를 만들지 않는다'
 );
 
+set local role authenticated;
+
 create temporary table ops_transition_fixtures (
   fixture_key text primary key,
   task_id uuid not null
 ) on commit drop;
+grant select on ops_transition_fixtures to service_role;
 
 insert into ops_transition_fixtures(fixture_key, task_id)
 select 'transfer', task.id from public.ops_tasks task where task.title = '전반 제출'
@@ -518,6 +570,8 @@ select is(
   '완료 canonical 실패 뒤 완료 원본도 남지 않는다'
 );
 
+-- Private verification reads do not confer browser access to notification tables.
+reset role;
 select is(
   (
     select count(*)
@@ -585,7 +639,7 @@ select is(
       '72000000-0000-4000-8000-000000000001'::uuid
     ) -> 'items' -> 0 ->> 'href'
   ),
-  '/admin/transfer?taskId=' || (
+  '/admin/transfer?flow=applicant&taskId=' || (
     select fixture.task_id::text from ops_transition_fixtures fixture where fixture.fixture_key = 'transfer'
   ),
   '전반 제출 계획은 실제 전반 화면 taskId 딥링크를 반환한다'

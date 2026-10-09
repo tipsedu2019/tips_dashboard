@@ -37,9 +37,15 @@
 
 UI는 수정된 Next 앱과 허용된 SQL만 실행하는 로컬 typed bridge를 사용했다. 실제 public RPC, authenticated 역할, JSON JWT claim, 실제 RLS/트리거/데이터를 사용했다. 외부 HTTP는 차단했다. 이는 Supabase PostgREST JWT 서명 검증이나 운영 provider 전달 검증을 뜻하지 않는다. 합성 Postgres는 internal network, 외부 포트 없음, cron 실행 off였으며 UI 후 DB audit에서 provider delivery/HTTP queue/cron run은 모두 0이었다. 시나리오별 명단·이력·완료 source·canonical notification 수와 날짜/회차 보존도 재조회했다.
 
-기존 보충 adapter suite는 20개 assertion까지 실행 후 중단했다: #14는 `22023 ops_transition_initial_status_invalid`를 기대하지만 실제 `42501 ops_roster_completion_requires_rpc`, #17은 학생/반 연결 없는 퇴원 fixture가 `22023 ops_withdrawal_management_link_required`로 실패하며 이후 authenticated 역할의 private `notification_events` 조회가 거절된다. 이 suite는 내부 명단 함수를 stub으로 교체하는 wrapper 전용 테스트다. 기대/fixture/조회 권한의 불일치를 아직 해결하지 않았으며 통과로 취급하지 않는다. 변경 전 대조 실행도 하지 않았으므로 baseline-pass/회귀 무관을 주장하지 않는다.
+추가 지시에 따라 변경 전 main과 후보를 **동일한 새 격리 DB·동일 입력**으로 대조했다. 원본 suite는 양쪽 모두 assertion 20까지 실행하고 #14 초기 완료 SQLSTATE 기대, #17 퇴원 필수 연결 fixture에서 실패한 뒤 private canonical 조회 권한 오류로 중단했다. 원본 입력 SHA256은 `15e952c263a5caf7ca69fd1f7dd5e013b72f68e801f55577b2b3083715803588`이다.
 
-실패 이후 대조 검사를 통과 대체로 해석할 수 있는 묶음 명령은 자동 승인 검토에서 거절됐다. 실패를 그대로 보고하며 별도의 DB lint/퇴원 snapshot 검사만 수집했다. 이 문서는 merge gate 통과 증거가 아니다.
+독립 리뷰에 따라 테스트만 별도로 보완했다: 실제 Auth/학생/수업 fixture, 가장 먼저 실행되는 우회 방지 trigger의 `42501`, 검증용 private 조회만 test-owner 역할로 실행, service_role의 임시 fixture SELECT, 비어 있지 않은 합성 규칙/템플릿 계획, 실제 `?flow=applicant&taskId=` 링크, 브라우저 private 조회 거절 assertion을 추가했다. 제품 ACL·역할·함수·Chat 키/설정은 변경하지 않았으며 모든 fixture는 rollback된다. 호출 RPC는 기존 authenticated 역할을 유지한다.
+
+보완된 동일 테스트는 main과 후보 모두 **47개 중 46개 통과, 1개 실패**다. 남은 “무관한 사용자 발송 계획 조회 거절”은 테스트 오류가 아니라 실제 기존 제품 결함으로 독립 확인됐다. `get_ops_task_legacy_dispatch_before_subject_completion_v1`의 `IF NOT(nullable OR …)`는 담당자 NULL이면 전체 조건도 NULL이 되어 거부 분기를 실행하지 않는다. 이 함수는 **service_role 전용**이므로 브라우저 직접 실행이나 실제 운영 발송 성공으로 과장하지 않는다. 서버가 전달하는 actor의 업무 권한 확인이 누락되는 문제다. 기대를 낮추거나 담당자를 임의로 채워서 숨기지 않았다. [동일 환경 대조 결과](adapter-main-comparison.json)를 참고한다.
+
+권한 조건을 NULL-safe하게 만드는 제품 수정은 원 요청의 Chat/API/권한 변경 금지와 충돌하여 별도 범위 승인을 요청했다. 승인 전에는 제품 권한 함수를 변경하지 않는다. 최소 제안은 기존 허용 조건을 `IF NOT coalesce((기존 OR 조건), false)`로 바꿔 NULL을 거절하는 것이다. 새로운 권한을 부여하거나 기존 ACL을 넓히지 않는다.
+
+앞서 실패 이후 대조 검사를 통과 대체로 해석할 수 있는 묶음 명령은 자동 승인 검토에서 거절됐다. 이후 사용자의 명시적 대조 지시에 따라 진단을 별도로 실행했고, 모든 실패 exit code/TAP를 그대로 보존했다. 이 문서는 merge gate 통과 증거가 아니다.
 
 ## SQL 적용·복구 조율
 
@@ -53,7 +59,7 @@ UI는 수정된 Next 앱과 허용된 SQL만 실행하는 로컬 typed bridge를
 
 ## 남은 단계
 
-1. 보충 adapter suite 실패와 필수 체크 차단 해소. 사용자 지시는 추가 결제 없이 로컬 검사/독립 리뷰였지만 AGENTS는 필수 `free-tier-guardrails`, `supabase-sql-review`, `supabase-schema-contract` 성공을 요구하고 실패/미실행을 허용하지 않는다. 보호설정/검사 완화 없이 부모 조율을 기다린다.
+1. 보충 adapter suite가 검출한 기존 actor 권한 결함의 수정 범위 승인·수정·재검증 및 필수 체크 차단 해소. 사용자 지시는 추가 결제 없이 로컬 검사/독립 리뷰였지만 AGENTS는 필수 `free-tier-guardrails`, `supabase-sql-review`, `supabase-schema-contract` 성공을 요구하고 실패/미실행을 허용하지 않는다. 보호설정/검사 완화 없이 부모 조율을 기다린다.
 2. 정확한 PR head/base와 merge SHA의 독립 리뷰 및 필수 검사 확인. 새 base/코드에는 새 증거가 필요하다.
 3. 부모가 운영 SQL 적용을 별도 조율한 뒤 reviewed PR merge/app 배포. 이전 main/release를 롤백 기준으로 유지한다.
 4. 실제 배포 SHA/schema와 운영 전반 UI를 독립 검증한다. 운영 학생 실제 완료는 별도 승인 범위다. 구현/draft PR만으로 사용자 요청 전체 완료를 선언하지 않는다.
