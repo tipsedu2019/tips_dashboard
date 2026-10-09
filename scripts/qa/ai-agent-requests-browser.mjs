@@ -1,47 +1,84 @@
+// Current API settings and retained request history: synthetic reads only.
 import assert from 'node:assert/strict';
 import fs from 'node:fs/promises';
 import { createRequire } from 'node:module';
-const require=createRequire(process.env.PLAYWRIGHT_PACKAGE||import.meta.url);
-const {chromium}=require('playwright');
-const base=process.env.AI_AGENT_BASE_URL||'http://127.0.0.1:3300';
-assert.equal(new URL(base).hostname,'127.0.0.1');
-const allowedOrigins=new Set([base,'http://127.0.0.1:3301','http://127.0.0.1:3302']);
-const out=process.env.AI_AGENT_QA_OUT||'/tmp/tips-ai-agent-requests-20261003/output/playwright/ai-agent-requests';
-await fs.mkdir(out,{recursive:true});
-const browser=await chromium.launch({headless:true}),results=[];
-async function control(value){const response=await fetch(base+'/__control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value)});assert.equal(response.status,200);return response.json();}
-async function snapshot(page,name,row){await page.evaluate(()=>document.fonts.ready);row.overflow=await page.evaluate(()=>Math.max(0,document.documentElement.scrollWidth-innerWidth));assert.equal(row.overflow,0,`${name} page overflow`);await page.screenshot({path:`${out}/${name}.png`,fullPage:name.includes('detail')});row.screenshots.push(`${name}.png`);}
-async function switchSession(page,index,event='SIGNED_IN'){const response=await fetch(base+'/__session?index='+index),session=await response.json();await page.evaluate(({session,event})=>{localStorage.setItem('sb-127-auth-token',JSON.stringify(session));const channel=new BroadcastChannel('sb-127-auth-token');channel.postMessage({event,session});setTimeout(()=>channel.close(),50);},{session,event});}
-matrix: for(const viewport of [{width:1440,height:900},{width:390,height:844}])for(const theme of ['light','dark']){
- await control({reset:true,mode:'normal'});
- const fixtureLogStart=(await fetch(base+'/__evidence').then(response=>response.json())).log.length;
- const context=await browser.newContext({viewport,locale:'ko-KR',timezoneId:'Asia/Seoul',reducedMotion:'reduce',serviceWorkers:'block',colorScheme:theme});
- const row={viewport,theme,errors:[],unhandled:[],externalBlocked:[],requests:[],screenshots:[],assertions:[]};results.push(row);
- await context.routeWebSocket(/.*/,socket=>socket.close());
- await context.route('**/*',async route=>{const request=route.request(),url=new URL(request.url());if(!allowedOrigins.has(url.origin)){row.externalBlocked.push(url.origin);return route.abort();}if(url.pathname.startsWith('/api/')||url.origin==='http://127.0.0.1:3302')row.requests.push({path:url.pathname,method:request.method()});if(url.origin===base&&!['GET','HEAD'].includes(request.method())&&!url.pathname.startsWith('/api/ai-agent/')&&url.pathname!=='/__control'){row.unhandled.push(request.method()+' '+url.pathname);return route.abort();}return route.continue();});
- const page=await context.newPage();page.on('pageerror',error=>row.errors.push(error.message));
- const tag=`${viewport.width}-${theme}`;
- const referenceState=async state=>{const referencePage=await context.newPage();referencePage.on('pageerror',error=>row.errors.push(error.message));await referencePage.clock.setFixedTime(new Date('2026-10-03T05:30:00Z'));let response=null;referencePage.on('response',value=>{if(value.url().includes('/list_management_numbered_page_v1'))response=value;});await referencePage.goto(base+'/admin/students');await referencePage.locator('[data-slot=data-table-toolbar] input').filter({visible:true}).first().waitFor();if(state!=='loading'){const deadline=Date.now()+10000;while(!response&&Date.now()<deadline)await referencePage.waitForTimeout(50);assert.ok(response,'matching student response');await response.finished();await referencePage.waitForTimeout(100);}await snapshot(referencePage,`students-${state}-${tag}`,row);await referencePage.close();};
- try{
-  await page.clock.setFixedTime(new Date('2026-10-03T05:30:00Z'));
-  await page.goto(`${base}/__fixture?route=students&theme=${theme}`);await page.getByText('합성학생01',{exact:true}).filter({visible:true}).first().waitFor();await snapshot(page,`students-${tag}`,row);
-  const metrics=async()=>page.evaluate(()=>{const header=[...document.querySelectorAll('[data-slot="data-table-toolbar"]')].find(el=>el.getClientRects().length),input=header?.querySelector('input'),cell=[...document.querySelectorAll('[data-slot="table-head"]')].find(el=>el.getClientRects().length),body=[...document.querySelectorAll('[data-slot="table-cell"]')].find(el=>el.getClientRects().length);return {inputHeight:input?.getBoundingClientRect().height,headerHeight:cell?.getBoundingClientRect().height,bodyHeight:body?.getBoundingClientRect().height,inputRadius:input?getComputedStyle(input).borderRadius:null,font:getComputedStyle(document.body).fontFamily,background:getComputedStyle(document.body).backgroundColor};});
-  row.reference=await metrics();
-  await page.goto(base+'/admin/ai-agent');await page.getByRole('link',{name:/합성 긴 요청 제목/}).filter({visible:true}).first().waitFor();await snapshot(page,`requests-${tag}`,row);row.requestsMetrics=await metrics();assert.equal(row.requestsMetrics.inputHeight,row.reference.inputHeight);assert.equal(row.requestsMetrics.inputRadius,row.reference.inputRadius);assert.equal(row.requestsMetrics.font,row.reference.font);if(viewport.width===1440){assert.ok(row.requestsMetrics.headerHeight>=44);assert.ok(row.requestsMetrics.bodyHeight>=48);}row.assertions.push('matched students font/input/table semantic dimensions; no page overflow');
-  const create=page.getByRole('button',{name:'요청 작성',exact:true});await create.focus();await create.press('Enter');await page.getByRole('dialog').waitFor();assert.equal(await page.getByLabel('요청자',{exact:true}).getAttribute('readonly'),'');const notify=page.getByRole('checkbox',{name:'완료 시 Google Chat 알림'});assert.equal(await notify.getAttribute('aria-checked'),'false');assert.equal(await notify.isDisabled(),true);await page.getByLabel('제목',{exact:true}).fill('합성 초안');await page.getByLabel('요청 내용',{exact:true}).fill('취소 후 보존할 합성 내용');await snapshot(page,`create-unconfigured-${tag}`,row);await page.keyboard.press('Escape');await page.getByRole('dialog').waitFor({state:'hidden'});assert.equal(await create.evaluate(el=>el===document.activeElement),true);await create.click();assert.equal(await page.getByLabel('제목',{exact:true}).inputValue(),'합성 초안');await page.getByLabel('제목',{exact:true}).focus();await page.waitForTimeout(100);await page.locator('[data-slot=dialog-overlay]').click({position:{x:3,y:3}});await page.getByRole('dialog').waitFor({state:'hidden'});await create.click();assert.equal(await page.getByLabel('요청 내용',{exact:true}).inputValue(),'취소 후 보존할 합성 내용');await page.getByRole('button',{name:'요청 저장',exact:true}).click();await page.getByRole('dialog').waitFor({state:'hidden'});await page.getByText('요청을 저장했습니다.',{exact:true}).waitFor();row.assertions.push('standard Enter/Escape/outside dismissal, draft preservation/focus restore, readonly requester, unconfigured notification off save works');
-  await create.click();await page.getByLabel('제목',{exact:true}).fill('미확정 합성 제출');await page.getByLabel('요청 내용',{exact:true}).fill('동일 키로 확인할 합성 본문');await control({mode:'mutation_lost_response'});await page.getByRole('button',{name:'요청 저장',exact:true}).click();await page.getByText('결과를 확인하지 못했습니다. 입력을 유지했습니다. 다시 시도해 주세요.',{exact:true}).waitFor();await page.keyboard.press('Escape');await page.getByRole('link',{name:/합성 긴 요청 제목/}).filter({visible:true}).first().click();await page.getByRole('button',{name:'변경사항 버리기',exact:true}).click();await page.getByRole('link',{name:'AI 요청 목록',exact:true}).click();await page.getByRole('button',{name:'요청 작성',exact:true}).click();assert.equal(await page.getByLabel('제목',{exact:true}).inputValue(),'미확정 합성 제출');await page.getByLabel('제목',{exact:true}).fill('미확정 이후 새 초안');await control({mode:'normal'});await page.getByRole('button',{name:'저장 결과 확인',exact:true}).click();await page.getByRole('button',{name:'요청 저장',exact:true}).waitFor();await page.getByText('요청을 저장했습니다.',{exact:true}).waitFor();assert.equal(await page.getByLabel('제목',{exact:true}).inputValue(),'미확정 이후 새 초안');const identityLog=await fetch(base+'/__evidence').then(response=>response.json());const submitted=identityLog.log.slice(fixtureLogStart).filter(item=>item.path==='/api/ai-agent/requests'&&item.method==='POST'&&item.body.title==='미확정 합성 제출');assert.equal(submitted.length,2);assert.equal(submitted[0].idempotencyKey,submitted[1].idempotencyKey);assert.deepEqual(submitted[0].body,submitted[1].body);await snapshot(page,`uncertain-create-remount-${tag}`,row);await page.keyboard.press('Escape');row.assertions.push('committed lost create response recovered after real client navigation using exact payload/key; newer draft survives');
-  await page.getByRole('link',{name:/합성 긴 요청 제목/}).filter({visible:true}).first().click();await page.getByRole('button',{name:'변경사항 버리기',exact:true}).click();await page.getByText('열린 질문: 확인할 내용을 답변해 주세요.',{exact:true}).waitFor();assert.equal(await page.locator('section[aria-labelledby="ai-messages-title"] li').count(),55);assert.equal(await page.locator('section[aria-labelledby="ai-audit-title"] li').count(),55);assert.equal(await page.locator('section[aria-labelledby="ai-actions-title"] > ul > li').count(),53);await snapshot(page,`detail-long-${tag}`,row);
-  await page.getByRole('button',{name:'합성 작업 1 작업 기록 조회',exact:true}).click();await page.getByText('합성 작업 확인 53',{exact:false}).waitFor();await page.getByLabel('질문에 답변',{exact:true}).fill('합성 답변 초안');await page.getByRole('link',{name:'AI 요청 목록',exact:true}).click();const confirmation=page.getByRole('dialog',{name:'저장하지 않은 변경사항'});await confirmation.waitFor();await page.getByRole('button',{name:'계속 편집',exact:true}).click();assert.equal(await page.getByLabel('질문에 답변',{exact:true}).inputValue(),'합성 답변 초안');await page.getByRole('button',{name:'답변 저장',exact:true}).click();await page.getByLabel('추가 내용',{exact:true}).waitFor();row.assertions.push('55 Q&A/events, 53 actions/journal pages complete; open UUID answer only; shared navigation preserves draft');
-  await page.getByRole('link',{name:'AI 요청 목록',exact:true}).click();await page.getByRole('button',{name:'요청 작성',exact:true}).waitFor();
-  await control({mode:'empty'});await page.getByRole('button',{name:'AI 요청 새로고침',exact:true}).click();await page.getByText('AI 요청이 없습니다.',{exact:true}).filter({visible:true}).waitFor();await snapshot(page,`empty-${tag}`,row);await referenceState('empty');
-  await control({mode:'error'});await page.getByRole('button',{name:'AI 요청 새로고침',exact:true}).click();await page.getByRole('button',{name:'AI 요청 다시 조회',exact:true}).waitFor();await snapshot(page,`error-${tag}`,row);await referenceState('error');
-  await control({mode:'loading'});await page.getByRole('button',{name:'AI 요청 다시 조회',exact:true}).click();await page.getByText('불러오는 중…',{exact:true}).filter({visible:true}).waitFor();await snapshot(page,`loading-${tag}`,row);await referenceState('loading');assert.equal(await page.getByRole('searchbox',{name:'AI 요청 검색'}).evaluate(el=>el===document.activeElement),true);await control({mode:'normal'});await page.getByRole('link',{name:/합성 긴 요청 제목/}).filter({visible:true}).first().waitFor();row.assertions.push('empty/error/loading recovery retains search focus');
-  await page.getByLabel('요청 범위',{exact:true}).selectOption('all');await page.getByRole('link',{name:/합성 긴 요청 제목/}).filter({visible:true}).first().waitFor();for(const size of [15,20,10]){await page.getByRole('combobox',{name:'페이지당 행 수'}).click();await page.getByRole('option',{name:`${size}개씩 보기`,exact:true}).click();await page.getByRole('combobox',{name:'페이지당 행 수'}).filter({visible:true}).waitFor();await page.waitForTimeout(100);}await control({role:'assistant'});await switchSession(page,0,'USER_UPDATED');await page.waitForFunction(()=>!document.querySelector('#ai-request-scope'));await page.getByTestId('admin-quick-search-trigger').click();await page.getByTestId('admin-quick-search-item-admin-ai-agent').waitFor();await snapshot(page,`assistant-search-${tag}`,row);await page.keyboard.press('Escape');await control({role:'admin'});await switchSession(page,0,'USER_UPDATED');await page.getByLabel('요청 범위',{exact:true}).waitFor();row.assertions.push('admin explicit own/all and shared15/20/10 pager; verified assistant own menu and real command search');
-  await page.goto(base+'/admin/settings/agent-access');await page.getByRole('tab',{name:'알림 공간',exact:true}).click();await page.getByLabel('직원',{exact:true}).waitFor();await page.getByLabel('경영팀',{exact:true}).waitFor();assert.equal(await page.getByLabel('경영팀',{exact:true}).isEnabled(),true);await page.getByLabel('경영팀',{exact:true}).click();await page.getByRole('button',{name:'변경 저장',exact:true}).click();await page.getByText('알림 공간 권한을 저장했습니다.',{exact:true}).waitFor();await page.getByLabel('직원',{exact:true}).selectOption({label:'권한 변경 직원 · 권한 없음'});await page.waitForFunction(()=>document.querySelector('#ai-policy-space_1')?.getAttribute('aria-checked')==='true');await page.getByLabel('경영팀',{exact:true}).click();await page.getByRole('button',{name:'변경 저장',exact:true}).click();await page.getByText('알림 공간 권한을 저장했습니다.',{exact:true}).waitFor();await snapshot(page,`policy-unconfigured-${tag}`,row);row.assertions.push('admin symbolic unconfigured preassignment and downgraded-target empty revocation; no key issuance');
-  await page.goto(base+'/admin/ai-agent');await page.getByRole('button',{name:'요청 작성',exact:true}).click();await page.getByLabel('제목',{exact:true}).fill('이전 계정 제출');await page.getByLabel('요청 내용',{exact:true}).fill('이전 계정 본문');await control({mode:'mutation_delay'});await page.getByRole('button',{name:'요청 저장',exact:true}).click();await switchSession(page,1);await page.getByRole('button',{name:'요청 작성',exact:true}).waitFor();await page.getByTestId('admin-quick-search-trigger').click();await page.getByTestId('admin-quick-search-item-admin-ai-agent').waitFor();await page.keyboard.press('Escape');await page.getByRole('button',{name:'요청 작성',exact:true}).click();await page.getByLabel('제목',{exact:true}).fill('새 계정 초안');await page.waitForTimeout(2100);assert.equal(await page.getByLabel('제목',{exact:true}).inputValue(),'새 계정 초안');assert.equal(await page.getByText('요청을 저장했습니다.',{exact:true}).count(),0);assert.equal(await page.getByText('이전 계정 제출',{exact:true}).count(),0);await snapshot(page,`account-boundary-${tag}`,row);await page.keyboard.press('Escape');
-  await control({mode:'normal',role:'viewer',userId:'a1400000-0000-4000-8000-000000000002'});await switchSession(page,1,'USER_UPDATED');await page.getByText('AI 요청에 접근할 권한이 없습니다.',{exact:true}).waitFor();assert.equal(await page.getByRole('button',{name:'요청 작성',exact:true}).count(),0);await page.getByTestId('admin-quick-search-trigger').click();assert.equal(await page.getByTestId('admin-quick-search-item-admin-ai-agent').count(),0);await page.keyboard.press('Escape');await snapshot(page,`role-boundary-${tag}`,row);await control({mode:'normal',role:'teacher',userId:'a1400000-0000-4000-8000-000000000002'});await switchSession(page,1,'USER_UPDATED');await page.getByRole('button',{name:'요청 작성',exact:true}).click();assert.equal(await page.getByLabel('제목',{exact:true}).inputValue(),'');await snapshot(page,`role-return-cleared-${tag}`,row);await page.keyboard.press('Escape');row.assertions.push('deferred old-account save ignored, new account draft preserved, same-user viewer role hides requests/menu');
-  assert.equal(row.errors.length,0,JSON.stringify(row.errors));assert.equal(row.unhandled.length,0,JSON.stringify(row.unhandled));row.passed=true;
- }catch(error){row.failure=error.stack;row.text=(await page.locator('body').innerText()).slice(-12000);await page.screenshot({path:`${out}/failure-${tag}.png`});}
- console.log(tag,row.passed?'pass':row.failure);await context.close();if(!row.passed)break matrix;
-}
-await browser.close();const evidence=await fetch(base+'/__evidence').then(response=>response.json());await fs.writeFile(out+'/results.json',JSON.stringify({results,evidence},null,2));assert.ok(results.every(row=>row.passed),'AI synthetic browser assertions failed');
+const require = createRequire(process.env.PLAYWRIGHT_PACKAGE || import.meta.url);
+const { chromium } = require('playwright');
+const base = process.env.AI_AGENT_BASE_URL || 'http://127.0.0.1:3300';
+assert.equal(new URL(base).hostname, '127.0.0.1');
+const allowed = new Set([base, ...[1, 2].map(offset => `http://127.0.0.1:${Number(new URL(base).port) + offset}`)]);
+const out = process.env.AI_AGENT_QA_OUT || '/tmp/tips-api-settings-browser';
+await fs.mkdir(out, { recursive: true });
+const browser = await chromium.launch({ headless: true, ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH ? { executablePath: process.env.PLAYWRIGHT_EXECUTABLE_PATH } : {}) });
+const results = [];
+const control = async value => { const response = await fetch(base + '/__control', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(value) }); assert.equal(response.status, 200); };
+try {
+ for (const width of [1440, 390]) for (const theme of ['light', 'dark']) {
+  await control({ reset: true });
+  const context = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 900 }, locale: 'ko-KR', timezoneId: 'Asia/Seoul', reducedMotion: 'reduce', serviceWorkers: 'block', colorScheme: theme });
+  const row = { width, theme, errors: [], forbidden: [], screenshots: [], assertions: [] }; results.push(row);
+  await context.routeWebSocket(/.*/, socket => socket.close());
+  await context.route('**/*', route => {
+   const request = route.request(), url = new URL(request.url());
+   if (!allowed.has(url.origin)) return route.abort();
+   if ((url.pathname.startsWith('/api/ai-agent/') && request.method() !== 'GET') || /\/(create|revoke)_agent_credential|\/ai_agent_(personal_)?credential_api/.test(url.pathname)) { row.forbidden.push(url.pathname); return route.abort(); }
+   return route.continue();
+  });
+  const page = await context.newPage(); page.on('pageerror', error => row.errors.push(error.message));
+  const screenshot = async name => { await page.evaluate(() => document.fonts.ready); assert.equal(await page.evaluate(() => Math.max(0, document.documentElement.scrollWidth - innerWidth)), 0, name + ' overflow'); const file = `${name}-${width}-${theme}.png`; await page.screenshot({ path: `${out}/${file}` }); row.screenshots.push(file); };
+  const metrics = () => page.evaluate(() => { const head = document.querySelector('[data-slot="table-head"]'); return { font: getComputedStyle(document.body).fontFamily, headHeight: head?.getBoundingClientRect().height, headFont: head ? getComputedStyle(head).fontSize : null }; });
+  try {
+   await page.goto(`${base}/__fixture?route=schools&theme=${theme}`);
+   await page.locator('input[data-school-row-name]').filter({ visible: true }).first().waitFor();
+   row.reference = await metrics(); await screenshot('schools-reference');
+   await page.goto(base + '/admin/settings/agent-access');
+   await page.getByRole('tab', { name: '지원 기능', exact: true }).waitFor();
+   assert.equal(await page.getByRole('tab', { selected: true }).textContent(), '지원 기능');
+   assert.equal(await page.getByRole('tab').count(), 3); assert.equal(await page.getByRole('tabpanel').count(), 1);
+   await page.getByText('개인 키 발급 화면과 개인 업무 수정은 미제공', { exact: false }).waitFor();
+   row.support = await metrics(); assert.equal(row.support.font, row.reference.font); assert.equal(row.support.headFont, row.reference.headFont); assert.ok(row.support.headHeight >= 44);
+   await screenshot('api-support');
+   await page.getByRole('tab', { name: '지원 기능', exact: true }).focus(); await page.keyboard.press('ArrowRight');
+   assert.equal(await page.getByRole('tab', { selected: true }).textContent(), '지원 기능');
+   await page.waitForFunction(() => document.activeElement?.textContent === '연결 키'); await page.keyboard.press('Enter'); await page.getByText('발급한 연결 키가 없습니다.', { exact: true }).waitFor();
+   assert.equal(await page.getByRole('tab', { selected: true }).textContent(), '연결 키');
+   await screenshot('connections-empty');
+   await control({ mode: 'error' }); await page.getByRole('button', { name: '연결 목록 새로고침', exact: true }).click();
+   await page.getByRole('alert').filter({ hasText: '연결 목록을 불러오지 못했습니다' }).waitFor(); await screenshot('connections-error');
+   await control({ mode: 'loading' }); await page.getByRole('button', { name: '연결 목록 새로고침', exact: true }).click();
+   await page.getByText('불러오는 중…', { exact: true }).waitFor(); await screenshot('connections-loading');
+   await page.getByText('발급한 연결 키가 없습니다.', { exact: true }).waitFor(); await control({ mode: 'normal' });
+   await page.getByRole('tab', { name: '사용 안내', exact: true }).click(); await page.getByRole('heading', { name: '수정 결과 확인' }).waitFor();
+   assert.equal(await page.getByRole('tabpanel').count(), 1); await screenshot('api-guide');
+   await page.getByRole('link', { name: '이전 요청 조회', exact: true }).click();
+   const requestLink = page.getByRole('link', { name: /합성 긴 요청 제목/ }).filter({ visible: true }).first(); await requestLink.waitFor();
+   assert.equal(await page.getByRole('button', { name: '요청 작성', exact: true }).count(), 0); await screenshot('history');
+   await requestLink.click(); await page.getByRole('heading', { name: /합성 긴 요청 제목/ }).waitFor();
+   assert.equal(await page.locator('section[aria-labelledby="ai-messages-title"] li').count(), 55);
+   assert.equal(await page.locator('section[aria-labelledby="ai-audit-title"] li').count(), 55);
+   assert.equal(await page.locator('section[aria-labelledby="ai-actions-title"] > ul > li').count(), 53);
+   assert.equal(await page.locator('textarea,form').count(), 0); assert.equal(await page.getByRole('button', { name: /요청 취소|요청 재개|답변 저장/ }).count(), 0);
+   await screenshot('history-detail'); await page.getByRole('button', { name: '합성 작업 1 작업 기록 조회', exact: true }).click();
+   await page.getByText('합성 작업 확인 53', { exact: false }).waitFor();
+   await page.getByRole('link', { name: '이전 요청 목록', exact: true }).click();
+   await page.getByRole('link', { name: /합성 긴 요청 제목/ }).filter({ visible: true }).first().waitFor();
+   for (const state of ['empty', 'error', 'loading']) {
+    await control({ mode: state }); const retry = page.getByRole('button', { name: 'AI 요청 다시 조회', exact: true }); if (await retry.count()) await retry.click(); else await page.getByRole('button', { name: 'AI 요청 새로고침', exact: true }).click();
+    if (state === 'empty') await page.getByText('AI 요청이 없습니다.', { exact: true }).filter({ visible: true }).first().waitFor();
+    if (state === 'error') await page.getByRole('button', { name: 'AI 요청 다시 조회', exact: true }).waitFor();
+    if (state === 'loading') await page.getByText('불러오는 중…', { exact: true }).filter({ visible: true }).first().waitFor();
+    await screenshot('history-' + state);
+    if (state === 'loading') await page.getByRole('link', { name: /합성 긴 요청 제목/ }).filter({ visible: true }).first().waitFor();
+   }
+   await control({ mode: 'normal' });
+   await page.getByTestId('admin-quick-search-trigger').click();
+   assert.equal(await page.getByTestId('admin-quick-search-item-admin-ai-agent').count(), 0);
+   await page.keyboard.press('Escape');
+   assert.deepEqual(row.errors, []); assert.deepEqual(row.forbidden, []);
+   row.assertions = ['school settings visual tokens retained', 'desktop/mobile light/dark no page overflow', 'manual keyboard tabs and single panel', 'empty/error/loading recovery', 'legacy ID with 55 messages/events and 53 actions/journals', 'zero retired mutation controls or network writes', 'retired menu absent from command search'];
+   row.passed = true;
+  } catch (error) { row.failure = error.stack; await page.screenshot({ path: `${out}/failure-${width}-${theme}.png` }); }
+  await context.close(); console.log(width, theme, row.passed ? 'PASS' : row.failure);
+  if (!row.passed) throw new Error('API settings browser checks failed');
+ }
+} finally { await browser.close(); await fs.writeFile(`${out}/results.json`, JSON.stringify({ results }, null, 2)); }
