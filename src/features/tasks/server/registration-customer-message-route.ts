@@ -1,6 +1,10 @@
 import { createHmac } from "node:crypto"
 
 import type { SupabaseClient } from "@supabase/supabase-js"
+import {
+  assertRegistrationNonpageableRpcArguments,
+  assertRegistrationNonpageableRpcResult,
+} from "../../../lib/registration-nonpageable-rpc-contract.js"
 
 import {
   REGISTRATION_CUSTOMER_MESSAGE_READINESS_CODES,
@@ -1190,13 +1194,16 @@ async function readRegistrationCustomerMessageContactFence(
   messageKind: RegistrationCustomerMessageKind,
   sourceId: string,
 ) {
-  const result = await client.rpc("read_registration_contact_message_fence_v1", {
+  const args = {
     p_actor_profile_id: actorProfileId,
     p_message_kind: messageKind,
     p_source_id: sourceId,
-  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }
+  assertRegistrationNonpageableRpcArguments("read_registration_contact_message_fence_v1", args)
+  const result = await client.rpc("read_registration_contact_message_fence_v1", args)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
   if (result.error) httpError(503, "registration_customer_message_runtime_unavailable")
-  return result.data
+  return assertRegistrationNonpageableRpcResult("read_registration_contact_message_fence_v1", result.data, args)
 }
 
 async function readRegistrationCustomerMessageSourceTask(

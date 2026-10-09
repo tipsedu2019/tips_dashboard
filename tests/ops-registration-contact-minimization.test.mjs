@@ -5,6 +5,8 @@ import vm from "node:vm"
 import ts from "typescript"
 import { ACTIVE_STUDENT_STATUS } from "../src/lib/student-status.js"
 import { stripRegistrationInquiryContact, stripRegistrationTaskContact } from "../src/features/tasks/registration-contact-client.ts"
+import { readRegistrationContactEvents } from "../src/features/tasks/registration-contact-event-reader.ts"
+import { STUDENT_MASTER_READ_COLUMNS, projectStudentMasterRecord } from "../src/features/management/student-master-privacy.js"
 import { isRegistrationCompletionImmutable } from "../src/features/tasks/registration-workflow.js"
 import { getTaskTypeLabel, REGISTRATION_PIPELINE_STATUSES } from "../src/features/tasks/ops-task-model.js"
 
@@ -29,6 +31,7 @@ function load(supabase, boundaries = {}) {
   vm.runInNewContext(compiled, { module: runtime, exports: runtime.exports, supabase,
     AbortSignal, Date, Map, Set, Object, Number, Error, Promise, ACTIVE_STUDENT_STATUS,
     stripRegistrationInquiryContact, stripRegistrationTaskContact,
+    readRegistrationContactEvents, STUDENT_MASTER_READ_COLUMNS, projectStudentMasterRecord,
     isRegistrationCompletionImmutable, REGISTRATION_PIPELINE_STATUSES, getTaskTypeLabel, ...boundaries,
   })
   return runtime.exports
@@ -48,8 +51,8 @@ const student = (overrides = {}) => ({ id: STUDENT, name: "이전 표시 이름"
   class_ids: [CLASS], waitlist_class_ids: [id(4)], ...overrides })
 function wire(result = (query) => ({ data: query.kind === "update" ? [{ id: STUDENT }] : [student()], error: null })) {
   const queries = []
-  return { queries, supabase: { from(table) {
-    const query = { table, kind: "read", operations: [], payload: null }
+  function build(table, rpcName = null, args = null) {
+    const query = { table, rpcName, args, kind: "read", operations: [], payload: null }
     queries.push(query)
     const builder = { then(resolve, reject) { return Promise.resolve(result(query)).then(resolve, reject) } }
     for (const method of ["select", "eq", "in", "order", "limit", "abortSignal", "retry", "single", "maybeSingle", "update", "upsert", "insert"]) {
@@ -60,7 +63,8 @@ function wire(result = (query) => ({ data: query.kind === "update" ? [{ id: STUD
       }
     }
     return builder
-  } } }
+  }
+  return { queries, supabase: { from(table) { return build(table) }, rpc(name, args) { return build(null, name, args) } } }
 }
 function noCanaries(value) {
   const serialized = JSON.stringify(value)
@@ -268,13 +272,17 @@ test("contact-free detail read keeps every actor label while profile queries sta
   const parent = { id: TASK, type: "registration", status: "requested", pipeline_status: "inquiry", student_id: STUDENT }
   const comments = Array.from({ length: 30 }, (_, n) => ({ id: id(100 + n), task_id: TASK, author_id: id(1000 + n), body: "업무 댓글" }))
   const attachments = Array.from({ length: 30 }, (_, n) => ({ id: id(200 + n), task_id: TASK, uploaded_by: id(2000 + n), file_name: "업무 파일" }))
-  const events = Array.from({ length: 30 }, (_, n) => ({ id: id(300 + n), task_id: TASK, actor_id: id(3000 + n), field_name: "업무 상태" }))
+  const events = Array.from({ length: 30 }, (_, n) => ({ id: id(300 + n), task_id: TASK, actor_id: id(3000 + n),
+    event_type: "registration_fact_saved", field_name: "업무 상태", before_value: null, after_value: null, created_at: "2026-10-09T00:00:00Z" }))
   const transport = wire((query) => {
     if (query.table === "ops_tasks") return { data: parent, error: null }
     if (query.table === "ops_registration_details") return { data: { task_id: TASK, pipeline_status: "inquiry", parent_phone: PARENT, student_phone: PHONE }, error: null }
     if (query.table === "ops_task_comments") return { data: comments, error: null }
     if (query.table === "ops_task_attachments") return { data: attachments, error: null }
-    if (query.table === "ops_task_events") return { data: events, error: null }
+    if (query.rpcName === "read_registration_contact_events_v1") {
+      assert.deepEqual(query.args, { p_task_id: TASK, p_limit: 30, p_shared_only: false })
+      return { data: { events, legacyImport: null }, error: null }
+    }
     if (query.table === "profiles") return { data: query.operations.find((operation) => operation.method === "in").args[1].map((profileId) => ({ id: profileId, name: `합성 담당 ${profileId}` })), error: null }
     assert.fail(`unexpected table ${query.table}`)
   })

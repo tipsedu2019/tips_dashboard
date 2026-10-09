@@ -82,12 +82,12 @@ test("service validates exact IDs without requiring roster membership or resolvi
   await assert.rejects(ready({ ...input, studentId: "", studentName: student.name }), /기존 학생을 다시 선택/)
 })
 
-test("transfer and word-retest still require their source roster", () => {
+test("pre-excluded transfer is allowed while word-retest still requires current source roster", () => {
   const { getRosterCompletionBlockers: blockers } = load("workspace", ["getRosterCompletionBlockers", "hasRosterLink"], {
     EMPTY_OPS_TASK_OPTION_INDEXES: {}, hasLinkedRecord: (value) => Boolean(text(value)),
     findStudentOptionByReference: () => student, findClassOptionByReference: () => classItem,
   })
-  assert.deepEqual(Array.from(blockers({ ...input, type: "transfer", transfer: { fromClassId: classItem.id } }, [student], [classItem])), ["전 수업 명단"])
+  assert.deepEqual(Array.from(blockers({ ...input, type: "transfer", transfer: { fromClassId: classItem.id } }, [student], [classItem])), [])
   assert.deepEqual(Array.from(blockers({ ...input, type: "word_retest" }, [student], [classItem])), ["수업 명단"])
 })
 

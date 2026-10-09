@@ -165,6 +165,184 @@ begin
 end;
 $$;
 
+-- Resource limits are RPC response budgets, not roster/admission business quotas.
+-- Oversized historical receipts fail closed unchanged; no truncation/backfill/purge.
+create function dashboard_private.registration_contact_assert_bounded_json_v1(p_value jsonb)
+returns void language plpgsql immutable security definer set search_path='' as $$
+begin
+  if p_value is null or pg_catalog.octet_length(pg_catalog.convert_to(p_value::text,'UTF8'))>128000 then
+    raise exception 'registration_contact_response_budget_exceeded' using errcode='23514'; end if;
+  if exists(with recursive nodes(value,depth) as (
+    select p_value,1 union all
+    select child.value,parent.depth+1 from nodes parent cross join lateral (
+      select value from pg_catalog.jsonb_array_elements(case when pg_catalog.jsonb_typeof(parent.value)='array' then parent.value else '[]'::jsonb end)
+      union all
+      select value from pg_catalog.jsonb_each(case when pg_catalog.jsonb_typeof(parent.value)='object' then parent.value else '{}'::jsonb end)
+    ) child where parent.depth<=8
+  ) select 1 from nodes where depth>8 or pg_catalog.jsonb_typeof(value)='string' and pg_catalog.length(value#>>'{}')>500) then
+    raise exception 'registration_contact_response_budget_exceeded' using errcode='23514'; end if;
+end $$;
+
+create function dashboard_private.registration_contact_assert_uuid_array_v1(p_value jsonb,p_max integer)
+returns void language plpgsql immutable security definer set search_path='' as $$
+begin
+  if pg_catalog.jsonb_typeof(p_value) is distinct from 'array' then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if pg_catalog.jsonb_array_length(p_value)>p_max then
+    raise exception 'registration_contact_response_budget_exceeded' using errcode='23514'; end if;
+  if exists(select 1 from pg_catalog.jsonb_array_elements(p_value) item(value)
+    where pg_catalog.jsonb_typeof(value) is distinct from 'string' or value#>>'{}' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if (select pg_catalog.count(*) from pg_catalog.jsonb_array_elements_text(p_value))<>
+    (select pg_catalog.count(distinct value::uuid) from pg_catalog.jsonb_array_elements_text(p_value)) then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+end $$;
+
+create function dashboard_private.registration_contact_assert_receipt_v1(p_receipt jsonb,p_task_id uuid,p_request_key text,p_command text)
+returns void language plpgsql stable security definer set search_path='' as $$
+declare result jsonb; state jsonb; item jsonb; key text; finalization jsonb; required_keys text[];
+begin
+  perform dashboard_private.registration_contact_assert_bounded_json_v1(p_receipt);
+  if pg_catalog.jsonb_typeof(p_receipt) is distinct from 'object' or p_receipt-array['version','taskId','requestKey','command','replayed','result']::text[]<>'{}'::jsonb
+    or not p_receipt ?& array['version','taskId','requestKey','command','replayed','result']::text[]
+    or p_receipt->'version' is distinct from '1'::jsonb or p_receipt->>'taskId' is distinct from p_task_id::text
+    or p_receipt->>'requestKey' is distinct from p_request_key or p_receipt->>'command' is distinct from p_command
+    or pg_catalog.jsonb_typeof(p_receipt->'replayed') is distinct from 'boolean' then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  result:=p_receipt->'result';
+  if pg_catalog.jsonb_typeof(result) is distinct from 'object' or result-array['taskId','trackId','classId','studentId',
+    'commonRevision','workflowRevision','workflowStatus','workflowStatusEnteredAt','waitingKind','retakeDecision','changed',
+    'sourceEventIds','enrollmentFinalization','subjects','tracks','contactState']::text[]<>'{}'::jsonb then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  required_keys:=case p_command
+    when 'create' then array['taskId','commonRevision','subjects','tracks']
+    when 'update_common' then array['taskId','commonRevision']
+    when 'save_inquiry' then array['taskId','commonRevision','subjects','tracks']
+    when 'set_workflow_status' then array['trackId','workflowStatus','workflowRevision','workflowStatusEnteredAt','enrollmentFinalization']
+    when 'reopen' then array['trackId','workflowStatus','workflowRevision','workflowStatusEnteredAt','enrollmentFinalization']
+    when 'waiting_details' then array['trackId','waitingKind','classId','retakeDecision']
+    when 'close' then array['taskId','changed']
+    when 'archive' then array['taskId','subjects','tracks']
+    when 'unarchive' then array['taskId','subjects','tracks']
+    when 'bind_student' then array['taskId','studentId','changed']
+    else null end;
+  if required_keys is null or not result ?& required_keys then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if result ? 'taskId' and result->>'taskId' is distinct from p_task_id::text then
+    raise exception 'registration_contact_result_scope_invalid' using errcode='23514'; end if;
+  foreach key in array array['trackId','classId','studentId'] loop
+    if result ? key and result->key<>'null'::jsonb then
+      if pg_catalog.jsonb_typeof(result->key) is distinct from 'string' or result->>key !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    end if;
+  end loop;
+  if result ? 'trackId' and result->'trackId'<>'null'::jsonb and not exists(
+    select 1 from public.ops_registration_subject_tracks track where track.id=(result->>'trackId')::uuid and track.task_id=p_task_id) then
+    raise exception 'registration_contact_result_scope_invalid' using errcode='23514'; end if;
+  foreach key in array array['commonRevision','workflowRevision'] loop
+    if result ? key and (pg_catalog.jsonb_typeof(result->key) is distinct from 'number' or result->>key !~ '^[1-9][0-9]{0,9}$') then
+      raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    if result ? key and (result->>key)::numeric>2147483647 then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  end loop;
+  if result ? 'workflowStatus' and (pg_catalog.jsonb_typeof(result->'workflowStatus') is distinct from 'string' or result->>'workflowStatus' not in ('inquiry','level_test_requested','consultation_requested','consultation_completed','waiting_current_class','waiting_new_class','waiting_next_opening','observation_requested','observation_feedback_pending','observation_completed','enrollment_requested','payment_in_progress','registered','not_registered','inquiry_only')) then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  foreach key in array array['waitingKind','retakeDecision'] loop
+    if result ? key and result->key<>'null'::jsonb and (pg_catalog.jsonb_typeof(result->key) is distinct from 'string' or key='waitingKind' and result->>key not in ('current_class','current_term_opening','next_term_opening') or key='retakeDecision' and result->>key not in ('required','not_required')) then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  end loop;
+  if result ? 'changed' and pg_catalog.jsonb_typeof(result->'changed') is distinct from 'boolean' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if result ? 'workflowStatusEnteredAt' and result->'workflowStatusEnteredAt'<>'null'::jsonb and (
+    pg_catalog.jsonb_typeof(result->'workflowStatusEnteredAt') is distinct from 'string' or pg_catalog.length(result->>'workflowStatusEnteredAt')>64) then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if result ? 'sourceEventIds' then
+    perform dashboard_private.registration_contact_assert_uuid_array_v1(result->'sourceEventIds',50);
+    if exists(select 1 from pg_catalog.jsonb_array_elements_text(result->'sourceEventIds') item(value)
+      where not exists(select 1 from public.ops_task_events event where event.id=item.value::uuid and event.task_id=p_task_id)) then
+      raise exception 'registration_contact_result_scope_invalid' using errcode='23514'; end if;
+  end if;
+  finalization:=result->'enrollmentFinalization';
+  if finalization is not null and finalization<>'null'::jsonb then
+    if pg_catalog.jsonb_typeof(finalization) is distinct from 'object' or finalization-array['trackId','studentId','batchId','changed','enrollmentIds']::text[]<>'{}'::jsonb
+      or not finalization ?& array['trackId','studentId','batchId','changed','enrollmentIds']::text[] or pg_catalog.jsonb_typeof(finalization->'changed') is distinct from 'boolean' then
+      raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    foreach key in array array['trackId','studentId','batchId'] loop
+      if key='batchId' and finalization->key='null'::jsonb then continue; end if;
+      if pg_catalog.jsonb_typeof(finalization->key) is distinct from 'string' or finalization->>key !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    end loop;
+    perform dashboard_private.registration_contact_assert_uuid_array_v1(finalization->'enrollmentIds',50);
+    if not exists(select 1 from public.ops_registration_subject_tracks track where track.id=(finalization->>'trackId')::uuid and track.task_id=p_task_id)
+      or finalization->'batchId'<>'null'::jsonb and not exists(select 1 from public.ops_registration_admission_batches batch where batch.id=(finalization->>'batchId')::uuid and batch.task_id=p_task_id)
+      or exists(select 1 from pg_catalog.jsonb_array_elements_text(finalization->'enrollmentIds') item(value)
+        where not exists(select 1 from public.ops_registration_enrollments enrollment
+          where enrollment.id=item.value::uuid and enrollment.track_id=(finalization->>'trackId')::uuid
+            and enrollment.student_id=(finalization->>'studentId')::uuid)) then
+      raise exception 'registration_contact_result_scope_invalid' using errcode='23514'; end if;
+  end if;
+  if result ? 'subjects' then
+    if pg_catalog.jsonb_typeof(result->'subjects') is distinct from 'array' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    if pg_catalog.jsonb_array_length(result->'subjects')>3 or exists(select 1 from pg_catalog.jsonb_array_elements(result->'subjects') subject(value)
+      where value not in ('"영어"'::jsonb,'"수학"'::jsonb,'"과학"'::jsonb))
+      or (select pg_catalog.count(*) from pg_catalog.jsonb_array_elements(result->'subjects'))<>(select pg_catalog.count(distinct value) from pg_catalog.jsonb_array_elements(result->'subjects')) then
+      raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  end if;
+  if result ? 'tracks' then
+    if pg_catalog.jsonb_typeof(result->'tracks') is distinct from 'array' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    if pg_catalog.jsonb_array_length(result->'tracks')>50 then raise exception 'registration_contact_response_budget_exceeded' using errcode='23514'; end if;
+    for item in select value from pg_catalog.jsonb_array_elements(result->'tracks') loop
+      if pg_catalog.jsonb_typeof(item) is distinct from 'object' or item-array['id','taskId','subject','workflowStatus','workflowRevision','status','archivedAt',
+        'directorProfileId','directorAssignmentSource','directorAssignmentRuleKey','waitingKind','levelTestRetakeDecision','migrationReviewRequired','stageEnteredAt']::text[]<>'{}'::jsonb
+        or not item ?& array['id','taskId','subject','workflowStatus','workflowRevision','status','archivedAt']::text[]
+        or item->>'taskId' is distinct from p_task_id::text or pg_catalog.jsonb_typeof(item->'id') is distinct from 'string'
+        or item->>'id' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$'
+        or item->>'subject' not in ('영어','수학','과학') then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if not exists(select 1 from public.ops_registration_subject_tracks track where track.id=(item->>'id')::uuid and track.task_id=p_task_id and track.subject=item->>'subject') then
+        raise exception 'registration_contact_result_scope_invalid' using errcode='23514'; end if;
+      if pg_catalog.jsonb_typeof(item->'workflowStatus') is distinct from 'string' or item->>'workflowStatus' not in ('inquiry','level_test_requested','consultation_requested','consultation_completed','waiting_current_class','waiting_new_class','waiting_next_opening','observation_requested','observation_feedback_pending','observation_completed','enrollment_requested','payment_in_progress','registered','not_registered','inquiry_only') or pg_catalog.jsonb_typeof(item->'status') is distinct from 'string' or item->>'status' not in ('inquiry','migration_review','level_test_scheduled','level_test_in_progress','consultation_waiting','visit_consultation_scheduled','waiting','enrollment_decided','enrollment_processing','registered','not_registered','inquiry_closed') or pg_catalog.jsonb_typeof(item->'workflowRevision') is distinct from 'number' or item->>'workflowRevision' !~ '^[1-9][0-9]{0,9}$' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if (item->>'workflowRevision')::numeric>2147483647 then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if item->'directorProfileId'<>'null'::jsonb and (pg_catalog.jsonb_typeof(item->'directorProfileId') is distinct from 'string' or item->>'directorProfileId' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      foreach key in array array['archivedAt','stageEnteredAt'] loop
+        if item ? key and item->key<>'null'::jsonb and (pg_catalog.jsonb_typeof(item->key) is distinct from 'string' or pg_catalog.length(item->>key)>64) then
+          raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      end loop;
+      if item->'directorAssignmentRuleKey'<>'null'::jsonb and (pg_catalog.jsonb_typeof(item->'directorAssignmentRuleKey') is distinct from 'string' or item->>'directorAssignmentRuleKey' !~ '^[a-zA-Z0-9_:.-]{0,200}$') then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if item ? 'directorAssignmentSource' and item->'directorAssignmentSource'<>'null'::jsonb and (pg_catalog.jsonb_typeof(item->'directorAssignmentSource') is distinct from 'string' or item->>'directorAssignmentSource' not in ('','default','manual','migration')) then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if item ? 'waitingKind' and item->'waitingKind'<>'null'::jsonb and (pg_catalog.jsonb_typeof(item->'waitingKind') is distinct from 'string' or item->>'waitingKind' not in ('current_class','current_term_opening','next_term_opening')) then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if item ? 'levelTestRetakeDecision' and item->'levelTestRetakeDecision'<>'null'::jsonb and (pg_catalog.jsonb_typeof(item->'levelTestRetakeDecision') is distinct from 'string' or item->>'levelTestRetakeDecision' not in ('required','not_required')) then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+      if item ? 'migrationReviewRequired' and pg_catalog.jsonb_typeof(item->'migrationReviewRequired') is distinct from 'boolean' then
+        raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    end loop;
+    if (select pg_catalog.count(*) from pg_catalog.jsonb_array_elements(result->'tracks'))<>(select pg_catalog.count(distinct (value->>'id')::uuid) from pg_catalog.jsonb_array_elements(result->'tracks'))
+      or (select pg_catalog.count(*) from pg_catalog.jsonb_array_elements(result->'tracks'))<>(select pg_catalog.count(distinct value->>'subject') from pg_catalog.jsonb_array_elements(result->'tracks')) then
+      raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  end if;
+  state:=result->'contactState';
+  if pg_catalog.jsonb_typeof(state) is distinct from 'object' or state-array['version','taskId','revision','generation','phase','closureReason','closedAt','commonRevision','allPhasesClosed','currentTrackIds','studentId','parentPhone']::text[]<>'{}'::jsonb
+    or not state ?& array['version','taskId','revision','generation','phase','closureReason','closedAt','commonRevision','allPhasesClosed','currentTrackIds','studentId','parentPhone']::text[]
+    or state->'version' is distinct from '1'::jsonb or state->>'taskId' is distinct from p_task_id::text or state->'parentPhone' is distinct from 'null'::jsonb
+    or pg_catalog.jsonb_typeof(state->'phase') is distinct from 'string' or state->>'phase' not in ('open','closed') or pg_catalog.jsonb_typeof(state->'allPhasesClosed') is distinct from 'boolean' then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  foreach key in array array['revision','generation'] loop
+    if pg_catalog.jsonb_typeof(state->key) is distinct from 'string' or state->>key !~ '^[1-9][0-9]{0,18}$' then
+      raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    if (state->>key)::numeric>9223372036854775807 then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  end loop;
+  if state->>'phase'='open' and (state->'closureReason' is distinct from 'null'::jsonb or state->'closedAt' is distinct from 'null'::jsonb or state->'allPhasesClosed'='true'::jsonb) or state->>'phase'='closed' and (pg_catalog.jsonb_typeof(state->'closureReason') is distinct from 'string' or state->>'closureReason' not in ('all_current_tracks_terminal','whole_case_cancelled','last_current_track_excluded')) then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if state->>'closureReason'='last_current_track_excluded' and state->'closedAt'='null'::jsonb then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if state->'studentId'<>'null'::jsonb and (pg_catalog.jsonb_typeof(state->'studentId') is distinct from 'string' or state->>'studentId' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if pg_catalog.jsonb_typeof(state->'commonRevision') is distinct from 'number' or state->>'commonRevision' !~ '^[1-9][0-9]{0,9}$' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if (state->>'commonRevision')::numeric>2147483647 then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  if state->'closedAt'<>'null'::jsonb and (pg_catalog.jsonb_typeof(state->'closedAt') is distinct from 'string' or pg_catalog.length(state->>'closedAt')>64) then
+    raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+  perform dashboard_private.registration_contact_assert_uuid_array_v1(state->'currentTrackIds',3);
+  if exists(select 1 from pg_catalog.jsonb_array_elements_text(state->'currentTrackIds') item(value)
+    where not exists(select 1 from public.ops_registration_subject_tracks track where track.id=item.value::uuid and track.task_id=p_task_id)) then
+    raise exception 'registration_contact_result_scope_invalid' using errcode='23514'; end if;
+end $$;
+
 -- Strict result projection: never spread a producer object or raw snapshot.
 create function dashboard_private.registration_contact_result_v1(p_result jsonb,p_task_id uuid)
 returns jsonb language plpgsql stable security definer set search_path='' as $$
@@ -188,7 +366,7 @@ begin
   end loop;
   if p_result ? 'workflowStatus' then
     if p_result->>'workflowStatus' not in ('inquiry','level_test_requested','consultation_requested','consultation_completed',
-      'waiting_current_class','waiting_new_class','waiting_next_opening','observation_requested','enrollment_requested',
+      'waiting_current_class','waiting_new_class','waiting_next_opening','observation_requested','observation_feedback_pending','observation_completed','enrollment_requested',
       'payment_in_progress','registered','not_registered','inquiry_only') then
       raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
     result:=result||pg_catalog.jsonb_build_object('workflowStatus',p_result->'workflowStatus');
@@ -209,6 +387,7 @@ begin
     result:=result||pg_catalog.jsonb_build_object('changed',p_result->'changed');
   end if;
   if p_result ? 'sourceEventIds' then
+    perform dashboard_private.registration_contact_assert_uuid_array_v1(p_result->'sourceEventIds',50);
     if pg_catalog.jsonb_typeof(p_result->'sourceEventIds')<>'array' or exists(select 1 from pg_catalog.jsonb_array_elements_text(p_result->'sourceEventIds') item(value)
       where item.value !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') then
       raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
@@ -226,6 +405,7 @@ begin
           or finalization->key<>'null'::jsonb and finalization->>key !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then
           raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
       end loop;
+      perform dashboard_private.registration_contact_assert_uuid_array_v1(finalization->'enrollmentIds',50);
       if exists(select 1 from pg_catalog.jsonb_array_elements_text(finalization->'enrollmentIds') item(value)
         where item.value !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$') then
         raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
@@ -235,13 +415,18 @@ begin
     end if;
   end if;
   if p_result ? 'subjects' then
+    if pg_catalog.jsonb_typeof(p_result->'subjects') is distinct from 'array' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
+    if pg_catalog.jsonb_array_length(p_result->'subjects')>3 then raise exception 'registration_contact_response_budget_exceeded' using errcode='23514'; end if;
+    if exists(select 1 from pg_catalog.jsonb_array_elements(p_result->'subjects') subject(value) where value not in ('"영어"'::jsonb,'"수학"'::jsonb,'"과학"'::jsonb)) or (select pg_catalog.count(*) from pg_catalog.jsonb_array_elements(p_result->'subjects'))<>(select pg_catalog.count(distinct value) from pg_catalog.jsonb_array_elements(p_result->'subjects')) then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
     select coalesce(pg_catalog.jsonb_agg(value),'[]'::jsonb) into row_item
       from pg_catalog.jsonb_array_elements(p_result->'subjects') subject(value)
       where value in ('"영어"'::jsonb,'"수학"'::jsonb,'"과학"'::jsonb);
     result:=result||pg_catalog.jsonb_build_object('subjects',row_item);
   end if;
   if pg_catalog.jsonb_typeof(p_result->'tracks')='array' then
+    if pg_catalog.jsonb_array_length(p_result->'tracks')>50 then raise exception 'registration_contact_response_budget_exceeded' using errcode='23514'; end if;
     for row_item in select value from pg_catalog.jsonb_array_elements(p_result->'tracks') loop
+      if pg_catalog.jsonb_typeof(row_item->'id') is distinct from 'string' or row_item->>'id' !~ '^[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}$' then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
       select source.* into source_track from public.ops_registration_subject_tracks source
         where source.id=(row_item->>'id')::uuid and source.task_id=p_task_id;
       if not found then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
@@ -546,6 +731,7 @@ begin
       if saved.command<>p_command or saved.request_hmac<>p_request_hmac or p_task_id is not null and saved.task_id<>p_task_id then
         raise exception 'idempotency_key_reused' using errcode='22023'; end if;
       response:=saved.response_payload||pg_catalog.jsonb_build_object('replayed',true);
+      perform dashboard_private.registration_contact_assert_receipt_v1(response,saved.task_id,p_request_key,p_command);
     else
       select exists(select 1 from dashboard_private.ops_registration_mutations source
         where source.actor_id=p_actor_id and source.request_key=p_request_key) into legacy;
@@ -661,6 +847,7 @@ begin
       if task_id is null then raise exception 'registration_contact_result_invalid' using errcode='23514'; end if;
       result:=dashboard_private.registration_contact_result_v1(result,task_id);
       response:=pg_catalog.jsonb_build_object('version',1,'taskId',task_id,'requestKey',p_request_key,'command',p_command,'replayed',legacy,'result',result);
+      perform dashboard_private.registration_contact_assert_receipt_v1(response,task_id,p_request_key,p_command);
       if not legacy then
         insert into dashboard_private.registration_contact_receipts_v1(actor_id,request_key,task_id,command,request_hmac,response_payload)
           values(p_actor_id,p_request_key,task_id,p_command,p_request_hmac,response);
@@ -1018,7 +1205,8 @@ begin
     join pg_catalog.pg_namespace namespace on namespace.oid=proc.pronamespace
     where namespace.nspname='dashboard_private' and proc.proname in (
       'lock_registration_contact_case_v1','prepare_registration_contact_write_v1','registration_case_contact_snapshot_v1',
-      'assert_registration_contact_open_v1','registration_contact_result_v1','registration_contact_fingerprint_v1',
+      'assert_registration_contact_open_v1','registration_contact_assert_bounded_json_v1','registration_contact_assert_uuid_array_v1',
+      'registration_contact_assert_receipt_v1','registration_contact_result_v1','registration_contact_fingerprint_v1',
       'registration_contact_fingerprint_matches_v1','guard_registration_contact_detail_write_v1',
       'guard_registration_contact_track_write_v1','guard_registration_contact_task_cancel_v1','refresh_registration_contact_case_v1') loop
     execute pg_catalog.format('alter function %s owner to postgres',item.signature);

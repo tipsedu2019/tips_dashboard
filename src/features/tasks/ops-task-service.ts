@@ -1,6 +1,9 @@
 import { supabase } from "@/lib/supabase"
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
 import { ACTIVE_STUDENT_STATUS } from "@/lib/student-status.js"
+import type { SupabaseClient } from "@supabase/supabase-js"
+import { STUDENT_MASTER_READ_COLUMNS, projectStudentMasterRecord } from "../management/student-master-privacy.js"
+import { readRegistrationContactEvents } from "./registration-contact-event-reader"
 
 import {
   REGISTRATION_PIPELINE_STATUSES,
@@ -2123,7 +2126,9 @@ export async function loadOpsTaskById(taskId: string): Promise<OpsTask | null> {
     supabase.from("ops_task_attachments")
       .select("id,task_id,file_name,file_kind,drive_file_id,drive_link,uploaded_by,uploaded_at").eq("task_id", taskId).order("uploaded_at").order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
-    supabase.from("ops_task_events")
+    taskType === "registration"
+      ? readRegistrationContactEvents(supabase, taskId, false).then((data) => ({ data, error: null }))
+      : supabase.from("ops_task_events")
       .select("id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at").eq("task_id", taskId).order("created_at", { ascending: false }).order("id").limit(30)
       .abortSignal(AbortSignal.timeout(8_000)).retry(false),
   ])
@@ -2967,14 +2972,65 @@ function assertCompletedOperationEditable(task: OpsTask) {
   }
 }
 
-async function selectOpsRowById(table: string, id: string) {
-  if (!supabase || !text(id)) return null
-  const { data, error } = await supabase.from(table).select("*").eq("id", id).limit(1)
+async function selectOpsStudentMasterById(client: SupabaseClient, studentId: string): Promise<Row | null> {
+  if (!isOpsRegistrationStudentId(studentId)) return null
+  const { data, error } = await client.from("students")
+    .select(STUDENT_MASTER_READ_COLUMNS)
+    .eq("id", studentId).order("id").limit(1)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
   if (error) {
     if (isMissingRelationError(error) || isMissingColumnError(error)) return null
     throw error
   }
-  return ((data || []) as unknown as Row[])[0] || null
+  if (!Array.isArray(data) || data.length > 1) throw new Error("ops_student_read_response_invalid")
+  const row = data[0] as Row | undefined
+  if (!row) return null
+  if (!isOpsRegistrationStudentId(row.id) || row.id.toLowerCase() !== studentId.toLowerCase()) {
+    throw new Error("ops_student_read_response_invalid")
+  }
+  return projectStudentMasterRecord(row)
+}
+
+async function selectOpsRowById(table: string, id: string) {
+  if (!supabase || !text(id)) return null
+  if (table === "students") return selectOpsStudentMasterById(supabase, id)
+  if (table === "classes") return selectOpsClassById(supabase, id)
+  if (table === "textbooks") return selectOpsTextbookById(supabase, id)
+  if (table === "teacher_catalogs") return selectOpsTeacherById(supabase, id)
+  throw new Error("ops_exact_read_table_invalid")
+}
+
+function normalizeOpsExactRead(data: unknown, error: unknown, id: string): Row | null {
+  if (error) {
+    if (isMissingRelationError(error) || isMissingColumnError(error)) return null
+    throw error
+  }
+  if (!Array.isArray(data) || data.length > 1) throw new Error("ops_exact_read_response_invalid")
+  const row = data[0] as Row | undefined
+  if (!row) return null
+  if (typeof row.id !== "string" || row.id.toLowerCase() !== id.toLowerCase()) throw new Error("ops_exact_read_response_invalid")
+  return row
+}
+
+async function selectOpsClassById(client: SupabaseClient, id: string): Promise<Row | null> {
+  const { data, error } = await client.from("classes")
+    .select("id,name,subject,grade,teacher,room,schedule,schedule_plan,status,student_ids,waitlist_ids,textbook_ids")
+    .eq("id", id).order("id").limit(1).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return normalizeOpsExactRead(data, error, id)
+}
+
+async function selectOpsTextbookById(client: SupabaseClient, id: string): Promise<Row | null> {
+  const { data, error } = await client.from("textbooks")
+    .select("id,title,name").eq("id", id).order("id").limit(1)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return normalizeOpsExactRead(data, error, id)
+}
+
+async function selectOpsTeacherById(client: SupabaseClient, id: string): Promise<Row | null> {
+  const { data, error } = await client.from("teacher_catalogs")
+    .select("id,name,profile_id").eq("id", id).order("id").limit(1)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  return normalizeOpsExactRead(data, error, id)
 }
 
 async function findOpsStudentByName(input: OpsTaskInput) {
@@ -2984,7 +3040,7 @@ async function findOpsStudentByName(input: OpsTaskInput) {
   if (!studentName) return null
 
   const { data, error } = await supabase.from("students")
-    .select("id,name,grade,school,contact,parent_contact,status,class_ids,waitlist_class_ids")
+    .select(STUDENT_MASTER_READ_COLUMNS)
     .eq("name", studentName).order("id").limit(20)
     .abortSignal(AbortSignal.timeout(8_000)).retry(false)
   if (error) {
@@ -2992,13 +3048,9 @@ async function findOpsStudentByName(input: OpsTaskInput) {
     throw error
   }
 
-  const rows = ((data || []) as unknown as Row[])
+  const rows = ((data || []) as unknown as Row[]).map((row) => projectStudentMasterRecord(row))
   const school = text(input.registration?.schoolName)
-  const studentPhone = text(input.registration?.studentPhone)
-  return rows.find((row) => (
-    (!school || text(row.school) === school) &&
-    (!studentPhone || text(row.contact) === studentPhone)
-  )) || rows[0] || null
+  return rows.find((row) => !school || text(row.school) === school) || rows[0] || null
 }
 
 async function resolveOpsStudent(input: OpsTaskInput) {

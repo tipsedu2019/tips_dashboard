@@ -3,7 +3,9 @@ import test from "node:test"
 
 import {
   createRegistrationCustomerMessageBundleSourceResolver,
+  createRegistrationCustomerMessageBundlePreviewSourceResolver,
   parseRegistrationCustomerMessageBundleSource,
+  parseRegistrationCustomerMessageBundlePreviewSource,
 } from "../src/features/tasks/server/registration-customer-message-bundle-source.ts"
 import { createRegistrationCustomerMessageCatalog } from "../src/features/tasks/server/registration-customer-message-catalog.ts"
 
@@ -47,6 +49,30 @@ test("bundle source parser accepts only the private DB shape", () => {
   assert.equal(parsed.items[0].subject, "영어")
   assert.throws(() => parseRegistrationCustomerMessageBundleSource({ ...source, phone: "01000000000" }))
   assert.throws(() => parseRegistrationCustomerMessageBundleSource({ ...source, items: [] }))
+})
+
+test("preview parser and resolver require metadata-only HTTP output while private legacy source stays separate", async () => {
+  const preview = { ...source }; delete preview.parentPhoneDigits
+  assert.throws(() => parseRegistrationCustomerMessageBundlePreviewSource(source))
+  assert.throws(() => parseRegistrationCustomerMessageBundleSource(preview))
+  assert.equal(Object.hasOwn(parseRegistrationCustomerMessageBundlePreviewSource(preview), "parentPhoneDigits"), false)
+  const resolver = createRegistrationCustomerMessageBundlePreviewSourceResolver({
+    catalog: createRegistrationCustomerMessageCatalog({}), resolveSource: async () => preview,
+  })
+  const result = await resolver.resolve({ messageKind: "level_test_booking_bundle", sourceId: TASK_ID })
+  assert.equal(JSON.stringify(result).includes("parentPhoneDigits"), false)
+  assert.equal(result.facts.reservations[0].subjectLabel, "영어")
+})
+
+test("metadata preview accepts the actual PostgreSQL timestamp precision without weakening its shape", () => {
+  const preview = { ...source }; delete preview.parentPhoneDigits
+  for (const timestamp of ["2026-08-21T05:00:00Z", "2026-08-21T05:00:00.1+00:00", "2026-08-21T05:00:00.123456+00:00"]) {
+    const value = { ...preview, items: [{ ...preview.items[0], scheduledAt: timestamp }] }
+    assert.equal(parseRegistrationCustomerMessageBundlePreviewSource(value).items[0].scheduledAt, new Date(timestamp).toISOString())
+  }
+  for (const timestamp of ["2026-08-21T05:00:00.1234567Z", "invalid"]) {
+    assert.throws(() => parseRegistrationCustomerMessageBundlePreviewSource({ ...preview, items: [{ ...preview.items[0], scheduledAt: timestamp }] }))
+  }
 })
 
 test("bundle resolver renders public reservation facts without private delivery fields", async () => {

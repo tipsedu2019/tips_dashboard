@@ -1,6 +1,7 @@
 import { supabase } from "@/lib/supabase"
 import { canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact, type RegistrationCaseContactState } from "./registration-contact-client.ts"
 import { createRegistrationContactTransport, type RegistrationContactMutation } from "./registration-contact-transport.ts"
+import { readRegistrationContactEvents } from "./registration-contact-event-reader"
 import { createRegistrationStudentCandidateService, type RegistrationStudentCandidateRequest, type RegistrationStudentBindingInput, type RegistrationStudentBindingResult } from "./registration-student-binding-service.ts"
 import { invalidatePublicClassesCacheAfterMutation } from "@/lib/public-classes-cache-invalidation.js"
 import {
@@ -959,8 +960,6 @@ const PRE_INTAKE_TRACK_SUMMARY_COLUMNS = [
 ].join(",")
 
 const PARENT_DETAIL_COLUMNS = "*,ops_registration_details(task_id,pipeline_status,inquiry_at,school_grade,school_name,request_note,admission_notice_sent,common_revision,admission_checklist,level_test_place,level_test_material_link,level_test_result,visit_consultation_place),ops_task_comments(*),ops_task_attachments(*)"
-const EVENT_COLUMNS = "id,task_id,actor_id,event_type,field_name,before_value,after_value,created_at"
-const MESSAGE_COLUMNS = "id,status,claim_active,template_key,request_key,updated_at"
 const REGISTRATION_APPOINTMENT_CALENDAR_COLUMNS = [
   "appointment_id",
   "task_id",
@@ -2593,23 +2592,20 @@ export function createRegistrationTrackService(
         ),
         loadScheduledAppointmentPage(),
         loadAppointmentHistoryRows(),
-        queryRows(
-          client.from("ops_task_events")
-            .select(EVENT_COLUMNS)
-            .eq("task_id", safeTaskId)
-            .eq("registration_task_event_shared_visible", true),
-          metrics,
-          signal,
-        ),
+        (() => {
+          metrics.queryCount += 1
+          return readRegistrationContactEvents(client, safeTaskId, true, signal)
+        })(),
         queryRows(
           client.from("ops_registration_messages")
-            .select(MESSAGE_COLUMNS)
+            .select("id,status,claim_active,template_key,request_key,updated_at")
             .eq("task_id", safeTaskId)
             .eq("template_key", "admission_application")
             .eq("claim_active", true)
-            .limit(1),
+            .order("id").limit(1)
+            .abortSignal(signal ? AbortSignal.any([signal, AbortSignal.timeout(8_000)]) : AbortSignal.timeout(8_000))
+            .retry(false),
           metrics,
-          signal,
         ),
         queryCustomerReminderSummaries(safeTaskId, metrics),
         loadOpenBatchRows(),

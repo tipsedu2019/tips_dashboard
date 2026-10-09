@@ -9,6 +9,7 @@ import vm from "node:vm";
 import ts from "typescript";
 import { canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact } from "../src/features/tasks/registration-contact-client.ts";
 import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
+import { readRegistrationContactEvents } from "../src/features/tasks/registration-contact-event-reader.ts";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
 import { normalizeRegistrationLevelTestPlace } from "../src/features/tasks/registration-level-test-place.ts";
@@ -28,6 +29,23 @@ import {
 const CONTACT_TASK = "73000000-0000-4000-8000-000000000001";
 const CONTACT_TRACK = "73000000-0000-4000-8000-000000000030";
 const CONTACT_KEY = "73000000-0000-4000-8000-000000000090";
+const EVENT_ACTOR = "74000000-0000-4000-8000-000000000090";
+const EVENT_FIXTURE_IDS = Object.freeze({
+  canonical: "74000000-0000-4000-8000-000000000001",
+  legacy: "74000000-0000-4000-8000-000000000002",
+  observationReason: "74000000-0000-4000-8000-000000000003",
+  observationLegacy: "74000000-0000-4000-8000-000000000004",
+  observationV1: "74000000-0000-4000-8000-000000000005",
+  publicV2: "74000000-0000-4000-8000-000000000006",
+  legacyNull: "74000000-0000-4000-8000-000000000007",
+  nonTrack: "74000000-0000-4000-8000-000000000008",
+  outerWhitespace: "74000000-0000-4000-8000-000000000009",
+  innerWhitespace: "74000000-0000-4000-8000-00000000000a",
+  innerArray: "74000000-0000-4000-8000-00000000000b",
+  malformed: "74000000-0000-4000-8000-00000000000c",
+  jsonNonV2: "74000000-0000-4000-8000-00000000000d",
+  stringVersionNearMiss: "74000000-0000-4000-8000-00000000000e",
+});
 function contactState(overrides = {}) { return {version:1,taskId:CONTACT_TASK,revision:"1",generation:"1",phase:"open",closureReason:null,closedAt:null,parentPhone:null,studentId:null,commonRevision:3,allPhasesClosed:false,currentTrackIds:[CONTACT_TRACK],...overrides}; }
 function contactEnvelope(mutation,result = {}) { return {version:1,taskId:CONTACT_TASK,command:mutation.command,requestKey:mutation.requestKey,replayed:false,result:{taskId:CONTACT_TASK,contactState:contactState({revision:"2"}),...result}}; }
 function commonContactInput(overrides = {}) { return {taskId:CONTACT_TASK,contactState:contactState(),studentName:"합성학생",schoolGrade:"중2",schoolName:"합성학교",parentPhone:"01000000000",studentPhone:"RETIRED_STUDENT_CANARY",campus:"본관",inquiryAt:"2026-09-01T18:49",requestNote:"업무메모",priority:"normal",expectedCommonRevision:3,requestKey:CONTACT_KEY,...overrides}; }
@@ -345,6 +363,7 @@ async function loadFactory(extraGlobals = {}) {
     loadRegistrationObservationFeedback,
     loadRegistrationObservationManagerDetail,
     canUseRegistrationParentContact, normalizeRegistrationCaseContact, stripRegistrationTaskContact,
+    readRegistrationContactEvents,
     parseAcademicSubject,
     REGISTRATION_WORKFLOW_STATUSES,
     getRegistrationWorkflowStatusFromLegacyTrack,
@@ -787,9 +806,10 @@ function deferred() {
   return { promise, resolve, reject };
 }
 
-function createClient({ queryHandler, rpcHandler, contactHandler } = {}) {
+function createClient({ queryHandler, rpcHandler, contactHandler, eventHandler } = {}) {
   const queries = [];
   const rpcCalls = [];
+  const rpcRequests = [];
   let activeQueries = 0;
   let maxActiveQueries = 0;
   let abortedQueries = 0;
@@ -895,13 +915,20 @@ function createClient({ queryHandler, rpcHandler, contactHandler } = {}) {
   return {
     queries,
     rpcCalls,
+    rpcRequests,
     getAbortedQueryCount: () => abortedQueries,
     getMaxActiveQueries: () => maxActiveQueries,
     client: {
       from: builder,
       rpc(name, args) {
+        const rpcRequest = { name, args, signal: null, retryEnabled: null };
         const run = async () => {
         rpcCalls.push([name, args]);
+        rpcRequests.push(rpcRequest);
+        if (name === "read_registration_contact_events_v1") {
+          assert.deepEqual({ ...args }, { p_task_id: CONTACT_TASK, p_limit: 30, p_shared_only: true });
+          return eventHandler ? eventHandler(args) : eventRpcResult(detailRows("ops_task_events").data);
+        }
         if (name === "get_registration_case_contact_v1" && contactHandler) return contactHandler(args);
         if (name === "get_registration_case_contact_v1") return { data: { version: 1, taskId: args.p_task_id, revision: "1", generation: "1", phase: "open", closureReason: null, closedAt: null, parentPhone: null, studentId: null, commonRevision: 1, allPhasesClosed: false, currentTrackIds: ["73000000-0000-4000-8000-000000000030"] }, error: null };
         if (rpcHandler) return rpcHandler(name, args);
@@ -919,7 +946,11 @@ function createClient({ queryHandler, rpcHandler, contactHandler } = {}) {
         }
         return { data: { ok: true }, error: null };
         };
-        const request = { abortSignal() { return request; }, retry() { return request; }, then(resolve, reject) { return run().then(resolve, reject); } };
+        const request = {
+          abortSignal(signal) { rpcRequest.signal = signal; return request; },
+          retry(enabled) { rpcRequest.retryEnabled = enabled; return request; },
+          then(resolve, reject) { return run().then(resolve, reject); },
+        };
         return request;
       },
     },
@@ -1567,11 +1598,11 @@ function detailRows(table) {
   if (table === "ops_task_events") {
     return { data: [
       {
-        id: "event-canonical", task_id: "73000000-0000-4000-8000-000000000001", actor_id: "profile-1",
+        id: EVENT_FIXTURE_IDS.canonical, task_id: "73000000-0000-4000-8000-000000000001", actor_id: EVENT_ACTOR,
         event_type: "registration_track_event", field_name: "registration_track:track-1",
         before_value: null,
         after_value: JSON.stringify({
-          version: 1, eventType: "consultation_completed", actorId: "profile-1",
+          version: 1, eventType: "consultation_completed", actorId: EVENT_ACTOR,
           trackId: "track-1", subject: "영어", source: "consultation_waiting",
           destination: "enrollment_decided", reason: null,
           metadata: { consultationId: "consultation-1" },
@@ -1580,11 +1611,11 @@ function detailRows(table) {
         created_at: "2026-07-12T01:59:00Z",
       },
       {
-        id: "event-legacy", task_id: "73000000-0000-4000-8000-000000000001", actor_id: "profile-1",
+        id: EVENT_FIXTURE_IDS.legacy, task_id: "73000000-0000-4000-8000-000000000001", actor_id: EVENT_ACTOR,
         event_type: "future_event", field_name: "future", before_value: null,
         after_value: "plain future history", created_at: "2026-07-12T02:00:00Z",
       },
-    ], error: null };
+    ].sort(compareEventFixtureRows), error: null };
   }
   if (table === "ops_registration_messages") {
     return { data: [{
@@ -1631,6 +1662,52 @@ const caseDetailObservationSecrets = {
 
 function toPostgresJsonbText(value) {
   return JSON.stringify(value).replaceAll('\":', '\": ');
+}
+
+function compareEventFixtureRows(left, right) {
+  return Date.parse(right.created_at) - Date.parse(left.created_at) || left.id.localeCompare(right.id);
+}
+
+function eventRpcResult(events, legacyImport = null) {
+  return { data: { events, legacyImport }, error: null };
+}
+
+function legacyImportEventFixture(overrides = {}) {
+  return {
+    id: "76000000-0000-4000-8000-000000000090", task_id: CONTACT_TASK, actor_id: null,
+    event_type: "legacy_registration_imported", field_name: "registration_legacy",
+    before_value: JSON.stringify({ pipelineStatus: "5. 등록 결정", studentId: BIND_STUDENT,
+      classId: "76000000-0000-4000-8000-000000000091", textbookId: "76000000-0000-4000-8000-000000000092" }),
+    after_value: JSON.stringify({ version: 1, eventType: "legacy_registration_imported", trackId: CONTACT_TRACK,
+      timestamps: { levelTestAt: "2026-07-01T01:00:00Z", classStartDate: "2026-07-20", classStartSession: "1회차" },
+      legacyBooleans: { admissionNoticeSent: false, makeeduRegistered: false, makeeduInvoiceSent: false, paymentChecked: false } }),
+    created_at: "2026-07-01T02:00:00Z", ...overrides,
+  };
+}
+
+function latestThirtyEventFixtures() {
+  const canonical = detailRows("ops_task_events").data.find((row) => row.id === EVENT_FIXTURE_IDS.canonical);
+  return Array.from({ length: 30 }, (_, index) => ({ ...canonical,
+    id: `76000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}`,
+  }));
+}
+
+function migrationReviewQueryFixture(query) {
+  const result = detailRows(query.table);
+  if (query.table === "ops_registration_subject_tracks") {
+    return { ...result, data: result.data.map((row) => ({ ...row, migration_review_required: true })) };
+  }
+  return result;
+}
+
+// The response fixture models the existing server shared-visibility predicate.
+// The imported host reader validates these RPC rows; the mock does no redaction.
+function sharedEventRpcFixture(args) {
+  assert.deepEqual({ ...args }, { p_task_id: CONTACT_TASK, p_limit: 30, p_shared_only: true });
+  const result = detailRowsWithObservationSecrets({ table: "ops_task_events", filters: [
+    ["eq", "task_id", args.p_task_id], ["eq", "registration_task_event_shared_visible", args.p_shared_only],
+  ] });
+  return { ...result, data: { events: result.data, legacyImport: null } };
 }
 
 function detailRowsWithObservationSecrets(query) {
@@ -1693,16 +1770,16 @@ function detailRowsWithObservationSecrets(query) {
       data: [
         ...result.data,
         {
-          id: "event-observation-reason-private",
+          id: EVENT_FIXTURE_IDS.observationReason,
           task_id: "73000000-0000-4000-8000-000000000001",
-          actor_id: "profile-1",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_track_event",
           field_name: "registration_observation:track-1",
           before_value: null,
           after_value: toPostgresJsonbText({
             version: 2,
             event_type: "registration_observation_withdrawn",
-            actor_profile_id: "profile-1",
+            actor_profile_id: EVENT_ACTOR,
             actor_kind: "user",
             system_source: null,
             track_id: "track-1",
@@ -1719,9 +1796,9 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:00:00Z",
         },
         {
-          id: "event-observation-legacy-private",
+          id: EVENT_FIXTURE_IDS.observationLegacy,
           task_id: "73000000-0000-4000-8000-000000000001",
-          actor_id: "profile-1",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_observation_audit_payload",
           field_name: "registration_observation:track-1",
           before_value: null,
@@ -1729,16 +1806,16 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:01:00Z",
         },
         {
-          id: "event-observation-v1-private",
+          id: EVENT_FIXTURE_IDS.observationV1,
           task_id: "73000000-0000-4000-8000-000000000001",
-          actor_id: "profile-1",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
           before_value: null,
           after_value: JSON.stringify({
             version: 1,
             eventType: "registration_observation_withdrawn",
-            actorId: "profile-1",
+            actorId: EVENT_ACTOR,
             trackId: "track-1",
             subject: "영어",
             source: "observation_feedback_pending",
@@ -1750,16 +1827,16 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:01:30Z",
         },
         {
-          id: "event-public-v2",
+          id: EVENT_FIXTURE_IDS.publicV2,
           task_id: "73000000-0000-4000-8000-000000000001",
-          actor_id: "profile-1",
+          actor_id: EVENT_ACTOR,
           event_type: "registration_track_event",
           field_name: "registration_track:track-1",
           before_value: null,
           after_value: toPostgresJsonbText({
             version: 2,
             event_type: "registration_consultation_completed",
-            actor_profile_id: "profile-1",
+            actor_profile_id: EVENT_ACTOR,
             actor_kind: "user",
             system_source: null,
             track_id: "track-1",
@@ -1779,7 +1856,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:02:00Z",
         },
         {
-          id: "event-legacy-null",
+          id: EVENT_FIXTURE_IDS.legacyNull,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "legacy_history_marker",
@@ -1789,7 +1866,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:00Z",
         },
         {
-          id: "event-non-track-observation-shaped",
+          id: EVENT_FIXTURE_IDS.nonTrack,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "customer_message_sent",
@@ -1802,7 +1879,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:30Z",
         },
         {
-          id: "event-outer-whitespace-observation-shaped",
+          id: EVENT_FIXTURE_IDS.outerWhitespace,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: " registration_observation_reference_only",
@@ -1812,7 +1889,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:40Z",
         },
         {
-          id: "event-inner-whitespace-observation-shaped",
+          id: EVENT_FIXTURE_IDS.innerWhitespace,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
@@ -1825,7 +1902,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:50Z",
         },
         {
-          id: "event-inner-array-observation-shaped",
+          id: EVENT_FIXTURE_IDS.innerArray,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
@@ -1838,7 +1915,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:03:55Z",
         },
         {
-          id: "event-malformed-non-v2",
+          id: EVENT_FIXTURE_IDS.malformed,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
@@ -1848,7 +1925,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:04:00Z",
         },
         {
-          id: "event-json-non-v2",
+          id: EVENT_FIXTURE_IDS.jsonNonV2,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
@@ -1862,7 +1939,7 @@ function detailRowsWithObservationSecrets(query) {
           created_at: "2026-08-14T01:05:00Z",
         },
         {
-          id: "event-json-string-version-near-miss",
+          id: EVENT_FIXTURE_IDS.stringVersionNearMiss,
           task_id: "73000000-0000-4000-8000-000000000001",
           actor_id: null,
           event_type: "registration_track_event",
@@ -1877,9 +1954,9 @@ function detailRowsWithObservationSecrets(query) {
       ].filter((row) => {
         if (usesSharedVisibilityComputedField) {
           return ![
-            "event-observation-reason-private",
-            "event-observation-legacy-private",
-            "event-observation-v1-private",
+            EVENT_FIXTURE_IDS.observationReason,
+            EVENT_FIXTURE_IDS.observationLegacy,
+            EVENT_FIXTURE_IDS.observationV1,
           ].includes(row.id);
         }
         if (usesLegacyTextRegex) {
@@ -1892,7 +1969,7 @@ function detailRowsWithObservationSecrets(query) {
           ) return false;
         }
         return true;
-      }),
+      }).sort(compareEventFixtureRows),
     };
   }
   return result;
@@ -1900,15 +1977,15 @@ function detailRowsWithObservationSecrets(query) {
 
 function assertCaseDetailOmitsObservationSecrets(detail) {
   const payload = JSON.stringify(detail);
-  const publicV2 = detail.events.find((event) => event.id === "event-public-v2");
-  const legacyNull = detail.events.find((event) => event.id === "event-legacy-null");
+  const publicV2 = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.publicV2);
+  const legacyNull = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.legacyNull);
   const nonTrack = detail.events.find(
-    (event) => event.id === "event-non-track-observation-shaped",
+    (event) => event.id === EVENT_FIXTURE_IDS.nonTrack,
   );
-  const malformed = detail.events.find((event) => event.id === "event-malformed-non-v2");
-  const jsonNonV2 = detail.events.find((event) => event.id === "event-json-non-v2");
+  const malformed = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.malformed);
+  const jsonNonV2 = detail.events.find((event) => event.id === EVENT_FIXTURE_IDS.jsonNonV2);
   const stringVersionNearMiss = detail.events.find(
-    (event) => event.id === "event-json-string-version-near-miss",
+    (event) => event.id === EVENT_FIXTURE_IDS.stringVersionNearMiss,
   );
   assert.deepEqual({
     appointmentIds: Array.from(detail.appointments, (appointment) => appointment.id),
@@ -1956,17 +2033,17 @@ function assertCaseDetailOmitsObservationSecrets(detail) {
   }, {
     appointmentIds: ["appointment-1"],
     eventIds: [
-      "event-canonical",
-      "event-legacy",
-      "event-public-v2",
-      "event-legacy-null",
-      "event-non-track-observation-shaped",
-      "event-outer-whitespace-observation-shaped",
-      "event-inner-whitespace-observation-shaped",
-      "event-inner-array-observation-shaped",
-      "event-malformed-non-v2",
-      "event-json-non-v2",
-      "event-json-string-version-near-miss",
+      EVENT_FIXTURE_IDS.stringVersionNearMiss,
+      EVENT_FIXTURE_IDS.jsonNonV2,
+      EVENT_FIXTURE_IDS.malformed,
+      EVENT_FIXTURE_IDS.innerArray,
+      EVENT_FIXTURE_IDS.innerWhitespace,
+      EVENT_FIXTURE_IDS.outerWhitespace,
+      EVENT_FIXTURE_IDS.nonTrack,
+      EVENT_FIXTURE_IDS.legacyNull,
+      EVENT_FIXTURE_IDS.publicV2,
+      EVENT_FIXTURE_IDS.legacy,
+      EVENT_FIXTURE_IDS.canonical,
     ],
     observationAppointmentKinds: [],
     observationEventTypes: [],
@@ -2036,11 +2113,15 @@ function assertCaseDetailUsesServerPrivacyFilters(harness) {
   const appointmentHistoryQuery = appointmentQueries.find((query) => (
     hasQueryFilter(query, "in", "status", ["completed", "canceled"])
   ));
-  const eventQuery = harness.queries.find((query) => query.table === "ops_task_events");
+  const eventRequest = harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1");
+  assert.ok(eventRequest, "shared history must use the bounded event RPC");
+  assert.equal(eventRequest.retryEnabled, false);
+  assert.ok(eventRequest.signal instanceof AbortSignal);
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false, "no raw event-table fallback");
   assert.deepEqual(JSON.parse(JSON.stringify({
     scheduledAppointmentFilters: scheduledAppointmentQuery?.filters,
     appointmentHistoryFilters: appointmentHistoryQuery?.filters,
-    eventFilters: eventQuery.filters,
+    eventArguments: eventRequest.args,
   })), {
     scheduledAppointmentFilters: [
       ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
@@ -2052,10 +2133,7 @@ function assertCaseDetailUsesServerPrivacyFilters(harness) {
       ["neq", "kind", "observation_class"],
       ["in", "status", ["completed", "canceled"]],
     ],
-    eventFilters: [
-      ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
-      ["eq", "registration_task_event_shared_visible", true],
-    ],
+    eventArguments: { p_task_id: CONTACT_TASK, p_limit: 30, p_shared_only: true },
   });
 }
 
@@ -2480,7 +2558,7 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
   await Promise.resolve();
 
   try {
-    assert.equal(harness.queries.length, 8);
+    assert.equal(harness.queries.length, 7);
     assert.deepEqual(harness.queries.map((query) => query.table).sort(), [
       "ops_registration_admission_batches",
       "ops_registration_admission_batches",
@@ -2488,9 +2566,12 @@ test("case detail reads overlap a delayed runtime readiness check", async () => 
       "ops_registration_appointments",
       "ops_registration_messages",
       "ops_registration_subject_tracks",
-      "ops_task_events",
       "ops_tasks",
     ]);
+    assert.deepEqual(harness.rpcCalls.map(([name]) => name).sort(), [
+      "get_registration_customer_reminder_summaries_v1", "read_registration_contact_events_v1",
+    ]);
+    assertCaseDetailUsesServerPrivacyFilters(harness);
   } finally {
     runtimeGate.resolve({ mode: "ready", version: 1 });
   }
@@ -2540,12 +2621,196 @@ test("case detail excludes observation rows at the server query boundary", async
     queryHandler(query) {
       return detailRowsWithObservationSecrets(query);
     },
+    eventHandler: sharedEventRpcFixture,
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
   await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
 
   assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("case detail preserves contact-free structured event business notes through the actual RPC reader", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const canonical = detailRows("ops_task_events").data.find((row) => row.id === EVENT_FIXTURE_IDS.canonical);
+  const payload = JSON.parse(canonical.after_value);
+  const metadata = { consultationId: "consultation-1", note: "synthetic 01000000000 remains a business note", changes: [{ summary: "합성 업무 기록" }] };
+  const harness = createClient({ queryHandler: (query) => detailRows(query.table), eventHandler: () => eventRpcResult(
+    [{ ...canonical, after_value: toPostgresJsonbText({ ...payload, metadata }) }],
+  ) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.deepEqual(JSON.parse(JSON.stringify(detail.events[0].metadata)), metadata);
+  assert.equal(detail.events[0].actorId, EVENT_ACTOR);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("case detail rejects unsanitized or invalid event RPC rows before caching or a raw-table fallback", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const canonical = detailRows("ops_task_events").data.find((row) => row.id === EVENT_FIXTURE_IDS.canonical);
+  const invalidPages = [
+    [{ ...canonical, after_value: JSON.stringify({ version: 1, metadata: [{ parentPhone: "SYNTHETIC_RAW_CONTACT_CANARY" }] }) }],
+    [{ ...canonical, task_id: CONTACT_TRACK }],
+    [{ ...canonical, id: "event-not-a-uuid" }],
+    [{ ...canonical, unexpected: "extra" }],
+    [canonical, { ...canonical }],
+    Array.from({ length: 31 }, (_, index) => ({ ...canonical, id: `75000000-0000-4000-8000-${(index + 1).toString(16).padStart(12, "0")}` })),
+    detailRows("ops_task_events").data.toReversed(),
+  ];
+  for (const data of invalidPages) {
+    const harness = createClient({ queryHandler: (query) => detailRows(query.table), eventHandler: () => eventRpcResult(data) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_contact_event_read_response_invalid/);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+    assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  }
+});
+
+test("case detail propagates an event RPC permission denial without retrying or reading the raw table", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const denied = Object.assign(new Error("synthetic event read permission denied"), { code: "42501" });
+  const harness = createClient({ queryHandler: (query) => detailRows(query.table), eventHandler: () => ({ data: null, error: denied }) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), (error) => error === denied);
+  assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+  assert.equal(harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1").retryEnabled, false);
+});
+
+test("one bounded event RPC preserves a migration snapshot older than the latest thirty events", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const events = latestThirtyEventFixtures();
+  const legacyImport = legacyImportEventFixture();
+  assert.equal(events.length, 30);
+  assert.ok(events.every((event) => Date.parse(event.created_at) > Date.parse(legacyImport.created_at)));
+  const response = eventRpcResult(events, legacyImport);
+  const originalResponse = structuredClone(response);
+  const harness = createClient({ queryHandler: migrationReviewQueryFixture, eventHandler: () => response });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(detail.events.length, 31);
+  assert.equal(new Set(Array.from(detail.events, (event) => event.id)).size, 31);
+  assert.equal(detail.events.filter((event) => event.id === legacyImport.id).length, 1);
+  assert.equal(detail.migrationLegacy.snapshotMissing, false);
+  assert.equal(detail.migrationLegacy.studentId, BIND_STUDENT);
+  assert.equal(detail.migrationLegacy.classId, "76000000-0000-4000-8000-000000000091");
+  assert.equal(detail.migrationLegacy.textbookId, "76000000-0000-4000-8000-000000000092");
+  assert.equal(detail.migrationLegacy.levelTestAt, "2026-07-01T01:00:00Z");
+  assert.equal(detail.migrationLegacy.classStartSession, "1회차");
+  assert.equal(detail.migrationLegacy.groups.placement, true);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+  assert.deepEqual(response, originalResponse, "the reader must not rewrite the server response");
+});
+
+test("a legacy snapshot already in the latest event page is deduplicated without another RPC", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const legacyImport = legacyImportEventFixture();
+  const events = [...latestThirtyEventFixtures().slice(0, 29), legacyImport];
+  const harness = createClient({ queryHandler: migrationReviewQueryFixture,
+    eventHandler: () => eventRpcResult(events, { ...legacyImport }) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(detail.events.length, 30);
+  assert.equal(detail.events.filter((event) => event.id === legacyImport.id).length, 1);
+  assert.equal(detail.migrationLegacy.snapshotMissing, false);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("newer malformed and version-two timeline imports do not mask the older valid migration anchor", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const legacyImport = legacyImportEventFixture();
+  const events = [...latestThirtyEventFixtures().slice(0, 28),
+    legacyImportEventFixture({ id: "76000000-0000-4000-8000-000000000071",
+      created_at: "2026-07-10T02:00:00Z", after_value: JSON.stringify({ version: 2 }) }),
+    legacyImportEventFixture({ id: "76000000-0000-4000-8000-000000000072",
+      created_at: "2026-07-09T02:00:00Z", after_value: "{malformed legacy" })];
+  const harness = createClient({ queryHandler: migrationReviewQueryFixture,
+    eventHandler: () => eventRpcResult(events, legacyImport) });
+  const service = createRegistrationTrackService(harness.client, readyOptions());
+  const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+  assert.equal(detail.events.length, 31);
+  assert.deepEqual(Array.from(detail.events, (event) => event.id), [...events.map((event) => event.id), legacyImport.id]);
+  assert.equal(detail.migrationLegacy.snapshotMissing, false);
+  assert.equal(detail.migrationLegacy.studentId, BIND_STUDENT);
+  assert.equal(detail.migrationLegacy.levelTestAt, "2026-07-01T01:00:00Z");
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
+});
+
+test("missing or noncanonical timeline imports keep migration provenance unavailable", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const timelineImport of [null, legacyImportEventFixture({ after_value: "{malformed legacy" }),
+    legacyImportEventFixture({ after_value: JSON.stringify({ version: 2, timestamps: { classStartDate: "2026-07-20" } }) })]) {
+    const harness = createClient({ queryHandler: (query) => {
+      const result = migrationReviewQueryFixture(query);
+      return query.table === "ops_tasks" ? { ...result, data: { ...result.data, student_id: BIND_STUDENT,
+        class_id: CONTACT_TRACK, textbook_id: CONTACT_KEY } } : result;
+    }, eventHandler: () => eventRpcResult(timelineImport
+      ? [...latestThirtyEventFixtures().slice(0, 29), timelineImport] : latestThirtyEventFixtures()) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    const detail = await service.loadCaseDetail(CONTACT_TASK, "viewer-1");
+    assert.equal(detail.migrationLegacy.snapshotMissing, true);
+    assert.equal(detail.migrationLegacy.studentId, "");
+    assert.equal(detail.migrationLegacy.classId, "");
+    assert.equal(detail.migrationLegacy.textbookId, "");
+    assert.equal(detail.migrationLegacy.currentStudentId, BIND_STUDENT);
+    assert.equal(detail.migrationLegacy.currentClassId, CONTACT_TRACK);
+    assert.equal(detail.migrationLegacy.currentTextbookId, CONTACT_KEY);
+    assert.equal(detail.migrationLegacy.groups.placement, false);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+    assertCaseDetailUsesServerPrivacyFilters(harness);
+  }
+});
+
+test("malformed event envelopes and unsafe legacy supplements are rejected before caching", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const legacy = legacyImportEventFixture();
+  const invalidEnvelopes = [[], { events: [] }, { legacyImport: null }, { events: [], legacyImport: null, extra: null },
+    { events: [], legacyImport: [] }, { events: [], legacyImport: { ...legacy, task_id: CONTACT_TRACK } },
+    { events: [], legacyImport: { ...legacy, event_type: "future_event" } },
+    { events: [], legacyImport: { ...legacy, after_value: "{malformed legacy" } },
+    { events: [], legacyImport: { ...legacy, after_value: JSON.stringify({ version: 2 }) } },
+    { events: [], legacyImport: { ...legacy, after_value: JSON.stringify({ version: 1, metadata: { parentPhone: "SYNTHETIC_RAW_CONTACT_CANARY" } }) } },
+    { events: [legacy], legacyImport: { ...legacy, before_value: "different immutable snapshot" } }];
+  for (const data of invalidEnvelopes) {
+    const harness = createClient({ queryHandler: migrationReviewQueryFixture, eventHandler: () => ({ data, error: null }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions());
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"), /registration_contact_event_read_response_invalid/);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+    assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+    assert.equal(harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1").retryEnabled, false);
+  }
+});
+
+test("an unavailable event RPC invalidates ready runtime without a raw event read or partial cache", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  for (const code of ["PGRST202", "42883"]) {
+    const unavailable = Object.assign(new Error("synthetic read_registration_contact_events_v1 unavailable"), { code });
+    let invalidations = 0;
+    const harness = createClient({ queryHandler: migrationReviewQueryFixture,
+      eventHandler: () => ({ data: null, error: unavailable }) });
+    const service = createRegistrationTrackService(harness.client, readyOptions({
+      invalidateRuntimeAfterReadyFailure(error) {
+        invalidations++;
+        throw Object.assign(new Error("runtime integrity failure"), { code: "REGISTRATION_RUNTIME_INTEGRITY_ERROR", cause: error });
+      },
+    }));
+    await assert.rejects(service.loadCaseDetail(CONTACT_TASK, "viewer-1"),
+      (error) => error.code === "REGISTRATION_RUNTIME_INTEGRITY_ERROR" && error.cause === unavailable);
+    assert.equal(invalidations, 1);
+    assert.equal(service.getContactReceipt(CONTACT_TASK), null);
+    assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+    assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+    const request = harness.rpcRequests.find((entry) => entry.name === "read_registration_contact_events_v1");
+    assert.ok(request.signal instanceof AbortSignal);
+    assert.equal(request.signal.aborted, true);
+    assert.equal(request.retryEnabled, false);
+  }
 });
 
 test("case detail bounds the active subject-track read and disables automatic retries", async () => {
@@ -3063,6 +3328,7 @@ test("generic case detail preserves nested observation-like and version20 histor
     queryHandler(query) {
       return detailRowsWithObservationSecrets(query);
     },
+    eventHandler: sharedEventRpcFixture,
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
@@ -3078,6 +3344,7 @@ test("observation-aware case detail preserves shared nested and malformed histor
     queryHandler(query) {
       return detailRowsWithObservationSecrets(query);
     },
+    eventHandler: sharedEventRpcFixture,
   });
   const service = createRegistrationTrackService(harness.client, readyOptions());
 
@@ -3394,8 +3661,9 @@ test("observation detail overlaps its required summary with enrollment reads and
   const detail = await request;
   assert.equal(detail.tracks[0].observationSummaryVisible, true);
   assert.equal(detail.enrollments.length, 1);
-  assert.equal(harness.queries.length, 11);
-  assert.equal(harness.rpcCalls.length, 2);
+  assert.equal(harness.queries.length, 10);
+  assert.equal(harness.rpcCalls.length, 3);
+  assertCaseDetailUsesServerPrivacyFilters(harness);
 });
 
 test("a parallel observation summary failure aborts detail reads without caching partial detail", async () => {
@@ -3479,9 +3747,9 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   let shouldStallEvents = true;
   const harness = createClient({
     queryHandler(query) {
-      if (query.table === "ops_task_events" && shouldStallEvents) return stalledEvents.promise;
       return detailRows(query.table);
     },
+    eventHandler: () => shouldStallEvents ? stalledEvents.promise : eventRpcResult(detailRows("ops_task_events").data),
   });
   const service = createRegistrationTrackService(harness.client, readyOptions({
     requestTimeoutMs: 5,
@@ -3505,11 +3773,16 @@ test("a stalled case-detail read times out and a forced retry can start fresh", 
   shouldStallEvents = false;
   const detail = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true });
   assert.equal(detail.task.id, "73000000-0000-4000-8000-000000000001");
-  assert.equal(harness.queries.filter((query) => query.table === "ops_task_events").length, 2);
-  stalledEvents.resolve(detailRows("ops_task_events"));
+  const eventRequests = harness.rpcRequests.filter((request) => request.name === "read_registration_contact_events_v1");
+  assert.equal(eventRequests.length, 2);
+  assert.equal(eventRequests[0].signal.aborted, true);
+  assert.equal(eventRequests[1].signal.aborted, false);
+  assert.ok(eventRequests.every((request) => request.retryEnabled === false));
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
+  stalledEvents.resolve(eventRpcResult(detailRows("ops_task_events").data));
   await Promise.resolve();
   assert.deepEqual(await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1"), detail);
-  assert.equal(harness.queries.length, 18);
+  assert.equal(harness.queries.length, 16);
 });
 
 test("a stalled appointment cancellation returns control to the editor", async () => {
@@ -3559,8 +3832,13 @@ test("a runtime-probe failure aborts the parallel case-detail reads", async () =
     service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1", { force: true }),
     (error) => error === runtimeError,
   );
-  assert.equal(harness.queries.length, 8);
-  assert.equal(harness.getAbortedQueryCount(), 8);
+  assert.equal(harness.queries.length, 7);
+  assert.equal(harness.getAbortedQueryCount(), 7);
+  const eventRequest = harness.rpcRequests.find((request) => request.name === "read_registration_contact_events_v1");
+  assert.ok(eventRequest.signal instanceof AbortSignal);
+  assert.equal(eventRequest.signal.aborted, true);
+  assert.equal(eventRequest.retryEnabled, false);
+  assert.equal(harness.queries.some((query) => query.table === "ops_task_events"), false);
 });
 
 test("detail loader bounds current and historical rows, maps them, and shares same-viewer in-flight work", async () => {
@@ -3592,7 +3870,8 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
   gate.resolve();
   const detail = await left;
 
-  assert.equal(harness.queries.length, 10);
+  assert.equal(harness.queries.length, 9);
+  assert.equal(harness.rpcCalls.length, 3);
   assert.equal(detail.commonRevision, 3);
   assert.equal(detail.tracks[0].directorName, "강부희");
   assert.equal(detail.tracks[0].phoneReadyAt, "2026-07-12T01:00:00Z");
@@ -3609,18 +3888,13 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
     scheduledAppointments: { loadedCount: 1, totalCount: 1, overflow: false },
     currentEnrollments: { loadedCount: 1, totalCount: 1, overflow: false },
   });
-  assert.equal(detail.events[0].eventType, "consultation_completed");
-  assert.equal(detail.events[0].trackId, "track-1");
-  assert.deepEqual({ ...detail.events[0].metadata }, { consultationId: "consultation-1" });
-  assert.equal(detail.events[1].eventType, "future_event");
-  assert.equal(detail.events[1].legacyText, "plain future history");
-
-  const events = harness.queries.find((query) => query.table === "ops_task_events");
-  assert.deepEqual(events.filters, [
-    ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
-    ["eq", "registration_task_event_shared_visible", true],
-  ]);
-  assert.ok(!events.filters.some((filter) => filter[0] === "in" && filter[1] === "event_type"));
+  assert.deepEqual(Array.from(detail.events, (event) => event.id), [EVENT_FIXTURE_IDS.legacy, EVENT_FIXTURE_IDS.canonical]);
+  assert.equal(detail.events[1].eventType, "consultation_completed");
+  assert.equal(detail.events[1].trackId, "track-1");
+  assert.deepEqual({ ...detail.events[1].metadata }, { consultationId: "consultation-1" });
+  assert.equal(detail.events[0].eventType, "future_event");
+  assert.equal(detail.events[0].legacyText, "plain future history");
+  assertCaseDetailUsesServerPrivacyFilters(harness);
   const messages = harness.queries.find((query) => query.table === "ops_registration_messages");
   assert.deepEqual(messages.filters, [
     ["eq", "task_id", "73000000-0000-4000-8000-000000000001"],
@@ -3654,7 +3928,10 @@ test("detail loader bounds current and historical rows, maps them, and shares sa
   const cached = await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
   assert.deepEqual(cached, detail);
   assert.notStrictEqual(cached, detail, "contacts are freshly authorized even when business data is cached");
-  assert.equal(harness.queries.length, 10);
+  assert.equal(harness.queries.length, 9);
+  assert.equal(harness.rpcCalls.length, 4);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, 1);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "get_registration_case_contact_v1").length, 2);
   assert.deepEqual(measures.at(-1), {
     name: "registration:case-detail", cacheHit: true, queryCount: 1, ok: true,
   });
@@ -3679,12 +3956,15 @@ test("detail caches are viewer-scoped, rejected reads are removed, and clear ign
   fail = false;
   await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
   const afterViewerOne = harness.queries.length;
+  const afterViewerOneEvents = harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length;
   await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-2");
-  assert.equal(harness.queries.length, afterViewerOne + 10);
+  assert.equal(harness.queries.length, afterViewerOne + 9);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, afterViewerOneEvents + 1);
 
   service.clearCaches();
   await service.loadCaseDetail("73000000-0000-4000-8000-000000000001", "viewer-1");
-  assert.equal(harness.queries.length, afterViewerOne + 20);
+  assert.equal(harness.queries.length, afterViewerOne + 18);
+  assert.equal(harness.rpcCalls.filter(([name]) => name === "read_registration_contact_events_v1").length, afterViewerOneEvents + 2);
 });
 
 test("registration option loader starts five reads, includes schools, excludes students and inactive rows", async () => {
@@ -4377,10 +4657,10 @@ test("a forced detail refresh cannot be overwritten by the stale request it supe
     queryHandler(query) {
       queryNumber += 1;
       const base = detailRows(query.table);
-      const stalePhaseOne = queryNumber <= 6;
-      const freshPhaseOne = queryNumber > 6 && queryNumber <= 12;
+      const stalePhaseOne = queryNumber <= 7;
+      const freshPhaseOne = queryNumber > 7 && queryNumber <= 14;
       const gate = stalePhaseOne ? staleGate : freshPhaseOne ? freshGate : null;
-      const title = stalePhaseOne || queryNumber > 15 ? "stale title" : "fresh title";
+      const title = stalePhaseOne ? "stale title" : "fresh title";
       const result = query.table === "ops_tasks"
         ? { ...base, data: { ...base.data, title } }
         : base;

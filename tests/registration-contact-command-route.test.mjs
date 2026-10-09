@@ -16,6 +16,7 @@ function command(overrides = {}) {
 function receipt(input = command(), overrides = {}) {
   return { version: 1, taskId: TASK, requestKey: KEY, command: input.command, replayed: false, result: {
     trackId: TRACK, workflowStatus: "registered", workflowRevision: 4,
+    workflowStatusEnteredAt: "2026-10-09T09:00:00.000Z", enrollmentFinalization: null,
     contactState: { version: 1, taskId: TASK, revision: "9", generation: "2", phase: "closed", closureReason: "all_current_tracks_terminal",
       closedAt: "2026-10-09T09:00:00.000Z", commonRevision: 3, allPhasesClosed: true, currentTrackIds: [TRACK], studentId: null, parentPhone: null },
   }, ...overrides }
@@ -61,7 +62,6 @@ test("student binding acknowledges only the requested UUID and required metadata
   const responseFor = changed => receipt(input, { result: {
     taskId: TASK, studentId: OTHER, changed,
     contactState: { ...receipt().result.contactState, studentId: OTHER },
-    enrollmentFinalization: { privateUnexpected: PHONE }, rawSnapshot: PHONE,
   } })
   for (const changed of [true, false]) {
     const fixture = harness({ command: input, response: responseFor(changed) })
@@ -85,6 +85,9 @@ test("student binding acknowledges only the requested UUID and required metadata
   }
   for (const patch of [{ studentId: ACTOR }, { studentId: null }, { generation: "3" }, { revision: "8" }, { parentPhone: PHONE }]) {
     const value = responseFor(true); Object.assign(value.result.contactState, patch); invalid.push(value)
+  }
+  for (const patch of [{ rawSnapshot: PHONE }, { enrollmentFinalization: { privateUnexpected: PHONE } }]) {
+    const value = responseFor(true); Object.assign(value.result, patch); invalid.push(value)
   }
   for (const value of invalid) {
     const fixture = harness({ command: input, response: value })
@@ -132,6 +135,15 @@ test("client actor, digest, student phone and unknown payload fields cannot cros
   }
 })
 
+test("historical observation states remain readable metadata but cannot request a final setter mutation", async () => {
+  for (const workflowStatus of ["observation_feedback_pending", "observation_completed"]) {
+    const fixture = harness()
+    const response = await fixture.run(command({ payload: { ...command().payload, workflowStatus } }))
+    assert.equal(response.status, 400)
+    assert.equal(fixture.calls.rpc.length, 0)
+  }
+})
+
 test("stale generation remains exact bigint metadata; malformed counters never reach RPC", async () => {
   for (const value of [1, "0", "01", "1\n", "9223372036854775808", null]) {
     const fixture = harness()
@@ -146,7 +158,12 @@ test("stale generation remains exact bigint metadata; malformed counters never r
 test("new case uses null expected state and omits retired student contact", async () => {
   const input = command({ command: "create", taskId: null, expectedGeneration: null, expectedRevision: null,
     payload: { studentName: "합성 학생", schoolName: "합성 학교", schoolGrade: "중2", parentPhone: PHONE, campus: "", inquiryAt: "2026-10-09T09:00:00Z", subjects: ["수학"], requestNote: "", priority: "normal" } })
-  const fixture = harness({ command: input, response: receipt(input) })
+  const saved = receipt(input)
+  saved.result = { taskId: TASK, commonRevision: 1, subjects: ["수학"],
+    tracks: [{ id: TRACK, taskId: TASK, subject: "수학", workflowStatus: "inquiry", workflowRevision: 1, status: "inquiry", archivedAt: null }],
+    contactState: { ...saved.result.contactState, revision: "1", generation: "1", phase: "open", closureReason: null,
+      closedAt: null, commonRevision: 1, allPhasesClosed: false } }
+  const fixture = harness({ command: input, response: saved })
   assert.equal((await fixture.run()).status, 200)
   assert.equal(fixture.calls.authorize, 0)
   assert.equal(fixture.calls.rpc[0].args.p_task_id, null)
@@ -154,7 +171,7 @@ test("new case uses null expected state and omits retired student contact", asyn
   assert.equal((await fixture.run({ ...input, expectedGeneration: "1" })).status, 400)
 })
 
-test("unknown producer fields and nested contact snapshots are never echoed", async () => {
+test("unknown producer fields and nested contact snapshots fail closed before projection", async () => {
   const saved = receipt()
   saved.result.rawRequest = { parentPhone: PHONE }
   saved.result.studentName = "합성 비공개 이름"
@@ -163,11 +180,60 @@ test("unknown producer fields and nested contact snapshots are never echoed", as
   saved.result.enrollmentFinalization = { trackId: TRACK, studentId: OTHER, batchId: null, enrollmentIds: [OTHER], changed: true, parentPhone: PHONE }
   const fixture = harness({ response: saved })
   const response = await fixture.run()
-  assert.equal(response.status, 200)
+  assert.equal(response.status, 503)
   const text = await response.text()
   assert.equal(text.includes(PHONE), false)
   assert.equal(text.includes("합성 비공개 이름"), false)
   assert.equal(text.includes("rawRequest"), false)
+  assert.equal(fixture.calls.rpc.length, 1)
+})
+
+test("metadata receipt enforces transport cardinality without truncating successful history", async () => {
+  const ids = Array.from({ length: 51 }, (_, index) => `10000000-0000-4000-8000-${String(index + 1).padStart(12, "0")}`)
+  for (const field of ["sourceEventIds", "enrollmentIds"]) {
+    for (const [values, status] of [[ids.slice(0, 50), 200], [ids, 503], [[OTHER, OTHER], 503]]) {
+      const saved = receipt()
+      if (field === "sourceEventIds") saved.result.sourceEventIds = values
+      else saved.result.enrollmentFinalization = { trackId: TRACK, studentId: OTHER, batchId: null, enrollmentIds: values, changed: true }
+      const fixture = harness({ response: saved })
+      const response = await fixture.run()
+      assert.equal(response.status, status)
+      assert.equal(response.headers.get("cache-control"), "no-store")
+      assert.equal(fixture.calls.rpc.length, 1)
+      const body = await response.json()
+      if (status === 200) assert.deepEqual(field === "sourceEventIds" ? body.result.sourceEventIds : body.result.enrollmentFinalization.enrollmentIds, values)
+      else assert.deepEqual(body, { error: "registration_contact_runtime_unavailable" })
+    }
+  }
+})
+
+test("duplicate, foreign task and overlong track metadata cannot become a successful receipt", async () => {
+  const track = { id: TRACK, taskId: TASK, subject: "수학", workflowStatus: "registered", workflowRevision: 4, status: "registered", archivedAt: null }
+  for (const tracks of [[track, track], [{ ...track, taskId: OTHER }], [{ ...track, directorAssignmentRuleKey: "x".repeat(201) }], Array(51).fill(track)]) {
+    const saved = receipt(); saved.result.tracks = tracks
+    const fixture = harness({ response: saved })
+    const response = await fixture.run()
+    assert.equal(response.status, 503)
+    assert.equal(fixture.calls.rpc.length, 1)
+    assert.deepEqual(await response.json(), { error: "registration_contact_runtime_unavailable" })
+  }
+})
+
+test("a workflow acknowledgement must contain its actual producer fields and requested track/status", async () => {
+  const invalid = []
+  for (const field of ["trackId", "workflowStatus", "workflowRevision", "workflowStatusEnteredAt", "enrollmentFinalization"]) {
+    const saved = receipt(); delete saved.result[field]; invalid.push(saved)
+  }
+  for (const patch of [{ trackId: OTHER }, { workflowStatus: "not_registered" }]) {
+    const saved = receipt(); Object.assign(saved.result, patch); invalid.push(saved)
+  }
+  for (const saved of invalid) {
+    const fixture = harness({ response: saved })
+    const response = await fixture.run()
+    assert.equal(response.status, 503)
+    assert.deepEqual(await response.json(), { error: "registration_contact_runtime_unavailable" })
+    assert.equal(fixture.calls.rpc.length, 1)
+  }
 })
 
 test("raw parent contact in mutation receipt or forged receipt identity fails closed", async () => {

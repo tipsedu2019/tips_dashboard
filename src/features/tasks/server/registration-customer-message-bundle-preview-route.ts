@@ -1,5 +1,9 @@
 import type { SupabaseClient } from "@supabase/supabase-js"
 import {
+  assertRegistrationNonpageableRpcArguments,
+  assertRegistrationNonpageableRpcResult,
+} from "../../../lib/registration-nonpageable-rpc-contract.js"
+import {
   assertRegistrationCustomerMessagePublicPayload,
   isRegistrationCustomerMessageBundleKind,
   parseRegistrationCustomerMessageTarget,
@@ -9,7 +13,7 @@ import {
   createRegistrationCustomerMessageCatalog,
   type RegistrationCustomerMessageServerEnv,
 } from "./registration-customer-message-catalog.ts"
-import { createRegistrationCustomerMessageBundleSourceResolver } from "./registration-customer-message-bundle-source.ts"
+import { createRegistrationCustomerMessageBundlePreviewSourceResolver } from "./registration-customer-message-bundle-source.ts"
 import {
   RegistrationCustomerMessageHttpError,
   createProductionRegistrationCustomerMessageAuth,
@@ -37,25 +41,38 @@ async function readBundleContactFence(
   messageKind: string,
   sourceId: string,
 ) {
-  return client.rpc("read_registration_contact_message_fence_v1", {
+  const args = {
     p_actor_profile_id: actorProfileId,
     p_message_kind: messageKind,
     p_source_id: sourceId,
-  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }
+  assertRegistrationNonpageableRpcArguments("read_registration_contact_message_fence_v1", args)
+  const result = await client.rpc("read_registration_contact_message_fence_v1", args)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (result.error) return result
+  assertRegistrationNonpageableRpcResult("read_registration_contact_message_fence_v1", result.data, args)
+  return result
 }
 
 async function readBundleSource(client: SupabaseClient, messageKind: string, sourceId: string) {
-  return client.rpc("resolve_registration_customer_message_bundle_source_v1", {
+  const args = {
     p_message_kind: messageKind,
     p_task_id: sourceId,
     p_service_date: null,
-  }).abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  }
+  assertRegistrationNonpageableRpcArguments("read_registration_contact_bundle_preview_v1", args)
+  const result = await client.rpc("read_registration_contact_bundle_preview_v1", args)
+    .abortSignal(AbortSignal.timeout(8_000)).retry(false)
+  if (result.error) return result
+  assertRegistrationNonpageableRpcResult("read_registration_contact_bundle_preview_v1", result.data, args)
+  return result
 }
 
 export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
   environment: NodeJS.ProcessEnv = process.env,
+  dependencies: Readonly<{ auth?: ReturnType<typeof createProductionRegistrationCustomerMessageAuth> }> = {},
 ) {
-  const auth = createProductionRegistrationCustomerMessageAuth()
+  const auth = dependencies.auth ?? createProductionRegistrationCustomerMessageAuth()
   const catalog = createRegistrationCustomerMessageCatalog(environment as RegistrationCustomerMessageServerEnv)
   return async function preview(request: Request) {
     try {
@@ -83,7 +100,7 @@ export function createProductionRegistrationCustomerMessageBundlePreviewHandler(
       } catch {
         throw new RegistrationCustomerMessageHttpError(409, "registration_customer_message_source_ineligible")
       }
-      const resolver = createRegistrationCustomerMessageBundleSourceResolver({
+      const resolver = createRegistrationCustomerMessageBundlePreviewSourceResolver({
         catalog,
         async resolveSource(input) {
           const result = await readBundleSource(context.serviceClient, input.messageKind, input.sourceId)

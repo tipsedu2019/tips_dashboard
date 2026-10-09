@@ -1,0 +1,56 @@
+{
+  "version": 1,
+  "assurance": "reviewed-source-contract-only",
+  "databaseRuntimeVerified": false,
+  "sqlApplied": false,
+  "sourceHashes": {
+    "src/lib/registration-nonpageable-rpc-contract.js": "2fc2ac1981c02c01bda7e67c033465c77034063f6c1ddddc65f9c7509025ae7b",
+    "src/lib/registration-rpc-source-contract.js": "71145e9a0b8dcb7f2a5dffcf0b2271b82799823ad4aabf29baed5865de5e7166",
+    "src/lib/query-surface-budget.js": "364641e3608f4edbd45fd4cf2aa5728f7224b8096275f6424ea23c88af094e51",
+    "scripts/verify-free-tier-query-contracts.mjs": "89e02cfe0c80a502c564bc81cfa0649a8c99e56f7f2a3d48f85aaf1baac17ec8",
+    "src/features/tasks/server/registration-contact-command-route.ts": "26f111897b3f2ffb4e44f5dc59798d4bf2e4e6467d95d0e1517a0bbe5a17db67",
+    "src/features/tasks/server/registration-customer-message-bundle-preview-route.ts": "cec7c304af9efc229dd0c211f4f14cb5c3ca0fb49d64fdc2835574f8fb8c0a2c",
+    "src/features/tasks/server/registration-customer-message-route.ts": "54f2a3f7f42fdb6f243c4f15f31151764c32d43eaa41b048362fdd1254a87a95",
+    "src/features/tasks/server/registration-customer-message-auth.ts": "55c857fc911d2d14ec8e61dd32a221f20faaa999fd01836553070833f1fc2a9a",
+    "src/features/tasks/server/registration-customer-message-contact-fence.ts": "aafce4239398989437c6070b90554e10f4d07e1209eb717d4406773cbc136e14",
+    "src/features/tasks/server/registration-customer-message-bundle-source.ts": "165c6ba78411e9d71d27e308923bbfd0eedc75bb92b7ac2534fa126a795ee00e",
+    "src/features/tasks/registration-contact-client.ts": "7a87d0f125fc004afb0f77c3dd2cde49b1600c18e1d6cda58c7a940553450b5f",
+    "src/features/tasks/registration-contact-message-policy.ts": "089cb11579d25cf006d7014e19326d621d389b1006a782cf3734702d7d37f0db",
+    "docs/security/sql/registration-contact-lifecycle-integration-draft.sql": "91f5661eb78e9831acf2915a77ae656db0e2fa1bad89bb088f931d3e72f3f9c5",
+    "docs/security/sql/registration-contact-message-fence-draft.sql": "1d336618550f0ce0eccee1fb5847a1b729417d307e2854f09e07234fcd4a14d9",
+    "tests/registration-contact-command-route.test.mjs": "451efbb47937ce6b4708b6f99404ac5f80e29132ab57abec5db3b94e653c41c9",
+    "tests/registration-observation-customer-message-route.test.mjs": "c1c5ee60ec21e109af15362d13fc2e4b6696cb030bf4fc5184feaa9f34e5a97c",
+    "tests/registration-customer-message-bundle-preview-route.test.mjs": "c16457edca3bfd69e73157fb258c4ff8669b81c28c4287dfa0e564490a9a218a",
+    "tests/registration-nonpageable-rpc-contract.test.mjs": "2eb18d91a269baf423251e9ecbe72f72b828bfcd77ca9815aef105fd231de23b",
+    "tests/registration-rpc-source-contract.test.mjs": "6f17db9664612e25e63a8b608b19197bc03aa9c26f7def3349f6902f1d476a7a",
+    "tests/query-surface-budget.test.mjs": "b94fb958158b6163a7d2908dcee73bed9a46ca6b7f52bfc40df65678f41a97ea",
+    "tests/query-surface-imported-constants.test.mjs": "6d9fc330a48a82b991e2fc2769a539bcf23511769f65e0e951425041cd17a211",
+    "tests/free-tier-operational-guardrails.test.mjs": "50a200ac5525fea6585549de7857675362d98de1f3ad7d609de8ab9703545a85"
+  },
+  "migrationClosure": {
+    "count": 389,
+    "sha256": "1654a35738e542b04aa78bd1502808062fd26fb3031b99c758a922b2c156b179"
+  },
+  "contracts": [
+    {
+      "file": "src/features/tasks/server/registration-contact-command-route.ts",
+      "symbol": "submitContactCommand",
+      "rpc": "mutate_registration_contact_v1"
+    },
+    {
+      "file": "src/features/tasks/server/registration-customer-message-bundle-preview-route.ts",
+      "symbol": "readBundleContactFence",
+      "rpc": "read_registration_contact_message_fence_v1"
+    },
+    {
+      "file": "src/features/tasks/server/registration-customer-message-bundle-preview-route.ts",
+      "symbol": "readBundleSource",
+      "rpc": "read_registration_contact_bundle_preview_v1"
+    },
+    {
+      "file": "src/features/tasks/server/registration-customer-message-route.ts",
+      "symbol": "readRegistrationCustomerMessageContactFence",
+      "rpc": "read_registration_contact_message_fence_v1"
+    }
+  ]
+}

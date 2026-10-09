@@ -1,6 +1,10 @@
 import { createHmac } from "node:crypto"
 import type { SupabaseClient } from "@supabase/supabase-js"
 import {
+  assertRegistrationNonpageableRpcArguments,
+  assertRegistrationNonpageableRpcResult,
+} from "../../../lib/registration-nonpageable-rpc-contract.js"
+import {
   createProductionRegistrationCustomerMessageAuth,
   RegistrationCustomerMessageHttpError,
 } from "./registration-customer-message-auth.ts"
@@ -26,6 +30,7 @@ const PAYLOAD_KEYS: Record<string, readonly string[]> = {
   bind_student: ["studentId"],
 }
 const STATUSES = new Set(["inquiry", "level_test_requested", "consultation_requested", "consultation_completed", "waiting_current_class", "waiting_new_class", "waiting_next_opening", "observation_requested", "observation_feedback_pending", "observation_completed", "enrollment_requested", "payment_in_progress", "registered", "not_registered", "inquiry_only"])
+const WRITE_WORKFLOW_STATUSES = new Set([...STATUSES].filter(status => !["observation_feedback_pending", "observation_completed"].includes(status)))
 const SUBJECTS = new Set(["영어", "수학", "과학"])
 function fail(status = 400, code = "registration_contact_request_invalid"): never {
   throw new RegistrationCustomerMessageHttpError(status, code)
@@ -85,7 +90,7 @@ function parseCommand(value: unknown): Command {
     if (["parentPhone", "waitingKind", "retakeDecision", "inquiryAt"].includes(key) && item === null) continue
     if (typeof item !== "string" || item.length > (key === "requestNote" ? 20_000 : 500) || /[\u0000\u007f]/.test(item)) fail()
     if (key === "parentPhone" && (/[^0-9+() .-]/.test(item) || item.length > 40)) fail()
-    if (key === "workflowStatus" && !STATUSES.has(item)) fail()
+    if (key === "workflowStatus" && !WRITE_WORKFLOW_STATUSES.has(item)) fail()
   }
   const required = PAYLOAD_KEYS[value.command as string].filter(key => key !== "parentPhone")
   if (required.some(key => !hasOwn(payload, key))) fail()
@@ -102,13 +107,19 @@ export function registrationContactCommandHmac(actorId: string, command: Command
   return createHmac("sha256", pepper).update(canonical({ namespace: "tips.registration-contact.command", version: 1, actorId, ...command })).digest("hex")
 }
 
-function submitContactCommand(client: SupabaseClient, actorId: string, command: Command, pepper: string, signal: AbortSignal) {
-  return client.rpc("mutate_registration_contact_v1", {
+async function submitContactCommand(client: SupabaseClient, actorId: string, command: Command, pepper: string, signal: AbortSignal) {
+  const args = {
     p_actor_id: actorId, p_command: command.command, p_task_id: command.taskId,
     p_request_key: command.requestKey, p_expected_generation: command.expectedGeneration,
     p_expected_revision: command.expectedRevision, p_payload: command.payload,
     p_request_hmac: registrationContactCommandHmac(actorId, command, pepper),
-  }).abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false)
+  }
+  assertRegistrationNonpageableRpcArguments("mutate_registration_contact_v1", args)
+  const result = await client.rpc("mutate_registration_contact_v1", args)
+    .abortSignal(AbortSignal.any([signal, AbortSignal.timeout(8_000)])).retry(false)
+  if (result.error) return result
+  assertRegistrationNonpageableRpcResult("mutate_registration_contact_v1", result.data, args)
+  return result
 }
 
 /** A mutation response is metadata. Temporary parent contact has a separate scoped read. */
@@ -165,7 +176,7 @@ function projectReceipt(value: unknown, command: Command): Record<string, unknow
     else {
       const item = source.enrollmentFinalization
       if (!record(item) || !uuid(item.trackId) || !uuid(item.studentId) || (item.batchId !== null && !uuid(item.batchId))
-        || typeof item.changed !== "boolean" || !Array.isArray(item.enrollmentIds) || !item.enrollmentIds.every(uuid)) fail(503, "registration_contact_response_invalid")
+        || typeof item.changed !== "boolean" || !Array.isArray(item.enrollmentIds) || item.enrollmentIds.length > 50 || !item.enrollmentIds.every(uuid)) fail(503, "registration_contact_response_invalid")
       result.enrollmentFinalization = { trackId: item.trackId, studentId: item.studentId, batchId: item.batchId, enrollmentIds: [...item.enrollmentIds], changed: item.changed }
     }
   }

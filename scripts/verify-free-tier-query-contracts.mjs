@@ -713,7 +713,8 @@ export async function verifyFreeTierContracts({
     }
   }
   violations.sort(compareViolations)
-  return { ok: violations.length === 0, violations }
+  return { ok: violations.length === 0, violations,
+    ...(queryResult.registrationSourceContract ? { registrationSourceContract: queryResult.registrationSourceContract } : {}) }
 }
 
 function parseArgs(argv) {
@@ -751,6 +752,9 @@ async function main() {
         console.error(`${violation.file}:${violation.symbol}:${violation.reason}`)
       }
       process.exitCode = 1
+    }
+    if (result.registrationSourceContract) {
+      console.log(`registration_rpc_source_contract=${JSON.stringify(result.registrationSourceContract)}`)
     }
   } catch (error) {
     console.error(error?.code || error?.message || "free_tier_verify_failed")

@@ -1,0 +1,14 @@
+{
+  "20260813234824_ops_task_page_reads.sql": "8bf1d40d90f9da0b95fd901254bb61a8a791acf948f1d07be6ba4ba092c4fe06",
+  "20260814011752_management_page_reads.sql": "58545f29874968eecd729840332da96c4a26ccbcab3302b8a74eb43222db2017",
+  "20260825152044_registration_admission_checklist_roster_consistency.sql": "d8eca1e1c781b43d4c7bb2e75a5d685afb1bce408bd455ac3d0c9cca5ea6df7b",
+  "20260831013310_management_numbered_pages.sql": "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667",
+  "20260831031913_ops_task_numbered_pages.sql": "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c",
+  "20260901110600_registration_subject_soft_archive.sql": "3435f142e0642bb7a6a6bc7f2b0bbbfd7d3ef730cfef1659cbcf86b269f005f3",
+  "20260905064919_ops_task_parameter_sensitive_plans.sql": "95319e3d4c19a3ac84514f7615b22021270dbd56dc107fb526dee12cee7a83fb",
+  "20260921144020_student_enrollment_status.sql": "8340be5894d4147aea02e66b008456755a8e7b4ff277de63e1effd42b6600a5e",
+  "20260922054047_curriculum_schedule_and_class_textbooks.sql": "7791c39138ce0d9ab552dd64576db2a60169a8e8624faa48dd01430819e0fe72",
+  "20260922140000_class_detail_roster_counts.sql": "8752e43ff7a3dcb4f605455bf24e2808ff297f16ab8732fd5afddb12dfc9d932",
+  "20260927141000_student_enrollment_batch_reads.sql": "04d90be530041537dfcb92389c767bdf9118098a50ce051e3bf6b2a20fe6bfe8",
+  "20260928021444_registration_numbered_keys_narrow_summary.sql": "d4b3c450540a19fed98582cf56f224d93d5fdf54383720fa49e2249b7c2ceb64"
+}
