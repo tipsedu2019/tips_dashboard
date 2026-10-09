@@ -27,6 +27,28 @@ function detailFixture() {
   };
 }
 
+test("legacy milestone titles retain prose but never render serialized or malformed snapshots", () => {
+  for (const legacyText of [
+    '{"campus":"PRIVATE_SNAPSHOT","actorId":"PRIVATE_ACTOR"}',
+    ' {"campus":"PRIVATE_BROKEN"', '["PRIVATE_ARRAY"]', '"PRIVATE_STRING"',
+    "null", "true", "42", { campus: "PRIVATE_OBJECT" },
+  ]) {
+    const [item] = buildRegistrationSubjectHistory({ events: [{
+      id: "legacy", eventType: "waiting_transitioned", legacyText,
+      payloadVersion: null, metadata: {}, occurredAt: "2026-10-09T00:00:00Z",
+    }] });
+    assert.equal(item.title, "대기 상태 변경");
+    assert.equal(item.timeKind, "unavailable");
+    assert.equal(item.actorId, null);
+  }
+  for (const legacyText of ["보호자 요청으로 문의 종료", "[전화상담] 보호자 요청으로 문의 종료", '"상담 취소" 요청으로 문의 종료']) {
+    const [prose] = buildRegistrationSubjectHistory({ events: [{
+      id: "prose", eventType: "track_closed", legacyText,
+    }] });
+    assert.equal(prose.title, legacyText);
+  }
+});
+
 test("history keeps canonical snapshots but excludes unknown generic legacy rows", () => {
   const history = buildRegistrationSubjectHistory(detailFixture());
   assert.equal(history.some((item) => item.id === "event:event-legacy"), false);

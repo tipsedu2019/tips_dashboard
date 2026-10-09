@@ -213,8 +213,25 @@ function normalizedActorKind(value) {
   return ACTOR_KINDS.has(kind) ? kind : null;
 }
 
+function legacyEventTitle(value) {
+  if (typeof value !== "string") return "";
+  const title = value.trim();
+  // Structured snapshots (including truncated JSON) are never display text.
+  try {
+    JSON.parse(title);
+    return "";
+  } catch {
+    if (/^\{/.test(title)
+      || /^\[\s*(?:[{["\d-]|true\b|false\b|null\b|$)/.test(title)
+      || /^"(?:[^"\\]|\\.)*$/.test(title)
+      || title === "[object Object]") return "";
+    return title;
+  }
+}
+
 function eventTitle(event, metadata = record(event.metadata), eventTypes = [text(event.eventType)]) {
-  if (text(event.legacyText)) return text(event.legacyText);
+  const legacyTitle = legacyEventTitle(event.legacyText);
+  if (legacyTitle) return legacyTitle;
   const types = new Set(eventTypes.map(text));
   const changeKind = text(metadata.changeKind);
   if (changeKind === "appointment_updated" && types.size > 1) return "예약 변경";
@@ -555,7 +572,9 @@ export function buildRegistrationSubjectHistory(detail = {}) {
     if (!stage && !fineAppointment) continue;
 
     if (!isCanonicalProcessEvent(event)) {
-      if (stage && text(event.legacyText)) migrationEvents.push({ event, stage });
+      if (stage && (text(event.legacyText) || event.eventType === "registration_case_created")) {
+        migrationEvents.push({ event, stage });
+      }
       continue;
     }
 
@@ -778,7 +797,7 @@ export function buildRegistrationSubjectHistory(detail = {}) {
       title: eventTitle(event),
       description: snapshotDescription(event),
       metadata: record(event.metadata),
-      actorKind: "migration",
+      actorKind: event.eventType === "registration_case_created" ? null : "migration",
       timeKind: "unavailable",
       origin: "migration",
     })),
