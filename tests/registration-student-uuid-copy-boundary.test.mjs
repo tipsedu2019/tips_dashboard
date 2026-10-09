@@ -25,6 +25,27 @@ test("nine source-pinned targets include the real last-lesson worker and final o
     ["20260712182834_registration_subject_track_mutations.sql", TRANSFER_COMPLETION_PR126_SOURCE.migration])
 })
 
+test("batch and enrollment targets use actual declared parameter identities rather than function names alone", () => {
+  const migration = readFileSync(new URL("../supabase/migrations/20260712182834_registration_subject_track_mutations.sql", import.meta.url), "utf8")
+  const targets = [
+    ["cancel_registration_admission_batch_impl", "uuid,jsonb,text,text", "uuid,uuid,text,text"],
+    ["complete_registration_admission_batch_impl", "uuid,text", "uuid,uuid,text"],
+    ["cancel_registration_enrollment_impl", "uuid,text,text,uuid,text,text", "uuid,text,text"],
+  ]
+  for (const [name, expectedTypes, wrongTypes] of targets) {
+    const headers = [...migration.matchAll(new RegExp(`create function dashboard_private\\.${name}\\(([\\s\\S]*?)\\)\\s*returns`, "gu"))]
+    assert.equal(headers.length, 1)
+    const types = headers[0][1].split(",").map((argument) => argument.trim().split(/\s+/u).slice(1).join(" ")).join(",")
+    assert.equal(types, expectedTypes, "types come from the final ordered declaration")
+    const identity = `dashboard_private.${name}(${types})`
+    assert.equal(finalSources.get(identity).declarationIdentity, identity)
+    assert.ok(candidates.has(identity))
+    const wrongIdentity = `dashboard_private.${name}(${wrongTypes})`
+    assert.ok(!finalSources.has(wrongIdentity), "the earlier name-only reader must not manufacture an overload")
+    assert.ok(!candidates.has(wrongIdentity))
+  }
+})
+
 test("PR126 dynamic transfer reconstruction fails closed on changed source or old body; no SQL execution is implied", () => {
   const migration = readFileSync(new URL(`../supabase/migrations/${TRANSFER_COMPLETION_PR126_SOURCE.migration}`, import.meta.url), "utf8")
   const original = readFileSync(new URL("../supabase/migrations/20260712182834_registration_subject_track_mutations.sql", import.meta.url), "utf8")
@@ -149,7 +170,7 @@ test("new UUID prerequisites follow authenticated exact receipt replay on all fo
     assert.ok(body.slice(replay, identity).includes("if v_receipt_found then return v_response; end if;"), name)
     assert.ok(body.slice(replay, identity).includes("idempotency_key_reused"), name)
   }
-  const cancel = candidates.get("dashboard_private.cancel_registration_enrollment_impl(uuid,text,text)").body
+  const cancel = candidates.get("dashboard_private.cancel_registration_enrollment_impl(uuid,text,text,uuid,text,text)").body
   assert.match(cancel, /if v_enrollment\.status = 'enrolled' and v_enrollment\.roster_active then[\s\S]*?registration-student-id:/u)
   assert.match(cancel, /v_enrollment\.status = 'planned'[\s\S]*?v_enrollment\.admission_batch_id is null/u)
 })

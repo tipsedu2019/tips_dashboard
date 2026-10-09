@@ -3,7 +3,7 @@ import { readFile, readdir } from "node:fs/promises"
 import test from "node:test"
 
 const root = new URL("../", import.meta.url)
-const normalize = (value) => value.trim().replace(/\s+/gu, " ")
+const normalize = (value) => value.replace(/\s+/gu, " ").trim()
 const signature = /create(?: or replace)? function public\.claim_registration_customer_reminder_job_v1\(\)[\s\S]*?as \$\$([\s\S]*?)\$\$;/giu
 
 async function finalClaimSource() {
@@ -45,4 +45,26 @@ test("draft exact source preflight accepts the final retired body and rejects th
   assert.doesNotMatch(draft, /create(?: or replace)? function public\.claim_registration_customer_reminder_job_v1\(/iu,
     "candidate must preserve the retired producer rather than resurrect an earlier claim loop")
   assert.doesNotMatch(draft, /grant execute/iu, "installation capabilities remain withheld")
+})
+
+test("source regression: SQL whitespace collapse precedes space-only btrim for the actual newline-delimited retired body", async () => {
+  const current = await finalClaimSource()
+  const draft = await readFile(new URL("docs/security/sql/registration-contact-message-fence-draft.sql", root), "utf8")
+  const literal = draft.match(/source_body is distinct from\s*'((?:[^']|'')*)'/u)?.[1]
+  assert.ok(literal)
+  const expected = literal.replace(/''/gu, "'")
+  assert.ok(draft.includes("select btrim(regexp_replace(p.prosrc,'\\s+',' ','g')),pg_get_userbyid(p.proowner)"),
+    "Postgres btrim removes spaces by default, so newline/tab collapse must run first")
+  const postgresBtrim = (value) => value.replace(/^ +| +$/gu, "")
+  const previousOrder = (value) => postgresBtrim(value).replace(/\s+/gu, " ")
+  const correctedOrder = (value) => postgresBtrim(value.replace(/\s+/gu, " "))
+  assert.match(current.body, /^\n[\s\S]*\n$/u, "the actual ordered source contains newline edges")
+  assert.notEqual(previousOrder(current.body), expected, "the old order rejects the genuine retired body")
+  for (const body of [current.body, `\n\t${expected}\r\n`, `  \n${expected}\t  `, expected]) {
+    assert.equal(correctedOrder(body), expected)
+  }
+  assert.notEqual(correctedOrder(current.body.replace("return null;", "return true;")), expected,
+    "whitespace compatibility must not accept a changed producer meaning")
+  assert.match(draft, /if owner_name<>'postgres' or source_body is distinct from/u)
+  assert.match(draft, /contact_retired_reminder_source_review_required' using errcode='55000'/u)
 })

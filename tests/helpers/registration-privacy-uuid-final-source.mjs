@@ -6,9 +6,9 @@ export const UUID_PROTOCOL_SIGNATURES = Object.freeze([
   "dashboard_private.finalize_registration_track_enrollments_v1(uuid,uuid)",
   "dashboard_private.apply_registration_current_class_wait(uuid,uuid,uuid,uuid)",
   "dashboard_private.start_registration_admission_batch_impl(uuid,uuid[],uuid[],text)",
-  "dashboard_private.cancel_registration_admission_batch_impl(uuid,uuid,text,text)",
-  "dashboard_private.complete_registration_admission_batch_impl(uuid,uuid,text)",
-  "dashboard_private.cancel_registration_enrollment_impl(uuid,text,text)",
+  "dashboard_private.cancel_registration_admission_batch_impl(uuid,jsonb,text,text)",
+  "dashboard_private.complete_registration_admission_batch_impl(uuid,text)",
+  "dashboard_private.cancel_registration_enrollment_impl(uuid,text,text,uuid,text,text)",
   "dashboard_private.complete_ops_withdrawal_roster_transition_impl(uuid,text)",
   "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
   "dashboard_private.apply_scheduled_withdrawal_roster_release_v1(uuid)",
@@ -101,9 +101,16 @@ export function readFinalUuidProtocolSources() {
     const source = readFileSync(new URL(file, root), "utf8")
     for (const signature of UUID_PROTOCOL_SIGNATURES) {
       const name = signature.slice(0, signature.indexOf("("))
-      const pattern = new RegExp(`create(?:\\s+or\\s+replace)?\\s+function\\s+${escapeRegex(name)}\\s*\\([\\s\\S]*?\\bas\\s+\\$\\$([\\s\\S]*?)\\$\\$;`, "giu")
-      const matches = [...source.matchAll(pattern)]
-      if (matches.length) targets.set(signature, { body: matches.at(-1)[1], sources: [file] })
+      const pattern = new RegExp(`create(?:\\s+or\\s+replace)?\\s+function\\s+${escapeRegex(name)}\\s*\\(([\\s\\S]*?)\\)\\s*returns\\b[\\s\\S]*?\\bas\\s+\\$\\$([\\s\\S]*?)\\$\\$;`, "giu")
+      const matches = [...source.matchAll(pattern)].map((match) => {
+        const types = match[1].split(",").map((argument) => {
+          const typed = argument.trim().match(/^[a-z_][a-z0-9_]*\s+(uuid(?:\[\])?|text|jsonb)(?:\s+default\s+null)?$/iu)
+          assert.ok(typed, `${file}: supported named target argument`)
+          return typed[1].toLowerCase()
+        })
+        return { declarationIdentity: `${name}(${types.join(",")})`, body: match[2] }
+      }).filter((match) => match.declarationIdentity === signature)
+      if (matches.length) targets.set(signature, { ...matches.at(-1), sources: [file] })
     }
     const mutate = (signature, apply) => {
       const current = targets.get(signature)

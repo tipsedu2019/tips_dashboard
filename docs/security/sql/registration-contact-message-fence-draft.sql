@@ -643,7 +643,7 @@ revoke all on function public.read_registration_contact_bundle_preview_v1(text,u
 do $retired_reminder_preflight$
 declare source_body text; owner_name text;
 begin
-  select regexp_replace(btrim(p.prosrc),'\s+',' ','g'),pg_get_userbyid(p.proowner)
+  select btrim(regexp_replace(p.prosrc,'\s+',' ','g')),pg_get_userbyid(p.proowner)
     into strict source_body,owner_name from pg_proc p
     where p.oid='public.claim_registration_customer_reminder_job_v1()'::regprocedure;
   if owner_name<>'postgres' or source_body is distinct from

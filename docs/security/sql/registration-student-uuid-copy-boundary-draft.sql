@@ -640,7 +640,7 @@ begin
   return v_response;
 end;
 $uuid_identity_body_2$),
-      ('dashboard_private.cancel_registration_admission_batch_impl(uuid,uuid,text,text)', 'fb59c198a3de4c4eb2e0077e97a7e88e5310f2e0fb0eea172e9594172d1b77b3', '77f2b816217b6ac1a3dd6a0cd256947f13d1df165cb2e0f53da830e47f860053', $uuid_identity_body_3$
+      ('dashboard_private.cancel_registration_admission_batch_impl(uuid,jsonb,text,text)', 'fb59c198a3de4c4eb2e0077e97a7e88e5310f2e0fb0eea172e9594172d1b77b3', '77f2b816217b6ac1a3dd6a0cd256947f13d1df165cb2e0f53da830e47f860053', $uuid_identity_body_3$
 declare
   v_actor_id uuid := (select auth.uid());
   v_request_key text := nullif(pg_catalog.btrim(p_request_key), '');
@@ -1172,7 +1172,7 @@ begin
   return v_response;
 end;
 $uuid_identity_body_3$),
-      ('dashboard_private.complete_registration_admission_batch_impl(uuid,uuid,text)', 'beba8198f4e2288313c37e9a5f368af11f31ef7e345c3b0373cfd36c26394d95', '66d154381bae92fbc0dbe95cecfec1156bd1afdcc7ff49f5b56fae4ac552f509', $uuid_identity_body_4$
+      ('dashboard_private.complete_registration_admission_batch_impl(uuid,text)', 'beba8198f4e2288313c37e9a5f368af11f31ef7e345c3b0373cfd36c26394d95', '66d154381bae92fbc0dbe95cecfec1156bd1afdcc7ff49f5b56fae4ac552f509', $uuid_identity_body_4$
 declare
   v_actor_id uuid := (select auth.uid());
   v_request_key text := nullif(pg_catalog.btrim(p_request_key), '');
@@ -1616,7 +1616,7 @@ begin
   return v_response;
 end;
 $uuid_identity_body_4$),
-      ('dashboard_private.cancel_registration_enrollment_impl(uuid,text,text)', '0717c27cc90a1d996d79efdb4c235980fd73b03becb249c9c08df488b3439e41', 'cd2392366cc6c82dd705c4546b5dd59de8d874fd2375cff9d9fe0f02a55bcd4b', $uuid_identity_body_5$
+      ('dashboard_private.cancel_registration_enrollment_impl(uuid,text,text,uuid,text,text)', '0717c27cc90a1d996d79efdb4c235980fd73b03becb249c9c08df488b3439e41', 'cd2392366cc6c82dd705c4546b5dd59de8d874fd2375cff9d9fe0f02a55bcd4b', $uuid_identity_body_5$
 declare
   v_actor_id uuid := (select auth.uid());
   v_request_key text := nullif(pg_catalog.btrim(p_request_key), '');

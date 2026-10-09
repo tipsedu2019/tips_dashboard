@@ -701,7 +701,7 @@ begin
     else
       if field in ('parentPhone','waitingKind','retakeDecision','inquiryAt') and p_payload->field='null'::jsonb then continue; end if;
       if pg_catalog.jsonb_typeof(p_payload->field)<>'string'
-        or pg_catalog.length(p_payload->>field)>case when field='requestNote' then 20000 else 500 end then
+        or pg_catalog.length(p_payload->>field)>(case when field='requestNote' then 20000 else 500 end) then
         raise exception 'registration_contact_payload_invalid' using errcode='22023'; end if;
       if field='parentPhone' and (pg_catalog.length(p_payload->>field)>40 or p_payload->>field ~ '[^0-9+() .-]') then
         raise exception 'registration_contact_payload_invalid' using errcode='22023'; end if;
