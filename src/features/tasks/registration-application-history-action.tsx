@@ -31,6 +31,7 @@ export function RegistrationApplicationHistoryAction({
       </PopoverTrigger>
       <PopoverContent
         align="end"
+        collisionPadding={16}
         className="max-h-[calc(100dvh-6rem)] w-[min(32rem,calc(100vw-2rem))] overflow-y-auto overscroll-contain p-0"
         onEscapeKeyDown={() => {
           restoreHistoryTriggerFocusRef.current = true

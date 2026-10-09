@@ -15,6 +15,11 @@ const NOTIFICATION_RETIREMENT_ALTER = [
 ].join("\n")
 const NOTIFICATION_RETIREMENT_CHECKPOINT = "set constraints dashboard_private.notification_rules_active_template_fkey immediate;"
 const NOTIFICATION_RETIREMENT_RESTORE = "set constraints dashboard_private.notification_rules_active_template_fkey deferred;"
+const REGISTRATION_ONLINE_INDEX_FILE = "20261004140438_registration_scheduled_index_online.sql"
+// Independently pinned source, never derived from the editable migration manifest.
+const REGISTRATION_ONLINE_INDEX_SHA256 = "bc154a3fb519c85ca7f8f21cf8f96e5bc56480f55a254b58a1306bd3e6662916"
+const REGISTRATION_INDEX_CREATE = "create unique index concurrently if not exists ops_registration_observations_scheduled_track_key\n  on public.ops_registration_observations(track_id)\n  where decision_kind is null and status = 'scheduled';"
+const REGISTRATION_INDEX_DROP = "drop index concurrently if exists public.ops_registration_observations_open_track_key;"
 const APPROVED_INTERLEAVED_PENDING_MIGRATIONS = Object.freeze([
   ["20260831013310_management_numbered_pages.sql", "577a477ad1ef68ad44768a39adc2cd7acda0a782dd12d02d9038397d24a65667"],
   ["20260831031913_ops_task_numbered_pages.sql", "2f3303d4dda16d925e70ed11ee5ae6b676aa90f92493cc54e4b5263e3199362c"],
@@ -31,6 +36,10 @@ const APPROVED_INTERLEAVED_PENDING_MIGRATIONS = Object.freeze([
   ["20260929113744_agent_api_audit_history_decoupling.sql", "2f29859963f8dfbda20860f5dd57f268c23f3fd06a4a625e6f9e168cb97db585"],
   ["20260929130122_agent_api_class_changes.sql", "797985bbb2c27410dc3b9ba4974d4e665f594514f94fdd7545c96f6447f35b2e"],
   ["20260929132914_agent_legacy_dated_override.sql", "75856b015a854c0b597a1748147ab9e0664863a243771aa0a022b0f251b0ebf0"],
+  // Registration stayed pending while newer main migrations were installed.
+  // Rehearse only these exact retained versions; never broaden legacy selection.
+  [REGISTRATION_ONLINE_INDEX_FILE, REGISTRATION_ONLINE_INDEX_SHA256],
+  ["20261004140440_registration_free_recording.sql", "68e828b52957d6978fdce64e649302287cc2b5ff8830e402c24db0d7fabc20a7"],
 ])
 
 function fail(code) {
@@ -267,6 +276,43 @@ function stripMigrationTransaction(source) {
   return sql.trim()
 }
 
+function registrationOnlineIndexRehearsal(source) {
+  if (sha256(source) !== REGISTRATION_ONLINE_INDEX_SHA256) {
+    fail("transactional_preflight_registration_index_hash_mismatch")
+  }
+  const statements = sqlStatements(source)
+  const expected = [
+    "set lock_timeout =", "set statement_timeout =", "do", "do",
+    "create unique index concurrently if not exists ops_registration_observations_scheduled_track_key on public.ops_registration_observations(track_id) where decision_kind is null and status =",
+    "do", "drop index concurrently if exists public.ops_registration_observations_open_track_key",
+    "do", "reset lock_timeout", "reset statement_timeout",
+  ]
+  if (!source.startsWith("-- pg-delta: transaction=false\n")
+    || transactionStatements(statements).length !== 0
+    || JSON.stringify(statements.map(({ normalized }) => normalized)) !== JSON.stringify(expected)) {
+    fail("transactional_preflight_registration_index_structure_invalid")
+  }
+  // This is a rollback/schema rehearsal only. The isolated runner separately
+  // applies the unmodified file through the pinned CLI and verifies its ledger.
+  // Session locks cannot leak out of a rollback test; keep all catalog guards
+  // and both timeout bounds while substituting only the known online actions.
+  let body = source
+  for (const [from, to] of [
+    ["-- pg-delta: transaction=false", "-- Exact-source registration index transactional rehearsal"],
+    ["set lock_timeout = '5s';", "set local lock_timeout = '5s';"],
+    ["set statement_timeout = '120s';", "set local statement_timeout = '120s';"],
+    ["pg_catalog.pg_try_advisory_lock(20261004, 140440)", "pg_catalog.pg_try_advisory_xact_lock(20261004, 140440)"],
+    [REGISTRATION_INDEX_CREATE, REGISTRATION_INDEX_CREATE.replace(" concurrently", "")],
+    [REGISTRATION_INDEX_DROP, REGISTRATION_INDEX_DROP.replace(" concurrently", "")],
+    ["reset lock_timeout;", "set local lock_timeout = '5s';"],
+    ["reset statement_timeout;", "set local statement_timeout = '120s';"],
+  ]) {
+    if (body.split(from).length !== 2) fail("transactional_preflight_registration_index_structure_invalid")
+    body = body.replace(from, to)
+  }
+  return body.trim()
+}
+
 export function addNotificationRetirementPreflightCheckpoint(body) {
   const anchorIndex = body.indexOf(NOTIFICATION_RETIREMENT_ALTER)
   const matchingStatements = sqlStatements(body).filter(({ start, end }) =>
@@ -368,7 +414,13 @@ export async function buildTransactionalPreflightSql({
   const migrationSections = []
   for (const { file, version } of pendingFiles) {
     const source = await readFile(resolveInsideRepo(repoRoot, `${forwardMigrationsPath}/${file}`), "utf8")
-    let body = stripMigrationTransaction(source)
+    if (file !== REGISTRATION_ONLINE_INDEX_FILE && (
+      source.startsWith("-- pg-delta: transaction=false\n")
+      || sqlStatements(source).some(({ normalized }) => /^(?:create (?:unique )?index|drop index) concurrently\b/u.test(normalized))
+    )) fail("transactional_preflight_nontransactional_migration_unapproved")
+    let body = file === REGISTRATION_ONLINE_INDEX_FILE
+      ? registrationOnlineIndexRehearsal(source)
+      : stripMigrationTransaction(source)
     if (file === NOTIFICATION_RETIREMENT_PREFLIGHT_FILE) {
       if (sha256(source) !== NOTIFICATION_RETIREMENT_PREFLIGHT_SHA256) {
         fail("transactional_preflight_notification_retirement_hash_mismatch")

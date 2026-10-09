@@ -1280,7 +1280,7 @@ test("fixture reset is deterministic and contains the approved workflow samples"
   assert.equal(first.caseDetails["fixture-task-migration-review"].tracks.every((track) => track.migrationReviewRequired), true)
 })
 
-test("fixture registered workflow finalizes enrollment without cascading the checklist", async () => {
+test("fixture registered workflow records only the outcome without enrollment or checklist side effects", async () => {
   const {
     createRegistrationSubjectTrackFixtureState,
     reduceRegistrationSubjectTrackFixture,
@@ -1317,22 +1317,13 @@ test("fixture registered workflow finalizes enrollment without cascading the che
     paymentConfirmed: false,
     registrationCompleted: true,
   })
-  assert.deepEqual(plain({
-    workflowStatus: track.workflowStatus,
-    pipelineStatus: track.status,
-    enrollmentStatus: enrollment.status,
-    rosterActive: enrollment.rosterActive,
-    studentId: enrollment.studentId,
-    batchStatus: detail.admissionBatches.find((item) => item.id === enrollment.admissionBatchId)?.status,
-  }), {
-    workflowStatus: "registered",
-    pipelineStatus: "registered",
-    enrollmentStatus: "enrolled",
-    rosterActive: true,
-    studentId: detail.task.studentId,
-    batchStatus: "completed",
-  })
-  assert.equal(outcome.result.enrollmentFinalization.changed, true)
+  assert.equal(track.workflowStatus, "registered")
+  const before = state.caseDetails["fixture-task-partial-registration"]
+  assert.equal(track.status, before.tracks.find((item) => item.id === track.id).status)
+  assert.deepEqual(plain(enrollment), plain(before.enrollments.find((item) => item.id === enrollment.id)))
+  assert.deepEqual(plain(detail.admissionBatches), plain(before.admissionBatches))
+  assert.equal(detail.task.studentId, before.task.studentId)
+  assert.equal(outcome.result.enrollmentFinalization, null)
   assert.equal(outcome.state.externalCallLedger.length, 0)
 })
 
@@ -3330,11 +3321,13 @@ test("class detail adapter returns only exact requested IDs and unsupported acti
 test("every fixture UI mutation is declared and produces an idempotency receipt", async () => {
   const { REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS } = await loadFixtureModule()
   assert.deepEqual(plain(REGISTRATION_SUBJECT_TRACK_FIXTURE_ACTIONS), [
+    "createRegistrationCase",
     "createRegistrationCaseWithInitialWorkflow",
     "syncRegistrationCaseSubjects",
     "saveRegistrationCaseInquiry",
     "updateRegistrationCaseCommon",
     "setRegistrationWorkflowStatus",
+    "saveRegistrationWaitingDetails",
     "setRegistrationAdmissionChecklistItem",
     "routeRegistrationInquiry",
     "assignRegistrationTrackDirector",
@@ -3556,4 +3549,42 @@ test("fixture unified inquiry save updates common fields subjects and revision w
   assert.deepEqual(updated.tracks.map((track) => track.subject), ["영어", "수학", "과학"])
   assert.deepEqual(result.tracks.map((track) => track.subject), ["영어", "수학", "과학"])
   assert.equal(state.externalCallLedger.length, priorExternalCalls)
+})
+
+test("canonical fixture create preserves blank information and performs no booking or provider execution", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  for (const subjects of [[], ["영어"]]) {
+    const initial = createRegistrationSubjectTrackFixtureState()
+    const command = { type: "createRegistrationCase", requestKey: "flat-create", payload: { studentName: "", schoolGrade: "", parentPhone: "", inquiryAt: "", subjects, priority: "normal" } }
+    const outcome = reduceRegistrationSubjectTrackFixture(initial, command)
+    const detail = outcome.state.caseDetails[outcome.result.taskId]
+    assert.equal(detail.task.studentName, "")
+    assert.equal(detail.task.registration.inquiryAt, "")
+    assert.equal(detail.tracks.length, subjects.length)
+    assert.equal(detail.appointments.length, 0)
+    assert.equal(detail.enrollments.length, 0)
+    assert.equal(outcome.state.externalCallLedger.length, 0)
+    assert.equal(reduceRegistrationSubjectTrackFixture(outcome.state, command).state, outcome.state)
+  }
+})
+
+test("partial waiting fixture save and status changes leave actual enrollment and booking untouched", async () => {
+  const { createRegistrationSubjectTrackFixtureState, reduceRegistrationSubjectTrackFixture } = await loadFixtureModule()
+  let state = createRegistrationSubjectTrackFixtureState()
+  const before = plain(state.caseDetails["fixture-task-partial-registration"])
+  const trackId = "fixture-track-partial-math"
+  const waiting = { type: "saveRegistrationWaitingDetails", requestKey: "partial-waiting", payload: { trackId, waitingKind: "current_class", classId: "", retakeDecision: "" } }
+  state = reduceRegistrationSubjectTrackFixture(state, waiting).state
+  assert.equal(reduceRegistrationSubjectTrackFixture(state, waiting).state, state)
+  for (const workflowStatus of ["observation_requested", "registered", "not_registered", "inquiry_only", "inquiry"]) {
+    const track = state.caseDetails[before.task.id].tracks.find(item => item.id === trackId)
+    const outcome = reduceRegistrationSubjectTrackFixture(state, { type: "setRegistrationWorkflowStatus", requestKey: workflowStatus, payload: {trackId, workflowStatus, expectedWorkflowRevision: track.workflowRevision} })
+    state = outcome.state
+    assert.equal(outcome.result.enrollmentFinalization, null)
+  }
+  const after = state.caseDetails[before.task.id]
+  assert.deepEqual(plain(after.enrollments), before.enrollments)
+  assert.deepEqual(plain(after.appointments), before.appointments)
+  assert.equal(state.externalCallLedger.length, 0)
+  assert.equal(after.events.filter(event => event.eventType === "registration_workflow_status_changed").length, 5)
 })

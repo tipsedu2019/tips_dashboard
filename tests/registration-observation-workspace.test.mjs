@@ -295,7 +295,7 @@ test("mounted historical observation uses its exact attempt status and exposes n
   )
   const expectedLabels = new Map([
     ["scheduled", "청강 예정"],
-    ["attended_feedback_pending", "원장 확인 대기"],
+    ["attended_feedback_pending", "참석 기록 있음"],
     ["completed", "청강 완료"],
     ["no_show", "불참"],
     ["canceled", "취소"],
@@ -408,8 +408,8 @@ test("mounted saved observation exposes one booking AlimTalk action with the can
 
   assert.match(markup, />청강 예약 안내 알림톡</)
   assert.doesNotMatch(markup, /disabled=""[^>]*>청강 예약 안내 알림톡</)
-  assert.match(markup, />청강 담당 전달</)
-  assert.match(markup, />청강 피드백 요청</)
+  assert.doesNotMatch(markup, />청강 담당 전달</)
+  assert.doesNotMatch(markup, />청강 피드백 요청</)
   assert.deepEqual(targets, [], "rendering alone must not dispatch the customer-message action")
   assert.equal(transport.mock.callCount(), 0, 'rendering the actual chat actions must not request or send notifications')
 })
@@ -1229,3 +1229,33 @@ test("track editor loads one bounded feedback DTO only for an owned visible pane
   )
   assert.doesNotMatch(loadEffect, /parentPhone|studentPhone|schoolName|inquiry|registrationTracks/)
 })
+
+test("final DB reader payloads expose new booking controls for all undecided historical states", async () => {
+  const { normalizeRegistrationObservationManagerDetail } = await import("../src/features/tasks/registration-observation-model.ts");
+  const RegistrationObservationEditor = await loadMountedObservationEditor();
+  const fixtures = JSON.parse(await readSource("tests/fixtures/registration-observation-history-reader.json"));
+  for (const fixture of fixtures) {
+    const detail = normalizeRegistrationObservationManagerDetail(fixture.before);
+    const original = structuredClone(detail.attempts);
+    assert.equal(detail.currentObservation, null);
+    assert.ok(detail.attempts.some(attempt => attempt.status === fixture.state && attempt.decisionKind === null));
+    const markup = renderToStaticMarkup(createElement(RegistrationObservationEditor, {
+      trackId: detail.track.trackId, workflowRevision: detail.track.workflowRevision,
+      observationRevision: null, appointmentNotificationRevision: null, detail,
+      actions: {}, onSaved: async () => undefined,
+    }));
+    assert.match(markup, /aria-label="청강 반"/u);
+    assert.match(markup, /청강 예약 저장/u);
+    assert.deepEqual(detail.attempts, original);
+    const after = normalizeRegistrationObservationManagerDetail(fixture.after);
+    assert.equal(after.currentObservation.status, "scheduled");
+    for (const attempt of detail.attempts) assert.deepEqual(after.attempts.find(row => row.observationId === attempt.observationId), attempt);
+  }
+});
+
+test("booking retry errors stay inside the open confirmation dialog", async () => {
+  const source = await readSource("src/features/tasks/registration-observation-editor.tsx");
+  const dialog = source.slice(source.indexOf('<Dialog open={saveConfirmOpen}'));
+  assert.match(dialog, /mutationError \? <p role="alert"[^>]*>\{mutationError\}<\/p>/);
+  assert.match(source, /mutationError && !saveConfirmOpen \? <p role="alert"/);
+});

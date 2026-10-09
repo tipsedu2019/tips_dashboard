@@ -1,0 +1,452 @@
+-- Keep this original version. The pinned CLI's default transaction includes
+-- all core statements AND its ledger insert; do not add authored BEGIN/COMMIT.
+set local lock_timeout = '5s';
+set local statement_timeout = '120s';
+
+
+do $registration_core_executor$
+begin
+  if not pg_catalog.pg_try_advisory_xact_lock(20261004, 140440) then
+    raise exception 'registration_index_executor_busy' using errcode = '55P03';
+  end if;
+end;
+$registration_core_executor$;
+
+do $registration_index_core_pre$
+declare
+  v_spec record;
+  v_index oid;
+begin
+  perform pg_catalog.set_config('search_path', '', true);
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.ops_registration_subject_tracks'::regclass
+      and conname = 'ops_registration_subject_tracks_observation_return_workflow_pai'
+  ) then
+    raise exception 'registration_index_phase_core_changed' using errcode = '55000';
+  end if;
+  for v_spec in
+    select * from (values
+      ('ops_registration_observations_open_track_key', 'CREATE UNIQUE INDEX ops_registration_observations_open_track_key ON public.ops_registration_observations USING btree (track_id) WHERE ((decision_kind IS NULL) AND (status = ANY (ARRAY[''scheduled''::text, ''attended_feedback_pending''::text, ''completed''::text, ''no_show''::text])))', false, false, true),
+      ('ops_registration_observations_scheduled_track_key', 'CREATE UNIQUE INDEX ops_registration_observations_scheduled_track_key ON public.ops_registration_observations USING btree (track_id) WHERE ((decision_kind IS NULL) AND (status = ''scheduled''::text))', true, true, false)
+    ) as expected(index_name, definition, required, require_valid, forbidden)
+  loop
+    v_index := pg_catalog.to_regclass('public.' || v_spec.index_name);
+    if v_index is null then
+      if v_spec.required then
+        raise exception 'registration_index_phase_fence_missing: %', v_spec.index_name using errcode = '55000';
+      end if;
+    elsif v_spec.forbidden then
+      raise exception 'registration_index_phase_fence_unexpected: %', v_spec.index_name using errcode = '55000';
+    elsif not exists (
+      select 1 from pg_catalog.pg_index i
+      where i.indexrelid = v_index
+        and i.indrelid = 'public.ops_registration_observations'::regclass
+        and pg_catalog.pg_get_indexdef(i.indexrelid) = v_spec.definition
+        and (not v_spec.require_valid or (i.indisvalid and i.indisready and i.indislive))
+        and exists (select 1 from pg_catalog.pg_class c where c.oid = i.indexrelid and c.relkind = 'i' and not c.relispartition)
+        and not exists (select 1 from pg_catalog.pg_constraint c where c.conindid = i.indexrelid)
+        and not exists (select 1 from pg_catalog.pg_depend d where d.refclassid = 'pg_catalog.pg_class'::regclass and d.refobjid = i.indexrelid)
+        and not exists (select 1 from pg_catalog.pg_inherits h where h.inhrelid = i.indexrelid or h.inhparent = i.indexrelid)
+    ) then
+      raise exception 'registration_index_phase_fence_drift_or_invalid: %', v_spec.index_name using errcode = '55000';
+    end if;
+  end loop;
+end;
+$registration_index_core_pre$;
+
+do $registration_waiting_constraint_pre$
+begin
+  if not exists (
+    select 1 from pg_catalog.pg_constraint
+    where conrelid = 'public.ops_registration_subject_tracks'::regclass
+      and conname = 'ops_registration_subject_tracks_waiting_detail_class_check'
+  ) then
+    raise exception 'registration_waiting_constraint_missing' using errcode = '55000';
+  end if;
+end;
+$registration_waiting_constraint_pre$;
+
+-- The owner confirmed that registration is optional information plus a manual
+-- progress/outcome property. Neither choosing a status nor saving a partial
+-- waiting note executes enrollment, books a session, or sends a message.
+-- Retain all historical return states; they are no longer a prerequisite for
+-- the manual status property. No existing data is rewritten.
+alter table public.ops_registration_subject_tracks
+  drop constraint if exists ops_registration_subject_tracks_observation_return_workflow_pai,
+  drop constraint if exists ops_registration_subject_tracks_waiting_detail_class_check,
+  add constraint ops_registration_subject_tracks_waiting_detail_class_check
+    check (waiting_detail_class_id is null or waiting_detail_kind is not distinct from 'current_class') not valid;
+
+create or replace function dashboard_private.set_registration_workflow_status_v1_impl(
+  p_track_id uuid,
+  p_workflow_status text,
+  p_expected_workflow_revision integer,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid := (select auth.uid());
+  v_request_key text := nullif(pg_catalog.btrim(p_request_key), '');
+  v_workflow_status text := nullif(pg_catalog.btrim(p_workflow_status), '');
+  v_track public.ops_registration_subject_tracks%rowtype;
+  v_target_fingerprint jsonb;
+  v_response jsonb;
+  v_receipt_matches boolean;
+  v_receipt_found boolean := false;
+  v_status_changed boolean;
+  v_previous_workflow_status text;
+  v_source_event_id uuid;
+  v_source_event_ids jsonb := '[]'::jsonb;
+begin
+  if v_actor_id is null then
+    raise exception 'registration_access_denied' using errcode = '42501';
+  end if;
+  if v_request_key is null then
+    raise exception 'request_key_required' using errcode = '22023';
+  end if;
+  if p_expected_workflow_revision is null or p_expected_workflow_revision < 1 then
+    raise exception 'registration_workflow_revision_invalid' using errcode = '22023';
+  end if;
+  if v_workflow_status not in (
+    'inquiry',
+    'level_test_requested',
+    'consultation_requested',
+    'consultation_completed',
+    'waiting_current_class',
+    'waiting_new_class',
+    'waiting_next_opening',
+    'observation_requested',
+    'enrollment_requested',
+    'payment_in_progress',
+    'registered',
+    'not_registered',
+    'inquiry_only'
+  ) then
+    raise exception 'registration_workflow_status_invalid' using errcode = '22023';
+  end if;
+
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_actor_id::text || ':' || v_request_key, 0)
+  );
+
+  perform 1
+  from public.ops_tasks task
+  join public.ops_registration_subject_tracks track
+    on track.task_id = task.id
+  where track.id = p_track_id
+    and task.type = 'registration'
+  order by task.id
+  for update of task;
+  if not found then
+    raise exception 'registration_track_not_found' using errcode = 'P0002';
+  end if;
+
+  select track.*
+  into v_track
+  from public.ops_registration_subject_tracks track
+  where track.id = p_track_id
+  for update;
+  if not found then
+    raise exception 'registration_track_not_found' using errcode = 'P0002';
+  end if;
+
+  perform dashboard_private.assert_registration_workflow_status_access(
+    v_track.id,
+    v_workflow_status
+  );
+
+  v_target_fingerprint := pg_catalog.jsonb_build_object(
+    'trackId', v_track.id,
+    'workflowStatus', v_workflow_status,
+    'expectedWorkflowRevision', p_expected_workflow_revision
+  );
+  select
+    mutation.response_payload,
+    mutation.task_id = v_track.task_id
+      and mutation.mutation_type = 'set_workflow_status'
+      and mutation.target_fingerprint = v_target_fingerprint
+  into v_response, v_receipt_matches
+  from dashboard_private.ops_registration_mutations mutation
+  where mutation.actor_id = v_actor_id
+    and mutation.request_key = v_request_key;
+  v_receipt_found := found;
+  if v_receipt_found and not v_receipt_matches then
+    raise exception 'idempotency_key_reused' using errcode = '22023';
+  end if;
+  if v_receipt_found then
+    v_response := v_response || pg_catalog.jsonb_build_object(
+      'enrollmentFinalization',
+      null
+    );
+    update dashboard_private.ops_registration_mutations mutation
+    set response_payload = v_response
+    where mutation.actor_id = v_actor_id
+      and mutation.request_key = v_request_key
+      and mutation.task_id = v_track.task_id
+      and mutation.mutation_type = 'set_workflow_status';
+    if not found then
+      raise exception 'registration_workflow_receipt_missing' using errcode = '23514';
+    end if;
+    return v_response;
+  end if;
+
+  if v_track.workflow_revision <> p_expected_workflow_revision then
+    raise exception 'registration_workflow_status_refresh_required'
+      using errcode = '23514';
+  end if;
+
+  v_status_changed := v_track.workflow_status is distinct from v_workflow_status;
+  if v_status_changed then
+    v_previous_workflow_status := v_track.workflow_status;
+    update public.ops_registration_subject_tracks track
+    set workflow_status = v_workflow_status,
+        workflow_revision = track.workflow_revision + 1,
+        workflow_status_entered_at = pg_catalog.now(),
+        updated_at = pg_catalog.now()
+    where track.id = v_track.id
+    returning track.* into v_track;
+
+    v_source_event_id := dashboard_private.write_registration_track_event_v2(
+      v_track.task_id,
+      v_track.id,
+      'registration_workflow_status_changed',
+      v_previous_workflow_status,
+      v_workflow_status,
+      'manual_status_change',
+      pg_catalog.jsonb_build_object(
+        'workflowStatus', v_workflow_status,
+        'workflowRevision', v_track.workflow_revision
+      ),
+      'user',
+      null
+    );
+    if v_workflow_status = 'registered' and not v_track.migration_review_required then
+      perform dashboard_private.record_registration_subject_completion_v1(
+        v_track.task_id, v_track.id, v_source_event_id, v_previous_workflow_status, v_track.workflow_revision
+      );
+      v_source_event_ids := pg_catalog.jsonb_build_array(v_source_event_id);
+    end if;
+  end if;
+
+  v_response := pg_catalog.jsonb_build_object(
+    'trackId', v_track.id,
+    'workflowStatus', v_track.workflow_status,
+    'workflowRevision', v_track.workflow_revision,
+    'workflowStatusEnteredAt', v_track.workflow_status_entered_at,
+    'enrollmentFinalization', null,
+    'sourceEventIds', v_source_event_ids
+  );
+
+  insert into dashboard_private.ops_registration_mutations(
+    actor_id,
+    request_key,
+    task_id,
+    mutation_type,
+    target_fingerprint,
+    response_payload
+  ) values (
+    v_actor_id,
+    v_request_key,
+    v_track.task_id,
+    'set_workflow_status',
+    v_target_fingerprint,
+    v_response
+  );
+  return v_response;
+end;
+$$;
+
+create or replace function dashboard_private.save_registration_waiting_details_v2_impl(
+  p_track_id uuid,
+  p_waiting_kind text,
+  p_class_id uuid,
+  p_retake_decision text,
+  p_request_key text
+)
+returns jsonb
+language plpgsql
+volatile
+security definer
+set search_path = ''
+as $$
+declare
+  v_actor_id uuid := (select auth.uid());
+  v_request_key text := nullif(pg_catalog.btrim(p_request_key), '');
+  v_waiting_kind text := nullif(pg_catalog.btrim(p_waiting_kind), '');
+  v_retake_decision text := nullif(pg_catalog.btrim(p_retake_decision), '');
+  v_track record;
+  v_fingerprint jsonb;
+  v_saved_fingerprint jsonb;
+  v_saved_task_id uuid;
+  v_saved_type text;
+  v_response jsonb;
+begin
+  perform dashboard_private.assert_registration_actor_is_active_manager_v1(v_actor_id);
+  if p_track_id is null or v_request_key is null then
+    raise exception 'registration_waiting_details_invalid' using errcode = '22023';
+  end if;
+  -- Optional information may stay blank. A supplied class remains a real FK.
+  if (v_waiting_kind is not null and v_waiting_kind not in (
+      'current_class', 'current_term_opening', 'next_term_opening'
+    ))
+    or (p_class_id is not null and v_waiting_kind is distinct from 'current_class')
+    or (v_retake_decision is not null and v_retake_decision not in ('required', 'not_required'))
+  then
+    raise exception 'registration_waiting_details_invalid' using errcode = '22023';
+  end if;
+
+  v_fingerprint := pg_catalog.jsonb_build_object(
+    'trackId', p_track_id,
+    'waitingKind', v_waiting_kind,
+    'classId', p_class_id,
+    'retakeDecision', v_retake_decision
+  );
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended(v_actor_id::text || ':' || v_request_key, 0)
+  );
+  select track.id, track.task_id
+  into v_track
+  from public.ops_registration_subject_tracks track
+  join public.ops_tasks task
+    on task.id = track.task_id
+   and task.type = 'registration'
+  where track.id = p_track_id
+  for update of track;
+  if not found then
+    raise exception 'registration_track_not_found' using errcode = 'P0002';
+  end if;
+  perform dashboard_private.assert_registration_mutation_access(
+    v_track.task_id,
+    p_track_id,
+    'change_waiting_kind'
+  );
+
+  select
+    mutation.task_id,
+    mutation.mutation_type,
+    mutation.target_fingerprint,
+    mutation.response_payload
+  into
+    v_saved_task_id,
+    v_saved_type,
+    v_saved_fingerprint,
+    v_response
+  from dashboard_private.ops_registration_mutations mutation
+  where mutation.actor_id = v_actor_id
+    and mutation.request_key = v_request_key;
+  if found then
+    if v_saved_task_id is distinct from v_track.task_id
+      or v_saved_type is distinct from 'save_registration_waiting_details_v2'
+      or v_saved_fingerprint is distinct from v_fingerprint
+    then
+      raise exception 'registration_mutation_request_conflict' using errcode = '22023';
+    end if;
+    return v_response;
+  end if;
+
+  update public.ops_registration_subject_tracks track
+  set waiting_detail_kind = v_waiting_kind,
+      waiting_detail_class_id = p_class_id,
+      waiting_detail_retake_decision = v_retake_decision,
+      updated_at = pg_catalog.now()
+  where track.id = p_track_id;
+  perform dashboard_private.record_registration_fact_audit_v1(
+    v_track.task_id,
+    p_track_id,
+    'waiting_details',
+    pg_catalog.jsonb_build_object(
+      'waitingKind', v_waiting_kind,
+      'classId', p_class_id,
+      'retakeDecision', v_retake_decision
+    )
+  );
+  v_response := pg_catalog.jsonb_build_object(
+    'trackId', p_track_id,
+    'waitingKind', v_waiting_kind,
+    'classId', p_class_id,
+    'retakeDecision', v_retake_decision
+  );
+  insert into dashboard_private.ops_registration_mutations(
+    actor_id,
+    request_key,
+    task_id,
+    mutation_type,
+    target_fingerprint,
+    response_payload
+  ) values (
+    v_actor_id,
+    v_request_key,
+    v_track.task_id,
+    'save_registration_waiting_details_v2',
+    v_fingerprint,
+    v_response
+  );
+  return v_response;
+end;
+$$;
+
+-- Completed/attended/no-show attempts are history even when the retired
+-- director decision was never recorded. Do not invent a decision or edit them.
+-- Keep the unique scheduled-attempt fence plus the booking RPC's track lock.
+alter index public.ops_registration_observations_scheduled_track_key
+  rename to ops_registration_observations_open_track_key;
+
+-- Patch the final definitions, including intervening security/read fixes.
+-- Exact anchors fail closed if that final producer contract changes.
+do $historical_observation_booking$
+declare
+  v_definition text;
+  v_anchor text;
+begin
+  v_definition := pg_catalog.pg_get_functiondef(
+    'dashboard_private.registration_observation_manager_detail_rows_v1(uuid,integer)'::regprocedure
+  );
+  v_anchor := $anchor$        and observation.decision_kind is null
+        and observation.status in (
+          'scheduled',
+          'attended_feedback_pending',
+          'completed',
+          'no_show'
+        )$anchor$;
+  if length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) then
+    raise exception 'registration_observation_current_reader_drift' using errcode = '55000';
+  end if;
+  execute replace(v_definition, v_anchor, $patch$        and observation.decision_kind is null
+        and observation.status = 'scheduled'
+        and appointment.status = 'scheduled'$patch$);
+
+  v_definition := pg_catalog.pg_get_functiondef(
+    'dashboard_private.save_registration_observation_booking_v1_impl(uuid,uuid,uuid,text,uuid,text,integer,integer,bigint,text)'::regprocedure
+  );
+  v_anchor := $anchor$          and observation.decision_kind is null
+          and observation.status in (
+            'scheduled', 'attended_feedback_pending', 'completed', 'no_show'
+          )$anchor$;
+  if length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) then
+    raise exception 'registration_observation_booking_history_guard_drift' using errcode = '55000';
+  end if;
+  execute replace(v_definition, v_anchor, $patch$          and observation.status = 'scheduled'$patch$);
+end;
+$historical_observation_booking$;
+
+-- The list and the manager detail must agree about the current booking.
+-- Recreate only the view query with the existing security-invoker setting.
+do $current_observation_summary$
+declare
+  v_definition text;
+  v_anchor text := $anchor$(observation.status = ANY (ARRAY['scheduled'::text, 'attended_feedback_pending'::text, 'completed'::text, 'no_show'::text]))$anchor$;
+begin
+  perform pg_catalog.set_config('search_path', '', true);
+  v_definition := pg_catalog.pg_get_viewdef('public.ops_registration_subject_track_summaries'::regclass, true);
+  if length(v_definition) - length(replace(v_definition, v_anchor, '')) <> length(v_anchor) then
+    raise exception 'registration_observation_summary_reader_drift' using errcode = '55000';
+  end if;
+  execute 'create or replace view public.ops_registration_subject_track_summaries with (security_invoker = true) as '
+    || replace(v_definition, v_anchor, $patch$(observation.status = 'scheduled'::text AND appointment.status = 'scheduled'::text)$patch$);
+end;
+$current_observation_summary$;
