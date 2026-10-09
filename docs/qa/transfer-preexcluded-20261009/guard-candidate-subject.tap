@@ -1,0 +1,48 @@
+ok 1 - Both subject notification constraints are validated in the final migration chain
+ok 2 - Final revalidator preserves the existing Science connection mapping
+ok 3 - Final revalidator preserves existing subject-audience and active-profile protections
+{"sub":"99880000-0000-4000-8000-000000000001","role":"authenticated"}
+99880000-0000-4000-8000-000000000001
+authenticated
+ok 4 - Only registration transfer and withdrawal subject-team rules remain enabled
+ok 5 - All four new templates have the compliance evidence required by the real settings snapshot
+ok 6 - All other word-retest Chat rules remain retired
+ok 7 - A settings mutation cannot broaden the result-only retired exception
+ok 8 - No follow-up due schedule is introduced
+ok 9 - Registration checklist remains a silent independent fact
+ok 10 - A real transition to registered emits once through canonical source recording
+ok 11 - Status request replay returns the exact original notification source
+ok 12 - Saving the same status creates no second source
+ok 13 - Workflow status still does not perform enrollment finalization
+ok 14 - Registration routing is derived from the active subject track
+service_role
+ok 15 - Registration legacy plan resolves the English team connection
+ok 16 - Registration template renders the factual completion copy
+ok 17 - An unrelated teacher cannot acquire a registration completion plan
+ok 18 - A later workflow change suppresses the stale subject completion plan
+authenticated
+ok 19 - Real transfer completion deduplicates the same subject in before and after classes
+ok 20 - Real withdrawal completion addresses the selected class subject only
+ok 21 - Existing withdrawal content field remains unchanged
+service_role
+ok 22 - Transfer plan contains one English team target
+ok 23 - Withdrawal plan contains one Science team target
+ok 24 - Existing custom management plan survives byte-for-byte beside the subject plan
+ok 25 - A stale subject snapshot suppresses only the new audience and preserves the old management plan
+authenticated
+ok 26 - Result producer fixes the recipient subject to English
+service_role
+ok 27 - Word result produces no dispatch plan
+ok 28 - Threshold-only correction suppresses a stale passed result
+ok 29 - A banned actor cannot read a subject-team result plan
+ok 30 - Word-retest creation remains retired for Google Chat
+ok 31 - Source creation and plan reads never register an external send
+ok 32 - Sources and legacy plan previews do not create delivery attempts
+ok 33 - Public legacy reader and private helper preserve ACL separation
+ok 34 - Final canonical revalidator accepts the exact active registered source and English target
+ok 35 - A mismatched subject connection is rejected even if the claimed delivery repeats it
+ok 36 - Canonical revalidation also suppresses a superseded registered status
+ok 37 - Even a previously started English subject result cannot cross the final SQL provider boundary
+ok 38 - Repeated retired dispatch attempts remain blocked
+ok 39 - Word result cannot cross the SQL boundary to the Math team
+1..39

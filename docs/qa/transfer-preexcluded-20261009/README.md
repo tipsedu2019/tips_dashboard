@@ -1,6 +1,6 @@
 # 전반 사전 명단 제외 완료 수정 — 2026-10-09
 
-**Draft / 운영 미적용.** 기준 main `6a6d7abe4f45e366beccc14efbbcce0534f0370f`.
+**Draft / 운영 미적용. 기존 adapter 권한 오류는 별도 최소 guard 후보로 해소했고 47/47을 통과했다.** 기준 main `6a6d7abe4f45e366beccc14efbbcce0534f0370f`.
 전달받은 마지막 운영 배포 기준은 PR125, 06:45 UTC이며 이 작업에서 운영 SQL·학생 상태·완료/승인·발송·Chat 설정/API/키를 변경하지 않았다. 공유 Mac Chrome도 사용하지 않았다.
 
 ## 원인과 변경
@@ -19,7 +19,7 @@
 | 검사 | 결과 |
 |---|---|
 | 수정 전 합성 차단 재현 | 5/5 |
-| 새 전반 pgTAP, 실제 public v2와 최종 함수 | 220/220 |
+| 새 전반 pgTAP, 실제 public v2와 최종 함수 | 최초 220/220; 새 DB 재검증 194/194 (동일 시나리오, 기존 합성 상세 26행 차이) |
 | 기존 과목 완료/알림 도메인 pgTAP | 39/39 |
 | 기존 퇴원 신청 snapshot pgTAP | 83/83 |
 | 서비스/화면/알림/등록 Node 검사 | 203/203 |
@@ -30,8 +30,8 @@
 | 기본 Supabase `db lint --fail-on error` | exit 0 |
 | Squawk 2.63.0, PG17 | 0 issues |
 | migration layout / SQLSTATE / free-tier worktree 검사 | 통과 |
-| 함수 catalog | 1,108개 중 2개 정의만 변경, owner/ACL/search_path 불변 |
-| 보충 `notification_transfer_withdrawal_adapters_test.sql` | **실패 — 아래 차단사항** |
+| 함수 catalog | 1,108개 중 전반 2개, guard 포함 총 3개 정의 변경; owner/ACL/search_path 불변 |
+| 보충 `notification_transfer_withdrawal_adapters_test.sql` | **최소 guard 후 47/47 — [분리 보고서](actor-guard-review.md)** |
 
 새 pgTAP은 정상/사전 제외/퇴원 상태/목적반 기등록/기존 claim/회차 누락/최초 이벤트 누락·수정·legacy alias, 같은 요청 재시도·다른 요청 반복, 중간 오류 전체 rollback과 재시도, 취소/되돌림, 잘못된 대상, 관리자/직원/교사/차단 계정/익명, 날짜·정산·시수·과거 이력·알림 중복을 확인한다. 실제 동시성 검사는 동일·다른 요청 완료, 목적반 동시 등록, 원반 claim 동시 변경을 포함한다.
 
@@ -41,9 +41,9 @@ UI는 수정된 Next 앱과 허용된 SQL만 실행하는 로컬 typed bridge를
 
 독립 리뷰에 따라 테스트만 별도로 보완했다: 실제 Auth/학생/수업 fixture, 가장 먼저 실행되는 우회 방지 trigger의 `42501`, 검증용 private 조회만 test-owner 역할로 실행, service_role의 임시 fixture SELECT, 비어 있지 않은 합성 규칙/템플릿 계획, 실제 `?flow=applicant&taskId=` 링크, 브라우저 private 조회 거절 assertion을 추가했다. 제품 ACL·역할·함수·Chat 키/설정은 변경하지 않았으며 모든 fixture는 rollback된다. 호출 RPC는 기존 authenticated 역할을 유지한다.
 
-보완된 동일 테스트는 main과 후보 모두 **47개 중 46개 통과, 1개 실패**다. 남은 “무관한 사용자 발송 계획 조회 거절”은 테스트 오류가 아니라 실제 기존 제품 결함으로 독립 확인됐다. `get_ops_task_legacy_dispatch_before_subject_completion_v1`의 `IF NOT(nullable OR …)`는 담당자 NULL이면 전체 조건도 NULL이 되어 거부 분기를 실행하지 않는다. 이 함수는 **service_role 전용**이므로 브라우저 직접 실행이나 실제 운영 발송 성공으로 과장하지 않는다. 서버가 전달하는 actor의 업무 권한 확인이 누락되는 문제다. 기대를 낮추거나 담당자를 임의로 채워서 숨기지 않았다. [동일 환경 대조 결과](adapter-main-comparison.json)를 참고한다.
+guard 적용 전 보완된 동일 테스트는 main과 후보 모두 **47개 중 46개 통과, 1개 실패**였다. 남은 “무관한 사용자 발송 계획 조회 거절”은 테스트 오류가 아니라 실제 기존 제품 결함으로 독립 확인됐다. `get_ops_task_legacy_dispatch_before_subject_completion_v1`의 `IF NOT(nullable OR …)`는 담당자 NULL이면 전체 조건도 NULL이 되어 거부 분기를 실행하지 않는다. public wrapper는 service_role 전용이며 내부 helper는 service_role도 직접 실행할 수 없다. 다만 로그인한 사용자의 sourceEventId를 서버가 wrapper에 전달하는 API 경로가 있어, 직접 RPC 차단이 이 결함을 대신 차단하지는 않는다. 운영 발송 성공은 검증하지 않았다. 정확한 영향은 [분리 보고서](actor-guard-review.md)에 기록했다. 기대를 낮추거나 담당자를 임의로 채워서 숨기지 않았다. [동일 환경 대조 결과](adapter-main-comparison.json)를 참고한다.
 
-권한 조건을 NULL-safe하게 만드는 제품 수정은 원 요청의 Chat/API/권한 변경 금지와 충돌하여 별도 범위 승인을 요청했다. 승인 전에는 제품 권한 함수를 변경하지 않는다. 최소 제안은 기존 허용 조건을 `IF NOT coalesce((기존 OR 조건), false)`로 바꿔 NULL을 거절하는 것이다. 새로운 권한을 부여하거나 기존 ACL을 넓히지 않는다.
+추가 지시로 기존 권한을 복원하는 코드·합성 테스트 후보가 허용되어, 기존 OR 조건 전체를 `coalesce(...,false)`로 감싸는 별도 forward migration을 작성했다. adapter **47/47**, 독립 권한 matrix **38/38**, 기존 전반/퇴원/과목 완료 회귀가 모두 통과했다. ACL·역할·API·Chat 설정/키와 운영 상태는 변경하지 않았다. 상세 변경조건, 정상 서버 경로 보존, 합성 재현의 한계와 운영 조율 범위는 [actor-guard-review.md](actor-guard-review.md)를 참고한다.
 
 앞서 실패 이후 대조 검사를 통과 대체로 해석할 수 있는 묶음 명령은 자동 승인 검토에서 거절됐다. 이후 사용자의 명시적 대조 지시에 따라 진단을 별도로 실행했고, 모든 실패 exit code/TAP를 그대로 보존했다. 이 문서는 merge gate 통과 증거가 아니다.
 
@@ -59,7 +59,7 @@ UI는 수정된 Next 앱과 허용된 SQL만 실행하는 로컬 typed bridge를
 
 ## 남은 단계
 
-1. 보충 adapter suite가 검출한 기존 actor 권한 결함의 수정 범위 승인·수정·재검증 및 필수 체크 차단 해소. 사용자 지시는 추가 결제 없이 로컬 검사/독립 리뷰였지만 AGENTS는 필수 `free-tier-guardrails`, `supabase-sql-review`, `supabase-schema-contract` 성공을 요구하고 실패/미실행을 허용하지 않는다. 보호설정/검사 완화 없이 부모 조율을 기다린다.
+1. 최소 actor guard 후보의 운영 적용 범위 조율 및 필수 체크 차단 해소. 코드 후보는 추가 승인 범위에서 작성·검증했고 adapter 실패는 47/47로 해소했다. 사용자 지시는 추가 결제 없이 로컬 검사/독립 리뷰였지만 AGENTS는 필수 `free-tier-guardrails`, `supabase-sql-review`, `supabase-schema-contract` 성공을 요구하고 실패/미실행을 허용하지 않는다. 보호설정/검사 완화 없이 부모 조율을 기다린다.
 2. 정확한 PR head/base와 merge SHA의 독립 리뷰 및 필수 검사 확인. 새 base/코드에는 새 증거가 필요하다.
 3. 부모가 운영 SQL 적용을 별도 조율한 뒤 reviewed PR merge/app 배포. 이전 main/release를 롤백 기준으로 유지한다.
 4. 실제 배포 SHA/schema와 운영 전반 UI를 독립 검증한다. 운영 학생 실제 완료는 별도 승인 범위다. 구현/draft PR만으로 사용자 요청 전체 완료를 선언하지 않는다.

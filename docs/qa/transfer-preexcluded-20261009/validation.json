@@ -8,20 +8,17 @@
     "supabase/migrations/20261009065550_transfer_completion_preexcluded_rosters.sql": "59ca0b65f1d0873b29040afb34551e1d58071291e222e9cc51cd4fbd6ce38099",
     "supabase/tests/transfer_preexcluded_completion_test.sql": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51",
     "tests/transfer-preexcluded-completion.test.mjs": "d36512bb6b38a42991b82c15e4a41591180d7299ed82fe598415de703311c985",
-    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "c2e01268908d4fcc2392528f8cc212ec044c09316190de5f14a4983f346e5c4d",
-    "supabase/tests/notification_transfer_withdrawal_adapters_test.sql": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
+    "supabase/test-baselines/dashboard-free-tier-v1.manifest.json": "2f95f61bbd8a4e32cb8fb7d896871f58dea66651e7223f85b484219269239f1a",
+    "supabase/tests/notification_transfer_withdrawal_adapters_test.sql": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f",
+    "supabase/migrations/20261009082000_ops_legacy_dispatch_actor_null_guard.sql": "191aaeb47a383122b52d85b6c0c21bb8ffe235c9bc9c456d3518dd4cb3ae05b3",
+    "supabase/tests/ops_legacy_dispatch_actor_guard_test.sql": "c58454c16b35a1fcdf20e244355948ff76fdc83aa9a5d8757343ceec145d60f1",
+    "tests/notification-legacy-retry-storm-route.test.mjs": "4f30a2d75e432032027ecedecba199e0f78035351e509f9b048f5275cad262ae"
   },
   "baseline": {
     "exitCode": 0,
     "assertions": 5,
     "failed": [],
     "inputSHA256": "5487878548ba923651875392a659ff97f9aeace48aed6712f6749e14d0095752"
-  },
-  "transferPgtap": {
-    "exitCode": 0,
-    "assertions": 220,
-    "failed": [],
-    "inputSHA256": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51"
   },
   "adjacentOperations": {
     "exitCode": 0,
@@ -34,29 +31,6 @@
     "assertions": 83,
     "failed": [],
     "inputSHA256": "ed4669636ad15aed0786f2e5d4c13fdead5aa288bc1c61106229fd1014e6dee9"
-  },
-  "adapterFailure": {
-    "exitCode": 0,
-    "assertions": 47,
-    "failed": [
-      "not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
-    ],
-    "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
-  },
-  "defaultLint": {
-    "exitCode": 0,
-    "separateAdapterSuiteRemainsFailed": true
-  },
-  "catalog": {
-    "functions": 1108,
-    "changed": [
-      "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
-      "dashboard_private.record_ops_transition_notification_source_v1(ops_tasks,text,uuid)"
-    ],
-    "ownersACLSearchPathUnchanged": true,
-    "restoredCatalogExact": true,
-    "beforeSHA256": "618a81b76f8f4b70510ef87aa050c653aa0b9624c317564b7a742ac86d203e57",
-    "afterSHA256": "3b0e5a735ea29ce84ffb62197d7910a1bddeac1c97183cb681e8ec0456213d55"
   },
   "concurrency": [
     {
@@ -285,5 +259,74 @@
     "layout.log": "487a77776cd6fe21f8fd3b4a079471a86cb955b03ffda043d43ac7bfa122fcf1",
     "sqlstate.log": "0d7f013368b8312323a93e3ce3df33f5f2a0a9835cfaf3cbea1cc372675d3ae9"
   },
-  "adapterComparison": "adapter-main-comparison.json"
+  "adapterComparison": "adapter-main-comparison.json",
+  "adapterBeforeGuard": {
+    "exitCode": 0,
+    "assertions": 47,
+    "failed": [
+      "not ok 47 - 무관한 사용자의 원본으로 발송 계획을 조회할 수 없다"
+    ],
+    "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f"
+  },
+  "adapterPgtap": {
+    "exitCode": 0,
+    "assertions": 47,
+    "failed": [],
+    "inputSHA256": "2be657981947a4238d06473ed5dc15c835b2e756c5ca314571af3cf77e5d6c8f",
+    "gateExitCode": 0
+  },
+  "guardValidation": "actor-guard-validation.json",
+  "remainingBlockers": [
+    "Hosted required checks not started due billing; substitution authority pending",
+    "Production SQL, merge/deploy and independent production UI pending"
+  ],
+  "defaultLintBeforeGuard": {
+    "exitCode": 0,
+    "separateAdapterSuiteRemainsFailed": true
+  },
+  "defaultLint": {
+    "exitCode": 0,
+    "adapterSuitePassed": true
+  },
+  "catalogBeforeGuard": {
+    "functions": 1108,
+    "changed": [
+      "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
+      "dashboard_private.record_ops_transition_notification_source_v1(ops_tasks,text,uuid)"
+    ],
+    "ownersACLSearchPathUnchanged": true,
+    "restoredCatalogExact": true,
+    "beforeSHA256": "618a81b76f8f4b70510ef87aa050c653aa0b9624c317564b7a742ac86d203e57",
+    "afterSHA256": "3b0e5a735ea29ce84ffb62197d7910a1bddeac1c97183cb681e8ec0456213d55"
+  },
+  "catalog": {
+    "functions": 1108,
+    "changedFromMain": [
+      "dashboard_private.complete_ops_transfer_roster_transition_impl(uuid,text)",
+      "dashboard_private.record_ops_transition_notification_source_v1(ops_tasks,text,uuid)",
+      "get_ops_task_legacy_dispatch_before_subject_completion_v1(uuid,uuid)"
+    ],
+    "ownersACLSearchPathSecurityVolatilityUnchanged": true,
+    "guardDefinitionIsExactCoalesceOnly": true,
+    "guardBefore": "f3bc28dcde7b2f8a00ba402e1b37ebd7be3602078f357873902fe2d44a3eeaa3",
+    "guardAfter": "ce81a9a868b5658906184fe14f1830bb53a565bce3ca8495409ce5d05f74a400",
+    "rollbackSHA256": "20e46a9efa9e49431ad5d948dc87181d7c701bb7f6d8a9550a25aa3c2c3a9088",
+    "restoredCatalogExact": true,
+    "transferAssertionCountDifference": {
+      "request detail keeps exact dates, rounds, teachers and financial checks": 26
+    }
+  },
+  "transferPgtapBeforeGuard": {
+    "exitCode": 0,
+    "assertions": 220,
+    "failed": [],
+    "inputSHA256": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51"
+  },
+  "transferPgtap": {
+    "exitCode": 0,
+    "assertions": 194,
+    "failed": [],
+    "inputSHA256": "7b90184dc225c6cdcea509d171bfc1f2d5114ebc03dbe494d31c3269b1f0ab51",
+    "gateExitCode": 0
+  }
 }
