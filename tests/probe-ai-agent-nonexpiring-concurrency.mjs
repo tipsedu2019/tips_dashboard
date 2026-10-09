@@ -150,6 +150,7 @@ const container=`supabase_db_${project}`;
 configureContainer(container);
 // END GENERATED AI PROBE SESSION SETUP
 const actor=randomUUID(),capActor=randomUUID(),owner=randomUUID(),source=randomUUID(),evidence=[];
+const record=row=>{evidence.push(row);console.log(JSON.stringify({event:'nonexpiring_case_passed',...row}));};
 const prior=JSON.parse(await query("select jsonb_build_object('support',(select to_jsonb(s) from dashboard_private.ai_agent_chat_support s),'spaces',(select jsonb_agg(to_jsonb(c) order by space_key) from dashboard_private.chat_space_configuration c));"));
 const json=v=>`'${JSON.stringify(v).replaceAll("'","''")}'::jsonb`;
 const asActor=(id=actor)=>`select set_config('request.jwt.claim.sub','${id}',true);set local role authenticated;`;
@@ -167,7 +168,7 @@ async function race(name,firstSql,secondSetup,expression,state){
   for(let n=0;n<150;n++){if(await query(`select ${bp}=any(pg_blocking_pids(${wp})) and exists(select 1 from pg_stat_activity where pid=${wp} and wait_event_type='Lock');`)==='t'){waited=true;break;}await new Promise(r=>setTimeout(r,40));}
   assert.equal(waited,true,name+' actual lock wait');b.end('commit;\n');assert.equal((await b.complete).code,0);
   const next=JSON.parse((await w.line(/^SECOND:(.*)$/m))[1]);w.end('commit;\n');assert.equal((await w.complete).code,0);assert.equal(next.state,state,name);
-  evidence.push({name,actualLockWait:true,sqlstate:next.state});return {first:b.child?await b.line(/^FIRST:(.*)$/m).then(m=>JSON.parse(m[1])).catch(()=>null):null,second:next.result};
+  record({name,actualLockWait:true,sqlstate:next.state});return {first:b.child?await b.line(/^FIRST:(.*)$/m).then(m=>JSON.parse(m[1])).catch(()=>null):null,second:next.result};
  }finally{await closeSessions(b,w);}
 }
 const duplicateInput=input();
@@ -196,8 +197,9 @@ await query("update dashboard_private.chat_space_send_budgets set last_dispatch_
 const prepared=JSON.parse(await last(`set role service_role;select ${chat(late,'prepare_attempt',{id:box.id,revision:box.revision,idempotencyKey:randomUUID()})};`));
 await query(`update dashboard_private.chat_credential_space_grants set revoked_at=clock_timestamp() where credential_id='${late.id}';`);
 const recorded=JSON.parse(await last(`set role service_role;select ${chat(late,'record_attempt',{id:box.id,attemptId:prepared.attempt.attemptId,idempotencyKey:randomUUID(),outcome:'sent',code:'200',messageName:'spaces/NE_RACE/messages/synthetic-confirmed',threadName:message.threadName})};`));assert.equal(recorded.outbox.state,'sent');
-evidence.push({name:'late central result remains recordable after grant revoke',sqlstate:'00000',providerCalls:0});
-for(let n=0;n<19;n++)await last(`begin;${asActor(capActor)}select ${issue(input())}->>'id';commit;`);
+record({name:'late central result remains recordable after grant revoke',sqlstate:'00000',providerCalls:0});
+// Batch setup under one transaction; only the twentieth-slot contenders race.
+await query(`begin;${asActor(capActor)}${Array.from({length:19},()=>`select ${issue(input())}->>'id';`).join('')}commit;`);
 const personal={ownerProfileId:owner,label:'Synthetic capacity contender',scopes:['ai-agent:requests:read'],grant:{queues:['employee_requests'],actions:['read']},expiresAt:null,idempotencyKey:randomUUID()};
 await race('central indefinite wins twentieth slot over personal finite',`${asActor(capActor)}select 'FIRST:'||${issue(input())}::text;`,asActor(capActor),`public.ai_agent_personal_credential_api_v1('create',${json(personal)})`,'54000');
 assert.equal(await last(`select count(*) from dashboard_private.ai_agent_credentials where created_by='${capActor}' and revoked_at is null and (expires_at is null or expires_at>clock_timestamp());`),'20');
