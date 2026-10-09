@@ -235,9 +235,11 @@ jobs:
             --test supabase/tests/ai_agent_personal_owner_test.sql \
             --test supabase/tests/agent_personal_dashboard_read_test.sql \
             --test supabase/tests/ai_agent_thread_replies_test.sql \
+            --test supabase/tests/ai_agent_nonexpiring_chat_test.sql \
             --probe tests/probe-ai-agent-auth-concurrency.mjs \
             --probe tests/probe-ai-agent-claim-concurrency.mjs \
             --probe tests/probe-ai-agent-space-policy-concurrency.mjs \
+            --probe tests/probe-ai-agent-nonexpiring-concurrency.mjs \
             --probe tests/probe-ai-agent-chat-runtime-concurrency.mjs \
             --probe tests/probe-ai-agent-http-producer.mjs \
             --probe tests/probe-ai-agent-personal-integration.mjs \

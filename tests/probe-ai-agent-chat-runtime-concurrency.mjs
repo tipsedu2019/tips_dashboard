@@ -203,12 +203,17 @@ const recorded=JSON.parse(await query(`select public.ai_agent_chat_api_v1('${has
 const unconfigured=await completion('<>@*[]',null);assert.equal(unconfigured.state,'cancelled');assert.equal(unconfigured.expectedSpace,null);
 await query(`update dashboard_private.chat_credential_space_grants set revoked_at=clock_timestamp() where credential_id='${first.id}';`);
 const denied=await query(`do $$begin perform public.ai_agent_chat_bridge_grant_v1('${hash}');raise exception 'unexpected_success';exception when sqlstate '42501' then raise notice 'BRIDGE_DENIED:42501';end$$;select '42501';`);assert.equal(denied,'42501');
+const neverInput={label:'Synthetic non-expiring seven-room reply',scopes:['chat:outbox:read','chat:send'],grant:{spaceKeys:Array.from({length:7},(_,i)=>`space_${i+1}`),purposes:['bridge_reply'],bridgeSourceId:source},expiresAt:null,nonExpiring:true,idempotencyKey:randomUUID()};
+const issueNever=async()=>JSON.parse((await query(`begin;${user(`select ${create(neverInput)};`)}commit;`)).split('\n').at(-1));
+const nonExpiringFirst=await issueNever(),nonExpiringReplay=await issueNever();
+const nonExpiringList=JSON.parse((await query(`begin;${user("select public.ai_agent_credential_api_v1('list','{}');")}commit;`)).split('\n').at(-1));
+assert.equal(nonExpiringFirst.expiresAt,null);assert.equal(nonExpiringReplay.token,null);
 // Restore only this probe's synthetic mutable configuration. Preserve monotonic revisions.
 for(const row of prior.spaces){await query(`update dashboard_private.chat_space_configuration set configured=${row.configured},resource_name=${row.resource_name===null?'null':"'"+row.resource_name+"'"},public_origin=${row.public_origin===null?'null':"'"+row.public_origin+"'"},revision=revision+1 where space_key='${row.space_key}';`);}
 await query(`update dashboard_private.ai_agent_chat_support set issuance_enabled=${prior.support.issuance_enabled},public_origin=${prior.support.public_origin===null?'null':"'"+prior.support.public_origin+"'"},revision=revision+1 where singleton;`);
 console.log(JSON.stringify({status:'passed',checkpoints:evidence,providerCalls:0,originConflictRollback:{before,after},committedAttemptBeforeLaterSync:true}));
 // Synthetic fixture-only DTOs for an independent strict consumer, never provider data.
-console.log('AI_CHAT_RUNTIME_CAPTURE:'+JSON.stringify({provenance:{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0},first,replay,bridge,hostile,safeEmpty,prepared,recorded,unconfigured,bridgeGrantLoss:{code:'42501',message:'ai_agent_grant_forbidden'}}));
+console.log('AI_CHAT_RUNTIME_CAPTURE:'+JSON.stringify({provenance:{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0},first,replay,bridge,hostile,safeEmpty,prepared,recorded,unconfigured,nonExpiringFirst,nonExpiringReplay,nonExpiringList,bridgeGrantLoss:{code:'42501',message:'ai_agent_grant_forbidden'}}));
 
 } finally {
 // BEGIN GENERATED AI PROBE CLEANUP

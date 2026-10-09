@@ -3,10 +3,15 @@ import {chatOutboxSchema,chatPreparedSchema,validateChatCompletion} from '../src
 import {createChatSendHandler} from '../src/features/chat/server/chat-send-route.ts';
 import {resolveBridgeSource} from '../src/features/chat/server/chat-runtime-configuration.ts';
 import {loadNotificationComponent} from './helpers/notification-component-loader.mjs';
-const {credentialIssueSchema}=loadNotificationComponent('src/features/ai-agent/ai-agent-credential-service.ts');
+const {credentialIssueSchema,credentialListSchema}=loadNotificationComponent('src/features/ai-agent/ai-agent-credential-service.ts');
 export async function assertChatProducerParity(data) {
  assert.deepEqual(data.provenance,{kind:'actual_disposable_db_gateway',synthetic:true,providerCalls:0});
  assert.deepEqual(credentialIssueSchema.parse(data.first),data.first);assert.deepEqual(credentialIssueSchema.parse(data.replay),data.replay);assert.equal(data.replay.token,null);
+ for(const key of ['nonExpiringFirst','nonExpiringReplay'])assert.deepEqual(credentialIssueSchema.parse(data[key]),data[key]);
+ assert.deepEqual(credentialListSchema.parse(data.nonExpiringList),data.nonExpiringList);
+ assert.equal(data.nonExpiringFirst.expiresAt,null);assert.equal(data.nonExpiringReplay.token,null);
+ assert.equal(data.nonExpiringFirst.id,data.nonExpiringReplay.id);assert.equal(data.nonExpiringFirst.grant.spaceKeys.length,7);
+ assert.equal(data.nonExpiringList.items.find(row=>row.id===data.nonExpiringFirst.id).expiresAt,null);
  for(const key of ['hostile','safeEmpty','unconfigured'])assert.deepEqual(chatOutboxSchema.parse(data[key]),data[key]);
  for(const key of ['prepared','recorded'])assert.deepEqual(chatPreparedSchema.parse(data[key]),data[key]);
  for(const key of ['hostile','safeEmpty'])validateChatCompletion(data[key],'https://dashboard.test.invalid');

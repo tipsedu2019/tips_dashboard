@@ -814,6 +814,11 @@
       "fileName": "20261008140556_ai_agent_thread_replies.sql",
       "sha256": "2b618a4944c4e5bdf573b1335cd146a4eb989fff451ca585f4e55a8c348682c1",
       "status": "final"
+    },
+    {
+      "fileName": "20261009065500_ai_agent_nonexpiring_chat_credentials.sql",
+      "sha256": "ffe2086b5cafc9da401e851bac7d23ccec970f0ba177b0db9f7b84008e2c12da",
+      "status": "final"
     }
   ]
 }
