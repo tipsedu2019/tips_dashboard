@@ -66,6 +66,7 @@ test('synthetic issuance requires purpose, explicit target, scope review and con
  assert.equal([...Object.values(window.localStorage),...Object.values(window.sessionStorage)].some(value=>String(value).includes(syntheticSecret)),false);
  await ui.flush(()=>ui.button('키 한 번 표시').click());assert.equal(document.getElementById('personal-secret').value,syntheticSecret);
  await ui.flush(()=>ui.button('키 숨기고 닫기').click());assert.equal(document.getElementById('personal-secret'),null);assert.equal(ui.button('키 한 번 표시'),undefined);
+ await ui.flush();await ui.flush();assert.equal(document.activeElement?.textContent,'새 개인 연결');
  assert.match(document.body.textContent,/합성 일정 읽기/);assert.equal(ui.fetchCalls.length,0);assert.equal(ui.rpcCalls.length,0);
 });
 test('unknown issuance retains only its request ID and blocks another issue across tab remount; recovery never redisplays the secret',async t=>{

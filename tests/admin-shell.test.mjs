@@ -716,8 +716,8 @@ test("assistant navigation only exposes allowed operation surfaces", async () =>
   assert.match(navigationSource, /title: "시간표"[\s\S]*url: "\/admin\/timetable"/);
   assert.doesNotMatch(assistantOverviewBlock, /url: "\/admin\/dashboard"/);
   assert.match(navigationSource, /canUseAssistantOperations \? assistantOverviewItems : fullOverviewItems/);
-  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
-  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests \}\)/);
+  assert.match(sidebarSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests, canUsePersonalApiSettings \}\)/);
+  assert.match(commandSearchSource, /buildAdminNavGroups\(\{ canManageAll, canEditCurriculumPlanning, canUseAssistantOperations, isAdmin, canUseAiAgentRequests, canUsePersonalApiSettings \}\)/);
 });
 
 test("homepage content and recruiting navigation are discoverable only to the actual admin role", () => {

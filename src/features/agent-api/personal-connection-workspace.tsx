@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Dialog } from "@/components/ui/dialog";
@@ -37,7 +37,14 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
   const [expiresAt, setExpiresAt] = useState(""), [confirmed, setConfirmed] = useState(false);
   const [revoke, setRevoke] = useState<PersonalConnection | null>(null);
   const [secret, setSecret] = useState(""), [revealed, setRevealed] = useState(false);
-  const createRef = useRef<HTMLButtonElement>(null);
+  const createRef = useRef<HTMLButtonElement>(null), refreshRef = useRef<HTMLButtonElement>(null);
+  const focusAfterLoad = useRef(false);
+  const [focusRevision, setFocusRevision] = useState(0);
+  useLayoutEffect(() => {
+    if (!focusRevision) return;
+    const target = createRef.current?.disabled ? refreshRef.current : createRef.current;
+    target?.focus({ preventScroll: true });
+  }, [focusRevision]);
   const ready = snapshot?.status === "ready" ? snapshot : null;
   const canMutate = Boolean(ready && !loading && !pending && !busy && !error);
 
@@ -63,7 +70,13 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
         }
         setSnapshot(next);
       } catch { if (active) { setSnapshot(null); setError("개인 연결 목록이나 처리 결과를 확인하지 못했습니다. 새 요청을 만들지 말고 다시 조회해 주세요."); } }
-      finally { if (active) setLoading(false); }
+      finally { if (active) {
+        setLoading(false);
+        if (focusAfterLoad.current) {
+          focusAfterLoad.current = false;
+          setFocusRevision(value => value + 1);
+        }
+      } }
     })();
     return () => { active = false; controller.abort(); };
   }, [ownerId, service, page, pageSize, pageReady, revision]);
@@ -103,14 +116,14 @@ function PersonalConnectionSession({ ownerId, service }: { ownerId: string; serv
       const operation = begin("revoke"), raw = await service.revoke({ requestId: operation.requestId, credentialId: revoke.id });
       if (generation.current !== current) return;
       parsePersonalRevoke(raw, ownerId, operation.requestId, revoke.id);
-      savePersonalPending(window.sessionStorage, ownerId, null); setPending(null); setRevoke(null); setRecovered(null); setNotice("선택한 개인 연결을 폐기했습니다."); setRevision(value => value + 1);
+      savePersonalPending(window.sessionStorage, ownerId, null); setPending(null); setRevoke(null); setRecovered(null); setNotice("선택한 개인 연결을 폐기했습니다."); focusAfterLoad.current = true; setRevision(value => value + 1);
     } catch { if (generation.current === current) { setRevoke(null); setError(uncertainMessage); } }
     finally { if (generation.current === current) { busyRef.current = false; setBusy(false); } }
   };
-  const closeSecret = () => { setSecret(""); setRevealed(false); setPage(1); setRevision(value => value + 1); };
+  const closeSecret = () => { focusAfterLoad.current = true; setSecret(""); setRevealed(false); setPage(1); setRevision(value => value + 1); };
 
   return <SettingsWorkspaceShell>
-    <SettingsMasterHeader filters={<span className="text-sm font-medium">내 개인 읽기 연결</span>} actions={<><Button variant="outline" onClick={refresh} disabled={loading || busy}>{pending ? "처리 결과 확인" : "목록 새로고침"}</Button><Button ref={createRef} onClick={openCreate} disabled={!canMutate}>새 개인 연결</Button></>} />
+    <SettingsMasterHeader filters={<span className="text-sm font-medium">내 개인 읽기 연결</span>} actions={<><Button ref={refreshRef} variant="outline" onClick={refresh} disabled={loading || busy}>{pending ? "처리 결과 확인" : "목록 새로고침"}</Button><Button ref={createRef} onClick={openCreate} disabled={!canMutate}>새 개인 연결</Button></>} />
     {loading ? <p role="status" className="text-sm">개인 연결 확인 중…</p> : null}
     {error ? <p role="alert" className="text-sm text-destructive">{error}</p> : null}
     {pending ? <p role="status" className="text-sm">이전 요청의 결과를 확인해야 합니다. 확인 전에는 새 발급·폐기를 진행할 수 없습니다.</p> : null}
