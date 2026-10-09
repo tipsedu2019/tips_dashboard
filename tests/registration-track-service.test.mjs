@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import vm from "node:vm";
 
 import ts from "typescript";
+import { createRegistrationDetailObservation } from "../src/features/tasks/registration-detail-observation.ts";
 import { buildRegistrationSubjectHistory } from "../src/features/tasks/registration-track-history.js";
 
 import { parseAcademicSubject } from "../src/lib/academic-subject-registry.ts";
@@ -80,6 +81,7 @@ async function loadFactory(extraGlobals = {}) {
   vm.runInNewContext(compiled, {
     module: sandboxModule,
     exports: sandboxModule.exports,
+    createRegistrationDetailObservation,
     AbortController,
     AbortSignal,
     clearTimeout,
@@ -666,6 +668,7 @@ function createClient({ queryHandler, rpcHandler } = {}) {
 
 function readyOptions(overrides = {}) {
   return {
+    detailObservation: { now: () => performance.now(), emit: () => {} },
     probeRuntime: async () => ({ mode: "ready", version: 1 }),
     probeIntakeRuntime: async () => ({ available: true, version: 1 }),
     probeObservationRuntime: async () => ({ available: true, runtimeVersion: 1 }),
@@ -5133,4 +5136,114 @@ test("enrollment detail save sends and hydrates every selected textbook, includi
     requestKey: "legacy-textbook",
   });
   assert.deepEqual(Array.from(legacy.rows[0].textbookIds), [books[0]]);
+});
+
+test("detail observations keep raw SDK failures private and preserve error identity, sharing and retries", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const privateError = { code: "SYNTHETIC", message: "FAKE_PRIVATE_STUDENT_TOKEN_URL", details: "FAKE_PRIVATE_BODY", hint: "FAKE_PRIVATE_HINT" };
+  const outputs = [];
+  let fail = true;
+  const harness = createClient({ queryHandler: query => query.table === "ops_task_events" && fail
+    ? { data: null, error: privateError }
+    : schedulingDetailRows(query.table) });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    detailObservation: { now: () => 42, emit: rows => outputs.push(rows) },
+  }));
+  const pending = service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  assert.strictEqual(service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), pending);
+  await assert.rejects(pending, error => error === privateError);
+  assert.equal(outputs.length, 1);
+  assert.ok(outputs[0].some(row => row.kind === "events" && row.phase === "failure"));
+  assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
+  assert.equal(JSON.stringify(outputs).includes("task-1"), false);
+  assert.equal(JSON.stringify(outputs).includes("viewer-1"), false);
+  for (const row of outputs[0]) assert.deepEqual(Object.keys(row), ["kind", "phase", "elapsedMs"]);
+  fail = false;
+  const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+  const count = harness.queries.length;
+  assert.strictEqual(await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true }), detail);
+  assert.equal(harness.queries.length, count);
+  assert.equal(outputs.length, 1, "successful retry and cache hit are silent");
+});
+
+test("detail observations report an initial-group failure without exposing reminder payloads", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const outputs = [];
+  const harness = createClient({
+    queryHandler: query => schedulingDetailRows(query.table),
+    rpcHandler: () => ({ data: [{ appointment_id: "FAKE_PRIVATE_ID", unexpected: "FAKE_PRIVATE_VALUE" }], error: null }),
+  });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    detailObservation: { now: () => 1, emit: rows => outputs.push(rows) },
+  }));
+  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), /registration_customer_reminder_summary_shape_invalid/);
+  assert.equal(outputs.length, 1);
+  assert.ok(outputs[0].some(row => row.kind === "initial_rows" && row.phase === "failure"));
+  assert.equal(outputs[0].some(row => row.kind.startsWith("reminder")), false,
+    "the unchanged legacy RPC is observed only through its initial group");
+  assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
+});
+
+test("detail observations record final DTO validation failure without making partial detail successful", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const outputs = [];
+  const harness = createClient({ queryHandler: query => {
+    const result = schedulingDetailRows(query.table);
+    return query.table === "ops_registration_subject_tracks"
+      ? { ...result, data: result.data.map(row => ({ ...row, subject: "FAKE_PRIVATE_UNSUPPORTED" })) }
+      : result;
+  } });
+  const service = createRegistrationTrackService(harness.client, readyOptions({
+    detailObservation: { now: () => 1, emit: rows => outputs.push(rows) },
+  }));
+  await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), /registration_subject_unsupported/);
+  assert.equal(outputs.length, 1);
+  assert.ok(outputs[0].some(row => row.kind === "detail_decode" && row.phase === "failure"));
+  assert.equal(JSON.stringify(outputs).includes("FAKE_PRIVATE"), false);
+});
+
+test("observation clock and output failures cannot replace a detail error or successful result", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const error = new Error("synthetic business failure");
+  for (const observation of [
+    { now() { throw new Error("clock unavailable"); }, emit() { assert.fail(); } },
+    { now: () => 1, emit() { throw new Error("output unavailable"); } },
+  ]) {
+    let fail = true;
+    const harness = createClient({ queryHandler: query => fail && query.table === "ops_task_events"
+      ? { data: null, error } : schedulingDetailRows(query.table) });
+    const service = createRegistrationTrackService(harness.client, readyOptions({ detailObservation: observation }));
+    await assert.rejects(service.loadCaseDetail("task-1", "viewer-1"), value => value === error);
+    fail = false;
+    assert.equal((await service.loadCaseDetail("task-1", "viewer-1")).task.id, "task-1");
+  }
+});
+
+test("enabling detail observations preserves query order, filters, counts, result and microtask scheduling", async () => {
+  const { createRegistrationTrackService } = await loadFactory();
+  const variants = [];
+  for (const enabled of [false, true]) {
+    const sequence = [];
+    const outputs = [];
+    let tick = 0;
+    let done = false;
+    const pulse = () => { tick += 1; if (!done && tick < 1000) queueMicrotask(pulse); };
+    const harness = createClient({ queryHandler: query => {
+      sequence.push([query.table, tick]);
+      return schedulingDetailRows(query.table);
+    } });
+    const service = createRegistrationTrackService(harness.client, readyOptions({
+      detailObservation: enabled ? { now: () => tick, emit: rows => outputs.push(rows) } : undefined,
+    }));
+    queueMicrotask(pulse);
+    try {
+      const detail = await service.loadCaseDetail("task-1", "viewer-1", { observationAware: true });
+      assert.ok(tick < 1000, "synthetic microtask probe must stay bounded");
+      variants.push({ detail: JSON.parse(JSON.stringify(detail)), sequence, ticks: tick,
+        queries: harness.queries.map(({ signal, ...query }) => ({ ...query, signalPresent: Boolean(signal) })),
+        rpcCalls: harness.rpcCalls });
+    } finally { done = true; }
+    assert.deepEqual(outputs, []);
+  }
+  assert.deepEqual(variants[1], variants[0]);
 });
